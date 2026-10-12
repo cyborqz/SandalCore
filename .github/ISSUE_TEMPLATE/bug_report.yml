@@ -1,0 +1,113 @@
+name: Bug Report
+description: Report an issue or bug encountered in Sandal Core
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please make sure to check existing issues before submitting and ensure all personal information (such as real names, private IPs, or account tokens) is completely redacted.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: A concise summary of the issue.
+      placeholder: e.g., Tree harvest interaction does not complete
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the functional area related to this bug.
+      options:
+        - "1- Connection and Protocol Foundations"
+        - "2- Authentication and Character Management"
+        - "3- World Bootstrap and Replication"
+        - "4- Stats Engine and Calculations"
+        - "5- Progression, Talents, and Items"
+        - "6- Combat and Class Abilities"
+        - "7- Living World and Navigation"
+        - "8- Mounts and Traversal"
+        - "9- City Nodes and Civilization"
+        - "10- Gathering and Professions"
+        - "11- Quests and Narrative"
+        - "12- Guilds and Social Systems"
+        - "13- Economy and Player Trading"
+        - "14- Node Sieges and Territory Wars"
+        - "15- Caravans and Trade Routes"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed, step-by-step instructions to reproduce the problem.
+      placeholder: |
+        1. Start the server and client
+        2. Approach a tree gatherable node
+        3. Press interact to start gathering
+        4. Observe the channel bar
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+      placeholder: Gathering channel completes, resources are added to inventory, and node transitions to harvested state.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened.
+      placeholder: Channel bar completes, but node is not harvested and interaction state locks.
+    validations:
+      required: true
+  - type: input
+    id: server_commit
+    attributes:
+      label: Server Commit
+      description: Git commit hash of Sandal Core you tested with.
+      placeholder: e.g., 8cdd9ed or latest main
+    validations:
+      required: true
+  - type: input
+    id: client_build
+    attributes:
+      label: Client Build
+      description: Ashes of Creation client version or build identifier.
+      placeholder: e.g., Alpha-2 retail build / Win64
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: Operating system where server components were running.
+      options:
+        - "Windows 11"
+        - "Windows 10"
+        - "Windows Server"
+        - "Linux / Docker"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Please paste server logs here. Remember to redact personal data, machine names, and private IPs.
+      render: shell
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: "I searched existing issues and confirmed this bug has not been reported."
+          required: true
+        - label: "I removed personal data (IP addresses, account names, tokens) from logs and screenshots."
+          required: true

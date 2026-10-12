@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package aoc.worldadmin.v1;
+
+option go_package = "aocrop/services/gen/aoc/worldadmin/v1;worldadminv1";
+
+// Internal: worldd's admin API (the GM travel tools). API-FIRST: every read and every control of the players in the world is a
+// method here. worldctl (the command line) and the admin app to come (a 3D viewer that controls the server) call these same
+// methods. worldd serves it on AOC_WORLD_ADMIN_ADDR (default 127.0.0.1:50056); calls carry the service token (internal/svcauth),
+// and without it every call is refused with Unauthenticated.
+//
+// A call arrives on a gRPC thread and is applied on worldd's network thread, between two ticks of the world (no session is touched
+// from another thread); a call the network thread does not take within a few seconds ends with Unavailable.
+//
+// A character is named by its name (case does not count). Errors: NotFound for a character that is not in the world or a place
+// that is not known; InvalidArgument for input worldd refuses (a speed outside its bounds, a point with no ground height and no z,
+// a number that is not finite), with its reason; FailedPrecondition for a character that cannot be moved now (dead).
+service WorldAdminService {
+  // Every player in the world now, in the order they joined.
+  rpc ListPlayers(ListPlayersRequest) returns (ListPlayersResponse);
+  // The places Teleport takes by name: every city node (by its record name, the same without Verra_, or its display name) and
+  // "login" (the default spawn).
+  rpc ListPlaces(ListPlacesRequest) returns (ListPlacesResponse);
+  // Moves a player to a named place or to a point. A mounted player is dismounted first (the mount desummons by distance, as it
+  // does today). The move checker is rebased, so the next moves are not corrected. With x and y but no z, the height is the ground's
+  // under the point when the server has ground there; otherwise the call is refused and asks for z.
+  rpc Teleport(TeleportRequest) returns (TeleportResponse);
+  // GM run speed: a multiplier of the character's MoveSpeedMult (and of the mount it rides), 0.5 to 10; 1 resets. It lasts until
+  // the character logs out or it is set to 1.
+  rpc SetMoveSpeed(SetMoveSpeedRequest) returns (SetMoveSpeedResponse);
+}
+
+message Position {
+  double x = 1; // cm
+  double y = 2;
+  double z = 3;
+}
+
+message Player {
+  string name = 1;
+  string character_id = 2; // the character's guid (32 hex digits)
+  Position position = 3;   // the last good position; while mounted, where the rider would be put beside the mount
+  double yaw_degrees = 4;
+  bool mounted = 5;
+  bool dead = 6;
+  double move_speed_multiplier = 7; // the GM multiplier; 1 for none
+}
+// (C.O.A ~ Cyb)
+
+message ListPlayersRequest {}
+
+message ListPlayersResponse {
+  repeated Player players = 1;
+}
+
+message Place {
+  string name = 1;         // "Verra_RVR_Joeva", or "login"
+  string display_name = 2; // "Joeva"
+  Position position = 3;
+  string kind = 4;         // "node" or "login"
+}
+
+message ListPlacesRequest {}
+
+message ListPlacesResponse {
+  repeated Place places = 1;
+}
+
+message Point {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  bool has_z = 4; // false: z is the ground height under (x, y), when the server has ground there
+}
+
+message TeleportRequest {
+  string character = 1;
+  oneof target {
+    string place = 2;
+    Point point = 3;
+  }
+}
+
+message TeleportResponse {
+  string character = 1;       // the name worldd has it under
+  Position from = 2;
+  Position to = 3;
+  string place = 4;           // the place's name when a place was asked for
+  bool dismounted = 5;        // the player was mounted: it was dismounted first
+  bool ground_height = 6;     // z is the ground height under the point (no z was given)
+}
+
+message SetMoveSpeedRequest {
+  string character = 1;
+  double multiplier = 2; // 0.5 to 10; 1 resets
+}
+
+message SetMoveSpeedResponse {
+  string character = 1;
+  double previous = 2;
+  double multiplier = 3;
+}

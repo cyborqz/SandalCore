@@ -1,0 +1,9 @@
+{
+    "service_name":  "auth-server",
+    "host":          "127.0.0.1",
+    "port":          8081,
+    "log_level":     "info",
+    "log_file":      "logs/auth-server.log",
+    "token_issuer":  "ashes-emulator",
+    "database_path": ""
+}

@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package aoc.auth.v1;
+
+option go_package = "aocrop/services/gen/aoc/auth/v1;authv1";
+
+// Internal: services resolve a launcher login token to its account.
+service AuthService {
+  // Unauthenticated when the token is unknown or expired.
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  int64 account_id = 1;
+  string username = 2;
+}

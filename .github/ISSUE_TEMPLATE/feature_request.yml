@@ -1,0 +1,45 @@
+name: Feature Request
+description: Propose an idea or enhancement for Sandal Core
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea or architectural suggestion for Sandal Core? We welcome well-reasoned proposals aligned with the emulator roadmap.
+  - type: input
+    id: title
+    attributes:
+      label: Feature Title
+      description: A concise title for your feature proposal.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: Is your feature request related to a specific limitation or protocol gap?
+      placeholder: Describe the context or use case.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the design or mechanics you envision.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you considered.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: "I searched existing issues and discussions to avoid duplicate suggestions."
+          required: true
+        - label: "I reviewed ROADMAP.md to see if this feature is already planned."
+          required: true

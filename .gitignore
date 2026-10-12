@@ -1,0 +1,131 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Build outputs
+# ──────────────────────────────────────────────────────────────────────────
+build/
+out/
+dist/
+cmake-build-*/
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.idb
+
+# ──────────────────────────────────────────────────────────────────────────
+# vcpkg & Dependencies
+# ──────────────────────────────────────────────────────────────────────────
+vcpkg_installed/
+vcpkg-manifest-install.log
+_deps/
+/third_party/CUE4Parse/
+/tools/mapc/bin/
+/tools/mapc/obj/
+
+# ──────────────────────────────────────────────────────────────────────────
+# CMake
+# ──────────────────────────────────────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CMakeSettings.json
+Testing/
+
+# ──────────────────────────────────────────────────────────────────────────
+# Visual Studio / MSBuild
+# ──────────────────────────────────────────────────────────────────────────
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.VC.db
+*.ipch
+.vs/
+x64/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# ──────────────────────────────────────────────────────────────────────────
+# IDEs & Editors
+# ──────────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.code-workspace
+.clangd/
+
+# ──────────────────────────────────────────────────────────────────────────
+# Python
+# ──────────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# ──────────────────────────────────────────────────────────────────────────
+# Runtime data & Logs
+# ──────────────────────────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+capture-*.jsonl
+emulator.db*
+active_account.kv
+characters.json
+
+# ──────────────────────────────────────────────────────────────────────────
+# Local configs & Secrets
+# ──────────────────────────────────────────────────────────────────────────
+config/local.json
+config/*.local.json
+.env
+.env.*
+*.secret
+*.token
+ics_auth_token.txt
+
+# ──────────────────────────────────────────────────────────────────────────
+# TLS / Certificates (Do not commit private keys or generated certs)
+# ──────────────────────────────────────────────────────────────────────────
+certs/*.key
+certs/*.pem
+certs/*.crt
+certs/*.srl
+certs/*.bak-*
+# Allow public CA bundle to ship
+!certs/amazon_ca_bundle.pem
+!certs/README.md
+
+# ──────────────────────────────────────────────────────────────────────────
+# Experimental / Debug Dumps (outside captures/)
+# ──────────────────────────────────────────────────────────────────────────
+dump_*.bin
+capture_*.bin
+Dumped*.txt
+
+# ──────────────────────────────────────────────────────────────────────────
+# Navmesh (too big for git: a Release asset; content/navmesh.json describes it and IS committed)
+# ──────────────────────────────────────────────────────────────────────────
+/content/sandal-core-navmesh-*.zip
+/content/area_nav.bin
+/content/area_geom.bin
+!/content/navmesh.json
+
+# ──────────────────────────────────────────────────────────────────────────
+# OS & Editor Cruft
+# ──────────────────────────────────────────────────────────────────────────
+*.swp
+*.bak
+*.tmp
+*.orig
+.DS_Store
+Thumbs.db
+desktop.ini

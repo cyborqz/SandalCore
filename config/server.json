@@ -1,0 +1,11 @@
+{
+    "ics_host":         "127.0.0.1",
+    "ics_port":         443,
+    "tether_port":      19021,
+    "game_port":        7777,
+    "max_players":      1000,
+    "auth_server_host": "127.0.0.1",
+    "auth_server_port": 8081,
+    "log_level":        "debug",
+    "client_extra_args": ""
+}

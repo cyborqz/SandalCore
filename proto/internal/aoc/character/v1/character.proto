@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package aoc.character.v1;
+
+option go_package = "aocrop/services/gen/aoc/character/v1;characterv1";
+
+// Internal: the runtime writer of character records (the offline charimport
+// tool is the exception). Access control is the caller's: GetCharacter and
+// SaveCharacterState take only an id, so the gateway compares the returned
+// account_id with the player's token. InvalidArgument messages carry the
+// store's wording (sometimes PostgreSQL's) for operators, not for players.
+service CharacterService {
+  // AlreadyExists when the name (case-insensitive) or the id is taken;
+  // InvalidArgument for input the store rejects (a malformed name, id,
+  // account, level or appearance, or text PostgreSQL refuses such as NUL) and
+  // for a race, gender, class or customization the service's rules refuse
+  // (services/README.md, "Character creation"); FailedPrecondition when the
+  // service has no usable content.db to check them against.
+  rpc CreateCharacter(CreateCharacterRequest) returns (CreateCharacterResponse);
+  rpc ListCharacters(ListCharactersRequest) returns (ListCharactersResponse);
+  // NotFound when there is no such character.
+  rpc GetCharacter(GetCharacterRequest) returns (GetCharacterResponse);
+  // Position, region and level after play; NotFound for an unknown id,
+  // InvalidArgument for input the store rejects (a negative level, a
+  // non-finite position, or text PostgreSQL refuses such as NUL).
+  rpc SaveCharacterState(SaveCharacterStateRequest) returns (SaveCharacterStateResponse);
+  // Removes a character of the given account. NotFound when that account has
+  // no such character (another account's character looks the same).
+  rpc DeleteCharacter(DeleteCharacterRequest) returns (DeleteCharacterResponse);
+  // Replaces all the items of a character (plan B2): worldd is the only writer while a
+  // character plays, and the latest save wins. NotFound for an unknown id; InvalidArgument,
+  // with nothing changed, for items that break the rules (a slot outside the storage, two items
+  // in a slot or with one instance guid, a quantity, quality or durability out of range) and for
+  // no items at all: a character keeps its items, so an empty save would be a bug in the caller.
+  rpc SaveInventory(SaveInventoryRequest) returns (SaveInventoryResponse);
+  // Saves the character's progress (plan D1): its level, its class and its XP and XP debt per leveling type, in one
+  // transaction (worldd is the only writer while a character plays; the latest save wins). A zero level or class leaves that
+  // value unchanged; an experience row replaces the character's row of that leveling type. NotFound for an unknown id;
+  // InvalidArgument, with nothing changed, for a level outside 1-25, a class outside 1-8, a leveling type of 0 or a negative
+  // XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
+  // replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
+  // the banks 0-19 and slots 0-15 or one held twice.
+  rpc SaveProgress(SaveProgressRequest) returns (SaveProgressResponse);
+}
+
+message Position {
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  float yaw = 4;
+}
+
+// race_id, gender_id and class_id are the client's own enums (ECharacterRace,
+// ECharacterGender, ECharacterClass, as in CreateCharacterInfo and
+// CharacterInformation of the client's protocol): race 0 Kaelar, 1 Vaelune,
+// 2 Vek, 3 Renkai, 4 Empyrean, 5 Pyrai, 6 Dunir, 7 Nikua (8 Tulnar is never
+// created); gender 0 Male, 1 Female; class 1 Ranger, 2 Bard, 3 Cleric,
+// 4 Fighter, 5 Rogue, 6 Summoner, 7 Tank, 8 Mage. Until plan B1 race_id held
+// the class and gender_id the ids 1 (Male) and 2 (Female).
+message Character {
+  string id = 1; // 32 lowercase hex digits (the client's GUID)
+  int64 account_id = 2;
+  string name = 3;
+  int32 race_id = 4; // ECharacterRace
+  int32 gender_id = 5; // ECharacterGender
+  int32 archetype_id = 6; // class archetype record id
+  string class_name = 7;
+  // A JSON object. The database normalizes it (key order, whitespace), so
+  // compare it parsed, not as a string.
+  string appearance_json = 8;
+  bytes create_info = 9; // the client's creation payload, byte-exact
+  int32 level = 10;
+  Position position = 11; // unset until first save: default spawn
+  string last_region = 12;
+  int64 created_at_ms = 13; // when the record was created (Unix milliseconds)
+  int32 class_id = 14; // ECharacterClass (0 only for a record whose class could not be derived)
+  // The character's items, Backpack then Equipment then Quest by slot: only when GetCharacterRequest.include_items asked for
+  // them (every other reply leaves it empty). A character that was never given a kit has none.
+  repeated Item items = 15;
+  // Plan D1: the character's XP per leveling type, with the items (include_items): a character that never earned any has
+  // none, and its XP is its level's threshold.
+  repeated Experience experience = 16;
+  // Plan D1, stage 2: the ranks the character bought, per skill tree, and its action bar (with the items, like the experience): a
+  // character that never bought a rank or arranged its bar has none.
+  repeated TreeRanks skill_ranks = 17;
+  repeated ActionbarSlot action_bar = 18;
+}
+// (CoA | C-Y-B)
+
+// The ranks a character bought in one skill tree (plan D1, stage 2): the tree's Guid (the design database's SkillTree) and the
+// SkillRank Guids in the order they were bought. A tree keeps its ranks per tree, so a character that switches class and back finds
+// the class's ranks again. The ranks a level grants by itself are not stored.
+message TreeRanks {
+  int64 tree_guid = 1;
+  repeated int64 rank_guids = 2;
+}
+
+// One slot of the character's action bar (plan D1, stage 2): FActionbarSlotUseData with its bank and slot. use_type is EActionbarUseType
+// (1 Ability, 2 Skill ... 9 Dismount; 0 is no slot), instigator EActionbarInstigator (0-3); item_guid is the 32 hex digits of an
+// item's instance guid or empty.
+message ActionbarSlot {
+  int32 bank = 1; // 0-19
+  int32 slot = 2; // 0-15
+  int32 use_type = 3;
+  int32 instigator = 4;
+  int64 ability_id = 5;
+  int64 skill_rank_id = 6;
+  int64 pet_command_id = 7;
+  int64 item_record_id = 8;
+  string item_guid = 9;
+  int32 item_rarity = 10; // 0-15
+  int32 item_quality = 11; // 0 or more
+  int32 combo_button = 12; // 0-15
+}
+
+// The XP a character has in one leveling type (plan D1): the design database's LevelingTypeDef Guid (Adventuring
+// 108651085518458, the weapon lines ...), the XP total as the client's XPTracker shows it and the experience debt.
+message Experience {
+  int64 leveling_type_guid = 1;
+  int64 xp = 2; // 0 or more
+  int64 debt = 3; // 0 or more
+}
+
+// The storages a character's items are in, with the slots the client's own storages have: the Backpack 70, the
+// Equipment 83 (the slot is the client's EEquipSlot: 2 Chest, 15 Primary ...) and the Quest storage 100.
+enum ItemContainer {
+  ITEM_CONTAINER_UNSPECIFIED = 0;
+  ITEM_CONTAINER_BACKPACK = 1;
+  ITEM_CONTAINER_EQUIPMENT = 2;
+  ITEM_CONTAINER_QUEST = 3;
+}
+
+// One item instance a character owns.
+message Item {
+  ItemContainer container = 1;
+  int32 slot = 2; // 0 to the storage's slots - 1
+  int64 item_record_id = 3; // the design database's ItemRecord Guid (content.db item.guid)
+  string instance_guid = 4; // the instance's own FGuid: 32 lowercase hex digits, the four int32 words in order, not all zero
+  int32 quantity = 5; // 1 to 1000000
+  int32 quality = 6; // an index into the item's quality curve, 1 to 200
+  float durability = 7; // 0 to 1e9
+  int64 created_at_ms = 8; // when the item was made (Unix milliseconds)
+  // The state a mount item persists (the mounts milestone; retail's login shows it on every mount item: two persisted stats and the lock time of FItemInstance).
+  // Absent, 0 for lock_expiration: an item that keeps none (every item but a mount).
+  optional float persisted_health = 9; // the mount's Health when it was last desummoned or died: 0 to 1e9
+  optional float persisted_mana = 10; // the mount's Mana (retail persists 1): 0 to 1e9
+  int64 lock_expiration = 11; // Unix seconds until which the item cannot be used (a mount that died); 0 or a past time: none
+}
+
+message CreateCharacterRequest {
+  int64 account_id = 1; // an existing account
+  string name = 2;
+  int32 race_id = 3; // ECharacterRace
+  int32 gender_id = 4; // ECharacterGender
+  int32 archetype_id = 5;
+  string class_name = 6;
+  string appearance_json = 7; // a JSON object; empty means {}
+  bytes create_info = 8;
+  string id = 9; // optional; generated when empty
+  int32 level = 10; // optional; 1 when zero
+  int32 class_id = 11; // ECharacterClass
+}
+// (C.O.A) (C-Y-B)
+
+message CreateCharacterResponse {
+  Character character = 1;
+}
+
+message ListCharactersRequest {
+  int64 account_id = 1;
+}
+
+message ListCharactersResponse {
+  repeated Character characters = 1;
+}
+
+message GetCharacterRequest {
+  string id = 1;
+  bool include_items = 2; // fill Character.items (worldd does, at login)
+}
+
+message GetCharacterResponse {
+  Character character = 1;
+}
+
+// An unset position, an empty last_region and a zero level each leave that
+// value unchanged; there is no way to clear one.
+message SaveCharacterStateRequest {
+  string id = 1;
+  Position position = 2;
+  string last_region = 3;
+  int32 level = 4;
+}
+
+message SaveCharacterStateResponse {
+  Character character = 1;
+}
+
+message DeleteCharacterRequest {
+  string id = 1;
+  int64 account_id = 2; // the owner; the character is only removed if it matches
+}
+
+message DeleteCharacterResponse {}
+
+message SaveInventoryRequest {
+  string id = 1;
+  repeated Item items = 2; // the character's whole inventory
+}
+
+message SaveInventoryResponse {
+  int32 saved = 1; // how many items the character has now
+}
+
+message SaveProgressRequest {
+  string id = 1;
+  int32 level = 2; // 1-25; 0 leaves the level unchanged
+  int32 class_id = 3; // ECharacterClass 1-8; 0 leaves the class unchanged
+  repeated Experience experience = 4; // each replaces the character's row of its leveling type
+  // Plan D1, stage 2: with replace_skill_ranks the character's bought ranks become exactly skill_ranks (a tree not listed has none
+  // left; an empty list removes them all); without it they are left alone. The same for the action bar.
+  bool replace_skill_ranks = 5;
+  repeated TreeRanks skill_ranks = 6;
+  bool replace_action_bar = 7;
+  repeated ActionbarSlot action_bar = 8;
+}
+
+message SaveProgressResponse {
+  Character character = 1; // with its experience rows
+}

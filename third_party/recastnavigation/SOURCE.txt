@@ -1,0 +1,2 @@
+recastnavigation v1.6.0 (tag), commit 6dc1667f580357e8a2154c28b7867bea7e8ad3a7, from https://github.com/recastnavigation/recastnavigation (zlib licence).
+Only Recast/ and Detour/ and License.txt are kept; the files are unmodified.

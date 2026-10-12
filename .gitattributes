@@ -1,0 +1,53 @@
+# Default: treat text as CRLF on checkout for Windows devs; LF in repo.
+* text=auto
+
+# Source code — always LF in repo, CRLF on Windows checkout (normal)
+*.cpp     text
+*.h       text
+*.c       text
+*.hpp     text
+*.cs      text
+*.py      text
+*.md      text
+*.json    text
+*.jsonl   text
+*.proto   text eol=lf
+*.cmake   text
+CMakeLists.txt text
+*.yml     text
+*.yaml    text
+*.toml    text
+*.idc     text
+
+# Shell scripts — LF always (even on Windows; some tools care)
+*.sh      text eol=lf
+
+# Windows scripts — CRLF always
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+# Binary fixtures — never normalise
+*.bin     binary
+*.pem     binary
+*.key     binary
+*.crt     binary
+*.p12     binary
+*.pdf     binary
+*.png     binary
+*.jpg     binary
+*.zip     binary
+*.dll     binary
+*.exe     binary
+
+# Regression-gate data (scripts/run_tests.ps1, scripts/e2e_replay.ps1) — compared exactly
+fixtures/e2e/**             -text
+fixtures/test-baseline.txt  -text
+
+# Generated Go code from proto/internal (buf generate)
+services/gen/** linguist-generated=true text eol=lf
+
+# Go sources stay LF on Windows checkouts (core.autocrlf would make gofmt flag them)
+*.go   text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
