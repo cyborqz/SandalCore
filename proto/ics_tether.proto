@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package ics_tether;
+
+option csharp_namespace = "IcsTether";
+
+import "ics_common.proto";
+
+service TetherService {
+    rpc ProcessTetherMessage(stream ics_common.MessageWrapper) returns (stream ics_common.MessageWrapper);
+}
+
+message TetherMessage {
+    map<string, string> tags        = 1;
+    string              data_string = 2;
+    bytes               data_bytes  = 3;
+}

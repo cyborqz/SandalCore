@@ -1,0 +1,2292 @@
+{
+ "class": "Bard",
+ "level": 1,
+ "source": "replay_data.bin: StatsComponent of the first pawn (pkt 107), storage payload of its Equipment (pkt 89)",
+ "items": [
+  {
+   "slot": 1,
+   "record": 6064630736269279236,
+   "quality": 1
+  },
+  {
+   "slot": 2,
+   "record": 6064630214426886486,
+   "quality": 1
+  },
+  {
+   "slot": 5,
+   "record": 6064630214427083132,
+   "quality": 1
+  },
+  {
+   "slot": 6,
+   "record": 6064630214427279778,
+   "quality": 1
+  },
+  {
+   "slot": 15,
+   "record": 6064631131688402948,
+   "quality": 1
+  },
+  {
+   "slot": 16,
+   "record": 6064630695486029824,
+   "quality": 1
+  },
+  {
+   "slot": 17,
+   "record": 6064631670974054529,
+   "quality": 1
+  },
+  {
+   "slot": 23,
+   "record": 6064629382556287782,
+   "quality": 1
+  },
+  {
+   "slot": 26,
+   "record": 6064634744584208707,
+   "quality": 1
+  },
+  {
+   "slot": 29,
+   "record": 6064634744581914946,
+   "quality": 1
+  },
+  {
+   "slot": 33,
+   "record": 6064634744578441536,
+   "quality": 1
+  },
+  {
+   "slot": 35,
+   "record": 6064634744576540991,
+   "quality": 1
+  },
+  {
+   "slot": 38,
+   "record": 6064634744579883329,
+   "quality": 1
+  }
+ ],
+ "stats": [
+  {
+   "guid": 108986352686712,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1119092736
+  },
+  {
+   "guid": 108986356618873,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1119092736
+  },
+  {
+   "guid": 109183576135288,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1119092736
+  },
+  {
+   "guid": 109183578756729,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1119092736
+  },
+  {
+   "guid": 109183598614138,
+   "array": "StatRepInt32Owner",
+   "bits": 1103101952
+  },
+  {
+   "guid": 109183598614139,
+   "array": "StatRepInt32Owner",
+   "bits": 1103101952
+  },
+  {
+   "guid": 109183598614140,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109183598614141,
+   "array": "StatRepInt32Owner",
+   "bits": 1114636288
+  },
+  {
+   "guid": 109183598614142,
+   "array": "StatRepInt32Owner",
+   "bits": 1108344832
+  },
+  {
+   "guid": 109183598614143,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109183603267200,
+   "array": "StatRepInt32Owner",
+   "bits": 1119879168
+  },
+  {
+   "guid": 109183603267201,
+   "array": "StatRepInt32Owner",
+   "bits": 1103101952
+  },
+  {
+   "guid": 109183605036675,
+   "array": "StatRepInt32Owner",
+   "bits": 1111490560
+  },
+  {
+   "guid": 109183605036676,
+   "array": "StatRepInt32Owner",
+   "bits": 1111490560
+  },
+  {
+   "guid": 109183605036677,
+   "array": "StatRepInt32Owner",
+   "bits": 1111490560
+  },
+  {
+   "guid": 109183607068294,
+   "array": "StatRepInt32Owner",
+   "bits": 1122107392
+  },
+  {
+   "guid": 109183607068295,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109183607068296,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109183607068297,
+   "array": "StatRepInt32Owner",
+   "bits": 1138425856
+  },
+  {
+   "guid": 109183607068298,
+   "array": "StatRepInt32Owner",
+   "bits": 1108344832
+  },
+  {
+   "guid": 109183607068299,
+   "array": "StatRepInt32Owner",
+   "bits": 1119879168
+  },
+  {
+   "guid": 109183607068301,
+   "array": "StatRepInt32Owner",
+   "bits": 1118044160
+  },
+  {
+   "guid": 109183607068302,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109183607133839,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109183607133840,
+   "array": "StatRepInt32Owner",
+   "bits": 1114636288
+  },
+  {
+   "guid": 109183607133841,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109228544644729,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109228544644730,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109315114489464,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109342856795769,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109342862759546,
+   "array": "StatRepInt32Owner",
+   "bits": 1111490560
+  },
+  {
+   "guid": 109342866232955,
+   "array": "StatRepInt32Owner",
+   "bits": 1111490560
+  },
+  {
+   "guid": 109342895396476,
+   "array": "StatRepInt32Owner",
+   "bits": 1130627072
+  },
+  {
+   "guid": 109342908372605,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109342909421182,
+   "array": "StatRepInt32Owner",
+   "bits": 1125384192
+  },
+  {
+   "guid": 109342915057279,
+   "array": "StatRepInt32Owner",
+   "bits": 1116733440
+  },
+  {
+   "guid": 109343183951489,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343183951492,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109343183951493,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 109343183951495,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 999019970
+  },
+  {
+   "guid": 109343183951496,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065281925
+  },
+  {
+   "guid": 109343236642456,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343236642458,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343269148321,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343269148323,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343269148326,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343355655871,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343355655872,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343355655873,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343390193352,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343390193353,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343390193354,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343399106251,
+   "array": "StatRepInt32Owner",
+   "bits": 991750378
+  },
+  {
+   "guid": 109343399106252,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 994313499
+  },
+  {
+   "guid": 109343399106253,
+   "array": "StatRepInt32Owner",
+   "bits": 1000114424
+  },
+  {
+   "guid": 109343399106254,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1092336572
+  },
+  {
+   "guid": 109343399106255,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343399106256,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343399106257,
+   "array": "StatRepInt32Owner",
+   "bits": 1060518991
+  },
+  {
+   "guid": 109343399171794,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1024676594
+  },
+  {
+   "guid": 109343399171795,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1025800945
+  },
+  {
+   "guid": 109343399171796,
+   "array": "StatRepInt32Owner",
+   "bits": 1058642330
+  },
+  {
+   "guid": 109343399171797,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1074301065
+  },
+  {
+   "guid": 109343399171798,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065196704
+  },
+  {
+   "guid": 109343399171799,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343399171800,
+   "array": "StatRepInt32Owner",
+   "bits": 996873555
+  },
+  {
+   "guid": 109343399171802,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1000114424
+  },
+  {
+   "guid": 109343399171803,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065269747
+  },
+  {
+   "guid": 109343399171804,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 994313499
+  },
+  {
+   "guid": 109343399171805,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343399171806,
+   "array": "StatRepInt32Owner",
+   "bits": 1058642330
+  },
+  {
+   "guid": 109343399171807,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1069604748
+  },
+  {
+   "guid": 109343399171808,
+   "array": "StatRepInt32Owner",
+   "bits": 1060420113
+  },
+  {
+   "guid": 109343399171809,
+   "array": "StatRepInt32Owner",
+   "bits": 1018600751
+  },
+  {
+   "guid": 109343399171810,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343399171811,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1069722111
+  },
+  {
+   "guid": 109343399171812,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1005207097
+  },
+  {
+   "guid": 109343399171813,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343399171814,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 999019970
+  },
+  {
+   "guid": 109343399171815,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065281925
+  },
+  {
+   "guid": 109343399171822,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1085989192
+  },
+  {
+   "guid": 109343399171823,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1063675494
+  },
+  {
+   "guid": 109343399171824,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343399171825,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343399171826,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343399237369,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343399237370,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343399237371,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343501407996,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343501407997,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343501408002,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343501408003,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343501408004,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343501408005,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343503832842,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343503832843,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 109343503832844,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343503832845,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 109343503832850,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 109343503832851,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064628595110117376,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 6064628595115753473,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 6064628617693364225,
+   "array": "StatRepInt32Owner",
+   "bits": 1069547520
+  },
+  {
+   "guid": 6064628617693364226,
+   "array": "StatRepInt32Owner",
+   "bits": 1022739087
+  },
+  {
+   "guid": 6064628617694412803,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617694412804,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617694478341,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716498439,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716498440,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064628617716498441,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716498442,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716695051,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716695052,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716695053,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628617716695054,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628633947144192,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064628633947144193,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628633961824258,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628633961889795,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064628633961889796,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064628633961889797,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629246696095744,
+   "array": "StatRepInt32Owner",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064629246696620033,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629246752391170,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629246756323331,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1017412337
+  },
+  {
+   "guid": 6064629246804164612,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1067537664
+  },
+  {
+   "guid": 6064629246805082117,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956196242,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261780,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261782,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261784,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261786,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261788,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261790,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956261792,
+   "array": "StatRepInt32Owner",
+   "bits": 1113063424
+  },
+  {
+   "guid": 6064629302956327330,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956327332,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956327334,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956327336,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956327338,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956327340,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956327342,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956392880,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956392882,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956392884,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956392886,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956392888,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956392892,
+   "array": "StatRepInt32Owner",
+   "bits": 1113063424
+  },
+  {
+   "guid": 6064629302956458430,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956458432,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956458434,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956458436,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956458438,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956458440,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956458442,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523980,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523982,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523984,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523986,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523988,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523990,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956523992,
+   "array": "StatRepInt32Owner",
+   "bits": 1113063424
+  },
+  {
+   "guid": 6064629302956589530,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956589532,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956589534,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956589536,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956589538,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956589540,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956589542,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956655080,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956655082,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956655084,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956655086,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956655088,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956655090,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956720628,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956720630,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956720632,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956720634,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956720636,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786174,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786176,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786178,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786180,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786182,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786184,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956786186,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956851724,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956851726,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956851728,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956851730,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956851732,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956851734,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956917278,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956917280,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302956917282,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302957048376,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302957048378,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302957048380,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302957179470,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302957179472,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629302957179474,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629484650246984,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629495591403526,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629495591731208,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629495592452105,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1063675494
+  },
+  {
+   "guid": 6064629495592517642,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1063675494
+  },
+  {
+   "guid": 6064629501729246919,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629501730557640,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629575339934476,
+   "array": "StatRepInt32Owner",
+   "bits": 1120403456
+  },
+  {
+   "guid": 6064629614175323427,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629614179976484,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629618866913442,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629618868486307,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064629618889326756,
+   "array": "StatRepInt32Owner",
+   "bits": 991750378
+  },
+  {
+   "guid": 6064629618890834085,
+   "array": "StatRepInt32Owner",
+   "bits": 1103101952
+  },
+  {
+   "guid": 6064629618893521062,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 994313499
+  },
+  {
+   "guid": 6064629618894504103,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 6064629618898698408,
+   "array": "StatRepInt32Owner",
+   "bits": 1002663798
+  },
+  {
+   "guid": 6064629618899943593,
+   "array": "StatRepInt32Owner",
+   "bits": 1114636288
+  },
+  {
+   "guid": 6064629618992087210,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 994313499
+  },
+  {
+   "guid": 6064629618993135787,
+   "array": "StatRepInt32Owner",
+   "bits": 1106247680
+  },
+  {
+   "guid": 6064629658719223808,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629658729185281,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629665669775360,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629665670889473,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629772956338622,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064629772956469695,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629772981897664,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064629772982028737,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629772990155204,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064629772990220741,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629885219569710,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629885220945967,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064629885423785053,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064629885424833630,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629885430797409,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064629885430862946,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064629999720283747,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214900974026,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214901039563,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214901105100,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214901105101,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214938788302,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214938853839,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214938853840,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630214938919377,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248356839451,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248357101597,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248357298207,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248379645985,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248379973667,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248380170277,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248409006119,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248409202729,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248409464875,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248449245229,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248449507375,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248449769521,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248539684915,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248539947061,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248540209207,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630248888664121,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254044053505,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254044577795,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254083768325,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254084096007,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254100545545,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254100742155,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254670839824,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254670839825,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254670970898,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254671691799,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254671691800,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630254671757337,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630277450956803,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630277451022340,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630277451022341,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630277451481097,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630277451481098,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630277451546635,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805141509,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805141510,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805207047,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805207048,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805600271,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805600272,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805665809,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298805665810,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298806124569,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298806124570,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298806124571,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298806190108,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808025122,
+   "array": "StatRepInt32Owner",
+   "bits": 1113063424
+  },
+  {
+   "guid": 6064630298808025123,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808090660,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808090661,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808483882,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808483883,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808549420,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630298808549421,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331461170,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331461171,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331526708,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331526709,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331854394,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331919931,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331919932,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299331919933,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332247618,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332313155,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332313156,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332378693,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332902986,
+   "array": "StatRepInt32Owner",
+   "bits": 1113063424
+  },
+  {
+   "guid": 6064630299332902987,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332968524,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299332968525,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299333296210,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299333296211,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299333361748,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299333361749,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632271366,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632271367,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632336904,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632336905,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632402442,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632402443,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632861202,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632926739,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632926740,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632992277,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299632992278,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633057815,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633385502,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633385503,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633451040,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633451041,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633516578,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633516579,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299633975338,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299634040875,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299634040876,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299634106413,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299634106414,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299634171951,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299635220535,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299635286072,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299635286073,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299635351610,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299635351611,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630299635417148,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630316223627265,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630316223889411,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630316224086021,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630492098134016,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630609932255260,
+   "array": "StatRepInt32Owner",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634003759106,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634023288836,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634025123845,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634029056006,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634053566471,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634055794696,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634058743817,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634059989002,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634061234187,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634067525644,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634070474765,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634097410063,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630634099769360,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630680113971204,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630794045031635,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630794046801108,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630798183235705,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064630809541214212,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064630854084526095,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064631159508107288,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064631171498508288,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631171498704897,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064631171498901506,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631171504013315,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631171504209924,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064631171504340997,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631171509452806,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064631171509649415,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631171512401928,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064631171512533001,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631210079748096,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631210088071169,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631210106421250,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631210107207683,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631210112581636,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631210112778245,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631313380540561,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631313385717906,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064631359014770589,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631359436099247,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631663405498419,
+   "array": "StatRepInt32Owner",
+   "bits": 1084227584
+  },
+  {
+   "guid": 6064631747701440948,
+   "array": "StatRepInt32Owner",
+   "bits": 1120403456
+  },
+  {
+   "guid": 6064631862756376581,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631863198482433,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631863198679042,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631863198875651,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064631863200448516,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632078182711356,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632078184611901,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632078185922622,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632078189658175,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632140374081536,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632140374278145,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632195659205501,
+   "array": "StatRepInt32Owner",
+   "bits": 1048576000
+  },
+  {
+   "guid": 6064632195676769150,
+   "array": "StatRepInt32Owner",
+   "bits": 1048576000
+  },
+  {
+   "guid": 6064632195678669695,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632195714583424,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632355397959700,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632355491414037,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382418321408,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382418780161,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382421401602,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382422056963,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382422450180,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382423105541,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382423695366,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382424875015,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382425268232,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382425661449,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382425989130,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382426316811,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382426710028,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632382427037709,
+   "array": "StatRepInt32OwnerProxy",
+   "bits": 0
+  },
+  {
+   "guid": 6064632920367763592,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064632982633512960,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064633186496741774,
+   "array": "StatRepInt32EveryoneProxy",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064633186506047887,
+   "array": "StatRepInt32Owner",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064633191806009345,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064633191813152770,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064633191815512067,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064633191818133508,
+   "array": "StatRepInt32Owner",
+   "bits": 0
+  },
+  {
+   "guid": 6064633940871678397,
+   "array": "StatRepInt32Owner",
+   "bits": 1065353216
+  },
+  {
+   "guid": 6064634285492994048,
+   "array": "StatRepInt32Owner",
+   "bits": 1121714176,
+   "base_bits": 1092616192,
+   "equip_bits": 1120403456
+  },
+  {
+   "guid": 6064634285519601665,
+   "array": "StatRepInt32Owner",
+   "bits": 0,
+   "base_bits": 0,
+   "equip_bits": 0
+  },
+  {
+   "guid": 6064634285548568578,
+   "array": "StatRepInt32Owner",
+   "bits": 981668463,
+   "base_bits": 981668463,
+   "equip_bits": 0
+  },
+  {
+   "guid": 6064634301982310400,
+   "array": "StatRepInt32Owner",
+   "bits": 0,
+   "base_bits": 0,
+   "equip_bits": 0
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+# GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+version: v2
+inputs:
+  - directory: ../proto/internal
+  - proto_file: ../proto/ics_xclient.proto
+plugins:
+  - local: protoc-gen-go
+    out: gen
+    include_imports: true
+    opt:
+      - module=aocrop/services/gen
+      - Mics_common.proto=aocrop/services/gen/ics/common;icscommon
+      - Mics_xclient.proto=aocrop/services/gen/ics/xclient;icsxclient
+  - local: protoc-gen-go-grpc
+    out: gen
+    include_imports: true
+    opt:
+      - module=aocrop/services/gen
+      - Mics_common.proto=aocrop/services/gen/ics/common;icscommon
+      - Mics_xclient.proto=aocrop/services/gen/ics/xclient;icsxclient

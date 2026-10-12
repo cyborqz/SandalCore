@@ -1,0 +1,176 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package aoc.citynode.v1;
+
+option go_package = "aocrop/services/gen/aoc/citynode/v1;citynodev1";
+
+// Internal: the city node service (Nodes 1). The live state of the game world's city nodes (level, XP, vassal link), the node
+// clock, and the seed a fresh server starts with. API-FIRST: every read and every control of the nodes is a method here. worldd
+// (which answers the game client), nodectl (the command line) and the admin app to come (a 3D viewer that controls the server)
+// all call these same methods. Calls carry the service token (internal/svcauth).
+//
+// A node is named by a NodeRef. Errors: NotFound for a node that is not there; InvalidArgument for input the service refuses
+// (a level outside 0..MaxNodeLevel, an XP total below 0, a clock speed outside its bounds ...), with its reason.
+service CityNodeService {
+  // Reads. ListNodes is every node, in guid order, with the node clock and the sequence number of the last change.
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  rpc GetClock(GetClockRequest) returns (GetClockResponse);
+  // The whole state first (one snapshot message), then every change after it, in the order the changes were made, with no
+  // gap and no repeat: the first change has seq = the snapshot's seq + 1, and each next one the one before + 1. The stream ends
+  // with Aborted when the reader fell too far behind (call again: the snapshot is the whole state) and with Unavailable when
+  // the service shuts down.
+  rpc WatchNodes(WatchNodesRequest) returns (stream WatchNodesResponse);
+
+  // Controls.
+  // Sets a node's level, 0..MaxNodeLevel (4, Town). It changes nothing else.
+  rpc SetNodeLevel(SetNodeLevelRequest) returns (SetNodeLevelResponse);
+  // Adds XP to a node (a negative amount takes XP away, down to 0). It stores the XP and moves the progress toward the next
+  // level; it does NOT change the level (there is no level-up from XP in Nodes 1).
+  rpc AddNodeExperience(AddNodeExperienceRequest) returns (AddNodeExperienceResponse);
+  // The node clock = real time x speed + offset. AdvanceClock skips ahead (a GM's skip); SetClockSpeed is the speed knob.
+  rpc AdvanceClock(AdvanceClockRequest) returns (AdvanceClockResponse);
+  rpc SetClockSpeed(SetClockSpeedRequest) returns (SetClockSpeedResponse);
+  // Applies the seed (deploy/citynode_seed.json, or the seed_json given). Without force it does so only if no seed has been
+  // applied yet; with force it applies it again and overwrites EVERY node's level and parent.
+  rpc ApplySeed(ApplySeedRequest) returns (ApplySeedResponse);
+}
+
+// NodeRef names a node: by guid (the CityNodeRecordBase guid) when it is not 0, else by name: the record name
+// ("Verra_RVR_Joeva", what the client's GM commands take), the same without "Verra_", or the display name ("Joeva").
+message NodeRef {
+  int64 guid = 1;
+  string name = 2;
+}
+
+message Node {
+  int64 guid = 1;
+  string name = 2;         // "Verra_RVR_Joeva"
+  string display_name = 3; // "Joeva"
+  uint32 level = 4;        // ENodeLevel: 0 Wilderness, 1 Crossroads, 2 Encampment, 3 Village, 4 Town
+  string level_name = 5;
+  int64 experience = 6;    // the node's XP in total (CityNodeExpToLevel's scale)
+  uint32 percent = 7;      // 0-100: how far the XP is through the node's level (0 at the highest level)
+  int64 experience_to_next_level = 8; // the XP still missing for the next level (0 at the highest level)
+  int64 parent_guid = 9;   // the lord this node is a vassal of; 0 for none
+  int64 updated_at_ms = 10; // unix milliseconds
+}
+
+// Clock is the node clock at one moment: node time = real time x speed + offset (unix time).
+message Clock {
+  double speed = 1;
+  int64 offset_seconds = 2;
+  int64 real_unix_ms = 3; // the real time it was read at
+  int64 node_unix_ms = 4; // node time then
+}
+
+message ListNodesRequest {}
+
+message ListNodesResponse {
+  repeated Node nodes = 1;
+  Clock clock = 2;
+  uint64 seq = 3; // the last change these include (WatchNodes numbers its changes the same way)
+  uint32 max_node_level = 4;
+}
+
+message GetNodeRequest {
+  NodeRef node = 1;
+}
+// C.Y.B / C-O-A
+
+message GetNodeResponse {
+  Node node = 1;
+}
+
+message GetClockRequest {}
+
+message GetClockResponse {
+  Clock clock = 1;
+}
+
+message WatchNodesRequest {}
+
+enum ChangeCause {
+  CHANGE_CAUSE_UNSPECIFIED = 0;
+  CHANGE_CAUSE_SET_LEVEL = 1;
+  CHANGE_CAUSE_ADD_EXPERIENCE = 2;
+  CHANGE_CAUSE_SEED = 3;
+}
+
+// NodeChange is one change of one node: the node as it is now, and what it was.
+message NodeChange {
+  Node node = 1;
+  uint32 previous_level = 2;
+  int64 previous_experience = 3;
+  int64 previous_parent_guid = 4;
+  ChangeCause cause = 5;
+  bool vassalship_disabled = 6; // SetNodeLevel's disable_vassalship flag (Nodes 1 has no vassal rules: it only travels along)
+}
+
+message Snapshot {
+  repeated Node nodes = 1;
+  Clock clock = 2;
+}
+
+message WatchNodesResponse {
+  // snapshot: seq is the last change it includes; every other event: seq is its own number.
+  uint64 seq = 1;
+  oneof event {
+    Snapshot snapshot = 2;
+    NodeChange node_changed = 3;
+    Clock clock_changed = 4;
+  }
+}
+
+message SetNodeLevelRequest {
+  NodeRef node = 1;
+  int32 level = 2;
+  // The client's GM flag bDisableVassalshipSystem. Nodes 1 has no vassal rules to switch off: the flag only travels with the
+  // change. The seed is set the way a GM sets a level with it on.
+  bool disable_vassalship = 3;
+}
+
+message SetNodeLevelResponse {
+  Node node = 1;
+  bool changed = 2; // false: the node already had that level (no change, no event)
+}
+
+message AddNodeExperienceRequest {
+  NodeRef node = 1;
+  int64 amount = 2; // not 0; a negative amount may not take the total below 0
+}
+
+message AddNodeExperienceResponse {
+  Node node = 1;
+}
+
+message AdvanceClockRequest {
+  int64 seconds = 1; // 1 to 100 years
+}
+
+message AdvanceClockResponse {
+  Clock clock = 1;
+}
+
+message SetClockSpeedRequest {
+  double factor = 1; // 0.001 to 100000; 1 is real time. Node time does not jump.
+}
+
+message SetClockSpeedResponse {
+  Clock clock = 1;
+}
+
+message ApplySeedRequest {
+  bool force = 1;
+  string seed_json = 2; // the seed's text; empty: the service's own seed file
+}
+
+message ApplySeedResponse {
+  bool applied = 1;          // the seed was applied now
+  bool forced = 2;           // force was asked for
+  uint32 nodes_changed = 3;  // nodes whose level or parent it changed
+  int64 applied_at_ms = 4;   // when the seed was applied (now, or before when applied is false)
+}

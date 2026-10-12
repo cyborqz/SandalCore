@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package ics_auth;
+
+option csharp_namespace = "IcsAuth";
+
+import "ics_common.proto";
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum AuthResultCode {
+    AUTH_RESULT_CODE_SUCCESS                          = 0;
+    AUTH_RESULT_CODE_ERROR_BEGIN                      = 100;
+    AUTH_RESULT_CODE_ERROR_UNKNOWN_REQUEST            = 101;
+    AUTH_RESULT_CODE_ERROR_INVALID_REQUEST            = 102;
+    AUTH_RESULT_CODE_ERROR_REQUEST_FAILED             = 103;
+    AUTH_RESULT_CODE_ERROR_AUTHENTICATION_FAILED      = 104;
+    AUTH_RESULT_CODE_ERROR_PERMISSION_CHECK_FAILED    = 105;
+    AUTH_RESULT_CODE_ERROR_ACCOUNT_BANNED             = 106;
+    AUTH_RESULT_CODE_ERROR_DATABASE_OPERATION_FAILED  = 107;
+    AUTH_RESULT_CODE_ERROR_ACCOUNT_LINK_NOT_FOUND     = 108;
+    AUTH_RESULT_CODE_ERROR_STEAM_AUTHENTICATION_FAILED = 109;
+    AUTH_RESULT_CODE_ERROR_STEAM_GAME_NOT_PURCHASED   = 110;
+    AUTH_RESULT_CODE_ERROR_END                        = 199;
+}
+
+// ─── Messages ────────────────────────────────────────────────────────────────
+
+message UnaryAuthBeginRequest {
+    ics_common.SystemData system_data  = 1;
+    string                username     = 2;
+    string                credentials  = 3;
+}
+
+message UnaryAuthBeginReply {
+    ics_common.SystemData system_data    = 1;
+    AuthResultCode        result_code    = 2;
+    string                auth_token     = 3;
+    string                refresh_token  = 4;
+}
+
+message UnaryAuthBeginSteamRequest {
+    ics_common.SystemData system_data   = 1;
+    string                steam_ticket  = 2;
+}
+// -- C.O.A & Cyb --
+
+message UnaryAuthBeginSteamReply {
+    ics_common.SystemData system_data          = 1;
+    AuthResultCode        result_code          = 2;
+    string                auth_token           = 3;
+    string                refresh_token        = 4;
+    string                oauth_auth_token     = 5;
+    string                oauth_refresh_token  = 6;
+}
+
+message UnaryAuthRefreshRequest {
+    ics_common.SystemData system_data    = 1;
+    string                auth_token     = 2;
+    string                refresh_token  = 3;
+}
+
+message UnaryAuthRefreshReply {
+    ics_common.SystemData system_data    = 1;
+    AuthResultCode        result_code    = 2;
+    string                auth_token     = 3;
+    string                refresh_token  = 4;
+}
+
+// ─── Service ─────────────────────────────────────────────────────────────────
+
+service AuthService {
+    // Standard username/password authentication
+    rpc ProcessUnaryAuthBeginRequest (UnaryAuthBeginRequest) returns (UnaryAuthBeginReply);
+
+    // Steam ticket-based authentication (primary flow for Steam users)
+    rpc ProcessUnaryAuthBeginSteamRequest (UnaryAuthBeginSteamRequest) returns (UnaryAuthBeginSteamReply);
+
+    // Token refresh
+    rpc ProcessUnaryAuthRefreshRequest (UnaryAuthRefreshRequest) returns (UnaryAuthRefreshReply);
+
+    // Bidirectional streaming for session management
+    rpc ProcessAuthMessage (stream ics_common.MessageWrapper) returns (stream ics_common.MessageWrapper);
+}

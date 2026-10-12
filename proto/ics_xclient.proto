@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package ics_xclient;
+
+option csharp_namespace = "IcsXClient";
+
+import "ics_common.proto";
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum GameClientInterestTypeEnum {
+    GameClientInterestType_Invalid     = 0;
+    GameClientInterestType_WorldStatus = 1;
+    GameClientInterestType_BitmaskSize = 64;
+}
+
+// ─── Auth Refresh ───────────────────────────────────────────────────────────
+
+message AuthRefreshRequest {
+    string auth_token    = 1;
+    string refresh_token = 2;
+}
+
+message AuthRefreshReply {
+    string auth_token    = 1;
+    string refresh_token = 2;
+}
+
+// ─── Game Version ───────────────────────────────────────────────────────────
+
+message CheckGameVersionRequest {
+    string game_version = 1;
+}
+
+message CheckGameVersionReply {
+    bool   supported = 1;
+    string message   = 2;
+}
+
+// ─── Client Interest ────────────────────────────────────────────────────────
+
+message GameClientInterestEvent {
+    uint64 start_interest_bitmask = 1;
+    uint64 stop_interest_bitmask  = 2;
+}
+
+// ─── Character Name Check ───────────────────────────────────────────────────
+
+message CheckCharacterNameRequest {
+    string character_name = 1;
+    string world_id       = 2;
+}
+
+message CheckCharacterNameReply {
+    string character_name = 1;
+    bool   available      = 2;
+}
+
+// ─── Character Creation ─────────────────────────────────────────────────────
+
+message CreateCharacterRequest {
+    string character_name = 1;
+    string world_id       = 2;
+    // field 3: aoc_character.CreateCharacterInfo create_character_info
+    // (omitted – requires aoc_character.proto which is not available)
+    bytes  create_character_info_raw = 3;
+}
+// ~ C.Y.B :: CoA ~
+
+message CreateCharacterReply {
+    string character_id   = 1;
+    string character_name = 2;
+    string world_id       = 3;
+    // field 4: aoc_character.CharacterInformation character_info
+    bytes  character_info_raw = 4;
+}
+
+// ─── Character Deletion ─────────────────────────────────────────────────────
+
+message CanDeleteCharacterRequest {
+    string character_id = 1;
+    string world_id     = 2;
+}
+
+message CanDeleteCharacterReply {
+    string character_id = 1;
+    bool   can_delete   = 2;
+}
+
+message DeleteCharacterRequest {
+    string character_id   = 1;
+    string character_name = 2;
+    string world_id       = 3;
+}
+
+message DeleteCharacterReply {
+    string character_id = 1;
+}
+
+// ─── Character List ─────────────────────────────────────────────────────────
+
+message GetCharactersRequest {
+    string world_id = 1;
+}
+
+message GetCharactersReply {
+    // field 1: repeated aoc_character.Character characters
+    // (uses raw bytes since aoc_character.proto is not available)
+    repeated bytes characters_raw = 1;
+}
+
+// ─── Character Selection ────────────────────────────────────────────────────
+
+message SelectCharacterRequest {
+    string character_id = 1;
+}
+
+message SelectCharacterReply {
+    string character_id = 1;
+}
+
+// ─── Play (connect to game server) ─────────────────────────────────────────
+
+message PlayRequest {
+    string character_id = 1;
+    string world_id     = 2;
+}
+
+message PlayReply {
+    string game_connection_token  = 1;
+    string game_connection_string = 2;
+}
+
+message PlayEndRequest {
+}
+
+message PlayEndReply {
+}
+
+message PlayRequestStatusReport {
+    int32 queue_position = 1;
+}
+
+// ─── Player State ───────────────────────────────────────────────────────────
+
+message PlayerCharacterMiniRecord {
+    string character_id   = 1;
+    string character_name = 2;
+    string world_id       = 3;
+}
+
+message PlayerSessionState {
+    string character_id                             = 1;
+    string world_id                                 = 2;
+    bool   has_pending_play_request                 = 3;
+    repeated PlayerCharacterMiniRecord character_mini_records = 4;
+}
+
+// ─── World / Realm ──────────────────────────────────────────────────────────
+
+message WorldInfo {
+    string world_id           = 1;
+    string world_display_name = 2;
+    bool   available          = 3;
+    int32  fullness           = 4;
+    int32  queue_job_count_hi = 5;
+    int32  character_count    = 6;
+}
+
+message GetWorldsRequest {
+}
+
+message GetWorldsReply {
+    repeated WorldInfo worlds = 1;
+}
+
+message WorldStatusEvent {
+    repeated WorldInfo worlds = 1;
+}
+
+// ─── Shop ───────────────────────────────────────────────────────────────────
+
+message GetShopHandoffCodeRequest {
+}
+
+message GetShopHandoffCodeReply {
+    string shop_handoff_code = 1;
+}
+
+// ─── Service ────────────────────────────────────────────────────────────────
+
+service XClientService {
+    rpc ProcessXClientMessage(stream ics_common.MessageWrapper) returns (stream ics_common.MessageWrapper);
+}

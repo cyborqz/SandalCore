@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package aoc.gateway.v1;
+
+option go_package = "aocrop/services/gen/aoc/gateway/v1;gatewayv1";
+
+// Internal: what world servers ask the gateway.
+service GatewayService {
+  // Redeems the one-time join ticket a client presents in its handshake. The
+  // first success spends it. PermissionDenied when the ticket is unknown,
+  // already used, expired, or was issued for another character or server,
+  // and always for server 0 (the static world).
+  rpc RedeemTicket(RedeemTicketRequest) returns (RedeemTicketResponse);
+}
+
+message RedeemTicketRequest {
+  string ticket = 1; // 32 lowercase hex digits, as the client sent it
+  string character_id = 2;
+  // The redeeming world server: its ServerId from mesh Register, always >= 1.
+  // Server 0 is the static world (and what an unset field reads as): it is
+  // always rejected, whatever was issued.
+  uint32 server_id = 3;
+}
+
+message RedeemTicketResponse {
+  int64 account_id = 1;
+  string character_id = 2;
+}

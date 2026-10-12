@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+# GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+# Local development infrastructure for the Go services and worldd.
+#   docker compose -f deploy/docker-compose.yml up -d --wait
+name: aoc
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: aoc
+      POSTGRES_PASSWORD: aoc
+      POSTGRES_DB: aoc
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Over TCP: during first-start init only the unix socket is served, so
+      # this turns healthy once the final server (and aoc_test) is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U aoc -d aoc"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  nats:
+    image: nats:2.10
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+
+volumes:
+  pgdata:

@@ -1,0 +1,29 @@
+Sandal Core
+Copyright (C) 2026 Cyb and contributors
+
+Developed by Cyb. Special thanks to Hatemost for building the foundation and CoA (Creation of Ashes) / the Ashes
+community who participated in capturing the PCAPs.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+Public License version 3 (AGPL-3.0-only) as published by the Free Software Foundation, together with the additional
+terms below. It is distributed WITHOUT ANY WARRANTY; see the LICENSE file for details.
+
+Additional terms under section 7 of the GNU AGPL v3
+1. Attribution (section 7(b)). Anyone who conveys this work or a modified version must preserve the copyright
+   notices, this NOTICE file and the author attributions above in the source code. Any interactive interface or
+   network service based on this work must include, in its Appropriate Legal Notices (for example a server start-up
+   banner or an "about" page), the attribution: "Developed by Cyb. Thanks to Hatemost and CoA (Creation of Ashes)."
+2. Modified versions (section 7(c)). Modified versions must be clearly marked as changed from the original, and
+   must not claim or imply that they are the original Sandal Core or that they are endorsed by Cyb.
+3. Names (section 7(e)). No rights are granted to use the names "Cyb", "Hatemost", "CoA", "Creation of Ashes" or
+   "Sandal Core" as trademarks, or to promote works derived from this one, beyond giving the attribution required
+   above.
+These are the only additional terms. Under section 10 of the AGPL v3 you may not impose any further restrictions on
+the recipients' exercise of the rights granted.
+
+Third-party components
+- third_party/recastnavigation: Recast & Detour, zlib license (see its own License.txt).
+
+Disclaimer
+Not affiliated with or endorsed by Intrepid Studios. Ashes of Creation and related names are trademarks of their
+owners. No game client, game assets or Intrepid code are included.

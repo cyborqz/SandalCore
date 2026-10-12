@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package ics_launcher;
+
+option csharp_namespace = "IcsLauncher";
+
+import "ics_common.proto";
+import "ics_patcher.proto";
+import "ics_patcher_v2.proto";
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum LauncherResultCode {
+    LAUNCHER_RESULT_CODE_SUCCESS                          = 0;
+    LAUNCHER_RESULT_CODE_ERROR_BEGIN                      = 100;
+    LAUNCHER_RESULT_CODE_ERROR_UNKNOWN_REQUEST            = 101;
+    LAUNCHER_RESULT_CODE_ERROR_INVALID_REQUEST            = 102;
+    LAUNCHER_RESULT_CODE_ERROR_REQUEST_FAILED             = 103;
+    LAUNCHER_RESULT_CODE_ERROR_AUTHENTICATION_FAILED      = 104;
+    LAUNCHER_RESULT_CODE_ERROR_DATABASE_OPERATION_FAILED  = 105;
+    LAUNCHER_RESULT_CODE_ERROR_NO_PATCH_TO_TARGET_VERSION = 106;
+    LAUNCHER_RESULT_CODE_ERROR_END                        = 199;
+}
+
+// ─── Messages ────────────────────────────────────────────────────────────────
+
+message IsNdaSignedRequest {
+    ics_common.SystemData system_data = 1;
+    string                product_id  = 2;
+}
+
+message IsNdaSignedReply {
+    ics_common.SystemData system_data  = 1;
+    LauncherResultCode    result_code  = 2;
+    bool                  is_signed    = 3;
+}
+
+message SignNdaRequest {
+    ics_common.SystemData system_data = 1;
+    string                product_id  = 2;
+}
+// [C | O | A ~ Cyb]
+
+message SignNdaReply {
+    ics_common.SystemData system_data = 1;
+    LauncherResultCode    result_code = 2;
+}
+
+// The connection info returned to the launcher, telling it how to start the game client
+message GameClientConnectionInfos {
+    string branch_id              = 1;
+    string executable             = 2;
+    string arguments              = 3;
+    string file_storage_location  = 4;
+}
+
+message GetGameClientConnectionInfosRequest {
+    ics_common.SystemData system_data = 1;
+    string                server_id   = 2;
+}
+
+message GetGameClientConnectionInfosReply {
+    ics_common.SystemData     system_data = 1;
+    LauncherResultCode        result_code = 2;
+    GameClientConnectionInfos infos       = 3;
+}
+
+message ResourceUrl {
+    string url       = 1;
+    int64  expire_in = 2;
+}
+
+message GetUrlFromTokenRequest {
+    ics_common.SystemData system_data = 1;
+    string                token       = 2;
+}
+
+message GetUrlFromTokenReply {
+    ics_common.SystemData system_data  = 1;
+    LauncherResultCode    result_code  = 2;
+    ResourceUrl           resource_url = 3;
+}
+
+// V1 patch request/reply using ics.patcher package
+message GetGamePatchToLatestVersionRequest {
+    ics_common.SystemData system_data = 1;
+    string                branch_id   = 2;
+    string                hash_from   = 3;
+}
+
+message GetGamePatchToLatestVersionReply {
+    ics_common.SystemData          system_data = 1;
+    LauncherResultCode             result_code = 2;
+    ics_patcher.GamePatchMetadata  game_patch  = 3;
+}
+
+// V2 patch request/reply using ics.patcher_v2 package
+message GetGamePatchToLatestVersionRequest_v2 {
+    ics_common.SystemData system_data = 1;
+    string                branch_id   = 2;
+    string                hash_from   = 3;
+}
+
+message GetGamePatchToLatestVersionReply_v2 {
+    ics_common.SystemData             system_data = 1;
+    LauncherResultCode                result_code = 2;
+    ics_patcher_v2.GamePatchMetadata  game_patch  = 3;
+}
+
+// ─── Service ─────────────────────────────────────────────────────────────────
+
+service LauncherService {
+    // Check if NDA is signed for a product
+    rpc IsNdaSigned (IsNdaSignedRequest) returns (IsNdaSignedReply);
+
+    // Sign the NDA
+    rpc SignNda (SignNdaRequest) returns (SignNdaReply);
+
+    // Get game client connection info (server addresses, executable path, args)
+    rpc GetGameClientConnectionInfos (GetGameClientConnectionInfosRequest) returns (GetGameClientConnectionInfosReply);
+
+    // Get a resource URL from a token
+    rpc GetUrlFromToken (GetUrlFromTokenRequest) returns (GetUrlFromTokenReply);
+
+    // Get patch information to update game to latest version (V1)
+    rpc GetGamePatchToLatestVersion (GetGamePatchToLatestVersionRequest) returns (GetGamePatchToLatestVersionReply);
+
+    // Get patch information to update game to latest version (V2)
+    rpc GetGamePatchToLatestVersion_v2 (GetGamePatchToLatestVersionRequest_v2) returns (GetGamePatchToLatestVersionReply_v2);
+
+    // Bidirectional streaming for launcher messages
+    rpc ProcessLauncherMessage (stream ics_common.MessageWrapper) returns (stream ics_common.MessageWrapper);
+}

@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package ics_patcher;
+
+option csharp_namespace = "IcsPatcher";
+
+// V1 patcher definitions
+
+message FileChange {
+    string             filename   = 1;
+    string             hash_from  = 2;
+    string             hash_to    = 3;
+    repeated Operation operations = 4;
+}
+
+message GamePatch {
+    string              branch_id    = 1;
+    string              version_from = 2;
+    string              version_to   = 3;
+    repeated FileChange file_changes = 4;
+}
+
+message GameBranch {
+    string branch_id              = 1;
+    string target_game_version_id = 2;
+}
+
+message GamePatchMetadata {
+    GamePatch game_patch = 1;
+    repeated  GamePatch  parts = 2;
+}
+
+message GameVersion {
+    string               branch_id     = 1;
+    string               hash          = 2;
+    int64                size          = 3;
+    repeated TrackedFile tracked_files = 4;
+}
+
+message Operation {
+    string action                        = 1;
+    int64  additional_required_disk_space = 2;
+    int64  offset                        = 3;
+    string patch_url                     = 4;
+    int64  size                          = 5;
+}
+
+message TrackedFile {
+    string filename = 1;
+    string hash     = 2;
+}

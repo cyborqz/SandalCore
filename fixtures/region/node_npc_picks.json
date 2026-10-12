@@ -1,0 +1,229 @@
+{
+ "captures": [
+  515,
+  520,
+  521,
+  522,
+  523,
+  558,
+  559,
+  560,
+  561,
+  562,
+  563,
+  564,
+  565,
+  566,
+  567,
+  568,
+  569,
+  570,
+  571,
+  572,
+  573,
+  574,
+  575,
+  576,
+  577,
+  578,
+  579,
+  623,
+  721,
+  722,
+  723,
+  752,
+  758,
+  766,
+  871,
+  883,
+  888,
+  914,
+  917,
+  918,
+  919,
+  921,
+  923,
+  946,
+  957,
+  958,
+  959,
+  960,
+  961,
+  962,
+  1030,
+  1065,
+  1198,
+  1353,
+  1354,
+  1359,
+  1360,
+  1361,
+  1362,
+  1363,
+  1364,
+  1384,
+  1385,
+  1393,
+  1394,
+  1395,
+  1397,
+  1398,
+  1400,
+  1402,
+  1403,
+  1454,
+  1553
+ ],
+ "picks": {
+  "/Game/DesignAssets/Population/NPC/PCRaces/FIllerNPC/Kaelar/Kaelar_Male_Citizen.Default__Kaelar_Male_Citizen_C": [
+   1030,
+   21,
+   21378
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/FIllerNPC/Kaelar/Kaelar_Male_Merchant.Default__Kaelar_Male_Merchant_C": [
+   959,
+   20,
+   1594
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Guards/Guard_Captain.Default__Guard_Captain_C": [
+   1065,
+   58,
+   3204
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Mercenary_F.Default__Node_Mercenary_F_C": [
+   766,
+   243,
+   2046
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Mercenary_M.Default__Node_Mercenary_M_C": [
+   766,
+   57,
+   1192
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Merchant_F.Default__Node_Merchant_F_C": [
+   766,
+   98,
+   1314
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Merchant_M.Default__Node_Merchant_M_C": [
+   623,
+   152,
+   25355
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Priest_F.Default__Node_Priest_F_C": [
+   1065,
+   15,
+   2726
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Priest_M.Default__Node_Priest_M_C": [
+   766,
+   9,
+   1025
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Scholar_F.Default__Node_Scholar_F_C": [
+   766,
+   168,
+   2374
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Scholar_M.Default__Node_Scholar_M_C": [
+   766,
+   192,
+   1948
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Villager_M_Carrying.Default__Node_Villager_M_Carrying_C": [
+   758,
+   371,
+   3245
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Villager_M_Carrying2.Default__Node_Villager_M_Carrying2_C": [
+   758,
+   380,
+   3269
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Villager_M_Hammer.Default__Node_Villager_M_Hammer_C": [
+   914,
+   89,
+   1380
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Filler/Node_Villager_M_Shovel.Default__Node_Villager_M_Shovel_C": [
+   871,
+   32,
+   1127
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/ServiceBuilding/Artisanship/ServiceBuilding_Cookhouse_General.Default__ServiceBuilding_Cookhouse_General_C": [
+   758,
+   308,
+   3140
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/ServiceBuilding/Artisanship/ServiceBuilding_SportfishingVendor_General.Default__ServiceBuilding_SportfishingVendor_General_C": [
+   758,
+   62,
+   2871
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/ServiceBuilding/ServiceBuilding_Caravansary_CaravanMaster.Default__ServiceBuilding_Caravansary_CaravanMaster_C": [
+   758,
+   38,
+   4497
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/ServiceBuilding/ServiceBuilding_Caravansary_CrateSalesman.Default__ServiceBuilding_Caravansary_CrateSalesman_C": [
+   723,
+   31,
+   1340
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_AcademicTypeVendor_KAE.Default__Node_AcademicTypeVendor_KAE_C": [
+   766,
+   199,
+   1965
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_BlackMarket_Vendor.Default__Node_BlackMarket_Vendor_C": [
+   766,
+   172,
+   1879
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_BuyOrderManager_KAE.Default__Node_BuyOrderManager_KAE_C": [
+   758,
+   440,
+   3427
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_CitizenshipManager_KAE.Default__Node_CitizenshipManager_KAE_C": [
+   959,
+   11,
+   1750
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_ConstructionManager_KAE.Default__Node_ConstructionManager_KAE_C": [
+   1030,
+   20,
+   21376
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_GuildCommodityVendor_KAE.Default__Node_GuildCommodityVendor_KAE_C": [
+   758,
+   252,
+   3006
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_Mayor_Vendor.Default__Node_Mayor_Vendor_C": [
+   623,
+   98,
+   23104
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_TownCrierManager_KAE.Default__Node_TownCrierManager_KAE_C": [
+   766,
+   161,
+   2232
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_TownHall_GuildManager_KAE.Default__Node_TownHall_GuildManager_KAE_C": [
+   959,
+   26,
+   1632
+  ],
+  "/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_Warehouse_GuildStorageClerk_KAE.Default__Node_Warehouse_GuildStorageClerk_KAE_C": [
+   758,
+   439,
+   3425
+  ],
+  "/Game/DesignAssets/Quests/SidequestAssets/1000_CorruptedMemories/1000_SoshaTerim.Default__1000_SoshaTerim_C": [
+   721,
+   294,
+   747
+  ]
+ }
+}

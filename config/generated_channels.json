@@ -1,0 +1,20 @@
+{
+  "_comment": "Phase D2 retest: re-enabled ch=119 entry after fixing the BunchDataBits width bug (14→13 bits in send_generated_bunch). The original D2 run produced a ContentBlockFail which we attributed to stateful RepLayout; a codebase audit uncovered a contradiction (replay parser reads 13 bits for S>C BunchDataBits, but game_server.h was writing 14), which would also produce ContentBlockFail via a 1-bit payload offset. Re-running to disambiguate.",
+  "_schema_version": 2,
+  "entries": [
+    {
+      "channel": 65535,
+      "generator": "noop",
+      "note": "Virtual channel — NoopGenerator never returns a bunch."
+    },
+    {
+      "channel": 119,
+      "generator": "recorded",
+      "ch_name": "#127",
+      "payload_hex": "56 61 08 00",
+      "bit_count": 31,
+      "emit_at_ms": 150000,
+      "note": "D2 retest: 4-byte unreliable state update from blueprint_bunches.csv pkt=1978 (payload_hash=c3331608062ef010)."
+    }
+  ]
+}
