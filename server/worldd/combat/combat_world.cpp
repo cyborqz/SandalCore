@@ -163,6 +163,9 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     n->kit = kit_of(leaf);
     npc::ai::Params p;
     p.aggro_radius_cm = a.npc.aggro_radius_cm > 0 ? a.npc.aggro_radius_cm : cfg_.default_aggro_cm;
+    // who may start a fight by noticing a player: a creature hostile to players whose data does not switch its aggro off (retest 3: a Timid Grem, whose instance overrides the radius with 0, and a
+    // huntable, whose alignment is Friendly, never attack first)
+    p.proximity_aggro = notices_players(n->hostile, a.npc);
     p.leash_radius_cm = a.npc.leash_radius_cm > 0 ? a.npc.leash_radius_cm : std::max(cfg_.default_leash_cm, p.aggro_radius_cm * 3.0);
     const double run = std::max({bp.max_run_speed, bp.max_walk_speed, 300.0});
     p.chase_speed_cm_s = run;
@@ -254,7 +257,22 @@ std::string CombatWorld::next_attack_name(uint64_t actor_id) const {
     return it->second->next.ability->row.name;
 }
 
-void CombatWorld::forget(uint64_t actor_id) { npcs_.erase(actor_id); }
+void CombatWorld::forget(uint64_t actor_id) {
+    npcs_.erase(actor_id);
+    huntable_stats_.erase(actor_id);
+}
+
+void CombatWorld::fill_huntable_stats(const world::WorldActor& a) {
+    if (!huntable_stats_.insert(a.id).second) return;
+    const npc::MotionStats bp = motion_.get(a.npc.archetype);
+    std::string err;
+    const auto cs = book_.make(bp, a.npc.level, err);
+    if (!cs) {
+        spdlog::warn("[combat] {} ({}): a huntable whose stats do not run keeps its template's: {}", a.id, spawns::blueprint_leaf(a.npc.archetype), err);
+        return;
+    }
+    write_stats(registry_, a.id, *cs);
+}
 
 void CombatWorld::add_shield(uint64_t npc_actor, double amount, double seconds, double now) {
     Npc* n = combatant(npc_actor);
@@ -587,6 +605,10 @@ void CombatWorld::tick(double now) {
             const auto known = npcs_.find(id);
             if (known != npcs_.end()) {
                 todo.insert(id);
+                continue;
+            }
+            if (huntable_ && huntable_(a->npc)) {   // a huntable is no fighter: its stats, nothing more
+                fill_huntable_stats(*a);
                 continue;
             }
             auto h = hostile_by_archetype_.find(a->npc.archetype);

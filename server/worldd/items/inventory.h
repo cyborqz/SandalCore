@@ -39,10 +39,21 @@
 //  onto an occupied slot that is not a swap, and every number out of range.  There is no class rule: the design data has none
 //  (every class's kit holds weapons of another class's line, and a retail level 20 character wears level 26 gear), so
 //  "the class may equip it" is true for all, and the record's bCanEquip is not a rule either (ItemRecord::can_equip).
+//
+//  Gathering stage 3, "Resource storage": the three resource containers (Resource0 to Resource2, the resource bags worn in Equipment slots 23, 24 and 25).  An item goes to a
+//  resource container iff its gameplay tags hold a child of item.resource (ItemInfo::resource); every other item goes to the Backpack, and the Backpack and the Equipment
+//  refuse a resource item as the resource containers refuse anything else [exe: UItemStorageComponent's item check, UItemMovementSubsystem::ValidateTargetContainers].  A
+//  container is a grid (resource_grid.h, from the bag's ResourceBagDef): an item takes inv_w x inv_h cells, its slot is the index of the top-left cell, a new stack goes to the
+//  first free rectangle (rows, then columns).  grant() is THE routing: a caller never picks a container.  A grant tops up the stacks of the same record and quality (up to the
+//  record's MaxStackSize, the bag's stat modifiers are not replicated) before it starts a new one, in the first container with room, in index order [R: capture 1198's
+//  Resource containers hold one stack of 15 Weeping Willow and one of 10 Halcyonite that harvests of 5 grew; the retail event of a top-up is not captured, the Remove and Add of
+//  the same instance that consume() sends is modelled].  The grids are the ones of the bags worn when the inventory was built: a container opens at the next login for a bag worn
+//  later, and a bag whose container is open cannot be taken off or replaced during the session.
 // ============================================================================
 #pragma once
 
 #include "content/content_db.h"
+#include "items/resource_grid.h"
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/repl/value.h"
 #include "svc/services.h"
@@ -50,8 +61,10 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace aoc::worldd::items {
@@ -61,9 +74,16 @@ namespace repl = ::aoc::protocol::repl;
 inline constexpr int kBackpackSlots = 70;
 inline constexpr int kEquipmentSlots = 83;
 inline constexpr int kQuestSlots = 100;
-inline constexpr int kMaxItems = kBackpackSlots + kEquipmentSlots + kQuestSlots;
+/// Gathering stage 3: a resource container has the cells of its bag (at most kMaxResourceCells), and the character service stores a slot below that.
+inline constexpr int kResourceContainers = 3;
+inline constexpr int kMaxItems = kBackpackSlots + kEquipmentSlots + kQuestSlots + kResourceContainers * kMaxResourceCells;
 
-/// The number of slots of a storage.
+inline bool is_resource(svc::ItemContainer c) { return c >= svc::ItemContainer::Resource0; }
+/// 0, 1 or 2 for Resource0 to Resource2.
+inline int resource_index(svc::ItemContainer c) { return static_cast<int>(c) - static_cast<int>(svc::ItemContainer::Resource0); }
+inline svc::ItemContainer resource_container(int index) { return static_cast<svc::ItemContainer>(static_cast<int>(svc::ItemContainer::Resource0) + index); }
+
+/// The number of slots of a storage (a resource container: the most any bag has; Inventory::grid has the bag's own).
 int slot_count(svc::ItemContainer c);
 const char* container_name(svc::ItemContainer c);
 
@@ -72,7 +92,7 @@ namespace equip {
 inline constexpr uint8_t Helmet = 1, Chest = 2, Wrists = 3, Hands = 4, Legs = 5, Feet = 6, Shoulders = 7, Back = 8, Belt = 9;
 inline constexpr uint8_t RingRight = 10, RingLeft = 11, Necklace = 12, EarRight = 13, EarLeft = 14;
 inline constexpr uint8_t Primary = 15, Secondary = 16, Ranged = 17, RangedOffHand = 18;
-inline constexpr uint8_t Shirt = 19, ResourceBag0 = 23, Pickaxe = 26, Axe = 29, Sickle = 33, FishingRod = 35, Bow = 38, Crowbar = 41;
+inline constexpr uint8_t Shirt = 19, ResourceBag0 = 23, ResourceBag1 = 24, ResourceBag2 = 25, Pickaxe = 26, Axe = 29, Sickle = 33, FishingRod = 35, Bow = 38, Crowbar = 41;
 inline constexpr uint8_t Costume = 71, PrimaryCosmetic = 75, CloakCosmetic = 79;
 }  // namespace equip
 // Cyb.C.O.A
@@ -108,6 +128,13 @@ std::optional<svc::InventoryItem> item_of(const repl::ItemInstance& instance, sv
 struct ItemInfo {
     std::vector<uint8_t> equip_slots;       // the EEquipSlot values it may be worn in, in the record's order
     bool                 two_handed = false;   // worn, it covers every slot of equip_slots
+    /// Gathering stage 3: the item is stored in a resource container (its gameplay tags hold a child of item.resource), takes inv_w x inv_h cells of its grid and stacks to max_stack.
+    bool                 resource = false;
+    int                  inv_w = 1;
+    int                  inv_h = 1;
+    int                  max_stack = 1;
+    /// The grid a resource bag gives its container, set for the items that are resource bags.
+    std::optional<ResourceGrid> bag;
     bool wearable() const { return !equip_slots.empty(); }
 };
 
@@ -118,15 +145,18 @@ public:
     virtual std::optional<ItemInfo> info(int64_t record) const = 0;
 };
 
-/// The catalog worldd runs: content.db's item and item_equip_slot.  A query that fails reads as "unknown" and is logged once.
+/// The catalog worldd runs: content.db's item, item_equip_slot and resource_bag.  A query that fails reads as "unknown" and is logged once.  What it found is kept (a grant asks about
+/// every item of a container): a record is read from the file once per catalog.
 class ContentItemCatalog : public ItemCatalog {
 public:
     explicit ContentItemCatalog(const content::ContentDb& db) : db_(db) {}
     std::optional<ItemInfo> info(int64_t record) const override;
 
 private:
-    const content::ContentDb& db_;
-    mutable bool              failure_logged_ = false;
+    const content::ContentDb&                                   db_;
+    mutable std::mutex                                          mutex_;
+    mutable std::unordered_map<int64_t, std::optional<ItemInfo>> kept_;
+    mutable bool                                                failure_logged_ = false;
 };
 
 // ---- the inventory --------------------------------------------------------------------------------------------------------
@@ -150,6 +180,19 @@ struct Outcome {
     bool               equipment_changed = false;   // the Equipment storage changed: the visible gear may have
 };
 
+/// What grant_what_fits did: the events of what it placed, and what it could not (the quantity left of an item that topped up a stack or filled a container in part comes back
+/// as an item of its own with the rest, under the instance guid the caller gave it).
+struct GrantResult {
+    Outcome                         outcome;   // ok unless an item breaks the table's rules or its guid is one the inventory has (then nothing was placed and `rest` is every item)
+    std::vector<svc::InventoryItem> rest;
+};
+
+/// The resource items found in the Backpack at the login, and where they went (Inventory::repair_resources).
+struct ResourceRepair {
+    std::vector<svc::InventoryItem> moved;    // now in a resource container, with their new container and slot
+    std::vector<svc::InventoryItem> stayed;   // left in the Backpack: no container had room for them
+};
+
 class Inventory {
 public:
     Inventory() = default;
@@ -157,15 +200,22 @@ public:
     /// The inventory holding `items` (in any order).  nullopt, with `error` saying which item and why, for a slot outside its
     /// storage, two items in a slot, an instance guid that is not 32 hex digits or is used twice, a record of 0 or less, a
     /// quantity or quality out of its range (what the character service's table checks) or more than kMaxItems.
-    static std::optional<Inventory> from_items(const std::vector<svc::InventoryItem>& items, std::string& error);
+    /// With a `catalog` the resource containers' grids are the ones of the bags worn in Equipment slots 23 to 25, and an item in a resource container must lie inside its grid, on
+    /// no blocked cell and on no other item (an error says which); without one a resource item is only checked for its slot number (the grids stay empty).
+    static std::optional<Inventory> from_items(const std::vector<svc::InventoryItem>& items, std::string& error, const ItemCatalog* catalog = nullptr);
+
+    /// The grid of a resource container (Resource0 to Resource2; an empty grid for any other storage and for a container whose bag is not worn).
+    const ResourceGrid& grid(svc::ItemContainer container) const;
+    /// The slot of the first free `w` x `h` rectangle of a resource container, -1 when there is none (or the storage is no resource container).
+    int place(svc::ItemContainer container, int w, int h, const ItemCatalog& catalog) const;
 
     /// The item in a slot, nullptr when it is empty or the slot is outside the storage.
     const svc::InventoryItem* at(svc::ItemContainer container, int slot) const;
     size_t count(svc::ItemContainer container) const;
-    size_t size() const { return count(svc::ItemContainer::Backpack) + count(svc::ItemContainer::Equipment) + count(svc::ItemContainer::Quest); }
-    /// The lowest empty slot of a storage, -1 when it is full.
+    size_t size() const { return slots_.size(); }
+    /// The lowest empty slot of a storage, -1 when it is full (a resource container: -1, its free places depend on the item's dimension: place()).
     int first_free(svc::ItemContainer container) const;
-    /// Every item: the Backpack's by slot, then the Equipment's, then the Quest storage's.
+    /// Every item: the Backpack's by slot, then the Equipment's, the Quest storage's and the three resource containers'.
     std::vector<svc::InventoryItem> items() const;
     /// The item record of every item, in the order of items() (a cheap look for a session that asks every tick which records it carries).
     std::vector<int64_t> records() const;
@@ -175,12 +225,14 @@ public:
     /// is 0xFFFFFFFF) or taken off (an equipment slot: into the lowest free bag slot).  Applied only when every check passes.
     Outcome use(svc::ItemContainer storage, int slot, const std::string& expected_guid, uint32_t requested_equip_slot,
                 const ItemCatalog& catalog);
+// (C | Y | B ~ CoA)
 
     /// ServerRequestStorageEvent, Move: the whole stack of `count` items of the instance `guid` from `from_slot` to the empty `to_slot`,
-    /// both in the Backpack.
-    Outcome move(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot);
+    /// both in the Backpack; or, with a `catalog`, both in resource containers (the same one or two): the stack is moved to the top-left cell `to_slot` of its rectangle, which must lie
+    /// in the grid on free cells (its own old cells are free).  The Backpack and a resource container never exchange items, a move onto a stack of the same item (Fill) is refused.
+    Outcome move(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot, const ItemCatalog* catalog = nullptr);
     /// ServerRequestStorageEvent, Swap: the two whole stacks of the Backpack change places; `to_guid` and `to_count` are what the
-    /// client says is in the target slot.
+    /// client says is in the target slot.  A resource container's items are not swapped (refused).
     Outcome swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
                  const std::string& to_guid, int32_t to_count);
 
@@ -190,12 +242,20 @@ public:
     /// losing one (the consumables retail used were single items, removed with one Remove event).
     Outcome consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count);
 
-    /// Plan D1: items granted into the Backpack (a GiveItem reward): each goes to the lowest free bag slot, an Add event each
-    /// (the character as the instigator, as the join's Adds), in the order given; `items` carry their record, quantity, quality,
-    /// durability, a fresh instance guid and creation time, their container and slot are set here. Refused, changing nothing,
-    /// when the bag has too few free slots for all of them, an item breaks the table's rules or its guid is one the inventory
-    /// has. The bag's Add is what the retail server sent for every item that reached a bag (the join's, an unequip's).
-    Outcome grant(std::vector<svc::InventoryItem> items);
+    /// Plan D1: items granted (a GiveItem reward, a purchase, a use): THE routing of Gathering stage 3 -- each item goes where its kind says (see the top of this file): a resource item
+    /// tops up the stacks of its record and quality in the resource containers and starts new ones at the first free rectangle of the first container with room, any other item takes
+    /// the lowest free bag slot.  An Add event each (the character as the instigator, as the join's Adds; a top-up is a Remove and an Add of the same instance), in the order given;
+    /// `items` carry their record, quantity, quality, durability, a fresh instance guid and creation time, their container and slot are set here.  Refused, changing nothing, when the
+    /// storages have no room for all of them, an item breaks the table's rules or its guid is one the inventory has.
+    Outcome grant(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog);
+    /// The same routing, for a caller that keeps what does not fit (a harvest: the rest goes to a pile on the ground): everything that fits is placed and the events say how, the rest
+    /// comes back in `rest`.  An item that breaks the table's rules or whose guid the inventory has refuses the whole call (nothing placed).
+    GrantResult grant_what_fits(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog);
+    /// Whether grant(items) would be applied (it changes nothing).
+    bool can_grant(const std::vector<svc::InventoryItem>& items, const ItemCatalog& catalog) const;
+    /// The login's repair: the resource items found in the Backpack (the harvests of Gathering stage 2 went there) move to the resource containers, first free rectangle each, in the
+    /// order of their Backpack slots.  Those no container has room for stay where they are.  No events (the join sends the repaired layout).
+    ResourceRepair repair_resources(const ItemCatalog& catalog);
 
     /// The mounts milestone, stage 3: a mount item keeps its Health and its LockExpiration (retail persists them on the item instance).  Sets them on the
     /// item of the instance `guid` (in the Backpack or the Equipment); `health` unset leaves the Health, `lock_expiration` negative leaves the lock.  The
@@ -205,17 +265,27 @@ public:
     /// The item of an instance guid (the Backpack, the Equipment, the Quest storage); nullptr when none.
     const svc::InventoryItem* find_guid(const std::string& guid) const;
 
+    /// Gathering stage 2, "Harvesting": a tool's wear.  Sets the durability of the item in `container` slot `slot` that holds the instance `guid` (no storage event: the client is
+    /// told by ClientUpdateItemDurability).  False, changing nothing, when the slot holds another item or the value is not a number from 0 up.
+    bool set_durability(svc::ItemContainer container, int slot, const std::string& guid, float durability);
+
     bool operator==(const Inventory& o) const { return slots_ == o.slots_; }
 
 private:
     using Key = std::pair<uint8_t, int>;
     const svc::InventoryItem* find(svc::ItemContainer c, int slot) const;
+    /// The cells a resource container's items cover (one flag per cell), `ignore` aside.
+    std::vector<bool> covered_cells(svc::ItemContainer container, const ItemCatalog& catalog, const std::string* ignore = nullptr) const;
+    /// grant_what_fits for one item that is a resource: tops up, then starts stacks; `item.quantity` is what is left.
+    void grant_resource(svc::InventoryItem item, const ItemInfo& info, const ItemCatalog& catalog, GrantResult& out);
+    Outcome move_resource(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot, const ItemCatalog& catalog);
     Outcome equip(int bag_slot, const ItemCatalog& catalog, uint32_t requested);
     Outcome unequip(int equip_slot);
     /// Whether a worn item covers `slot` (it is in it, or a two-hander of the Equipment lists it).
     bool covered(int slot, const ItemCatalog& catalog) const;
 
     std::map<Key, svc::InventoryItem> slots_;   // (container, slot) -> the item
+    std::array<ResourceGrid, kResourceContainers> grids_;   // the grids of the resource bags worn when the inventory was built
 };
 
 // ---- the visible gear ----------------------------------------------------------------------------------------------------

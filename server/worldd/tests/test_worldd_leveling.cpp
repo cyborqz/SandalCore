@@ -230,6 +230,7 @@ static void test_uses(const content::ContentDb& db) {
     p = use::plan_use(db, gm::kLevel10, no_curve);
     CHECK(!p.ok && contains(p.refusal, "no Adventuring level curve"), "a level scroll with no curve to compute against: refused");
 }
+// [C:Y:B - C O A]
 
 // ---- the readers and the plan B3 fixes ------------------------------------------------------------------------------------------
 
@@ -255,6 +256,9 @@ static void test_readers(const fs::path& dir, const content::ContentDb& db) {
               t->experience[0].target_level == 10 && t->experience[0].margin == 10 && t->experience[0].curve_guid == gm::kAdventuringCurve &&
               t->experience[0].mult_stat_guid == gm::kXPAddMult && t->experience[1].target_level == 0,
           "reward_table: the level-10 table, its predicate as 10, the two XP rewards");
+    CHECK(t && t->experience[0].expr == 0 && t->experience[0].expression == "(formula)" && t->experience[1].expression == "xp - cur + 10",
+          "reward_table: each XP reward keeps its expression text and its compiled expression id (Gathering stage 2: 0 for the kinds that have none)");
+    CHECK(!db.profession_data(error) && error.empty(), "profession_data: a file without the profession tables (the fixture) is none, with no error");
     const auto r = db.reward_table(7100000000000000031ll, error);
     CHECK(r && !r->modelled && r->level_below == -1, "a table that is not modelled, with a predicate contentc does not read");
     CHECK(!db.reward_table(42, error) && error.empty() && !db.action_response(42, error) && error.empty(), "a table or action that is none: nullopt, no error");

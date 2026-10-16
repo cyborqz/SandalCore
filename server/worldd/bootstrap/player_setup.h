@@ -109,8 +109,19 @@ struct HeldItemsSetup {
 
 // ---- the items (plan B2) ------------------------------------------------------------------------------------------------
 
-/// The storages of the pawn that hold the character's items (the resource storage holds none in part 1).
-enum class ItemStorage : uint8_t { Backpack, Equipment, Quest };
+/// The storages of the pawn that hold the character's items (Gathering stage 3: and the three resource containers).
+enum class ItemStorage : uint8_t { Backpack, Equipment, Quest, Resource0, Resource1, Resource2 };
+inline constexpr bool is_resource_storage(ItemStorage s) { return s >= ItemStorage::Resource0; }
+
+/// Gathering stage 3: one resource container of the pawn -- a dynamic UResourceStorageComponent (ItemLocationType 11, 12 or 13) with OwnerInfo.ResourceContainers[i] naming it, and a
+/// ClientReceiveStoragePayload of columns x rows slots with its Dimension and, for a bag with a custom matrix, the OverrideMatrix [R: capture 1198's three containers].  A container
+/// whose bag is not worn is not present: no component, no payload, a null in ResourceContainers.
+struct ResourceBagSetup {
+    bool                          present = false;
+    int                           columns = 0;
+    int                           rows = 0;
+    std::vector<std::vector<int>> override_matrix;   // by column; -1 usable, -2 blocked; empty: none
+};
 
 /// One item of a storage: the instance as the wire carries it, and its slot.
 struct StoredItem {
@@ -158,7 +169,9 @@ struct SessionGuids {
     emit::FIntrepidNetworkGUID quest_storage;
     emit::FIntrepidNetworkGUID reward_storage;
     emit::FIntrepidNetworkGUID appearance;
-    emit::FIntrepidNetworkGUID resource_storage;       // dynamic: created at the pawn's second state
+    /// The pawn's dynamic resource containers, created at its second state: Resource0 is minted in the capture's place; Resource1 and Resource2 only when the character wears a bag for them
+    /// (PlayerSession::join), so that a character with the starter's one bag gets the ids it always had.
+    std::array<emit::FIntrepidNetworkGUID, 3> resource_storage;
     emit::FIntrepidNetworkGUID collision_cylinder;     // the pawn's default component the PC attaches to
     emit::FIntrepidNetworkGUID alignment;
     emit::FIntrepidNetworkGUID ability;
@@ -183,6 +196,15 @@ struct ProgressSetup {
     int64_t                xp = 0;
     int64_t                debt = 0;
     std::vector<TreeSetup> trees;
+    /// Gathering stage 2: one profession of the XPTracker: its leveling type (the maps' key), its XP total and the guid of its certification level. Every profession of the
+    /// character is listed, in the order of the CharacterProfessions guids: the join's LevelingCertificationsFastMap has them all (22 at a retail join), the ExperienceFastMap
+    /// only those with XP.
+    struct Profession {
+        int64_t leveling_type = 0;
+        int64_t xp = 0;
+        int64_t certification = 0;
+    };
+    std::vector<Profession> professions;
 };
 
 /// Mints every GUID of a joining player but the GameState's, in the capture's order (PlayerState, PlayerController,
@@ -228,6 +250,8 @@ struct PlayerSetup {
     /// Plan B2: the character's items in its three storages, in any order: what the join's storage payloads and ClientReceiveStorageEvent
     /// calls carry. Empty for a character that has none (the storages are sent empty, as before plan B2).
     std::vector<StoredItem>          items;
+    /// Gathering stage 3: the three resource containers.  The default is the starter's: Resource0 empty, 6 x 4 (the Sanctus bag every class wears), the others absent.
+    std::array<ResourceBagSetup, 3>  resource_bags = {ResourceBagSetup{true, 6, 4, {}}, ResourceBagSetup{}, ResourceBagSetup{}};
     /// Plan D1: the XPTracker's state at the join.
     ProgressSetup                    progress;
     /// BaseCharacterInfo.bShouldSendOrgsAtWarWithToast: the client shows "Your Settlement is at war!" after login.

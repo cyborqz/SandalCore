@@ -276,6 +276,8 @@ func jsonOf(v any) string {
 	return string(b)
 }
 
+// C Y B / C O A
+
 // buildAbilities fills the ab_* tables (and meta's ab.* counts).
 func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string) error {
 	for _, schema := range []string{"ProjectileRecordBase", "LingeringEffectRecordBase", "AbilityTargetingRecordBase", "StatTypeDefRecordBase"} {
@@ -583,8 +585,13 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	meta["ab.effects"] = strconv.Itoa(len(effectSet))
 	meta["ab.exprs"] = strconv.FormatInt(b.exprs.next, 10)
 	meta["ab.montage_ids"] = "montage_ids.tsv: retail captures, ability and AnimationIndex to the montage's NetGUID where exactly one id was seen"
-	return b.buildLoot(opt, meta) // plan E1, stage 3, part 2: the reward tables (their expressions join the set)
+	if err := b.buildLoot(opt, meta); err != nil { // plan E1, stage 3, part 2: the reward tables (their expressions join the set)
+		return err
+	}
+	return b.buildGather(opt, meta) // Gathering stage 2: the gathering tables (their formulas join the set)
 }
+
+// [CoA ~ C_Y_B]
 
 func sortedBools(m map[int64]bool) []int64 {
 	out := make([]int64, 0, len(m))
@@ -839,6 +846,8 @@ func (b *abBuilder) writeAbility(r *designdb.Row, netGuids map[string]map[int]ui
 	return nil
 }
 
+// ~ C Y B :: CoA ~
+
 // targetingName is the name of a targeting record (they are in no table kept: the row name comes from the ability's own reference
 // when it has one; the design data's Id struct carries "None" for most, so the guid is the key).
 func (b *abBuilder) targetingName(guid int64) string {
@@ -974,6 +983,8 @@ func (b *abBuilder) writeHit(r *designdb.Row) error {
 	}
 	return b.writeMods("hit", r, f)
 }
+
+// -- C-O-A . Cyb --
 
 func (b *abBuilder) writeProjectile(r *designdb.Row) error {
 	f := newFields(fmt.Sprintf("Projectile %s (%d)", r.Name, r.Guid), r.Fields)

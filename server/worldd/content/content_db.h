@@ -73,8 +73,8 @@ inline constexpr int kSchemaVersion = 1;
 
 /// The oldest contentc whose file this worldd reads (services/internal/content MinContentcVersion): version 4 has the stat program and
 /// the item stat tables (plan B3), version 5 the item uses, reward tables, level curves and auto-granted ranks (plan D1), version 6 the ability tables and the stat bundle's format 2 (plan D2), version 7 the NPC population chain and
-/// the vendors (plan E1), version 8 the routes' waypoints, 9 the combat tables and the spawn filter's records, 10 the reward tables, 11 the mounts (mount, mount_stat, mount_ability, mount_effect), 12 the city nodes (city_node, city_zoi and the other node tables: Nodes 1). An older file does not open, and the message says to rebuild it.
-inline constexpr int kMinContentcVersion = 12;
+/// the vendors (plan E1), version 8 the routes' waypoints, 9 the combat tables and the spawn filter's records, 10 the reward tables, 11 the mounts (mount, mount_stat, mount_ability, mount_effect), 12 the city nodes (city_node, city_zoi and the other node tables: Nodes 1), 13 the gathering tables (gather_def, gather_tool, item_variation, profession, certification_level ...), the profession level-up curves and the host functions 180-184 (Gathering stage 2), 14 the items' inventory dimension and resource flag (item.inv_w, inv_h, resource) and the resource bags' grids (resource_bag, resource_bag_cell: Gathering stage 3, "Resource storage"), 15 the foliage defs and states and every gathering interaction (foliage_def, foliage_state, gather_interaction, gather_interaction_def: Gathering stage 3, "Foliage gathering"). An older file does not open, and the message says to rebuild it.
+inline constexpr int kMinContentcVersion = 15;
 
 /// One row of `class`: a player class.
 struct ClassRecord {
@@ -214,6 +214,26 @@ struct ItemRecord {
     int32_t              default_quality = 1;
     int32_t              max_stack_size = 1;
     double               max_durability = 0;
+    /// Gathering stage 3 (contentc version 14): the cells the item takes in a resource container's grid (inv_w x inv_h, never turned), and whether it is a resource
+    /// (its gameplay tags hold a child of item.resource): a resource item is kept in a Resource container, any other item in the Backpack, the Equipment or the Quest storage.
+    int32_t              inv_w = 1;
+    int32_t              inv_h = 1;
+    bool                 resource = false;
+    /// Gathering stage 3, "the pick-up popup" (contentc version 16): the record's ItemName as the player reads it ("Coconut Wood"; item.display_name).  Empty where the record has
+    /// no name and in a file older than version 16 (it opens all the same; the popup's text then uses the record's `name`).
+    std::string          display_name;
+};
+
+/// Gathering stage 3 (contentc version 14): the grid a worn resource bag gives its container (rows of resource_bag and resource_bag_cell).
+struct ResourceBagRecord {
+    int64_t                       item = 0;       // the bag item's record Guid
+    int64_t                       def = 0;        // its ResourceBagDef
+    std::string                   def_name;
+    int32_t                       columns = 0;    // BagDimension.X
+    int32_t                       rows = 0;       // BagDimension.Y
+    bool                          custom = false; // bCustomDimension: the matrix applies
+    /// The def's BagMatrixOverride by column (matrix[x][y]): -1 usable, -2 blocked; empty when the def has none.  It is stored even when `custom` is false (the Sanctus def's).
+    std::vector<std::vector<int32_t>> matrix;
 };
 
 // ---- plan D1: using an item, the level curves and the ranks a level grants (contentc version 5) ---------------------------------------
@@ -222,6 +242,9 @@ struct ItemRecord {
 inline constexpr int64_t kGuidAdventuring = 108651085518458ll;              // the LevelingTypeDef of the character's own level
 inline constexpr int64_t kGuidUniversalTree = 6064631673604472832ll;        // the SkillTree whose nodes a level grants by itself
 inline constexpr int64_t kGuidAdventuringXPAddMult = 6064630809541214212ll; // the stat the level scrolls' formula adds to 1
+/// Gathering stage 3, "Hunting": the Hunting profession (CharacterProfession; its leveling type is LevelingTypeDef_Hunter 109460722964090).  A gathering interaction of this profession is
+/// the hunt of a creature's corpse with a Bow (the 53 Hunting_<kind> interactions); every other gathering interaction is a node's or a tree's.
+inline constexpr int64_t kProfessionHunting = 108752770061965ll;
 inline constexpr int64_t kTypeLevelingTypeDef = 5949882024684912047ll;      // the TypeId of the XPTracker's map keys
 inline constexpr int64_t kTypeSkillTree = 297887639323616934ll;             // the TypeId of SkillTreePurchasesFastMap's keys
 inline constexpr int64_t kTypeSkillRank = 4847957796014348780ll;            // the TypeId of a tree list's ranks
@@ -262,6 +285,10 @@ struct RewardXp {
     double      margin = 0;
     int64_t     curve_guid = 0;
     int64_t     mult_stat_guid = 0;
+    /// Gathering stage 2 (contentc version 13): a Profession reward's own expression, as an ab_expr id (0: none; the other kinds have none), and its text (the
+    /// profession is named in it: professions::profession_named_in).
+    int64_t     expr = 0;
+    std::string expression;
 };
 // == C-O-A | C:Y:B ==
 
@@ -307,6 +334,147 @@ struct AutoGrant {
     int64_t                  rank_guid = 0;
     int64_t                  effect_guid = 0;
     std::vector<RankStatMod> mods;
+};
+
+// ---- Gathering stage 2, part "Professions and GM items" (contentc version 13): the professions and their certification levels -----------------------------------
+
+/// A row of `certification_level`: the five tiers (Novice 0 ... GrandMaster 4), the profession levels each spans and how many professions a character may hold at it.
+struct CertificationRow {
+    int64_t     guid = 0;
+    std::string name;
+    int         tier = 0;
+    int         min_level = 1;
+    int         max_level = 10;
+    bool        limited = false;       // has_max_allowable
+    int         max_allowable = 0;
+};
+
+/// A row of `profession` with its leveling type and curve (the XP total at which each of the 50 levels is reached).
+struct ProfessionRow {
+    int64_t       guid = 0;
+    std::string   name;
+    std::string   category;            // Gathering, Processing or Crafting
+    int64_t       leveling_type_guid = 0;
+    int64_t       skill_tree_guid = 0;
+    LevelingType  leveling;
+};
+
+/// A row of `action_certification`: a SetCertificationLevel ActionResponse, one tier up (Promote) or down (Demote) for a profession.
+struct CertificationActionRow {
+    int64_t     action_guid = 0;
+    std::string name;
+    int64_t     profession_guid = 0;
+    bool        promote = true;
+};
+
+struct ProfessionData {
+    std::vector<ProfessionRow>                   professions;      // guid order
+    std::vector<CertificationRow>                certifications;   // tier order
+    std::map<int64_t, CertificationActionRow>    actions;          // by action guid
+};
+
+// ---- Gathering stage 2, part "Harvesting" (contentc version 13): what a harvest reads (gather_def, gather_tool, item_variation) ------------------------------------
+
+/// A row of `gather_def`: a GatherableActorDef joined to its foliage data (the respawn), its PlayerInteractionDef (the range) and its GatheringInteractionData (the rest).
+struct GatherDefRow {
+    int64_t     guid = 0;               // the GatherableActorDef (what AGatherableActor.GatherableActorDef.Guid carries)
+    std::string name;                   // Plant_Daffodil_Medium_1
+    double      empty_duration = 0;     // GatheringFoliageData.EmptyDuration, seconds
+    double      override_respawn = 0;   // the actor def's OverrideRespawnDuration, seconds (0: none)
+    int64_t     interaction_guid = 0;   // the PlayerInteractionDef
+    double      interact_radius = 0;    // cm
+    double      interact_tolerance = 0; // cm
+    bool        allow_in_combat = true;
+    int64_t     profession_guid = 0;    // the CharacterProfession (Mining, Lumberjacking, Herbalism ...)
+    int         tool_slot = 0;          // the EEquipSlot of the tool: Pickaxe 26, Axe 29, Sickle 33, FishingRod 35, Bow 38
+    int64_t     cert_guid = 0;          // the CertificationLevel the interaction needs
+    int         cert_tier = 0;          // ... its tier (Novice 0 ... GrandMaster 4)
+    double      base_duration = 0;      // BaseGatheringDuration, seconds
+    int64_t     duration_expr = 0;      // ab_expr ids (0: none): the channel's length and the tool's wear
+    int64_t     durability_expr = 0;
+    int64_t     reward_guid = 0;        // loot_table.guid
+};
+
+/// A row of `gather_tool`: a tool item and what it is for.
+struct GatherToolRow {
+    int64_t     item_guid = 0;
+    std::string item_name;
+    int64_t     profession_guid = 0;    // GatheringToolData.Profession
+    int64_t     cert_guid = 0;
+    int         cert_tier = 0;          // the tier of nodes the tool reaches
+    int         tool_slot = 0;          // the slot the item is worn in
+    int64_t     required_profession = 0;   // the item's own requirement to be used (0: none)
+    int64_t     required_cert = 0;
+};
+
+struct GatherData {
+    std::map<int64_t, GatherDefRow>  defs;         // by GatherableActorDef guid
+    std::map<int64_t, GatherToolRow> tools;        // by item guid
+    std::map<int64_t, int64_t>       quality_expr; // ItemVariation guid -> the ab_expr id of its Quality formula (0: none)
+    std::map<int64_t, int64_t>       durability_expr; // ... and of its Durability formula
+};
+
+// ---- Gathering stage 3, part "Foliage gathering" (contentc version 15): the painted trees, plants and stones, and every gathering interaction ------------------------
+
+/// EFoliageState as the client's IndexedStates and FoliageData carry it (a harvested instance is Empty; regrowth passes Infancy and Juvenile up to the state it is painted in).
+inline constexpr int kFoliageInfancy = 0, kFoliageJuvenile = 1, kFoliageAdult = 2, kFoliageEmpty = 3;
+
+/// A row of `foliage_def`: a GatheringFoliageData.
+struct FoliageDefRow {
+    int64_t     guid = 0;
+    std::string name;                   // Tree_Oak_Large_1
+    double      empty_duration = 0;     // seconds an instance stays Empty after a harvest
+    int64_t     dynamic_guid = 0;       // the seasonal factor's def (not applied)
+    int         paint_state = kFoliageAdult;   // the state the map paints the instances in: what a regrown instance returns to
+    int         gatherable_state = kFoliageAdult, min_state = kFoliageInfancy, max_state = kFoliageAdult;
+    int64_t     state_guids[3] = {0, 0, 0};    // the GatheringFoliageState of Infancy, Juvenile, Adult (0: none)
+};
+
+/// A row of `foliage_state`: a GatheringFoliageState.
+struct FoliageStateRow {
+    int64_t     guid = 0;
+    std::string name;
+    double      lifecycle_duration = 0;   // seconds in the state before the next one (0: permanent)
+    int64_t     interaction_guid = 0;     // the gather_interaction that harvests the instance in this state (0: none)
+    double      override_distance = -1;   // cm (-1: the interaction's own)
+    double      override_angle = -1;      // degrees (-1: the interaction's own)
+    double      collision_radius = 0;     // cm
+};
+// (Cyb : C O A)
+
+/// A row of `gather_interaction`: a GatheringInteractionData with the range of the PlayerInteractionDef named like it.
+struct GatherInteractionRow {
+    int64_t     guid = 0;
+    std::string name;                   // Tree_Oak_Large, Hunting_Wolf
+    int         target_state = kFoliageEmpty;
+    int64_t     profession_guid = 0;
+    int64_t     cert_guid = 0;
+    int         cert_tier = 0;
+    int         tool_slot = -1;         // -1: the data names no tool
+    double      base_duration = 0;
+    int64_t     duration_expr = 0;
+    int64_t     durability_expr = 0;
+    int64_t     reward_guid = 0;
+    int64_t     interaction_guid = 0;   // the PlayerInteractionDef that carries the range (0: none)
+    double      interact_radius = 0, interact_tolerance = 0;
+    bool        allow_in_combat = true;
+};
+
+/// A row of `gather_interaction_def`: a PlayerInteractionDef that names a gathering interaction (the Hunting_<X> defs of the huntable creatures among them).
+struct GatherInteractionDefRow {
+    int64_t     guid = 0;
+    std::string name;
+    int64_t     gather_guid = 0;        // the GatheringInteractionData it names (one is no record)
+    double      interact_radius = 0, interact_tolerance = 0, discovery_distance = 0;
+    bool        allow_in_combat = true;
+};
+
+struct FoliageData {
+    std::map<int64_t, FoliageDefRow>           defs;               // by guid
+    std::multimap<std::string, int64_t>        defs_by_name;       // a name -> its guids (Stone_Limestone_Large_2 has two records)
+    std::map<int64_t, FoliageStateRow>         states;             // by guid
+    std::map<int64_t, GatherInteractionRow>    interactions;       // by GatheringInteractionData guid
+    std::map<int64_t, GatherInteractionDefRow> interaction_defs;   // by PlayerInteractionDef guid
 };
 
 // ---- plan D1, stage 2: the talents (contentc's skill_tree, skill_node, skill_node_require, skill_node_exclusive, skill_rank,
@@ -740,6 +908,10 @@ public:
     /// file does not know); nullopt with `error` set when the query failed or the row holds an EEquipSlot that does not fit a byte.
     std::optional<ItemRecord> item(int64_t guid, std::string& error) const;
 
+    /// Gathering stage 3 (contentc version 14): the grid of a resource bag item.  nullopt with `error` empty for an item that is no resource bag; with `error` set when a query
+    /// failed or the rows are not what contentc writes (a dimension below 1 or above the 255 cells a container holds, a cell outside the grid).
+    std::optional<ResourceBagRecord> resource_bag(int64_t item_guid, std::string& error) const;
+
     /// Plan B3: the stat program. nullopt, with `error`, when the table has no row or the query failed.
     std::optional<StatProgramRow> stat_program(std::string& error) const;
 
@@ -763,6 +935,15 @@ public:
     /// Plan D1: the leveling type named ("Adventuring") with its curve; nullopt with `error` set when there is none or a key is not a
     /// whole level at a whole XP total ascending.
     std::optional<LevelingType> leveling_type_named(const std::string& name, std::string& error) const;
+    /// Gathering stage 2, "Professions and GM items": the 22 professions with their curves, the five certification levels and the certification actions. nullopt with
+    /// `error` empty when the file has none of these tables (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
+    std::optional<ProfessionData> profession_data(std::string& error) const;
+    /// Gathering stage 2, "Harvesting": the gather tables, whole (339 defs, 87 tools, 47 item variations in contentc version 13). nullopt with `error` empty when the file has none of the tables
+    /// (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
+    std::optional<GatherData> gather_data(std::string& error) const;
+    /// Gathering stage 3, "Foliage gathering": the foliage defs and states and every gathering interaction (402, 743, 236 and 194 rows in contentc version 15).  nullopt with `error` empty
+    /// when the file has none of the tables (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
+    std::optional<FoliageData> foliage_data(std::string& error) const;
     /// Plan D1: the nodes a level grants in the trees of a leveling type, by level requirement then node guid, with their rank mods.
     std::optional<std::vector<AutoGrant>> auto_grants(int64_t leveling_type_guid, std::string& error) const;
 

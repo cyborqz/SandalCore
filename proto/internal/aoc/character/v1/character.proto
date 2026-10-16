@@ -42,7 +42,7 @@ service CharacterService {
   // InvalidArgument, with nothing changed, for a level outside 1-25, a class outside 1-8, a leveling type of 0 or a negative
   // XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
   // replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
-  // the banks 0-19 and slots 0-15 or one held twice.
+  // the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
   rpc SaveProgress(SaveProgressRequest) returns (SaveProgressResponse);
 }
 
@@ -87,6 +87,20 @@ message Character {
   // character that never bought a rank or arranged its bar has none.
   repeated TreeRanks skill_ranks = 17;
   repeated ActionbarSlot action_bar = 18;
+  // Gathering stage 2: the character's 22 professions (certification tier, level and XP of each, in profession-guid order), with the items
+  // (include_items) and in the reply of SaveProgress: a profession with no stored row is Novice, level 1, no XP, so there are always 22.
+  repeated ProfessionState professions = 19;
+}
+
+// One of the 22 CharacterProfessions of a character (Gathering stage 2, migration 0010): profession_guid is the design database's
+// CharacterProfessions Guid (Mining 108752769996425, Lumberjacking 108752769996426 ...), certification_tier the CertificationLevel's tier
+// (0 Novice, 1 Apprentice, 2 Journeyman, 3 Master, 4 GrandMaster), level 1-50 and xp the total on the profession's level-up curve. A profession's
+// XP lives only here (nothing of it is in Experience).
+message ProfessionState {
+  int64 profession_guid = 1;
+  int32 certification_tier = 2; // 0-4
+  int32 level = 3; // 1-50
+  int64 xp = 4; // 0 or more
 }
 // (CoA | C-Y-B)
 
@@ -126,11 +140,16 @@ message Experience {
 
 // The storages a character's items are in, with the slots the client's own storages have: the Backpack 70, the
 // Equipment 83 (the slot is the client's EEquipSlot: 2 Chest, 15 Primary ...) and the Quest storage 100.
+// Gathering stage 3 (add-only): the three resource containers, which are the resource bags worn in Equipment slots 23, 24 and 25 (EItemLocation Resource0 to Resource2).
+// A slot of a resource container is the index (row by row) of the top-left cell of the item's rectangle in the bag's grid: 0 to 255.
 enum ItemContainer {
   ITEM_CONTAINER_UNSPECIFIED = 0;
   ITEM_CONTAINER_BACKPACK = 1;
   ITEM_CONTAINER_EQUIPMENT = 2;
   ITEM_CONTAINER_QUEST = 3;
+  ITEM_CONTAINER_RESOURCE0 = 4;
+  ITEM_CONTAINER_RESOURCE1 = 5;
+  ITEM_CONTAINER_RESOURCE2 = 6;
 }
 
 // One item instance a character owns.
@@ -226,6 +245,9 @@ message SaveProgressRequest {
   repeated TreeRanks skill_ranks = 6;
   bool replace_action_bar = 7;
   repeated ActionbarSlot action_bar = 8;
+  // Gathering stage 2: each profession replaces the character's row of that profession, the others are left alone. InvalidArgument, with nothing
+  // changed, for a profession that is none of the 22, one given twice, a tier outside 0-4, a level outside 1-50 or a negative xp.
+  repeated ProfessionState professions = 9;
 }
 
 message SaveProgressResponse {

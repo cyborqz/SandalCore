@@ -6,6 +6,7 @@ package aocexpr
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -163,6 +164,8 @@ func contextOf(ctx StatContext, o Object) StatContext {
 	return ctx
 }
 
+// [C.O.A - C_Y_B]
+
 // StatEnv returns the environment of a player's stat formulas over ctx: arithmetic
 // is float64 (set Single for float32), EvalCurve resolves in curves.
 //
@@ -316,6 +319,12 @@ func StatEnv(ctx StatContext, curves CurveSource) *Env {
 				return ctx.ActorGuid(), nil
 			}),
 			"GetPlayerProfessionLevel": num(func(a []Value) (float64, error) {
+				// GetPlayer() (the GM artisan scrolls' experience expressions) is the character the expression is evaluated for: the actor of the context
+				if len(a) == 2 {
+					if o, ok := a[0].(Object); ok && o.Role == RolePlayer {
+						a = []Value{ctx.ActorGuid(), a[1]}
+					}
+				}
 				if err := argsOf(a, "ns"); err != nil {
 					return 0, err
 				}
@@ -350,6 +359,8 @@ func StatEnv(ctx StatContext, curves CurveSource) *Env {
 		},
 	}
 }
+
+// C-O-A x C_Y_B
 
 // TagMatches reports whether a gameplay tag matches a wanted one (FNames: without regard to case): equal, or a
 // descendant of it ("Item.Gear.Weapon.Shield.Tower" matches "Item.Gear.Weapon.Shield").
@@ -392,31 +403,33 @@ type AbilityContext interface {
 
 // AbilityFloatFuncs are the host functions of an ability expression that give a float (on top of StatFloatFuncs).
 var AbilityFloatFuncs = map[string]bool{
-	"GetAbilityProgressRatio":           true,
-	"RandDouble":                        true,
-	"GetXPDebtRatio":                    true,
-	"GetRemainingAbilityCharges":        true,
-	"GetStatDeltaOverTime":              true,
-	"GetStatModValue":                   true,
-	"GetStatModEffectiveValue":          true,
-	"GetAngleBetween":                   true,
-	"Now":                               true,
-	"GetProgressDuration":               true,
-	"GetDistanceBetween":                true,
-	"GetHealthPercentage":               true,
-	"GetEffectRemainingDuration":        true,
-	"GetRemainingAbilityCooldown":       true,
-	"GetHitTriggerCount":                true,
-	"GetAbilityHitCount":                true,
-	"GetAbilityComboCount":              true,
-	"RandIntRange":                      true,
-	"CalculateDamage":                   true,
-	"CalculateDamageMultiplier":         true,
-	"CalculateDamageAdditiveMultiplier": true,
-	"CalculateDamageMitigation":         true,
-	"CalculateDamageCritical":           true,
-	"CalculateDamagePenetration":        true,
-	"CalculateDamageDampening":          true,
+	"GetAbilityProgressRatio":             true,
+	"RandDouble":                          true,
+	"GetXPDebtRatio":                      true,
+	"GetRemainingAbilityCharges":          true,
+	"GetStatDeltaOverTime":                true,
+	"GetStatModValue":                     true,
+	"GetStatModEffectiveValue":            true,
+	"GetAngleBetween":                     true,
+	"Now":                                 true,
+	"GetProgressDuration":                 true,
+	"GetDistanceBetween":                  true,
+	"GetHealthPercentage":                 true,
+	"GetEffectRemainingDuration":          true,
+	"GetRemainingAbilityCooldown":         true,
+	"GetHitTriggerCount":                  true,
+	"GetAbilityHitCount":                  true,
+	"GetAbilityComboCount":                true,
+	"RandIntRange":                        true,
+	"GetArtisanshipModifiedStat":          true,
+	"GetGatheringInteractionBaseDuration": true,
+	"CalculateDamage":                     true,
+	"CalculateDamageMultiplier":           true,
+	"CalculateDamageAdditiveMultiplier":   true,
+	"CalculateDamageMitigation":           true,
+	"CalculateDamageCritical":             true,
+	"CalculateDamagePenetration":          true,
+	"CalculateDamageDampening":            true,
 }
 
 // AbilityFuncNames lists the host functions AbilityEnv supplies besides StatFuncNames.
@@ -430,8 +443,12 @@ func AbilityFuncNames() []string {
 		"CalculateDamageMitigation", "CalculateDamageCritical", "CalculateDamagePenetration", "CalculateDamageDampening", "Int", "GetPlayerLootMaxLevel", "GetPlayerLootAvgLuck", "DoesNPCContainTag", "GetPlayerLevel",
 		// Nodes 1, stage 1: the city node reads
 		"GetPlayer", "GetPlayerGuid", "GetNodeBiome", "GetNodeRecord", "GetCurrentNode", "Node_GetNodeType", "Node_GetLevel", "Node_InLevelRangeInclusive",
-		"Node_IsPlayerCitizen", "Node_IsPlayerCitizenOfNode", "Node_IsPlayerMayor", "EnumInt"}
+		"Node_IsPlayerCitizen", "Node_IsPlayerCitizenOfNode", "Node_IsPlayerMayor", "EnumInt",
+		// Gathering stage 2: the gathering reads
+		"GetArtisanshipModifiedStat", "GetRolledItemQuality", "GetItemRarity", "GetSourceCertificationTier", "GetGatheringInteractionBaseDuration"}
 }
+
+// [C | O | A :: C:Y:B]
 
 // AbilityEnv returns the environment of an ability expression over ctx: StatEnv, and GetTarget, GetAbilityProgressRatio,
 // GetEffectCountByRecordAndInstigator and RandDouble.
@@ -622,6 +639,17 @@ func AbilityEnv(ctx AbilityContext, curves CurveSource) *Env {
 			return nil, fmt.Errorf("takes no arguments, got %d", len(args))
 		}
 		return ctx.HostFn(HostIsClient, "", nil) != 0, nil
+	}
+	// int(x): the compiler (statprog) makes it Floor, which is the truncation of the non-negative numbers the data applies it to (a roll, a curve's quantity)
+	env.Funcs["Int"] = func(args []Value) (Value, error) {
+		if len(args) != 1 {
+			return nil, fmt.Errorf("takes 1 argument(s), got %d", len(args))
+		}
+		x, ok := args[0].(float64)
+		if !ok {
+			return nil, fmt.Errorf("takes a number")
+		}
+		return math.Floor(x), nil
 	}
 	env.Funcs["RandIntRange"] = func(args []Value) (Value, error) {
 		if len(args) != 2 {
@@ -844,10 +872,44 @@ func AbilityEnv(ctx AbilityContext, curves CurveSource) *Env {
 		}
 	}
 	addNodeFuncs(env, ctx)
+	addGatherFuncs(env, ctx)
 	return env
 }
 
 // CoA : C.Y.B
+
+// addGatherFuncs adds the gathering reads (Gathering stage 2) to an ability environment: the host answers them (hostfn.go, HostArtisanStat ...).
+func addGatherFuncs(env *Env, ctx AbilityContext) {
+	argc := func(args []Value, n int) error {
+		if len(args) != n {
+			return fmt.Errorf("takes %d argument(s), got %d", n, len(args))
+		}
+		return nil
+	}
+	env.Funcs["GetArtisanshipModifiedStat"] = func(args []Value) (Value, error) {
+		if err := argc(args, 2); err != nil {
+			return nil, err
+		}
+		o, ok := args[0].(Object)
+		r, ok2 := args[1].(Ref)
+		if !ok || !ok2 {
+			return nil, fmt.Errorf("takes an actor and a stat")
+		}
+		return ctx.HostFn(HostArtisanStat, fmt.Sprint(r.Guid), []float64{float64(o.Role)}), nil
+	}
+	for name, fn := range map[string]int{"GetRolledItemQuality": HostRolledItemQuality, "GetItemRarity": HostItemRarity, "GetSourceCertificationTier": HostSourceCertTier,
+		"GetGatheringInteractionBaseDuration": HostGatherBaseSecs} {
+		fn := fn
+		env.Funcs[name] = func(args []Value) (Value, error) {
+			if err := argc(args, 0); err != nil {
+				return nil, err
+			}
+			return ctx.HostFn(fn, "", nil), nil
+		}
+	}
+}
+
+// [C O A :: C:Y:B]
 
 // addNodeFuncs adds the city node reads (Nodes 1, stage 1) to an ability environment: the host answers them (hostfn.go, HostNodeBiome ...), and a
 // node value is the reference of its record, which the context's NodeRanker turns from and to the host's rank.

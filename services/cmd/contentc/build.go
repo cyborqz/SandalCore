@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "12"
+const Version = "16"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -42,6 +42,10 @@ type Options struct {
 	// Encoding is how record.data is stored: content.EncodingJSON or
 	// content.EncodingGzip.
 	Encoding string
+
+	// ArtisanCurves is mapc's artisan_curves.tsv: the profession level-up curves of the paks (the design database holds a placeholder). "" is dist/content/artisan_curves.tsv
+	// of the checkout; a file that is not there leaves the placeholder, and the build says so (and meta artisan_curves.status).
+	ArtisanCurves string
 
 	// Patches are the changes to the mappings the walk needs; nil is
 	// designdb.Patches(). Build refuses a patch that fits nothing (its struct or
@@ -114,6 +118,8 @@ type source struct {
 	// what buildTyped read, for the builders after it (plan D1 reads the StatCurve keys and the stat names)
 	curves    *aocexpr.CurveMap
 	statNames map[int64]string
+	// artisan are the profession level-up curves of artisan_curves.tsv, nil when the file is not there (gather.go)
+	artisan *artisanCurves
 }
 
 // keep lists the record structs the typed tables read.
@@ -131,6 +137,7 @@ var keep = map[string]bool{
 	"ItemStatBlockRecordBase":     true,
 	"QualityCurveRecordBase":      true,
 	"StartingEquipmentRecordBase": true,
+	"ResourceBagDefRecordBase":    true, // Gathering stage 3 (version 14): the grids of the resource bags
 	// plan B3: what an item adds to the stats
 	"SetBonusRecordBase": true,
 	// plan D1: using an item, the level curves and the ranks a level grants
@@ -204,6 +211,17 @@ var keep = map[string]bool{
 	"ServiceBuildingPlotRecordBase":        true,
 	"BuildingRecordBase":                   true,
 	"BuildingNodeAssetSetsRecordBase":      true,
+	// Gathering stage 2 (version 13): the gathering tables, the professions and the certification levels (gather.go; ItemRecordBase and ActionResponseRecordBase are kept above)
+	"GatherableActorDefRecordBase":       true,
+	"GatheringFoliageDataRecordBase":     true,
+	"GatheringFoliageStateRecordBase":    true, // Gathering stage 3 (version 15): the states of the painted foliage
+	"PlayerInteractionDefRecordBase":     true,
+	"GatheringInteractionDataRecordBase": true,
+	"GatheringDynamicDefRecordBase":      true,
+	"GatheringToolDataRecordBase":        true,
+	"CertificationLevelRecordBase":       true,
+	"CharacterProfessionsRecordBase":     true,
+	"ItemVariationRecordBase":            true,
 }
 
 // -- C Y B x C.O.A --
@@ -359,6 +377,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 
 	// The typed tables.
 	meta := map[string]string{}
+	if err := loadArtisanCurves(src, &opt, meta); err != nil {
+		return nil, err
+	}
 	if err := buildTyped(w, src, &opt, meta); err != nil {
 		return nil, err
 	}

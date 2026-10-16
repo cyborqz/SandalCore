@@ -172,6 +172,17 @@ std::optional<Send> PlayerBootstrap::pawn_mountable_pet(const FIntrepidNetworkGU
     return update(Role::Pawn, "the pawn's mountable pet", pawn_, pawn_shadow_);
 }
 
+std::optional<Send> PlayerBootstrap::pawn_channeling(const repl::ChannelingData& data) {
+    if (!ok_ || !second_state_sent_) return std::nullopt;
+    repl::Subobject* info = nullptr;
+    for (repl::Subobject& s : pawn_.subobjects) {
+        if (s.name == "InteractInfo") info = &s;
+    }
+    if (!info || !info->obj.schema || !info->obj.schema->command("ChannelingData")) return std::nullopt;
+    if (!info->obj.state.set(*info->obj.schema, "ChannelingData", Value(data))) return std::nullopt;
+    return update(Role::Pawn, "the pawn's channeling data", pawn_, pawn_shadow_);
+}
+
 std::optional<Send> PlayerBootstrap::pawn_mounted(const FIntrepidNetworkGUID& mount, const FIntrepidNetworkGUID& mesh, int64_t scale_percent) {
     if (!ok_ || !second_state_sent_ || !mount.is_valid() || !mesh.is_valid()) return std::nullopt;
     repl::Subobject* info = nullptr;

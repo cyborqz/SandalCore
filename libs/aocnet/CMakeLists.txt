@@ -68,6 +68,7 @@ add_library(aocnet STATIC
     protocol/repl/block_reader.cpp
     protocol/repl/vendor_codec.cpp
     protocol/repl/callout_codec.cpp
+    protocol/repl/channeling_codec.cpp
     protocol/repl/vendor_rpc.cpp
     protocol/repl/node_rpc.cpp
     protocol/repl/node_layout.cpp
@@ -93,6 +94,7 @@ add_library(aocnet STATIC
     protocol/repl/block_reader.h
     protocol/repl/vendor_codec.h
     protocol/repl/callout_codec.h
+    protocol/repl/channeling_codec.h
     protocol/repl/vendor_rpc.h
     protocol/repl/node_rpc.h
     protocol/repl/node_layout.h

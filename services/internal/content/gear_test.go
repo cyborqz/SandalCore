@@ -42,20 +42,23 @@ func TestRequireVersionRefusesAnOlderContentc(t *testing.T) {
 		setup   func(*sql.DB)
 		want    string // "" accepted
 	}{
-		"version 3 (plan B2)":           {"3", withProgram, "built by contentc version 3, this checkout needs version 12"},
-		"version 4 (plan B3)":           {"4", withProgram, "built by contentc version 4, this checkout needs version 12"},
-		"version 5 (plan D1)":           {"5", withProgram, "built by contentc version 5, this checkout needs version 12"},
-		"version 6 (plan D2)":           {"6", withProgram, "built by contentc version 6, this checkout needs version 12"},
-		"no version at all":             {"", withProgram, "not written by contentc"},
-		"a version that is no number":   {"four", withProgram, "not written by contentc"},
-		"version 7 (plan E1, stage 1)":  {"7", withProgram, "built by contentc version 7, this checkout needs version 12"},
-		"version 8 (plan E1, stage 2)":  {"8", withProgram, "built by contentc version 8, this checkout needs version 12"},
-		"version 9 (plan E1, stage 3)":  {"9", withProgram, "built by contentc version 9, this checkout needs version 12"},
-		"version 10 (plan E1, stage 3)": {"10", withProgram, "built by contentc version 10, this checkout needs version 12"},
-		"version 11 (the mounts)":       {"11", withProgram, "built by contentc version 11, this checkout needs version 12"},
-		"version 12 without the row":    {"12", nil, "stat_program table has 0 rows"},
-		"version 12 with the stat row":  {"12", withProgram, ""},
-		"a later version":               {"13", withProgram, ""},
+		"version 3 (plan B2)":            {"3", withProgram, "built by contentc version 3, this checkout needs version 15"},
+		"version 4 (plan B3)":            {"4", withProgram, "built by contentc version 4, this checkout needs version 15"},
+		"version 5 (plan D1)":            {"5", withProgram, "built by contentc version 5, this checkout needs version 15"},
+		"version 6 (plan D2)":            {"6", withProgram, "built by contentc version 6, this checkout needs version 15"},
+		"no version at all":              {"", withProgram, "not written by contentc"},
+		"a version that is no number":    {"four", withProgram, "not written by contentc"},
+		"version 7 (plan E1, stage 1)":   {"7", withProgram, "built by contentc version 7, this checkout needs version 15"},
+		"version 8 (plan E1, stage 2)":   {"8", withProgram, "built by contentc version 8, this checkout needs version 15"},
+		"version 9 (plan E1, stage 3)":   {"9", withProgram, "built by contentc version 9, this checkout needs version 15"},
+		"version 10 (plan E1, stage 3)":  {"10", withProgram, "built by contentc version 10, this checkout needs version 15"},
+		"version 11 (the mounts)":        {"11", withProgram, "built by contentc version 11, this checkout needs version 15"},
+		"version 12 (Nodes 1)":           {"12", withProgram, "built by contentc version 12, this checkout needs version 15"},
+		"version 13 (Gathering stage 2)": {"13", withProgram, "built by contentc version 13, this checkout needs version 15"},
+		"version 14 (Gathering stage 3)": {"14", withProgram, "built by contentc version 14, this checkout needs version 15"},
+		"version 15 without the row":     {"15", nil, "stat_program table has 0 rows"},
+		"version 15 with the stat row":   {"15", withProgram, ""},
+		"a later version":                {"16", withProgram, ""},
 	} {
 		db := openWith(t, tc.version, tc.setup)
 		err := db.RequireVersion()
@@ -70,7 +73,7 @@ func TestRequireVersionRefusesAnOlderContentc(t *testing.T) {
 		}
 	}
 	// a file with no stat_program table at all (a content.db of an older schema) says so
-	old := openWith(t, "12", func(db *sql.DB) { exec(t, db, `DROP TABLE stat_program`) })
+	old := openWith(t, "15", func(db *sql.DB) { exec(t, db, `DROP TABLE stat_program`) })
 	if err := old.RequireVersion(); err == nil || !strings.Contains(err.Error(), "no stat program table") {
 		t.Errorf("RequireVersion without the table = %v", err)
 	}

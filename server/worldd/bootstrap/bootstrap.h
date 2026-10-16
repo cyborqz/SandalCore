@@ -137,6 +137,9 @@ struct ItemEvent {
     int32_t                slot = 0;
     repl::ItemInstance     item;
     bool                   instigated = true;   // the character's guid is the event's instigator, else the zero guid
+    /// Gathering stage 3, "the pick-up popup": the FCalloutQueueInfo the retail server sends with the Add of a harvested item (items/acquired.h); the client shows the popup with the
+    /// item's icon from it.  Unset for every other event.
+    std::optional<repl::CalloutQueueInfo> callout;
 };
 
 /// One item leaving a loot container (plan E1, stage 3, part 2): the slot of the window it was in and the stack.
@@ -230,6 +233,9 @@ public:
     /// storage holds (the payloads' source) and each event changes it, so a payload built later has the items as the client was told
     /// of them. Applying an event twice (a chain refused and built again) changes nothing the second time.
     std::optional<Send> item_events(std::span<const ItemEvent> events);
+    /// Gathering stage 2, "Harvesting": ClientUpdateItemDurability on the PlayerController for the item in `storage` slot `slot` (its new durability); what the payloads show follows.
+    /// nullopt for a slot that holds no item or an update the schema refuses.
+    std::optional<Send> item_durability(ItemStorage storage, int32_t slot, float durability);
     /// Plan E1, stage 3, part 2: a corpse's loot window.  ClientReceiveLootStoragePayload(LootActor = the corpse, its stacks as the window shows them).
     std::optional<Send> loot_payload(const emit::FIntrepidNetworkGUID& loot_actor, const repl::StoragePayload& data);
     /// The stacks the player took out of the loot container `container`: a type-1 ClientReceiveStorageEvent for each (retail's order: the removal from the
@@ -292,11 +298,37 @@ public:
     /// A callout of the PlayerController's CalloutQueueReplication: one item (Message `message`, SetCalloutType `type`, PointSize `point_size`, the
     /// creation time in .NET ticks) under the key `key`, as the retail server shows "Cannot summon mount here." [R: 876, 870]. Idempotent for a key that
     /// is added already (a chain built again after a checkpoint restore). `key` is the caller's: 0 is refused.
-    std::optional<Send> callout_add(const std::string& message, int32_t type, int32_t point_size, int64_t creation_ticks, uint64_t key);
+    /// `table` and `message_key` (both non-empty): the callout's text is the string table's entry, the item's LocalizedMessage, and `message` is empty, as the retail server shows
+    /// "GatheringInterruption_Movement" of the table "Economy" [R: capture 1464 packet 191: type 4, point size 32].
+    /// `chat_category`: the item's ChatCategory [R: 2 in the mounts' refusals 876 and 870; 4 in capture 1464's interruption].
+    std::optional<Send> callout_add(const std::string& message, int32_t type, int32_t point_size, int64_t creation_ticks, uint64_t key, const std::string& table = std::string(),
+                                    const std::string& message_key = std::string(), uint64_t chat_category = 2);
     /// Takes the item of `key` off the array (retail does, three seconds after it was shown). Idempotent; nullopt for a key never added.
     std::optional<Send> callout_remove(uint64_t key);
     /// The callouts the array holds (tests).
     size_t callouts() const { return callout_ids_.size(); }
+
+    // ---- Gathering stage 3, part "Foliage gathering" (bootstrap/gather_wire.cpp) -----------------------------------------------------------------------------------------------
+    /// UPlayerInfo.FoliageData: the channel of a tree or plant the pawn cuts, a plain struct on the pawn's BaseCharacterInfo [R: 1463 packet 315 sets it 116 ms after the client's start
+    /// (the effects' clock, not whole seconds), packet 836 clears it 2 ms after the result: duration 0, start 0, index 0xFFFFFFFF, no names, state 3, no tool].  One pawn update;
+    /// nothing when the client holds this value.
+    struct FoliageChannel {
+        float       duration = 0;                 // seconds
+        double      start_time = 0;               // on the synchronized clock
+        uint32_t    instance = 0xFFFFFFFFu;       // OriginalInstanceIndex
+        std::string owner, component;             // FoliageName, FoliageComponentUUID as UE prints them ("" = None)
+        uint8_t     interaction_index = 0;
+        uint8_t     state = 3;                    // EFoliageState (3: none / Empty)
+        int64_t     tool_record = 0;
+        std::array<uint32_t, 4> tool_guid{};      // A B C D
+        bool operator==(const FoliageChannel&) const = default;
+    };
+    std::optional<Send> pawn_foliage_data(const FoliageChannel& channel);
+    /// ClientConfirmMultiInteractFoliage on the PlayerController: the harvest is done [R: 12 captures: a one-bit parameter, InteractIndex left at 0; in the result frame's first packet
+    /// after the storage event].
+    std::optional<Send> foliage_confirm();
+    /// ClientInterruptInteractionWithFoliage(instance, owner, component) on the PlayerController: the server ended the channel [R: 1464 packet 191, 105 ms after the refused start].
+    std::optional<Send> foliage_interrupt(uint32_t instance, const std::string& owner, const std::string& component);
 
     /// The acknowledgement of a ServerMovePacked: ClientMoveResponsePacked with FCharacterMoveResponsePackedBits' header
     /// for "good move" (10 bits, 645) and the client's TimeStamp (a float), an unreliable bunch of 68 bits on the pawn's
@@ -344,6 +376,10 @@ public:
     /// UseActionbarSlot 0x6b12700 and CanEverUseActionbarSlot 0x6a91a10 take GetActionbarInstigator 0x6aba180 -> the player character's GetMountablePet): without it the
     /// mount's dash (bank 18) cannot be used, nothing is sent and nothing is said (stage 3 fix 3).  The InteractInfo must exist (ensure_interact_info).  One pawn update.
     std::optional<Send> pawn_mountable_pet(const emit::FIntrepidNetworkGUID& mount);
+    /// Gathering stage 2 (the fix after the user's test 1): the pawn's InteractInfo.ChannelingData = `data` [R: 1427 packet 67 sets it with the node's wake, packet 674 clears it
+    /// 2 ms after the result frame; nine more harvests and a corpse harvest the same].  The client plays the gather animation and shows the bar from it, and sends its own
+    /// ServerInterruptChannel when the player moves.  The InteractInfo must exist (ensure_interact_info).  One pawn update; nothing when `data` is what the client holds.
+    std::optional<Send> pawn_channeling(const repl::ChannelingData& data);
     /// Getting on [R: 910 pkt 310]: the rider's pawn is attached to `mount` at MountSocket (AttachComponent = its CharacterMesh0 `mesh`, exported with the chain
     /// as the mount's component), RemoteRole 1, no PlayerState and no Controller, the attachment state (zone 2, lerp, valid), InteractInfo.MountPtr = the mount
     /// and, with the caller's set_abilities, the AbilityComponent's lists. `scale_percent` is the attachment's RelativeScale3D in percent. One reliable chain
@@ -361,6 +397,9 @@ public:
     /// Sets the XPTracker's Adventuring XP and debt (absolute totals, as retail replicates them). Nothing goes out until leveling_update().
     /// False, nothing changed, when a value does not fit or the tracker is not built yet.
     bool set_progress(int64_t xp, int64_t debt);
+    /// Gathering stage 2: a profession's certification (LevelingCertificationsFastMap, keyed by its leveling type, the value the CertificationLevel's guid) and, once it has
+    /// any, its XP total (ExperienceFastMap, the same key). Nothing goes out until leveling_update(). False, nothing changed, when a value does not fit or the tracker is not built yet.
+    bool set_profession(int64_t leveling_type, int64_t xp, int64_t certification);
     /// Plan D1, stage 2: the rank list of one skill tree (the whole list, as retail sends it each time the tree changes; no ranks erase the
     /// tree's item). Every tree's key is the tree's Guid and TypeId with the hardcoded name 0, as the retail server's replies key it. Nothing
     /// goes out until leveling_update(). False, nothing changed, when the list does not fit.

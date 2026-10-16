@@ -457,6 +457,32 @@ DELETE FROM schema_migrations WHERE version = 9;
 COMMIT;
 ```
 
+**Rolling back migration 0010.** Migration 0010 (Gathering stage 2) adds ONE table, `character_professions` (a character's certification tier, level and XP in each of the 22 professions), and
+backfills it with 22 Novice, level 1, XP 0 rows for every character that exists; it writes nowhere else. The rollback drops the table with whatever professions it holds (the characters
+are untouched, and the next start of the services migrates and backfills again, with every profession back at Novice level 1). Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0010 (Gathering stage 2)
+BEGIN;
+DROP TABLE character_professions;
+DELETE FROM schema_migrations WHERE version = 10;
+COMMIT;
+```
+
+**Rolling back migration 0011.** Migration 0011 (Gathering stage 3, "Resource storage") adds ONE table, `character_resource_items` (the items a character keeps in its resource containers
+Resource0 to Resource2, which are the resource bags worn in Equipment slots 23 to 25), with the columns and constraints of `character_items`; it writes nowhere else, backfills nothing
+and does not touch `character_items` (whose container CHECK stays Backpack / Equipment / Quest). The rollback drops the table with whatever it holds: the resource items of the characters
+are gone (the characters and the rest of their items are untouched; a character that harvested after the migration loses those harvests). Stop the character service and worldd first.
+After the rollback an older worldd, which does not know the containers, plays the characters again; the next start of the services migrates again.
+
+```sql
+-- rollback of migration 0011 (Gathering stage 3, Resource storage)
+BEGIN;
+DROP TABLE character_resource_items;
+DELETE FROM schema_migrations WHERE version = 11;
+COMMIT;
+```
+
 **Content.** contentc version 5 adds `item_use`, `item_action`, `action_response`, `action_reward`, `reward_table`, `reward_item`, `reward_xp`, `leveling_type`,
 `leveling_curve`, `skill_auto_grant` and `skill_rank_stat_mod` (`internal/content/schema.go` says what each holds; `cmd/contentc/progression.go` writes them).
 Version 5 is the oldest file this checkout reads (`RequireVersion`, and worldd's `ContentDb::open`): after pulling D1 rebuild `content.db` and restart both services.
@@ -673,6 +699,84 @@ Enums are stored as their text and, where the host answers with them, as the ord
 
 **The transforms keep the sign of a zero (Nodes 1, stage 3a).** The town replicator sends the layouts' transforms bit for bit and retail's carry `-0.0` (29 of Joeva's 85 items). A `REAL` column of SQLite stores a whole-number float as an integer and reads it back as `+0.0`, so the ten transform columns (`qx` .. `sz`) of `node_layout_prop`, `node_layout_plot` and `node_asset_set_member` are declared with no type (`internal/content/nodes.go`, `TestNodeTransformColumnsKeepNegativeZero`). The version stays 12: every reader sees the same numbers. **Rebuild `content.db` with this contentc** for the signs to be kept (`cd services && go run ./cmd/contentc`, 30 s); a file built before has `+0.0` where retail has `-0.0`, which `test_worldd_node_layout` reports as a difference in the layout items.
 
+## Gathering data (Gathering stage 2, part "Gathering data"; contentc version 13; migration 0010)
+
+**contentc version 13** types what the design data says about harvesting and about the professions (`internal/content/gather.go` has the tables and the Go readers, `cmd/contentc/gather.go`
+the writer). The raw records stay in `record`; these tables join them:
+
+| Table | Rows | What |
+|---|---|---|
+| `gather_def` | 339 | every `GatherableActorDef` joined to its `GatheringFoliageData` (`empty_duration`, `dynamic_guid`), the actor def's `override_respawn`, its `PlayerInteractionDef` (`interact_radius`, `interact_tolerance`, `discovery_distance`, `channel_duration`, the flags) and its `GatheringInteractionData` (`profession_guid`, `tool_slot` = the `EEquipSlot` of `equip_slot` (Pickaxe 26, Axe 29, Sickle 33, FishingRod 35, Bow 38), `cert_guid`, `cert_tier`, `base_duration`, `duration_expr` and `durability_expr` as `ab_expr` ids, `reward_guid` = `loot_table.guid`). Mining 156, Lumberjacking 101, Herbalism 82 (Novice 146, Apprentice 82, Journeyman 110, GrandMaster 1), all three joins present for all 339 |
+| `gather_dynamic` | 136 | the 34 `GatheringDynamicDef`s: the empty-duration multiplier by season (`ESeason` 0 Winter .. 3 Fall), day and night (the respawn default ignores them) |
+| `gather_tool` | 87 | each tool item with its `GatheringToolData` (profession, certification, `cert_tier`), the slot it is worn in (the item's first `EquipSlot`: Pickaxe 19, Bow 16, Sickle 15, Axe 15, FishingRod 15, FishingLure 6, Trap 1) and the item's own `RequiredProfessionId` and `RequiredCertificationLevelId` (equal to the tool data's for 86; `MA_0005B_Thanacite_Pickaxe` names none) |
+| `item_variation` | 47 | every `ItemVariation` with the `Quality` formula (`Artisan_Gathering_<Prof>_<Tool>_Rarity[_T1_Only]`) and the `Durability` formula as `ab_expr` ids (0: none). 44 of the 45 Quality formulas compile; the Hunting bow's `_Prototype` names a Term by `$Term:...$` (Gathering stage 3) |
+| `profession` | 22 | the `CharacterProfessions`: category (Gathering 5, Crafting 8, Processing 9), `leveling_type_guid`, `skill_tree_guid` |
+| `certification_level` | 5 | Novice (tier 0, levels 1-10), Apprentice (1, 10-20, at most 5 professions), Journeyman (2, 20-30, 4), Master (3, 30-40, 3), GrandMaster (4, 40-50, 2): `min_level`, `max_level`, `has_max_allowable`, `max_allowable` |
+| `action_certification` | 98 | the `SetCertificationLevel` action responses: the profession and `Promote` (70) or `Demote` (28). **No item uses a Demote action** |
+
+`reward_xp` gets a column `expr`: the `ab_expr` id of a `Profession` reward's expression (88 rows of 67 tables: the GM artisan scrolls' `xp - cur + 1`), all compiled. The 22 profession `LevelingTypeDef`s
+and the three `StatCurve`s `Gathering_`, `Processing_` and `Crafting_LevelUpCurve` held only a placeholder (0 XP at level 0, 50,000 at level 50; no keys): the real curves are pak assets
+(`ExternalCurve`; Unreal ignores a curve's own keys when it is set), which `mapc artisan-curves` (`tools/mapc/README.md`) reads into `dist/content/artisan_curves.tsv` (150 keys). contentc reads
+that file (`--artisan-curves`, `AOC_ARTISAN_CURVES`, default `dist/content/artisan_curves.tsv`) into `stat_curve` and `leveling_curve`: level 1 to 50, XP total `400 x level^2` (5.19e-08 at level 1), the same
+for all three. Without the file the build logs a WARNING, keeps the placeholder and records `meta artisan_curves.status = missing`. The Level 9, 15 and 25 scrolls' `xp - cur + 1` lands a level 1 character on
+levels 9, 15 and 25 (32,400, 90,000 and 250,000 XP); a tier edge (10, 20, 30, 40, 50) is a key of the curve.
+
+**The host functions 180-184** (`internal/aocexpr/hostfn.go`, `server/worldd/stats/stat_program.h`, the same numbers on both engines): `GetArtisanshipModifiedStat(actor, stat)` (180; name = the stat's guid, args[0] =
+the role of the actor, the player is the caster; a rating, 0 for another actor), `GetRolledItemQuality()` (181), `GetItemRarity()` (182; `EItemRarity` 0 Common .. 6 Artifact), `GetSourceCertificationTier()` (183; 0 Novice ..
+4 GrandMaster) and `GetGatheringInteractionBaseDuration()` (184, seconds). The host fills a plain context: `statprog.GatherContext` in Go, `stats::GatherContext` with `gather_host_fn` (`server/worldd/stats/gather_host.h`) in
+C++, and the shared corpus holds `gatherhost` blocks both answer the same. 24 of the 300 expressions that did not compile in version 12 compile now (the quantity, speed and experience formulas); 79 more compile because
+`GetPlayerProfessionLevel(GetPlayer(), "Mining")` (the scrolls' form) is accepted beside `GetPlayerProfessionLevel(GetActorGuid(GetInstigator()), ...)`; 198 of 1,875 do not (version 12: 300 of 1,845; the Hunting prototype's
+Quality formula is the one new failure). An equation's input term with no value (`"Value": ""`: the tool's term of the rarity, speed and experience equations of Mining, Lumberjacking and Herbalism) is no input: the term's
+default, 0. So the rarity, speed and experience sums have TWO terms, the quantity sum three. `RandIntRange(lo, hi)` is `lo` when `hi < lo` (UE's `RandRange`; `RandIntRange(1, 0)` of a quantity table with no entry is 1)
+in the Go test host and in all three C++ hosts. `int(x)` is `Floor` for the non-negative numbers the data applies it to.
+
+**The professions of a character.** Migration 0010 adds ONE table, `character_professions (character_id, profession_guid, certification_tier 0-4, level 1-50, xp)`, and backfills 22 Novice, level 1, XP 0 rows for every
+character that exists (the user's rule: every character holds Novice certification in all 22 `CharacterProfessions`); `CreateCharacter` inserts the 22 in its transaction, a missing row reads as Novice level 1, and a
+profession's XP lives only there (nothing of it is in `character_experience`). The 22 guids are `character.ProfessionGuids`, the migration's SQL and `content.db`'s `profession` (tests hold the three together).
+`proto/internal/aoc/character/v1/character.proto`: `ProfessionState {profession_guid, certification_tier, level, xp}`, `Character.professions` (field 19, with `include_items` and in `SaveProgress`'s reply: always the 22 in guid
+order) and `SaveProgressRequest.professions` (field 9; each row replaces that profession's row; `InvalidArgument`, with nothing changed, for a profession that is none of the 22, one twice, a tier outside 0-4, a level outside
+1-50 or a negative XP). worldd's `svc::Character::professions` and `svc::Progress::professions` carry them.
+
+## Resource storage (Gathering stage 3, part "Resource storage"; contentc version 14; migration 0011)
+
+**contentc version 14** adds to the `item` table `inv_w`, `inv_h` (the record's `InventoryDimension` in cells, 1 x 1 where the record has none; the data has 10,192 items of 1 x 1, 202 of 2 x 2, 68 of 1 x 2, 52 of 1 x 3, 48 of 2 x 1,
+4 of 2 x 3, one of 3 x 1 and one of 4 x 2, so none is larger than the Sanctus bag's 6 x 4) and `resource` (1 when the item's `GameplayTags` hold a child of `item.resource`, compared case-insensitively because the data mixes
+`Item.Resource.Raw.Reagent` and `item.resource.cert.nodecert`: 1,824 items, 182 of the 184 items the gathering interactions reward), and two tables (`internal/content/resource.go`, `cmd/contentc/items.go`):
+
+| Table | Rows | What |
+|---|---|---|
+| `resource_bag` | 70 | each item that carries a `ResourceBagDefId` (64 are worn in `ResourceBag_0..2`, slots 23 to 25; 6 are warehouse tab definitions): the `ResourceBagDef`, its `columns` x `rows` (`BagDimension` X and Y, which the data types as floats) and `custom` (`bCustomDimension`) |
+| `resource_bag_cell` | 606 | the `BagMatrixOverride` of the 20 defs that have one (of the 23 the bags use), one row per cell: its column, its row and `value` -1 (usable) or -2 (blocked). The matrix applies only when `custom` is 1 (the Sanctus def, `Item_Bag_Resource_Sanctus_def`, stores a 4-column matrix its 6 x 4 grid ignores); a custom def's matrix must be its grid (X columns of Y cells, only -1 and -2): contentc checks it for the defs a bag uses (an unused def, `Bag_Resource_T1_Lumberjacking_Variety_def`, has 11 columns for a grid of 8) |
+
+`maximum_items` of a container is `columns x rows`, blocked cells included. The grids: `Bag_Resource_Sanctus` 6 x 4, `Bag_Resource_T1_Mining_0` 5 x 5 (9 blocked), `Bag_Resource_T1_Lumberjacking_0` 7 x 3 (9), `Bag_Resource_T2_Mining_0` 8 x 5 (16)
+and `Bag_Resource_T2_Lumberjacking_0` 6 x 5 (12) with exactly the OverrideMatrix capture 1198's client was sent, the 8 x 8 T3 bags (28 blocked), and `Bag_Resource_SandalsOfHolding` 8 x 30 = 240 (the most cells a bag has: a slot of the new table is below 256).
+`content.Item` has `InvW`, `InvH`, `Resource`; `DB.ResourceBag(item)` and `DB.ResourceBags()` read the grids. `MinContentcVersion` and worldd's `kMinContentcVersion` are 14.
+
+**Migration 0011** adds ONE table, `character_resource_items`, with the columns and the constraints of `character_items` (migration 0004 and 0007's columns), `container IN ('Resource0', 'Resource1', 'Resource2')` and `slot` 0 to 255, the same primary key
+(`character_id, container, slot`), the instance guid unique per character in the table, and `ON DELETE CASCADE` on the character. `character_items` is not touched (its container CHECK stays Backpack / Equipment / Quest: every migration is add-only), nothing is
+backfilled, and nothing else changes (a test holds the schema of every other table). The resource items of a character live only in the new table. The instance guid is unique per character across BOTH tables: `character.ValidateItems` checks it
+over the whole set of a `SaveInventory`, because a table cannot hold a rule over two tables. `Inventory` returns the Backpack's items by slot, then the Equipment's, the Quest storage's and the three resource containers' (`character.Resource0..2`, `SlotCount` 256,
+`MaxItems` 70 + 83 + 100 + 3 x 256); `SaveInventory` deletes the rows of both tables and inserts the set in the table of each item's container in ONE transaction; `GrantMissingKits` and the GM starter set's backfill count the resource table too.
+`aoc.character.v1.ItemContainer` gets `ITEM_CONTAINER_RESOURCE0/1/2 = 4/5/6` (add-only; the numbers are the wire contract with worldd, a test pins them). The play database `aoc_e1play` receives the migration when the services start.
+
+## Foliage data (Gathering stage 3, part "Foliage gathering"; contentc version 15)
+
+**contentc version 15** types what the design data says about the painted trees, plants and stones and about every gathering interaction (`internal/content/foliage.go` has the tables and the Go readers, `cmd/contentc/foliage.go` the writer; worldd's `foliage/` and `gather/gathering.*` read them). Four tables; the raw records stay in `record`:
+
+| Table | Rows | What |
+|---|---|---|
+| `foliage_def` | 402 | each `GatheringFoliageData`: `empty_duration` (seconds an emptied instance stays Empty), `paint_state` (the state the map paints it in, which it returns to), the min/max/gatherable states, the `GatheringFoliageState` of each of its Infancy, Juvenile and Adult (0 = none) and the seasonal `dynamic_guid` (stored, not applied) |
+| `foliage_state` | 743 | each `GatheringFoliageState`: `lifecycle_duration` (seconds before it grows into the next state; 0 = it stays), `interaction_guid` (the `GatheringInteractionData` that harvests it in this state; 0 for a sapling: 424 of the 743 have one), the distance and angle the interaction overrides (-1 = its own) and the `collision_radius` |
+| `gather_interaction` | 236 | each `GatheringInteractionData`: the profession, certification and tier, the tool's equip slot (-1 when the data names none), `base_duration`, the compiled duration and wear formulas (`ab_expr` ids), the reward table, the state the harvest leaves the foliage in (Empty = 3) and the range of the `PlayerInteractionDef` named like it (radius, tolerance, combat) |
+| `gather_interaction_def` | 194 | each `PlayerInteractionDef` that names a `GatheringInteractionData`, by its own guid: the 53 `Hunting_<X>` defs a huntable creature's asset names, and the ranges of the nodes' and the foliage's |
+
+`EFoliageState` is Infancy 0, Juvenile 1, Adult 2, Empty 3 (the captured `IndexedStates` carry 3 for a harvested instance and 0 and 1 for a growing one). Stage 2's `gather_def` is untouched (the 339 placed nodes); the new `gather_interaction` holds every interaction, so the foliage and the Hunting corpses use the same rolls. The 5 formulas the interactions add join the expression set (`meta gather.exprs` is 35, `ab_expr` 1,880), so the stat program bundle in `stat_program` grew by 146 bytes and the shared stat corpus was rewritten (`go run ./internal/statprog/cmd/statprog corpus --out ..\server\worldd\stats\testdata\corpus.txt`; `TestCorpusUpToDate` and worldd's `test_worldd_content_db` on the real file hold it). Counts and the cross-references (every def's three state slots are rows of `foliage_state`, every state's interaction a row of `gather_interaction`, an interaction def's `gather_guid` a row or the 0 of "none") are pinned by `cmd/contentc/foliage_real_test.go`; `content.DB.FoliageDefs()`, `FoliageStates()`, `GatherInteractions()` and `GatherInteractionDefs()` read them. `MinContentcVersion` and worldd's `kMinContentcVersion` are **15**: every reader refuses an older file with the way to rebuild it (`cd services && go run ./cmd/contentc`), and nothing else needs a migration (no database table is added).
+
+
+## Item display names (Gathering stage 3, "the pick-up popup"; contentc version 16)
+
+**contentc version 16** adds one column to the item table: `item.display_name`, the record's `ItemName` source text as the player reads it ("Coconut Wood"), empty for the 78 of 10,568 records that have no name (`cmd/contentc/items.go`; `content.DB.Item` returns it as `DisplayName`). worldd puts it into the pick-up popup of a harvest ("Acquired <a ...> [Coconut Wood] </>x5", `server/worldd/items/acquired.h`); a content.db older than 16 still opens (the popup then shows the record name). `TestRealItemDisplayNames` checks the 17 items of the 24 retail harvest events against the names the retail text carries.
+
 ## Test
 
 ```powershell
@@ -707,6 +811,7 @@ The inputs stay outside the repo and are given as flags with environment default
 | `--usmap` | `AOC_USMAP` | the mappings file: `dist/content/aoc.usmap`, generated from the client (below), or the old `5.6.0-434126+++game+jvs_game_rel-AOC_FIXED.usmap`; both decode every table |
 | `--config` | `AOC_CLIENT_CONFIG` | optional: the Cache.db export's `AOC\Config` directory, for `StatRegenTime` in `DefaultCombat.ini` (without it the documented default, 1 s, is used and the rule's source says so) |
 | `--out` | | `dist/content/content.db` at the repo root (git-ignored) |
+| `--artisan-curves` | `AOC_ARTISAN_CURVES` | optional (Gathering stage 2): `mapc artisan-curves`' output, the profession level-up curves of the paks; default `dist/content/artisan_curves.tsv`. Without it the placeholder curves stay and the build says so |
 | `--record-encoding` | | `gzip+json` (default) or `json`, see below |
 
 The client loads the first `.dbc` of that directory (read from its code, see the `internal/designdb`

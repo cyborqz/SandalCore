@@ -114,9 +114,13 @@ bool PlayerBootstrap::build_actors() {
     // plan B2: the items the storages hold. A slot outside its storage or an item in a slot twice is a setup this refuses, not one
     // it repairs: the payload would not carry what the character service stored.
     for (const StoredItem& it : s.items) {
-        const int limit = it.storage == ItemStorage::Backpack ? storage_info(StorageKind::Backpack).slots
-                          : it.storage == ItemStorage::Equipment ? storage_info(StorageKind::Equipment).slots
-                                                                  : storage_info(StorageKind::QuestStorage).slots;
+        int limit = it.storage == ItemStorage::Backpack ? storage_info(StorageKind::Backpack).slots
+                    : it.storage == ItemStorage::Equipment ? storage_info(StorageKind::Equipment).slots
+                                                            : storage_info(StorageKind::QuestStorage).slots;
+        if (is_resource_storage(it.storage)) {
+            const ResourceBagSetup& bag = s.resource_bags[static_cast<size_t>(static_cast<int>(it.storage) - static_cast<int>(ItemStorage::Resource0))];
+            limit = bag.present ? bag.columns * bag.rows : 0;
+        }
         if (it.slot < 0 || it.slot >= limit || !it.item.has_item) return fail("an item of the setup is in a slot outside its storage or is empty");
         if (!items_.emplace(std::make_pair(static_cast<uint8_t>(it.storage), it.slot), it.item).second) return fail("two items of the setup are in one slot");
     }
@@ -416,17 +420,23 @@ void PlayerBootstrap::add_second_state_components() {
         }
     }
 
-    repl::Subobject resource;   // not stably named: the client spawns it from its class
-    resource.guid = g.resource_storage;
-    resource.dynamic_class = resource_storage_class_export();
-    resource.obj.schema = gen::find_class_schema("UResourceStorageComponent");
-    if (resource.obj.schema) set(resource.obj, "ItemLocationType", Value::u64(11));   // EItemLocation::Resource0
-    else fail("no schema for UResourceStorageComponent");
+    // Gathering stage 3: one dynamic UResourceStorageComponent per worn resource bag (EItemLocation Resource0 to Resource2 = 11 to 13; capture 1198 has three on every pawn)
+    std::vector<repl::Subobject> resources;
+    for (size_t i = 0; i < s.resource_bags.size(); ++i) {
+        if (!s.resource_bags[i].present) continue;
+        repl::Subobject resource;   // not stably named: the client spawns it from its class
+        resource.guid = g.resource_storage[i];
+        resource.dynamic_class = resource_storage_class_export();
+        resource.obj.schema = gen::find_class_schema("UResourceStorageComponent");
+        if (resource.obj.schema) set(resource.obj, "ItemLocationType", Value::u64(11 + i));
+        else fail("no schema for UResourceStorageComponent");
+        resources.push_back(std::move(resource));
+    }
 
     pawn_.subobjects.insert(pawn_.subobjects.begin(), std::move(alignment));
     pawn_.subobjects.insert(pawn_.subobjects.begin() + 3, std::move(ability));   // after Alignment, BaseCharacterInfo, CombatInfo
     pawn_.subobjects.insert(pawn_.subobjects.begin() + 4, std::move(stats));
-    pawn_.subobjects.push_back(std::move(resource));
+    for (repl::Subobject& resource : resources) pawn_.subobjects.push_back(std::move(resource));
 // C-Y-B / C O A
 
     // what the old components gain
@@ -470,10 +480,12 @@ void PlayerBootstrap::add_second_state_components() {
     if (repl::Subobject* owner = component(g.owner_info)) {
         set(owner->obj, "WeaponSkillLineId.Guid", Value::i64(s.weapon_skill_line.guid));
         set(owner->obj, "WeaponSkillLineId.Name", Value(repl::NameValue::plain(s.weapon_skill_line.name)));
-        // ResourceContainers has three slots; the capture names the first, the resource storage, and leaves the others null.
+        // ResourceContainers has three slots: the containers of the worn bags (the starter's one is the first), a null for the others [R: capture 1198 names all three]
         repl::ArrayValue containers;
         containers.elements.resize(3);
-        containers.elements[0].values[1] = object(g.resource_storage);
+        for (size_t i = 0; i < s.resource_bags.size(); ++i) {
+            if (s.resource_bags[i].present) containers.elements[i].values[1] = object(g.resource_storage[i]);
+        }
         set(owner->obj, "ResourceContainers", Value(std::move(containers)));
     }
     if (repl::Subobject* appearance = component(g.appearance)) {
@@ -739,6 +751,19 @@ bool PlayerBootstrap::set_progress(int64_t xp, int64_t debt) {
     return true;
 }
 
+bool PlayerBootstrap::set_profession(int64_t leveling_type, int64_t xp, int64_t certification) {
+    if (!ok_ || leveling_type == 0 || certification == 0 || xp < 0) return false;
+    repl::DesignDataId key;   // the retail join keys a profession with the hardcoded name 0 (1198 pkt 1510)
+    key.guid = leveling_type;
+    key.type_id = content::kTypeLevelingTypeDef;
+    if (!leveling_.set_certification(key, certification)) return false;
+    if (xp > 0 || leveling_.experience(key)) {
+        if (!leveling_.set_experience(key, xp)) return false;
+    }
+    if (xp_tracker_added_) sync_xp_tracker();
+    return true;
+}
+
 bool PlayerBootstrap::set_tree_ranks(int64_t tree, const std::vector<int64_t>& ranks) {
     if (!ok_ || tree == 0) return false;
     if (ranks.empty()) {
@@ -775,6 +800,9 @@ std::optional<Send> PlayerBootstrap::xp_tracker_open() {
         if (!set_progress(p.xp, p.debt)) return std::nullopt;
         for (const TreeSetup& t : p.trees) {
             if (!set_tree_ranks(t.tree, t.ranks)) return std::nullopt;
+        }
+        for (const ProgressSetup::Profession& pr : p.professions) {
+            if (!set_profession(pr.leveling_type, pr.xp, pr.certification)) return std::nullopt;
         }
         repl::Subobject tracker = make_component(setup_.guids.xp_tracker, "XPTracker", kChecksumXPTracker);
         if (!tracker.obj.schema) {
@@ -869,6 +897,7 @@ std::optional<Send> PlayerBootstrap::skill_on_actionbar(const repl::SkillOnActio
     if (!ok_) return std::nullopt;
     return finish(Role::PlayerController, false, "ClientUpdateSkillOnActionbar", repl::client_update_skill_on_actionbar(pc_, u, acks_));
 }
+// (C Y B) (CoA)
 
 std::optional<std::vector<Send>> PlayerBootstrap::join_sequence() {
     if (!ok_) return std::nullopt;
@@ -888,12 +917,20 @@ std::optional<std::vector<Send>> PlayerBootstrap::join_sequence() {
         for (Send& s : *adds) out.push_back(std::move(s));
         return true;
     };
+    // Gathering stage 3: each worn bag's container, its Adds first and then its payload (the same pattern as the three storages above)
+    const auto add_resource_containers = [&]() {
+        for (int i = 0; i < 3; ++i) {
+            if (!setup_.resource_bags[static_cast<size_t>(i)].present) continue;
+            if (!add_adds(static_cast<ItemStorage>(static_cast<int>(ItemStorage::Resource0) + i)) || !add(storage_payload(resource_kind(i), Role::Pawn))) return false;
+        }
+        return true;
+    };
     const bool done =
         add(player_controller_open()) && add(hud()) && add(voice_and_level_list()) && add(flush_bandwidth_and_time()) &&
         add(game_state_open()) && add(load_tracker_before_possession()) && add_adds(ItemStorage::Backpack) && add(pawn_open()) &&
         add(storage_payload(StorageKind::Backpack, Role::Pawn)) && add_adds(ItemStorage::Equipment) &&
         add(storage_payload(StorageKind::Equipment, Role::Pawn)) && add_adds(ItemStorage::Quest) &&
-        add(storage_payload(StorageKind::QuestStorage, Role::Pawn)) && add(storage_payload(StorageKind::Resource, Role::Pawn)) &&
+        add(storage_payload(StorageKind::QuestStorage, Role::Pawn)) && add_resource_containers() &&
         add(restart_camera_rotation()) && add(possession_update()) && add(pawn_second_state()) && add(player_state_open()) && add(xp_tracker_open());
     if (!done) {
         restore(before);
@@ -934,20 +971,24 @@ const FIntrepidNetworkGUID& PlayerBootstrap::storage_guid(StorageKind kind) cons
         case StorageKind::Backpack: return g.backpack;
         case StorageKind::Equipment: return g.equipment;
         case StorageKind::QuestStorage: return g.quest_storage;
-        case StorageKind::Resource: return g.resource_storage;
+        case StorageKind::Resource0: return g.resource_storage[0];
+        case StorageKind::Resource1: return g.resource_storage[1];
+        case StorageKind::Resource2: return g.resource_storage[2];
     }
     return g.backpack;
 }
 
 namespace {
 
-/// The storage a StorageKind holds items of; the resource storage holds none.
+/// The storage a StorageKind holds items of.
 std::optional<ItemStorage> item_storage_of(StorageKind kind) {
     switch (kind) {
         case StorageKind::Backpack: return ItemStorage::Backpack;
         case StorageKind::Equipment: return ItemStorage::Equipment;
         case StorageKind::QuestStorage: return ItemStorage::Quest;
-        case StorageKind::Resource: return std::nullopt;
+        case StorageKind::Resource0: return ItemStorage::Resource0;
+        case StorageKind::Resource1: return ItemStorage::Resource1;
+        case StorageKind::Resource2: return ItemStorage::Resource2;
     }
     return std::nullopt;
 }
@@ -960,6 +1001,9 @@ const FIntrepidNetworkGUID& PlayerBootstrap::item_storage_guid(ItemStorage stora
         case ItemStorage::Backpack: return g.backpack;
         case ItemStorage::Equipment: return g.equipment;
         case ItemStorage::Quest: return g.quest_storage;
+        case ItemStorage::Resource0: return g.resource_storage[0];
+        case ItemStorage::Resource1: return g.resource_storage[1];
+        case ItemStorage::Resource2: return g.resource_storage[2];
     }
     return g.backpack;
 }
@@ -988,9 +1032,18 @@ std::optional<Send> PlayerBootstrap::storage_payload(StorageKind kind, Role targ
     // slots x 178 + 145 trailing bits"), the instance and its slot for one that has an item.
     repl::StoragePayload payload;
     payload.target = storage_guid(kind);
-    payload.maximum_items = info.slots;
-    payload.storage.resize(static_cast<size_t>(info.slots));
+    int slots = info.slots;
     payload.dimension = repl::Vec2d{info.dimension_x, info.dimension_y};
+    if (is_resource_kind(kind)) {
+        // Gathering stage 3: the container of a worn bag has the bag's grid; a container without a bag is not sent
+        const ResourceBagSetup& bag = setup_.resource_bags[static_cast<size_t>(resource_kind_index(kind))];
+        if (!bag.present) return std::nullopt;
+        slots = bag.columns * bag.rows;
+        payload.dimension = repl::Vec2d{static_cast<double>(bag.columns), static_cast<double>(bag.rows)};
+        for (const std::vector<int>& column : bag.override_matrix) payload.override_matrix.emplace_back(column.begin(), column.end());
+    }
+    payload.maximum_items = slots;
+    payload.storage.resize(static_cast<size_t>(slots));
     if (const auto storage = item_storage_of(kind)) {
         for (auto it = items_.lower_bound({static_cast<uint8_t>(*storage), 0}); it != items_.end() && it->first.first == static_cast<uint8_t>(*storage); ++it) {
             repl::StorageSlot& slot = payload.storage[static_cast<size_t>(it->first.second)];
@@ -1011,7 +1064,7 @@ std::optional<Send> PlayerBootstrap::storage_payload(StorageKind kind, Role targ
     // acknowledged it. The resource storage is a dynamic subobject: its class went out with its block, and the original's
     // payloads name it with no export at all.
     std::vector<ExportChain> chains;
-    if (kind != StorageKind::Resource) chains.push_back(repl::component_export(setup_.guids.pawn, storage_guid(kind), info.component_name, kChecksumItemStorage));
+    if (!is_resource_kind(kind)) chains.push_back(repl::component_export(setup_.guids.pawn, storage_guid(kind), info.component_name, kChecksumItemStorage));
     repl::PackedExports packed = repl::pack_exports(chains, acks_);
     if (!packed.ok) return std::nullopt;
     e.exports = std::move(packed.bunches);
@@ -1038,6 +1091,7 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         ev.type = static_cast<uint8_t>(e.type);
         ev.item = e.item;
         if (e.instigated) ev.instigator = character;
+        ev.callout = e.callout;
         repl::StorageEventContainer target;
         target.object = item_storage_guid(e.storage);
         target.slots.push_back({e.slot, static_cast<int32_t>(e.item.quantity), e.item.guid});
@@ -1260,6 +1314,27 @@ std::optional<Send> PlayerBootstrap::item_events(std::span<const ItemEvent> even
 }
 // -- CoA . C_Y_B --
 
+std::optional<Send> PlayerBootstrap::item_durability(ItemStorage storage, int32_t slot, float durability) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(storage), slot};
+    const auto it = items_.find(key);
+    if (it == items_.end() || !it->second.has_item) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientUpdateItemDurability");
+    if (!rpc) return std::nullopt;
+    repl::ItemDurabilityUpdate update;
+    update.container = item_storage_guid(storage);
+    update.items.push_back({it->second.guid, slot, durability});
+    auto params = repl::item_durability_params(*rpc, update);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientUpdateItemDurability";
+    call.params = std::move(*params);
+    auto send = rpcs(Role::PlayerController, "ClientUpdateItemDurability", std::span<const repl::RpcRequest>(&call, 1));
+    if (!send) return std::nullopt;
+    it->second.durability = durability;   // what the client was told is what the payloads show from now on
+    return send;
+}
+
 std::optional<std::vector<Send>> PlayerBootstrap::storage_adds(ItemStorage storage) {
     if (!ok_) return std::nullopt;
     // the Adds of what the storage holds, by slot; the chains are built without touching the copy of the storages: these are items the
@@ -1401,18 +1476,19 @@ std::optional<Send> PlayerBootstrap::mount_bar(int64_t dash_ability, int32_t slo
 namespace {
 
 /// The values of a CalloutQueueReplication item by handle (the schema element commands, in order: the value members, then the key FGuid).
-repl::ElementState callout_state(const std::string& message, int32_t type, int32_t point_size, int64_t creation_ticks, uint64_t key) {
+repl::ElementState callout_state(const std::string& message, int32_t type, int32_t point_size, int64_t creation_ticks, uint64_t key, const std::string& table = std::string(),
+                                 const std::string& message_key = std::string(), uint64_t chat_category = 2) {
     repl::ElementState es;
     auto& v = es.values;
     v[1] = Value::str("");                              // Title
     v[2] = Value::str(message);                         // Message
     v[3] = Value(repl::TextValue{});                    // TextMessage
-    v[4] = Value(repl::LocalizedMessage{});             // LocalizedMessage
+    v[4] = Value(repl::LocalizedMessage{table, message_key});   // LocalizedMessage (empty for a plain message)
     v[5] = Value::str("");                              // FormattedOnScreenMessage
     v[6] = Value::str("");                              // FromSourcePlayer
     v[7] = Value::i64(point_size);                      // PointSize
     v[8] = Value::u64(static_cast<uint64_t>(type));     // SetCalloutType
-    v[9] = Value::u64(2);                               // ChatCategory [R: 2 in 876 and 870]
+    v[9] = Value::u64(chat_category);                   // ChatCategory [R: 2 in 876 and 870, 4 in 1464]
     v[10] = Value::u64(0);                              // NodeLevel
     v[11] = Value::boolean(false);                      // bIsMessageSentByGM
     v[12] = Value::str("");                             // ChatEmblems
@@ -1434,12 +1510,13 @@ repl::ElementState callout_state(const std::string& message, int32_t type, int32
 
 }  // namespace
 
-std::optional<Send> PlayerBootstrap::callout_add(const std::string& message, int32_t type, int32_t point_size, int64_t creation_ticks, uint64_t key) {
+std::optional<Send> PlayerBootstrap::callout_add(const std::string& message, int32_t type, int32_t point_size, int64_t creation_ticks, uint64_t key, const std::string& table,
+                                                 const std::string& message_key, uint64_t chat_category) {
     if (!ok_ || !second_state_added_ || key == 0 || callouts_removed_.count(key) != 0) return std::nullopt;
     if (callout_ids_.count(key) == 0) {
         repl::FastArrayState* array = pc_.obj.arrays.get(*pc_.obj.schema, "CalloutQueueReplication");
         if (!array) return std::nullopt;
-        const auto id = array->add(callout_state(message, type, point_size, creation_ticks, key));
+        const auto id = array->add(callout_state(message, type, point_size, creation_ticks, key, table, message_key, chat_category));
         if (!id) return std::nullopt;
         callout_ids_[key] = *id;
     }

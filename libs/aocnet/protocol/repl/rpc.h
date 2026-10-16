@@ -112,12 +112,23 @@ struct RpcCall {
     size_t                   param_bits = 0;
 };
 
+/// The RPC fields of a client bunch that read_rpc_fields skipped: how many, and the first few field indices (what the caller says).
+struct SkippedFields {
+    size_t                count = 0;
+    std::vector<uint32_t> first;   // at most kMaxSkippedKept
+};
+constexpr size_t kMaxSkippedKept = 8;
+
 /// Reads the field loop from `pos` to `end`, every field an RPC of `cls`.  A field whose parameters do not
 /// decode (a struct without a codec ...) is still listed, `decoded` false.  Advances `pos` to `end`.
 /// nullopt (`pos` unchanged) for a header that does not read, a field that is not an RPC or more than
 /// kMaxClientRpcsPerBunch fields.
+/// With `skipped` (the client's bunches): a field whose header reads but is no RPC of `cls` (an index the class
+/// does not have, a property) is skipped by its payload bits, as UE skips an RPC it cannot find, and counted in
+/// *skipped; it counts against the kMaxClientRpcsPerBunch bound all the same.  Only a header that does not read
+/// (its extent unknown) still fails the loop.
 std::optional<std::vector<RpcCall>> read_rpc_fields(const schema::ClassSchema& cls, const uint8_t* data, size_t end,
-                                                    size_t& pos, const CodecOptions& opts = {});
+                                                    size_t& pos, const CodecOptions& opts = {}, SkippedFields* skipped = nullptr);
 
 // ---- the client's RPCs ---------------------------------------------------------
 
@@ -128,11 +139,25 @@ struct ClientRpc {
     RpcCall                    call;
 };
 
+/// A block of a subobject the client named in place (subobject.h's InPlaceName): the name and the block's payload bits.
+struct InPlaceBlock {
+    InPlaceName name;
+    size_t      payload_bits = 0;
+};
+
+constexpr size_t kMaxInPlaceKept = 8;
+
 struct ClientBunch {
     std::vector<ClientRpc> rpcs;
     /// Blocks not read as RPCs: property blocks (bHasRepLayout, e.g. the PlayerController's client-side
-    /// subobjects) and blocks of a subobject the resolver does not know.
+    /// subobjects) and blocks of a subobject the resolver does not know (or the client named in place).
     size_t skipped_blocks = 0;
+    /// The blocks of subobjects the client named in place: skipped by their payload bits, the rest of the bunch read.  The first
+    /// kMaxInPlaceKept are kept (the caller says what they were); `in_place_blocks` counts them all (a client can send a dozen in one bunch).
+    std::vector<InPlaceBlock> in_place;
+    size_t                    in_place_blocks = 0;
+    /// RPC fields skipped because their header names no RPC of the target's class (read_rpc_fields' `skipped`).
+    SkippedFields skipped_fields;
 };
 
 /// The most RPC calls one client bunch may carry: a bunch holds thousands of one-field RPC blocks at a few bits each, and
@@ -143,7 +168,12 @@ constexpr size_t kMaxClientRpcsPerBunch = 1024;
 using ResolveSubobject = std::function<const schema::ClassSchema*(const emit::FIntrepidNetworkGUID&)>;
 
 /// Reads the payload of a bunch from the client (`bits` bits from bit 0, after the bunch header): its
-/// content blocks, each an RPC block of `actor_class` or of the class `resolve` gives the subobject.
+/// content blocks, each an RPC block of `actor_class` or of the class `resolve` gives the subobject.  A block
+/// that is not the caller's to read -- a RepLayout block, a subobject nothing resolves, a subobject the client
+/// names in place (ClientBunch::in_place), an RPC field the class does not have -- is skipped by its payload bits
+/// and the rest of the bunch is read: UE writes each one with its bit count, and one call the server cannot read
+/// must not take the others of the bunch with it (Gathering stage 3: a tree's start in the bunch of an unnamed
+/// 550-bit call never arrived).
 /// nullopt for a block or field header that does not read, or more than kMaxClientRpcsPerBunch RPC calls.
 std::optional<ClientBunch> read_client_bunch(const schema::ClassSchema& actor_class, const ResolveSubobject& resolve,
                                              const uint8_t* data, size_t bits, const CodecOptions& opts = {});

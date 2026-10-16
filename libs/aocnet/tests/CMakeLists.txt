@@ -65,6 +65,10 @@ foreach(t
     test_repl_loot
     test_repl_mount
     test_repl_nodes
+    test_repl_gather
+    test_repl_resource
+    test_repl_foliage
+    test_repl_hunting
     test_repl_node_layout
 )
     aocnet_add_test(${t})

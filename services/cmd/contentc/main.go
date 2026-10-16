@@ -19,6 +19,8 @@
 //	--config  AOC_CLIENT_CONFIG   the Cache.db export's AOC\Config directory, for StatRegenTime in
 //	                              DefaultCombat.ini; without it the documented default (1 s) is used
 //	--out     dist/content/content.db at the repository root (a build artifact, not checked in)
+//	--artisan-curves AOC_ARTISAN_CURVES  mapc's artisan_curves.tsv, the profession level-up curves (pak assets: Gathering stage 2); default dist/content/artisan_curves.tsv. Without the
+//	                              file the design database's placeholder curves stay and the build says so loudly
 //
 // --record-encoding says how record.data is stored: gzip+json (the default, 270 MB for
 // the whole file) or json (the rows queryable with json_extract; 573 MB of JSON).
@@ -54,6 +56,13 @@
 //	                      (Nodes 1, version 12) the city nodes typed: the 81 nodes by rank (the index in the guid-sorted list), the 78 zones of
 //	                      influence with their biome, level details, rules, taxes, reputation, citizenship and election definitions, the layouts
 //	                      with their asset sets, plots and buildings and the populations of each building state (nodes.go)
+//
+//	gather_def, gather_dynamic, gather_tool, item_variation, profession, certification_level, action_certification
+//	                      (Gathering stage 2, version 13) the 339 gatherable actor defs joined to their foliage data, interaction and gathering interaction
+//	                      (profession, tool slot, certification, base duration, the compiled duration and durability formulas, the reward table), the
+//	                      seasonal multipliers, the 87 tool items, the 47 item variations with their compiled Quality formulas, the 22 professions, the 5
+//	                      certification levels and the 98 promote and demote actions (gather.go); the profession level-up curves (stat_curve and
+//	                      leveling_curve) come from mapc's artisan_curves.tsv, and a Profession reward's experience points at its expression (reward_xp.expr)
 //
 // The stamina_rule keys (content.Rule*) hold, with where each comes from:
 // Stamina and MaxStamina's formulas and starting values, the StaminaRegeneration
@@ -114,6 +123,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&opt.USMap, "usmap", os.Getenv("AOC_USMAP"), "the mappings file (default $AOC_USMAP)")
 	fs.StringVar(&opt.Config, "config", os.Getenv("AOC_CLIENT_CONFIG"), "the client's Config directory, for DefaultCombat.ini (default $AOC_CLIENT_CONFIG)")
 	fs.StringVar(&opt.Out, "out", filepath.Join(repoRoot(), "dist", "content", "content.db"), "the content.db to write")
+	fs.StringVar(&opt.ArtisanCurves, "artisan-curves", os.Getenv("AOC_ARTISAN_CURVES"), "mapc artisan-curves' output (default $AOC_ARTISAN_CURVES, else dist/content/artisan_curves.tsv of the checkout)")
 	fs.StringVar(&opt.Encoding, "record-encoding", defaultEncoding, "how record.data is stored: json or gzip+json")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {

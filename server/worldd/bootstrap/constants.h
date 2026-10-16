@@ -58,6 +58,11 @@ repl::ExportChain lingering_effect_archetype_export();
 repl::ExportChain node_layout_archetype_export();
 /// /Script/GameSystemsPlugin.ResourceStorageComponent, the pawn's dynamic subobject class (pkt#107).
 repl::ExportChain resource_storage_class_export();
+/// Default__IntrepidStateIFA in /Script/Foliage: the archetype of a foliage cell's state actor (Gathering stage 3, "Foliage gathering"; capture 1198's export at packet 244:
+/// id 18292086725290287385, checksum 3015814482, the package 12703675336461722793).
+repl::ExportChain foliage_state_actor_archetype_export();
+/// /Script/Foliage.IntrepidFoliageStateComponent, the state actor's dynamic subobject class (capture 1198, packet 244: id 8959184318458680037, checksum 480712344, outer the same package).
+repl::ExportChain foliage_state_component_class_export();
 /// BP_AOCHUD_C in /Game/UI/Widgets/BP_AOCHUD, ClientSetHUD's parameter (pkt#22 chSeq 956).
 repl::ExportChain hud_class_export();
 /// AoCGameModeBaseBP_C in /Game/GameBlueprints/AoCGameModeBaseBP, the GameState's GameModeClass (pkt#28).
@@ -190,10 +195,16 @@ ClientTimes client_times(double world_time);
 
 // ---- the storages ------------------------------------------------------------------------------------------------------
 
-enum class StorageKind : uint8_t { Backpack, Equipment, QuestStorage, Resource };
+/// Gathering stage 3: the resource storage is three (Resource0 to Resource2, the dynamic UResourceStorageComponents of the resource bags worn in Equipment slots 23 to 25).
+enum class StorageKind : uint8_t { Backpack, Equipment, QuestStorage, Resource0, Resource1, Resource2 };
+inline constexpr bool is_resource_kind(StorageKind k) { return k >= StorageKind::Resource0; }
+/// 0, 1 or 2 for Resource0 to Resource2.
+inline constexpr int resource_kind_index(StorageKind k) { return static_cast<int>(k) - static_cast<int>(StorageKind::Resource0); }
+inline constexpr StorageKind resource_kind(int index) { return static_cast<StorageKind>(static_cast<int>(StorageKind::Resource0) + index); }
 
 /// ClientReceiveStoragePayload(TargetStorage, NewStorageData) of an empty storage: what differs between the four
-/// (MaximumItems and the Dimension of the resource storage; pkt#82-97, transcript section 1.3).
+/// (MaximumItems and the Dimension of the resource storage; pkt#82-97, transcript section 1.3).  A resource container's size is its bag's
+/// (PlayerSetup::resource_bags); the entry here is the starter's, the Sanctus bag's 6 x 4.
 struct StorageInfo {
     StorageKind kind;
     const char* component_name;   // the export name; the resource storage has none (a dynamic subobject)

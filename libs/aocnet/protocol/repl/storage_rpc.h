@@ -148,4 +148,29 @@ std::optional<std::vector<ItemStorageEvent>> parse_loot_events(const RpcCall& ca
 /// The parameters of ClientRemoveListenerFromStorage(LootActor); nullopt for another RPC.
 std::optional<RpcParams> remove_listener_params(const schema::RpcSchema& rpc, const emit::FIntrepidNetworkGUID& actor);
 
+// ---- Gathering stage 2, "Harvesting": a tool's wear ---------------------------------------------------------------------------------
+//
+//  ClientUpdateItemDurability(ItemDurabilityUpdate) on the PlayerController tells the client the new durability of items of one container.  A harvest sends one, in the
+//  frame of its result, before the storage events [R: 1427 packet 673: the Equipment storage, slot 33 (the Sickle), 165 -> 164]: the struct FItemDurabilityUpdate holds the
+//  container (TargetContainer, an object) and an array of {ItemGuid (an FGuid), Slot (int32), Durability (float)}.
+
+struct ItemDurability {
+    GuidValue item;            // the instance guid
+    int32_t   slot = 0;        // its slot in the container
+    float     durability = 0;
+    bool operator==(const ItemDurability& o) const { return item == o.item && slot == o.slot && same_bits(durability, o.durability); }
+};
+
+struct ItemDurabilityUpdate {
+    emit::FIntrepidNetworkGUID container;      // TargetContainer: the storage component
+    std::vector<ItemDurability> items;
+    bool operator==(const ItemDurabilityUpdate& o) const { return container == o.container && items == o.items; }
+};
+
+/// The parameters of a ClientUpdateItemDurability call on `rpc`; nullopt for another RPC or an update with no item.
+std::optional<RpcParams> item_durability_params(const schema::RpcSchema& rpc, const ItemDurabilityUpdate& update);
+/// The update of a decoded call; nullopt for another RPC, an undecoded call or parameters that are no update.
+std::optional<ItemDurabilityUpdate> parse_item_durability(const RpcCall& call);
+std::optional<ItemDurabilityUpdate> parse_item_durability(const schema::RpcSchema& rpc, const RpcParams& params);
+
 }}}  // namespace aoc::protocol::repl

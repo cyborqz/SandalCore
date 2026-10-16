@@ -34,6 +34,8 @@ const char* state_name(State s);
 
 struct Params {
     double aggro_radius_cm = 800.0;       // a Wolf's (the data's 800; 0 in the data means the Blueprint's, which is not in it)
+    /// false: it never starts a fight by noticing someone (an NPC friendly to players, or one whose data switches its aggro off: a Timid Grem); it still fights what hurts it.
+    bool   proximity_aggro = true;
     double leash_radius_cm = 3000.0;      // from home
     double sense_interval = 0.25;         // how often an idle NPC looks for a target
     double attack_hysteresis = 1.15;      // an attack goes on to this multiple of its range

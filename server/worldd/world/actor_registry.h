@@ -29,6 +29,7 @@
 
 #include "protocol/repl/replicator.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -46,6 +47,7 @@ enum class ActorKind : uint8_t {
     Pile,        // a dead player's loot pile (APlayerLootPile; plan E1, stage 3, part 2)
     Mount,       // a summoned mount (the mounts milestone, stage 2): an ANPCCharacter-layout actor with an owner, never dormant
     NodeLayout,  // a town's ANodeLayoutReplicator (Nodes 1, stage 3a): the scenery of a city node, awake within 1.45 km, never dormant
+    Foliage,     // a foliage cell's AIntrepidStateIFA (Gathering stage 3, "Foliage gathering"): which instances of the cell are cut or growing; opened as a snapshot, never awake
 };
 // [C | Y | B ~ C-O-A]
 
@@ -71,9 +73,16 @@ struct NpcInfo {
     double      respawn_seconds = 0;
     double      respawn_variance = 0;
     double      aggro_radius_cm = 0;     // the instance's override or the asset's AggroRadius (0: the Blueprint's, which is not in the data: the AI's default)
+    /// Retest 3 (Timid Grems): the instance overrides the aggro radius WITH 0 (bOverrideAggroRadius on, AggroRadius 0: all 31 instances of the Pop_TimidGrem set, and the Timid Raven, Spider
+    /// and Deer sets), which is the data saying "never notices a player on its own"; unlike an instance with no override, whose 0 means "the Blueprint's radius" (the AI's default).  It still
+    /// fights back what hurts it.
+    bool        aggro_off = false;
     double      leash_radius_cm = 0;     // the asset's LeashRadius (0 for every NPC type of the area)
     uint64_t    controller = 0;      // the AI controller object's ObjectId (the actor's Owner and Controller name it; it has no channel)
     uint64_t    interact_component = 0;   // the ObjectId of its InteractableComponent (0: none), what a client's interaction names
+    /// Gathering stage 3, "Hunting": the PlayerInteractionDef its InteractableComponent's first input names (the block's InteractionInputData[0].PlayerInteractDefinition; 0: none).  For a
+    /// huntable creature it is the Hunting_<kind> def, which names the gathering interaction its corpse is harvested with (gather/gathering.h hunt_kind); for a vendor it is the vendor's.
+    int64_t     interact_def = 0;
     /// E1 stage 3 fix 3: the ObjectId of its CollisionCylinder (0: none), minted INSIDE the actor's own block (the actor's + 4, retail's slot: the
     /// AlignmentComponent's - 2 in 211 of 211 captured exports). The hit confirmations and the ability items name it and export it as the actor's
     /// "CollisionCylinder". A GUID outside the block (the draft's + 24) was the next-minted object's (the next NPC's AlignmentComponent, a dance's
@@ -99,6 +108,15 @@ struct SceneryInfo {
     size_t      payload_bits = 0;    // the field payload as an open sends it
 };
 
+/// Gathering stage 2, "Harvesting": what the harvesting player's own connection sees of a resource node that the shared state cannot say (an object reference to a pawn that only that
+/// player's client has).  The node's InteractableComponent holds InteractingPlayer as none; the actor view of the player `player_id` shows `pawn` in it while `show` is set
+/// (gather/node_wire.h).  Every other connection sees none, as the retail captures' second observer does.
+struct GatherSeen {
+    uint64_t                         player_id = 0;   // the PlayerId of the player who harvests (or harvested) the node
+    protocol::emit::FIntrepidNetworkGUID pawn;        // ... and its pawn
+    bool                             show = false;
+};
+
 struct WorldActor {
     uint64_t   id = 0;                    // = actor.guid.ObjectId
     ActorKind  kind = ActorKind::Npc;
@@ -107,6 +125,15 @@ struct WorldActor {
     double     yaw_degrees = 0;
     double     awake_radius_cm = 0;       // 0: the relevancy config's (retail: some large creatures 119 m, the rest 150 m)
     bool       never_dormant = false;     // players, mounts and a player's effects are never dormancy-closed (evidence 4)
+    /// Gathering stage 3 (a foliage cell's state actor): retail opens it when something in the cell changes and closes it with Dormancy about 265 ms later [R: capture 1463's open
+    /// to its close], whatever the distance: it is never awake.  The view puts it in the snapshot ring wherever it is in range, closes its snapshots `dormancy_delay` after the open
+    /// (0: the relevancy config's 134 ms), keeps the shadows of its fast arrays between opens (`keep_fast_shadow`: UE keeps a dormant replicator's state, and the client's list of
+    /// cut instances has to be deleted from, not rebuilt) and shows a connection that never had it `first_open_form` of it instead.
+    bool       snapshot_only = false;
+    std::string label;                    // a short name for the log (a foliage cell's owner)
+    std::chrono::milliseconds dormancy_delay{0};
+    bool       keep_fast_shadow = false;
+    std::function<void(repl::Actor&)> first_open_form;
     uint64_t   owner = 0;                 // the PlayerId an effect belongs to (0: nobody's): only that player's connection is sent it
     /// Exports that go with the actor block of its open (an object its values name by path that the client has no other way to find: a lingering
     /// zone's AttachComponent, the pawn's CharacterMesh0).
@@ -115,6 +142,7 @@ struct WorldActor {
     uint32_t   reliable_version = 1;      // the changes that must not be lost
     NpcInfo    npc;
     SceneryInfo scenery;                  // ActorKind::NodeLayout only
+    GatherSeen gather;                    // ActorKind::Gatherable only (gather/node_wire.h)
 };
 
 struct RegistryConfig {

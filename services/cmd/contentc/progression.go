@@ -211,6 +211,33 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 		if err := firstErr(f, curve, ed); err != nil {
 			return err
 		}
+		// A LevelUpCurve that names a pak asset (ExternalCurve) is that asset's: Unreal's FRuntimeFloatCurve ignores its own keys when an external curve is set. The 22
+		// profession types name Gathering/Processing/CraftingLevelUpCurve and keep a placeholder (0 XP at level 0, 50,000 at level 50; Weaponsmith another) in their own
+		// keys; mapc artisan-curves reads the assets (Gathering stage 2).
+		var points [][2]float64 // level, XP total
+		external := ""
+		if v, ok := curve.get("ExternalCurve"); ok {
+			external, _ = v.(string)
+		}
+		if pak := src.artisan.keysFor(external); pak != nil {
+			for _, k := range pak {
+				points = append(points, [2]float64{k.Time, k.Value})
+			}
+			opt.logf("leveling type %s (%d): its own LevelUpCurve (%d keys) is a placeholder; the pak asset %s gives %d", r.Name, r.Guid, len(keys), packageOf(external), len(points))
+		} else {
+			for i, kv := range keys {
+				ks, ok := kv.(designdb.Struct)
+				if !ok {
+					return fmt.Errorf("%s: key %d is %T", f.where, i, kv)
+				}
+				kf := newFields(fmt.Sprintf("%s: key %d", f.where, i), ks)
+				level, xp := kf.float("Time"), kf.float("Value")
+				if kf.err != nil {
+					return kf.err
+				}
+				points = append(points, [2]float64{level, xp})
+			}
+		}
 		multStat, err := multiplierStat(mult)
 		if err != nil {
 			return fmt.Errorf("%s: XPMultiplier: %w", f.where, err)
@@ -224,16 +251,8 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 		// or repeats one, is left out and said so; a fraction of XP is rounded. Nothing of it reaches the Adventuring curve.
 		last := int64(0)
 		skipped := 0
-		for i, kv := range keys {
-			ks, ok := kv.(designdb.Struct)
-			if !ok {
-				return fmt.Errorf("%s: key %d is %T", f.where, i, kv)
-			}
-			kf := newFields(fmt.Sprintf("%s: key %d", f.where, i), ks)
-			level, xp := kf.float("Time"), kf.float("Value")
-			if kf.err != nil {
-				return kf.err
-			}
+		for i, pt := range points {
+			level, xp := pt[0], pt[1]
 			if !finite(level, xp) || xp < 0 || xp > 1<<53 {
 				return fmt.Errorf("%s: key %d is level %v at %v XP: not a finite XP total", f.where, i, level, xp)
 			}

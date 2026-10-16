@@ -61,6 +61,8 @@ type recStore struct {
 
 	ranks []character.TreeRanks     // what SkillRanks returns (plan D1, stage 2)
 	bar   []character.ActionbarSlot // what ActionBar returns
+
+	profs []character.Profession // what Professions returns (Gathering stage 2)
 }
 
 type ctxKey struct{}
@@ -147,6 +149,14 @@ func (r *recStore) SkillRanks(ctx context.Context, id string) ([]character.TreeR
 	r.gotCtx = ctx.Value(ctxKey{})
 	r.gotID = id
 	return r.ranks, r.err
+}
+
+func (r *recStore) Professions(ctx context.Context, id string) ([]character.Profession, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gotCtx = ctx.Value(ctxKey{})
+	r.gotID = id
+	return r.profs, r.err
 }
 
 func (r *recStore) ActionBar(ctx context.Context, id string) ([]character.ActionbarSlot, error) {

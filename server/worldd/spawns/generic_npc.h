@@ -38,6 +38,16 @@
 //  the captured template when a capture opened it, whose component is kept) and 13 quest NPCs (Quest_NPC_Master and one named NPC), which show the
 //  Blueprint's default.  Unproven until a run.
 //
+//  Huntable creatures (Gathering stage 3, "Hunting"): an asset whose PlayerInteractionDef is one of the Hunting_<kind> defs (GenericConfig::hunting_defs) gets an eighth block, a
+//  UInteractableComponent, as the living Hunting_Raven and Hunting_Spider of the captures have (capture 914 packet 1561, 758 packet 4538, and a Tidesnapper's in 1458): the Raven's own block
+//  with the asset's two ids put in (ComponentDefId = the asset's InteractComponent, InteractionInputData[0].PlayerInteractDefinition = its InteractionDef).  The three captured blocks differ
+//  in those two ids alone, which tools/capture/gen_hunting.py and test_worldd_hunting prove to the bit.  Every other creature keeps its seven blocks.
+//
+//  A huntable's other blocks are a living huntable's too, not a hostile creature's (the same Pop_Raven instance of capture 914 sends both): its CombatInfo writes bIsDead, bInvulnerable and
+//  bNotTargetable (all 0), its AbilityComponent is empty (it fights nothing), its UNPCInfo carries the CharacterName the nameplate shows (a hostile creature's open has none: the client reads
+//  the Blueprint's), and its one Blueprint alignment is the Friendly one (npc_motion.tsv: 6064632310208593979, Friendly to the Player alignment in alignment_relation), where the hostile
+//  Raven lists two hostile ones.  The first two are copied from the captured living Raven, the name is put in, and the alignment comes from the Blueprint as for every creature.
+//
 //  A Blueprint that is not a pawn (npc_motion.tsv has no line for it: a banner, a tent, a quest sparkle), an excluded one, and every Blueprint when
 //  the table is not loaded or the switch is off, get no template, and the loader counts them by name.
 // ============================================================================
@@ -65,6 +75,12 @@ struct GenericConfig {
     std::vector<std::string> exclude;
     /// The NetworkChecksum of the exports the client is sent.  0: not compared (see above).
     uint32_t                 export_checksum = 0;
+    /// Gathering stage 3, "Hunting": the PlayerInteractionDefs of the huntable creatures (gather/gathering.h hunting_defs).  Empty: every creature has its seven plain blocks.
+    std::set<int64_t>        hunting_defs;
+    /// ... and the name of each, which the creature's nameplate shows (UNPCInfo.CharacterName: gather/gathering.h hunting_names).  A def with no name here keeps the donor's UNPCInfo as it is.
+    std::map<int64_t, std::string> hunting_names;
+    /// false (worldd --no-gathering): the world does not look the defs up and no creature is huntable.
+    bool                     hunting = true;
 };
 
 enum class Verdict : uint8_t {
@@ -87,22 +103,32 @@ public:
     /// `blueprints` (may be null) must outlive this.
     GenericNpcs(const CapturedData& captured, const npc::MotionTable* blueprints, GenericConfig config);
 
-    /// The open of an NPC of `asset`'s Blueprint (a captured template is the caller's first choice); nullptr with `why` when there is none.  The
-    /// pointer is valid as long as this object.
+    /// The open of an NPC of `asset`'s Blueprint (a captured template is the caller's first choice); nullptr with `why` when there is none.  A huntable creature's has the eighth
+    /// block (above).  The pointer is valid as long as this object.
     const OpenTemplate* template_for(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
 
     /// What the donor is (its archetype path), "" when the captures have none.
     const std::string& donor() const { return donor_path_; }
     const GenericConfig& config() const { return config_; }
-    size_t made() const { return made_.size(); }
+    size_t made() const { return made_.size() - hunting_made_; }   // the Blueprints' plain templates
+    /// How many of the templates made are a huntable creature's (eight blocks).
+    size_t hunting_made() const { return hunting_made_; }
+    /// Whether the captures hold the living huntable the eighth block is made from (the Hunting_Raven's open).
+    bool has_hunting_block() const { return hunt_block_ != nullptr; }
 
 private:
+    /// The plain template of the asset's Blueprint (seven blocks), made and kept; nullptr with `why` when the Blueprint has none.
+    const OpenTemplate* make_plain(const content::NpcAssetRow& asset, Verdict* why) const;
+
     const CapturedData*      captured_;
     const npc::MotionTable*  blueprints_;
     GenericConfig            config_;
     std::set<std::string>    excluded_;      // lower case
     const OpenTemplate*      donor_ = nullptr;
     std::string              donor_path_;
+    const ParsedBlock*       hunt_block_ = nullptr;   // the living Hunting_Raven's UInteractableComponent
+    const OpenTemplate*      living_ = nullptr;       // ... and its whole open (its CombatInfo and AbilityComponent are every huntable's)
+    mutable size_t           hunting_made_ = 0;
     mutable std::map<std::string, OpenTemplate> made_;     // by archetype path (stable addresses)
     mutable std::set<uint64_t>                  minted_;   // the static NetGUIDs handed out
 };

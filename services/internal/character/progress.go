@@ -40,6 +40,8 @@ type Progress struct {
 	SkillRanks        []TreeRanks
 	ReplaceActionBar  bool
 	ActionBar         []ActionbarSlot
+	// Gathering stage 2: each profession replaces the character's row of that profession (professions.go); the others are left alone.
+	Professions []Profession
 }
 
 // C-Y-B x C O A
@@ -77,6 +79,9 @@ func (p Progress) Validate() error {
 			return fmt.Errorf("%w: leveling type %d is given twice", ErrInvalid, e.LevelingTypeGuid)
 		}
 		seen[e.LevelingTypeGuid] = true
+	}
+	if err := ValidateProfessions(p.Professions); err != nil {
+		return err
 	}
 	if p.ReplaceSkillRanks {
 		if err := ValidateSkillRanks(p.SkillRanks); err != nil {
@@ -174,6 +179,9 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 			return Character{}, itemsError(err)
 		}
 	}
+	if err := saveProfessions(ctx, tx, characterID, p.Professions); err != nil {
+		return Character{}, itemsError(err)
+	}
 	if p.ReplaceSkillRanks {
 		if err := replaceSkillRanks(ctx, tx, characterID, p.SkillRanks); err != nil {
 			return Character{}, itemsError(err)
@@ -237,6 +245,8 @@ type StarterSetResult struct {
 	Skipped []string // "name (id): why" for each left for the next start
 	NoRoom  int      // items that did not fit a full bag (the character is marked anyway: the set is given once)
 }
+
+// [CoA :: C.Y.B]
 
 // GrantMissingStarterSets gives the GM starter set to every character whose gm_starter_set_granted_at is NULL (plan D1,
 // AOC_GM_STARTER_SET=1): once per character. Each grant is its own transaction that locks the character, checks the column
@@ -336,7 +346,7 @@ func (s *Store) grantBag(ctx context.Context, characterID string, set []Item, gu
 			return -1, 0, nil
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT `+itemColumns+` FROM character_items WHERE character_id = $1`, characterID)
+	rows, err := tx.Query(ctx, allItemsSQL, characterID)
 	if err != nil {
 		return 0, 0, err
 	}

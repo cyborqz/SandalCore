@@ -7,6 +7,9 @@ package statprog
 import (
 	"database/sql"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 
 	"aocrop/services/internal/aocexpr"
 	"aocrop/services/internal/content"
@@ -89,6 +92,8 @@ type realFxCase struct {
 	host   TableHostSpec
 	retail []CorpusRetail // numbers of the retail captures the case reproduces
 }
+
+// -- CoA . C.Y.B --
 
 // realFxCases makes the corpus's fxcases of the real bundle b (compiled with the expressions of the file: results and exprIDs are what
 // CompileExprs and LoadExprs gave).
@@ -239,6 +244,45 @@ func realFxCases(path string, b *Bundle, results []ExprResult, exprIDs []int64) 
 		}
 		in.Effects = []ActiveEffect{e}
 		out = append(out, realFxCase{name: c.name, bundle: "main", in: in, state: st, host: TableHostSpec{Seed: c.seed, Progress: map[string]float64{"SongGroup": c.progress}}})
+	}
+
+	// Gathering stage 2: harvests. Every expression program of the bundle runs for each case, the Artisan equations (the speed, the rarity and quantity of a
+	// harvest, the experience, the ItemVariations' Quality, the Profession experience rewards) among them, against a host that answers the gathering reads
+	// (aocexpr.HostArtisanStat ...) with a rating for each artisanship rating stat, the quality the harvest rolled, the item's rarity, the interaction's tier and
+	// its base duration: the same SplitMix seed and answers on the C++ engine must give the same bits.
+	var ratingStats []int64
+	for _, s := range b.Stats {
+		if name := b.Strings[s.Name]; strings.HasPrefix(name, "Artisan") && strings.HasSuffix(name, "_Rating") {
+			ratingStats = append(ratingStats, s.Guid)
+		}
+	}
+	sort.Slice(ratingStats, func(i, j int) bool { return ratingStats[i] < ratingStats[j] })
+	if len(ratingStats) < 100 {
+		return nil, fmt.Errorf("the graph has %d artisanship rating stats, want over 100", len(ratingStats))
+	}
+	harvest := func(seed uint64, rating func(i int) float64, quality, rarity, tier, base float64) TableHostSpec {
+		fns := map[string]float64{"181|": quality, "182|": rarity, "183|": tier, "184|": base}
+		for i, g := range ratingStats {
+			fns["180|"+strconv.FormatInt(g, 10)] = rating(i)
+		}
+		return TableHostSpec{Seed: seed, Fns: fns}
+	}
+	for _, c := range []struct {
+		name         string
+		class, level int
+		spec         TableHostSpec
+	}{
+		// a Novice harvest at rating 0: the rarity roll's gaps and overlaps, the base experience, no bonus quantity
+		{"real_gather_novice_rating0", 1, 20, harvest(101, func(int) float64 { return 0 }, 1, 0, 0, 15)},
+		// an Apprentice harvest of an Uncommon item with a rating on every stat
+		{"real_gather_apprentice_uncommon", 8, 40, harvest(202, func(i int) float64 { return float64(100 + 7*(i%13)) }, 6, 1, 1, 11.25)},
+		// a Journeyman harvest at the top of the rating range, fractions included
+		{"real_gather_journeyman_top", 4, 50, harvest(303, func(i int) float64 { return 4204.5 + float64(i%3)*0.25 }, 31, 3, 2, 7.5)},
+		// a GrandMaster harvest of a Legendary item
+		{"real_gather_grandmaster_legendary", 3, 12, harvest(404, func(i int) float64 { return float64(8409 * (i % 2)) }, 71, 5, 4, 30)},
+	} {
+		in := Inputs{Class: c.class, Level: c.level, Ranks: RanksAt(auto, c.level)}
+		out = append(out, realFxCase{name: c.name, bundle: "main", in: in, host: c.spec})
 	}
 	return out, nil
 }

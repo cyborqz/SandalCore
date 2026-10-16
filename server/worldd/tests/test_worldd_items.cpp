@@ -28,9 +28,11 @@
 #include "capture_blocks.h"
 #include "capture_equip.h"
 #include "capture_items.h"
+#include "capture_resource.h"
 #include "content_db_fixture.h"
 #include "world_stats.h"
 #include "cyb_appearance.h"
+#include "items/acquired.h"
 #include "items/inventory.h"
 #include "protocol/repl/item_codec.h"
 #include "protocol/repl/rep_block.h"
@@ -721,6 +723,7 @@ static bool bits_equal(const BunchWriter& w, const cap::Rpc& c) {
     const auto want = capture_blocks::bytes_of(c.hex);
     return w.bit_pos() == c.bits && capture_blocks::same_bit_range(w.data(), want.data(), c.bits, nullptr);
 }
+// -- C | O | A . Cyb --
 
 /// A corpus's items, as the rebuilding of its payloads and events needs them.
 struct Corpus {
@@ -730,6 +733,11 @@ struct Corpus {
     std::vector<const cap::Rpc*> payloads;               // their payloads (pawn), by storage
     repl::GuidValue character;                           // the instigator of the events
     emit::FIntrepidNetworkGUID guids[3];                 // the storages' objects
+    // Gathering stage 3: the resource containers of the login (24, 40 and 30 slots: the Sanctus, Mining T2 and Lumberjacking T2 bags), by container index
+    std::map<int, repl::StoragePayload> resource_payload;
+    std::map<int, const cap::Rpc*> resource_rpc;
+    std::vector<const cap::Rpc*> resource_events[3];
+    std::vector<bs::StoredItem> resource_items;
 };
 
 template <size_t N>
@@ -749,7 +757,22 @@ static std::optional<Corpus> read_corpus(const cap::Rpc (&rpcs)[N]) {
         if (p->maximum_items == 70) storage = static_cast<int>(bs::ItemStorage::Backpack);
         else if (p->maximum_items == 83) storage = static_cast<int>(bs::ItemStorage::Equipment);
         else if (p->maximum_items == 100) storage = static_cast<int>(bs::ItemStorage::Quest);
-        if (storage < 0 || out.payload.count(storage)) continue;   // a resource bag, or the same payload sent again
+        if (storage < 0) {   // a resource container: 24 slots (the Sanctus bag), 40 (the Mining bag), 30 (the Lumberjacking bag)
+            const int index = p->maximum_items == 24 ? 0 : p->maximum_items == 40 ? 1 : p->maximum_items == 30 ? 2 : -1;
+            if (index < 0 || out.resource_payload.count(index)) continue;   // or the same payload sent again
+            out.resource_payload[index] = *p;
+            out.resource_rpc[index] = &c;
+            for (const repl::StorageSlot& s : p->storage) {
+                if (!s.item.has_item) continue;
+                bs::StoredItem si;
+                si.storage = static_cast<bs::ItemStorage>(static_cast<int>(bs::ItemStorage::Resource0) + index);
+                si.slot = s.slot;
+                si.item = s.item;
+                out.resource_items.push_back(std::move(si));
+            }
+            continue;
+        }
+        if (out.payload.count(storage)) continue;   // the same payload sent again
         out.payload[storage] = *p;
         out.payloads[static_cast<size_t>(storage)] = &c;
         out.guids[storage] = p->target;
@@ -772,7 +795,12 @@ static std::optional<Corpus> read_corpus(const cap::Rpc (&rpcs)[N]) {
         if (!e || e->targets.size() != 1) return std::nullopt;
         bool ours = false;
         for (int s = 0; s < 3; ++s) ours = ours || e->targets[0].object == out.guids[s];
-        if (!ours) continue;   // an event of a resource bag
+        if (!ours) {   // an event of a resource container
+            for (const auto& [index, payload] : out.resource_payload) {
+                if (e->targets[0].object == payload.target) out.resource_events[index].push_back(&c);
+            }
+            continue;
+        }
         out.events.push_back(&c);
         if (!have_character && e->type == 0) {
             out.character = e->instigator;
@@ -795,6 +823,17 @@ static bs::PlayerSetup setup_of(const Corpus& c) {
     s->guids.equipment = c.guids[1];
     s->guids.quest_storage = c.guids[2];
     s->items = c.items;
+    // Gathering stage 3: the containers of the corpus's bags, with their grids and what they hold
+    for (const auto& [index, payload] : c.resource_payload) {
+        s->guids.resource_storage[static_cast<size_t>(index)] = payload.target;
+        bs::ResourceBagSetup& bag = s->resource_bags[static_cast<size_t>(index)];
+        bag.present = true;
+        bag.columns = static_cast<int>(payload.dimension.x);
+        bag.rows = static_cast<int>(payload.dimension.y);
+        bag.override_matrix.clear();
+        for (const std::vector<int32_t>& column : payload.override_matrix) bag.override_matrix.emplace_back(column.begin(), column.end());
+    }
+    for (const bs::StoredItem& it : c.resource_items) s->items.push_back(it);
     return std::move(*s);
 }
 
@@ -840,6 +879,27 @@ static void test_corpus(const char* label, const cap::Rpc (&rpcs)[N], size_t exp
     }
     if (!order_ok) std::printf("    %zu events built, %zu captured; the first that differs is number %zu\n", mine.size(), c->events.size(), first_bad);
     CHECK(order_ok, "every ClientReceiveStorageEvent equals the capture's bit for bit, in the capture's order (the Backpack's, the Equipment's, the Quest storage's)");
+    // Gathering stage 3: the resource containers -- each worn bag's payload (the bag's columns x rows slots, its Dimension and, for the Mining and Lumberjacking bags, the OverrideMatrix)
+    // and its Adds equal the capture's bit for bit
+    size_t resource_items = 0;
+    for (const auto& [index, rpc] : c->resource_rpc) {
+        const auto send = pb.storage_payload(bs::resource_kind(index), bs::Role::Pawn);
+        const auto bits = send ? param_bits_of(*send, pawn_cls) : std::vector<BunchWriter>{};
+        const std::string name = "Resource" + std::to_string(index);
+        CHECK(bits.size() == 1 && bits_equal(bits[0], *rpc), (std::string("the ") + name + " payload equals the capture's, " + std::to_string(rpc->bits) + " bits").c_str());
+        const auto sends = pb.storage_adds(static_cast<bs::ItemStorage>(static_cast<int>(bs::ItemStorage::Resource0) + index));
+        std::vector<BunchWriter> mine_r;
+        if (sends) {
+            for (const bs::Send& send2 : *sends) {
+                for (BunchWriter& w : param_bits_of(send2, pc_cls)) mine_r.push_back(std::move(w));
+            }
+        }
+        bool same = sends.has_value() && mine_r.size() == c->resource_events[index].size();
+        for (size_t i = 0; same && i < mine_r.size(); ++i) same = bits_equal(mine_r[i], *c->resource_events[index][i]);
+        CHECK(same, (std::string("the ") + name + "'s " + std::to_string(c->resource_events[index].size()) + " Adds equal the capture's, bit for bit").c_str());
+        resource_items += pb.item_count(static_cast<bs::ItemStorage>(static_cast<int>(bs::ItemStorage::Resource0) + index));
+    }
+    CHECK(resource_items == c->resource_items.size(), "the bootstrap holds every item of the resource containers");
     // not more than the chain limit in one chain
     const auto adds = pb.storage_adds(bs::ItemStorage::Backpack);
     bool small = adds.has_value();
@@ -958,9 +1018,9 @@ static void test_join_with_items() {
     for (int n = 0; n < 4; ++n) ok = ok && is(i++, "pc ClientReceiveStorageEvent");
     ok = ok && is(i++, "pawn pawn open") && is(i++, "pawn ClientReceiveStoragePayload");
     for (int n = 0; n < 2; ++n) ok = ok && is(i++, "pc ClientReceiveStorageEvent");
-    ok = ok && is(i++, "pawn ClientReceiveStoragePayload") && is(i++, "pc ClientReceiveStorageEvent") && is(i++, "pawn ClientReceiveStoragePayload") &&
-         is(i++, "pawn ClientReceiveStoragePayload");
-    CHECK(ok, "the retail login's order: the Backpack's four chains of Adds, the pawn's open, the Backpack's payload; the Equipment's two and its payload; the Quest storage's one and its payload; the resource payload");
+    ok = ok && is(i++, "pawn ClientReceiveStoragePayload") && is(i++, "pc ClientReceiveStorageEvent") && is(i++, "pawn ClientReceiveStoragePayload");
+    for (int n = 0; n < 3; ++n) ok = ok && is(i++, "pc ClientReceiveStorageEvent") && is(i++, "pawn ClientReceiveStoragePayload");   // Gathering stage 3: each resource container's Adds, then its payload
+    CHECK(ok, "the retail login's order: the Backpack's four chains of Adds, the pawn's open, the Backpack's payload; the Equipment's two and its payload; the Quest storage's one and its payload; each of the three resource containers' Adds and payload");
     CHECK(is(i, "pc ClientRestart, camera mode, rotation") && seq->size() == i + 5 && names.back() == "pc XPTracker", "then restart, possession, the pawn's second state, the PlayerState and (plan D1) the XPTracker");
     // the chains the client is sent are within the connection's limits
     bool limits = true;
@@ -1712,6 +1772,67 @@ static void test_review_codec_noise() {
 
 // ---- main ----------------------------------------------------------------------------------------------------------------------
 
+// ---- the pick-up popup (Gathering stage 3) -----------------------------------------------------------------------------------
+
+/// items/acquired.h against the 24 retail harvest events (tests/capture_resource.h, `full_hex`: the events as captured): the popup's callout made from the item, its name and the
+/// time alone, put into the event, is the retail event bit for bit.  The name is what the retail text says between the brackets; the test_worldd_content_db and contentc's
+/// TestRealItemDisplayNames tests check that content.db's item.display_name reads the same names.
+static void test_acquired_popup() {
+    std::printf("the pick-up popup: items/acquired.h against the 24 retail harvest events\n");
+    const schema::RpcSchema* rpc = class_named("AoCPlayerControllerBP_C").rpc("ClientReceiveStorageEvent");
+    CHECK(rpc != nullptr, "the PlayerController has ClientReceiveStorageEvent");
+    if (!rpc) return;
+    size_t n = 0, same_text = 0, same_bits = 0, bands = 0;
+    for (const capture_resource::Harvest& h : capture_resource::kHarvests) {
+        ++n;
+        const auto bytes = capture_blocks::bytes_of(h.full_hex);
+        repl::CodecOptions opts;
+        opts.inline_objects = true;
+        size_t pos = 0;
+        auto params = repl::read_rpc_params(*rpc, bytes.data(), h.full_bits, pos, opts);
+        if (!params || pos != h.full_bits) continue;
+        repl::RpcCall call;
+        call.rpc = rpc;
+        call.params = std::move(*params);
+        call.decoded = true;
+        const auto retail = repl::parse_storage_event(call);
+        if (!retail || !retail->callout) continue;
+        const std::string& said = retail->callout->message;
+        const size_t open = said.find("> [");
+        const size_t close = said.find(']', open == std::string::npos ? 0 : open);
+        if (open == std::string::npos || close == std::string::npos) continue;
+        const std::string name = said.substr(open + 3, close - open - 3);
+        // our event: the retail one with its callout taken out and made again
+        repl::ItemStorageEvent mine = *retail;
+        mine.callout = items::acquired_callout(mine.item, name, retail->callout->creation_time.ticks);
+        same_text += mine.callout->message == said ? 1 : 0;
+        bands += items::rarity_band_name(h.quality) == std::string_view(said).substr(said.find("Item_") + 5, said.find('"', said.find("Item_")) - said.find("Item_") - 5) ? 1 : 0;
+        const auto mine_params = repl::storage_event_params(*rpc, mine);
+        BunchWriter w;
+        bool failed = false;
+        if (mine_params) repl::write_rpc_params(*rpc, *mine_params, w, opts, &failed);
+        if (mine_params && !failed && w.bit_pos() == h.full_bits && capture_blocks::same_bit_range(w.data(), bytes.data(), h.full_bits, nullptr)) ++same_bits;
+    }
+    CHECK(n == 24 && same_text == n, "the text acquired_text makes from the record, quality, quantity and name is the retail text, 24 of 24");
+    CHECK(bands == n, "the style is the band of the quality (Common 1, Uncommon 6, Rare 16, Heroic 31) in all 24");
+    CHECK(same_bits == n, "the event with acquired_callout's callout is the retail event to the last bit, 24 of 24 (the creation time is the capture's)");
+    // the bands of the qualities no capture shows, and a quantity of 1 or 2
+    CHECK(items::rarity_band_name(5) == "Common" && items::rarity_band_name(6) == "Uncommon" && items::rarity_band_name(15) == "Uncommon" && items::rarity_band_name(16) == "Rare" &&
+              items::rarity_band_name(30) == "Rare" && items::rarity_band_name(31) == "Heroic" && items::rarity_band_name(50) == "Heroic" && items::rarity_band_name(51) == "Epic" &&
+              items::rarity_band_name(71) == "Legendary" && items::rarity_band_name(101) == "Artifact" && items::rarity_band_name(200) == "Artifact" && items::rarity_band_name(0) == "Common",
+          "the rarity bands: Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50, Epic 51-70, Legendary 71-100, Artifact 101-200");
+    repl::ItemInstance one;
+    one.has_item = true;
+    one.record_id = 42;
+    one.quality = 1;
+    one.quantity = 1;
+    repl::ItemInstance two = one;
+    two.quantity = 2;
+    CHECK(items::acquired_text(one, "A").find("[A]</>") != std::string::npos && items::acquired_text(one, "A").find("</>x") == std::string::npos &&
+              items::acquired_text(two, "A").find("[A] </>x2") != std::string::npos,
+          "a quantity of 1 ends [Name]</> and of 2 ends [Name] </>x2");
+}
+
 int main() {
     test_guids_and_ticks();
     test_from_items();
@@ -1729,6 +1850,7 @@ int main() {
     test_restore_undoes_the_held_items();
     test_setup_with_items();
     test_content_items();
+    test_acquired_popup();
     test_fuzz();
     test_review_fuzz();
     test_review_codec_noise();

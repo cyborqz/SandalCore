@@ -41,6 +41,8 @@
 #include "combat/combat_world.h"
 #include "combat/rewards.h"
 #include "content/content_db.h"
+#include "foliage/foliage.h"
+#include "gather/gathering.h"
 #include "items/inventory.h"
 #include "nav/area_nav.h"
 #include "npc/area_npcs.h"
@@ -49,6 +51,7 @@
 #include "session/leveling.h"
 #include "session/move_checker.h"
 #include "session/position_saver.h"
+#include "session/professions.h"
 #include "session/actor_view.h"
 #include "session/talents.h"
 #include "spawns/area.h"
@@ -74,6 +77,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -110,7 +114,7 @@ public:
     /// `stat_rounding` is how an item's interpolated value is made whole (the research's best fit, half up).
     bootstrap::StatContext stat_context() const {
         return {bundle_ ? &*bundle_ : nullptr, gear_ ? &*gear_ : nullptr, stats::Rounding::HalfUp, curve_ ? &*curve_ : nullptr, curve_ ? &grants_ : nullptr,
-                talents_ ? &*talents_ : nullptr, mounts_ ? &mounts_->data() : nullptr};
+                talents_ ? &*talents_ : nullptr, mounts_ ? &mounts_->data() : nullptr, professions_ ? &*professions_ : nullptr};
     }
     /// Plan D1: the Adventuring level curve (content.db's leveling_type and leveling_curve) and the Universal tree's auto-granted nodes, read once
     /// at startup; a content.db without them is not ready. Null when the world is not ready.
@@ -121,6 +125,9 @@ public:
     /// ready. Null when the world is not ready.
     const talents::Catalog*                talents() const { return talents_ ? &*talents_ : nullptr; }
     const stats::StatBundle* stat_bundle() const { return bundle_ ? &*bundle_ : nullptr; }
+    /// Gathering stage 2: the 22 professions with their level-up curves and the five certification levels (content.db's profession, certification_level and
+    /// action_certification, read once at startup). Null when the file has none of those tables (an older fixture): characters then have no professions.
+    const professions::Book* professions() const { return professions_ ? &*professions_ : nullptr; }
     /// Plan D2: every ability, hit, effect and expression of content.db's ab_* tables, read once at startup: what the generic ability runtime
     /// runs. Null when the file has none (an older fixture) or they did not read: then only Sprint, Dodge and Rest run, and the log says why.
     const abilities::Catalog* ability_catalog() const { return catalog_override_set_ ? ability_catalog_override_ : ability_catalog_ ? &*ability_catalog_ : nullptr; }
@@ -249,6 +256,23 @@ public:
     /// node wire and the node population data (call it after load_area and load_ground); the NPCs made (0 with `config.enabled` false or without those).  Once.
     size_t start_node_people(const spawns::NodePopulations::Config& config);
     const spawns::NodePopulations* node_people() const { return node_pops_.get(); }
+
+    /// Gathering stage 2, "Harvesting": the resource nodes' harvest (gather/gathering.h): the gather tables, the nodes' reward tables and the shared node state.  False, with `error`,
+    /// when content.db has no gather tables or the ability catalog is not there; the world then has nodes that can be seen and not harvested (their interaction is ignored, and logged).
+    bool start_gathering(const gather::Config& config, std::string& error);
+    gather::Gathering*       gathering() { return gathering_.get(); }
+    const gather::Gathering* gathering() const { return gathering_.get(); }
+    /// Gathering stage 3, "Foliage gathering": the painted trees, plants and stones (foliage/foliage.h): the map, the state of every instance and the cell actors that show it.  After
+    /// start_gathering (its interactions and reward tables).  False, with `error`, when gathering is off, content.db has no foliage tables or the map does not load; the world then has
+    /// foliage that is seen and not harvested (the interaction is logged once).
+    bool start_foliage(const foliage::Config& config, std::string& error);
+    foliage::Foliage*        foliage() { return foliage_.get(); }
+    const foliage::Foliage*  foliage() const { return foliage_.get(); }
+    /// Gathering stage 2: the stacks of a harvest that a full bag could not take, as a pile where the player stands (the aftermath's public loot pile, the one a death makes).
+    /// The pile's actor id; 0, with `error`, when the world has no loot piles (--no-loot, or no area).  `pile_hook` replaces the aftermath in a test that has none.
+    uint64_t drop_harvest_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<combat::LootStack> stacks, std::string& error);
+    using PileHook = std::function<uint64_t(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, const std::vector<combat::LootStack>& stacks)>;
+    void set_pile_hook(PileHook hook) { pile_hook_ = std::move(hook); }
     /// The node level a road of a zone that has no node of its own (a starting area) is worth what it is at (worldd's --spawn-node-level).
     void set_road_default_level(int level) { road_default_level_ = level; }
     /// Sets every by-level road (the roads_levels.tsv file) to the level its zone's node has now.  load_roads and tick_world call it; the number of roads that changed.
@@ -324,6 +348,8 @@ public:
 
 private:
     void log_npc_types() const;
+    void log_huntables() const;
+    void log_hunting_kinds();
     /// Rebuilds the town floors from the node people when those changed since the last build (town_floor()).
     void refresh_town_floor() const;
     /// G1 stage 1: a chunked ground's window (nav/area_nav.h): the blocking read of the login spot's chunks at start, and the per-tick drive (interest, pump, the NPCs of new chunks).
@@ -364,6 +390,7 @@ private:
     std::optional<leveling::LevelCurve>      curve_;
     std::vector<content::AutoGrant>          grants_;          // the Universal tree's, by level
     std::optional<talents::Catalog>          talents_;         // plan D1, stage 2
+    std::optional<professions::Book>         professions_;     // Gathering stage 2
     std::optional<abilities::Catalog>        ability_catalog_;  // plan D2
     std::optional<spawns::MountBook>         mounts_;           // the mounts milestone
     world::RoadMap                           roads_;            // the mounts milestone, stage 3
@@ -389,6 +416,8 @@ private:
     npc::MotionTable                     motion_;
     bool                                 motion_loaded_ = false;
     spawns::GenericConfig                generic_config_;
+    /// How the area's NPCs walk, with the huntable creatures standing (Gathering stage 3: npc/area_npcs.h SpeedModel).
+    npc::SpeedModel speeds() const;
     spawns::SpawnContext                 spawn_context_;
     std::optional<spawns::SpawnFilter>   spawn_filter_;
     std::optional<spawns::GenericNpcs>   generic_;
@@ -408,6 +437,9 @@ private:
     std::unique_ptr<world::NodeScenery>  scenery_;
     const spawns::NodePopulationData*    node_pop_data_ = nullptr;
     std::unique_ptr<spawns::NodePopulations> node_pops_;   // after the NPC world, the fights and the aftermath: their hooks point at them
+    std::unique_ptr<gather::Gathering>   gathering_;       // Gathering stage 2: the registry's nodes' harvest
+    std::unique_ptr<foliage::Foliage>    foliage_;         // Gathering stage 3: the painted foliage (after gathering_: it points into it)
+    PileHook                             pile_hook_;
     int                                  road_default_level_ = 0;
     uint64_t                             roads_seen_version_ = ~0ull;
     mutable world::TownFloor             town_floor_;           // the towns in a bowl (town_floor())

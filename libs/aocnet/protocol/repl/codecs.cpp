@@ -14,6 +14,7 @@
 #include "protocol/repl/hit_codec.h"
 #include "protocol/repl/vendor_codec.h"
 #include "protocol/repl/callout_codec.h"
+#include "protocol/repl/channeling_codec.h"
 #include "protocol/repl/item_codec.h"
 
 #include <algorithm>
@@ -110,7 +111,7 @@ void   write_double(BunchWriter& out, double d) { out.write_uint64(std::bit_cast
 enum class S {
     Unknown, Vec3, Vec2, Ticks, Rotator, Quantized, Normal, RepMovement, LoadTracker, UniqueId, Tag, TagContainer,
     StatInt32, Quat, GuidToBool, Alignment, AppearanceId, Customization, ItemInstance, ItemStorageEvent, HitConfirmations,
-    MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage,
+    MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData,
 };
 
 S find_struct(std::string_view n) {
@@ -139,6 +140,7 @@ S find_struct(std::string_view n) {
     if (n == "FVendorTransactionCart") return S::VendorTransaction;
     if (n == "FNodeTaxDetails") return S::NodeTax;
     if (n == "FLocalizedMessage") return S::LocalizedMessage;
+    if (n == "FChannelingData") return S::ChannelingData;
     return S::Unknown;
 }
 
@@ -1128,6 +1130,10 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
             const auto* m = v.get_if<LocalizedMessage>();
             return m && localized_message_fits(*m);
         }
+        case S::ChannelingData: {
+            const auto* d = v.get_if<ChannelingData>();
+            return d && channeling_data_fits(*d);
+        }
         case S::Unknown:     break;
     }
     return false;
@@ -1298,6 +1304,11 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
             if (!m) return std::nullopt;
             return Value(std::move(*m));
         }
+        case S::ChannelingData: {
+            auto d = read_channeling_data(r);
+            if (!d) return std::nullopt;
+            return Value(std::move(*d));
+        }
         case S::Unknown:
             break;
     }
@@ -1397,6 +1408,8 @@ bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out
             return write_node_tax_details(out, *v.get_if<NodeTaxDetails>());
         case S::LocalizedMessage:
             return write_localized_message(out, *v.get_if<LocalizedMessage>());
+        case S::ChannelingData:
+            return write_channeling_data(out, *v.get_if<ChannelingData>());
         case S::Unknown:
             break;
     }

@@ -1105,6 +1105,8 @@ func argc(e aocexpr.Call, n int) error {
 	return nil
 }
 
+// C O A and C-Y-B
+
 func (f *fnc) call(e aocexpr.Call) (val, error) {
 	args := make([]val, len(e.Args))
 	for i, a := range e.Args {
@@ -1140,6 +1142,9 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 		return val{t: t, n: n}, nil
 	}
 	if v, ok, err := f.nodeCall(e, args); ok {
+		return v, err
+	}
+	if v, ok, err := f.gatherCall(e, args); ok {
 		return v, err
 	}
 	switch e.Name {
@@ -1769,6 +1774,11 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 		}
 		return val{t: tActor}, nil
 	case "GetPlayerProfessionLevel":
+		// the stat formulas pass GetActorGuid(GetInstigator()); the GM artisan scrolls' experience expressions pass GetPlayer() (Gathering stage 2): the character the
+		// expression is evaluated for, which is the actor of the state either way
+		if len(args) == 2 && args[0].t == tPlayer {
+			args[0] = val{t: tActor}
+		}
 		if err := check(tActor, tStr); err != nil {
 			return val{}, err
 		}
@@ -1797,6 +1807,8 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 	}
 	return val{}, unsupportedAt(e.At, "function %q", e.Name)
 }
+
+// ~ CoA & C | Y | B ~
 
 // actor runs a read of an actor's own state in that actor's context (the caster's needs none).
 func (f *fnc) actor(role int, v val) val {
@@ -1948,6 +1960,14 @@ func (f *fnc) term(e aocexpr.Call, r aocexpr.Ref) (val, error) {
 	switch {
 	case idx >= 0:
 		text = f.terms[idx][r.Guid]
+		if strings.TrimSpace(text) == "" {
+			// a formula's input term with no value (the data's `"Value": ""`: the Artisan XP equations' tool term) supplies nothing: the term's own default
+			// ("" is 0), where it would have been looked up had the formula not named it
+			idx = -1
+			if known {
+				text = td.Default
+			}
+		}
 	case known:
 		text = td.Default // nothing supplies the term: its own default ("" is 0)
 	default:

@@ -36,6 +36,15 @@ const (
 	tBlockNoD = 7000000000000000003
 	tBlockHlf = 7000000000000000004
 	tCurve    = 8000000000000000001
+
+	// Gathering stage 3, "Resource storage": the items with a dimension, the resource tag and a bag def
+	tOak      = 6000000000000000010 // Item.Resource.Raw.Wood, 1 x 3, stack 20
+	tCert     = 6000000000000000011 // item.resource.cert.nodecert (lower case), 1 x 1, stack 10
+	tCarcass  = 6000000000000000012 // Item.Resource.Raw.Carcass, 2 x 2, stack 1
+	tBagSmall = 6000000000000000013 // a custom 3 x 2 bag with a blocked cell
+	tBagPlain = 6000000000000000014 // a plain 4 x 3 bag whose def also carries a matrix the grid ignores
+	tDefSmall = 6600000000000000001
+	tDefPlain = 6600000000000000002
 )
 
 func itemEnums() *usmap.Map {
@@ -104,6 +113,50 @@ func kitRow(guid int64, class string, equipped designdb.Pairs, stored ...designd
 		"Class": "ECharacterClass::" + class, "EquippedItems": equipped, "StoredItems": stored}}
 }
 
+// withStorage sets what the resource storage reads of an item row: its InventoryDimension, its GameplayTags and the stack size.
+// withName gives the record an ItemName (an FText whose source text is the name the player reads; Gathering stage 3, version 16: item.display_name).
+func withName(r designdb.Row, source string) designdb.Row {
+	r.Fields["ItemName"] = designdb.Text{History: 0, Key: "0E76EC574247138A76DB4684C25E3DBA", Source: source}
+	return r
+}
+
+func withStorage(r designdb.Row, w, h, stack int64, tags ...string) designdb.Row {
+	var list []designdb.Value
+	for _, t := range tags {
+		list = append(list, t)
+	}
+	if list == nil {
+		list = []designdb.Value{}
+	}
+	r.Fields["InventoryDimension"] = designdb.Struct{"X": w, "Y": h}
+	r.Fields["GameplayTags"] = list
+	r.Fields["MaxStackSize"] = stack
+	return r
+}
+
+// withBag names the ResourceBagDef of an item row.
+func withBag(r designdb.Row, def int64) designdb.Row {
+	r.Fields["ResourceBagDefId"] = idStruct(def)
+	return r
+}
+
+// bagDef is a ResourceBagDef whose matrix is given by column (-1 usable, -2 blocked).
+func bagDef(guid int64, name string, x, y int64, custom bool, columns ...[]int64) designdb.Row {
+	var matrix []designdb.Value
+	for _, c := range columns {
+		var col []designdb.Value
+		for _, v := range c {
+			col = append(col, v)
+		}
+		matrix = append(matrix, designdb.Struct{"Column": col})
+	}
+	if matrix == nil {
+		matrix = []designdb.Value{}
+	}
+	return designdb.Row{Guid: guid, Name: name, Fields: designdb.Struct{
+		"BagDimension": designdb.Struct{"X": x, "Y": y}, "BagMatrixOverride": matrix, "bCustomDimension": custom}}
+}
+
 func variant(item int64) designdb.Struct {
 	return designdb.Struct{"ItemId": idStruct(item), "VariationId": idStruct(0)}
 }
@@ -111,6 +164,8 @@ func variant(item int64) designdb.Struct {
 func equippedItem(slot string, item int64) designdb.Pair {
 	return designdb.Pair{Key: "EEquipSlot::" + slot, Value: variant(item)}
 }
+
+// (C.O.A ~ Cyb)
 
 // itemSource is the rows buildItems reads: six worn or carried items with the durabilities the tests check, and a kit for each class.
 func itemSource() *source {
@@ -143,6 +198,17 @@ func itemSource() *source {
 		itemRow(tNoStat, "NoStat", true, false, 1, tBlockNoD, tCurve, "Shirt"),
 		itemRow(tHalf, "Half", true, false, 1, tBlockHlf, tCurve, "Head"),
 		itemRow(tNoCurve, "NoCurve", true, false, 4, tBlockMix, 0, "Belt"),
+		withName(withStorage(itemRow(tOak, "Resource_Raw_Wood_Oak", false, false, 1, 0, 0), 1, 3, 20, "Item.Fuel", "Item.Resource.Raw.Wood", "artisanship.gathering.lumberjacking"), "Oak Wood"),
+		withStorage(itemRow(tCert, "Certificate_T1_Test", false, false, 1, 0, 0), 1, 1, 10, "item.resource.cert.nodecert"),
+		withStorage(itemRow(tCarcass, "Resource_Raw_Carcass_Test", false, false, 1, 0, 0), 2, 2, 1, "Item.Resource.Raw.Carcass"),
+		withBag(withStorage(itemRow(tBagSmall, "Bag_Resource_Small", true, false, 1, 0, 0, "ResourceBag_0"), 1, 1, 1, "Item.Bag"), tDefSmall),
+		withBag(withStorage(itemRow(tBagPlain, "Bag_Resource_Plain", true, false, 1, 0, 0, "ResourceBag_0"), 1, 1, 1, "Item.Bag"), tDefPlain),
+	}
+	src.rows["ResourceBagDefRecordBase"] = []designdb.Row{
+		// 3 x 2: the middle cell of the first row is blocked (the matrix is a list of columns)
+		bagDef(tDefSmall, "Small_def", 3, 2, true, []int64{-1, -1}, []int64{-2, -1}, []int64{-1, -1}),
+		// 4 x 3 and not custom: its two-column matrix is ignored
+		bagDef(tDefPlain, "Plain_def", 4, 3, false, []int64{-1, -2}, []int64{-2, -1}),
 	}
 	classRows := []designdb.Row{}
 	kits := []designdb.Row{}
@@ -209,7 +275,7 @@ func TestSyntheticItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta["typed.item"] != "9" || meta["typed.starting_equipment"] != "19" { // the Bard's 4 worn and 1 carried, two worn for each of the other seven
+	if meta["typed.item"] != "14" || meta["typed.starting_equipment"] != "19" { // the Bard's 4 worn and 1 carried, two worn for each of the other seven
 		t.Errorf("meta = %v", meta)
 	}
 
@@ -281,6 +347,117 @@ func TestSyntheticItems(t *testing.T) {
 	}
 	if n := scalarInt(t, db, `SELECT count(DISTINCT class_guid) FROM starting_equipment`); n != 8 {
 		t.Errorf("%d classes have a kit", n)
+	}
+}
+
+// == CoA | C_Y_B ==
+
+// Gathering stage 3, "Resource storage" (contentc version 14): inv_w, inv_h and resource on the item table, and the resource bags' grids.
+func TestSyntheticResourceStorage(t *testing.T) {
+	db, meta, err := buildItemsSynthetic(t, itemSource(), itemEnums())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta["typed.resource_bag"] != "2" || meta["typed.item_resource"] != "3" {
+		t.Errorf("meta typed.resource_bag = %q, typed.item_resource = %q, want 2 and 3", meta["typed.resource_bag"], meta["typed.item_resource"])
+	}
+	type want struct {
+		w, h, stack int
+		resource    bool
+	}
+	for guid, w := range map[int64]want{
+		tOak:      {1, 3, 20, true}, // Item.Resource.Raw.Wood among other tags
+		tCert:     {1, 1, 10, true}, // item.resource.cert.nodecert: the data mixes the capitals
+		tCarcass:  {2, 2, 1, true},  //
+		tBagSmall: {1, 1, 1, false}, // Item.Bag is not a resource
+		tPotion:   {1, 1, 1, false}, // a record with no InventoryDimension reads as one cell
+		tChest:    {1, 1, 1, false}, //
+		tBagPlain: {1, 1, 1, false}, //
+	} {
+		it, err := db.Item(guid)
+		if err != nil {
+			t.Errorf("item %d: %v", guid, err)
+			continue
+		}
+		if it.InvW != w.w || it.InvH != w.h || it.MaxStackSize != w.stack || it.Resource != w.resource {
+			t.Errorf("%s = %dx%d stack %d resource %v, want %dx%d stack %d resource %v", it.Name, it.InvW, it.InvH, it.MaxStackSize, it.Resource, w.w, w.h, w.stack, w.resource)
+		}
+	}
+	// the display name: the ItemName's source text, '' for a record that has none
+	for guid, want := range map[int64]string{tOak: "Oak Wood", tChest: "", tCert: ""} {
+		if it, err := db.Item(guid); err != nil || it.DisplayName != want {
+			t.Errorf("item %d reads the display name %q (%v), want %q", guid, it.DisplayName, err, want)
+		}
+	}
+	bags, err := db.ResourceBags()
+	if err != nil || len(bags) != 2 {
+		t.Fatalf("ResourceBags = %d, %v; want 2", len(bags), err)
+	}
+	small, err := db.ResourceBag(tBagSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if small.DefGuid != tDefSmall || small.Columns != 3 || small.Rows != 2 || !small.Custom || small.DefName != "Small_def" || small.Blocked() != 1 ||
+		len(small.Matrix) != 3 || small.Matrix[1][0] != content.CellBlocked || small.Matrix[0][0] != content.CellUsable || small.Matrix[2][1] != content.CellUsable {
+		t.Errorf("the small bag = %+v", small)
+	}
+	plain, err := db.ResourceBag(tBagPlain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Columns != 4 || plain.Rows != 3 || plain.Custom || plain.Blocked() != 0 || len(plain.Matrix) != 2 {
+		t.Errorf("the plain bag = %+v: its matrix is stored but does not apply", plain)
+	}
+	if _, err := db.ResourceBag(tPotion); err == nil {
+		t.Error("an item that is no bag has a grid")
+	}
+}
+
+func TestSyntheticResourceStorageRefusals(t *testing.T) {
+	rowOf := func(src *source, schema string, guid int64) *designdb.Row {
+		for i := range src.rows[schema] {
+			if src.rows[schema][i].Guid == guid {
+				return &src.rows[schema][i]
+			}
+		}
+		t.Fatalf("no %s row %d", schema, guid)
+		return nil
+	}
+	for name, tc := range map[string]struct {
+		change func(*source)
+		want   string
+	}{
+		"a bag def that is none": {func(s *source) { rowOf(s, "ItemRecordBase", tBagSmall).Fields["ResourceBagDefId"] = idStruct(424242) }, "its ResourceBagDef 424242 is none"},
+		"no bag def table":       {func(s *source) { delete(s.rows, "ResourceBagDefRecordBase") }, "no decoded ResourceBagDefRecordBase"},
+		"a custom matrix with too few columns": {func(s *source) {
+			rowOf(s, "ResourceBagDefRecordBase", tDefSmall).Fields["BagMatrixOverride"] = []designdb.Value{designdb.Struct{"Column": []designdb.Value{int64(-1), int64(-1)}}}
+		}, "custom matrix has 1 column(s)"},
+		"a custom matrix with a short column": {func(s *source) {
+			rowOf(s, "ResourceBagDefRecordBase", tDefSmall).Fields["BagMatrixOverride"] = []designdb.Value{
+				designdb.Struct{"Column": []designdb.Value{int64(-1), int64(-1)}}, designdb.Struct{"Column": []designdb.Value{int64(-1)}},
+				designdb.Struct{"Column": []designdb.Value{int64(-1), int64(-1)}}}
+		}, "column 1 has 1 cell(s)"},
+		"a cell that is neither -1 nor -2": {func(s *source) {
+			rowOf(s, "ResourceBagDefRecordBase", tDefSmall).Fields["BagMatrixOverride"] = []designdb.Value{
+				designdb.Struct{"Column": []designdb.Value{int64(-1), int64(0)}}, designdb.Struct{"Column": []designdb.Value{int64(-1), int64(-1)}},
+				designdb.Struct{"Column": []designdb.Value{int64(-1), int64(-1)}}}
+		}, "cell (0, 1) is 0"},
+		"a bag with no cells": {func(s *source) {
+			rowOf(s, "ResourceBagDefRecordBase", tDefPlain).Fields["BagDimension"] = designdb.Struct{"X": int64(0), "Y": int64(3)}
+		}, "dimension 0 x 3"},
+		"a dimension of 0": {func(s *source) {
+			rowOf(s, "ItemRecordBase", tOak).Fields["InventoryDimension"] = designdb.Struct{"X": int64(1), "Y": int64(0)}
+		}, "InventoryDimension 1 x 0"},
+		"a dimension without Y": {func(s *source) {
+			rowOf(s, "ItemRecordBase", tOak).Fields["InventoryDimension"] = designdb.Struct{"X": int64(1)}
+		}, "no field Y"},
+		"a tag that is not text": {func(s *source) { rowOf(s, "ItemRecordBase", tOak).Fields["GameplayTags"] = []designdb.Value{int64(1)} }, "array of tags"},
+	} {
+		src := itemSource()
+		tc.change(src)
+		if _, _, err := buildItemsSynthetic(t, src, itemEnums()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: buildItems = %v, want an error containing %q", name, err, tc.want)
+		}
 	}
 }
 

@@ -19,19 +19,32 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// The three storages a character's items are in (plan B2). They are the values of character_items.container.
+// The storages a character's items are in. Backpack, Equipment and Quest are the values of character_items.container (plan B2); Resource0 to Resource2 (Gathering stage 3,
+// "Resource storage") are the values of character_resource_items.container: the containers of the resource bags worn in Equipment slots 23, 24 and 25.
 const (
 	Backpack  = "Backpack"
 	Equipment = "Equipment"
 	Quest     = "Quest"
+	Resource0 = "Resource0"
+	Resource1 = "Resource1"
+	Resource2 = "Resource2"
 )
 
+// MaxResourceSlots is the most cells a resource bag has (a slot of a resource container is the index of the top-left cell of its item, row by row): the largest bag
+// in the data is the Livestream promotion bag, 8 x 30 = 240. Whether an item fits its bag's real grid is worldd's check (this service has no item data).
+const MaxResourceSlots = 256
+
 // SlotCount is the number of slots of each storage, as the client's own storage payloads have it (MaximumItems): the
-// Backpack's 70, the Equipment's 83 (one for every EEquipSlot value below cCount) and the Quest storage's 100.
-var SlotCount = map[string]int32{Backpack: 70, Equipment: 83, Quest: 100}
+// Backpack's 70, the Equipment's 83 (one for every EEquipSlot value below cCount) and the Quest storage's 100; a resource container's is the most any bag has.
+var SlotCount = map[string]int32{Backpack: 70, Equipment: 83, Quest: 100, Resource0: MaxResourceSlots, Resource1: MaxResourceSlots, Resource2: MaxResourceSlots}
 
 // MaxItems is the most items a character can have: every slot of every storage.
-const MaxItems = 70 + 83 + 100
+const MaxItems = 70 + 83 + 100 + 3*MaxResourceSlots
+
+// IsResource says whether a container is one of the three resource containers (kept in character_resource_items).
+func IsResource(container string) bool {
+	return container == Resource0 || container == Resource1 || container == Resource2
+}
 
 // Limits of one item's numbers, the constraints of migration 0004.
 const (
@@ -47,8 +60,8 @@ var guidPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // Item is one item instance a character owns (a row of character_items).
 type Item struct {
-	Container    string // Backpack, Equipment or Quest
-	Slot         int32  // where in the storage: 0 to SlotCount-1 (an Equipment slot is the client's EEquipSlot)
+	Container    string // Backpack, Equipment, Quest, Resource0, Resource1 or Resource2
+	Slot         int32  // where in the storage: 0 to SlotCount-1 (an Equipment slot is the client's EEquipSlot; a resource slot the index of the item's top-left cell)
 	ItemRecordID int64  // the design database's ItemRecord Guid
 	InstanceGUID string // the instance's own id: 32 lowercase hex digits, not all zero
 	Quantity     int32
@@ -70,7 +83,7 @@ func (it Item) Validate() error {
 	n, known := SlotCount[it.Container]
 	switch {
 	case !known:
-		return fmt.Errorf("%w: item container %q is not Backpack, Equipment or Quest", ErrInvalid, it.Container)
+		return fmt.Errorf("%w: item container %q is not Backpack, Equipment, Quest, Resource0, Resource1 or Resource2", ErrInvalid, it.Container)
 	case it.Slot < 0 || it.Slot >= n:
 		return fmt.Errorf("%w: slot %d is not a slot of the %s (0 to %d)", ErrInvalid, it.Slot, it.Container, n-1)
 	case it.ItemRecordID <= 0:
@@ -125,9 +138,9 @@ func ValidateItems(items []Item) error {
 	return nil
 }
 
-// SortItems puts items in the order Inventory returns them: by storage (Backpack, Equipment, Quest) and slot.
+// SortItems puts items in the order Inventory returns them: by storage (Backpack, Equipment, Quest, Resource0, Resource1, Resource2) and slot.
 func SortItems(items []Item) {
-	order := map[string]int{Backpack: 0, Equipment: 1, Quest: 2}
+	order := map[string]int{Backpack: 0, Equipment: 1, Quest: 2, Resource0: 3, Resource1: 4, Resource2: 5}
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
 		if order[a.Container] != order[b.Container] {
@@ -139,14 +152,29 @@ func SortItems(items []Item) {
 
 const itemColumns = `container, slot, item_record_id, instance_guid, quantity, quality, durability, created_at, persisted_health, persisted_mana, lock_expiration`
 
-// insertItems adds the items of a character in tx, in one batch.
+// itemTable is the table an item is kept in: the Backpack, the Equipment and the Quest storage in character_items, a resource container in character_resource_items.
+func itemTable(container string) string {
+	if IsResource(container) {
+		return "character_resource_items"
+	}
+	return "character_items"
+}
+
+// allItemsSQL reads the items of one character ($1) from both tables, in the order Inventory returns them.
+const allItemsSQL = `SELECT ` + itemColumns + ` FROM (
+	SELECT ` + itemColumns + `, CASE container WHEN 'Backpack' THEN 0 WHEN 'Equipment' THEN 1 ELSE 2 END AS storage_order FROM character_items WHERE character_id = $1
+	UNION ALL
+	SELECT ` + itemColumns + `, CASE container WHEN 'Resource0' THEN 3 WHEN 'Resource1' THEN 4 ELSE 5 END FROM character_resource_items WHERE character_id = $1
+) all_items ORDER BY storage_order, slot`
+
+// insertItems adds the items of a character in tx, in one batch: each into the table of its container.
 func insertItems(ctx context.Context, tx pgx.Tx, characterID string, items []Item) error {
 	if len(items) == 0 {
 		return nil
 	}
 	var batch pgx.Batch
 	for _, it := range items {
-		batch.Queue(`INSERT INTO character_items (character_id, `+itemColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		batch.Queue(`INSERT INTO `+itemTable(it.Container)+` (character_id, `+itemColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			characterID, it.Container, it.Slot, it.ItemRecordID, it.InstanceGUID, it.Quantity, it.Quality, it.Durability, it.CreatedAt,
 			it.PersistedHealth, it.PersistedMana, it.LockExpiration)
 	}
@@ -162,14 +190,13 @@ func insertItems(ctx context.Context, tx pgx.Tx, characterID string, items []Ite
 
 // CoA and C | Y | B
 
-// Inventory returns the items of a character: the Backpack's by slot, then the Equipment's, then the Quest storage's.
+// Inventory returns the items of a character: the Backpack's by slot, then the Equipment's, the Quest storage's and the three resource containers'.
 // A character with none (it never got a kit) has an empty list; an unknown character is ErrNotFound.
 func (s *Store) Inventory(ctx context.Context, characterID string) ([]Item, error) {
 	if !idPattern.MatchString(characterID) {
 		return nil, ErrNotFound
 	}
-	rows, err := s.pool.Query(ctx, `SELECT `+itemColumns+` FROM character_items WHERE character_id = $1
-		ORDER BY CASE container WHEN 'Backpack' THEN 0 WHEN 'Equipment' THEN 1 ELSE 2 END, slot`, characterID)
+	rows, err := s.pool.Query(ctx, allItemsSQL, characterID)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +225,7 @@ func (s *Store) Inventory(ctx context.Context, characterID string) ([]Item, erro
 	return out, nil
 }
 
-// SaveInventory replaces all the items of the character with items, in one transaction (the latest save wins: worldd is
+// SaveInventory replaces all the items of the character, in both tables, with items, in one transaction (the latest save wins: worldd is
 // the only writer while a character plays). ErrNotFound for an unknown character; ErrInvalid, with nothing changed, for items
 // that break the rules (ValidateItems) and for no items at all: a character keeps its items until they can be destroyed
 // (not in part 1 of the complete character), so an empty save is a bug in the caller, and it would erase the character's
@@ -224,8 +251,10 @@ func (s *Store) SaveInventory(ctx context.Context, characterID string, items []I
 	if err := lockCharacter(ctx, tx, characterID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM character_items WHERE character_id = $1`, characterID); err != nil {
-		return err
+	for _, table := range []string{"character_items", "character_resource_items"} {
+		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE character_id = $1`, characterID); err != nil {
+			return err
+		}
 	}
 	if err := insertItems(ctx, tx, characterID, items); err != nil {
 		return itemsError(err)
@@ -283,7 +312,8 @@ func (s *Store) GrantMissingKits(ctx context.Context, kits KitMaker) (BackfillRe
 		class    int32
 	}
 	rows, err := s.pool.Query(ctx, `SELECT c.id, c.name, COALESCE(c.class_id, 0) FROM characters c
-		WHERE NOT EXISTS (SELECT 1 FROM character_items i WHERE i.character_id = c.id) ORDER BY c.created_at, c.id`)
+		WHERE NOT EXISTS (SELECT 1 FROM character_items i WHERE i.character_id = c.id)
+		  AND NOT EXISTS (SELECT 1 FROM character_resource_items r WHERE r.character_id = c.id) ORDER BY c.created_at, c.id`)
 	if err != nil {
 		return res, err
 	}
@@ -368,7 +398,7 @@ func (s *Store) grantKit(ctx context.Context, characterID string, items []Item) 
 		return false, err
 	}
 	var has bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM character_items WHERE character_id = $1)`, characterID).Scan(&has); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM character_items WHERE character_id = $1) OR EXISTS (SELECT 1 FROM character_resource_items WHERE character_id = $1)`, characterID).Scan(&has); err != nil {
 		return false, err
 	}
 	if has {

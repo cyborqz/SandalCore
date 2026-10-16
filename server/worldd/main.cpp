@@ -236,6 +236,25 @@ int main(int argc, char** argv) {
     app.add_option("--loot-corpse-seconds", loot_corpse_seconds, "how long a corpse with loot that nobody takes stays (modelled: 120 s)")->envname("AOC_LOOT_CORPSE_SECONDS")->capture_default_str();
     app.add_option("--loot-chance-mult", loot_chance_mult, "multiplies the chance of every RollEachByPercent loot draw (never a quantity; each chance is capped at 1): 3 makes small drop chances 3 times as likely (1: the data's own)")
         ->envname("AOC_LOOT_CHANCE_MULT")->check(CLI::Range(0.0, 1000.0))->capture_default_str();
+    // Gathering stage 2, "Harvesting": the resource nodes (gather/gathering.h)
+    bool no_gathering = false, gather_quality_literal = false;
+    double gather_respawn_mult = 1.0;
+    app.add_flag("--no-gathering", no_gathering, "the kill switch for harvesting: the resource nodes are seen and not harvested")->envname("AOC_NO_GATHERING");
+    app.add_option("--gather-respawn-mult", gather_respawn_mult,
+                   "multiplies the time a gathered resource node takes to return (the data's: the actor def's OverrideRespawnDuration, else the foliage data's EmptyDuration; 0.02 turns a tree's 14,400 s into 288 s; at least 1 s)")
+        ->envname("AOC_GATHER_RESPAWN_MULT")->check(CLI::Range(0.0001, 1000.0))->capture_default_str();
+    app.add_flag("--gather-quality-literal", gather_quality_literal,
+                 "GetRolledItemQuality() in the Quantity equation answers the literal quality (1, 6, 16 ...) instead of the index of its rarity band (0 to 6): the equation compares it with 0 to 6")
+        ->envname("AOC_GATHER_QUALITY_LITERAL");
+    // Gathering stage 3, "Foliage gathering": the painted trees, plants and stones (foliage/foliage.h); --no-gathering switches them off with the nodes
+    double foliage_regrow_mult = 1.0;
+    std::string foliage_map_path = "dist/content/region_foliage.tsv";
+    app.add_option("--foliage-regrow-mult", foliage_regrow_mult,
+                   "multiplies EVERY phase of a harvested tree's, plant's or stone's regrowth (the data's: an Oak large is 300 s empty, 1800 s a sapling, 1800 s medium, then whole; a plant 1800 s empty and 300 s a sapling; 0.01 makes the Oak 3 + 18 + 18 s)")
+        ->envname("AOC_FOLIAGE_REGROW_MULT")->check(CLI::Range(0.0001, 1000.0))->capture_default_str();
+    app.add_option("--foliage-map", foliage_map_path,
+                   "the painted foliage of the area, dist/content/region_foliage.tsv (tools/mapc `mapc extract`: 84,218 instances of the Riverlands; a missing file: the foliage is seen and not harvested)")
+        ->envname("AOC_FOLIAGE_MAP")->capture_default_str();
     app.add_option("--max-sessions", endpoint_config.max_sessions,
                    "the most client sessions at once; further handshakes are ignored (0: no limit)")
         ->capture_default_str();
@@ -301,6 +320,7 @@ int main(int argc, char** argv) {
     uint32_t randomizer = 0;
     while (randomizer == 0) secure_random(reinterpret_cast<uint8_t*>(&randomizer), sizeof(randomizer));
     aoc::protocol::ServerGuidAllocator guids(reg.server_id, randomizer);
+// -- C | O | A . C_Y_B --
 
     const auto mode = gamestate_mode == "captured" ? bootstrap::GameStateMode::Captured
                       : gamestate_mode == "tier3"  ? bootstrap::GameStateMode::Tier3
@@ -406,6 +426,7 @@ int main(int argc, char** argv) {
         {
             spawns::GenericConfig generic;
             generic.enabled = !no_generic_npcs;
+            generic.hunting = !no_gathering;   // Gathering stage 3: with harvesting off a creature is not huntable (no hunting interactable)
             for (size_t start = 0; start <= npc_exclude.size();) {
                 const size_t comma = npc_exclude.find(',', start);
                 std::string one = npc_exclude.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
@@ -512,6 +533,24 @@ int main(int argc, char** argv) {
             spawns::NodePopulations::Config people;
             people.enabled = !no_node_people;
             players.start_node_people(people);
+        }
+        // Gathering stage 2, "Harvesting": the nodes of the area can be harvested
+        if (no_gathering) {
+            spdlog::info("[gather] --no-gathering: the resource nodes are seen and not harvested");
+        } else {
+            gather::Config gathering;
+            gathering.board.respawn_mult = gather_respawn_mult;
+            gathering.quality_literal = gather_quality_literal;
+            std::string gather_error;
+            if (!players.start_gathering(gathering, gather_error)) {
+                spdlog::warn("[gather] harvesting is off: {} (the resource nodes are seen and not harvested)", gather_error);
+            } else {
+                foliage::Config trees;
+                trees.map_path = foliage_map_path;
+                trees.regrow_mult = foliage_regrow_mult;
+                std::string foliage_error;
+                if (!players.start_foliage(trees, foliage_error)) spdlog::warn("[foliage] harvesting is off: {} (the trees, plants and stones of the world are seen and not harvested)", foliage_error);
+            }
         }
     } else if (area_radius_m == 0) {
         spdlog::info("--area-radius 0: players see no other actors");

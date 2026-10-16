@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -34,26 +35,43 @@ float to_float(double d, int& faults) {
 // engine's "none": the effects and the ranks come with the inputs).
 class FlagState final : public StatState {
 public:
-    FlagState(bool moving, bool in_combat, const NpcShape& npc = {}) : moving_(moving), in_combat_(in_combat), npc_(npc) {}
+    FlagState(bool moving, bool in_combat, const NpcShape& npc = {}, const std::map<std::string, int>& levels = {}) : moving_(moving), in_combat_(in_combat), npc_(npc) {
+        set_levels(levels);
+    }
     bool in_combat() const override { return in_combat_; }
+    // the names compare without regard to case, as FNames do (the expressions say "Lumbermilling" where the record is LumberMilling): kept in lower case
+    double profession_level(double /*actor*/, const std::string& name) const override {
+        const auto it = levels_.find(lower(name));
+        return it == levels_.end() ? 1.0 : static_cast<double>(it->second);
+    }
+    void set_levels(const std::map<std::string, int>& levels) {
+        levels_.clear();
+        for (const auto& [name, level] : levels) levels_[lower(name)] = level;
+    }
     bool moving() const override { return moving_; }
     double npc_elite_rank() const override { return npc_.elite_rank; }
     double npc_stat_distribution(int i) const override { return i >= 0 && i < 8 ? npc_.dist[static_cast<size_t>(i)] : 0; }
 
 private:
+    static std::string lower(std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    }
     bool moving_, in_combat_;
     NpcShape npc_;
+    std::map<std::string, int> levels_;   // by lower-case name
 };
 
 }  // namespace
 
 struct CharacterStats::Evaluation::State {
     FlagState flags;
-    State(bool moving, bool in_combat, const NpcShape& npc) : flags(moving, in_combat, npc) {}
+    State(bool moving, bool in_combat, const NpcShape& npc, const std::map<std::string, int>& levels) : flags(moving, in_combat, npc, levels) {}
 };
 
-CharacterStats::Evaluation::Evaluation(const StatBundle& bundle, StatInputs inputs, bool moving, bool in_combat, const NpcShape& npc)
-    : bundle_(&bundle), in_(std::move(inputs)), state_(std::make_unique<State>(moving, in_combat, npc)) {
+CharacterStats::Evaluation::Evaluation(const StatBundle& bundle, StatInputs inputs, bool moving, bool in_combat, const NpcShape& npc,
+                                       const std::map<std::string, int>& profession_levels)
+    : bundle_(&bundle), in_(std::move(inputs)), state_(std::make_unique<State>(moving, in_combat, npc, profession_levels)) {
     if (!run_stats(*bundle_, in_, state_->flags, result_, err_)) return;
     ev_ = std::make_unique<ExprEvaluator>(*bundle_, in_, state_->flags, result_);
     if (!ev_->ok()) err_ = ev_->error();
@@ -68,6 +86,8 @@ bool CharacterStats::Evaluation::eval(int64_t program, ExprHost& host, double& o
     }
     return ev_->eval(program, host, out, err);
 }
+
+void CharacterStats::Evaluation::set_profession_levels(const std::map<std::string, int>& levels) { state_->flags.set_levels(levels); }
 
 double CharacterStats::Evaluation::stat(int64_t guid) const {
     for (const StatOut& s : result_.stats) {
@@ -127,7 +147,7 @@ bool CharacterStats::compute(std::span<const WornItem> worn, Next& next, std::st
         if (v.resource()) in.current.emplace_back(v.guid, static_cast<double>(v.value));
     }
     StatResult r;
-    if (!run_stats(*bundle_, in, FlagState(moving_, in_combat_, npc_), r, err)) return false;
+    if (!run_stats(*bundle_, in, FlagState(moving_, in_combat_, npc_, profession_levels_), r, err)) return false;
     std::vector<StatValue>& out = next.values;
     out.clear();
     out.reserve(r.stats.size());
@@ -246,7 +266,7 @@ std::unique_ptr<CharacterStats::Evaluation> CharacterStats::evaluation(std::span
     for (const StatValue& v : values_) {
         if (v.resource() || (live_vitals && v.held() && !v.float_array())) in.current.emplace_back(v.guid, static_cast<double>(v.value));
     }
-    auto e = std::make_unique<Evaluation>(*bundle_, std::move(in), moving_, in_combat_, npc_);
+    auto e = std::make_unique<Evaluation>(*bundle_, std::move(in), moving_, in_combat_, npc_, profession_levels_);
     if (!e->ok()) {
         err = e->error();
         return nullptr;

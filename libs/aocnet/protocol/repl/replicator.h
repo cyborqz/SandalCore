@@ -159,10 +159,11 @@ struct ObjectShadow {
     /// this reproduces the capture.
     void invalidate(uint32_t handle) { rep.sent.erase(static_cast<uint16_t>(handle)); }
 
-    /// A new channel: the client has nothing of the object.  `active` stays.
-    void forget_sent() {
+    /// A new channel: the client has nothing of the object.  `active` stays.  `keep_fast`: the fast arrays' shadows stay too (the client keeps its copy of them across a
+    /// Dormancy close, and the open sends the arrays as deltas against it: a foliage cell's list of cut instances).
+    void forget_sent(bool keep_fast = false) {
         rep.clear();
-        fast.clear();
+        if (!keep_fast) fast.clear();
         opened = false;
     }
 };
@@ -170,17 +171,20 @@ struct ObjectShadow {
 struct ActorShadow {
     ObjectShadow                actor;
     std::map<uint64_t, ObjectShadow> subobjects;   // by the subobject's ObjectId: one the actor gained is new here
+    /// The caller keeps the client's copy of the fast arrays across a new channel (ObjectShadow::forget_sent): the open then sends them as deltas against the shadow.  It is not
+    /// something that was sent, so an open keeps it.
+    bool                        keep_fast = false;
 
     /// A new channel: the client has nothing.  A subobject's entry goes unless the caller gave it a mask (then it stays,
     /// forgotten).  Entries of subobjects the actor no longer has linger until then (a few KB each): the map is bounded by
-    /// the subobjects the actor ever had.
+    /// the subobjects the actor ever had.  With `keep_fast` every entry stays, forgotten but for its fast arrays.
     void forget_sent() {
-        actor.forget_sent();
+        actor.forget_sent(keep_fast);
         for (auto it = subobjects.begin(); it != subobjects.end();) {
-            if (it->second.active.all_active()) {
+            if (it->second.active.all_active() && !keep_fast) {
                 it = subobjects.erase(it);
             } else {
-                it->second.forget_sent();
+                it->second.forget_sent(keep_fast);
                 ++it;
             }
         }

@@ -76,7 +76,7 @@ struct DbOptions {
     /// XORed into the stat_program row's crc32 (the header's own otherwise): a row that does not belong to its blob.
     int64_t     stat_program_crc_xor = 0;
     /// meta contentc.version (contentc's: 11 has the mounts, 5 has the item uses, reward tables, level curves and auto grants of plan D1).
-    const char* contentc_version_value = "12";
+    const char* contentc_version_value = "15";
     /// Plan D1 (contentc version 5): item_use, item_action, action_response, action_reward, reward_table, reward_item, reward_xp, leveling_type,
     /// leveling_curve, skill_auto_grant and skill_rank_stat_mod, with the real rows of the GM items below, the Adventuring curve and the
     /// Universal tree's grants.
@@ -144,7 +144,7 @@ inline constexpr const char* kProgressStatements[] = {
     "(6064633408454984170, 'GM_Scroll_Consumables 06', '', 0, 1), (7100000000000000031, 'Test_Random', 'IsNight()', -1, 0)",
     "INSERT INTO reward_item VALUES (6064634082574270466, 0, 6064630214426886486, 6064629086629396481, 1), (6064634082574270466, 1, 6064630214427083132, 6064629086629396481, 1), "
     "(6064633408454984170, 0, 6064631187700000007, 6064629086629396481, 20)",
-    "INSERT INTO reward_xp VALUES "
+    "INSERT INTO reward_xp (table_guid, ord, experience_type, target_level, margin, curve_guid, mult_stat_guid, expression) VALUES "
     "(6064634615529865344, 0, 'Adventuring', 10, 10, 6064630643828785675, 6064630809541214212, '(formula)'), (6064634615529865344, 1, 'Weapon', 0, 0, 6064633413997300497, 0, 'xp - cur + 10'), "
     "(6064630843443445822, 0, 'Adventuring', 15, 10, 6064630643828785675, 6064630809541214212, '(formula)'), (6064630843443445822, 1, 'Weapon', 0, 0, 6064633413997300497, 0, 'xp - cur + 10'), "
     "(6064632139788779521, 0, 'Adventuring', 20, 10, 6064630643828785675, 6064630809541214212, '(formula)'), (6064632139788779521, 1, 'Weapon', 0, 0, 6064633413997300497, 0, 'xp - cur + 10'), "
@@ -222,6 +222,79 @@ inline constexpr const char* kItemInsert =
     "(6064631187700000007, 'Test_Potion', 1, 0, 0), (6064631187700000008, 'Test_Cape', 5, 1, 0), "
     "(6064631187700000009, 'Test_Costume', 1, 1, 0), (6064631187700000010, 'Test_Cloak', 1, 1, 0), (6064631187700000011, 'Test_Shirt', 1, 1, 0), "
     "(6064631187700000012, 'Test_Size_Rod', 5, 1, 0), (6064631187700000013, 'Test_Cursed_Earring', 5, 1, 0)";
+
+/// Gathering stage 3, "Resource storage" (contentc version 14): real resource records with the dimension and the stack size content.db v14 has for them, and the two real
+/// bags that capture 1198's character wore beside the Sanctus bag (the Mining T2 bag, 8 x 5, and the Lumberjacking T2 bag, 6 x 5), with their matrices.  The Sanctus bag
+/// (item::kBag) is a 6 x 4 grid, not custom: its def's four-column matrix does not apply.
+namespace resource {
+inline constexpr int64_t kOak = 109162169652924ll;                // Resource_Raw_Wood_Oak: 1 x 3, stack 20
+inline constexpr int64_t kCoal = 109162169652923ll;               // Resource_Raw_Stone_Coal: 1 x 1
+inline constexpr int64_t kDaffodil = 6064629184431849472ll;       // Resource_Raw_Plant_Daffodil: 1 x 2
+inline constexpr int64_t kMoonbell = 6064630520851136512ll;       // 1 x 2
+inline constexpr int64_t kWillow = 6064631481841025063ll;         // Resource_Raw_Wood_WeepingWillow: 1 x 3
+inline constexpr int64_t kBraidwood = 6064631481844695080ll;      // 1 x 3
+inline constexpr int64_t kLimestone = 6064629252228972574ll;      // 2 x 2
+inline constexpr int64_t kSapphire = 6064629252182507530ll;       // 2 x 2
+inline constexpr int64_t kHalcyonite = 6064629252186439693ll;     // 2 x 2
+inline constexpr int64_t kRividium = 6064629252198170643ll;       // 2 x 2
+inline constexpr int64_t kBearCarcass = 6064630406148390932ll;    // Resource_Raw_Carcass_Bear: 2 x 2
+inline constexpr int64_t kBass = 6064629326234910728ll;           // Resource_Raw_Fish_LargemouthBass: 2 x 1
+inline constexpr int64_t kBluegill = 6064629326176452611ll;       // 2 x 1
+inline constexpr int64_t kRune = 6064632203796545556ll;           // Resource_Reagent_EnchantedRune_Riverlands: 1 x 1
+inline constexpr int64_t kGlint = 6064628753953390592ll;          // Certificate_T1_Glint: 1 x 1, stack 10
+inline constexpr int64_t kBagMining = 6064632218973765644ll;      // Bag_Resource_T2_Mining_0: 8 x 5
+inline constexpr int64_t kBagLumber = 6064632219108704288ll;      // Bag_Resource_T2_Lumberjacking_0: 6 x 5
+inline constexpr int64_t kDefSanctus = 6064629382564414247ll, kDefMining = 6064632218996572174ll, kDefLumber = 6064632219178696704ll;
+
+// the matrices of the three defs by column (-1 usable, -2 blocked): capture 1198's OverrideMatrix of the Mining and the Lumberjacking bag, and the Sanctus def's stored one
+inline const std::vector<std::vector<int>> kSanctusMatrix = {{-1, -1, -1}, {-2, -1, -1}, {-2, -1, -1}, {-1, -1, -1}};
+inline const std::vector<std::vector<int>> kMiningMatrix = {{-1, -1, -2, -1, -1}, {-1, -1, -2, -1, -1}, {-2, -2, -2, -2, -2}, {-1, -1, -2, -1, -1},
+                                                              {-1, -1, -2, -1, -1}, {-2, -2, -2, -2, -2}, {-1, -1, -2, -1, -1}, {-1, -1, -2, -1, -1}};
+inline const std::vector<std::vector<int>> kLumberMatrix = {{-2, -2, -1, -1, -1}, {-1, -1, -1, -2, -2}, {-2, -2, -1, -1, -1}, {-1, -1, -1, -2, -2},
+                                                              {-2, -2, -1, -1, -1}, {-1, -1, -1, -2, -2}};
+}  // namespace resource
+
+inline constexpr const char* kResourceItemInsert =
+    "INSERT INTO item (guid, name, level, can_equip, occupies_all_equip_slots, max_stack_size, inv_w, inv_h, resource) VALUES "
+    "(109162169652924, 'Resource_Raw_Wood_Oak', 1, 0, 0, 20, 1, 3, 1), (109162169652923, 'Resource_Raw_Stone_Coal', 1, 0, 0, 20, 1, 1, 1), "
+    "(6064629184431849472, 'Resource_Raw_Plant_Daffodil', 1, 0, 0, 20, 1, 2, 1), (6064630520851136512, 'Resource_Raw_Plant_Moonbell', 1, 0, 0, 20, 1, 2, 1), "
+    "(6064631481841025063, 'Resource_Raw_Wood_WeepingWillow', 1, 0, 0, 20, 1, 3, 1), (6064631481844695080, 'Resource_Raw_Wood_Braidwood', 1, 0, 0, 20, 1, 3, 1), "
+    "(6064629252228972574, 'Resource_Raw_Stone_Limestone', 1, 0, 0, 20, 2, 2, 1), (6064629252182507530, 'Resource_Raw_Gem_Sapphire', 1, 0, 0, 20, 2, 2, 1), "
+    "(6064629252186439693, 'Resource_Raw_Gem_Halcyonite', 1, 0, 0, 20, 2, 2, 1), (6064629252198170643, 'Resource_Raw_Metal_Rividium', 1, 0, 0, 20, 2, 2, 1), "
+    "(6064630406148390932, 'Resource_Raw_Carcass_Bear', 1, 0, 0, 20, 2, 2, 1), (6064629326234910728, 'Resource_Raw_Fish_LargemouthBass', 1, 0, 0, 20, 2, 1, 1), "
+    "(6064629326176452611, 'Resource_Raw_Fish_Bluegill', 1, 0, 0, 20, 2, 1, 1), (6064632203796545556, 'Resource_Reagent_EnchantedRune_Riverlands', 1, 0, 0, 20, 1, 1, 1), "
+    "(6064628753953390592, 'Certificate_T1_Glint', 1, 0, 0, 10, 1, 1, 1), "
+    "(6064632218973765644, 'Bag_Resource_T2_Mining_0', 1, 1, 0, 1, 1, 1, 0), (6064632219108704288, 'Bag_Resource_T2_Lumberjacking_0', 1, 1, 0, 1, 1, 1, 0)";
+inline constexpr const char* kResourceSlotInsert =
+    "INSERT INTO item_equip_slot VALUES (6064632218973765644, 0, 23), (6064632218973765644, 1, 24), (6064632218973765644, 2, 25), "
+    "(6064632219108704288, 0, 23), (6064632219108704288, 1, 24), (6064632219108704288, 2, 25)";
+// C_Y_B and C | O | A
+
+/// The resource_bag rows of the three bags and the cell rows of their defs (resource_bag_cell: def, column, row, value).
+inline std::vector<std::string> resource_bag_statements() {
+    std::vector<std::string> out;
+    out.push_back("CREATE TABLE resource_bag (item_guid INTEGER PRIMARY KEY, def_guid INTEGER NOT NULL, def_name TEXT NOT NULL, columns INTEGER NOT NULL, "
+                  "rows INTEGER NOT NULL, custom INTEGER NOT NULL)");
+    out.push_back("CREATE TABLE resource_bag_cell (def_guid INTEGER NOT NULL, col INTEGER NOT NULL, row INTEGER NOT NULL, value INTEGER NOT NULL, "
+                  "PRIMARY KEY (def_guid, col, row)) WITHOUT ROWID");
+    out.push_back("INSERT INTO resource_bag VALUES (6064629382556287782, 6064629382564414247, 'Item_Bag_Resource_Sanctus_def', 6, 4, 0), "
+                  "(6064632218973765644, 6064632218996572174, 'Bag_Resource_T2_Mining_0', 8, 5, 1), "
+                  "(6064632219108704288, 6064632219178696704, 'Bag_Resource_T2_Lumberjacking_0', 6, 5, 1)");
+    const auto cells = [&](int64_t def, const std::vector<std::vector<int>>& matrix) {
+        std::string sql = "INSERT INTO resource_bag_cell VALUES ";
+        for (size_t c = 0; c < matrix.size(); ++c) {
+            for (size_t r = 0; r < matrix[c].size(); ++r) {
+                if (c || r) sql += ", ";
+                sql += "(" + std::to_string(def) + ", " + std::to_string(c) + ", " + std::to_string(r) + ", " + std::to_string(matrix[c][r]) + ")";
+            }
+        }
+        return sql;
+    };
+    out.push_back(cells(resource::kDefSanctus, resource::kSanctusMatrix));
+    out.push_back(cells(resource::kDefMining, resource::kMiningMatrix));
+    out.push_back(cells(resource::kDefLumber, resource::kLumberMatrix));
+    return out;
+}
 inline constexpr const char* kItemSlotInsert =
     "INSERT INTO item_equip_slot VALUES "
     "(6064630736269279236, 0, 1), (6064630214426886486, 0, 2), (6064630214427083132, 0, 5), (6064630214427279778, 0, 6), "
@@ -375,11 +448,19 @@ inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
     if (o.item_tables) {
         ok = exec(db, "CREATE TABLE item (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, level INTEGER NOT NULL, can_equip INTEGER NOT NULL, "
                       "occupies_all_equip_slots INTEGER NOT NULL, default_quality INTEGER NOT NULL DEFAULT 1, max_stack_size INTEGER NOT NULL DEFAULT 1, "
-                      "max_durability REAL NOT NULL DEFAULT 0, stat_block_guid INTEGER NOT NULL DEFAULT 0, quality_curve_guid INTEGER NOT NULL DEFAULT 0)") && ok;
+                      "max_durability REAL NOT NULL DEFAULT 0, stat_block_guid INTEGER NOT NULL DEFAULT 0, quality_curve_guid INTEGER NOT NULL DEFAULT 0, "
+                      "inv_w INTEGER NOT NULL DEFAULT 1, inv_h INTEGER NOT NULL DEFAULT 1, resource INTEGER NOT NULL DEFAULT 0, "
+                      "display_name TEXT NOT NULL DEFAULT '')") && ok;
         ok = exec(db, kItemInsert) && ok;
+        ok = exec(db, kResourceItemInsert) && ok;
+        // Gathering stage 3, "the pick-up popup" (contentc version 16): the names the retail text shows for two of the resource records
+        ok = exec(db, "UPDATE item SET display_name = 'Oak Wood' WHERE guid = 109162169652924") && ok;
+        ok = exec(db, "UPDATE item SET display_name = 'Daffodil' WHERE guid = 6064629184431849472") && ok;
+        for (const std::string& sql : resource_bag_statements()) ok = exec(db, sql.c_str()) && ok;
         ok = exec(db, "CREATE TABLE item_equip_slot (item_guid INTEGER NOT NULL, ord INTEGER NOT NULL, slot INTEGER NOT NULL, "
                       "PRIMARY KEY (item_guid, ord)) WITHOUT ROWID") && ok;
         ok = exec(db, kItemSlotInsert) && ok;
+        ok = exec(db, kResourceSlotInsert) && ok;
     }
     if (o.stat_tables) {
         ok = exec(db, "CREATE TABLE equip_slot (slot INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE)") && ok;
@@ -435,7 +516,8 @@ inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
         ok = exec(db, "CREATE TABLE reward_item (table_guid INTEGER NOT NULL, ord INTEGER NOT NULL, item_guid INTEGER NOT NULL, variation_guid INTEGER NOT NULL, "
                       "quantity INTEGER NOT NULL, PRIMARY KEY (table_guid, ord)) WITHOUT ROWID") && ok;
         ok = exec(db, "CREATE TABLE reward_xp (table_guid INTEGER NOT NULL, ord INTEGER NOT NULL, experience_type TEXT NOT NULL, target_level INTEGER NOT NULL, "
-                      "margin REAL NOT NULL, curve_guid INTEGER NOT NULL, mult_stat_guid INTEGER NOT NULL, expression TEXT NOT NULL, PRIMARY KEY (table_guid, ord)) WITHOUT ROWID") && ok;
+                      "margin REAL NOT NULL, curve_guid INTEGER NOT NULL, mult_stat_guid INTEGER NOT NULL, expression TEXT NOT NULL, expr INTEGER NOT NULL DEFAULT 0, "
+                      "PRIMARY KEY (table_guid, ord)) WITHOUT ROWID") && ok;
         ok = exec(db, "CREATE TABLE leveling_type (guid INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, experience_type TEXT NOT NULL, level_cap INTEGER NOT NULL, "
                       "uses_debt INTEGER NOT NULL, xp_mult_stat_guid INTEGER NOT NULL)") && ok;
         ok = exec(db, "CREATE TABLE leveling_curve (type_guid INTEGER NOT NULL, level INTEGER NOT NULL, xp INTEGER NOT NULL, PRIMARY KEY (type_guid, level)) WITHOUT ROWID") && ok;

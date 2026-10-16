@@ -206,6 +206,16 @@ bool FastArrayState::change(int32_t id, ElementState values) {
 }
 // ~ C-Y-B :: C O A ~
 
+bool FastArrayState::set_values(int32_t id, ElementState values) {
+    if (!item_matches(layout_, values)) return false;
+    for (FastArrayItem& it : items_) {
+        if (it.id != id) continue;
+        it.values = std::move(values);
+        return true;
+    }
+    return false;
+}
+
 bool FastArrayState::remove(int32_t id) {
     const auto it = std::find_if(items_.begin(), items_.end(), [id](const FastArrayItem& i) { return i.id == id; });
     if (it == items_.end()) return false;

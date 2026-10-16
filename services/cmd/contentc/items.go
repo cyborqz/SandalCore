@@ -23,6 +23,7 @@ var itemRecordTypes = map[string]uint64{
 	"StartingEquipmentRecordBase": content.TypeStartingEquipment,
 	"StatTypeDefRecordBase":       content.TypeStatDef,
 	"CharacterClassesRecordBase":  content.TypeCharacterClasses,
+	"ResourceBagDefRecordBase":    content.TypeResourceBagDef, // Gathering stage 3 (version 14)
 }
 
 // rarities are the bands of an ItemStatValues, in order (the quality curve's Common ... Artifact).
@@ -71,10 +72,17 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 		return err
 	}
 
+	bagDefs, err := readBagDefs(src.rows["ResourceBagDefRecordBase"])
+	if err != nil {
+		return err
+	}
+
 	itemSlots := map[int64][]int64{} // the slots of each item, in its record's order
 	items := src.rows["ItemRecordBase"]
 	known := make(map[int64]bool, len(items))
-	worn, withDurability := 0, 0
+	worn, withDurability, resources := 0, 0, 0
+	type bagItem struct{ item, def int64 }
+	var bagItems []bagItem
 	for _, r := range items {
 		f := newFields(fmt.Sprintf("Item %s (%d)", r.Name, r.Guid), r.Fields)
 		canEquip := f.boolean("CanEquip")
@@ -86,8 +94,21 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 		curve, _ := f.id("QualityCurveId")
 		appearance, _ := f.id("AppearanceId")
 		slotNames := f.list("EquipSlots")
+		invW, invH := inventoryDimension(f)
+		resource := hasResourceTag(f)
+		displayName := "" // the record's ItemName (Gathering stage 3, version 16): the name the pick-up popup's text shows; a record without one keeps ''
+		if _, has := f.get("ItemName"); has {
+			displayName = f.text("ItemName")
+		}
+		bagDefGuid := int64(0)
+		if _, has := f.get("ResourceBagDefId"); has {
+			bagDefGuid, _ = f.id("ResourceBagDefId")
+		}
 		if f.err != nil {
 			return f.err
+		}
+		if invW < 1 || invH < 1 || invW > 255 || invH > 255 {
+			return fmt.Errorf("%s: InventoryDimension %d x %d has no cell", f.where, invW, invH)
 		}
 		if known[r.Guid] {
 			return fmt.Errorf("two ItemRecord rows have Guid %d", r.Guid)
@@ -117,9 +138,15 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 			}
 		}
 		if err := w.exec(`INSERT INTO item (guid, name, level, can_equip, occupies_all_equip_slots, default_quality, max_stack_size,
-			stat_block_guid, appearance_guid, max_durability, quality_curve_guid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.Guid, r.Name, level, b2i(canEquip), b2i(occupiesAll), quality, stack, statBlock, appearance, durability, curve); err != nil {
+			stat_block_guid, appearance_guid, max_durability, quality_curve_guid, inv_w, inv_h, resource, display_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.Guid, r.Name, level, b2i(canEquip), b2i(occupiesAll), quality, stack, statBlock, appearance, durability, curve, invW, invH, b2i(resource), displayName); err != nil {
 			return err
+		}
+		if resource {
+			resources++
+		}
+		if bagDefGuid != 0 {
+			bagItems = append(bagItems, bagItem{r.Guid, bagDefGuid})
 		}
 		for i, v := range values {
 			if err := w.exec(`INSERT INTO item_equip_slot (item_guid, ord, slot) VALUES (?, ?, ?)`, r.Guid, i, v); err != nil {
@@ -127,7 +154,7 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 			}
 		}
 	}
-	opt.logf("item: %d items, %d with a slot, %d with a durability", len(items), worn, withDurability)
+	opt.logf("item: %d items, %d with a slot, %d with a durability, %d resources", len(items), worn, withDurability, resources)
 
 	kits, err := buildStartingKits(w, src, slotValue, known, itemSlots)
 	if err != nil {
@@ -136,10 +163,148 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 	opt.logf("starting_equipment: %d items for %d classes", kits.items, kits.classes)
 	meta["typed.item"] = fmt.Sprint(len(items))
 	meta["typed.starting_equipment"] = fmt.Sprint(kits.items)
+	meta["typed.item_resource"] = fmt.Sprint(resources)
+
+	// the grids of the resource bags: each bag item's def, and the matrix of every def a bag uses
+	written := map[int64]bool{}
+	for _, b := range bagItems {
+		def, ok := bagDefs[b.def]
+		if !ok {
+			return fmt.Errorf("Item %d: its ResourceBagDef %d is none of the ResourceBagDef rows", b.item, b.def)
+		}
+		if err := w.exec(`INSERT INTO resource_bag (item_guid, def_guid, def_name, columns, rows, custom) VALUES (?, ?, ?, ?, ?, ?)`,
+			b.item, def.guid, def.name, def.columns, def.rows, b2i(def.custom)); err != nil {
+			return err
+		}
+		if written[def.guid] {
+			continue
+		}
+		if err := def.check(); err != nil {
+			return fmt.Errorf("Item %d: %w", b.item, err)
+		}
+		written[def.guid] = true
+		for c, col := range def.matrix {
+			for r, v := range col {
+				if err := w.exec(`INSERT INTO resource_bag_cell (def_guid, col, row, value) VALUES (?, ?, ?, ?)`, def.guid, c, r, v); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	opt.logf("resource_bag: %d bag items with %d distinct grids", len(bagItems), len(written))
+	meta["typed.resource_bag"] = fmt.Sprint(len(bagItems))
 	return nil
 }
 
 // == C:Y:B | C.O.A ==
+
+// inventoryDimension reads an item's InventoryDimension (cells wide and tall): a record without the member reads as one cell, one with it needs both.
+func inventoryDimension(f *fields) (w, h int64) {
+	if _, has := f.get("InventoryDimension"); !has {
+		return 1, 1
+	}
+	d := newFields(f.where+": InventoryDimension", f.strukt("InventoryDimension"))
+	w, h = wholeNumber(d, "X"), wholeNumber(d, "Y")
+	if d.err != nil && f.err == nil {
+		f.err = d.err
+	}
+	return w, h
+}
+
+// wholeNumber reads a cell count the design data types as an int in one record and as a float in another (a BagDimension is an FVector2D): it must be whole.
+func wholeNumber(f *fields, name string) int64 {
+	x := f.number(name)
+	if f.err == nil && (x != math.Trunc(x) || x < 0 || x > 1e6) {
+		f.err = fmt.Errorf("%s: %s is %v, not a whole number of cells", f.where, name, x)
+	}
+	return int64(x)
+}
+
+// hasResourceTag says whether the item's GameplayTags hold a child of item.resource (a case-insensitive prefix: the data mixes Item.Resource.Raw.Reagent
+// and item.resource.cert.nodecert). A record without the member has none.
+func hasResourceTag(f *fields) bool {
+	if _, has := f.get("GameplayTags"); !has {
+		return false
+	}
+	for _, t := range f.tags("GameplayTags") {
+		if strings.HasPrefix(strings.ToLower(t), "item.resource") {
+			return true
+		}
+	}
+	return false
+}
+
+// resourceBagDef is a ResourceBagDef as the tables hold it.
+type resourceBagDef struct {
+	guid          int64
+	name          string
+	columns, rows int64
+	custom        bool
+	matrix        [][]int64 // by column; -1 usable, -2 blocked
+}
+
+// check says whether the def can be a bag's grid: a custom def's matrix must be its grid (BagDimension.X columns of Y cells) and hold only -1 and -2, since the
+// client lays its blocked cells out from it. Only the defs a bag item uses are checked: the data has an unused one (Bag_Resource_T1_Lumberjacking_Variety_def, 11
+// columns for a grid of 8) that no item reaches.
+func (d resourceBagDef) check() error {
+	if d.columns < 1 || d.rows < 1 || d.columns*d.rows > 255 {
+		return fmt.Errorf("ResourceBagDef %s (%d): dimension %d x %d has no cells or more than 255", d.name, d.guid, d.columns, d.rows)
+	}
+	if !d.custom {
+		return nil
+	}
+	if int64(len(d.matrix)) != d.columns {
+		return fmt.Errorf("ResourceBagDef %s (%d): the custom matrix has %d column(s) for a grid of %d", d.name, d.guid, len(d.matrix), d.columns)
+	}
+	for c, col := range d.matrix {
+		if int64(len(col)) != d.rows {
+			return fmt.Errorf("ResourceBagDef %s (%d): the custom matrix: column %d has %d cell(s) for %d rows", d.name, d.guid, c, len(col), d.rows)
+		}
+		for r, v := range col {
+			if v != content.CellUsable && v != content.CellBlocked {
+				return fmt.Errorf("ResourceBagDef %s (%d): the custom matrix: cell (%d, %d) is %d, not -1 or -2", d.name, d.guid, c, r, v)
+			}
+		}
+	}
+	return nil
+}
+
+// readBagDefs reads the ResourceBagDef rows by Guid.
+func readBagDefs(rows []designdb.Row) (map[int64]resourceBagDef, error) {
+	out := make(map[int64]resourceBagDef, len(rows))
+	for _, r := range rows {
+		f := newFields(fmt.Sprintf("ResourceBagDef %s (%d)", r.Name, r.Guid), r.Fields)
+		dim := newFields(f.where+": BagDimension", f.strukt("BagDimension"))
+		d := resourceBagDef{guid: r.Guid, name: r.Name, columns: wholeNumber(dim, "X"), rows: wholeNumber(dim, "Y"), custom: f.boolean("bCustomDimension")}
+		for i, cv := range f.list("BagMatrixOverride") {
+			cs, ok := cv.(designdb.Struct)
+			if !ok {
+				return nil, fmt.Errorf("%s: BagMatrixOverride[%d] is %T", f.where, i, cv)
+			}
+			cf := newFields(fmt.Sprintf("%s: BagMatrixOverride[%d]", f.where, i), cs)
+			var col []int64
+			for j, v := range cf.list("Column") {
+				n, ok := v.(int64)
+				if !ok {
+					return nil, fmt.Errorf("%s: Column[%d] is %T", cf.where, j, v)
+				}
+				col = append(col, n)
+			}
+			if cf.err != nil {
+				return nil, cf.err
+			}
+			d.matrix = append(d.matrix, col)
+		}
+		if err := firstErr(f, dim); err != nil {
+			return nil, err
+		}
+		if _, dup := out[r.Guid]; dup {
+			return nil, fmt.Errorf("two ResourceBagDef rows have Guid %d", r.Guid)
+		}
+		out[r.Guid] = d
+	}
+	return out, nil
+}
 
 // buildEquipSlots fills equip_slot from the mappings' EEquipSlot (the enumerators with a name of their own: not the
 // _..._CHECK_START pseudo values, cCount or _MAX) and returns the names by value.
@@ -173,6 +338,8 @@ func buildEquipSlots(w *writer, m *usmap.Map) (map[int64]string, error) {
 	}
 	return names, nil
 }
+
+// CoA with C.Y.B
 
 // readQualityCurves reads every QualityCurve: a rarity's range of Quality, by the curve's Guid.
 func readQualityCurves(rows []designdb.Row) (map[int64][]qualityBand, error) {

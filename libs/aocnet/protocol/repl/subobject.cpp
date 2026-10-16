@@ -125,11 +125,28 @@ PackedExports pack_exports(std::span<const ExportChain> chains, const ExportAcks
 // ---- content blocks -----------------------------------------------------------
 
 size_t write_block_header(BunchWriter& out, const BlockHeader& h, bool server_form) {
-    // ObjectId 1 is the export-flags form of a reference (codecs.h refuses it): no block names it.
+    // ObjectId 1 is the export-flags form of a reference (codecs.h refuses it): no block names it by GUID.  The client's form can
+    // name the subobject in place (`in_place`: what UPackageMapClient writes for an object the server never gave it a GUID for).
     if (!h.is_actor && (h.object.ObjectId == 1 || (server_form && !h.stably_named &&
                                                    (h.dynamic_class.ObjectId == 1 || (h.outer && h.outer->ObjectId == 1)))))
         return 0;
+    if (!h.is_actor && h.in_place && server_form) return 0;   // the server names a subobject by its GUID
     const size_t start = out.bit_pos();
+    if (!h.is_actor && h.in_place) {
+        InlineObject name;
+        name.flags = h.in_place->flags;
+        name.outer = h.in_place->outer;
+        name.path = h.in_place->path;
+        name.checksum = h.in_place->checksum;
+        if (!inline_object_fits(name)) return 0;
+        out.write_bit(h.has_rep_layout);
+        out.write_bit(false);
+        if (!write_inline_object(out, name)) {
+            out.truncate(start);
+            return 0;
+        }
+        return out.bit_pos() - start;
+    }
     out.write_bit(h.has_rep_layout);
     out.write_bit(h.is_actor);
     if (h.is_actor) return out.bit_pos() - start;
@@ -144,6 +161,7 @@ size_t write_block_header(BunchWriter& out, const BlockHeader& h, bool server_fo
     }
     return out.bit_pos() - start;
 }
+// C_Y_B with CoA
 
 size_t write_content_block(BunchWriter& out, const BlockHeader& h, const BunchWriter& payload, bool server_form) {
     const size_t start = out.bit_pos();
@@ -160,7 +178,24 @@ std::optional<BlockView> read_content_block(const uint8_t* data, size_t end, siz
     v.start = pos;
     v.header.has_rep_layout = r.read_bit() != 0;
     v.header.is_actor = r.read_bit() != 0;
-    if (!v.header.is_actor) {
+    if (!v.header.is_actor && !server_form) {
+        // the client's form: the subobject's GUID, or, when the server never gave the client one, its name in place (ObjectId 1 and the
+        // export).  The name is read to its last bit so that the block can be skipped by its payload bits.
+        const auto object = read_object_value(r, /*allow_inline=*/true);
+        if (!object) return std::nullopt;
+        if (const auto* guid = object->get_if<FIntrepidNetworkGUID>()) {
+            v.header.object = *guid;
+        } else if (const auto* name = object->get_if<InlineObject>()) {
+            InPlaceName in_place;
+            in_place.flags = name->flags;
+            in_place.outer = name->outer;
+            in_place.path = name->path;
+            in_place.checksum = name->checksum;
+            v.header.in_place = std::move(in_place);
+        } else {
+            return std::nullopt;
+        }
+    } else if (!v.header.is_actor) {
         const auto object = read_object(r);
         if (!object) return std::nullopt;
         v.header.object = *object;

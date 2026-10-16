@@ -47,10 +47,32 @@
 //  StorageEventContainer 0x1464614d0: the object reference (128 bits), a TArray of {Slot int32, Count int32, FGuid}
 //  (int32 count), the StorageEventStatus byte.
 //
-//  FItemStorageEvent::NetSerialize 0x145c58f20: MoveSourceContainer, ItemData, a UBOOL (1: a further optional struct
-//  follows, 0x145c599d0, not decoded), EventType byte, InstigatingClient FGuid, three TOptionals (a UBOOL, then FGuid /
+//  FItemStorageEvent::NetSerialize 0x145c58f20: MoveSourceContainer, ItemData, a UBOOL (1: a TOptional<FCalloutQueueInfo>
+//  follows, 0x145c599d0: below), EventType byte, InstigatingClient FGuid, three TOptionals (a UBOOL, then FGuid /
 //  int64 / FGuid), TargetContainers (int32 count and the containers).  Round trips the 125 events of the login capture,
 //  the 13 of the Bard and 31 of the client's ServerRequestStorageEvent.
+//
+//  FCalloutQueueInfo 0x145c599d0 (Gathering stage 3, "the pick-up popup"; the same struct as an item of AAoCPlayerController's CalloutQueueReplication, written
+//  by a NetSerialize of its own that picks some of its members; the memory offsets are the exe's, the names the replicated properties of the same offsets, inferred),
+//  in the order the code runs it, read from the exe and proven bit for bit on the 24 events of the retail harvests and hunts that fill the Resource containers
+//  (tests/capture_resource.h, `full_hex`: 22 captures, each event 7.0 to 7.3 kbit of which the callout is 5.2 to 5.4):
+//
+//    FText    TextMessage (+0x20)        flags 32, history 8 (0xFF = none), for none a UBOOL: has a culture-invariant string (0, so no more): 72 bits, in all 24
+//    FString  Message (+0x10)            "Acquired <a id=...> [Coconut Wood] </>x5" (items/acquired.h has the text)
+//    FLocalizedMessage (+0x30)           0x1456f4680, callout_codec.h: the table and the key as FStrings and the argument count: 96 bits of zero in all 24
+//    8        SetCalloutType (+0x94)     6 in all 24
+//    32       PointSize (+0x90)          36
+//    8        ChatCategory (+0x95)       141
+//    FString  FormattedOnScreenMessage (+0x70)   the message again in all 24;  FString FromSourcePlayer (+0x80) and FString ChatEmblems (+0x98): empty
+//    8        NodeLevel (+0x96)          0;  UBOOL bIsMessageSentByGM (+0x97): 0
+//    FItemInstance ItemAssociated (+0xa8)        the event's own item, equal to its ItemData in all 24 (the same guid and creation time)
+//    64 + 64  ToastRecordID (+0x198), ActionResponseID (+0x1a0)   0
+//    FVector  ContextLocation (+0x1b8)   0x14141ed80: three doubles at AoC's net version, 0
+//    64       CreationTime (+0x1d0)      FDateTime ticks: the moment the server made it (the only member that differs between two events of the same item)
+//
+//  The client's event apply (0x146a8c320) hands it, when set (the TOptional's flag is at +0x240 of the struct, 576 bytes), to 0x146a90160 (the item feed: the callout, and a chat
+//  line when +0x95 is 6 -- it is 141 in the retail events).  The event has a second optional the apply uses, a TOptional<FText> that it sends to the pawn's text delegate
+//  (+0x1c50): no harvest event sets one (the three optionals after the instigator are unset in all 24; which of the serialized members it is, is not known).  An FText of another history and a localized message with arguments are refused (the codecs refuse them: codecs.h, callout_codec.h); neither is in a capture.
 //
 //  Readers return nullopt for a read past the end, an instance whose duplicated members differ, a packed int that is not
 //  its shortest form or over 32 bits, a UBOOL above 1, a set optional-struct flag, and a count above the bounds below (the

@@ -28,11 +28,16 @@
 //                                rank list and ClientUpdateSkillOnActionbar per grant) and saves the progress; a class scroll changes the class and
 //                                the stats; a gear or consumables scroll fills the bag; the refusals (a scroll for one's level, an action of another
 //                                type, a stale instance, an empty slot, a used-up stack, a full bag, spam) change nothing; a relog carries it all
+//  professions (Gathering stage 2) on the real content.db: the join lists the 22 professions in the retail order with their certification levels (the
+//                                retail join's maps are the golden) and the ExperienceFastMap only of those with XP; a GM artisan scroll gives profession XP,
+//                                promotes and gives its tool, sends the XPTracker items and BroadcastPlayLevelUpEffects (the profession's leveling type is the
+//                                category), saves all 22 rows and survives a relog; a scroll that changes nothing is refused and stays; the T3 tool equips
 //  stats (plan B3)               the join's StatsComponent arrays are the engine's stats; an equip sends, in the same packet as the events, only the stats
 //                                that changed, as deltas of their arrays, and the client's arrays are the session's stats again; Health and Mana above
 //                                a new maximum are clamped, below it they stay; nothing is sent when no stat moves; the deltas wait for a full window
 //                                with the rest of the update; a stat of the ability runtime goes through it (MaxStamina clamps Stamina)
 // ============================================================================
+#include "capture_leveling.h"
 #include "capture_packets.h"
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
@@ -227,11 +232,12 @@ struct Fixture {
     std::unique_ptr<PlayerWorld> world;
 
     /// The small content.db of content_db_fixture.h, or, with `real` and AOC_CONTENT_DB set, the real file.
-    explicit Fixture(bool real = false) {
+    explicit Fixture(bool real = false, const char* real_path = nullptr) {
         dir = cf::make_temp_dir("worldd_items_session_");
         fs::path db = dir / "content.db";
         const char* real_db = std::getenv("AOC_CONTENT_DB");
-        if (real && real_db && *real_db) db = real_db;
+        if (real && real_path && *real_path) db = real_path;
+        else if (real && real_db && *real_db) db = real_db;
         else if (!cf::make_db(db)) std::exit(2);
         std::string error;
         content = content::ContentDb::open(db.string(), error);
@@ -282,6 +288,7 @@ struct Mirror {
     size_t tracker_updates = 0;
     int    level = 1;
     std::vector<int> level_ups;                    // BroadcastPlayLevelUpEffects' InLevel, in order
+    std::vector<int64_t> level_up_categories;      // and its Category (the leveling type), in the same order
     size_t effects_added = 0, effects_removed = 0;
     size_t absorbed = 0;
     // plan D1, stage 2: the client's AbilityComponent lists, its CurrentEffects items, its action bar and what it was told of skills, and the order of it all
@@ -301,6 +308,9 @@ struct Mirror {
     std::function<bool(int64_t)> stat_extended;   // the client's stat table: which stats carry base and equipment (the bundle's kStatBuckets)
 
     static int storage_of(const bs::SessionGuids& g, const emit::FIntrepidNetworkGUID& o) {
+        for (int i = 0; i < 3; ++i) {
+            if (o == g.resource_storage[static_cast<size_t>(i)]) return 3 + i;   // Gathering stage 3: Resource0 to Resource2
+        }
         return o == g.backpack ? 0 : o == g.equipment ? 1 : o == g.quest_storage ? 2 : -1;
     }
 
@@ -376,6 +386,10 @@ struct Mirror {
                                 const auto it = cmd ? c.params.values.find(cmd->handle) : c.params.values.end();
                                 const int64_t* lv = it != c.params.values.end() ? it->second.get_if<int64_t>() : nullptr;
                                 level_ups.push_back(lv ? static_cast<int>(*lv) : -1);
+                                const schema::RepCommand* catcmd = repl::rpc_command(*c.rpc, "Category");
+                                const auto cit = catcmd ? c.params.values.find(catcmd->handle) : c.params.values.end();
+                                const int64_t* cat = cit != c.params.values.end() ? cit->second.get_if<int64_t>() : nullptr;
+                                level_up_categories.push_back(cat ? *cat : -1);
                             }
                         }
                     }
@@ -598,7 +612,7 @@ struct Harness {
     size_t mirrored = 0;                // chains of `got` the mirror has absorbed
 // C-Y-B with C-O-A
 
-    explicit Harness(svc::Character record = cyb_record(), bool with_sink = true, bool real_db = false) : fx(real_db) {
+    explicit Harness(svc::Character record = cyb_record(), bool with_sink = true, bool real_db = false, const char* real_path = nullptr) : fx(real_db, real_path) {
         if (with_sink) fx.world->set_position_sink(&sink);
         s = PlayerSession::join(conn, *fx.world, record, identity(), world_time_at(t), error);
         if (!s) {
@@ -760,7 +774,7 @@ static bool mirror_matches(const Harness& h) {
     for (const svc::InventoryItem& it : items) {
         if (it.container == ItemContainer::Quest) continue;
         ++n;
-        const auto f = h.mirror.storage.find({it.container == Bag ? 0 : 1, it.slot});
+        const auto f = h.mirror.storage.find({static_cast<int>(it.container), it.slot});
         if (f == h.mirror.storage.end() || !(f->second == items::to_instance(it))) return false;
     }
     return n == h.mirror.storage.size();
@@ -1152,13 +1166,13 @@ static void test_budgets() {
         h.client_sends(std::move(bunches));
         h.settle();
         CHECK(h.s->item_requests_refused() == 8 && h.s->requests_dropped() == 4, "12 requests in an instant: 8 refused, 4 dropped for the budget and counted");
-        CHECK(h.mirror.payloads == payloads + 8, "and the client was corrected four times (a Backpack and an Equipment payload each): the resync budget");
+        CHECK(h.mirror.payloads == payloads + 12, "and the client was corrected four times (a Backpack, an Equipment and, since Gathering stage 3, a Resource0 payload each): the resync budget");
         // the correction budget fills again: one per two seconds
         h.step(milliseconds(2100));
         h.request(item_used(3, 50, guid_n(900)), h.pawn_ch);
-        CHECK(h.mirror.payloads == payloads + 10 && h.s->item_requests_refused() == 9, "two seconds later a refusal is corrected again, once");
+        CHECK(h.mirror.payloads == payloads + 15 && h.s->item_requests_refused() == 9, "two seconds later a refusal is corrected again, once");
         h.request(item_used(3, 50, guid_n(901)), h.pawn_ch);
-        CHECK(h.mirror.payloads == payloads + 10 && h.s->item_requests_refused() == 10, "(and not twice in a row)");
+        CHECK(h.mirror.payloads == payloads + 15 && h.s->item_requests_refused() == 10, "(and not twice in a row)");
         CHECK(mirror_matches(h) && gear_matches(h), "the client ends up with the inventory");
     }
     {
@@ -2949,6 +2963,7 @@ static void test_d1_relog() {
     Harness h3(tk);
     CHECK(h3.s->class_id() == 7 && h3.s->character_stats()->class_enum() == 7, "a Tank record plays as a Tank");
 }
+// C | Y | B captures, CoA code
 
 static void test_d1_saver_progress() {
     std::printf("plan D1: the progress reaches the character service through the saver\n");
@@ -2970,6 +2985,247 @@ static void test_d1_saver_progress() {
         CHECK(wait_until([&] { return api.progress_count() == 1; }) && api.progress[0].first == kCyb && api.progress[0].second == p, "a progress handed to the saver reaches SaveProgress whole");
         CHECK(saver.progress_saved() == 1, "counted as saved");
     }
+}
+
+// ============================================================================================================================
+//  Gathering stage 2, part "Professions and GM items": the 22 professions, the GM artisan scrolls and the tools, on the real content.db
+// ============================================================================================================================
+
+/// The real content.db: AOC_CONTENT_DB, else the working tree's dist/content/content.db; null when there is none (the tests then skip).
+static const char* professions_db_path() {
+    const char* env = std::getenv("AOC_CONTENT_DB");
+    if (env && *env) return env;
+#ifdef PROFESSIONS_REAL_DB
+    if (fs::exists(PROFESSIONS_REAL_DB)) return PROFESSIONS_REAL_DB;
+#endif
+    return nullptr;
+}
+
+namespace g2 {
+inline constexpr int64_t kMining25 = 6064632989080814323ll, kMining9 = 6064634615541072001ll, kAlchemy9 = 6064634615657267369ll, kAll25 = 6064632988513402885ll;
+inline constexpr int64_t kT3Pickaxe = 6064629376467927053ll;   // Gear_Artisan_Mining_Tool_Pickaxe_T3_0: the Mining Level 25 scroll's tool
+inline constexpr int64_t kMining = 108752769996425ll, kAlchemy = 108752757020295ll;
+inline constexpr int64_t kLtMining = 109460719621753ll, kLtAlchemy = 109460747540106ll;
+inline constexpr int64_t kNovice = 108906339653240ll, kApprentice = 108906340767353ll, kJourneyman = 108906342012538ll;
+}  // namespace g2
+
+static repl::DesignDataId leveling_id(int64_t leveling_type) {
+    repl::DesignDataId d;
+    d.guid = leveling_type;
+    d.type_id = content::kTypeLevelingTypeDef;
+    return d;
+}
+
+/// The Bard's worn kit and the GM artisan scrolls of the real file in bag slots 4 ... (guids 300 ...).
+static svc::Character record_with_artisan_scrolls(const std::vector<int64_t>& scrolls) {
+    svc::Character c = cyb_record();
+    std::vector<svc::InventoryItem> items;
+    for (const auto& it : c.items)
+        if (it.container == Worn) items.push_back(it);
+    for (size_t i = 0; i < scrolls.size(); ++i) items.push_back(make_item(Bag, 4 + static_cast<int>(i), scrolls[i], 300 + static_cast<uint32_t>(i)));
+    c.items = std::move(items);
+    return c;
+}
+
+static std::string profession_name(const professions::Book& book, int64_t leveling_type) {
+    for (const professions::Profession& p : book.all())
+        if (p.leveling_type == leveling_type) return p.name;
+    return "?";
+}
+
+static void test_g2_join() {
+    const char* path = professions_db_path();
+    if (!path) {
+        std::printf("Gathering stage 2: the join's professions: skipped (no real content.db)\n");
+        return;
+    }
+    std::printf("Gathering stage 2: the join lists the professions\n");
+    // a new character: 22 entries, all Novice, in the order of the retail join; no profession XP
+    {
+        Harness h(record_with_artisan_scrolls({}), true, true, path);
+        const professions::Book* book = h.fx.world->professions();
+        CHECK(book && book->size() == 22 && h.s->professions().valid(), "the world and the session have the 22 professions");
+        const auto certs = h.mirror.tracker.certifications();
+        bool order = certs.size() == std::size(capture_leveling::kJoinCertifications), novice = true;
+        for (size_t i = 0; order && i < certs.size(); ++i) {
+            order = certs[i].key.guid == capture_leveling::kJoinCertifications[i].key && certs[i].key.type_id == content::kTypeLevelingTypeDef;
+            novice = novice && certs[i].value == g2::kNovice;
+        }
+        CHECK(order && novice && certs.size() == 22, "the client's LevelingCertificationsFastMap has the 22 professions' leveling types in the retail join's order, each Novice");
+        const auto xp = h.mirror.tracker.experience();
+        CHECK(xp.size() == 1 && xp[0].key.guid == content::kGuidAdventuring, "the ExperienceFastMap has Adventuring only: a profession with no XP is not listed");
+        bool all_novice = true;
+        for (const professions::Profession& p : book->all()) all_novice = all_novice && h.s->professions().state(p.guid) == professions::State{};
+        CHECK(all_novice, "every profession is Novice, level 1, no XP");
+        CHECK(h.sink.progress.empty() && !h.s->progress_changed(), "nothing is saved at the join");
+        CHECK(h.mirror.unreadable == 0 && h.mirror.tracker_updates == 1, "the join's XPTracker is still one chain");
+    }
+    // a character in the state of the retail join (1198 pkt 1510): its certification levels and its professions' XP
+    {
+        Harness probe(record_with_artisan_scrolls({}), true, true, path);
+        const professions::Book& book = *probe.fx.world->professions();
+        svc::Character c = record_with_artisan_scrolls({});
+        for (const professions::Profession& p : book.all()) {
+            int64_t cert = g2::kNovice, xp = 0;
+            for (const auto& e : capture_leveling::kJoinCertifications)
+                if (e.key == p.leveling_type) cert = e.value;
+            for (const auto& e : capture_leveling::kJoinExperience)
+                if (e.key == p.leveling_type) xp = e.value;
+            const int tier = book.tier_of_guid(cert);
+            c.professions.push_back({p.guid, tier, book.level_of(p, xp, tier), xp});
+        }
+        Harness h(c, true, true, path);
+        const auto certs = h.mirror.tracker.certifications();
+        bool same = certs.size() == std::size(capture_leveling::kJoinCertifications);
+        for (size_t i = 0; same && i < certs.size(); ++i)
+            same = certs[i].key.guid == capture_leveling::kJoinCertifications[i].key && certs[i].value == capture_leveling::kJoinCertifications[i].value;
+        CHECK(same, "the join's LevelingCertificationsFastMap equals the retail join's: the same 22 keys in the same order, the same certification levels");
+        std::map<int64_t, int64_t> want, got;
+        for (const auto& e : capture_leveling::kJoinExperience)
+            if (profession_name(book, e.key) != "?") want[e.key] = e.value;
+        for (const auto& e : h.mirror.tracker.experience())
+            if (profession_name(book, e.key.guid) != "?") got[e.key.guid] = e.value;
+        CHECK(want.size() == 19 && got == want, "the ExperienceFastMap lists the same 19 professions with the same XP (the 3 with none are not listed)");
+        const professions::Professions& p = h.s->professions();
+        CHECK(p.level(108752769996425ll) == 19 && p.tier(108752769996425ll) == 1 && p.level(108752769996426ll) == 21 && p.tier(108752769996426ll) == 2 && p.level(108752770061964ll) == 18,
+              "Mining is level 19 Apprentice, Lumberjacking 21 Journeyman, Fishing 18 Apprentice (the curve and the tiers fit the retail state)");
+    }
+}
+
+static void test_g2_scrolls() {
+    const char* path = professions_db_path();
+    if (!path) {
+        std::printf("Gathering stage 2: the scrolls: skipped (no real content.db)\n");
+        return;
+    }
+    std::printf("Gathering stage 2: the GM artisan scrolls, the XPTracker, the level-ups, the saves, the tool and a relog\n");
+    Harness h(record_with_artisan_scrolls({g2::kMining25, g2::kMining9, g2::kAlchemy9, g2::kAll25}), true, true, path);
+    const professions::Book& book = *h.fx.world->professions();
+    CHECK(h.mirror.unreadable == 0 && h.s->professions().valid(), "(joined)");
+
+    // Alchemy Level 9: level 9, still Novice
+    size_t chains = h.got.size();
+    const size_t stat_updates0 = h.mirror.stat_updates.size();
+    h.request_both(item_used(3, 6, guid_n(302)), item_activate(3, 6, guid_n(302)));
+    CHECK(h.s->uses_applied() == 1 && h.s->uses_refused() == 0 && h.mirror.unreadable == 0 && !h.s->failed(), "the Alchemy Level 9 scroll is used");
+    CHECK(h.s->professions().state(g2::kAlchemy) == (professions::State{0, 9, 32401}), "Alchemy is Novice level 9 with 32,401 XP (the XP from the start of level 1 to level 9, plus 1)");
+    CHECK(h.s->inventory().at(Bag, 6) == nullptr && mirror_matches(h), "the scroll is consumed");
+    const auto alchemy_xp = h.mirror.tracker.experience(leveling_id(g2::kLtAlchemy));
+    const auto alchemy_cert = h.mirror.tracker.certification(leveling_id(g2::kLtAlchemy));
+    CHECK(alchemy_xp && *alchemy_xp == 32401 && alchemy_cert && *alchemy_cert == g2::kNovice, "the client's XPTracker: Alchemy 32,401 XP, Novice");
+    const auto adv = h.mirror.tracker.experience(adventuring_id());
+    CHECK(adv && *adv == 0 && h.s->progress() == (leveling::Progress{1, 0, 0}) && h.mirror.level == 1, "Adventuring is untouched, the pawn's Level is still 1");
+    CHECK(h.mirror.level_ups == (std::vector<int>{9}) && h.mirror.level_up_categories == (std::vector<int64_t>{g2::kLtAlchemy}), "BroadcastPlayLevelUpEffects(Alchemy's leveling type, 9) was sent");
+    CHECK(count_calls(pc_calls_since(h, chains), "ClientUpdateSkillOnActionbar") == 0 && h.mirror.stat_updates.size() == stat_updates0, "no skill, no stat changed");
+    CHECK(h.sink.progress.size() == 1 && h.sink.progress[0].second.professions.size() == 22, "the progress is saved with all 22 profession rows");
+    {
+        const auto& rows = h.sink.progress[0].second.professions;
+        const auto it = std::find_if(rows.begin(), rows.end(), [](const svc::ProfessionState& r) { return r.profession_guid == g2::kAlchemy; });
+        CHECK(it != rows.end() && it->certification_tier == 0 && it->level == 9 && it->xp == 32401 && rows[0].profession_guid < rows[21].profession_guid,
+              "Alchemy's row is Novice, level 9, 32,401 XP; the rows are in guid order");
+    }
+// -- CoA x C.Y.B --
+
+    // Mining Level 25: XP, Promote, XP, Promote, XP, and the T3 pickaxe in the bag
+    chains = h.got.size();
+    h.request_both(item_used(3, 4, guid_n(300)), item_activate(3, 4, guid_n(300)));
+    CHECK(h.s->uses_applied() == 2 && h.s->professions().state(g2::kMining) == (professions::State{2, 25, 266400}), "the Mining Level 25 scroll: Journeyman, level 25, 266,400 XP");
+    const auto mining_cert = h.mirror.tracker.certification(leveling_id(g2::kLtMining));
+    const auto mining_xp = h.mirror.tracker.experience(leveling_id(g2::kLtMining));
+    CHECK(mining_cert && *mining_cert == g2::kJourneyman && mining_xp && *mining_xp == 266400, "the client's XPTracker: Mining Journeyman, 266,400 XP");
+    CHECK(h.mirror.level_up_categories == (std::vector<int64_t>{g2::kLtAlchemy, g2::kLtMining}) && h.mirror.level_ups == (std::vector<int>{9, 25}), "a second broadcast: Mining's leveling type, level 25");
+    int pickaxe_slot = -1;
+    std::string pickaxe_guid;
+    for (const svc::InventoryItem& it : h.s->inventory().items()) {
+        if (it.container == Bag && it.item_record_id == g2::kT3Pickaxe) {
+            pickaxe_slot = it.slot;
+            pickaxe_guid = it.instance_guid;
+        }
+    }
+    CHECK(pickaxe_slot >= 0 && h.s->inventory().at(Bag, 4) == nullptr && mirror_matches(h), "the T3 pickaxe arrived in the bag, the scroll is gone, and the client's bag agrees");
+    CHECK(count_calls(pc_calls_since(h, chains), "ClientReceiveStorageEvent") == 2, "two storage events: the scroll's Remove and the pickaxe's Add");
+    CHECK(h.s->character_stats()->profession_levels().count("Mining") == 1 && h.s->character_stats()->profession_levels().at("Mining") == 25 &&
+              h.s->character_stats()->profession_levels().at("Alchemy") == 9,
+          "the stat engine answers GetPlayerProfessionLevel with the real levels");
+    CHECK(h.sink.progress.size() == 2, "saved again");
+
+    // the tool equips into its slot (the kit's pickaxe goes back to the bag)
+    if (pickaxe_slot >= 0) {
+        h.step(milliseconds(150));
+        h.request_both(item_used(3, pickaxe_slot, pickaxe_guid), item_activate(3, pickaxe_slot, pickaxe_guid));
+        CHECK(h.s->inventory().at(Worn, 26) && h.s->inventory().at(Worn, 26)->item_record_id == g2::kT3Pickaxe && mirror_matches(h),
+              "the T3 pickaxe is worn in the Pickaxe slot 26, the client's equipment agrees");
+    }
+
+    // Mining Level 9 for a level 25 miner: refused, the scroll stays
+    const size_t refused = h.s->uses_refused(), applied = h.s->uses_applied();
+    h.request_both(item_used(3, 5, guid_n(301)), item_activate(3, 5, guid_n(301)));
+    CHECK(h.s->uses_refused() == refused + 1 && h.s->uses_applied() == applied && h.s->inventory().at(Bag, 5) && h.s->inventory().at(Bag, 5)->item_record_id == g2::kMining9,
+          "a Level 9 scroll for a level 25 miner is refused and stays");
+
+    // _All: level 25 in every profession (modelled), Journeyman, a broadcast for each profession that gained a level
+    const size_t broadcasts = h.mirror.level_ups.size();
+    h.request_both(item_used(3, 7, guid_n(303)), item_activate(3, 7, guid_n(303)));
+    bool every = true;
+    for (const professions::Profession& p : book.all()) {
+        const professions::State s = h.s->professions().state(p.guid);
+        every = every && s.level == 25 && s.tier == 2;
+    }
+    CHECK(every && h.s->professions().state(g2::kMining) == (professions::State{2, 25, 266400}), "_All: all 22 professions are level 25 and Journeyman (Mining, already there, is left as it was)");
+    const auto certs = h.mirror.tracker.certifications();
+    bool journeymen = certs.size() == 22;
+    for (const auto& c : certs) journeymen = journeymen && c.value == g2::kJourneyman;
+    CHECK(journeymen && h.mirror.tracker.experience().size() == 23, "the client's maps: 22 Journeyman certifications, 22 professions with XP (and Adventuring)");
+    CHECK(h.mirror.level_ups.size() == broadcasts + 21, "21 level-up broadcasts (every profession but Mining gained levels)");
+    CHECK(h.mirror.unreadable == 0 && !h.s->failed() && h.s->inventory().at(Bag, 7) == nullptr, "everything the server sent reads; the scroll is consumed");
+
+    // the end hands the progress over once more, and a relog from the saved rows plays the same professions
+    h.s->finish("end");
+    CHECK(h.sink.progress.size() >= 3, "(saved)");
+    svc::Character relog = record_with_artisan_scrolls({});
+    relog.professions = h.sink.progress.back().second.professions;
+    relog.experience = h.sink.progress.back().second.experience;
+    Harness again(relog, true, true, path);
+    bool same = again.s->professions().valid();
+    for (const professions::Profession& p : book.all()) same = same && again.s->professions().state(p.guid) == h.s->professions().state(p.guid);
+    CHECK(same, "a relog from the saved rows plays the same 22 professions");
+    const auto recerts = again.mirror.tracker.certifications();
+    bool rejourney = recerts.size() == 22;
+    for (const auto& c : recerts) rejourney = rejourney && c.value == g2::kJourneyman;
+    const auto re_xp = again.mirror.tracker.experience(leveling_id(g2::kLtMining));
+    CHECK(rejourney && re_xp && *re_xp == 266400 && again.mirror.tracker.experience().size() == 23, "and the join lists them: Journeyman everywhere, Mining 266,400 XP");
+}
+
+static void test_g2_saver_round_trip() {
+    const char* path = professions_db_path();
+    if (!path) {
+        std::printf("Gathering stage 2: the saver round trip: skipped (no real content.db)\n");
+        return;
+    }
+    std::printf("Gathering stage 2: the professions reach the character service through the saver and come back\n");
+    // the session hands the progress to its sink; a real CharacterSaver hands it to the (fake) character service, whole
+    Harness h(record_with_artisan_scrolls({g2::kMining25}), true, true, path);
+    h.request_both(item_used(3, 4, guid_n(300)), item_activate(3, 4, guid_n(300)));
+    CHECK(h.s->professions().state(g2::kMining) == (professions::State{2, 25, 266400}) && !h.sink.progress.empty(), "the scroll is used and the progress is handed over");
+    FakeCharacters api;
+    svc::Progress saved;
+    {
+        CharacterSaver saver(api, quick());
+        saver.save_progress(kCyb, h.sink.progress.back().second);
+        CHECK(wait_until([&] { return api.progress_count() == 1; }), "the saver gives it to SaveProgress");
+        CHECK(saver.progress_saved() == 1, "counted as saved");
+    }
+    {
+        std::lock_guard<std::mutex> l(api.mu);
+        if (!api.progress.empty()) saved = api.progress.back().second;
+    }
+    CHECK(saved.professions.size() == 22 && saved == h.sink.progress.back().second, "the character service got all 22 profession rows, the progress whole");
+    svc::Character relog = record_with_artisan_scrolls({});
+    relog.professions = saved.professions;
+    Harness again(relog, true, true, path);
+    CHECK(again.s->professions().state(g2::kMining) == (professions::State{2, 25, 266400}), "a relog from the character service's rows: Mining Journeyman, level 25, 266,400 XP");
+    const auto cert = again.mirror.tracker.certification(leveling_id(g2::kLtMining));
+    CHECK(cert && *cert == g2::kJourneyman, "the join's XPTracker says so");
 }
 
 // ============================================================================================================================
@@ -4071,6 +4327,154 @@ static void test_d1s2_stored_garbage() {
     CHECK(h.mirror.unreadable == 0 && !h.s->failed() && client_list(h, bard).size() == 3, "the session joins and the client's list of the tree is the granted ranks and Menacing");
 }
 
+// ---- Gathering stage 3, "Resource storage": the resource containers on a connection -------------------------------------------------
+
+namespace fr = content_fixture::resource;
+static const ItemContainer R0 = ItemContainer::Resource0;
+
+/// The Bard's kit and, in Resource0 (the Sanctus bag in slot 23: 6 x 4 cells), a stack of 7 oak (1 x 3) at (0, 0), 3 daffodils (1 x 2) at (1, 0) and 20 coal (1 x 1) at (2, 0).
+static std::vector<svc::InventoryItem> resource_kit() {
+    std::vector<svc::InventoryItem> out = bard_items();
+    out.push_back(make_item(R0, 0, fr::kOak, 300, 7));
+    out.push_back(make_item(R0, 1, fr::kDaffodil, 301, 3));
+    out.push_back(make_item(R0, 2, fr::kCoal, 302, 20));
+    return out;
+}
+
+static void test_resource_join() {
+    std::printf("Gathering stage 3: the join opens the resource container with what it holds\n");
+    Harness h(record_with(resource_kit()));
+    const items::Inventory& inv = h.s->inventory();
+    CHECK(inv.grid(R0).cells() == 24 && inv.grid(ItemContainer::Resource1).empty() && inv.count(R0) == 3, "Resource0 is the Sanctus bag's 6 x 4 and holds the three stacks; no other container");
+    CHECK(mirror_matches(h), "the client was told every item of every container it holds, the resource ones included");
+    const auto oak = h.mirror.storage.find({3, 0});
+    CHECK(oak != h.mirror.storage.end() && oak->second.record_id == static_cast<uint64_t>(fr::kOak) && oak->second.quantity == 7, "the oak (x7) sits in the client's Resource0 slot 0");
+    // OwnerInfo.ResourceContainers names the one container
+    const bs::SessionGuids& g = h.s->bootstrap().setup().guids;
+    const repl::Subobject* owner = h.s->bootstrap().pawn().find(g.owner_info);
+    const repl::Value* rc = owner ? owner->obj.state.get(*owner->obj.schema, "ResourceContainers") : nullptr;
+    const auto* arr = rc ? rc->get_if<repl::ArrayValue>() : nullptr;
+    bool named = arr && arr->elements.size() == 3;
+    if (named) {
+        const auto first = arr->elements[0].values.find(1);
+        const auto* o = first == arr->elements[0].values.end() ? nullptr : first->second.get_if<emit::FIntrepidNetworkGUID>();
+        named = o && *o == g.resource_storage[0] && arr->elements[1].values.empty() && arr->elements[2].values.empty();
+    }
+    CHECK(named, "OwnerInfo.ResourceContainers names Resource0 and leaves the other two null");
+    CHECK(h.mirror.payloads >= 4, "the join sent the Backpack's, the Equipment's, the Quest storage's and Resource0's payloads");
+}
+// [CoA + C_Y_B]
+
+static void test_resource_requests() {
+    std::printf("Gathering stage 3: the client's drags inside the resource container\n");
+    Harness h(record_with(resource_kit()));
+    const bs::SessionGuids g = h.s->bootstrap().setup().guids;
+    const std::string daffodil = guid_n(301), coal = guid_n(302);
+    // a Move inside Resource0: the daffodils from (1, 0) to (3, 1)
+    MoveSpec m;
+    m.from_object = g.resource_storage[0];
+    m.to_object = g.resource_storage[0];
+    m.from_slot = 1;
+    m.from_count = 3;
+    m.to_slot = 9;
+    m.source_guid = m.event_guid = daffodil;
+    const size_t events = h.mirror.events.size();
+    h.request(storage_move(m), h.pc_ch);
+    CHECK(h.s->inventory().at(R0, 9) && !h.s->inventory().at(R0, 1) && h.s->inventory().at(R0, 9)->quantity == 3 && h.mirror.events.size() == events + 2 && mirror_matches(h),
+          "a Move inside Resource0 is made: a Remove and an Add on the container's guid, and the client agrees");
+    const bool on_container = h.mirror.events.size() == events + 2 && h.mirror.events[events + 1].targets[0].object == g.resource_storage[0] && h.mirror.events[events + 1].targets[0].slots[0].slot == 9;
+    CHECK(on_container, "...the Add names Resource0's guid and slot 9");
+
+    // refusals change nothing and the client is sent the containers again
+    const items::Inventory before = h.s->inventory();
+    const size_t refused = h.s->item_requests_refused(), payloads = h.mirror.payloads;
+    const auto expect_refused = [&](MoveSpec spec, const char* what) {
+        const size_t r0 = h.s->item_requests_refused();
+        h.request(storage_move(spec), h.pc_ch);
+        const bool ok = h.s->item_requests_refused() == r0 + 1 && h.s->inventory() == before;
+        if (!ok) std::printf("    (%s: refused %zu -> %zu)\n", what, r0, h.s->item_requests_refused());
+        return ok;
+    };
+    MoveSpec onto = m;   // the daffodils onto the oak
+    onto.from_slot = 9;
+    onto.to_slot = 0;
+    CHECK(expect_refused(onto, "onto the oak"), "a Move onto another stack is refused (a swap or a fill)");
+    MoveSpec swap = onto;
+    swap.type = static_cast<uint8_t>(repl::StorageEventType::Swap);
+    swap.target_guid = guid_n(300);
+    swap.to_count = 7;
+    CHECK(expect_refused(swap, "swap"), "a Swap in the container is refused");
+    MoveSpec fill = onto;
+    fill.type = static_cast<uint8_t>(repl::StorageEventType::Fill);
+    CHECK(expect_refused(fill, "fill"), "a Fill is refused");
+    MoveSpec destroy = onto;
+    destroy.type = static_cast<uint8_t>(repl::StorageEventType::Remove);
+    CHECK(expect_refused(destroy, "destroy"), "a Remove (destroying the stack by dragging it out) is refused");
+    MoveSpec to_bag = m;   // the coal into the Backpack
+    to_bag.from_slot = 2;
+    to_bag.from_count = 20;
+    to_bag.source_guid = to_bag.event_guid = coal;
+    to_bag.to_object = g.backpack;
+    to_bag.to_slot = 30;
+    CHECK(expect_refused(to_bag, "to the Backpack"), "a resource stack dragged into the Backpack is refused");
+    MoveSpec from_bag = m;   // a potion into the resource container
+    from_bag.from_object = g.backpack;
+    from_bag.from_slot = 1;
+    from_bag.from_count = 5;
+    from_bag.source_guid = from_bag.event_guid = guid_n(201);
+    from_bag.to_object = g.resource_storage[0];
+    from_bag.to_slot = 20;
+    CHECK(expect_refused(from_bag, "from the Backpack"), "a potion dragged into the resource container is refused");
+    MoveSpec third = m;   // a container with no bag
+    third.from_slot = 9;
+    third.to_object = g.resource_storage[2];
+    third.to_slot = 0;
+    CHECK(expect_refused(third, "third container"), "a drag to Resource2, which the character has no bag for, is refused");
+    CHECK(h.s->item_requests_refused() == refused + 7, "seven refusals counted");
+    CHECK(h.mirror.payloads > payloads && mirror_matches(h), "the client was sent its containers again after the refusals, and agrees");
+}
+
+static void test_resource_repair() {
+    std::printf("Gathering stage 3: the login moves the Backpack's resource items to the container and saves that\n");
+    std::vector<svc::InventoryItem> items = bard_items();
+    items.push_back(make_item(Bag, 4, fr::kOak, 310, 5));
+    items.push_back(make_item(Bag, 5, fr::kDaffodil, 311, 3));
+    items.push_back(make_item(Bag, 6, fi::kPotion, 312, 2));
+    Harness h(record_with(items));
+    const items::Inventory& inv = h.s->inventory();
+    CHECK(inv.at(R0, 0) && inv.at(R0, 0)->item_record_id == fr::kOak && inv.at(R0, 1) && inv.at(R0, 1)->item_record_id == fr::kDaffodil && !inv.at(Bag, 4) && !inv.at(Bag, 5) && inv.at(Bag, 6),
+          "the oak and the daffodils moved from the Backpack to Resource0 (slots 0 and 1); the potion stayed");
+    CHECK(mirror_matches(h) && h.mirror.storage.count({3, 0}) == 1 && h.mirror.storage.count({0, 4}) == 0, "the client was told the repaired layout at the join (no resource item in its Backpack)");
+    CHECK(h.s->inventory_changed() && h.s->inventory_dirty(), "the session knows the layout differs from the record's and saves it");
+    h.s->finish("the test");
+    bool saved = false;
+    for (const auto& s : h.sink.inventories) {
+        bool oak = false, daffodil = false, none_in_bag = true;
+        for (const svc::InventoryItem& it : s.items) {
+            oak = oak || (it.container == R0 && it.slot == 0 && it.item_record_id == fr::kOak);
+            daffodil = daffodil || (it.container == R0 && it.slot == 1 && it.item_record_id == fr::kDaffodil);
+            none_in_bag = none_in_bag && !(it.container == Bag && (it.item_record_id == fr::kOak || it.item_record_id == fr::kDaffodil));
+        }
+        saved = saved || (oak && daffodil && none_in_bag);
+    }
+    CHECK(saved, "the inventory handed to the saver has the resource items in Resource0");
+}
+// -- C O A . Cyb --
+
+static void test_resource_no_room_at_login() {
+    std::printf("Gathering stage 3: a resource item that finds no room at the login stays in the Backpack\n");
+    std::vector<svc::InventoryItem> items = bard_items();
+    for (uint32_t i = 0; i < 7; ++i) {   // seven oaks: six fit a 6 x 4 grid
+        svc::InventoryItem oak = make_item(Bag, 4 + static_cast<int>(i), fr::kOak, 320 + i, 20);
+        oak.quality = static_cast<int32_t>(i + 1);
+        items.push_back(oak);
+    }
+    Harness h(record_with(items));
+    const items::Inventory& inv = h.s->inventory();
+    CHECK(inv.count(R0) == 6 && inv.at(Bag, 10) && inv.at(Bag, 10)->item_record_id == fr::kOak, "six oaks moved, the seventh stays in the Backpack (nothing is deleted)");
+    CHECK(inv.size() == bard_items().size() + 7, "every item is still there");
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);   // (a crash must not take the last results with it)
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
@@ -4134,6 +4538,13 @@ int main() {
     test_d1s2_shapes();
     test_d1s2_stored_garbage();
     test_d1s2_regeneration();
+    test_g2_join();
+    test_g2_scrolls();
+    test_g2_saver_round_trip();
+    test_resource_join();
+    test_resource_requests();
+    test_resource_repair();
+    test_resource_no_room_at_login();
     test_real_content_db();
 
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

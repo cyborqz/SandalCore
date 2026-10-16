@@ -99,6 +99,15 @@ GenericNpcs::GenericNpcs(const CapturedData& captured, const npc::MotionTable* b
     }
     donor_ = wolf ? wolf : first;
     if (donor_) donor_path_ = donor_->archetype_path;
+    // the living huntable's eighth block: the Hunting_Raven's open (capture 914), whose interactable the other kinds' differ from in two ids only
+    for (const OpenTemplate& t : captured.opens()) {
+        if (t.category != "npc" || t.archetype_path.find("/Hunting_Raven.Default__Hunting_Raven_C") == std::string::npos) continue;
+        const int i = t.find("UInteractableComponent");
+        if (i > 0 && t.blocks.size() == 8) {
+            hunt_block_ = &t.blocks[static_cast<size_t>(i)];
+            living_ = &t;
+        }
+    }
 }
 
 const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset, Verdict* why) const {
@@ -112,7 +121,47 @@ const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset,
     if (!config_.enabled) return fail(Verdict::Disabled);
     if (!blueprints_ || blueprints_->empty()) return fail(Verdict::NoTable);
     if (!excluded_.empty() && (excluded_.count(lower(blueprint_leaf(path))) || excluded_.count(lower(path)))) return fail(Verdict::Excluded);
-    if (const auto it = made_.find(path); it != made_.end()) return &it->second;
+    const OpenTemplate* plain = nullptr;
+    if (const auto it = made_.find(path); it != made_.end()) plain = &it->second;
+    if (!plain) plain = make_plain(asset, why);
+    if (!plain) return nullptr;
+    // a huntable creature: the plain template with the eighth block (the template is kept per interaction: two assets may share one Blueprint, HuntingTest and Hunting_Wolf do)
+    if (hunt_block_ && asset.interaction_def != 0 && asset.interact_component != 0 && config_.hunting_defs.count(asset.interaction_def)) {
+        const std::string key = path + "#hunting#" + std::to_string(asset.interact_component) + "#" + std::to_string(asset.interaction_def);
+        if (const auto it = made_.find(key); it != made_.end()) return &it->second;
+        OpenTemplate t = *plain;
+        // a living huntable's other blocks (capture 914's Raven, to the bit in test_worldd_hunting): the CombatInfo's three flags written, the AbilityComponent empty, the nameplate's name
+        for (const char* cls : {"UNPCCombatInfo", "UAoCAbilityComponent"}) {
+            const int to = t.find(cls), from = living_ ? living_->find(cls) : -1;
+            if (to > 0 && from > 0) t.blocks[static_cast<size_t>(to)].state = living_->blocks[static_cast<size_t>(from)].state;
+        }
+        if (const auto name = config_.hunting_names.find(asset.interaction_def); name != config_.hunting_names.end()) {
+            if (const int ni = t.find("UNPCInfo"); ni > 0) {
+                ParsedBlock& info = t.blocks[static_cast<size_t>(ni)];
+                if (info.schema) info.state.state.set(*info.schema, "CharacterName", repl::Value::str(name->second));
+            }
+        }
+        ParsedBlock block = *hunt_block_;
+        const bool ok = block.schema && block.state.state.set(*block.schema, "ComponentDefId.Guid", repl::Value::i64(asset.interact_component));
+        const repl::Value* data = ok ? block.state.state.get(*block.schema, "InteractionInputData") : nullptr;
+        const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+        if (!arr || arr->elements.empty()) return plain;   // (the captured block is not what it was read as: the creature stays plain)
+        repl::ArrayValue copy = *arr;
+        copy.elements[0].values[6] = repl::Value::i64(asset.interaction_def);   // InteractionInputData.PlayerInteractDefinition.Guid
+        if (!block.state.state.set(*block.schema, "InteractionInputData", repl::Value(std::move(copy)))) return plain;
+        t.blocks.push_back(std::move(block));
+        ++hunting_made_;
+        return &made_.emplace(key, std::move(t)).first->second;
+    }
+    return plain;
+}
+
+const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, Verdict* why) const {
+    const auto fail = [&](Verdict v) -> const OpenTemplate* {
+        if (why) *why = v;
+        return nullptr;
+    };
+    const std::string& path = asset.archetype_path;
     const auto row = blueprints_->find(path);
     if (!row) return fail(Verdict::NotPawn);
     if (!donor_) return fail(Verdict::NoDonor);

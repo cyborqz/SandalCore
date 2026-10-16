@@ -30,6 +30,7 @@
 #include "protocol/schema/generated/AGameStateBase.h"
 #include "protocol/schema/generated/AGatherableActor.h"
 #include "protocol/schema/generated/AInfo.h"
+#include "protocol/schema/generated/AIntrepidStateIFA.h"
 #include "protocol/schema/generated/ALootPile.h"
 #include "protocol/schema/generated/ANPCCharacter.h"
 #include "protocol/schema/generated/ANodeLayoutReplicator.h"
@@ -53,6 +54,7 @@
 #include "protocol/schema/generated/UCharacterInfo.h"
 #include "protocol/schema/generated/UCharacterSecondaryInfo.h"
 #include "protocol/schema/generated/UInteractableComponent.h"
+#include "protocol/schema/generated/UIntrepidFoliageStateComponent.h"
 #include "protocol/schema/generated/UIntrepidRepKeyComponent.h"
 #include "protocol/schema/generated/UItemStorageComponent.h"
 #include "protocol/schema/generated/ULevelingComponent.h"
@@ -92,6 +94,7 @@ constexpr Entry kByName[] = {
     {"AGameStateBase", &kAGameStateBase},
     {"AGatherableActor", &kAGatherableActor},
     {"AInfo", &kAInfo},
+    {"AIntrepidStateIFA", &kAIntrepidStateIFA},
     {"ALootPile", &kALootPile},
     {"ANPCCharacter", &kANPCCharacter},
     {"ANodeLayoutReplicator", &kANodeLayoutReplicator},
@@ -116,6 +119,7 @@ constexpr Entry kByName[] = {
     {"UCharacterInfo", &kUCharacterInfo},
     {"UCharacterSecondaryInfo", &kUCharacterSecondaryInfo},
     {"UInteractableComponent", &kUInteractableComponent},
+    {"UIntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
     {"UIntrepidRepKeyComponent", &kUIntrepidRepKeyComponent},
     {"UItemStorageComponent", &kUItemStorageComponent},
     {"ULevelingComponent", &kULevelingComponent},
@@ -146,6 +150,7 @@ constexpr Entry kComponents[] = {
     {"GroundMountComponent", &kUMountComponent},
     {"InteractInfo", &kUNPCSecondaryInfo},
     {"InteractableComponent", &kUInteractableComponent},
+    {"IntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
     {"NPCAppearanceComponent", &kUNPCAppearanceComponent},
     {"OwnerInfo", &kUOwnerInfoComponent},
     {"QuestStorageComponent", &kUItemStorageComponent},
@@ -169,6 +174,7 @@ constexpr const ClassSchema* kAll[] = {
     &kAGameStateBase,
     &kAGatherableActor,
     &kAInfo,
+    &kAIntrepidStateIFA,
     &kALootPile,
     &kANPCCharacter,
     &kANodeLayoutReplicator,
@@ -192,6 +198,7 @@ constexpr const ClassSchema* kAll[] = {
     &kUCharacterInfo,
     &kUCharacterSecondaryInfo,
     &kUInteractableComponent,
+    &kUIntrepidFoliageStateComponent,
     &kUIntrepidRepKeyComponent,
     &kUItemStorageComponent,
     &kULevelingComponent,

@@ -8,6 +8,7 @@
 // ============================================================================
 #include "protocol/repl/item_codec.h"
 
+#include "protocol/repl/callout_codec.h"
 #include "protocol/repl/codecs.h"
 
 #include <algorithm>
@@ -226,6 +227,7 @@ std::optional<ItemInstance> read_item_instance(PacketReader& r) {
     if (overran(r)) return std::nullopt;
     return it;
 }
+// Cyb and C-O-A
 
 bool write_item_instance(BunchWriter& out, const ItemInstance& it) {
     if (!item_instance_fits(it)) return false;
@@ -275,11 +277,83 @@ bool write_item_instance(BunchWriter& out, const ItemInstance& it) {
     return true;
 }
 
+// ---- FCalloutQueueInfo (the optional struct of an FItemStorageEvent) -----------
+
+namespace {
+
+bool callout_fits(const CalloutQueueInfo& c) {
+    return text_fits(c.text_message) && fstring_fits(c.message) && localized_message_fits(c.localized_message) && fstring_fits(c.formatted_on_screen) &&
+           fstring_fits(c.from_source_player) && fstring_fits(c.chat_emblems) && item_instance_fits(c.item);
+}
+
+/// NetSerialize 0x145c599d0, in the exe's order: the FText (+0x20), the Message (+0x10), the FLocalizedMessage (+0x30: 0x1456f4680, the table and the key as FStrings and the
+/// arguments' count), the type byte (+0x94), PointSize (+0x90, an int32), the ChatCategory byte (+0x95), three FStrings (+0x70, +0x80, +0x98), NodeLevel (+0x96), a UBOOL (+0x97),
+/// the FItemInstance (+0xa8), two int64 (+0x198, +0x1a0), an FVector (+0x1b8: 0x14141ed80, three doubles at AoC's net version) and the creation time (+0x1d0).
+std::optional<CalloutQueueInfo> read_callout(PacketReader& r) {
+    CalloutQueueInfo c;
+    auto text = read_text(r);
+    if (!text) return std::nullopt;
+    c.text_message = std::move(*text);
+    auto message = read_fstring(r);
+    if (!message) return std::nullopt;
+    c.message = std::move(*message);
+    auto localized = read_localized_message(r);
+    if (!localized) return std::nullopt;
+    c.localized_message = std::move(*localized);
+    c.callout_type = r.read_uint8();
+    c.point_size = static_cast<int32_t>(r.read_uint32());
+    c.chat_category = r.read_uint8();
+    auto formatted = read_fstring(r);
+    auto from = read_fstring(r);
+    auto emblems = read_fstring(r);
+    if (!formatted || !from || !emblems) return std::nullopt;
+    c.formatted_on_screen = std::move(*formatted);
+    c.from_source_player = std::move(*from);
+    c.chat_emblems = std::move(*emblems);
+    c.node_level = r.read_uint8();
+    const auto by_gm = read_ubool(r);
+    if (!by_gm) return std::nullopt;
+    c.sent_by_gm = *by_gm;
+    auto item = read_item_instance(r);
+    if (!item) return std::nullopt;
+    c.item = std::move(*item);
+    c.toast_record_id = static_cast<int64_t>(r.read_uint64());
+    c.action_response_id = static_cast<int64_t>(r.read_uint64());
+    c.context_location.x = read_double(r);
+    c.context_location.y = read_double(r);
+    c.context_location.z = read_double(r);
+    c.creation_time.ticks = static_cast<int64_t>(r.read_uint64());
+    if (overran(r)) return std::nullopt;
+    return c;
+}
+
+bool write_callout(BunchWriter& out, const CalloutQueueInfo& c) {
+    if (!callout_fits(c)) return false;
+    if (!write_text(out, c.text_message) || !write_fstring(out, c.message) || !write_localized_message(out, c.localized_message)) return false;
+    out.write_uint8(c.callout_type);
+    out.write_uint32(static_cast<uint32_t>(c.point_size));
+    out.write_uint8(c.chat_category);
+    if (!write_fstring(out, c.formatted_on_screen) || !write_fstring(out, c.from_source_player) || !write_fstring(out, c.chat_emblems)) return false;
+    out.write_uint8(c.node_level);
+    write_ubool(out, c.sent_by_gm);
+    if (!write_item_instance(out, c.item)) return false;
+    out.write_uint64(static_cast<uint64_t>(c.toast_record_id));
+    out.write_uint64(static_cast<uint64_t>(c.action_response_id));
+    write_double(out, c.context_location.x);
+    write_double(out, c.context_location.y);
+    write_double(out, c.context_location.z);
+    out.write_uint64(static_cast<uint64_t>(c.creation_time.ticks));
+    return true;
+}
+
+}  // namespace
+
 // ---- FItemStorageEvent --------------------------------------------------------
 
 bool item_storage_event_fits(const ItemStorageEvent& e) {
     if (!item_instance_fits(e.item) || !container_fits(e.move_source) || e.targets.size() > kMaxEventContainers)
         return false;
+    if (e.callout && !callout_fits(*e.callout)) return false;
     return std::all_of(e.targets.begin(), e.targets.end(), container_fits);
 }
 // built by Cyb with C | O | A
@@ -293,7 +367,12 @@ std::optional<ItemStorageEvent> read_item_storage_event(PacketReader& r) {
     if (!item) return std::nullopt;
     e.item = std::move(*item);
     const auto optional_struct = read_ubool(r);
-    if (!optional_struct || *optional_struct) return std::nullopt;   // set: a struct no capture shows, refused
+    if (!optional_struct) return std::nullopt;
+    if (*optional_struct) {   // the FCalloutQueueInfo of a harvest's pick-up popup; one that holds more than the codec models is refused
+        auto callout = read_callout(r);
+        if (!callout) return std::nullopt;
+        e.callout = std::move(*callout);
+    }
     e.type = r.read_uint8();
     auto instigator = read_guid(r);
     if (!instigator) return std::nullopt;
@@ -330,7 +409,8 @@ bool write_item_storage_event(BunchWriter& out, const ItemStorageEvent& e) {
     if (!item_storage_event_fits(e)) return false;
     write_container(out, e.move_source);
     if (!write_item_instance(out, e.item)) return false;
-    write_ubool(out, false);   // the optional struct: never set
+    write_ubool(out, e.callout.has_value());   // the optional struct: a harvest's pick-up popup
+    if (e.callout && !write_callout(out, *e.callout)) return false;
     out.write_uint8(e.type);
     write_guid(out, e.instigator);
     write_ubool(out, e.extra_guid_a.has_value());

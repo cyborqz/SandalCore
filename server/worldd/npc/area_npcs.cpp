@@ -113,7 +113,8 @@ NpcMotionSetup make_setup(const world::WorldActor& a, const MotionTable& table, 
     if (const double e = numeric_expression(instance->speed_expr); e > 0) s.patrol_speed = m.max_walk_speed * e * speeds.patrol_expression_gain;
     else if (retail && retail->patrol_speed >= 20.0f && retail->patrol_speed <= 0.9 * m.max_walk_speed) s.patrol_speed = retail->patrol_speed;
     const std::string& amb = instance->ambient_behavior;
-    if (amb.find("Wander") != std::string::npos || amb.find("Default") != std::string::npos || amb.empty()) s.ambient = Ambient::Wander;
+    if (speeds.standing_defs && a.npc.interact_def != 0 && speeds.standing_defs->count(a.npc.interact_def)) s.ambient = Ambient::Stationary;   // a huntable creature stands (SpeedModel)
+    else if (amb.find("Wander") != std::string::npos || amb.find("Default") != std::string::npos || amb.empty()) s.ambient = Ambient::Wander;
     else if (amb.find("Patrol") != std::string::npos) s.ambient = Ambient::Patrol;
     else s.ambient = Ambient::Stationary;
     if (s.ambient == Ambient::Patrol) {

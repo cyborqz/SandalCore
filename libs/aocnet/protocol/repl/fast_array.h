@@ -197,6 +197,10 @@ public:
     /// (Items.RemoveAt + MarkArrayDirty).  False when there is no such ID.
     bool remove(int32_t id);
 
+    /// Replaces an item's values WITHOUT touching its ReplicationKey or the array's: the array a connection is shown (a copy made for it) differs from the server's in a value, and
+    /// the keys that say what the connection has stay the server's.  False when there is no such ID or the values do not fit.
+    bool set_values(int32_t id, ElementState values);
+
     /// MarkArrayDirty: ArrayReplicationKey++ (skipping INDEX_NONE).  The
     /// original server was seen to call it more than once per change.
     void mark_array_dirty();
@@ -273,6 +277,7 @@ struct FastArrayDelta {
     std::vector<Changed> changed;
     bool operator==(const FastArrayDelta&) const;
 };
+// -- C | O | A . Cyb --
 
 /// The reader: one field payload from bit `pos` of `data` (`end` is the bit
 /// the payload must not run past, the field header's bit count added to `pos`).

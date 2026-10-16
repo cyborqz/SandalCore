@@ -1154,11 +1154,11 @@ static void test_possession_bunch_and_requests() {
     const bs::SessionGuids& g = h.s->bootstrap().setup().guids;
     const size_t b2 = h.got.size();
     repl::RpcParams params;
-    repl::set_rpc_param(*pawn_cls.rpc("ServerRequestStorageData"), params, "StorageContainer", repl::Value(g.resource_storage));
+    repl::set_rpc_param(*pawn_cls.rpc("ServerRequestStorageData"), params, "StorageContainer", repl::Value(g.resource_storage[0]));
     h.client_sends({h.client.actor(pawn_ch, client_rpc(pawn_cls, "ServerRequestStorageData", params), true)});
     h.settle();
     auto pb = expected_bootstrap(*h.fx.content, cyb_record(), world_time_at(t0), bs::GameStateMode::Tier2);
-    const auto want = pb->storage_payload(bs::StorageKind::Resource, bs::Role::Pawn);
+    const auto want = pb->storage_payload(bs::StorageKind::Resource0, bs::Role::Pawn);
     const auto reply = h.on_channel(pawn_ch, b2);
     CHECK(reply.size() == 1 && want && same_bits(reply[0]->content, want->emission.payload) && reply[0]->exports.empty(),
           "ServerRequestStorageData(resource storage): the pawn's empty resource payload (pkt#773), no export");
@@ -1467,7 +1467,7 @@ static void test_request_budget() {
 
     // the storage payloads have their own, larger budget
     repl::RpcParams params;
-    repl::set_rpc_param(*pawn_cls.rpc("ServerRequestStorageData"), params, "StorageContainer", repl::Value(h.s->bootstrap().setup().guids.resource_storage));
+    repl::set_rpc_param(*pawn_cls.rpc("ServerRequestStorageData"), params, "StorageContainer", repl::Value(h.s->bootstrap().setup().guids.resource_storage[0]));
     const BunchWriter storage = client_rpc(pawn_cls, "ServerRequestStorageData", params);
     at = h.got.size();
     const size_t dropped_before = h.s->requests_dropped();

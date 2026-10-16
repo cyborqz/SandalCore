@@ -64,6 +64,7 @@ add_library(worldd_stats STATIC
     stats/damage.cpp
     stats/damage.h
     stats/gear.cpp
+    stats/gather_host.h
     stats/gear.h
     stats/stat_engine.cpp
     stats/stat_engine.h
@@ -151,6 +152,7 @@ add_library(worldd_core STATIC
     bootstrap/character_setup.h
     bootstrap/constants.cpp
     bootstrap/constants.h
+    bootstrap/gather_wire.cpp
     bootstrap/mount_ride.cpp
     bootstrap/player_setup.cpp
     bootstrap/player_setup.h
@@ -174,8 +176,26 @@ add_library(worldd_core STATIC
     combat/rewards.h
     content/content_db.cpp
     content/content_db.h
+    foliage/foliage.cpp
+    foliage/foliage.h
+    foliage/foliage_cells.cpp
+    foliage/foliage_cells.h
+    foliage/foliage_map.cpp
+    foliage/foliage_map.h
+    foliage/foliage_store.cpp
+    foliage/foliage_store.h
+    gather/gathering.cpp
+    gather/gathering.h
+    gather/node_board.cpp
+    gather/node_board.h
+    gather/node_wire.cpp
+    gather/node_wire.h
+    gather/rules.cpp
+    gather/rules.h
     items/inventory.cpp
     items/inventory.h
+    items/resource_grid.cpp
+    items/resource_grid.h
     login/login_service.cpp
     login/login_service.h
     login/login_worker.cpp
@@ -210,12 +230,16 @@ add_library(worldd_core STATIC
     session/mounts.h
     session/move_checker.cpp
     session/move_checker.h
+    session/player_foliage.cpp
+    session/player_gather.cpp
     session/player_session.cpp
     session/player_session.h
     session/player_world.cpp
     session/player_world.h
     session/position_saver.cpp
     session/position_saver.h
+    session/professions.cpp
+    session/professions.h
     session/riding.cpp
     session/riding.h
     session/talents.cpp
@@ -377,6 +401,9 @@ foreach(t
 )
     worldd_add_test(${t})
 endforeach()
+# Gathering stage 2: the session tests of the professions and the GM artisan scrolls run on the real content.db of the working tree (they skip without it)
+target_compile_definitions(test_worldd_items_session PRIVATE
+    PROFESSIONS_REAL_DB="${PROJECT_SOURCE_DIR}/dist/content/content.db")
 
 # ============================================================================
 #  the stat engine's test (plan B3): the interpreter, the gear rules and the character's stats on the corpus
@@ -399,6 +426,47 @@ set_target_properties(test_worldd_ability_content PROPERTIES FOLDER "Tests/world
 worldd_add_test(test_worldd_area)
 target_compile_definitions(test_worldd_area PRIVATE
     AREA_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")
+
+# the harvest of the resource nodes (Gathering stage 2, "Harvesting"): the node state, the wire against capture 1427, the requirements and the rolls, on the real content.db of the working tree
+worldd_add_test(test_worldd_gather)
+target_compile_definitions(test_worldd_gather PRIVATE
+    GATHER_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")
+worldd_add_test(test_worldd_gather_session)
+target_compile_definitions(test_worldd_gather_session PRIVATE
+    GATHER_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")
+
+# Resource storage (Gathering stage 3): the grid against the captured slots, the routing, the top-up, the full container, the moves and the login's repair on a fixture, and the flags of every
+# item of the real content.db of the working tree
+worldd_add_test(test_worldd_resource)
+target_compile_definitions(test_worldd_resource PRIVATE
+    RESOURCE_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")
+
+# Foliage gathering (Gathering stage 3): the map, the store with a fake clock, the cells' state actors and the foliage tables of the real content.db and region_foliage.tsv of the working tree
+worldd_add_test(test_worldd_foliage)
+target_compile_definitions(test_worldd_foliage PRIVATE
+    FOLIAGE_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+    FOLIAGE_TSV_PATH="${PROJECT_SOURCE_DIR}/dist/content/region_foliage.tsv")
+
+worldd_add_test(test_worldd_foliage_session)
+target_compile_definitions(test_worldd_foliage_session PRIVATE
+    GATHER_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+    FOLIAGE_TSV_PATH="${PROJECT_SOURCE_DIR}/dist/content/region_foliage.tsv")
+
+# Hunting (Gathering stage 3): the huntable creature's template, the 53 hunting interactions and their rewards, and the corpse's wire against capture 1457, on the real content.db of the working tree
+worldd_add_test(test_worldd_hunting)
+target_compile_definitions(test_worldd_hunting PRIVATE
+    HUNT_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+    NPC_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv")
+
+worldd_add_test(test_worldd_hunting_session)
+target_compile_definitions(test_worldd_hunting_session PRIVATE
+    GATHER_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+    NPC_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv")
+
+# the professions and the GM artisan items (Gathering stage 2): the rules on a small book and the 67 scrolls on the real content.db of the working tree
+worldd_add_test(test_worldd_professions)
+target_compile_definitions(test_worldd_professions PRIVATE
+    PROFESSIONS_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")
 
 # the Riverlands as the area (G1 stage 1, Part B): the index, the population against an independent oracle, the region's load, the GM garden
 worldd_add_test(test_worldd_region)

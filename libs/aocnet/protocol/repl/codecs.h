@@ -112,6 +112,10 @@
 //      A PlayerController callout's LocalizedMessage: the string table and the key as FStrings and an empty argument list
 //      (callout_codec.h).  See LocalizedMessage (value.h).
 //
+//  FChannelingData (Gathering stage 2, the fix after test 1)
+//      The pawn's InteractInfo.ChannelingData: what the pawn is channeling (the node, when it started, how long, the tool).  Read from ten retail harvests
+//      (channeling_codec.h has the layout and what is inferred).  See ChannelingData (value.h).
+//
 //  A struct without a codec here (FCharacterServerMovePackedBits ...) is refused by name:
 //  no reader guesses.
 // ============================================================================

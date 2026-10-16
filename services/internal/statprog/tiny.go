@@ -178,6 +178,11 @@ func TinyExprs() []Expr {
 		{What: "citizens and the mayor", Text: "SelectFloat(Node_IsPlayerCitizen(GetPlayer()) || Node_IsPlayerCitizenOfNode(GetPlayer(), GetCurrentNode(GetOwner())) || Node_IsPlayerMayor(GetPlayer()) == true, 1000.0, 2000.0)"},
 		{What: "a node and its level in variables", Text: "const n = GetCurrentNode(GetOwner());\nvar lvl = Node_GetLevel(n);\nSelectFloat(lvl == ENodeLevel::Town || Node_GetNodeType(n) == ENodeType::Martial, 5.0, 6.0) + SelectFloat(Node_InLevelRangeInclusive(n, ENodeLevel::Wilderness, ENodeLevel::Crossroads), 0.5, 0.25)"},
 		{What: "a node named by its record", Text: "SelectFloat(Node_GetNodeType($CityNode:Tiny_Halcyon$) == ENodeType::Scientific, 1.0, 0.0) + SelectFloat(Node_IsPlayerCitizenOfNode(GetPlayerGuid(), $CityNode:Tiny_Aela$), 9.0, 0.0)"},
+		// Gathering stage 2: the gathering reads (aocexpr.HostArtisanStat ...), the way the Artisan equations of the data write them
+		{What: "the gathering speed", Text: "const rating = GetArtisanshipModifiedStat(GetInstigator(), " + stat(1) + ") + GetArtisanshipModifiedStat(GetInstigator(), " + stat(2) + ");\nGetGatheringInteractionBaseDuration() * EvalCurve($#" + fmt.Sprint(TypeStatCurve) + ":11$, rating)"},
+		{What: "the xp of a harvest", Text: "const itemRarity = GetItemRarity();\nconst recipeCert = GetSourceCertificationTier();\nvar baseXP = 80.0;\nvar rarityMult = 1.0;\nif(recipeCert == 0){\n  set baseXP = 80.0;\n}\nif(recipeCert == 1){\n  set baseXP = 90.0;\n}\nif(recipeCert == 2){\n  set baseXP = 100.0;\n}\nif(itemRarity == 0){\n  set rarityMult = 1.0;\n}\nif(itemRarity == 1){\n  set rarityMult = 1.5;\n}\nif(itemRarity >= 5){\n  set rarityMult = 3.5;\n}\nbaseXP * rarityMult"},
+		{What: "the quantity of a harvest", Text: "const rarity = GetRolledItemQuality();\nvar MaxQuant = 0;\nvar Result = 0;\nif (rarity == 0) {\n  set MaxQuant = int(7.9);\n}\nif (rarity == 3) {\n  set MaxQuant = int(4.2);\n}\nif (rarity == 6) {\n  set MaxQuant = 1;\n}\nset Result = RandIntRange(1, MaxQuant);\nResult"},
+		{What: "a rating, a tier and the quality in one sum", Text: "GetArtisanshipModifiedStat(GetSelf(), " + stat(3) + ") * 0.5 + GetSourceCertificationTier() * 100.0 + GetRolledItemQuality() + GetItemRarity() * 1000.0"},
 	}
 }
 
@@ -189,11 +194,14 @@ func tinyHosts() []TableHostSpec {
 			Tags: map[string]bool{"ability.Phys": true}, Flags: map[string]bool{"Crit": true}, Targets: 3, XPDebt: 0.5,
 			// the city node reads (aocexpr.HostNodeBiome ...): a node's rank and an enum's ordinal; the numbers a read is given are not added to its answer
 			Fns: map[string]float64{"1|7001": 3, "2|TARGET_Self": 1, "3|": 1, "10|": 12.5, "9|": 90, "4|1001": -40, "5|1002": -7.5, "6|1002": -3.25, "11|DefaultGroup": 2.5,
-				"170|": 14, "171|": 1, "172|": 1, "173|": 1, "174|": 3, "175|": 0, "176|": 1, "177|": 0}},
+				"170|": 14, "171|": 1, "172|": 1, "173|": 1, "174|": 3, "175|": 0, "176|": 1, "177|": 0,
+				// the gathering reads (Gathering stage 2): the ratings of stats 1 and 3, the rolled quality, the item rarity, the tier, the base duration
+				"180|1001": 215, "180|1003": 40, "181|": 3, "182|": 1, "183|": 1, "184|": 11.25}},
 		{Seed: 99, Progress: map[string]float64{"SongGroup": 1, "Other": 0}, Inst: map[aocexpr.Ref]float64{tinyEffect(7): 0.5, tinyEffect(8): 9},
 			Flags: map[string]bool{"Glancing": true}, Targets: 7, XPDebt: 1,
 			// a desert node of the third rank's neighbour, a Town of Divine type, and a mayor
-			Fns: map[string]float64{"170|": 6, "171|": 2, "172|": 0, "173|": 2, "174|": 4, "175|": 1, "176|": 1, "177|": 1}},
+			Fns: map[string]float64{"170|": 6, "171|": 2, "172|": 0, "173|": 2, "174|": 4, "175|": 1, "176|": 1, "177|": 1,
+				"180|1001": 8409, "180|1002": 316.5, "180|1003": 7, "181|": 6, "182|": 6, "183|": 2, "184|": 15}},
 	}
 }
 

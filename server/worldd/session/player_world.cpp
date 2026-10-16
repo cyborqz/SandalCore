@@ -162,6 +162,23 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
                     problem = "content.db's skill trees cannot be read: " + error;
                 }
             }
+            // Gathering stage 2: the professions (a content.db without their tables runs without professions, and says so)
+            if (problem.empty()) {
+                std::string why;
+                if (auto data = content_->profession_data(why)) {
+                    if (auto book = professions::Book::from(*data, why)) {
+                        professions_ = std::move(*book);
+                        spdlog::info("[content] professions: {} professions, {} certification levels, {} certification actions", professions_->size(), data->certifications.size(),
+                                     data->actions.size());
+                    } else {
+                        problem = "content.db's professions are not what this worldd can run: " + why;
+                    }
+                } else if (!why.empty()) {
+                    problem = "content.db's professions cannot be read: " + why;
+                } else {
+                    spdlog::warn("[content] content.db has no profession tables: characters have no professions (rebuild content.db with this checkout's contentc)");
+                }
+            }
             // plan D2: the ability tables (a content.db without them still runs Sprint, Dodge and Rest)
             if (problem.empty()) {
                 std::string why;
@@ -186,6 +203,7 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
             }
             if (!problem.empty()) {
                 ability_catalog_.reset();
+                professions_.reset();
                 talents_.reset();
                 bundle_.reset();
                 gear_.reset();
@@ -199,6 +217,7 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
         }
     }
 }
+// built with CoA and C | Y | B
 
 bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) {
     if (!content_) {
@@ -222,6 +241,14 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     }
     captured_ = std::move(*captured);
     gm_ = std::move(*gm);
+    // Gathering stage 3, "Hunting": the creatures whose asset names a Hunting_<kind> interaction get the hunting interactable (spawns/generic_npc.h); an older content.db has none
+    if (generic_config_.hunting && generic_config_.hunting_defs.empty()) {
+        std::string fe;
+        if (const auto foliage = content_->foliage_data(fe)) {
+            generic_config_.hunting_defs = gather::hunting_defs(*foliage);
+            generic_config_.hunting_names = gather::hunting_names(*foliage);
+        }
+    }
     generic_.emplace(*captured_, motion_loaded_ ? &motion_ : nullptr, generic_config_);
     spawns::AreaSources sources;
     sources.db = content_;
@@ -241,6 +268,7 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     for (const std::string& n : area_report_->notes) spdlog::warn("[area] {}", n);
     log_spawn_filter();
     log_npc_types();
+    log_huntables();
     if (area_.region) {
         // the data NPCs by the zone of influence they stand in
         std::string line;
@@ -305,6 +333,65 @@ void PlayerWorld::log_spawn_filter() const {
     }
 }
 
+void PlayerWorld::log_hunting_kinds() {
+    // Gathering stage 3, "Hunting": which of the kinds the tables can run (a dry run of each with a level-25 Bard's stats)
+    if (!gathering_ || gathering_->hunting().empty() || !stat_bundle() || !stat_context().gear) return;
+    const bootstrap::StatContext ctx = stat_context();
+    stats::CharacterStats cs(*ctx.bundle, *ctx.gear, 2, 25, ctx.rounding);
+    std::string err;
+    if (!cs.start({}, err)) {
+        spdlog::warn("[hunt] the hunting kinds are not checked: the probe character's stats do not start ({})", err);
+        return;
+    }
+    auto run = cs.evaluation({}, err);
+    if (!run) {
+        spdlog::warn("[hunt] the hunting kinds are not checked: {}", err);
+        return;
+    }
+    const size_t none = gathering_->classify_hunting(*run);
+    std::string names;
+    for (const auto& [def, k] : gathering_->hunting()) {
+        if (k.gives_nothing) names += (names.empty() ? "" : ", ") + k.name;
+    }
+    spdlog::info("[hunt] {} hunting kinds: {} give no usable item (their items are RETIRED_ or NOTUSED_, or the table never selects one): {}; their corpses are hunted for the experience only. "
+                 "The data's NumberOfSubtablesToSelect of 2 is read as 1 for {} tables with two subtables (a hunt gives a carcass or a trainable, not both)",
+                 gathering_->hunting().size(), none, names.empty() ? "none" : names, gathering_->hunting_one_of());
+}
+
+void PlayerWorld::log_huntables() const {
+    // Gathering stage 3, "Hunting": the creatures of the area whose corpse is hunted with a Bow, by kind
+    const std::set<int64_t>& defs = generic_config_.hunting_defs;
+    if (!generic_config_.hunting) {
+        spdlog::info("[hunt] --no-gathering: no creature is huntable");
+        return;
+    }
+    if (defs.empty()) {
+        spdlog::info("[hunt] no huntable creatures: content.db has no hunting interactions (rebuild it with contentc 15 or later)");
+        return;
+    }
+    std::map<int64_t, size_t> by_def;
+    size_t total = 0;
+    registry_.for_each([&](const world::WorldActor& a) {
+        if (a.kind == world::ActorKind::Npc && a.npc.interact_def != 0 && defs.count(a.npc.interact_def)) {
+            ++by_def[a.npc.interact_def];
+            ++total;
+        }
+    });
+    std::map<int64_t, std::string> names;
+    std::string names_error;
+    if (const auto foliage = content_ ? content_->foliage_data(names_error) : std::nullopt) {
+        for (const int64_t d : defs) {
+            const auto it = foliage->interaction_defs.find(d);
+            if (it != foliage->interaction_defs.end()) names[d] = it->second.name;
+        }
+    }
+    std::vector<std::pair<std::string, size_t>> counts;
+    for (const auto& [def, n] : by_def) counts.emplace_back(names.count(def) ? names[def] : std::to_string(def), n);
+    spdlog::info("[hunt] huntable creatures in the area: {} of {} NPCs ({} kinds, eight blocks with the hunting interactable{}); a Bow in Equipment slot 38 hunts a corpse for a carcass or a trainable and Hunter XP",
+                 total, registry_.count(world::ActorKind::Npc), by_def.size(), generic_ && !generic_->has_hunting_block() ? "; NOT: the Raven's captured open is missing, so they are plain creatures" : "");
+    log_counts("[hunt] by kind: ", counts);
+}
+
 void PlayerWorld::log_npc_types() const {
     const spawns::PopulationStats& pop = area_report_->population;
     const spawns::GenericNpcs* g = generic_ ? &*generic_ : nullptr;
@@ -365,7 +452,7 @@ bool PlayerWorld::load_ground(const std::string& nav_path, const std::string& mo
                  static_cast<long long>(nav_->center_x()), static_cast<long long>(nav_->center_y()), nav_->radius() / 100.0);
     check_ground_covers_area();
     npcs_ = std::make_unique<npc::NpcWorld>(registry_, nav_.get());
-    ground_report_ = npc::populate(registry_, *npcs_, motion_, *area_report_);
+    ground_report_ = npc::populate(registry_, *npcs_, motion_, *area_report_, speeds());
     spdlog::info("[nav] {}", ground_report_->describe());
     for (const std::string& line : ground_report_->describe_types()) spdlog::info("[nav] by type (standing/wandering/patrolling): {}", line);
     start_combat();
@@ -585,6 +672,49 @@ size_t PlayerWorld::apply_road_levels() {
     return changed;
 }
 
+uint64_t PlayerWorld::drop_harvest_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<combat::LootStack> stacks,
+                                        std::string& error) {
+    error.clear();
+    if (aftermath_) return aftermath_->drop_pile(x, y, z, owner, name, std::move(stacks), world_clock_, error);
+    if (pile_hook_) return pile_hook_(x, y, z, owner, name, stacks);
+    error = "the world has no loot piles (no area, or --no-loot)";
+    return 0;
+}
+
+bool PlayerWorld::start_gathering(const gather::Config& config, std::string& error) {
+    error.clear();
+    if (gathering_) return true;
+    if (!content_) {
+        error = "no content.db";
+        return false;
+    }
+    if (!ability_catalog()) {
+        error = "no ability catalog (the formulas of a harvest are its programs)";
+        return false;
+    }
+    auto g = gather::Gathering::make(*content_, registry_, *ability_catalog(), config, error);
+    if (!g) return false;
+    gathering_ = std::move(g);
+    spdlog::info("[gather] on: {} node defs, {} tools, {} reward tables; a gathered node returns after the data's respawn x {}{}", gathering_->defs(), gathering_->tools(), gathering_->tables(),
+                 config.board.respawn_mult, config.quality_literal ? "; GetRolledItemQuality() answers the literal quality" : "");
+    log_hunting_kinds();
+    return true;
+}
+
+bool PlayerWorld::start_foliage(const foliage::Config& config, std::string& error) {
+    error.clear();
+    if (foliage_) return true;
+    if (!gathering_) {
+        error = "gathering is off";
+        return false;
+    }
+    auto f = foliage::Foliage::make(*content_, *gathering_, registry_, [this] { return mint_guid(); }, config, error);
+    if (!f) return false;
+    foliage_ = std::move(f);
+    spdlog::info("[foliage] on: {}", foliage_->describe());
+    return true;
+}
+
 size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& config_in) {
     if (node_pops_ || !config_in.enabled || !city_nodes_ || !node_wire_ || !node_pop_data_ || !area_report_ || !area_report_->data || !captured_ || !generic_) return 0;
     spawns::NodePopulations::Config config = config_in;
@@ -595,7 +725,7 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
         if (!npcs_) return;   // no ground: the NPC stands where the data put it
         const world::WorldActor* a = registry_.find(id);
         if (!a) return;
-        npc::NpcMotionSetup setup = npc::make_setup(*a, motion_, instance, route, npc::SpeedModel{});
+        npc::NpcMotionSetup setup = npc::make_setup(*a, motion_, instance, route, speeds());
         if (setup.ambient == npc::Ambient::Patrol && setup.route.size() < 2) setup.ambient = npc::Ambient::Wander;
         npcs_->add(id, setup);   // (a chunk of the ground that is not resident yet: the NPC waits for it, as the area's do)
     };
@@ -648,6 +778,10 @@ void PlayerWorld::start_aftermath() {
     aftermath_->set_name_of([this](int64_t item) { return item_name(item); });
     aftermath_->set_respawner([this](uint32_t ref, double now) { return respawn_npc(ref, now); });
     aftermath_->set_city_nodes(city_nodes_);
+    // Gathering stage 3, "Hunting": a creature whose interaction is a hunting one is hunted when it dies (no loot pile, a corpse that waits 120 s for the hunter)
+    const auto huntable = [this](const world::NpcInfo& i) { return gathering_ && i.interact_def != 0 && gathering_->hunt_kind(i.interact_def) != nullptr; };
+    aftermath_->set_huntable(huntable);
+    combat_->set_huntable(huntable);
     aftermath_->install();
     if (!aftermath_config_.enabled) {
         spdlog::info("[loot] OFF (--no-loot): a death gives no experience and no loot, and nothing respawns (the corpse still goes)");
@@ -799,6 +933,12 @@ std::string PlayerWorld::item_name(int64_t item) const {
 }
 // built with C-Y-B and C O A
 
+npc::SpeedModel PlayerWorld::speeds() const {
+    npc::SpeedModel s;
+    if (generic_config_.hunting) s.standing_defs = &generic_config_.hunting_defs;   // (empty without --gathering: nothing stands)
+    return s;
+}
+
 uint64_t PlayerWorld::respawn_npc(uint32_t spawn_ref, double now) {
     // an NPC of a town's people comes back from the node's CURRENT selection (spawns/node_populations.h), or not at all when its point is gone
     if (spawns::NodePopulations::is_node_ref(spawn_ref)) return node_pops_ ? node_pops_->respawn(spawn_ref, now) : 0;
@@ -838,7 +978,7 @@ uint64_t PlayerWorld::respawn_npc(uint32_t spawn_ref, double now) {
             if (const auto rt = area_report_->routes.find(inst->patrol_route); rt != area_report_->routes.end()) route = &rt->second;
         }
     }
-    npc::NpcMotionSetup setup = npc::make_setup(*a, motion_, inst, route, npc::SpeedModel{});
+    npc::NpcMotionSetup setup = npc::make_setup(*a, motion_, inst, route, speeds());
     if (setup.ambient == npc::Ambient::Patrol && setup.route.size() < 2) setup.ambient = npc::Ambient::Wander;
     npcs_->add(id, setup);
     return id;

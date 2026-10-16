@@ -15,6 +15,7 @@
 // ============================================================================
 #include "stats/character_stats.h"
 #include "stats/damage.h"
+#include "stats/gather_host.h"
 #include "stats/gear.h"
 #include "stats/stat_engine.h"
 #include "stats/stat_program.h"
@@ -193,7 +194,20 @@ struct Refusal {
     std::string name, bundle;
     int class_enum, level;
 };
+// A `gatherhost` block (Gathering stage 2): a harvest's context and the reads the host must answer (services/internal/statprog gather.go writes them).
+struct GatherQuery {
+    int fn = 0;
+    std::string name;   // "" for none ("-" in the corpus)
+    int role = 0;
+    uint64_t want = 0;  // the answer's float64 bits
+};
+struct GatherBlock {
+    std::string name;
+    GatherContext ctx;
+    std::vector<GatherQuery> queries;
+};
 struct Corpus {
+    std::vector<GatherBlock> gathers;
     std::vector<FuzzLine> fuzzes;
     std::vector<Refusal> refusals;
     std::map<std::string, std::vector<uint8_t>> bundles;
@@ -204,6 +218,7 @@ struct Corpus {
     std::map<std::string, MapView> views;
     std::vector<DamageCall> damages;
 };
+// (C_Y_B | C | O | A)
 
 bool load_corpus(const std::string& path, Corpus& c, std::string& err) {
     std::ifstream f(path, std::ios::binary);
@@ -218,6 +233,7 @@ bool load_corpus(const std::string& path, Corpus& c, std::string& err) {
     bool skipping = false;  // an fxcase (plan D2: effects, ranks, expressions): test_worldd_effects reads those
     DamageProfile* cur_profile = nullptr;
     MapView* cur_view = nullptr;
+    GatherBlock* cur_gather = nullptr;
     while (std::getline(f, line)) {
         ++line_no;
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
@@ -247,6 +263,37 @@ bool load_corpus(const std::string& path, Corpus& c, std::string& err) {
         }
         if (k == "fxcase" || k == "nodehost") {   // the effects test reads the fxcases, test_worldd_city_nodes the nodehost blocks
             skipping = true;
+            continue;
+        }
+        if (k == "gatherhost") {
+            if (w.size() != 2) return bad("gatherhost NAME");
+            c.gathers.emplace_back();
+            cur_gather = &c.gathers.back();
+            cur_gather->name = w[1];
+            continue;
+        }
+        if (cur_gather && k != "end") {
+            GatherContext& g = cur_gather->ctx;
+            if (k == "quality" || k == "duration") {
+                if (w.size() != 2 || w[1].size() != 16) return bad("quality|duration F64");
+                (k == "quality" ? g.quality : g.base_duration) = bits_to_double(hex64(w[1]));
+            } else if (k == "rarity" || k == "tier") {
+                if (w.size() != 2) return bad("rarity|tier N");
+                (k == "rarity" ? g.item_rarity : g.source_tier) = std::stoi(w[1]);
+            } else if (k == "rating") {
+                if (w.size() != 3 || w[2].size() != 16) return bad("rating STATGUID F64");
+                g.ratings[std::stoll(w[1])] = bits_to_double(hex64(w[2]));
+            } else if (k == "q") {
+                if (w.size() != 6 || w[4] != "=" || w[5].size() != 16) return bad("q FN NAME ROLE = F64");
+                GatherQuery q;
+                q.fn = std::stoi(w[1]);
+                q.name = w[2] == "-" ? "" : w[2];
+                q.role = std::stoi(w[3]);
+                q.want = hex64(w[5]);
+                cur_gather->queries.push_back(std::move(q));
+            } else {
+                return bad("a line that is no part of a gatherhost block");
+            }
             continue;
         }
         if (k == "bundle") {
@@ -296,6 +343,7 @@ bool load_corpus(const std::string& path, Corpus& c, std::string& err) {
             cur = nullptr;
             cur_profile = nullptr;
             cur_view = nullptr;
+            cur_gather = nullptr;
         } else if (k == "fuzz") {
             if (w.size() != 6) return bad("fuzz");
             c.fuzzes.push_back({w[1], std::stoull(w[2]), std::stoi(w[3]), std::stoul(w[4]), hex64(w[5])});
@@ -353,6 +401,7 @@ bool load_corpus(const std::string& path, Corpus& c, std::string& err) {
     }
     return true;
 }
+// (C-Y-B ~ CoA)
 
 // The digest of a result: FNV-1a 64 as statprog.Digest.
 uint64_t digest(const StatResult& r) {
@@ -1143,6 +1192,52 @@ void test_equipment_beyond_a_float(const StatBundle& b, const StatBundle* dbl) {
 }
 // (C O A | C-Y-B)
 
+// The gathering reads (Gathering stage 2): gather_host_fn against the corpus's gatherhost blocks, which services/internal/statprog's GatherContext wrote.
+void test_gather_reads(const Corpus& c) {
+    std::printf("the gathering reads against the shared corpus\n");
+    CHECKF(c.gathers.size() >= 4, "the corpus has %zu gatherhost blocks, want 4", c.gathers.size());
+    size_t asked = 0, right = 0, rated = 0;
+    for (const GatherBlock& b : c.gathers) {
+        for (const GatherQuery& q : b.queries) {
+            double args[1] = {static_cast<double>(q.role)};
+            double out = -12345;
+            const bool known = gather_host_fn(b.ctx, q.fn, q.name, q.fn == kHostArtisanStat ? args : nullptr, q.fn == kHostArtisanStat ? 1 : 0, out);
+            ++asked;
+            if (q.fn == kHostArtisanStat && q.want != 0) ++rated;
+            if (known && std::memcmp(&out, &q.want, sizeof out) == 0) {
+                ++right;
+            } else {
+                std::printf("  [FAIL] %s: fn %d \"%s\" role %d = %g (known %d), the corpus says %g\n", b.name.c_str(), q.fn, q.name.c_str(), q.role, out, known ? 1 : 0,
+                            bits_to_double(q.want));
+                ++g_fail;
+            }
+        }
+    }
+    CHECKF(asked >= 40 && right == asked, "%zu reads asked, %zu as the corpus says", asked, right);
+    CHECKF(rated >= 4, "%zu of the reads are ratings a stat has", rated);
+    // a function outside 180..184 is no gathering read, and the answers do not touch out
+    GatherContext g;
+    double out = 7;
+    CHECK(!gather_host_fn(g, kHostNodeLast, "", nullptr, 0, out) && !gather_host_fn(g, 179, "", nullptr, 0, out) && !gather_host_fn(g, 185, "", nullptr, 0, out) &&
+              !gather_host_fn(g, kHostPlayerLevel, "", nullptr, 0, out) && out == 7,
+          "a function outside 180..184 is no gathering read");
+    // by hand: the player's rating, another actor's, a stat with none, a name that is no guid
+    g.ratings[1001] = 215.5;
+    g.quality = 31;
+    g.item_rarity = 3;
+    g.source_tier = 2;
+    g.base_duration = 11.25;
+    double role0[1] = {0}, role1[1] = {1};
+    CHECK(gather_host_fn(g, kHostArtisanStat, "1001", role0, 1, out) && out == 215.5, "the caster's rating");
+    CHECK(gather_host_fn(g, kHostArtisanStat, "1001", role1, 1, out) && out == 0, "the target has none");
+    CHECK(gather_host_fn(g, kHostArtisanStat, "1001", nullptr, 0, out) && out == 215.5, "no role given: the caster");
+    CHECK(gather_host_fn(g, kHostArtisanStat, "1002", role0, 1, out) && out == 0, "a stat with no rating reads 0");
+    CHECK(gather_host_fn(g, kHostArtisanStat, "10x", role0, 1, out) && out == 0 && gather_host_fn(g, kHostArtisanStat, "", role0, 1, out) && out == 0, "a name that is no guid reads 0");
+    CHECK(gather_host_fn(g, kHostRolledItemQuality, "", nullptr, 0, out) && out == 31 && gather_host_fn(g, kHostItemRarity, "", nullptr, 0, out) && out == 3 &&
+              gather_host_fn(g, kHostSourceCertTier, "", nullptr, 0, out) && out == 2 && gather_host_fn(g, kHostGatherBaseSecs, "", nullptr, 0, out) && out == 11.25,
+          "the quality, the rarity, the tier and the base duration");
+}
+
 }  // namespace
 
 int main() {
@@ -1155,6 +1250,7 @@ int main() {
     std::map<std::string, StatBundle> bundles;
     test_corpus(corpus, bundles);
     test_damage_corpus(corpus);
+    test_gather_reads(corpus);
     test_fuzz_parity(corpus);
     if (bundles.count("main")) test_damage(corpus.bundles["main"], "the real graph");
     if (bundles.count("tiny")) {

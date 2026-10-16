@@ -24,6 +24,9 @@ const (
 	TypeQualityCurve      = 2763533897913176681 // table 240
 	TypeStartingEquipment = 8457388432688083496 // table 289
 
+	// Gathering stage 3, "Resource storage": the grid of a worn resource bag.
+	TypeResourceBagDef = 6026413454960341687 // ResourceBagDefRecordBase (the TypeId of an item's ResourceBagDefId)
+
 	// Plan B3: the set bonuses of the items.
 	TypeSetBonus = 1330963460908541034 // table 264, SetBonusRecordBase
 

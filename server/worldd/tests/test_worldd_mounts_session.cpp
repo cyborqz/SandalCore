@@ -1317,6 +1317,11 @@ static void test_item_abilities_in_a_real_world() {
 }
 // ~ CoA - C:Y:B ~
 
+/// A catalog that knows no record: the grant routes everything to the Backpack (Gathering stage 3: grant() takes the catalog).
+struct NoItemCatalog : items::ItemCatalog {
+    std::optional<items::ItemInfo> info(int64_t) const override { return std::nullopt; }
+};
+
 static void test_item_ability_arrives_with_the_item() {
     std::printf("a mount item that reaches the bag during the session brings its ability record right after it (retail 821: the record is appended)\n");
     Harness h(cyb_record(kit_without_mounts()));
@@ -1328,7 +1333,7 @@ static void test_item_ability_arrives_with_the_item() {
     svc::InventoryItem fresh = make_item(Bag, 0, g_mount_record, 900);
     fresh.slot = inv.first_free(Bag);
     const int slot = fresh.slot;
-    CHECK(inv.grant({fresh}).ok, "the mount item is granted into the bag");
+    CHECK(inv.grant({fresh}, NoItemCatalog()).ok, "the mount item is granted into the bag");
     h.run(milliseconds(300));
     const ClientLists after = client_lists(h);
     CHECK(times_in(after.records, kSummonMountRecord) == 1 && after.records.size() == before.records.size() + 1 && after.records.back() == kSummonMountRecord,
@@ -1338,7 +1343,7 @@ static void test_item_ability_arrives_with_the_item() {
     // a second mount item brings nothing new, and the lists stay as they are
     svc::InventoryItem second = make_item(Bag, 0, g_other_mount_record, 901);
     second.slot = inv.first_free(Bag);
-    CHECK(inv.grant({second}).ok, "a second mount item is granted");
+    CHECK(inv.grant({second}, NoItemCatalog()).ok, "a second mount item is granted");
     h.run(milliseconds(300));
     const ClientLists again = client_lists(h);
     CHECK(again.updates == after.updates && again.records == after.records, "a second mount item adds no record and sends no update");

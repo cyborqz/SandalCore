@@ -346,12 +346,50 @@ struct StorageEventContainer {
     bool operator==(const StorageEventContainer&) const = default;
 };
 
+/// FLocalizedMessage (the mounts milestone, stage 1): a message the client looks up in a string table, the `LocalizedMessage` of a PlayerController
+/// callout (`CalloutQueueReplication.Items.Value.LocalizedMessage`: a toast such as "NCS" / "Quest_Toast_Started", a refusal such as "Economy" /
+/// "UnequipFailCorruption").  On the wire (callout_codec.h) it is the table's id and the key as FStrings and the format arguments as an int32 count;
+/// every captured message has none, so only the empty argument list is modelled (a message with arguments is refused by the codec).  Both strings are empty
+/// in a callout whose text is its plain `Message` ("Cannot summon mount here.", captures 876 and 870: all 96 bits of the struct are 0).
+struct LocalizedMessage {
+    std::string string_table_id;
+    std::string key;
+    bool operator==(const LocalizedMessage&) const = default;
+};
+
+/// FCalloutQueueInfo as the TOptional of an FItemStorageEvent carries it (Gathering stage 3, "the pick-up popup"; NetSerialize 0x145c599d0; item_codec.h has the layout and the
+/// evidence): the same struct as an item of the PlayerController's CalloutQueueReplication, written with a NetSerialize of its own that picks these members, in this order.  The
+/// retail server sets it on every storage event that adds a harvested item to a Resource container: the client's event apply (0x146a8c320) hands it to the item feed
+/// (0x146a90160), which shows the pick-up popup with the item's icon and the `message`'s rich text.  The members are named for the replicated callout's properties of the same
+/// memory offsets ([inferred]; the 24 retail events have `callout_type` 6, `point_size` 36 and `chat_category` 141, an empty `text_message`, `localized_message` and strings besides
+/// `message` and its copy `formatted_on_screen`, no node level or GM flag, the stored item as `item`, zero ids and location, and the time the server sent it as `creation_time`).
+struct CalloutQueueInfo {
+    TextValue         text_message;                // +0x20: an FText, None (history 0xFF) and no string in the 24 events
+    std::string       message;                     // +0x10: "Acquired <a id=\"Item\" ...> [Name] </>x5" (the rich text of the popup)
+    LocalizedMessage  localized_message;           // +0x30: empty (no table, no key, no arguments)
+    uint8_t           callout_type = 0;            // +0x94 (SetCalloutType): 6
+    int32_t           point_size = 0;              // +0x90: 36
+    uint8_t           chat_category = 0;           // +0x95 (ChatCategory): 141
+    std::string       formatted_on_screen;         // +0x70: a copy of `message` in the 24 events
+    std::string       from_source_player;          // +0x80
+    std::string       chat_emblems;                // +0x98
+    uint8_t           node_level = 0;              // +0x96
+    bool              sent_by_gm = false;          // +0x97 (a UBOOL)
+    ItemInstance      item;                        // +0xa8 (ItemAssociated): the event's own item in the 24 events
+    int64_t           toast_record_id = 0;         // +0x198
+    int64_t           action_response_id = 0;      // +0x1a0
+    Vec3d             context_location;            // +0x1b8
+    Ticks             creation_time;               // +0x1d0: FDateTime ticks, the moment the server sent the event
+    bool operator==(const CalloutQueueInfo&) const = default;
+};
+
 /// FItemStorageEvent (NetSerialize 0x145c58f20): what the server tells the PlayerController (ClientReceiveStorageEvent) and
 /// what the client asks for (ServerRequestStorageEvent).  `type` is EItemStorageEventType (Add 0, Remove 1, Move 2, Fill
 /// 3, Swap 4).  The three extra members are TOptionals the exe serializes after the instigator; none is ever set in a
-/// capture, and their meaning is not known.  A further optional struct the exe reads (a UBOOL after ItemData; the research
-/// of 2026-10-02 found 9 retail events of delete and chest flows that set it, none in tests/capture_items.h) is not decoded:
-/// such an event is refused.
+/// capture, and their meaning is not known.  The optional struct after ItemData is `callout` (an FCalloutQueueInfo: the retail
+/// server sets it on every event that puts a harvested item into a Resource container; the 9 events of delete and chest flows
+/// that the research of 2026-10-02 found with the flag set are not in tests/capture_items.h, and one whose struct holds more than
+/// the codec models -- an FText of another history, a localized message with arguments -- is refused).
 struct ItemStorageEvent {
     StorageEventContainer              move_source;
     ItemInstance                       item;
@@ -361,6 +399,7 @@ struct ItemStorageEvent {
     std::optional<uint64_t>            extra_i64;
     std::optional<GuidValue>           extra_guid_b;
     std::vector<StorageEventContainer> targets;
+    std::optional<CalloutQueueInfo>    callout;    // the TOptional after ItemData (a UBOOL, then the struct): the pick-up popup of a harvest
     bool operator==(const ItemStorageEvent&) const = default;
 };
 // -- Cyb . C | O | A --
@@ -505,15 +544,24 @@ struct NodeTaxDetails {
     bool operator==(const NodeTaxDetails&) const = default;
 };
 
-/// FLocalizedMessage (the mounts milestone, stage 1): a message the client looks up in a string table, the `LocalizedMessage` of a PlayerController
-/// callout (`CalloutQueueReplication.Items.Value.LocalizedMessage`: a toast such as "NCS" / "Quest_Toast_Started", a refusal such as "Economy" /
-/// "UnequipFailCorruption").  On the wire (callout_codec.h) it is the table's id and the key as FStrings and the format arguments as an int32 count;
-/// every captured message has none, so only the empty argument list is modelled (a message with arguments is refused by the codec).  Both strings are empty
-/// in a callout whose text is its plain `Message` ("Cannot summon mount here.", captures 876 and 870: all 96 bits of the struct are 0).
-struct LocalizedMessage {
-    std::string string_table_id;
-    std::string key;
-    bool operator==(const LocalizedMessage&) const = default;
+
+/// FChannelingData (Gathering stage 2, the fix after the user's test 1): the `ChannelingData` of the pawn's InteractInfo (UCharacterSecondaryInfo handle 26), what the pawn is channeling.
+/// The retail server sets it with the node's wake at the start of a harvest and clears it just after the result; the client plays the gather animation and shows the bar from it, and
+/// sends ServerInterruptChannel when the player moves.  The words are held as they are on the wire (channeling_codec.h has the layout, the evidence and what is inferred): the start
+/// is {target, flags 6, active, start_time, timed, duration, tool_record, tool_guid}, the clear {target, flags 0x106, not active, 0.0, not timed} with the rest at zero.
+struct ChannelingData {
+    emit::FIntrepidNetworkGUID target;        // the node's actor
+    uint32_t                   flags = 0;     // 6 while channeling, 0x106 once over
+    bool                       active = false;
+    double                     start_time = 0;   // seconds on the synchronized clock (CurrentEffects' StartTime); whole seconds in every capture
+    bool                       timed = false;    // the duration and the tool follow
+    float                      duration = 0;     // the channel's length, seconds
+    int64_t                    tool_record = 0;  // the worn tool's item record id
+    GuidValue                  tool_guid;        // and its instance guid
+    bool operator==(const ChannelingData& o) const {
+        return target == o.target && flags == o.flags && active == o.active && same_bits(start_time, o.start_time) && timed == o.timed && same_bits(duration, o.duration) &&
+               tool_record == o.tool_record && tool_guid == o.tool_guid;
+    }
 };
 
 // FCharacterCustomizationSaveData::NetSerialize sends the struct as a delta
@@ -612,7 +660,7 @@ public:
         Vec3d, Vec2d, Rot, QuantVec, Normal16, RepMovement, LoadTracker, UniqueNetId, Ticks,
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
-        EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage>;
+        EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

@@ -33,9 +33,11 @@
 #include "content/content_db.h"
 #include "session/ability_catalog.h"
 #include "stats/character_stats.h"
+#include "stats/gather_host.h"
 #include "world/city_nodes.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -46,6 +48,8 @@ struct RolledItem {
     int64_t item = 0;
     int64_t variation = 0;
     int64_t quantity = 0;
+    /// Gathering stage 2: the quality the item's variation rolled (0: none rolled, the item record's default stands).
+    int     quality = 0;
 };
 
 struct RolledXp {
@@ -63,8 +67,25 @@ struct Rolled {
 };
 // (C-O-A : Cyb)
 
+/// Gathering stage 2: a harvest's rolls (the reward tables of a node).  The table's items carry an ItemVariation whose Quality formula rolls the item's rarity (Artisan_Gathering_Rarity)
+/// and a quantity formula that reads what that roll gave (GetRolledItemQuality) and, for the experience, the rarity of the harvest's item (GetItemRarity): for each item the roller runs
+/// the variation's formula first, then the quantity, then the experience tables read the rarity of the FIRST item rolled (the interaction's own line, not a bonus drop).
+struct GatherRoll {
+    stats::GatherContext context;                              // the host's answers; the roller sets quality and item_rarity as it goes; ratings, source_tier and base_duration are the caller's
+    const std::map<int64_t, int64_t>* quality_expr = nullptr;  // ItemVariation guid -> the ab_expr id of its Quality formula
+    /// The EItemRarity ordinal (0 Common .. 6 Artifact) of an item of `item` at `quality`: the band of its record's quality curve.
+    std::function<int(int64_t item, int quality)> rarity_of;
+    /// GetRolledItemQuality() answers the quality itself (true) or the index of its rarity band (false: the default; the equation compares it with 0 to 6).
+    bool quality_literal = false;
+    bool primary_set = false;                                  // the first item has been rolled
+    int  primary_quality = 0, primary_rarity = 0;              // ... its quality and rarity
+    size_t quality_failures = 0;                               // a Quality formula that did not run (the item keeps the record's quality)
+};
+
 struct RollContext {
-    stats::CharacterStats::Evaluation* npc = nullptr;   // the dead creature's run: the owner of the expressions
+    stats::CharacterStats::Evaluation* npc = nullptr;   // the dead creature's run: the owner of the expressions (a harvest: the player's)
+    /// Gathering stage 2: set for a harvest (see GatherRoll); null for a kill.
+    GatherRoll* gather = nullptr;
     const std::vector<std::string>*    npc_tags = nullptr;
     double  loot_max_level = 1;       // GetPlayerLootMaxLevel
     double  avg_luck = 0;             // GetPlayerLootAvgLuck

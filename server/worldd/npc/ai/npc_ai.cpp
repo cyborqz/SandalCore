@@ -82,7 +82,7 @@ Orders NpcAi::think(const Sense& s) {
     }
 
     if (state_ == State::Idle) {
-        if (s.now >= next_sense_) {
+        if (params_.proximity_aggro && s.now >= next_sense_) {
             next_sense_ = s.now + params_.sense_interval;
             for (const Candidate& c : s.known) {
                 if (!c.alive || !c.hostile) continue;

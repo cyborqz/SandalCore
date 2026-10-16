@@ -35,6 +35,10 @@ bool write_stat(world::ActorRegistry& registry, uint64_t actor_id, int64_t recor
 /// CombatInfo: bInCombat, bIsDead and ActiveTargets (`target_object` the ObjectId of what it fights, 0 for none).  False when the actor has no CombatInfo.
 bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_combat, bool dead, uint64_t target_object);
 
+/// Gathering stage 3, "Hunting" (the done update of a corpse's hunt, capture 1457 and four more): the actor is dead for its clients: CombatInfo.bIsDead set, Health 0 and a bNotTargetable it was
+/// given cleared (never added).  Works on the actor itself, for a caller that is inside the registry's `modify`; what already holds the value changes nothing.  True when something changed.
+bool mark_dead(world::WorldActor& actor);
+
 /// CombatInfo.EliteRank.
 bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int rank);
 

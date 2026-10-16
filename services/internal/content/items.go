@@ -23,6 +23,9 @@ type Item struct {
 	AppearanceGuid        int64   // 0: none
 	MaxDurability         float64 // at DefaultQuality; 0 for an item with none
 	QualityCurveGuid      int64   // plan B3: 0: none
+	InvW, InvH            int     // Gathering stage 3 (version 14): the cells the item takes in a resource container's grid (1 x 1 for most)
+	Resource              bool    // its GameplayTags hold a child of item.resource: it is stored in a Resource container, never in the Backpack
+	DisplayName           string  // Gathering stage 3 (version 16): the record's ItemName source text ("Coconut Wood"); '' where the record has none
 	EquipSlots            []int   // EEquipSlot values, in the record's order; empty for an item that is not worn
 }
 
@@ -30,9 +33,9 @@ type Item struct {
 func (d *DB) Item(guid int64) (Item, error) {
 	var it Item
 	err := d.sql.QueryRow(`SELECT guid, name, level, can_equip, occupies_all_equip_slots, default_quality, max_stack_size,
-		stat_block_guid, appearance_guid, max_durability, quality_curve_guid FROM item WHERE guid = ?`, guid).
+		stat_block_guid, appearance_guid, max_durability, quality_curve_guid, inv_w, inv_h, resource, display_name FROM item WHERE guid = ?`, guid).
 		Scan(&it.Guid, &it.Name, &it.Level, &it.CanEquip, &it.OccupiesAllEquipSlots, &it.DefaultQuality, &it.MaxStackSize,
-			&it.StatBlockGuid, &it.AppearanceGuid, &it.MaxDurability, &it.QualityCurveGuid)
+			&it.StatBlockGuid, &it.AppearanceGuid, &it.MaxDurability, &it.QualityCurveGuid, &it.InvW, &it.InvH, &it.Resource, &it.DisplayName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Item{}, fmt.Errorf("content: no item %d", guid)
 	}

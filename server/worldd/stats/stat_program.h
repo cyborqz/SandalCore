@@ -146,7 +146,7 @@ constexpr int kHostProgressDuration = 11;  // GetProgressDuration(group)
 // Plan E1, stage 3: other actors, the hit's targets and the damage formulas.
 constexpr int kHostDistanceBetween = 12;   // name "A,B": the distance in cm between two actors (the roles)
 constexpr int kHostIsClient = 13;          // the server runs the expression: 0
-constexpr int kHostRandIntRange = 14;      // args lo, hi: a whole number from lo to hi inclusive
+constexpr int kHostRandIntRange = 14;      // args lo, hi: a whole number from lo to hi inclusive; lo when hi < lo (no random number used)
 constexpr int kHostSameActor = 15;         // name "A,B": 1 when the two roles are the same actor
 constexpr int kHostHitTriggerCount = 16;   // name: the ability's guid; args[0]: the role of the actor
 constexpr int kHostAbilityHitCount = 17;   // name: the ability's guid; args[0]: the role of the actor
@@ -179,6 +179,15 @@ constexpr int kHostPlayerCitizen = 175;        // Node_IsPlayerCitizen(player): 
 constexpr int kHostPlayerCitizenOfNode = 176;  // Node_IsPlayerCitizenOfNode(player, node): args[0] is the rank
 constexpr int kHostPlayerMayor = 177;          // Node_IsPlayerMayor(player)
 constexpr int kHostNodeLast = 177;
+// Gathering stage 2 (aocexpr/hostfn.go HostArtisanStat ...): what the Artisan equations ask of the harvest in progress and of the player.  All numbers; the equations compare the
+// quality, the rarity and the tier with whole numbers (stats/gather_host.h answers them from a GatherContext).
+constexpr int kHostArtisanStat = 180;        // GetArtisanshipModifiedStat(actor, stat): name = the stat's guid in decimal, args[0] = the role of the actor (the player is the caster)
+constexpr int kHostRolledItemQuality = 181;  // GetRolledItemQuality(): the quality the harvest's rarity equation rolled
+constexpr int kHostItemRarity = 182;         // GetItemRarity(): the EItemRarity ordinal of the harvest's item (Common 0 ... Artifact 6)
+constexpr int kHostSourceCertTier = 183;     // GetSourceCertificationTier(): the CertificationTier of the harvested interaction (Novice 0 ... GrandMaster 4)
+constexpr int kHostGatherBaseSecs = 184;     // GetGatheringInteractionBaseDuration(): the interaction's BaseGatheringDuration, seconds
+constexpr int kHostGatherFirst = 180;
+constexpr int kHostGatherLast = 184;
 constexpr int kActorPlayer = 100;              // the actor code of GetPlayer() in the args of kHostCurrentNode (the roles of a hit are 0 to 6)
 // kHostRoleBase + role * 16 + op: a read of an actor that only the host knows, by role.
 constexpr int kHostRoleBase = 32;

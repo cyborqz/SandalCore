@@ -75,8 +75,15 @@ std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minte
     w->npc.home_y = s.y;
     w->npc.home_z = s.z;
     // how far it notices and follows: the instance's own radius when it overrides the asset's [R: research/combat 6]
-    if (s.instance && s.instance->override_aggro && s.instance->aggro_radius > 0) w->npc.aggro_radius_cm = s.instance->aggro_radius;
-    else if (s.asset && s.asset->aggro_radius > 0) w->npc.aggro_radius_cm = s.asset->aggro_radius;
+    // [R: the data, retest 3] an override with a radius of 0 on a Timid asset (Rabid_Timid, Deer_Timid, Spider_Timid, Raven_Timid: 31 of 31 instances of Pop_TimidGrem) is "never
+    // notices a player"; the same override on the camps' wolves, goblins and bandits keeps the Blueprint's default, because they attack on sight [user, retest 3]; no override with no
+    // radius is "the Blueprint's", the AI's default
+    if (s.instance && s.instance->override_aggro) {
+        if (s.instance->aggro_radius > 0) w->npc.aggro_radius_cm = s.instance->aggro_radius;
+        else if (s.asset && s.asset->asset_ref.find("_Timid.") != std::string::npos) w->npc.aggro_off = true;
+    } else if (s.asset && s.asset->aggro_radius > 0) {
+        w->npc.aggro_radius_cm = s.asset->aggro_radius;
+    }
     if (s.asset && s.asset->leash_radius > 0) w->npc.leash_radius_cm = s.asset->leash_radius;
     if (s.instance) {
         w->npc.respawn_seconds = s.instance->respawn_time;

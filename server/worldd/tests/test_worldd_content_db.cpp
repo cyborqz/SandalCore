@@ -137,7 +137,7 @@ static void test_queries(const fs::path& dir) {
         auto db = content::ContentDb::open(path.string(), error);
         CHECK(db.has_value(), "a content.db of schema version 1 opens");
         if (!db) return;
-        CHECK(db->meta().schema_version == 1 && db->meta().contentc_version == "12" &&
+        CHECK(db->meta().schema_version == 1 && db->meta().contentc_version == "15" &&
                   db->meta().source_dbc_sha256 == "a2a3b82715732603e37a5cffcd422691f4402133cfdd0f231c7eb31025114a23" &&
                   db->meta().built_at == "2026-10-01T05:28:49Z",
               "meta: schema version, contentc version, the source's sha256 and the build time");
@@ -220,16 +220,16 @@ static void test_stat_content(const fs::path& dir) {
     std::printf("plan B3: contentc version 4, the stat program, the items' stat data\n");
     std::string error;
 
-    // contentc before version 12 is refused, saying what to do (plan D1 raised it from 4, plan D2 from 5, plan E1 from 6, stage 2 from 7, stage 3 from 8, part 2 from 9, the mounts from 10, Nodes 1 from 11)
-    for (const char* old : {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "0"}) {
+    // contentc before version 15 is refused, saying what to do (plan D1 raised it from 4, plan D2 from 5, plan E1 from 6, stage 2 from 7, stage 3 from 8, part 2 from 9, the mounts from 10, Nodes 1 from 11, Gathering stage 2 from 12, Gathering stage 3 from 13, "Foliage gathering" from 14)
+    for (const char* old : {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "0"}) {
         DbOptions o;
         o.contentc_version_value = old;
         const fs::path p = dir / (std::string("cv") + old + ".db");
         write_db(p, o);
         error.clear();
         const auto r = content::ContentDb::open(p.string(), error);
-        CHECK(!r && contains(error, (std::string("contentc version ") + old).c_str()) && contains(error, "reads version 12 or later") && contains(error, "go run ./cmd/contentc"),
-              (std::string("a file built by contentc version ") + old + " does not open: the message says version 12 is needed and how to rebuild").c_str());
+        CHECK(!r && contains(error, (std::string("contentc version ") + old).c_str()) && contains(error, "reads version 15 or later") && contains(error, "go run ./cmd/contentc"),
+              (std::string("a file built by contentc version ") + old + " does not open: the message says version 15 is needed and how to rebuild").c_str());
     }
     {
         DbOptions o;
@@ -237,9 +237,9 @@ static void test_stat_content(const fs::path& dir) {
         write_db(dir / "cvfour.db", o);
         error.clear();
         CHECK(!content::ContentDb::open((dir / "cvfour.db").string(), error) && contains(error, "no number"), "a contentc.version that is no number is refused");
-        o.contentc_version_value = "13";
-        write_db(dir / "cv13.db", o);
-        CHECK(content::ContentDb::open((dir / "cv13.db").string(), error).has_value(), "a later contentc version opens");
+        o.contentc_version_value = "15";
+        write_db(dir / "cv15.db", o);
+        CHECK(content::ContentDb::open((dir / "cv15.db").string(), error).has_value(), "a later contentc version opens");
     }
     {
         DbOptions o;

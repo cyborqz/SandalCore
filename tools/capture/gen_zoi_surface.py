@@ -15,7 +15,7 @@ of z = 16,384 cm (the same height tools' zoi_lookup.py calls the surface).
     python tools/capture/gen_zoi_surface.py --check         # write nothing, exit 1 when the header would change
     python tools/capture/gen_zoi_surface.py --chunks DIR --content-db content.db
 
-The encoding of a chunk file is the one the G1 research decoded (g1-handover research g1region/riverlands/zoi_lookup.py, validated
+The encoding of a chunk file (validated
 on all 30,558 files, the 78 ZOI records' extents and 153,359 retail player moves): the world is cut into chunks of 32,768 cm per
 axis (chunk = floor(position / 32768)), each 64 x 64 x 64 cells of 512 cm; the Zen package's export (at HeaderSize, the u32 at byte 4)
 is 15 header bytes, a u8 version (3), a u32 palette count P, P x u64 ZOI guid (0 = none), a u32 N and N x (UE packed-int run length,

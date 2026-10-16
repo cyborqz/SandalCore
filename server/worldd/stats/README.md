@@ -89,6 +89,10 @@ Expression functions the stat engine does not own go through a generic operation
 (the empty group), run by both engines (`go run . corpus --db ... --out ...` rewrites it, `corpus --check` compares).
 A stat with `kStatResource` is a held class resource: `StatOut` carries its limits and regeneration (`max`, `min`, `has_*`), `StatInputs::current` feeds the held value to `GetStat`, `CharacterStats::set_resources` names the guids (`content::kResourceStats`).
 
+### The gathering reads (Gathering stage 2; `gather_host.h`)
+
+Host functions **180 to 184** (`kHostArtisanStat` .. `kHostGatherBaseSecs`) are what the Artisan equations ask of a harvest: `GetArtisanshipModifiedStat(actor, stat)` (name = the stat's guid, args[0] = the actor's role; the player is the caster), `GetRolledItemQuality()`, `GetItemRarity()`, `GetSourceCertificationTier()` and `GetGatheringInteractionBaseDuration()`. `stats::GatherContext` (`quality`, `item_rarity`, `source_tier`, `base_duration`, `ratings` by stat guid) and `gather_host_fn(ctx, fn, name, args, n, out)` answer them (false for any other function; a stat with no rating, another actor and a name that is no guid read 0): the harvest host of the Harvesting part fills the context and calls it from its `ExprHost::host_fn`. `RandIntRange` (14) answers `lo` when `hi < lo`, in every host. `test_worldd_stats` holds `gather_host_fn` to the corpus's `gatherhost` blocks (the Go `GatherContext`'s answers), `test_worldd_effects` runs the Artisan programs of the real bundle in the `real_gather_*` fxcases, with the same `fn` answers and SplitMix seeds as the Go engine.
+
 ## Tests
 
 `test_worldd_stats` (`stats/tests/test_worldd_stats.cpp`, target in a separate block at the end of `server/worldd/CMakeLists.txt`)
