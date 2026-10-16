@@ -56,6 +56,9 @@ func TestItemValidate(t *testing.T) {
 		{"Backpack slot 70", func(i *Item) { i.Slot = 70 }, "slot 70"},
 		{"Equipment slot 83", func(i *Item) { i.Container, i.Slot = Equipment, 83 }, "slot 83"},
 		{"Quest slot 100", func(i *Item) { i.Container, i.Slot = Quest, 100 }, "slot 100"},
+		{"Resource0 slot 256", func(i *Item) { i.Container, i.Slot = Resource0, 256 }, "slot 256"},
+		{"Resource2 slot -1", func(i *Item) { i.Container, i.Slot = Resource2, -1 }, "slot -1"},
+		{"a fourth resource container", func(i *Item) { i.Container = "Resource3" }, "container"},
 		{"record 0", func(i *Item) { i.ItemRecordID = 0 }, "record"},
 		{"negative record", func(i *Item) { i.ItemRecordID = -5 }, "record"},
 		{"guid in capitals", func(i *Item) { i.InstanceGUID = strings.ToUpper(guid(255)) }, "guid"},
@@ -172,7 +175,7 @@ func TestValidateItemsRefusesDuplicatesAndTooMany(t *testing.T) {
 	}
 	var all []Item
 	n := 0
-	for _, c := range []string{Backpack, Equipment, Quest} {
+	for _, c := range []string{Backpack, Equipment, Quest, Resource0, Resource1, Resource2} { // Gathering stage 3: the resource containers count too
 		for s := int32(0); s < SlotCount[c]; s++ {
 			n++
 			all = append(all, item(c, s, 1, guid(n)))
@@ -390,6 +393,159 @@ func TestDeletingACharacterDeletesItsItems(t *testing.T) {
 	}
 	if got, _ := s.Inventory(ctx, b.ID); len(got) != 1 {
 		t.Errorf("the other character's items: %+v", got)
+	}
+}
+
+// ---- Gathering stage 3, "Resource storage": the resource containers --------------------------------------------------------------------
+
+// A kit of the Backpack, the Equipment and the Quest storage and two resource containers: stacks of raw items and a carcass.
+func withResources() []Item {
+	oak := item(Resource0, 0, 6064630000000000001, guid(20))
+	oak.Quantity = 17
+	oak.Quality = 6
+	carcass := item(Resource0, 7, 6064630000000000002, guid(21))
+	carcass.Durability = 0
+	ore := item(Resource1, 39, 6064630000000000003, guid(22))
+	ore.Quantity = 99
+	return append(smallKit(), oak, carcass, ore)
+}
+
+func TestResourceItemsAreStoredAndReadBackInTheOrderOfStorage(t *testing.T) {
+	s, acc := setup(t)
+	ctx := context.Background()
+	kit := withResources()
+	c, err := s.Create(ctx, New{AccountID: acc, Name: "cyb", ClassID: 2, Items: kit})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := s.Inventory(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append([]Item{}, kit...)
+	SortItems(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Inventory =\n%+v\nwant\n%+v", got, want)
+	}
+	order := []string{Backpack, Equipment, Equipment, Quest, Resource0, Resource0, Resource1}
+	for i, o := range order {
+		if got[i].Container != o {
+			t.Errorf("item %d is in %s, want %s: %+v", i, got[i].Container, o, got)
+		}
+	}
+	if got[4].Slot != 0 || got[5].Slot != 7 || got[6].Slot != 39 || got[4].Quantity != 17 || got[4].Quality != 6 {
+		t.Errorf("the resource items: %+v", got[4:])
+	}
+	// the Backpack and the Equipment tables hold none of them: a resource item lives only in its own table
+	var inItems, inResource int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM character_items WHERE character_id = $1`, c.ID).Scan(&inItems); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM character_resource_items WHERE character_id = $1`, c.ID).Scan(&inResource); err != nil {
+		t.Fatal(err)
+	}
+	if inItems != 4 || inResource != 3 {
+		t.Errorf("%d rows in character_items and %d in character_resource_items, want 4 and 3", inItems, inResource)
+	}
+}
+
+func TestSaveInventoryReplacesBothTables(t *testing.T) {
+	s, acc := setup(t)
+	ctx := context.Background()
+	c, err := s.Create(ctx, New{AccountID: acc, Name: "cyb", ClassID: 2, Items: withResources()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the oak is topped up and moved, the carcass is gone, the ore moves to the third container, a new reagent comes; the other items stay
+	oak := item(Resource0, 12, 6064630000000000001, guid(20))
+	oak.Quantity = 20
+	oak.Quality = 6
+	ore := item(Resource2, 3, 6064630000000000003, guid(22))
+	ore.Quantity = 99
+	reagent := item(Resource0, 0, 6064630000000000009, guid(23))
+	next := append(smallKit(), oak, ore, reagent)
+	if err := s.SaveInventory(ctx, c.ID, next); err != nil {
+		t.Fatalf("SaveInventory: %v", err)
+	}
+	got, err := s.Inventory(ctx, c.ID)
+	want := append([]Item{}, next...)
+	SortItems(want)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("after the save:\n%+v, %v\nwant\n%+v", got, err, want)
+	}
+	// a save with no resource item empties the resource table (the latest save wins in both)
+	if err := s.SaveInventory(ctx, c.ID, smallKit()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM character_resource_items WHERE character_id = $1`, c.ID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("%d resource items remain after a save with none (%v)", n, err)
+	}
+	// one character's resource items are never another's
+	other, _ := s.Create(ctx, New{AccountID: acc, Name: "Bravo", ClassID: 2, Items: []Item{item(Backpack, 0, 1, guid(30)), item(Resource0, 0, 5, guid(31))}})
+	if err := s.SaveInventory(ctx, c.ID, withResources()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Inventory(ctx, other.ID); len(got) != 2 || got[1].Container != Resource0 || got[1].ItemRecordID != 5 {
+		t.Errorf("Bravo's items after Cyb's save: %+v", got)
+	}
+}
+
+// C Y B + C O A
+
+func TestSaveInventoryRefusalsForResourceItemsChangeNothing(t *testing.T) {
+	s, acc := setup(t)
+	ctx := context.Background()
+	c, err := s.Create(ctx, New{AccountID: acc, Name: "cyb", ClassID: 2, Items: withResources()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := s.Inventory(ctx, c.ID)
+	for name, items := range map[string][]Item{
+		// the instance guid is unique per character across BOTH tables (checked here: a table cannot hold it)
+		"a guid in the Backpack and in a resource container": {item(Backpack, 0, 1, guid(1)), item(Resource0, 0, 5, guid(1))},
+		"a guid in two resource containers":                  {item(Resource0, 0, 5, guid(1)), item(Resource1, 0, 5, guid(1))},
+		"two items in a resource slot":                       {item(Resource0, 4, 5, guid(1)), item(Resource0, 4, 5, guid(2))},
+		"a resource slot out of range":                       {item(Resource1, 256, 5, guid(1))},
+		"a fourth resource container":                        {item("Resource3", 0, 5, guid(1))},
+	} {
+		if err := s.SaveInventory(ctx, c.ID, items); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v, want ErrInvalid", name, err)
+		}
+		if got, _ := s.Inventory(ctx, c.ID); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s changed the items: %+v", name, got)
+		}
+	}
+}
+
+func TestDeletingACharacterDeletesItsResourceItems(t *testing.T) {
+	s, acc := setup(t)
+	ctx := context.Background()
+	a, _ := s.Create(ctx, New{AccountID: acc, Name: "Alpha", ClassID: 2, Items: withResources()})
+	if err := s.Delete(ctx, acc, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM character_resource_items WHERE character_id = $1`, a.ID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("%d resource items of the deleted character remain (%v)", n, err)
+	}
+}
+
+// A character whose only items are in a resource container is not a character without items: the starter kit backfill leaves it alone.
+func TestGrantMissingKitsLeavesACharacterWithResourceItemsAlone(t *testing.T) {
+	s, acc := setup(t)
+	ctx := context.Background()
+	c, err := s.Create(ctx, New{AccountID: acc, Name: "Hoarder", ClassID: 2, Items: []Item{item(Resource0, 0, 6064630000000000001, guid(40))}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureLog(t)
+	res, err := s.GrantMissingKits(ctx, &fakeKits{})
+	if err != nil || res.Granted != 0 {
+		t.Fatalf("GrantMissingKits = %+v, %v; a character with a resource item has items", res, err)
+	}
+	if got, _ := s.Inventory(ctx, c.ID); len(got) != 1 || got[0].Container != Resource0 {
+		t.Errorf("the character's items after the backfill: %+v", got)
 	}
 }
 

@@ -51,7 +51,12 @@
 //                      the pawn's ResourceStorageComponent at pkt#107
 //    then SerializeIntPacked(payload bits) and the payload.  The client's blocks
 //    (C>S) carry only the two bits and the subobject's GUID: "only the server
-//    can tell clients to create objects".
+//    can tell clients to create objects".  A subobject the server never gave the
+//    client a GUID for (a component worldd does not replicate) is named IN PLACE,
+//    as UPackageMapClient writes an unmapped object: the default GUID (ObjectId 1,
+//    the rest 0), FExportFlags and, with the path flag, the outer's GUID, the name
+//    (FString) and, flagged, the checksum -- Gathering stage 3's trees: the
+//    client's 550-bit blocks, ten a second, which dropped the whole bunch.
 //    An object with nothing to say at an open still gets a block, bHasRepLayout 0
 //    and 0 payload bits (139 bits: pkt#78's OwnerInfo, Backpack, Equipment, ...).
 // ============================================================================
@@ -142,6 +147,18 @@ PackedExports pack_exports(std::span<const ExportChain> chains, const ExportAcks
 
 // ---- content blocks -----------------------------------------------------------
 
+/// A subobject the client names IN PLACE (client -> server): the server never gave it a GUID, so UPackageMapClient writes
+/// the default GUID (ObjectId 1) and the object's export instead -- FExportFlags (1 path, 2 no-load, 4 checksum) and, with
+/// the path, the outer's GUID, the name and, flagged, the checksum (value.h's InlineObject, the form a parameter takes).
+/// Nothing resolves a name here: the block is skipped by its payload bits, and the name says what it was.
+struct InPlaceName {
+    uint8_t                    flags = 0;
+    emit::FIntrepidNetworkGUID outer;       // with the path flag
+    std::string                path;        // with the path flag: the object's name in its outer ("XPTracker")
+    uint32_t                   checksum = 0;   // with the checksum flag
+    bool operator==(const InPlaceName&) const = default;
+};
+
 struct BlockHeader {
     bool                       has_rep_layout = false;
     bool                       is_actor = true;         // the channel's actor; else `object`
@@ -150,11 +167,13 @@ struct BlockHeader {
     bool                       stably_named = true;
     emit::FIntrepidNetworkGUID dynamic_class;           // !stably_named
     std::optional<emit::FIntrepidNetworkGUID> outer;    // !stably_named; nullopt: the actor is the outer
+    /// client -> server only, for a subobject the client has no GUID for: its name in place; then `object` stays 0.
+    std::optional<InPlaceName> in_place;
     bool operator==(const BlockHeader&) const = default;
 };
 
 /// The header alone; the server's form (`server_form`) or the client's.  Returns the bits written; 0, writing
-/// nothing, when it would name an object by ObjectId 1.
+/// nothing, when it would name an object by ObjectId 1 (the client's form writes `in_place` instead, when set).
 size_t write_block_header(emit::BunchWriter& out, const BlockHeader& header, bool server_form = true);
 
 /// A whole content block: the header, SerializeIntPacked(payload bits), the payload.  Returns the bits written

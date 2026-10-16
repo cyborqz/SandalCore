@@ -15,9 +15,14 @@
 //                             use (nothing is consumed: the scroll stays for a character it is meant for)
 //    SetPrimaryArchetype      the class of the action's CharacterClassId; the character's own class refuses the use
 //
-//  Everything else refuses the use and says what was asked (the response type, an unmodelled table, an unmodelled predicate),
-//  and a reward stage 1 does not run (a Weapon XP reward, an expression that is not the formula) is a note: the rest of the use
-//  goes on. Nothing here changes anything: the session applies a Plan (the inventory, the XP, the class) and tells the client.
+//    SetCertificationLevel    (Gathering stage 2) Promote: the profession is one certification tier up; Demote: one down. A GM artisan scroll lists them
+//                             between its XP lines (professions.h says when a Promote takes effect)
+//    a Profession XP reward   (Gathering stage 2) the reward's compiled expression, run with the live profession levels, is the XP the profession earns
+//
+//  The actions run IN ORDER, each seeing what the one before left (the XP of a scroll's second line depends on the tier its Promote reached). Everything else
+//  refuses the use and says what was asked (the response type, an unmodelled table, an unmodelled predicate), and a reward stage 1 does not run (a Weapon XP
+//  reward, an expression that is not the formula) is a note: the rest of the use goes on. Nothing here changes anything: the session applies a Plan (the
+//  inventory, the XP, the professions, the class) and tells the client.
 //
 //  Evidence: the GM items' records in content.db (the research of 2026-10-02 and contentc's tables); no retail capture holds a
 //  GM item use (scratchpad dcodecs/levelup_evidence.md), so the replies are modelled on what retail sent for the pieces (the
@@ -27,6 +32,7 @@
 
 #include "content/content_db.h"
 #include "session/leveling.h"
+#include "session/professions.h"
 
 #include <cstdint>
 #include <optional>
@@ -51,6 +57,10 @@ struct Plan {
     std::vector<Granted>     items;           // into the bag, in the records' order
     int64_t                  adventuring_xp = 0;
     std::optional<int>       set_class;       // ECharacterClass (1 Ranger ... 8 Mage)
+    /// Gathering stage 2: what the character holds in its professions after the use (valid() only when the context had professions), and each profession that
+    /// differs from before (before and after, in profession order). A use that moves no level and no tier leaves the professions as they were.
+    professions::Professions         professions_after;
+    std::vector<professions::Change> profession_changes;
     std::vector<std::string> notes;           // what was skipped
     std::string              summary;         // one line for the log ("+418,410 XP, 19 items")
 };
@@ -62,6 +72,11 @@ struct Context {
     leveling::Progress          progress;
     double                      xp_add_mult = 0;       // the AdventuringXPAddMult stat
     const leveling::LevelCurve* curve = nullptr;       // the Adventuring curve (null: XP rewards are refused)
+    /// Gathering stage 2: the professions' book, what the character holds now, and the runner of a Profession reward's expression. Without the book an item that
+    /// changes a certification or gives profession XP is refused; without the runner a Profession XP reward is.
+    const professions::Book*  professions = nullptr;
+    professions::Professions  held;
+    professions::XpRunner     profession_xp;
 };
 
 /// The most items one use grants (a gear scroll gives 19; the bag has 70 slots).

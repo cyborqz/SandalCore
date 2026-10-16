@@ -17,6 +17,8 @@ namespace Mapc;
 ///                                    (`mapc build --check` is the same; `--check` stands anywhere: `mapc --check roads` is `mapc roads --check`; `--explain` prints what a line means and stops)
 ///   mapc mount-speeds [--check]      read the 141 mount Blueprints' MaxWalkSpeed, MaxFlySpeed and MaxSwimSpeed (no map: seconds), write DIR/mount_speeds.tsv;
 ///                                    with --check write nothing and exit 1 when DIR's file differs from a fresh read (mounts milestone)
+///   mapc artisan-curves [--check]    read the three profession level-up curves (Gathering, Processing, Crafting: pak assets the design database does not hold; no map:
+///                                    seconds), write DIR/artisan_curves.tsv; with --check write nothing and exit 1 when DIR's file differs from a fresh read (Gathering stage 2)
 ///   mapc roads [--check]             read the BP_RoadActor_C splines of the area's MainGrid cells, write DIR/roads_raw.tsv (a map read: run it alone; mounts milestone, stage 4)
 ///   mapc probe KEY.tsv               the answer key's hit rate on the extracted geometry (diagnostic)
 ///   mapc inspect NAME...             what one static mesh holds (diagnostic)
@@ -97,8 +99,8 @@ public static class Cli
             switch (o.Cmd)
             {
                 case "help": case "build": case "extract": o.Cmd = "check"; break;   // the E1 gate: rebuild all three in a scratch folder and compare
-                case "check": case "mount-speeds": case "roads": break;               // these compare themselves
-                default: throw new ArgumentException("--check goes with build, mount-speeds or roads (or alone: the E1 check), not with " + o.Cmd);
+                case "check": case "mount-speeds": case "roads": case "artisan-curves": break;   // these compare themselves
+                default: throw new ArgumentException("--check goes with build, mount-speeds, artisan-curves or roads (or alone: the E1 check), not with " + o.Cmd);
             }
         }
         // review B I7: E1's circle is not the default area any more; its build must not land in (or be compared with) the Riverlands' files in dist/content
@@ -108,6 +110,7 @@ public static class Cli
             throw new ArgumentException("--center/--radius (E1's circle) needs an explicit --out-dir: the default dist/content holds the Riverlands' files, which a circle build would overwrite (E1's own are in dist/content/e1)");
         return o;
     }
+// -- Cyb & C | O | A --
 
     public static int Run(string[] args)
     {
@@ -151,11 +154,12 @@ public static class Cli
                 case "foliage-detail": { var game = new Game(o.Paks, o.Usmap); return Diag.FoliageDetail(game, o.Rest[0], o.Rest.Count > 1 ? int.Parse(o.Rest[1]) : 3); }
                 case "cell-exports": { var game = new Game(o.Paks, o.Usmap); return Diag.CellExports(game, o.Rest[0], o.Rest.Count > 1 ? o.Rest[1] : null, 12); }
                 case "mount-speeds": return MountSpeedsCommand(o);
+                case "artisan-curves": return ArtisanCurvesCommand(o);
                 case "roads": return RoadsCommand(o);
                 case "bp": { var game = new Game(o.Paks, o.Usmap); Inspect.Bp(game, o.Rest[0], o.Rest.Count > 1 ? o.Rest[1] : null); return 0; }
                 case "inspect": { var game = new Game(o.Paks, o.Usmap); Inspect.Run(game, new[] { "inspect" }.Concat(o.Rest).ToArray()); return 0; }
                 default:
-                    Console.WriteLine("mapc extract | build | --check | probe-cells | mount-speeds [--check] | roads [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
+                    Console.WriteLine("mapc extract | build | --check | probe-cells | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
                     return o.Cmd == "help" ? 0 : 2;
             }
         }
@@ -230,6 +234,29 @@ public static class Cli
             Console.WriteLine($"wrote {file}");
         }
         return bad == 0 ? 0 : 1;
+    }
+
+    /// <summary>mapc artisan-curves: the profession level-up curves into DIR/artisan_curves.tsv, or with --check a byte comparison with the file that is there.</summary>
+    static int ArtisanCurvesCommand(Opt o)
+    {
+        var game = new Game(o.Paks, o.Usmap);
+        var curves = ArtisanCurves.Collect(game, out var packages, out var bad);
+        string text = ArtisanCurves.ToTsv(curves);
+        Console.WriteLine($"{curves.Count} curves of {packages} packages ({bad} unreadable), {curves.Sum(c => c.Keys.Count)} keys");
+        string file = Path.Combine(o.OutDir, ArtisanCurves.FileName);
+        if (o.CheckFlag)
+        {
+            if (!File.Exists(file)) { Console.WriteLine($"{ArtisanCurves.FileName}: missing in {o.OutDir}"); return 1; }
+            var have = File.ReadAllBytes(file); var fresh = Encoding.UTF8.GetBytes(text);
+            bool same = have.AsSpan().SequenceEqual(fresh);
+            Console.WriteLine(same ? $"{ArtisanCurves.FileName}: identical ({have.Length} bytes)" : $"{ArtisanCurves.FileName}: DIFFERS (file {have.Length} bytes, fresh {fresh.Length})");
+            return same && bad == 0 ? 0 : 1;
+        }
+        if (bad != 0) { Console.Error.WriteLine($"mapc: {bad} curve package(s) could not be read: nothing written"); return 1; }
+        Directory.CreateDirectory(o.OutDir);
+        File.WriteAllText(file, text);
+        Console.WriteLine($"wrote {file}");
+        return 0;
     }
 
     /// <summary>What the map read is cut for: the Riverlands' rectangles by default, E1's circle when --center or --radius is given.</summary>

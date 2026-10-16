@@ -214,8 +214,9 @@ func (c refCtx) Term(r aocexpr.Ref) (float64, error) {
 	}
 	td, known := e.g.Terms[r.Guid]
 	var v float64
+	blank := idx >= 0 && strings.TrimSpace(e.terms[idx][r.Guid]) == "" // an input term with no value supplies nothing (compile.go: fnc.term)
 	switch {
-	case idx >= 0:
+	case idx >= 0 && !blank:
 		text := e.terms[idx][r.Guid]
 		saved := e.terms
 		depth := idx
@@ -238,6 +239,8 @@ func (c refCtx) Term(r aocexpr.Ref) (float64, error) {
 				return 0, err
 			}
 		}
+	case blank:
+		v = 0 // the graph does not know the term: nothing to default to
 	default:
 		if len(e.terms) == 0 {
 			return 0, fmt.Errorf("GetTerm outside a formula")

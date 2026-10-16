@@ -40,8 +40,9 @@ struct Position {
 };
 
 /// The storages a character's items are in (aoc.character.v1.ItemContainer, plan B2): the Backpack (70 slots), the Equipment
-/// (83: the slot is the client's EEquipSlot) and the Quest storage (100).
-enum class ItemContainer : uint8_t { Backpack = 0, Equipment = 1, Quest = 2 };
+/// (83: the slot is the client's EEquipSlot) and the Quest storage (100); Gathering stage 3 adds the three resource containers, the resource bags worn in Equipment slots 23,
+/// 24 and 25 (EItemLocation Resource0 to Resource2): a slot is the index of the top-left cell of the item's rectangle in the bag's grid.
+enum class ItemContainer : uint8_t { Backpack = 0, Equipment = 1, Quest = 2, Resource0 = 3, Resource1 = 4, Resource2 = 5 };
 
 /// One item instance of a character (aoc.character.v1.Item).
 struct InventoryItem {
@@ -79,6 +80,17 @@ struct Experience {
     bool operator==(const Experience& o) const { return leveling_type_guid == o.leveling_type_guid && xp == o.xp && debt == o.debt; }
 };
 // C:Y:B : C.O.A
+
+/// Gathering stage 2: one of the 22 CharacterProfessions of a character (aoc.character.v1.ProfessionState): the design database's CharacterProfessions Guid
+/// (Mining 108752769996425 ...), the certification tier (0 Novice ... 4 GrandMaster), the level (1-50) and the XP total on the profession's level-up curve.
+/// A profession's XP lives only here (not in `experience`).
+struct ProfessionState {
+    int64_t profession_guid = 0;
+    int32_t certification_tier = 0;
+    int32_t level = 1;
+    int64_t xp = 0;
+    bool operator==(const ProfessionState&) const = default;
+};
 
 /// Plan D1, stage 2: the ranks a character bought in one skill tree (aoc.character.v1.TreeRanks): the tree's Guid and the SkillRank Guids in the
 /// order they were bought. The ranks a level grants by itself are not stored.
@@ -138,6 +150,9 @@ struct Character {
     /// or arranged its bar has none.
     std::vector<TreeRanks>     skill_ranks;
     std::vector<ActionbarSlot> action_bar;
+    /// Gathering stage 2: the character's 22 professions in guid order (with the items): a profession the service has no row for is Novice, level 1, no XP,
+    /// so a service of this version always sends 22; an older fake may send none, which worldd reads the same way.
+    std::vector<ProfessionState> professions;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -154,13 +169,16 @@ struct Progress {
     std::vector<TreeRanks>     skill_ranks;
     bool                       replace_action_bar = false;
     std::vector<ActionbarSlot> action_bar;
+    /// Gathering stage 2: each profession replaces the character's row of that profession; the others are left alone (the character service refuses a profession
+    /// that is none of the 22, one twice, a tier outside 0-4, a level outside 1-50 or a negative XP).
+    std::vector<ProfessionState> professions;
     bool operator==(const Progress& o) const {
         if (level != o.level || class_id != o.class_id || experience.size() != o.experience.size()) return false;
         for (size_t i = 0; i < experience.size(); ++i) {
             if (!(experience[i] == o.experience[i])) return false;
         }
         return replace_skill_ranks == o.replace_skill_ranks && skill_ranks == o.skill_ranks && replace_action_bar == o.replace_action_bar &&
-               action_bar == o.action_bar;
+               action_bar == o.action_bar && professions == o.professions;
     }
 };
 // [C:Y:B :: C O A]

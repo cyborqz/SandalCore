@@ -247,7 +247,20 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
         } else {
             s.dynamic_class = b.class_chain;
         }
-        if (b.cls == "UInteractableComponent") w.npc.interact_component = s.guid.ObjectId;
+        if (b.cls == "UInteractableComponent") {
+            w.npc.interact_component = s.guid.ObjectId;
+            // Gathering stage 3, "Hunting": the PlayerInteractionDef of the component's first input (a huntable creature's Hunting_<kind>: its corpse is hunted by it)
+            if (b.schema && b.schema->command("InteractionInputData")) {
+                const repl::Value* data = b.state.state.get(*b.schema, "InteractionInputData");
+                const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+                if (arr && !arr->elements.empty()) {
+                    const auto g = arr->elements[0].values.find(6);   // InteractionInputData.PlayerInteractDefinition.Guid
+                    if (g != arr->elements[0].values.end()) {
+                        if (const int64_t* i = g->second.get_if<int64_t>()) w.npc.interact_def = *i;
+                    }
+                }
+            }
+        }
         a.subobjects.push_back(std::move(s));
     }
     const auto sub = [&](const char* cls) -> repl::Subobject* {

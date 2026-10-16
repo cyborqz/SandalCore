@@ -292,7 +292,7 @@ static void test_load_tracker_and_pawn_open() {
     const auto quest = payload(StorageKind::QuestStorage, Role::Pawn);
     CHECK(emitted_as(quest, {ref(capture_bootstrap::kPawnQuestPayloadExports0)}, ref(capture_bootstrap::kPawnQuestPayloadContent)),
           "pkt#93: the empty QuestStorage payload (100 slots) equals the original's");
-    const auto resource = payload(StorageKind::Resource, Role::Pawn);
+    const auto resource = payload(StorageKind::Resource0, Role::Pawn);
     CHECK(emitted_as(resource, {}, ref(capture_bootstrap::kPawnResourcePayloadContent)),
           "pkt#97: the empty resource storage payload (24 slots, Dimension 6 x 4, no export) equals the original's");
 
@@ -301,9 +301,9 @@ static void test_load_tracker_and_pawn_open() {
     CHECK(pc_backpack && pc_backpack->role == Role::PlayerController &&
               emitted_as(pc_backpack, {ref(capture_bootstrap::kPcBackpackPayloadExports0)}, ref(capture_bootstrap::kPcBackpackPayloadContent)),
           "pkt#597: the Backpack payload on the PlayerController equals the original's");
-    const auto pc_resource = payload(StorageKind::Resource, Role::PlayerController);
+    const auto pc_resource = payload(StorageKind::Resource0, Role::PlayerController);
     CHECK(emitted_as(pc_resource, {}, ref(capture_bootstrap::kPcResourcePayloadContent)), "pkt#607: the resource payload on the PlayerController equals the original's");
-    const auto reply = payload(StorageKind::Resource, Role::Pawn);
+    const auto reply = payload(StorageKind::Resource0, Role::Pawn);
     CHECK(emitted_as(reply, {}, ref(capture_bootstrap::kPawnResourceReplyContent)), "pkt#773: the reply to ServerRequestStorageData equals the original's");
     CHECK(!pb.storage_payload(StorageKind::Backpack, Role::PlayerState) && !pb.storage_payload(StorageKind::Backpack, Role::GameState),
           "a storage payload goes to the pawn or the PlayerController only");
@@ -952,7 +952,7 @@ static void test_guids_and_parts() {
           "mint_session_guids: consecutive even ids under the ServerId, the GameState's passed through");
     bool even = true;
     for (const auto* x : {&g.player_state, &g.player_controller, &g.global_gm_commands, &g.pawn, &g.base_character_info, &g.combat_info, &g.owner_info,
-                          &g.backpack, &g.equipment, &g.quest_storage, &g.reward_storage, &g.appearance, &g.resource_storage, &g.collision_cylinder,
+                          &g.backpack, &g.equipment, &g.quest_storage, &g.reward_storage, &g.appearance, &g.resource_storage[0], &g.resource_storage[1], &g.resource_storage[2], &g.collision_cylinder,
                           &g.alignment, &g.ability, &g.stats}) {
         even = even && (x->ObjectId % 2) == 0;
     }

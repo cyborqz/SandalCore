@@ -42,6 +42,7 @@ struct Delivered {
     bool reliable = false;
     bool open = false;                           // the chain opens the channel
     bool close = false;                          // a close bunch (no content)
+    uint32_t close_reason = 0;                   // why: EChannelCloseReason (0 Destroyed, 1 Dormancy, 2 LevelUnloaded, 3 Relevancy), when `close`
     std::vector<emit::BunchWriter> exports;      // the export bunches, each a bunch payload
     emit::BunchWriter content;                   // the content bits: SerializeNewActor and blocks, or an RPC
 };
@@ -189,11 +190,13 @@ private:
     /// One part of a chain, as it arrived.
     struct Part {
         bool reliable = false, partial = false, initial = false, final = false, exports = false, open = false, close = false;
+        uint32_t close_reason = 0;
         emit::BunchWriter bits;
     };
     /// The chain being put together on a channel.
     struct Assembling {
         bool open = false, close = false;
+        uint32_t close_reason = 0;
         std::vector<emit::BunchWriter> exports;
         emit::BunchWriter content;
         Assembling() {}   // BunchWriter's default constructor is explicit: no `Assembling{}`
@@ -209,6 +212,7 @@ private:
         p.exports = b.has_package_map_exports;
         p.open = b.is_open;
         p.close = b.is_close;
+        p.close_reason = b.is_close ? b.close_reason : 0;
         p.bits.write_bit_range(pkt, b.data_start_bit, b.bunch_data_bits);
         if (!b.is_reliable) {
             assemble(b.channel, std::move(p), out);
@@ -233,6 +237,7 @@ private:
             d.reliable = reliable;
             d.open = a.open;
             d.close = a.close;
+            d.close_reason = a.close_reason;
             d.exports = std::move(a.exports);
             d.content = std::move(a.content);
             out.push_back(std::move(d));
@@ -242,6 +247,7 @@ private:
             Assembling single;
             single.open = p.open;
             single.close = p.close;
+            single.close_reason = p.close_reason;
             single.content = std::move(p.bits);
             emit_chain(std::move(single), p.reliable);
             return;
@@ -249,6 +255,7 @@ private:
         if (p.initial) a = Assembling();
         a.open = a.open || p.open;
         a.close = a.close || p.close;
+        if (p.close) a.close_reason = p.close_reason;
         if (p.exports) {
             a.exports.push_back(std::move(p.bits));
         } else {

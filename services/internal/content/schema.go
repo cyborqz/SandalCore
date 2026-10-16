@@ -34,7 +34,8 @@
 //	equip_slot, item,
 //	item_equip_slot,
 //	starting_equipment   plan B2: the items of the design database (where each may be worn, its fresh
-//	                     durability) and the kit each class starts with
+//	                     durability) and the kit each class starts with; since contentc version 14 the item's
+//	                     inventory dimension and whether it is a resource (resource.go)
 //	quality_curve, stat_block_stat,
 //	item_set, set_bonus, item_tag,
 //	stat_program         plan B3 (contentc version 4): what an item adds to the stats (its stat block at each rarity,
@@ -428,7 +429,11 @@ CREATE TABLE item (
     stat_block_guid          INTEGER NOT NULL,   -- 0: none
     appearance_guid          INTEGER NOT NULL,   -- the ItemAppearance record, 0: none
     max_durability           REAL NOT NULL,
-    quality_curve_guid       INTEGER NOT NULL    -- plan B3: the QualityCurve whose bands pick the rarity of a quality, 0: none
+    quality_curve_guid       INTEGER NOT NULL,   -- plan B3: the QualityCurve whose bands pick the rarity of a quality, 0: none
+    inv_w                    INTEGER NOT NULL DEFAULT 1,   -- Gathering stage 3 (contentc version 14): the record's InventoryDimension in cells; a stack takes
+    inv_h                    INTEGER NOT NULL DEFAULT 1,   --   this many in a Resource container's grid (1 x 1 where the record has none)
+    resource                 INTEGER NOT NULL DEFAULT 0,   -- 1: its GameplayTags hold a child of item.resource (case-insensitive prefix): it goes to a Resource container
+    display_name             TEXT NOT NULL DEFAULT ''      -- Gathering stage 3, "the pick-up popup" (contentc version 16): the record's ItemName as the player reads it ("Coconut Wood"), '' where the record has none
 );
 CREATE INDEX item_by_name ON item (name);
 -- The slots an item may be worn in, in the order of the record's EquipSlots (the first free one is used when the client
@@ -587,6 +592,7 @@ CREATE TABLE reward_xp (
     curve_guid      INTEGER NOT NULL,
     mult_stat_guid  INTEGER NOT NULL,
     expression      TEXT NOT NULL,
+    expr            INTEGER NOT NULL DEFAULT 0,   -- (contentc version 13) the ab_expr id of the expression of a Profession reward (the GM artisan scrolls' xp - cur + 1); 0 for the other kinds
     PRIMARY KEY (table_guid, ord)
 ) WITHOUT ROWID;
 -- LevelingTypeDef: a leveling type (Adventuring, the weapon lines, the professions), its cap (LevelCapOverride, 0 for
@@ -749,5 +755,14 @@ func Create(db *sql.DB) error {
 	if err := createMounts(db); err != nil {
 		return err
 	}
-	return createNodes(db)
+	if err := createNodes(db); err != nil {
+		return err
+	}
+	if err := createGather(db); err != nil {
+		return err
+	}
+	if err := createResource(db); err != nil {
+		return err
+	}
+	return createFoliage(db)
 }

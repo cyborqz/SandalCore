@@ -214,6 +214,8 @@ func TestArchetypePath(t *testing.T) {
 	}
 }
 
+// -- C_Y_B x C O A --
+
 func TestSyntheticPopulation(t *testing.T) {
 	db, meta, err := buildPopulationSynthetic(t, populationSource())
 	if err != nil {
@@ -419,6 +421,8 @@ func TestSyntheticPopulation(t *testing.T) {
 	}
 }
 
+// -- C-Y-B . CoA --
+
 // A record of the wrong shape stops the build with a message that names the row and the field.
 func TestSyntheticPopulationRefuses(t *testing.T) {
 	src := populationSource()
@@ -516,7 +520,7 @@ func TestRealPopulation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta["contentc.version"] != "12" || meta["typed.npc_placement"] != "15179" {
+	if meta["contentc.version"] != "16" || meta["typed.npc_placement"] != "15179" {
 		t.Errorf("meta contentc.version %q, typed.npc_placement %q", meta["contentc.version"], meta["typed.npc_placement"])
 	}
 }

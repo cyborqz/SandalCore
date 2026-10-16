@@ -38,6 +38,8 @@ type Store interface {
 	// Plan D1, stage 2: the ranks a character bought and its action bar.
 	SkillRanks(ctx context.Context, id string) ([]character.TreeRanks, error)
 	ActionBar(ctx context.Context, id string) ([]character.ActionbarSlot, error)
+	// Gathering stage 2: the character's 22 professions (a profession with no row is Novice, level 1, no XP).
+	Professions(ctx context.Context, id string) ([]character.Profession, error)
 }
 
 var _ Store = (*character.Store)(nil)
@@ -201,6 +203,11 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 		if err := s.addTalents(ctx, c.ID, out); err != nil {
 			return nil, toStatus(ctx, err)
 		}
+		profs, err := s.store.Professions(ctx, c.ID)
+		if err != nil {
+			return nil, toStatus(ctx, err)
+		}
+		out.Professions = toProtoProfessions(profs)
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -219,6 +226,9 @@ func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRe
 	for _, a := range r.GetActionBar() {
 		p.ActionBar = append(p.ActionBar, fromProtoSlot(a))
 	}
+	for _, pr := range r.GetProfessions() {
+		p.Professions = append(p.Professions, character.Profession{ProfessionGuid: pr.GetProfessionGuid(), CertificationTier: pr.GetCertificationTier(), Level: pr.GetLevel(), XP: pr.GetXp()})
+	}
 	c, err := s.store.SaveProgress(ctx, r.GetId(), p)
 	if err != nil {
 		return nil, toStatus(ctx, err)
@@ -232,6 +242,11 @@ func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRe
 	if err := s.addTalents(ctx, c.ID, out); err != nil {
 		return nil, toStatus(ctx, err)
 	}
+	profs, err := s.store.Professions(ctx, c.ID)
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	out.Professions = toProtoProfessions(profs)
 	return &characterv1.SaveProgressResponse{Character: out}, nil
 }
 
@@ -266,6 +281,17 @@ func fromProtoSlot(a *characterv1.ActionbarSlot) character.ActionbarSlot {
 		ItemRarity: a.GetItemRarity(), ItemQuality: a.GetItemQuality(), ComboButton: a.GetComboButton()}
 }
 
+func toProtoProfessions(ps []character.Profession) []*characterv1.ProfessionState {
+	if len(ps) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.ProfessionState, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, &characterv1.ProfessionState{ProfessionGuid: p.ProfessionGuid, CertificationTier: p.CertificationTier, Level: p.Level, Xp: p.XP})
+	}
+	return out
+}
+
 func toProtoExperience(xp []character.Experience) []*characterv1.Experience {
 	if len(xp) == 0 {
 		return nil
@@ -276,6 +302,8 @@ func toProtoExperience(xp []character.Experience) []*characterv1.Experience {
 	}
 	return out
 }
+
+// C O A with Cyb
 
 // SaveInventory replaces all the items of a character (worldd saves them as its player plays; the latest save wins).
 func (s *Server) SaveInventory(ctx context.Context, r *characterv1.SaveInventoryRequest) (*characterv1.SaveInventoryResponse, error) {
@@ -354,6 +382,9 @@ var containerNames = map[characterv1.ItemContainer]string{
 	characterv1.ItemContainer_ITEM_CONTAINER_BACKPACK:  character.Backpack,
 	characterv1.ItemContainer_ITEM_CONTAINER_EQUIPMENT: character.Equipment,
 	characterv1.ItemContainer_ITEM_CONTAINER_QUEST:     character.Quest,
+	characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE0: character.Resource0, // Gathering stage 3, "Resource storage"
+	characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE1: character.Resource1,
+	characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE2: character.Resource2,
 }
 
 func toProtoItems(items []character.Item) []*characterv1.Item {
@@ -379,11 +410,11 @@ func toProtoItems(items []character.Item) []*characterv1.Item {
 
 // (C-Y-B + C | O | A)
 
-// fromProtoItem is the item as the store takes it; an error for a container that is none of the three.
+// fromProtoItem is the item as the store takes it; an error for a container that is none of the six.
 func fromProtoItem(p *characterv1.Item) (character.Item, error) {
 	name, ok := containerNames[p.GetContainer()]
 	if !ok {
-		return character.Item{}, fmt.Errorf("container %s is not the Backpack, the Equipment or the Quest storage", p.GetContainer())
+		return character.Item{}, fmt.Errorf("container %s is not the Backpack, the Equipment, the Quest storage or a resource container", p.GetContainer())
 	}
 	return character.Item{
 		Container: name, Slot: p.GetSlot(), ItemRecordID: p.GetItemRecordId(), InstanceGUID: p.GetInstanceGuid(),

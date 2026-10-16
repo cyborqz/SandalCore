@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
@@ -68,7 +69,12 @@ constexpr const char* kEffectStatSql =
     "SELECT effect_guid, stat_guid, source_stat_guid, factor, addend FROM effect_stat_runtime ORDER BY effect_guid, ord";
 constexpr const char* kStaminaRuleSql = "SELECT value FROM stamina_rule WHERE key = ?1";
 // plan B2 (contentc version 3): schema.go's item and item_equip_slot
-constexpr const char* kItemSql = "SELECT guid, name, can_equip, occupies_all_equip_slots, default_quality, max_stack_size, max_durability FROM item WHERE guid = ?1";
+constexpr const char* kItemSql = "SELECT guid, name, can_equip, occupies_all_equip_slots, default_quality, max_stack_size, max_durability, inv_w, inv_h, resource FROM item WHERE guid = ?1";
+// Gathering stage 3 (contentc version 14): schema.go's resource_bag and resource_bag_cell
+constexpr const char* kResourceBagSql = "SELECT def_guid, def_name, columns, rows, custom FROM resource_bag WHERE item_guid = ?1";
+constexpr const char* kResourceBagCellSql = "SELECT col, row, value FROM resource_bag_cell WHERE def_guid = ?1 ORDER BY col, row";
+// Gathering stage 3, "the pick-up popup" (contentc version 16): schema.go's item.display_name.  Not among the statements every file must answer: a file of version 15 has no such column
+constexpr const char* kItemNameSql = "SELECT display_name FROM item WHERE guid = ?1";
 constexpr const char* kItemSlotsSql = "SELECT slot FROM item_equip_slot WHERE item_guid = ?1 ORDER BY ord";
 // plan B3 (contentc version 4): schema.go's stat_program, item (stat_block_guid, quality_curve_guid), quality_curve, stat_block_stat, item_set,
 // item_tag, set_bonus and equip_slot
@@ -92,7 +98,33 @@ constexpr const char* kActionSql = "SELECT guid, name, response_type, class_guid
 constexpr const char* kActionRewardSql = "SELECT reward_table_guid FROM action_reward WHERE action_guid = ?1 ORDER BY ord";
 constexpr const char* kRewardTableSql = "SELECT guid, name, predicate, level_below, modelled FROM reward_table WHERE guid = ?1";
 constexpr const char* kRewardItemSql = "SELECT item_guid, variation_guid, quantity FROM reward_item WHERE table_guid = ?1 ORDER BY ord";
-constexpr const char* kRewardXpSql = "SELECT experience_type, target_level, margin, curve_guid, mult_stat_guid FROM reward_xp WHERE table_guid = ?1 ORDER BY ord";
+constexpr const char* kRewardXpSql = "SELECT experience_type, target_level, margin, curve_guid, mult_stat_guid, expr, expression FROM reward_xp WHERE table_guid = ?1 ORDER BY ord";
+// Gathering stage 2 (contentc version 13): schema.go's profession, certification_level and action_certification (internal/content/gather.go)
+constexpr const char* kProfessionTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('profession', 'certification_level', 'action_certification')";
+constexpr const char* kProfessionSql =
+    "SELECT p.guid, p.name, p.category, p.leveling_type_guid, p.skill_tree_guid, l.name FROM profession p LEFT JOIN leveling_type l ON l.guid = p.leveling_type_guid ORDER BY p.guid";
+constexpr const char* kCertificationSql =
+    "SELECT guid, name, tier, min_level, max_level, has_max_allowable, max_allowable FROM certification_level ORDER BY tier";
+constexpr const char* kCertificationActionSql = "SELECT action_guid, name, profession_guid, action FROM action_certification ORDER BY action_guid";
+// Gathering stage 2, "Harvesting": schema.go's gather_def, gather_tool and item_variation (internal/content/gather.go)
+constexpr const char* kGatherTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('gather_def', 'gather_tool', 'item_variation')";
+constexpr const char* kGatherDefSql =
+    "SELECT guid, name, empty_duration, override_respawn, interaction_guid, interact_radius, interact_tolerance, allow_in_combat, profession_guid, tool_slot, cert_guid, "
+    "cert_tier, base_duration, duration_expr, durability_expr, reward_guid FROM gather_def ORDER BY guid";
+constexpr const char* kGatherToolSql =
+    "SELECT item_guid, item_name, profession_guid, cert_guid, cert_tier, tool_slot, required_profession, required_cert FROM gather_tool ORDER BY item_guid";
+constexpr const char* kItemVariationSql = "SELECT guid, quality_expr, durability_expr FROM item_variation ORDER BY guid";
+// Gathering stage 3, "Foliage gathering": schema.go's foliage tables (internal/content/foliage.go)
+constexpr const char* kFoliageTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('foliage_def', 'foliage_state', 'gather_interaction', 'gather_interaction_def')";
+constexpr const char* kFoliageDefSql =
+    "SELECT guid, name, empty_duration, dynamic_guid, paint_state, gatherable_state, min_state, max_state, state0_guid, state1_guid, state2_guid FROM foliage_def ORDER BY guid";
+constexpr const char* kFoliageStateSql =
+    "SELECT guid, name, lifecycle_duration, interaction_guid, override_distance, override_angle, collision_radius FROM foliage_state ORDER BY guid";
+constexpr const char* kGatherInteractionSql =
+    "SELECT guid, name, target_state, profession_guid, cert_guid, cert_tier, tool_slot, base_duration, duration_expr, durability_expr, reward_guid, interaction_guid, interact_radius, "
+    "interact_tolerance, allow_in_combat FROM gather_interaction ORDER BY guid";
+constexpr const char* kGatherInteractionDefSql =
+    "SELECT interaction_guid, name, gather_guid, interact_radius, interact_tolerance, discovery_distance, allow_in_combat FROM gather_interaction_def ORDER BY interaction_guid";
 constexpr const char* kLevelingTypeSql = "SELECT guid, name, experience_type, level_cap, uses_debt, xp_mult_stat_guid FROM leveling_type WHERE name = ?1";
 constexpr const char* kLevelingCurveSql = "SELECT level, xp FROM leveling_curve WHERE type_guid = ?1 ORDER BY level";
 constexpr const char* kAutoGrantSql =
@@ -123,6 +155,7 @@ bool column_is_real(sqlite3_stmt* s, int col) {
     return t == SQLITE_FLOAT || t == SQLITE_INTEGER;   // an INTEGER is a whole REAL: SQLite stores 1.0 as 1
 }
 bool column_is_text(sqlite3_stmt* s, int col) { return sqlite3_column_type(s, col) == SQLITE_TEXT; }
+// C | Y | B captures, CoA code
 
 }  // namespace
 
@@ -219,7 +252,7 @@ std::optional<ContentDb> ContentDb::open(const std::string& path, std::string& e
                             kItemSlotsSql, kStatProgramSql, kItemGearSql, kQualityCurveSql, kStatBlockSql, kItemSetSql, kItemTagSql, kSetBonusSql,
                             kEquipSlotSql, kItemUseSql, kItemActionSql, kActionSql, kActionRewardSql, kRewardTableSql, kRewardItemSql, kRewardXpSql,
                             kLevelingTypeSql, kLevelingCurveSql, kAutoGrantSql, kRankModSql, kTreeSql, kNodeSql, kRequireSql, kExclusiveSql, kSkillRankSql,
-                            kRankCostSql, kAllRankModSql, kPointTypeSql, kLevelingPointSql, kItemWeaponSql}) {
+                            kRankCostSql, kAllRankModSql, kPointTypeSql, kLevelingPointSql, kItemWeaponSql, kResourceBagSql, kResourceBagCellSql}) {
         Stmt q(c.db_, sql);
         if (!q.ok()) {
             error = path + " does not have the tables this worldd reads: " + db_message(c.db_) +
@@ -470,8 +503,10 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
             error = "content.db item " + std::to_string(guid) + " has a default_quality, max_stack_size or max_durability of the wrong storage class";
             return std::nullopt;
         }
-        const int64_t quality = sqlite3_column_int64(q.get(), 4), stack = sqlite3_column_int64(q.get(), 5);
-        if (quality < 1 || quality > 200 || stack < 1 || stack > 1000000) {
+        // (six resource reagents of the design data -- the Ashlar ones and the sugar cane seeds -- have a DefaultQuality of -3 or -2, a marker no instance can hold: a fresh instance of
+        // them takes quality 1, which is what a harvest did for a record it could not read; without this they were unknown records and went to the Backpack, which the client refuses)
+        const int64_t quality = std::max<int64_t>(1, sqlite3_column_int64(q.get(), 4)), stack = sqlite3_column_int64(q.get(), 5);
+        if (quality > 200 || stack < 1 || stack > 1000000) {
             error = "content.db item " + std::to_string(guid) + " has default_quality " + std::to_string(quality) + " or max_stack_size " + std::to_string(stack) +
                     " outside the character service's ranges";
             return std::nullopt;
@@ -479,6 +514,27 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
         rec.default_quality = static_cast<int32_t>(quality);
         rec.max_stack_size = static_cast<int32_t>(stack);
         rec.max_durability = sqlite3_column_double(q.get(), 6);
+        // Gathering stage 3: the dimension an item takes in a resource container and whether it is stored there
+        if (!column_is_int(q.get(), 7) || !column_is_int(q.get(), 8) || !column_is_int(q.get(), 9)) {
+            error = "content.db item " + std::to_string(guid) + " has an inv_w, inv_h or resource of the wrong storage class";
+            return std::nullopt;
+        }
+        const int64_t w = sqlite3_column_int64(q.get(), 7), h = sqlite3_column_int64(q.get(), 8), resource = sqlite3_column_int64(q.get(), 9);
+        if (w < 1 || w > 255 || h < 1 || h > 255 || (resource != 0 && resource != 1)) {
+            error = "content.db item " + std::to_string(guid) + " has the dimension " + std::to_string(w) + " x " + std::to_string(h) + " or the resource flag " +
+                    std::to_string(resource) + ", which contentc does not write";
+            return std::nullopt;
+        }
+        rec.inv_w = static_cast<int32_t>(w);
+        rec.inv_h = static_cast<int32_t>(h);
+        rec.resource = resource == 1;
+    }
+    {   // the display name (contentc version 16); a file without the column keeps it empty
+        Stmt q(db_, kItemNameSql);
+        if (q.ok()) {
+            sqlite3_bind_int64(q.get(), 1, guid);
+            if (sqlite3_step(q.get()) == SQLITE_ROW) rec.display_name = column_text(q.get(), 0);
+        }
     }
     Stmt q(db_, kItemSlotsSql);
     if (!q.ok()) {
@@ -500,6 +556,67 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
         return std::nullopt;
     }
     return rec;
+}
+// (C | O | A ~ C.Y.B)
+
+// ---- Gathering stage 3: the resource bags ------------------------------------------------------------------------------------
+
+std::optional<ResourceBagRecord> ContentDb::resource_bag(int64_t item_guid, std::string& error) const {
+    error.clear();
+    ResourceBagRecord bag;
+    bag.item = item_guid;
+    {
+        Stmt q(db_, kResourceBagSql);
+        if (!q.ok()) {
+            error = "content.db resource bag query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        sqlite3_bind_int64(q.get(), 1, item_guid);
+        const int step = sqlite3_step(q.get());
+        if (step == SQLITE_DONE) return std::nullopt;   // no such bag: not an error of the file
+        if (step != SQLITE_ROW) {
+            error = "content.db resource bag query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        if (!column_is_int(q.get(), 0) || !column_is_text(q.get(), 1) || !column_is_int(q.get(), 2) || !column_is_int(q.get(), 3) || !column_is_int(q.get(), 4)) {
+            error = "content.db resource bag " + std::to_string(item_guid) + " has a column of the wrong storage class";
+            return std::nullopt;
+        }
+        const int64_t columns = sqlite3_column_int64(q.get(), 2), rows = sqlite3_column_int64(q.get(), 3);
+        if (columns < 1 || rows < 1 || columns * rows > 255) {
+            error = "content.db resource bag " + std::to_string(item_guid) + " has the grid " + std::to_string(columns) + " x " + std::to_string(rows) +
+                    ", outside 1 to 255 cells";
+            return std::nullopt;
+        }
+        bag.def = sqlite3_column_int64(q.get(), 0);
+        bag.def_name = column_text(q.get(), 1);
+        bag.columns = static_cast<int32_t>(columns);
+        bag.rows = static_cast<int32_t>(rows);
+        bag.custom = sqlite3_column_int64(q.get(), 4) != 0;
+    }
+    Stmt q(db_, kResourceBagCellSql);
+    if (!q.ok()) {
+        error = "content.db resource bag cell query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    sqlite3_bind_int64(q.get(), 1, bag.def);
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        const int64_t col = sqlite3_column_int64(q.get(), 0), row = sqlite3_column_int64(q.get(), 1), value = sqlite3_column_int64(q.get(), 2);
+        if (col < 0 || col > 255 || row < 0 || row > 255 || (value != -1 && value != -2)) {
+            error = "content.db resource bag " + std::to_string(item_guid) + " has the cell (" + std::to_string(col) + ", " + std::to_string(row) + ") = " + std::to_string(value);
+            return std::nullopt;
+        }
+        if (bag.matrix.size() <= static_cast<size_t>(col)) bag.matrix.resize(static_cast<size_t>(col) + 1);
+        std::vector<int32_t>& column = bag.matrix[static_cast<size_t>(col)];
+        if (column.size() <= static_cast<size_t>(row)) column.resize(static_cast<size_t>(row) + 1, -1);
+        column[static_cast<size_t>(row)] = static_cast<int32_t>(value);
+    }
+    if (step != SQLITE_DONE) {
+        error = "content.db resource bag cell query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    return bag;
 }
 
 // ---- plan B3 -----------------------------------------------------------------------------------------------------------------
@@ -868,7 +985,8 @@ std::optional<RewardTable> ContentDb::reward_table(int64_t guid, std::string& er
         int step;
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
             sqlite3_stmt* s = q.get();
-            if (!column_is_text(s, 0) || !column_is_int(s, 1) || !column_is_real(s, 2) || !column_is_int(s, 3) || !column_is_int(s, 4)) {
+            if (!column_is_text(s, 0) || !column_is_int(s, 1) || !column_is_real(s, 2) || !column_is_int(s, 3) || !column_is_int(s, 4) || !column_is_int(s, 5) ||
+                !column_is_text(s, 6)) {
                 error = "content.db reward_xp of table " + std::to_string(guid) + " has a column of the wrong storage class";
                 return std::nullopt;
             }
@@ -883,6 +1001,8 @@ std::optional<RewardTable> ContentDb::reward_table(int64_t guid, std::string& er
             x.margin = sqlite3_column_double(s, 2);
             x.curve_guid = sqlite3_column_int64(s, 3);
             x.mult_stat_guid = sqlite3_column_int64(s, 4);
+            x.expr = sqlite3_column_int64(s, 5);
+            x.expression = column_text(s, 6);
             t.experience.push_back(std::move(x));
         }
         if (step != SQLITE_DONE) {
@@ -963,6 +1083,413 @@ std::optional<LevelingType> ContentDb::leveling_type_named(const std::string& na
     }
     return t;
 }
+// [CoA - C | Y | B]
+
+std::optional<FoliageData> ContentDb::foliage_data(std::string& error) const {
+    error.clear();
+    {
+        Stmt q(db_, kFoliageTableSql);
+        if (!q.ok()) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int found = 0, step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) ++found;
+        if (step != SQLITE_DONE) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        if (found == 0) return std::nullopt;
+        if (found != 4) {
+            error = "content.db has some of the foliage tables (foliage_def, foliage_state, gather_interaction, gather_interaction_def) and not all: rebuild it with this checkout's contentc";
+            return std::nullopt;
+        }
+    }
+    FoliageData out;
+    const auto bad = [&](const char* table, const std::string& what) {
+        error = std::string("content.db ") + table + ": " + what;
+        return std::optional<FoliageData>{};
+    };
+    // each query: the columns' storage classes are checked (a column of another class is not what contentc writes), then the row is read by `read`
+    const auto each = [&](const char* sql, const char* table, const std::vector<char>& kinds, const auto& read) -> bool {
+        Stmt q(db_, sql);
+        if (!q.ok()) {
+            error = std::string("content.db ") + table + " query failed: " + db_message(db_);
+            return false;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (size_t c = 0; c < kinds.size(); ++c) {
+                const int col = static_cast<int>(c);
+                const bool ok = kinds[c] == 'i' ? column_is_int(s, col) : kinds[c] == 'r' ? column_is_real(s, col) : column_is_text(s, col);
+                if (!ok) {
+                    error = std::string("content.db ") + table + " has a column of the wrong storage class";
+                    return false;
+                }
+            }
+            if (!read(s)) return false;
+        }
+        if (step != SQLITE_DONE) {
+            error = std::string("content.db ") + table + " query failed: " + db_message(db_);
+            return false;
+        }
+        return true;
+    };
+    const auto state_ok = [](int64_t v) { return v >= kFoliageInfancy && v <= kFoliageEmpty; };
+    if (!each(kFoliageDefSql, "foliage_def", {'i', 't', 'r', 'i', 'i', 'i', 'i', 'i', 'i', 'i', 'i'}, [&](sqlite3_stmt* s) {
+            FoliageDefRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.empty_duration = sqlite3_column_double(s, 2);
+            r.dynamic_guid = sqlite3_column_int64(s, 3);
+            const int64_t paint = sqlite3_column_int64(s, 4), gatherable = sqlite3_column_int64(s, 5), lo = sqlite3_column_int64(s, 6), hi = sqlite3_column_int64(s, 7);
+            if (!state_ok(paint) || !state_ok(gatherable) || !state_ok(lo) || !state_ok(hi) || !(r.empty_duration >= 0)) {
+                error = "content.db foliage_def " + r.name + " has a state outside Infancy..Empty or a negative empty duration";
+                return false;
+            }
+            r.paint_state = static_cast<int>(paint);
+            r.gatherable_state = static_cast<int>(gatherable);
+            r.min_state = static_cast<int>(lo);
+            r.max_state = static_cast<int>(hi);
+            for (int i = 0; i < 3; ++i) r.state_guids[i] = sqlite3_column_int64(s, 8 + i);
+            out.defs_by_name.emplace(r.name, r.guid);
+            out.defs[r.guid] = std::move(r);
+            return true;
+        })) {
+        return std::nullopt;
+    }
+    if (!each(kFoliageStateSql, "foliage_state", {'i', 't', 'r', 'i', 'r', 'r', 'r'}, [&](sqlite3_stmt* s) {
+            FoliageStateRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.lifecycle_duration = sqlite3_column_double(s, 2);
+            r.interaction_guid = sqlite3_column_int64(s, 3);
+            r.override_distance = sqlite3_column_double(s, 4);
+            r.override_angle = sqlite3_column_double(s, 5);
+            r.collision_radius = sqlite3_column_double(s, 6);
+            if (!(r.lifecycle_duration >= 0) || !(r.collision_radius >= 0)) {
+                error = "content.db foliage_state " + r.name + " has a negative lifecycle duration or collision radius";
+                return false;
+            }
+            out.states[r.guid] = std::move(r);
+            return true;
+        })) {
+        return std::nullopt;
+    }
+    if (!each(kGatherInteractionSql, "gather_interaction", {'i', 't', 'i', 'i', 'i', 'i', 'i', 'r', 'i', 'i', 'i', 'i', 'r', 'r', 'i'}, [&](sqlite3_stmt* s) {
+            GatherInteractionRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            const int64_t target = sqlite3_column_int64(s, 2), tier = sqlite3_column_int64(s, 5), slot = sqlite3_column_int64(s, 6);
+            if (!state_ok(target) || tier < 0 || tier > 4 || slot < -1 || slot > 255) {
+                error = "content.db gather_interaction " + r.name + " has target state " + std::to_string(target) + ", certification tier " + std::to_string(tier) + " and tool slot " +
+                        std::to_string(slot);
+                return false;
+            }
+            r.target_state = static_cast<int>(target);
+            r.profession_guid = sqlite3_column_int64(s, 3);
+            r.cert_guid = sqlite3_column_int64(s, 4);
+            r.cert_tier = static_cast<int>(tier);
+            r.tool_slot = static_cast<int>(slot);
+            r.base_duration = sqlite3_column_double(s, 7);
+            r.duration_expr = sqlite3_column_int64(s, 8);
+            r.durability_expr = sqlite3_column_int64(s, 9);
+            r.reward_guid = sqlite3_column_int64(s, 10);
+            r.interaction_guid = sqlite3_column_int64(s, 11);
+            r.interact_radius = sqlite3_column_double(s, 12);
+            r.interact_tolerance = sqlite3_column_double(s, 13);
+            r.allow_in_combat = sqlite3_column_int64(s, 14) != 0;
+            if (!(r.base_duration >= 0) || !(r.interact_radius >= 0) || !(r.interact_tolerance >= 0)) {
+                error = "content.db gather_interaction " + r.name + " has a negative or no-number duration or range";
+                return false;
+            }
+            out.interactions[r.guid] = std::move(r);
+            return true;
+        })) {
+        return std::nullopt;
+    }
+    if (!each(kGatherInteractionDefSql, "gather_interaction_def", {'i', 't', 'i', 'r', 'r', 'r', 'i'}, [&](sqlite3_stmt* s) {
+            GatherInteractionDefRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.gather_guid = sqlite3_column_int64(s, 2);
+            r.interact_radius = sqlite3_column_double(s, 3);
+            r.interact_tolerance = sqlite3_column_double(s, 4);
+            r.discovery_distance = sqlite3_column_double(s, 5);
+            r.allow_in_combat = sqlite3_column_int64(s, 6) != 0;
+            out.interaction_defs[r.guid] = std::move(r);
+            return true;
+        })) {
+        return std::nullopt;
+    }
+    if (out.defs.empty() || out.states.empty() || out.interactions.empty()) return bad("foliage tables", "a table is empty");
+    return out;
+}
+// -- C.O.A . C_Y_B --
+
+std::optional<GatherData> ContentDb::gather_data(std::string& error) const {
+    error.clear();
+    {
+        // a file without the tables is an older one (the tests' small fixtures): no gathering, and no error
+        Stmt q(db_, kGatherTableSql);
+        if (!q.ok()) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int found = 0, step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) ++found;
+        if (step != SQLITE_DONE) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        if (found == 0) return std::nullopt;
+        if (found != 3) {
+            error = "content.db has some of the gathering tables (gather_def, gather_tool, item_variation) and not all: rebuild it with this checkout's contentc";
+            return std::nullopt;
+        }
+    }
+    GatherData out;
+    const auto wrong = [&](const char* table) {
+        error = std::string("content.db ") + table + " has a column of the wrong storage class";
+        return std::optional<GatherData>{};
+    };
+    {
+        Stmt q(db_, kGatherDefSql);
+        if (!q.ok()) {
+            error = "content.db gather_def query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (const int c : {0, 4, 7, 8, 9, 10, 11, 13, 14, 15}) {
+                if (!column_is_int(s, c)) return wrong("gather_def");
+            }
+            if (!column_is_text(s, 1)) return wrong("gather_def");
+            for (const int c : {2, 3, 5, 6, 12}) {
+                if (!column_is_real(s, c)) return wrong("gather_def");
+            }
+            GatherDefRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.empty_duration = sqlite3_column_double(s, 2);
+            r.override_respawn = sqlite3_column_double(s, 3);
+            r.interaction_guid = sqlite3_column_int64(s, 4);
+            r.interact_radius = sqlite3_column_double(s, 5);
+            r.interact_tolerance = sqlite3_column_double(s, 6);
+            r.allow_in_combat = sqlite3_column_int64(s, 7) != 0;
+            r.profession_guid = sqlite3_column_int64(s, 8);
+            const int64_t slot = sqlite3_column_int64(s, 9), tier = sqlite3_column_int64(s, 11);
+            if (slot < 0 || slot > 255 || tier < 0 || tier > 4) {
+                error = "content.db gather_def " + r.name + " has tool slot " + std::to_string(slot) + " and certification tier " + std::to_string(tier);
+                return std::nullopt;
+            }
+            r.tool_slot = static_cast<int>(slot);
+            r.cert_guid = sqlite3_column_int64(s, 10);
+            r.cert_tier = static_cast<int>(tier);
+            r.base_duration = sqlite3_column_double(s, 12);
+            r.duration_expr = sqlite3_column_int64(s, 13);
+            r.durability_expr = sqlite3_column_int64(s, 14);
+            r.reward_guid = sqlite3_column_int64(s, 15);
+            if (!(r.interact_radius >= 0) || !(r.interact_tolerance >= 0) || !(r.base_duration >= 0) || !(r.empty_duration >= 0) || !(r.override_respawn >= 0)) {
+                error = "content.db gather_def " + r.name + " has a negative or no-number range, duration or respawn";
+                return std::nullopt;
+            }
+            out.defs[r.guid] = std::move(r);
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db gather_def query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    {
+        Stmt q(db_, kGatherToolSql);
+        if (!q.ok()) {
+            error = "content.db gather_tool query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (const int c : {0, 2, 3, 4, 5, 6, 7}) {
+                if (!column_is_int(s, c)) return wrong("gather_tool");
+            }
+            if (!column_is_text(s, 1)) return wrong("gather_tool");
+            const int64_t tier = sqlite3_column_int64(s, 4), slot = sqlite3_column_int64(s, 5);
+            if (tier < 0 || tier > 4 || slot < 0 || slot > 255) {
+                error = "content.db gather_tool " + column_text(s, 1) + " has certification tier " + std::to_string(tier) + " and slot " + std::to_string(slot);
+                return std::nullopt;
+            }
+            GatherToolRow r;
+            r.item_guid = sqlite3_column_int64(s, 0);
+            r.item_name = column_text(s, 1);
+            r.profession_guid = sqlite3_column_int64(s, 2);
+            r.cert_guid = sqlite3_column_int64(s, 3);
+            r.cert_tier = static_cast<int>(tier);
+            r.tool_slot = static_cast<int>(slot);
+            r.required_profession = sqlite3_column_int64(s, 6);
+            r.required_cert = sqlite3_column_int64(s, 7);
+            out.tools[r.item_guid] = std::move(r);
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db gather_tool query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    {
+        Stmt q(db_, kItemVariationSql);
+        if (!q.ok()) {
+            error = "content.db item_variation query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (const int c : {0, 1, 2}) {
+                if (!column_is_int(s, c)) return wrong("item_variation");
+            }
+            const int64_t guid = sqlite3_column_int64(s, 0);
+            out.quality_expr[guid] = sqlite3_column_int64(s, 1);
+            out.durability_expr[guid] = sqlite3_column_int64(s, 2);
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db item_variation query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    return out;
+}
+// ~ Cyb - C O A ~
+
+std::optional<ProfessionData> ContentDb::profession_data(std::string& error) const {
+    error.clear();
+    {
+        // a file without the tables is an older one (the tests' small fixtures): no professions, and no error
+        Stmt q(db_, kProfessionTableSql);
+        if (!q.ok()) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int found = 0, step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) ++found;
+        if (step != SQLITE_DONE) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        if (found == 0) return std::nullopt;
+        if (found != 3) {
+            error = "content.db has some of the profession tables (profession, certification_level, action_certification) and not all: rebuild it with this checkout's contentc";
+            return std::nullopt;
+        }
+    }
+    ProfessionData out;
+    const auto wrong = [&](const char* table) {
+        error = std::string("content.db ") + table + " has a column of the wrong storage class";
+        return std::optional<ProfessionData>{};
+    };
+    std::vector<std::string> leveling_names;
+    {
+        Stmt q(db_, kProfessionSql);
+        if (!q.ok()) {
+            error = "content.db profession query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_text(s, 1) || !column_is_text(s, 2) || !column_is_int(s, 3) || !column_is_int(s, 4)) return wrong("profession");
+            ProfessionRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.category = column_text(s, 2);
+            r.leveling_type_guid = sqlite3_column_int64(s, 3);
+            r.skill_tree_guid = sqlite3_column_int64(s, 4);
+            if (!column_is_text(s, 5)) {
+                error = "content.db profession " + r.name + " names the leveling type " + std::to_string(r.leveling_type_guid) + ", which content.db does not have";
+                return std::nullopt;
+            }
+            leveling_names.push_back(column_text(s, 5));
+            out.professions.push_back(std::move(r));
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db profession query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    for (size_t i = 0; i < out.professions.size(); ++i) {
+        std::string why;
+        auto type = leveling_type_named(leveling_names[i], why);
+        if (!type) {
+            error = "the leveling type of profession " + out.professions[i].name + ": " + why;
+            return std::nullopt;
+        }
+        out.professions[i].leveling = std::move(*type);
+    }
+    {
+        Stmt q(db_, kCertificationSql);
+        if (!q.ok()) {
+            error = "content.db certification level query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (const int c : {0, 2, 3, 4, 5, 6}) {
+                if (!column_is_int(s, c)) return wrong("certification_level");
+            }
+            if (!column_is_text(s, 1)) return wrong("certification_level");
+            const int64_t tier = sqlite3_column_int64(s, 2), lo = sqlite3_column_int64(s, 3), hi = sqlite3_column_int64(s, 4), allow = sqlite3_column_int64(s, 6);
+            if (tier < 0 || tier > 255 || lo < 1 || lo > 255 || hi < lo || hi > 255 || allow < 0 || allow > 1000) {
+                error = "content.db certification_level " + column_text(s, 1) + " has tier " + std::to_string(tier) + ", levels " + std::to_string(lo) + " to " +
+                        std::to_string(hi) + " and a limit of " + std::to_string(allow);
+                return std::nullopt;
+            }
+            CertificationRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.tier = static_cast<int>(tier);
+            r.min_level = static_cast<int>(lo);
+            r.max_level = static_cast<int>(hi);
+            r.limited = sqlite3_column_int64(s, 5) != 0;
+            r.max_allowable = static_cast<int>(allow);
+            out.certifications.push_back(std::move(r));
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db certification level query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    {
+        Stmt q(db_, kCertificationActionSql);
+        if (!q.ok()) {
+            error = "content.db certification action query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_text(s, 1) || !column_is_int(s, 2) || !column_is_text(s, 3)) return wrong("action_certification");
+            CertificationActionRow r;
+            r.action_guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.profession_guid = sqlite3_column_int64(s, 2);
+            const std::string what = column_text(s, 3);
+            if (what != "Promote" && what != "Demote") {
+                error = "content.db action_certification " + r.name + " is a '" + what + "' (Promote or Demote)";
+                return std::nullopt;
+            }
+            r.promote = what == "Promote";
+            out.actions[r.action_guid] = std::move(r);
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db certification action query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    return out;
+}
+// -- C.O.A & Cyb --
 
 std::optional<std::vector<AutoGrant>> ContentDb::auto_grants(int64_t leveling_type_guid, std::string& error) const {
     std::vector<AutoGrant> out;

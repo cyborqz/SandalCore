@@ -47,12 +47,17 @@ void Aftermath::install() {
 
 void Aftermath::on_death(const DeathEvent& d) {
     ++stats_.deaths;
+    const bool huntable = huntable_ && d.info && huntable_(*d.info);
     if (!cfg_.enabled) {
         // the corpse still goes: nothing more is made of the death
         Corpse c;
         c.npc = d.npc;
         c.died_at = d.at;
         c.close_at = d.at + cfg_.corpse_seconds;
+        if (huntable) {   // (a huntable's corpse is hunted, not looted: it stays for the hunt whatever happens to the rewards)
+            c.huntable = true;
+            c.close_at = d.at + cfg_.hunt_corpse_seconds;
+        }
         corpses_[d.npc] = std::move(c);
         return;
     }
@@ -60,6 +65,10 @@ void Aftermath::on_death(const DeathEvent& d) {
     c.npc = d.npc;
     c.died_at = d.at;
     c.close_at = d.at + cfg_.corpse_seconds;
+    if (huntable) {   // Gathering stage 3: no loot pile, a corpse that waits for the hunter
+        c.huntable = true;
+        c.close_at = d.at + cfg_.hunt_corpse_seconds;
+    }
     // (the Nodes 1 test of 2026-10-10: the death and loot lines had an empty creature name) the creature's name, else its Blueprint's
     c.name = d.info && !d.info->name.empty() ? d.info->name : d.blueprint;
     std::string looter_note;   // for the death line: the highest looter's level, the level gap and the data's Loot_Falloff
@@ -74,13 +83,7 @@ void Aftermath::on_death(const DeathEvent& d) {
     for (PlayerPort* p : fighters) c.rights.insert(p->actor_id());
 
     // the respawn: from the death, not from the corpse's closing
-    const uint32_t ref = d.info ? d.info->spawn_ref : 0;
-    if (cfg_.respawn && respawner_ && ref != 0 && d.info && d.info->respawn_rule != "NoRespawn") {
-        double base = d.info->respawn_seconds > 0 ? d.info->respawn_seconds : cfg_.default_respawn_seconds;
-        const double var = std::max(0.0, d.info->respawn_variance);
-        const double delay = std::max(cfg_.min_respawn_seconds, base + var * (2.0 * rng_.rand_double() - 1.0));
-        respawns_.push_back({d.at + delay, ref});
-    }
+    if (d.info) schedule_respawn(*d.info, d.at);
 // C.Y.B and C-O-A
 
     if (book_ && !fighters.empty()) {
@@ -112,7 +115,11 @@ void Aftermath::on_death(const DeathEvent& d) {
             if (d.motion) roots = d.motion->rewards;
             if (d.info) roots.insert(roots.end(), d.info->loot_tables.begin(), d.info->loot_tables.end());
             ctx.player_level = max_level;
-            const Rolled rolled = book_->roll(roots, ctx);
+            Rolled rolled = book_->roll(roots, ctx);
+            if (huntable) {   // the kill's experience stays; its items (the Glint certificates, the Bezoar roll) are not dropped: the corpse's reward is the hunt's
+                rolled.loot.clear();
+                rolled.direct.clear();
+            }
             // the loot
             std::vector<LootStack> stacks;
             for (const std::vector<RolledItem>* list : {&rolled.loot, &rolled.direct}) {
@@ -173,14 +180,26 @@ void Aftermath::on_death(const DeathEvent& d) {
         const std::string n = name_of_ ? name_of_(s.item) : std::string();
         items += (items.empty() ? "" : ", ") + (n.empty() ? "item " + std::to_string(s.item) : n) + " x" + std::to_string(s.quantity);
     }
-    spdlog::info("[loot] {} ({}, level {}) died: {} fought it{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}", c.name, d.blueprint, d.level, fighters.size(), looter_note, c.loot.size(),
-                 items.empty() ? "" : " (", items, items.empty() ? "" : ")", c.close_at - d.at, respawns_.empty() ? "" : "; its spawn point refills it");
+    spdlog::info("[loot] {} ({}, level {}) died: {} fought it{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", c.name, d.blueprint, d.level, fighters.size(), looter_note, c.loot.size(),
+                 items.empty() ? "" : " (", items, items.empty() ? "" : ")", c.close_at - d.at, respawns_.empty() ? "" : "; its spawn point refills it",
+                 huntable ? "; a huntable: its corpse is hunted with a Bow (no loot)" : "");
     corpses_[d.npc] = std::move(c);
+}
+
+void Aftermath::schedule_respawn(const world::NpcInfo& info, double at) {
+    const uint32_t ref = info.spawn_ref;
+    if (!cfg_.respawn || !respawner_ || ref == 0 || info.respawn_rule == "NoRespawn") return;
+    const double base = info.respawn_seconds > 0 ? info.respawn_seconds : cfg_.default_respawn_seconds;
+    const double var = std::max(0.0, info.respawn_variance);
+    const double delay = std::max(cfg_.min_respawn_seconds, base + var * (2.0 * rng_.rand_double() - 1.0));
+    respawns_.push_back({at + delay, ref});
 }
 
 void Aftermath::tick(double now) {
     for (auto it = corpses_.begin(); it != corpses_.end();) {
-        if (now >= it->second.close_at) {
+        if (now >= it->second.close_at && it->second.living) {
+            it = corpses_.erase(it);   // (a hunt nobody ended: the creature is alive, it stays; only its record goes)
+        } else if (now >= it->second.close_at) {
             const uint64_t id = it->first;
             it = corpses_.erase(it);
             registry_.remove(id);   // every connection that holds it closes the channel (Destroyed)
@@ -248,6 +267,46 @@ uint64_t Aftermath::drop_pile(double x, double y, double z, const protocol::repl
     corpses_[c.npc] = std::move(c);
     ++stats_.piles;
     return pile->actor;
+}
+
+bool Aftermath::hunt_started(uint64_t npc, double now, double seconds) {
+    auto it = corpses_.find(npc);
+    if (it == corpses_.end()) {
+        // a huntable creature that is alive: hunted as it stands
+        const world::WorldActor* a = registry_.find(npc);
+        if (!a || a->kind != world::ActorKind::Npc || !huntable_ || !huntable_(a->npc)) return false;
+        Corpse c;
+        c.npc = npc;
+        c.name = a->npc.name;
+        c.died_at = now;
+        c.close_at = now + seconds + 5.0;
+        c.huntable = true;
+        c.living = true;
+        corpses_[npc] = std::move(c);
+        return true;
+    }
+    if (!it->second.huntable) return false;
+    it->second.close_at = std::max(it->second.close_at, now + seconds + 5.0);   // the channel is never cut short by the corpse going
+    return true;
+}
+
+void Aftermath::hunt_cancelled(uint64_t npc) {
+    const auto it = corpses_.find(npc);
+    if (it != corpses_.end() && it->second.living) corpses_.erase(it);
+}
+
+bool Aftermath::hunt_done(uint64_t npc, double now) {
+    const auto it = corpses_.find(npc);
+    if (it == corpses_.end() || !it->second.huntable) return false;
+    Corpse& c = it->second;
+    if (c.living) {   // the hunt is the creature's end: it dies for its clients with the done update, and its spawn point refills it
+        c.living = false;
+        c.died_at = now;
+        if (const world::WorldActor* a = registry_.find(npc)) schedule_respawn(a->npc, now);
+    }
+    c.hunted = true;
+    c.close_at = std::min(c.close_at, now + cfg_.hunt_done_seconds);
+    return true;
 }
 
 void Aftermath::emptied(uint64_t npc, double now) {

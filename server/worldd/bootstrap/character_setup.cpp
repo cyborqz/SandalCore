@@ -790,6 +790,18 @@ std::optional<StatsSetup> stats_setup_for(const std::vector<stats::StatValue>& v
 
 // ---- the setup ----------------------------------------------------------------------------------------------------------
 
+ItemStorage item_storage_of(svc::ItemContainer container) {
+    switch (container) {
+        case svc::ItemContainer::Backpack: return ItemStorage::Backpack;
+        case svc::ItemContainer::Equipment: return ItemStorage::Equipment;
+        case svc::ItemContainer::Quest: return ItemStorage::Quest;
+        case svc::ItemContainer::Resource0: return ItemStorage::Resource0;
+        case svc::ItemContainer::Resource1: return ItemStorage::Resource1;
+        case svc::ItemContainer::Resource2: return ItemStorage::Resource2;
+    }
+    return ItemStorage::Backpack;
+}
+
 std::vector<HeldItem> held_items_for(const items::Inventory& inventory) {
     const std::array<int64_t, 23> records = items::held_records(inventory);
     std::vector<HeldItem> out;
@@ -868,16 +880,40 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
 
     // the items (plan B2): what is in the bag, what is worn, and what that shows
     std::string items_error;
-    auto inventory = items::Inventory::from_items(ch.items, items_error);
+    const items::ContentItemCatalog item_catalog(content);   // Gathering stage 3: the resource containers are the grids of the worn bags
+    auto inventory = items::Inventory::from_items(ch.items, items_error, &item_catalog);
     if (!inventory) return fail("the character's items cannot be played: " + items_error);
+    // Gathering stage 3: the harvests of Gathering stage 2 sit in the Backpack, where the client refuses them ("An invalid item type was added to this Backpack"): the resource items found
+    // there move to the resource containers by their grids, those that do not fit stay (nothing is ever deleted)
+    {
+        const items::ResourceRepair repair = inventory->repair_resources(item_catalog);
+        if (!repair.moved.empty() || !repair.stayed.empty()) {
+            out.items_repaired = !repair.moved.empty();
+            out.notes.push_back("resource items in the Backpack (the harvests of Gathering stage 2): " + std::to_string(repair.moved.size()) + " moved to the resource containers, " +
+                                std::to_string(repair.stayed.size()) + " stay in the Backpack for want of room");
+        }
+    }
     for (const svc::InventoryItem& it : inventory->items()) {
         StoredItem stored;
-        stored.storage = it.container == svc::ItemContainer::Backpack ? ItemStorage::Backpack
-                         : it.container == svc::ItemContainer::Equipment ? ItemStorage::Equipment
-                                                                         : ItemStorage::Quest;
+        stored.storage = item_storage_of(it.container);
         stored.slot = it.slot;
         stored.item = items::to_instance(it);
         s.items.push_back(std::move(stored));
+    }
+    // the containers of the worn resource bags (a character with no bag in slot 23 keeps the starter's empty 6 x 4 container the client always had: nothing can be placed in it)
+    for (int i = 0; i < items::kResourceContainers; ++i) {
+        const items::ResourceGrid& grid = inventory->grid(items::resource_container(i));
+        ResourceBagSetup& bag = s.resource_bags[static_cast<size_t>(i)];
+        if (!grid.empty()) {
+            bag.present = true;
+            bag.columns = grid.columns();
+            bag.rows = grid.rows();
+            bag.override_matrix = grid.override_matrix();
+        } else if (i != 0) {
+            bag = ResourceBagSetup{};
+        } else if (inventory->size() > 0) {
+            out.notes.push_back("no resource bag in Equipment slot 23: Resource0 is the starter's empty 6 x 4 container and holds nothing");
+        }
     }
     if (inventory->count(svc::ItemContainer::Equipment) > 0) {
         s.held_items.array_key = kInitialHeldItemsKey;
@@ -888,7 +924,9 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
     if (inventory->size() > 0) {
         out.notes.push_back("items: " + std::to_string(inventory->count(svc::ItemContainer::Backpack)) + " in the bag, " +
                             std::to_string(inventory->count(svc::ItemContainer::Equipment)) + " worn, " +
-                            std::to_string(inventory->count(svc::ItemContainer::Quest)) + " quest items");
+                            std::to_string(inventory->count(svc::ItemContainer::Quest)) + " quest items, " +
+                            std::to_string(inventory->count(svc::ItemContainer::Resource0)) + "/" + std::to_string(inventory->count(svc::ItemContainer::Resource1)) + "/" +
+                            std::to_string(inventory->count(svc::ItemContainer::Resource2)) + " in the resource containers");
     }
     // the progress (plan D1): the record's level and its Adventuring XP row; the ranks the level has granted and their stat mods
     std::vector<const content::AutoGrant*> granted;
@@ -919,6 +957,17 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
         out.progress.level = ch.level;   // no curve (a test's context): the tracker shows 0 XP
     }
 // [C Y B + CoA]
+
+    // the professions (Gathering stage 2): the record's 22 rows (a missing one is Novice, level 1), and what the XPTracker says of them at the join
+    if (stat_context.professions) {
+        std::vector<std::string> corrected;
+        out.professions = professions::Professions::load(*stat_context.professions, ch.professions, &corrected);
+        for (std::string& n : corrected) out.notes.push_back(std::move(n));
+        for (const professions::Profession& p : stat_context.professions->all()) {
+            const professions::State st = out.professions.state(p.guid);
+            s.progress.professions.push_back({p.leveling_type, st.xp, stat_context.professions->tier(st.tier).guid});
+        }
+    }
 
     // the talents (plan D1, stage 2): the ranks the record stored under the catalog's rules, what the XPTracker lists, the abilities the ranks and
     // the weapon in hand make, and the action bar

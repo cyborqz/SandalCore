@@ -18,6 +18,7 @@
 //                     clear of every other actor, on the ground a ground function gives, the same garden every time, and nothing when the donor is missing
 // ============================================================================
 #include "content/content_db.h"
+#include "gather/gathering.h"
 #include "npc/motion_table.h"
 #include "proc_stats.h"
 #include "spawns/area_loader.h"
@@ -252,6 +253,35 @@ static void test_golden(const content::ContentDb& db, const spawns::CapturedData
     const auto list_zoi = spawns::select_data_spawns(w.data, templates, zoned, st_zoi, &filter);
     std::printf("    selected in %s: %zu NPCs\n", ms_since(t0).c_str(), list_zoi.size());
     compare_golden("zones on (worldd's default)", tests::kGoldenZoi, list_zoi, st_zoi);
+    // Gathering stage 3, "Hunting": with the hunting defs known the same creatures spawn at the same places (the golden counts by Blueprint and position, not by block), and the huntable ones
+    // are made with the eighth block: the Riverlands' 759 (7.2 %), the Raven's and Spider's from the captured opens, the rest from the Raven's block with their own ids
+    {
+        std::string fe;
+        const auto foliage = db.foliage_data(fe);
+        CHECK(foliage.has_value(), "content.db has the hunting interactions (contentc 15)");
+        if (foliage) {
+            spawns::GenericConfig cfg;
+            cfg.hunting_defs = gather::hunting_defs(*foliage);
+            spawns::GenericNpcs hunting_generic(captured, &w.table, cfg);
+            const spawns::TemplateSource hunting_templates{&captured, &hunting_generic};
+            spawns::PopulationStats st_hunt;
+            const auto list_hunt = spawns::select_data_spawns(w.data, hunting_templates, zoned, st_hunt, &filter);
+            compare_golden("zones on, the huntable creatures with their interactable", tests::kGoldenZoi, list_hunt, st_hunt);
+            size_t huntable = 0, eight = 0, others_with_interactable = 0;
+            std::map<std::string, size_t> kinds;
+            for (const spawns::DataSpawn& s : list_hunt) {
+                const bool hunting = s.asset && cfg.hunting_defs.count(s.asset->interaction_def) != 0;
+                huntable += hunting ? 1 : 0;
+                eight += hunting && s.open && s.open->blocks.size() == 8 && s.open->find("UInteractableComponent") == 7 ? 1 : 0;
+                if (hunting) ++kinds[s.asset->name];
+                others_with_interactable += !hunting && s.open && s.open->find("UInteractableComponent") > 0 && s.generic ? 1 : 0;
+            }
+            std::printf("    %zu huntable creatures of %zu NPCs in %zu kinds\n", huntable, list_hunt.size(), kinds.size());
+            CHECK(list_hunt.size() == 10554, "the same 10,554 NPCs");
+            CHECK(huntable == 759 && eight == huntable, "759 of them are huntable (7.2 %), each with its eighth block, a UInteractableComponent");
+            CHECK(kinds.size() == 17 && others_with_interactable == 0, "17 kinds, and no other generic creature has an interactable block");
+        }
+    }
     std::printf("    zones off: %zu points dropped, %zu without a template; zones on: %zu dropped, %zu without a template\n", st_plain.filtered_total(), st_plain.no_template, st_zoi.filtered_total(), st_zoi.no_template);
     CHECK(st_zoi.filtered_total() < st_plain.filtered_total() && st_zoi.filtered_total() + st_zoi.no_template == st_plain.filtered_total() + st_plain.no_template,
           "the zone rule lets the zone-named points through the filter (fewer dropped); the points it frees are Blueprints with no NPC to make, so they move to 'no template' and the NPCs are the same");
@@ -261,6 +291,7 @@ static void test_golden(const content::ContentDb& db, const spawns::CapturedData
     size_t named = 0;
     for (const auto& [guid, a] : w.data.assets) named += !a.filter.zones.empty();
     std::printf("    %zu assets name a zone of influence in their own filter\n", named);
+// ~ CoA - C:Y:B ~
 
     // E1's circle: the same selection as before (no zones: a filter that names one never passes)
     spawns::AreaConfig circle;

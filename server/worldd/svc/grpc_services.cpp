@@ -117,6 +117,9 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         case characterv1::ITEM_CONTAINER_BACKPACK: it.container = ItemContainer::Backpack; break;
         case characterv1::ITEM_CONTAINER_EQUIPMENT: it.container = ItemContainer::Equipment; break;
         case characterv1::ITEM_CONTAINER_QUEST: it.container = ItemContainer::Quest; break;
+        case characterv1::ITEM_CONTAINER_RESOURCE0: it.container = ItemContainer::Resource0; break;
+        case characterv1::ITEM_CONTAINER_RESOURCE1: it.container = ItemContainer::Resource1; break;
+        case characterv1::ITEM_CONTAINER_RESOURCE2: it.container = ItemContainer::Resource2; break;
         default:
             // an item in a storage this worldd has never heard of: the whole record is not one it can play
             r.status = CallStatus::Failed;
@@ -148,6 +151,14 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         tr.rank_guids.assign(t.rank_guids().begin(), t.rank_guids().end());
         r.character.skill_ranks.push_back(std::move(tr));
     }
+    for (const auto& p : c.professions()) {
+        ProfessionState x;
+        x.profession_guid = p.profession_guid();
+        x.certification_tier = p.certification_tier();
+        x.level = p.level();
+        x.xp = p.xp();
+        r.character.professions.push_back(x);
+    }
     for (const auto& a : c.action_bar()) {
         ActionbarSlot s;
         s.bank = a.bank();
@@ -177,6 +188,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     }
     return r;
 }
+// CoA and C:Y:B
 
 CallStatus GrpcServices::save_progress(const std::string& id, const Progress& progress) {
     grpc::ClientContext ctx;
@@ -196,6 +208,13 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
         auto* p = req.add_skill_ranks();
         p->set_tree_guid(t.tree_guid);
         for (const int64_t r : t.rank_guids) p->add_rank_guids(r);
+    }
+    for (const ProfessionState& pr : progress.professions) {
+        auto* p = req.add_professions();
+        p->set_profession_guid(pr.profession_guid);
+        p->set_certification_tier(pr.certification_tier);
+        p->set_level(pr.level);
+        p->set_xp(pr.xp);
     }
     req.set_replace_action_bar(progress.replace_action_bar);
     for (const ActionbarSlot& a : progress.action_bar) {
@@ -242,6 +261,9 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
         case ItemContainer::Backpack: p->set_container(characterv1::ITEM_CONTAINER_BACKPACK); break;
         case ItemContainer::Equipment: p->set_container(characterv1::ITEM_CONTAINER_EQUIPMENT); break;
         case ItemContainer::Quest: p->set_container(characterv1::ITEM_CONTAINER_QUEST); break;
+        case ItemContainer::Resource0: p->set_container(characterv1::ITEM_CONTAINER_RESOURCE0); break;
+        case ItemContainer::Resource1: p->set_container(characterv1::ITEM_CONTAINER_RESOURCE1); break;
+        case ItemContainer::Resource2: p->set_container(characterv1::ITEM_CONTAINER_RESOURCE2); break;
         }
         p->set_slot(it.slot);
         p->set_item_record_id(it.item_record_id);

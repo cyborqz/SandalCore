@@ -39,6 +39,7 @@ type fakeStore struct {
 	xp      map[string][]character.Experience
 	ranks   map[string][]character.TreeRanks // plan D1, stage 2
 	bar     map[string][]character.ActionbarSlot
+	profs   map[string][]character.Profession // Gathering stage 2
 }
 
 func (f *fakeStore) Create(_ context.Context, n character.New) (character.Character, error) {
@@ -127,6 +128,13 @@ func (f *fakeStore) SkillRanks(_ context.Context, id string) ([]character.TreeRa
 		return nil, character.ErrNotFound
 	}
 	return f.ranks[id], nil
+}
+
+func (f *fakeStore) Professions(_ context.Context, id string) ([]character.Profession, error) {
+	if _, ok := f.byID[id]; !ok {
+		return nil, character.ErrNotFound
+	}
+	return f.profs[id], nil
 }
 
 func (f *fakeStore) ActionBar(_ context.Context, id string) ([]character.ActionbarSlot, error) {

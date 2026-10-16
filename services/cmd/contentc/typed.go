@@ -48,7 +48,7 @@ func buildTyped(w *writer, src *source, opt *Options, meta map[string]string) er
 	}
 	opt.logf("stat_def: %d stats", len(statRows))
 
-	curves, err := buildCurves(w, src.rows["StatCurveRecordBase"])
+	curves, err := buildCurves(w, src.rows["StatCurveRecordBase"], src.artisan, opt)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,10 @@ func buildStatDefs(w *writer, rows []designdb.Row) (map[int64]string, error) {
 
 // buildCurves fills stat_curve_def and stat_curve and returns the curves with
 // keys as a table EvalCurve can use.
-func buildCurves(w *writer, rows []designdb.Row) (*aocexpr.CurveMap, error) {
+//
+// A curve that has no keys of its own and names a pak asset (ExternalCurve) that artisan_curves.tsv holds gets the asset's keys: the three profession level-up
+// curves (Gathering stage 2).
+func buildCurves(w *writer, rows []designdb.Row, artisan *artisanCurves, opt *Options) (*aocexpr.CurveMap, error) {
 	cm := &aocexpr.CurveMap{TypeID: content.TypeStatCurve, Curves: map[int64]*aocexpr.Curve{}}
 	for _, r := range rows {
 		f := newFields(fmt.Sprintf("StatCurve %s (%d)", r.Name, r.Guid), r.Fields)
@@ -161,6 +164,12 @@ func buildCurves(w *writer, rows []designdb.Row) (*aocexpr.CurveMap, error) {
 				return nil, fmt.Errorf("%s: key %d: %w", f.where, i, err)
 			}
 			ks = append(ks, k)
+		}
+		if len(ks) == 0 {
+			if pak := artisan.keysFor(external); pak != nil {
+				ks = append(ks, pak...)
+				opt.logf("stat_curve: %s (%d) has no keys of its own; its pak asset %s gives %d", r.Name, r.Guid, packageOf(external), len(ks))
+			}
 		}
 		if len(ks) > 0 {
 			c, err := aocexpr.NewCurve(ks)

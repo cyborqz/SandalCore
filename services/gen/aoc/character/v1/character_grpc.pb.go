@@ -71,7 +71,7 @@ type CharacterServiceClient interface {
 	// InvalidArgument, with nothing changed, for a level outside 1-25, a class outside 1-8, a leveling type of 0 or a negative
 	// XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
 	// replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
-	// the banks 0-19 and slots 0-15 or one held twice.
+	// the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
 	SaveProgress(ctx context.Context, in *SaveProgressRequest, opts ...grpc.CallOption) (*SaveProgressResponse, error)
 }
 
@@ -196,7 +196,7 @@ type CharacterServiceServer interface {
 	// InvalidArgument, with nothing changed, for a level outside 1-25, a class outside 1-8, a leveling type of 0 or a negative
 	// XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
 	// replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
-	// the banks 0-19 and slots 0-15 or one held twice.
+	// the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
 	SaveProgress(context.Context, *SaveProgressRequest) (*SaveProgressResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }

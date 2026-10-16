@@ -24,8 +24,8 @@ func TestRealGearTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta["contentc.version"] != "12" {
-		t.Errorf("contentc.version = %q, want 12", meta["contentc.version"])
+	if meta["contentc.version"] != "16" {
+		t.Errorf("contentc.version = %q, want 16", meta["contentc.version"])
 	}
 	for table, want := range map[string]int64{"quality_curve": 14, "stat_block_stat": 18395, "set_bonus": 269, "item_set": 2513, "item_tag": 16815} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {

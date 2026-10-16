@@ -81,6 +81,7 @@
 #include "items/inventory.h"
 #include "session/action_bar.h"
 #include "session/leveling.h"
+#include "session/professions.h"
 #include "session/talents.h"
 #include "stats/character_stats.h"
 #include "svc/services.h"
@@ -187,12 +188,18 @@ struct StatContext {
     /// The mounts milestone: the mount tables. With them a mount item in the bag or worn brings its ability (Summon_Mount) to the pawn's
     /// ReplicatedRecordsToLoad (carried_item_abilities); null: no item brings one.
     const content::MountData*              mounts = nullptr;
+    /// Gathering stage 2: the professions' book. With it the character holds its 22 professions (the record's rows, Novice level 1 for a missing one) and the XPTracker lists
+    /// their certifications at the join; without it (a test's context, an older content.db) there are none.
+    const professions::Book*               professions = nullptr;
 };
 
 /// Plan D1 (effects since plan D2): the passives of the ranks `granted` (the Universal tree's auto grants a level reached) that have constant
 /// stat mods, one infinite effect each, for the stat engine's effect state.
 std::vector<stats::ActiveEffect> rank_effects_of(std::span<const content::AutoGrant* const> granted);
 // ~ C-O-A & Cyb ~
+
+/// The pawn's storage that shows an inventory container (Backpack, Equipment, Quest storage, Resource0 to Resource2).
+ItemStorage item_storage_of(svc::ItemContainer container);
 
 struct CharacterSetupResult {
     std::optional<PlayerSetup> setup;
@@ -204,12 +211,16 @@ struct CharacterSetupResult {
     std::vector<std::string>   notes;
     /// Plan B2: the character's items as the session plays them (set whenever `setup` is).
     std::optional<items::Inventory> inventory;
+    /// Gathering stage 3: the login's repair moved resource items from the Backpack to a resource container (the layout differs from the record's: the session saves it).
+    bool                            items_repaired = false;
     /// Plan B3: the character's stats as the session plays them: started with the worn items, what `setup.stats` was made from (set
     /// whenever `setup` is).
     std::optional<stats::CharacterStats> character_stats;
     /// Plan D1: the character's Adventuring progress (the record's level; its XP row when it has one at or past the level's threshold,
     /// else the threshold; the debt).
     leveling::Progress                   progress;
+    /// Gathering stage 2: what the character holds in the 22 professions (valid() only with the book).
+    professions::Professions             professions;
     /// Plan D1, stage 2: the character's ranks (the catalog's rules over what the record stored) and its action bar (the stored one, or the
     /// default: the weapon bank and the class's auto-granted skills). Set when the context has the catalog.
     std::optional<talents::Book>         book;

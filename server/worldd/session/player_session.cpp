@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <map>
 #include <random>
 
 namespace aoc { namespace worldd {
@@ -183,7 +184,10 @@ private:
     std::vector<int64_t> aligns_;
 };
 
-PlayerSession::~PlayerSession() { leave_combat(); }
+PlayerSession::~PlayerSession() {
+    cancel_gather(nullptr, "the session is destroyed");
+    leave_combat();
+}
 
 void PlayerSession::leave_combat() {
     if (combat_side_ && npc_world_ && npc_world_->combat()) npc_world_->combat()->remove_player(combat_side_.get());
@@ -274,6 +278,11 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         if (refusal) *refusal = built.refusal;
         return nullptr;
     }
+    // Gathering stage 3: a resource container of a second or third bag needs a guid of its own (minted here, after everything else, so that the one bag every class starts with
+    // changes no id)
+    for (size_t i = 1; i < built.setup->resource_bags.size(); ++i) {
+        if (built.setup->resource_bags[i].present && built.setup->guids.resource_storage[i].ObjectId == 0) built.setup->guids.resource_storage[i] = world.mint_guid();
+    }
     // the five city nodes' bowls (world/town_floor.h): a character saved on the baked ground under a town (a rider in the air was saved at the ground below it, before the town floor was
     // known) would join about 50 m under the town: it joins on the town floor.  worldd only changes its own copy of the position; the record stays (the first move saves the new one).
     if (const auto lifted = world.lift_out_of_bowl(built.setup->x, built.setup->y, built.setup->z)) {
@@ -313,6 +322,12 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
                           world.ability_rules(), std::move(*built.inventory), world.item_catalog(), std::move(built.character_stats), &world,
                           character.class_id, built.progress));
     p->notes_ = std::move(built.notes);
+    if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
+        p->inventory_dirty_ = true;
+        p->inventory_changed_ = true;
+    }
+    p->professions_ = std::move(built.professions);
+    if (p->stats_ && p->professions_.valid()) p->stats_->set_profession_levels(p->professions_.levels_by_name());
     p->node_maps_version_ = nodes_version;
     // the purchase reply's delay (a probe of the D1 draft's bar animation): the default is retail's, the variable changes it
     if (const char* env = std::getenv("AOC_PURCHASE_REPLY_DELAY_MS")) {
@@ -411,6 +426,21 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     }
     spdlog::info("[session] {}: level {}, Adventuring {} XP (debt {}), class {}", setup.name, p->progress_.level, p->progress_.xp, p->progress_.debt,
                  bootstrap::client_class_name(p->class_id_) ? bootstrap::client_class_name(p->class_id_) : "?");
+    if (p->professions_.valid()) {
+        size_t beyond = 0;
+        std::string highest;
+        int best = 0;
+        for (const professions::Profession& pf : p->professions_.book()->all()) {
+            const professions::State st = p->professions_.state(pf.guid);
+            beyond += st.tier > professions::kTierNovice || st.xp > 0;
+            if (st.level > best) {
+                best = st.level;
+                highest = pf.name + " " + std::to_string(st.level) + " (" + p->professions_.book()->tier(st.tier).name + ")";
+            }
+        }
+        spdlog::info("[session] {}: {} professions, {} beyond Novice level 1 with no XP{}", setup.name, p->professions_.book()->size(), beyond,
+                     highest.empty() || best <= 1 ? std::string() : "; the highest is " + highest);
+    }
     p->pump(conn);
     if (refusal) *refusal = bootstrap::SetupRefusal::None;
     return p;
@@ -560,6 +590,7 @@ void PlayerSession::pump(Connection& conn) {
 void PlayerSession::tick(Connection& conn) { pump(conn); }
 
 void PlayerSession::tick(Connection& conn, Clock::time_point now) {
+    last_now_ = now;
     pump(conn);
     if (finished_ || failed_) return;
     session_seconds(now);   // the clock starts at the first tick
@@ -567,6 +598,8 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_mounts(conn, now);
     run_ride(conn, now);
     run_timers(conn, now);
+    run_gather(conn, now);
+    run_foliage(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
@@ -671,6 +704,7 @@ void PlayerSession::hand_over(const char* why, bool periodic) {
 void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
+    cancel_gather(nullptr, why);   // Gathering stage 2: a node this player channels is available again
     // this player's lingering zones leave the world with it (the actor system closes them for a connection that is still there)
     if (registry_) {
         for (const auto& [id, za] : zone_actors_) registry_->remove(za.actor);
@@ -685,6 +719,22 @@ void PlayerSession::finish(const char* why) {
     if (view_) {
         spdlog::info("[session] {}: the world's actors: {}", name(), view_->describe());
         view_->finish();
+    }
+    // (the client's calls by name: what reached dispatch, so that a call worldd never logged -- a tree's start -- is told from one that never arrived)
+    if (!client_calls_.empty()) {
+        std::map<std::string, size_t> by_name;
+        for (const auto& [rpc_name, count] : client_calls_) by_name[rpc_name] += count;
+        std::vector<std::pair<std::string, size_t>> calls(by_name.begin(), by_name.end());
+        std::sort(calls.begin(), calls.end(), [](const auto& a, const auto& b) { return a.second != b.second ? a.second > b.second : a.first < b.first; });
+        std::string text;
+        for (size_t i = 0; i < calls.size() && i < 30; ++i) text += (i ? ", " : "") + calls[i].first + " " + std::to_string(calls[i].second);
+        spdlog::info("[session] {}: the client's calls by name ({} kinds, the most first): {}{}", name(), calls.size(), text, calls.size() > 30 ? ", ..." : "");
+    }
+    // (what the reader did not serve: a bunch that does not read takes every call in it away, so the count is part of the summary)
+    if (malformed_bunches_ > 0 || in_place_blocks_ > 0 || skipped_fields_ > 0) {
+        spdlog::info("[session] {}: the client's calls the reader did not serve: {} bunches that did not read at all (ignored whole); {} calls on subobjects it names by path (skipped, in {} bunches, {} names); {} RPC "
+                     "fields of no RPC of their class (skipped)",
+                     name(), malformed_bunches_, in_place_blocks_, in_place_bunches_, in_place_names_.size(), skipped_fields_);
     }
     // Is what the pawn's Stamina array holds (what was last put into the updates the client gets) what the server's runtime has?  A cache that
     // drifted would freeze the HUD until a relog (E1 stage 1, fix 2: it did not, the move clock was the cause; this keeps checking).
@@ -716,6 +766,7 @@ void PlayerSession::hand_over_progress(const char* why) {
     p.level = progress_.level;
     p.class_id = class_id_;
     p.experience.push_back({content::kGuidAdventuring, progress_.xp, progress_.debt});
+    p.professions = professions_.to_svc();   // Gathering stage 2: all 22 whole, as the session holds them (empty without the world's book)
     if (book_) {
         // plan D1, stage 2: the ranks and the bar go whole with every hand-over (what the session holds is what the character has)
         p.replace_skill_ranks = true;
@@ -859,23 +910,88 @@ void PlayerSession::on_bunch(Connection& conn, const InBunch& bunch, Clock::time
     const auto parsed = repl::read_client_bunch(*cls, resolve, bunch.data.data(), bunch.bits, client_opts);
     if (!parsed) {
         // The connection already refused a broken packet; this is a bunch whose content blocks do not read.
-        if (++malformed_bunches_ <= 3) {
-            // (the first bytes in hex: the client's own data, what an unknown RPC looks like when the next run is read; stage 3 fix 2)
-            std::string head;
-            for (size_t i = 0; i < bunch.data.size() && i < 24; ++i) {
-                static const char* const kHex = "0123456789abcdef";
-                head += kHex[bunch.data[i] >> 4];
-                head += kHex[bunch.data[i] & 15];
-            }
-            spdlog::warn("[session] {}: a bunch of {} bits on channel {} ({}) does not read: ignored (starts {})", name(), bunch.bits, bunch.channel,
-                         role_name(role), head);
+        // (The first bytes in hex: the client's own data, what an unknown RPC looks like when the next run is read; stage 3 fix 2.  A bunch that does not read takes every call in it with it,
+        // so none may go unseen: the first three are given whole, up to 160 bytes, and so is the first of every KIND -- its size and first eight bytes -- up to kMaxUnreadKinds, which is how
+        // a start that shared a bunch with a call the reader could not read shows as a bunch of its own size; the rest one in ten, with their first 24 bytes (retest 3: they were debug lines, invisible.)
+        static const char* const kHex = "0123456789abcdef";
+        std::string head;
+        for (size_t i = 0; i < bunch.data.size() && i < 160; ++i) {
+            head += kHex[bunch.data[i] >> 4];
+            head += kHex[bunch.data[i] & 15];
+        }
+        ++malformed_bunches_;
+        const std::string kind = std::to_string(bunch.bits) + ":" + head.substr(0, 16);
+        const bool new_kind = unread_kinds_.size() < kMaxUnreadKinds && unread_kinds_.insert(kind).second;
+        if (malformed_bunches_ <= 3 || new_kind) {
+            spdlog::warn("[session] {}: a bunch of {} bits on channel {} ({}) does not read: ignored (starts {})", name(), bunch.bits, bunch.channel, role_name(role), head);
         } else {
-            spdlog::debug("[session] {}: a bunch of {} bits on channel {} does not read: ignored", name(), bunch.bits, bunch.channel);
+            spdlog::log(malformed_bunches_ % 10 == 0 ? spdlog::level::info : spdlog::level::debug,
+                        "[session] {}: a bunch of {} bits on channel {} ({}) does not read: ignored ({} so far; starts {})", name(), bunch.bits, bunch.channel, role_name(role), malformed_bunches_,
+                        head.substr(0, 48));
         }
         return;
     }
-    for (const repl::ClientRpc& rpc : parsed->rpcs) dispatch(conn, role, rpc, bunch, now);
+    note_unserved_blocks(role, *parsed, bunch);
+    for (const repl::ClientRpc& rpc : parsed->rpcs) {
+        ++client_calls_[rpc.call.rpc->name];   // (by the schema's own string: no allocation; the summary at the session's end adds the classes' copies of a name up)
+        dispatch(conn, role, rpc, bunch, now);
+    }
 }
+
+void PlayerSession::note_unserved_blocks(Role role, const repl::ClientBunch& parsed, const InBunch& bunch) {
+    // Calls on a subobject the client names by path (the server never gave it a GUID: a component worldd does not replicate): the reader
+    // skipped each by its bit count and read the rest of the bunch.  A client sends them every 100 ms, and one of them in the bunch of a tree's
+    // start used to take the start with it (the trees' retests 3 and 4: 0 starts).  Said once per name, with the first bunch whole.
+    if (parsed.in_place_blocks > 0) {
+        in_place_blocks_ += parsed.in_place_blocks;
+        ++in_place_bunches_;
+        static const char* const kHex = "0123456789abcdef";
+        for (const repl::InPlaceBlock& block : parsed.in_place) {
+            const repl::InPlaceName& n = block.name;
+            const std::string key = std::to_string(n.outer.ObjectId) + "/" + n.path;
+            const auto seen = in_place_names_.find(key);
+            if (seen != in_place_names_.end()) {
+                ++seen->second;
+                continue;
+            }
+            if (in_place_names_.size() >= kMaxInPlaceNames) continue;   // (the names beyond these are only counted)
+            in_place_names_[key] = 1;
+            std::string whole;
+            for (size_t i = 0; i < bunch.data.size() && i < 160; ++i) {
+                whole += kHex[bunch.data[i] >> 4];
+                whole += kHex[bunch.data[i] & 15];
+            }
+            spdlog::warn("[session] {}: the client calls an RPC on a subobject of its {} that it names by path (\"{}\", outer {}/{}/{}, export flags {}, {} payload bits): worldd "
+                         "replicates no such subobject, so the call is skipped and the rest of its bunch is read; said once per name; the bunch is {}, {} bits, and starts {}",
+                         name(), role_name(role), n.path, n.outer.ObjectId, n.outer.ServerId, n.outer.Randomizer, static_cast<unsigned>(n.flags), block.payload_bits,
+                         bunch.reliable ? "reliable" : "unreliable", bunch.bits, whole);
+        }
+        // (does a call named by path share a bunch with the client's other calls?  A bunch that did not read took them all away: the first few such bunches are said, with the others' names)
+        if (!parsed.rpcs.empty() && ++in_place_shared_logged_ <= kMaxInPlaceSharedLogged) {
+            std::string others;
+            for (const repl::ClientRpc& rpc : parsed.rpcs) others += (others.empty() ? "" : ", ") + std::string(rpc.call.rpc ? rpc.call.rpc->name : "?");
+            spdlog::info("[session] {}: a {} bunch of {} bits held {} calls named by path and {} others ({}): the others are read and answered as usual", name(),
+                         bunch.reliable ? "reliable" : "unreliable", bunch.bits, parsed.in_place_blocks, parsed.rpcs.size(), others);
+        }
+        // (the running count at info on every power of ten of the blocks: the stream is ten a second)
+        for (size_t cutoff = 10; cutoff <= in_place_blocks_; cutoff *= 10) {
+            if (in_place_blocks_ - parsed.in_place_blocks < cutoff && in_place_blocks_ >= cutoff) {
+                spdlog::info("[session] {}: {} calls on subobjects the client names by path so far, skipped ({} bunches, {} names)", name(), in_place_blocks_, in_place_bunches_,
+                             in_place_names_.size());
+            }
+        }
+    }
+    if (parsed.skipped_fields.count > 0) {
+        skipped_fields_ += parsed.skipped_fields.count;
+        if (++skipped_fields_logged_ <= kLoggedPerKind) {
+            std::string ids;
+            for (const uint32_t id : parsed.skipped_fields.first) ids += (ids.empty() ? "" : ", ") + std::to_string(id);
+            spdlog::warn("[session] {}: the client sent {} RPC fields on the {}'s channel that its class has no RPC for (field indices {}): skipped, the rest of the bunch is read", name(),
+                         parsed.skipped_fields.count, role_name(role), ids);
+        }
+    }
+}
+// C O A + C_Y_B
 
 void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now) {
     const std::string_view name_of_rpc = rpc.call.rpc->name;
@@ -898,6 +1014,13 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
                              pawn ? "another object" : "nothing readable");
             }
             return;
+        }
+        if (name_of_rpc == "ServerStartInteractionWithFoliage") {
+            // (retest 3: the client sets its own FoliageData the moment it sends this and says "while gathering" to everything else until the server answers; an unreadable call left no line)
+            if (!rpc.call.decoded && ++foliage_unreadable_logged_ <= kLoggedPerKind) {
+                spdlog::warn("[session] {}: ServerStartInteractionWithFoliage arrived and its parameters do not decode: no cutting starts, and the client is told to end its own (ClientInterruptInteractionWithFoliage)", name());
+            }
+            return on_foliage_interact(conn, rpc, now);
         }
         if (name_of_rpc == "ServerDesummonMount") return on_desummon_mount(conn, now);
         if (name_of_rpc == "ServerDismountInteraction") return on_dismount_request(conn, now);
@@ -946,6 +1069,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerItemUsed") return on_item_used(conn, rpc, now);
         if (name_of_rpc == "ServerPurchaseSkillBuild") return on_purchase(conn, rpc, now);
         if (name_of_rpc == "ServerInteractWithInteractableComponent") return on_interact(conn, rpc, now);
+        if (name_of_rpc == "ServerInterruptChannel") return on_interrupt_channel(conn, now);
         if (name_of_rpc == "RequestServerRespawnChoices") return on_respawn_choices_request(conn, rpc, now);
         if (name_of_rpc == "SendServerRespawnChoice") return on_respawn_choice(conn, rpc, now);
         if (name_of_rpc == "ServerSetUseRangedWeapon") return on_set_ranged(conn, rpc, now);
@@ -965,7 +1089,8 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerEndAbility") return on_ability_end(conn, rpc, now);
     }
     if (unhandled_logged_.insert(std::string(name_of_rpc)).second) {
-        spdlog::debug("[session] {}: ignoring the client's {} ({})", name(), name_of_rpc, role_name(role));
+        // (info since retest 3: which calls of the client worldd answers with nothing, once each; the hunt's ServerSetActiveTarget is one)
+        spdlog::info("[session] {}: ignoring the client's {} ({}): worldd does not answer it (once per call)", name(), name_of_rpc, role_name(role));
     }
 }
 // (C-Y-B ~ CoA)
@@ -1048,6 +1173,7 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
     }
     if (verdict.accepted) {
         pending_fix_.reset();   // the client is where the server has it now: an earlier refusal of this datagram needs no correction
+        if (!on_mount && is_moving(before, move)) moved_at_ = now;   // Gathering stage 3: a tree is not cut while walking
         if (AbilityRuntime* abilities = ability_runtime(now)) {
             const bool moving = is_moving(before, move);
             abilities->set_moving(moving, ability_seconds(now));
@@ -1403,6 +1529,7 @@ void PlayerSession::run_abilities(Connection& conn, Clock::time_point now) {
     check_death(conn, now);
     flush_abilities(conn);
 }
+// (CoA : C.Y.B)
 
 void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now, bool on_mount) {
     AbilityRuntime* runtime = ability_runtime(now);
@@ -1427,6 +1554,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
         return;
     }
     ++ability_triggers_;
+    cancel_gather(&conn, "an ability was triggered");   // Gathering stage 2: a new ability ends the channel [modelled: no capture]
     int64_t ability = 0;
     int32_t instance = 0;
     int32_t item_slot = -1;
@@ -1584,18 +1712,13 @@ void PlayerSession::on_hit_request(Connection& conn, const repl::ClientRpc& rpc,
 //  items (plan B2)
 // ============================================================================================================================
 
-namespace {
-
-/// The ItemEvents the bootstrap sends for an Outcome's events.
-std::vector<bootstrap::ItemEvent> item_events_of(const items::Outcome& outcome) {
+std::vector<bootstrap::ItemEvent> item_events_for(const items::Outcome& outcome) {
     std::vector<bootstrap::ItemEvent> out;
     out.reserve(outcome.events.size());
     for (const items::Event& e : outcome.events) {
         bootstrap::ItemEvent ev;
         ev.type = e.type;
-        ev.storage = e.container == svc::ItemContainer::Backpack    ? bootstrap::ItemStorage::Backpack
-                     : e.container == svc::ItemContainer::Equipment ? bootstrap::ItemStorage::Equipment
-                                                                    : bootstrap::ItemStorage::Quest;
+        ev.storage = bootstrap::item_storage_of(e.container);
         ev.slot = e.slot;
         ev.item = items::to_instance(e.item);
         ev.instigated = e.instigated;
@@ -1605,6 +1728,13 @@ std::vector<bootstrap::ItemEvent> item_events_of(const items::Outcome& outcome) 
 }
 // ~ C Y B - C-O-A ~
 
+namespace {
+
+/// A catalog that knows no record: a session without one routes every grant to the Backpack.
+struct NoCatalog : items::ItemCatalog {
+    std::optional<items::ItemInfo> info(int64_t) const override { return std::nullopt; }
+};
+
 std::optional<svc::ItemContainer> container_of_location(uint8_t location) {
     if (location == static_cast<uint8_t>(repl::ItemLocation::Backpack)) return svc::ItemContainer::Backpack;
     if (location == static_cast<uint8_t>(repl::ItemLocation::Equipment)) return svc::ItemContainer::Equipment;
@@ -1612,6 +1742,11 @@ std::optional<svc::ItemContainer> container_of_location(uint8_t location) {
 }
 
 }  // namespace
+
+const items::ItemCatalog& PlayerSession::item_catalog() const {
+    static const NoCatalog none;
+    return catalog_ ? *catalog_ : none;
+}
 
 // ============================================================================================================================
 //  mounts (the mounts milestone, stage 2: session/mounts.h has the rules and the numbers)
@@ -1686,6 +1821,7 @@ void PlayerSession::on_summon_trigger(Connection& conn, int32_t client_instance,
     }
     run_mounts(conn, now);
 }
+// [Cyb x C.O.A]
 
 void PlayerSession::on_desummon_mount(Connection& conn, Clock::time_point now) {
     ++mount_desummon_requests_;
@@ -1857,6 +1993,7 @@ bool PlayerSession::mount_up(Connection& conn, const world::WorldActor& a, Clock
     const content::MountRow* row = mounts_ ? mounts_->book().find(mounts_->item_record()) : nullptr;
     if (!row || !world_ || !registry_ || !view_) return false;
     if (!ability_runtime(now)) return false;
+    cancel_gather(&conn, "the player mounts", Interrupt::Mounted);   // Gathering stage 2: a rider harvests nothing
     const double t = ability_seconds(now);
     const bootstrap::SessionGuids& g = pb_.setup().guids;
     const spawns::MountBook& book = mounts_->book();
@@ -2171,7 +2308,7 @@ void PlayerSession::apply_persist(Connection* conn, const MountController::Persi
     inventory_changed_ = true;
     ++items_applied_;
     if (!conn || o.events.empty() || !room_for(2)) return;
-    const std::vector<bootstrap::ItemEvent> events = item_events_of(o);
+    const std::vector<bootstrap::ItemEvent> events = item_events_for(o);
     for (size_t at = 0; at < events.size(); at += bootstrap::kMaxEventsPerChain) {
         const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at),
                                                      events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at + bootstrap::kMaxEventsPerChain)));
@@ -2311,6 +2448,7 @@ double PlayerSession::xp_add_mult() const {
     const stats::StatValue* v = stats_->find(content::kGuidAdventuringXPAddMult);
     return v && std::isfinite(v->value) ? v->value : 0.0;
 }
+// built by C-O-A with C_Y_B
 
 std::string PlayerSession::fresh_guid() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
@@ -2386,29 +2524,27 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     ctx.progress = progress_;
     ctx.xp_add_mult = xp_add_mult();
     ctx.curve = curve;
+    // Gathering stage 2: the professions, and the runner of a Profession reward's expression (made when the first one is asked for: it runs the stat graph once)
+    ctx.professions = world_->professions();
+    ctx.held = professions_;
+    const abilities::Catalog* ability_catalog = world_->ability_catalog();
+    std::shared_ptr<professions::XpRunner> runner;
+    if (ctx.professions && ability_catalog && stats_ && stats_->started()) {
+        const std::vector<stats::WornItem> worn = bootstrap::worn_items_of(inventory_);
+        runner = std::make_shared<professions::XpRunner>();
+        ctx.profession_xp = [this, runner, ability_catalog, worn](int64_t expr, const std::map<std::string, int>& levels, std::string& why) -> std::optional<double> {
+            if (!*runner) {
+                *runner = professions::make_xp_runner(*ability_catalog, *stats_, worn, why);
+                if (!*runner) return std::nullopt;
+            }
+            return (*runner)(expr, levels, why);
+        };
+    }
     const use::Plan plan = use::plan_use(*db, item.item_record_id, ctx);
     if (!plan.ok) return refuse(plan.refusal);
-    // the room: the grants need free bag slots; the consumed stack frees its slot only when it empties
-    const size_t free = static_cast<size_t>(items::kBackpackSlots) - inventory_.count(svc::ItemContainer::Backpack) + ((plan.consume && item.quantity == 1) ? 1 : 0);
-    if (plan.items.size() > free) {
-        return refuse("the bag has " + std::to_string(free) + " free slot(s) and the use grants " + std::to_string(plan.items.size()) + " item(s): nothing is used");
-    }
-    const std::span<const content::AutoGrant> grants = world_->auto_grants();
-    // the steps: the events, the XPTracker, the broadcast, the pawn's state, the class bar, and a skill update for each rank a level or a class grants
-    const size_t steps = 1 + (plan.items.size() + 1) / bootstrap::kMaxEventsPerChain + 1 + 1 + 1 + 1 + grants.size() + 8;
-    if (!room_for(steps)) return;
-// (Cyb : C.O.A)
-
-    // the inventory: the consumed stack, then the grants
-    items::Outcome all;
-    all.ok = true;
-    if (plan.consume) {
-        const items::Outcome c = inventory_.consume(svc::ItemContainer::Backpack, use.slot, item.instance_guid, 1);
-        if (!c.ok) return refuse(c.refusal);
-        all.events.insert(all.events.end(), c.events.begin(), c.events.end());
-    }
-    if (!plan.items.empty()) {
-        std::vector<svc::InventoryItem> fresh;
+    // what the use grants, as fresh instances (their kind decides where the inventory puts them: a resource item to a resource container, the rest to the Backpack)
+    std::vector<svc::InventoryItem> fresh;
+    {
         const int64_t created = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000;
         for (const use::Granted& g : plan.items) {
             svc::InventoryItem it;
@@ -2421,7 +2557,32 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
             it.created_at_ms = created;
             fresh.push_back(std::move(it));
         }
-        const items::Outcome g = inventory_.grant(std::move(fresh));
+    }
+    // the room: the grants need room in the storage of their kind; the consumed stack frees its slot only when it empties (tried on a copy)
+    if (!fresh.empty()) {
+        items::Inventory trial = inventory_;
+        if (plan.consume) trial.consume(svc::ItemContainer::Backpack, use.slot, item.instance_guid, 1);
+        if (!trial.can_grant(fresh, item_catalog())) {
+            return refuse("the storages have no room for the use's " + std::to_string(plan.items.size()) + " item(s) (the bag has " +
+                          std::to_string(static_cast<size_t>(items::kBackpackSlots) - inventory_.count(svc::ItemContainer::Backpack)) + " free slot(s)): nothing is used");
+        }
+    }
+    const std::span<const content::AutoGrant> grants = world_->auto_grants();
+    // the steps: the events, the XPTracker, the broadcast, the pawn's state, the class bar, and a skill update for each rank a level or a class grants
+    const size_t steps = 1 + (plan.items.size() + 1) / bootstrap::kMaxEventsPerChain + 1 + 1 + 1 + 1 + grants.size() + 8 + plan.profession_changes.size();
+    if (!room_for(steps)) return;
+// (Cyb : C.O.A)
+
+    // the inventory: the consumed stack, then the grants
+    items::Outcome all;
+    all.ok = true;
+    if (plan.consume) {
+        const items::Outcome c = inventory_.consume(svc::ItemContainer::Backpack, use.slot, item.instance_guid, 1);
+        if (!c.ok) return refuse(c.refusal);
+        all.events.insert(all.events.end(), c.events.begin(), c.events.end());
+    }
+    if (!fresh.empty()) {
+        const items::Outcome g = inventory_.grant(std::move(fresh), item_catalog());
         if (!g.ok) {
             // the room was checked: a refusal here is a record the table refuses, not something the client can cause; the consumed stack stays consumed
             spdlog::error("[session] {}: the use's items are not granted ({}): the item was consumed and nothing came of it", name(), g.refusal);
@@ -2445,6 +2606,10 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     }
     const bool leveled = xp.leveled();
     if (leveled) levels_gained_ += static_cast<size_t>(xp.after.level - xp.before.level);
+
+    // the professions (Gathering stage 2): the XP, the Promotes and the levels they cross
+    const std::vector<professions::Change> profession_changes = plan.profession_changes.empty() ? std::vector<professions::Change>() : set_professions(plan.professions_after);
+    const bool professions_changed = !profession_changes.empty();
 
     // the class
     bool class_changed = false;
@@ -2478,17 +2643,21 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     ++uses_applied_;
     ++items_applied_;
     if (inventory_moved) {
-        const std::vector<bootstrap::ItemEvent> events = item_events_of(all);
+        const std::vector<bootstrap::ItemEvent> events = item_events_for(all);
         for (size_t at = 0; at < events.size(); at += bootstrap::kMaxEventsPerChain) {
             const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at),
                                                          events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at + bootstrap::kMaxEventsPerChain)));
             queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
         }
     }
-    if (xp.changed() || leveled || class_changed) {
+    if (xp.changed() || leveled || class_changed || professions_changed) {
         const int64_t total = progress_.xp, debt = progress_.debt;
-        queue("XPTracker", [total, debt](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+        const std::vector<ProfessionWire> wire = profession_wire(profession_changes);   // the professions that changed, in profession order
+        queue("XPTracker", [total, debt, wire](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
             if (!pb.set_progress(total, debt)) return std::nullopt;
+            for (const ProfessionWire& w : wire) {
+                if (!pb.set_profession(w.leveling_type, w.xp, w.certification)) return std::nullopt;
+            }
             return pb.leveling_update();
         }, conn, /*must_build=*/true);
     }
@@ -2496,6 +2665,7 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
         const int level = progress_.level;
         queue("BroadcastPlayLevelUpEffects", [level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(content::kGuidAdventuring, level); }, conn);
     }
+    if (professions_changed) queue_profession_level_ups(conn, profession_changes);
     if (leveled || class_changed) {
         queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("level and stats"); }, conn, /*must_build=*/true);
     }
@@ -2531,12 +2701,56 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     std::string line = "used item " + std::to_string(item.item_record_id) + ": " + plan.summary;
     if (xp.changed()) line += "; Adventuring " + std::to_string(xp.after.xp) + " XP (debt " + std::to_string(xp.after.debt) + ")";
     if (leveled) line += ", level " + std::to_string(xp.before.level) + " -> " + std::to_string(xp.after.level);
+    for (const professions::Change& c : profession_changes) {
+        const professions::Profession* pf = professions_.book()->find(c.profession);
+        if (!pf) continue;
+        const professions::Book& pbook = *professions_.book();
+        line += "; " + pf->name + " level " + std::to_string(c.before.level) + " -> " + std::to_string(c.after.level) + ", " + pbook.tier(c.before.tier).name + " -> " +
+                pbook.tier(c.after.tier).name + ", " + std::to_string(c.after.xp) + " XP";
+    }
     if (!granted_names.empty()) line += ", granted " + granted_names;
     if (class_changed) line += "; the class is " + class_name + " now (its tree, abilities and bar are sent live)";
     line += "; " + std::to_string(all.events.size()) + " storage event(s)";
     for (const std::string& n : plan.notes) line += "; " + n;
     spdlog::log(level_for(use_logged_), "[session] {}: {}", name(), line);
-    if (xp.changed() || class_changed) hand_over_progress(leveled ? "a level-up" : class_changed ? "a class change" : "XP earned");
+    if (xp.changed() || class_changed || professions_changed) {
+        hand_over_progress(leveled ? "a level-up" : class_changed ? "a class change" : professions_changed && !xp.changed() ? "a profession changed" : "XP earned");
+    }
+}
+// C | O | A and Cyb
+
+std::vector<professions::Change> PlayerSession::set_professions(const professions::Professions& after) {
+    std::vector<professions::Change> changes = professions::Professions::diff(professions_, after);
+    if (changes.empty()) return changes;
+    professions_ = after;
+    progress_changed_ = true;
+    if (stats_) stats_->set_profession_levels(professions_.levels_by_name());
+    for (const professions::Change& c : changes) {
+        if (c.leveled()) profession_levels_gained_ += static_cast<size_t>(c.after.level - c.before.level);
+    }
+    return changes;
+}
+
+std::vector<PlayerSession::ProfessionWire> PlayerSession::profession_wire(const std::vector<professions::Change>& changes) const {
+    std::vector<ProfessionWire> wire;
+    if (!professions_.valid()) return wire;
+    const professions::Book& book = *professions_.book();
+    for (const professions::Change& c : changes) {
+        if (const professions::Profession* pf = book.find(c.profession)) wire.push_back({pf->leveling_type, c.after.xp, book.tier(c.after.tier).guid});
+    }
+    return wire;
+}
+
+void PlayerSession::queue_profession_level_ups(Connection& conn, const std::vector<professions::Change>& changes) {
+    if (!professions_.valid()) return;
+    // a profession's level-up is the XP item and BroadcastPlayLevelUpEffects on the pawn with the profession's leveling type as the category (retail's artisan and weapon levels)
+    for (const professions::Change& c : changes) {
+        const professions::Profession* pf = professions_.book()->find(c.profession);
+        if (!pf || !c.leveled()) continue;
+        const int64_t category = pf->leveling_type;
+        const int level = c.after.level;
+        queue("BroadcastPlayLevelUpEffects", [category, level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(category, level); }, conn);
+    }
 }
 
 void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what) {
@@ -2549,7 +2763,7 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
         wielded_line_ = w ? w->line : 0;
     }
     if (outcome.equipment_changed) apply_gear_stats();   // before the replies are queued: they are built later, and carry the stats' deltas
-    std::vector<bootstrap::ItemEvent> events = item_events_of(outcome);
+    std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
     // the storage events go first (the PlayerController's chain), then the pawn's visible gear: the order and the packet of the retail answer
     queue("ClientReceiveStorageEvent", [events](bootstrap::PlayerBootstrap& pb) { return pb.item_events(events); }, conn, /*must_build=*/true);
     if (outcome.equipment_changed) {
@@ -2567,6 +2781,12 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     }
     spdlog::log(level_for(item_applied_logged_), "[session] {}: {}: {} storage event(s){}", name(), what, outcome.events.size(),
                 outcome.equipment_changed ? ", the visible gear is updated" : "");
+    for (const items::Event& e : outcome.events) {
+        if (e.type == repl::StorageEventType::Add && e.container == svc::ItemContainer::Equipment && e.slot >= items::equip::ResourceBag0 && e.slot <= items::equip::ResourceBag2) {
+            // Gathering stage 3: the container of a bag worn now is not open this session (the client lays its containers out at the login)
+            spdlog::info("[session] {}: a resource bag is worn in Equipment slot {}: its container opens at the next login", name(), e.slot);
+        }
+    }
 }
 // (C Y B | CoA)
 
@@ -2574,8 +2794,12 @@ void PlayerSession::refuse_item_request(Connection& conn, const char* what, cons
     ++items_refused_;
     spdlog::log(level_for(item_refused_logged_), "[session] {}: {} refused, nothing changed: {}", name(), what, why);
     // the client is told what is where, as at the join; a client that is refused over and over gets that a few times, then silence
-    if (!resync_budget_.take(now) || !room_for(2)) return;
-    for (const bootstrap::StorageKind k : {bootstrap::StorageKind::Backpack, bootstrap::StorageKind::Equipment}) {
+    if (!resync_budget_.take(now) || !room_for(5)) return;
+    std::vector<bootstrap::StorageKind> kinds = {bootstrap::StorageKind::Backpack, bootstrap::StorageKind::Equipment};
+    for (int i = 0; i < items::kResourceContainers; ++i) {
+        if (pb_.setup().resource_bags[static_cast<size_t>(i)].present) kinds.push_back(bootstrap::resource_kind(i));   // Gathering stage 3: a refused drag in a resource container too
+    }
+    for (const bootstrap::StorageKind k : kinds) {
         queue("ClientReceiveStoragePayload", [k](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(k, Role::Pawn); }, conn);
     }
 }
@@ -2634,10 +2858,14 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
         if (object == g.backpack) return svc::ItemContainer::Backpack;
         if (object == g.equipment) return svc::ItemContainer::Equipment;
         if (object == g.quest_storage) return svc::ItemContainer::Quest;
+        for (int i = 0; i < items::kResourceContainers; ++i) {
+            if (pb_.setup().resource_bags[static_cast<size_t>(i)].present && object == g.resource_storage[static_cast<size_t>(i)]) return items::resource_container(i);
+        }
         return std::nullopt;
     };
     const auto type = static_cast<repl::StorageEventType>(event->type);
     if (type != repl::StorageEventType::Move && type != repl::StorageEventType::Swap) {
+        // (a Remove is the client destroying an item by dragging it out, a Fill dragging a stack onto another: Gathering stage 3 refuses both; the backlog has them)
         return refuse_item_request(conn, what, "an event of type " + std::to_string(event->type) + " is not made (only a Move and a Swap of whole stacks)", now);
     }
     if (event->move_source.slots.size() != 1 || event->targets.size() != 1 || event->targets[0].slots.size() != 1) {
@@ -2651,7 +2879,7 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
     if (!(src.item_guid == event->item.guid)) return refuse_item_request(conn, what, "the item of the event is not the instance of its source slot", now);
     const std::string guid = items::guid_hex(src.item_guid);
     const items::Outcome outcome = type == repl::StorageEventType::Move
-                                       ? inventory_.move(*from, src.slot, src.count, guid, *to, dst.slot)
+                                       ? inventory_.move(*from, src.slot, src.count, guid, *to, dst.slot, &item_catalog())
                                        : inventory_.swap(*from, src.slot, src.count, guid, *to, dst.slot, items::guid_hex(dst.item_guid), dst.count);
     if (!outcome.ok) return refuse_item_request(conn, what, outcome.refusal, now);
     apply_outcome(conn, outcome, type == repl::StorageEventType::Move ? "an item is moved in the bag" : "two items swap places in the bag");
@@ -2689,7 +2917,11 @@ void PlayerSession::on_storage_request(Connection& conn, const repl::ClientRpc& 
         if (*container == g.backpack) kind = bootstrap::StorageKind::Backpack;
         else if (*container == g.equipment) kind = bootstrap::StorageKind::Equipment;
         else if (*container == g.quest_storage) kind = bootstrap::StorageKind::QuestStorage;
-        else if (*container == g.resource_storage) kind = bootstrap::StorageKind::Resource;
+        else {
+            for (int i = 0; i < items::kResourceContainers; ++i) {
+                if (pb_.setup().resource_bags[static_cast<size_t>(i)].present && *container == g.resource_storage[static_cast<size_t>(i)]) kind = bootstrap::resource_kind(i);
+            }
+        }
     }
     if (!kind) {
         spdlog::debug("[session] {}: ServerRequestStorageData names a container worldd has no payload for", name());
@@ -2746,10 +2978,15 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     const world::WorldActor* a = registry_->find_by_component(req->interactable.ObjectId);
     if (!a) return ignore("it is no component of an actor of this world");
     if (a->kind == world::ActorKind::Mount) return on_mount_interact(conn, *a, now);   // getting on
+    if (a->kind == world::ActorKind::Gatherable) return on_gather_interact(conn, *a, now);   // Gathering stage 2: a resource node
     if (view_->state_of(a->id) != world::ClientState::Awake) return ignore("the client does not have that actor open");
     const GoodPosition at = checker_.good();
     const double distance = std::hypot(a->x - at.x, a->y - at.y);
     if (distance > kInteractRangeCm) return ignore("the actor is " + std::to_string(static_cast<int>(distance / 100.0)) + " m away");
+    // Gathering stage 3, "Hunting": the interactable of a huntable creature starts its hunt, alive as it stands (or dead, if it was killed some other way), not a loot window
+    if (a->kind == world::ActorKind::Npc && a->npc.interact_def != 0 && npc_world_ && npc_world_->gathering() && npc_world_->gathering()->hunt_kind(a->npc.interact_def)) {
+        return on_hunt_interact(conn, *a, now);
+    }
     if (npc_world_ && npc_world_->aftermath()) {
         if (const combat::Corpse* corpse = npc_world_->aftermath()->corpse_by_interactable(req->interactable.ObjectId)) return open_loot(conn, *corpse, *a, now);
     }
@@ -2837,13 +3074,13 @@ void PlayerSession::on_vendor_purchase(Connection& conn, const repl::ClientRpc& 
         }
         fresh.push_back(std::move(it));
     }
-    const items::Outcome outcome = inventory_.grant(std::move(fresh));
+    const items::Outcome outcome = inventory_.grant(std::move(fresh), item_catalog());
     if (!outcome.ok) return refuse(outcome.refusal);
     inventory_dirty_ = true;
     inventory_changed_ = true;
     ++items_applied_;
     ++vendor_purchases_;
-    const std::vector<bootstrap::ItemEvent> events = item_events_of(outcome);
+    const std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
     for (size_t at = 0; at < events.size(); at += bootstrap::kMaxEventsPerChain) {
         const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at),
                                                      events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at + bootstrap::kMaxEventsPerChain)));
@@ -2912,6 +3149,7 @@ void PlayerSession::check_death(Connection& conn, Clock::time_point now) {
 void PlayerSession::die(Connection& conn, Clock::time_point now) {
     dead_ = true;
     ++deaths_;
+    cancel_gather(&conn, "the player died", Interrupt::Death);   // Gathering stage 2
     if (pipeline_) pipeline_->set_dead(true);
     // the mounts milestone, stage 3: the dead player is dismounted (the death frame below restarts its pawn) and its mount is desummoned
     if (mounted()) dismount(conn, now, DismountWhy::PlayerDied);
@@ -2944,9 +3182,10 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     const bool loss_on = !npc_world_ || npc_world_->aftermath_config().death_loss;
     if (db && loss_on) {
         for (const svc::InventoryItem& it : inventory_.items()) {
-            if (it.container != svc::ItemContainer::Backpack || it.quantity <= 0 || !is_material(*db, it.item_record_id)) continue;
+            // Gathering stage 3: the materials are in the resource containers now (the Backpack holds them only for a bag that had no room at the login)
+            if ((it.container != svc::ItemContainer::Backpack && !items::is_resource(it.container)) || it.quantity <= 0 || !is_material(*db, it.item_record_id)) continue;
             const int32_t take = it.quantity == 1 ? 1 : (it.quantity + 1) / 2;
-            const items::Outcome c = inventory_.consume(svc::ItemContainer::Backpack, it.slot, it.instance_guid, take);
+            const items::Outcome c = inventory_.consume(it.container, it.slot, it.instance_guid, take);
             if (!c.ok) continue;
             all.events.insert(all.events.end(), c.events.begin(), c.events.end());
             combat::LootStack s;
@@ -2960,7 +3199,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
         inventory_dirty_ = true;
         inventory_changed_ = true;
         ++items_applied_;
-        const std::vector<bootstrap::ItemEvent> events = item_events_of(all);
+        const std::vector<bootstrap::ItemEvent> events = item_events_for(all);
         for (size_t at2 = 0; at2 < events.size(); at2 += bootstrap::kMaxEventsPerChain) {
             const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at2),
                                                          events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at2 + bootstrap::kMaxEventsPerChain)));
@@ -3202,9 +3441,8 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
             left -= it.quantity;
             fresh.push_back(std::move(it));
         }
-        const size_t free = static_cast<size_t>(items::kBackpackSlots) - inventory_.count(svc::ItemContainer::Backpack);
-        items::Outcome got;
-        if (fresh.size() <= free) got = inventory_.grant(std::move(fresh));
+        // Gathering stage 3: a stack goes where its kind says (a pile mixes both kinds) and stays in the corpse when that storage has no room for it
+        const items::Outcome got = inventory_.grant(std::move(fresh), item_catalog());
         if (!got.ok) {
             after->put_back(corpse->npc, slot);
             ++bag_full;
@@ -3231,7 +3469,7 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
     // retail's order: the removal from the loot container, the add to the bag, and the window closes when nothing is left
     const FIntrepidNetworkGUID container = corpse->parts->container_guid;
     queue("ClientReceiveStorageEvent (loot)", [container, removed](bootstrap::PlayerBootstrap& pb) { return pb.loot_removed(container, removed); }, conn, /*must_build=*/true);
-    const std::vector<bootstrap::ItemEvent> adds = item_events_of(all);
+    const std::vector<bootstrap::ItemEvent> adds = item_events_for(all);
     for (size_t at2 = 0; at2 < adds.size(); at2 += bootstrap::kMaxEventsPerChain) {
         const std::vector<bootstrap::ItemEvent> part(adds.begin() + static_cast<std::ptrdiff_t>(at2),
                                                      adds.begin() + static_cast<std::ptrdiff_t>(std::min(adds.size(), at2 + bootstrap::kMaxEventsPerChain)));
@@ -3248,10 +3486,13 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
 // ~ C.O.A - C Y B ~
 
 void PlayerSession::on_client_load(Connection& conn, Clock::time_point now) {
-    if (!within_budget(load_budget_, "ServerRequestClientLoad", now) || !room_for(6)) return;
+    if (!within_budget(load_budget_, "ServerRequestClientLoad", now) || !room_for(8)) return;
     spdlog::log(level_for(load_logged_), "[session] {}: the client asks for its load: storage payloads, group and action bar", name());
-    for (const bootstrap::StorageKind k : {bootstrap::StorageKind::Backpack, bootstrap::StorageKind::Equipment,
-                                           bootstrap::StorageKind::QuestStorage, bootstrap::StorageKind::Resource}) {
+    std::vector<bootstrap::StorageKind> kinds = {bootstrap::StorageKind::Backpack, bootstrap::StorageKind::Equipment, bootstrap::StorageKind::QuestStorage};
+    for (int i = 0; i < items::kResourceContainers; ++i) {
+        if (pb_.setup().resource_bags[static_cast<size_t>(i)].present) kinds.push_back(bootstrap::resource_kind(i));   // Gathering stage 3: the container of every worn bag
+    }
+    for (const bootstrap::StorageKind k : kinds) {
         queue("ClientReceiveStoragePayload", [k](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(k, Role::PlayerController); },
               conn);
     }

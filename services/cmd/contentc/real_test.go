@@ -293,7 +293,7 @@ func TestRealRecordCounts(t *testing.T) {
 	for table, count := range map[string]int64{
 		"stat_def":        732,
 		"stat_curve_def":  122,
-		"stat_curve":      2917,
+		"stat_curve":      3067, // 2917 and the 150 keys of the three profession level-up curves (mapc artisan-curves; Gathering stage 2)
 		"stat_init":       1087,
 		"class":           8,
 		"class_stat_base": 8 * 6 * 50,

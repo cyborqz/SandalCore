@@ -20,8 +20,8 @@ const MetaContentcVersion = "contentc.version"
 
 // MinContentcVersion is the oldest contentc whose content.db this checkout reads: version 4 has the stat program and the
 // item stat tables (plan B3), version 5 the item uses, reward tables, level curves and auto-granted ranks (plan D1), version 6 the ability tables and the stat bundle's
-// format 2 (effect state and expression programs, plan D2), version 7 the NPC population chain and the vendors (plan E1, stage 1), version 8 the routes' waypoints and the instances' patrol settings (stage 2), version 9 the combat tables and the spawn filter's records (stage 3), version 10 the reward tables (loot_table, stage 3 part 2), version 11 the mounts (mount, mount_stat, mount_ability and mount_effect, the mounts milestone), version 12 the city nodes (city_node, city_zoi, the node tables of nodes.go: Nodes 1, stage 1).
-const MinContentcVersion = 12
+// format 2 (effect state and expression programs, plan D2), version 7 the NPC population chain and the vendors (plan E1, stage 1), version 8 the routes' waypoints and the instances' patrol settings (stage 2), version 9 the combat tables and the spawn filter's records (stage 3), version 10 the reward tables (loot_table, stage 3 part 2), version 11 the mounts (mount, mount_stat, mount_ability and mount_effect, the mounts milestone), version 12 the city nodes (city_node, city_zoi, the node tables of nodes.go: Nodes 1, stage 1), version 13 the gathering tables (gather_def, gather_tool, item_variation, profession, certification_level and the others of gather.go), the profession level-up curves and the host functions 180-184 (Gathering stage 2), version 14 the items' inventory dimension and resource flag and the resource bags' grids (item.inv_w, inv_h, resource; resource_bag, resource_bag_cell: Gathering stage 3, "Resource storage"), version 15 the foliage defs and states and every gathering interaction (foliage_def, foliage_state, gather_interaction, gather_interaction_def: Gathering stage 3, "Foliage gathering"), version 16 the items' display name (item.display_name, the record's ItemName: Gathering stage 3, "the pick-up popup").
+const MinContentcVersion = 15
 
 // RebuildHint is the command that makes a content.db this checkout reads.
 const RebuildHint = "rebuild it with this checkout's contentc: cd services && go run ./cmd/contentc"
@@ -39,7 +39,7 @@ func (d *DB) RequireVersion() error {
 		return fmt.Errorf("content: the file has no usable %s in meta (%q): it was not written by contentc; %s", MetaContentcVersion, v, RebuildHint)
 	}
 	if n < MinContentcVersion {
-		return fmt.Errorf("content: the file was built by contentc version %d, this checkout needs version %d or later (the city node tables, Nodes 1): %s",
+		return fmt.Errorf("content: the file was built by contentc version %d, this checkout needs version %d or later (the foliage defs and states and the gathering interactions, Gathering stage 3): %s",
 			n, MinContentcVersion, RebuildHint)
 	}
 	var rows int

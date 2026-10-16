@@ -68,6 +68,15 @@ struct SavedState {
 struct Characters final : characterv1::CharacterService::Service {
     grpc::StatusCode code = grpc::StatusCode::OK;
     grpc::StatusCode save_code = grpc::StatusCode::OK;
+    // Gathering stage 2: SaveProgress's professions as the service received them, and what GetCharacter answers with
+    struct Prof {
+        int64_t guid = 0;
+        int32_t tier = 0, level = 0;
+        int64_t xp = 0;
+    };
+    std::vector<Prof> got_professions, reply_professions;
+    int progress_calls = 0;
+    int32_t got_level = 0;
     std::chrono::milliseconds save_delay{0};   // a service that hangs on SaveCharacterState
     bool with_position = true;
     std::string auth;
@@ -87,6 +96,14 @@ struct Characters final : characterv1::CharacterService::Service {
         saved.level = req->level();
         return save_code == grpc::StatusCode::OK ? grpc::Status::OK : grpc::Status(save_code, "no");
     }
+    grpc::Status SaveProgress(grpc::ServerContext* ctx, const characterv1::SaveProgressRequest* req, characterv1::SaveProgressResponse*) override {
+        auth = auth_of(ctx);
+        ++progress_calls;
+        got_level = req->level();
+        got_professions.clear();
+        for (const auto& p : req->professions()) got_professions.push_back({p.profession_guid(), p.certification_tier(), p.level(), p.xp()});
+        return save_code == grpc::StatusCode::OK ? grpc::Status::OK : grpc::Status(save_code, "no");
+    }
     grpc::Status GetCharacter(grpc::ServerContext* ctx, const characterv1::GetCharacterRequest* req,
                               characterv1::GetCharacterResponse* resp) override {
         auth = auth_of(ctx);
@@ -103,6 +120,13 @@ struct Characters final : characterv1::CharacterService::Service {
         c->set_appearance_json("{}");
         c->set_level(5);
         c->set_last_region("Riverlands");
+        for (const Prof& p : reply_professions) {
+            auto* x = c->add_professions();
+            x->set_profession_guid(p.guid);
+            x->set_certification_tier(p.tier);
+            x->set_level(p.level);
+            x->set_xp(p.xp);
+        }
         if (with_position) {
             c->mutable_position()->set_x(1.5);
             c->mutable_position()->set_y(-2.5);
@@ -162,6 +186,7 @@ int main() {
     gw.code = grpc::StatusCode::UNAUTHENTICATED;
     CHECK(s.redeem_ticket("x", "y", 7).status == svc::CallStatus::Failed,
           "Unauthenticated (a wrong service token) -> Failed");
+// C-O-A x Cyb
 
     std::printf("character\n");
     auto c = s.get_character("bbec5c86eb101fe5f38c87f0fa22e7d0");
@@ -177,6 +202,37 @@ int main() {
     ch.code = grpc::StatusCode::NOT_FOUND;
     CHECK(s.get_character("x").status == svc::CallStatus::NotFound, "NotFound -> NotFound");
     CHECK(ch.auth == "Bearer " + kToken, "it carries the token too");
+
+    std::printf("professions (Gathering stage 2)\n");
+    ch.code = grpc::StatusCode::OK;
+    CHECK(s.get_character("x").character.professions.empty(), "a character record with no professions maps to none");
+    ch.reply_professions = {{108752769996425, 2, 25, 250000}, {108752769996426, 0, 9, 32400}};
+    {
+        const auto pc = s.get_character("x");
+        CHECK(pc.status == svc::CallStatus::Ok && pc.character.professions.size() == 2 &&
+                  pc.character.professions[0] == (svc::ProfessionState{108752769996425, 2, 25, 250000}) &&
+                  pc.character.professions[1] == (svc::ProfessionState{108752769996426, 0, 9, 32400}),
+              "GetCharacter maps the professions: guid, certification tier, level and XP, in order");
+    }
+    {
+        svc::Progress p;
+        p.level = 12;
+        p.professions = {{108752769996425, 3, 40, 640000}, {108752770061963, 1, 11, 48400}};
+        CHECK(s.save_progress("bbec5c86eb101fe5f38c87f0fa22e7d0", p) == svc::CallStatus::Ok && ch.progress_calls == 1 && ch.got_level == 12 &&
+                  ch.got_professions.size() == 2 && ch.got_professions[0].guid == 108752769996425 && ch.got_professions[0].tier == 3 &&
+                  ch.got_professions[0].level == 40 && ch.got_professions[0].xp == 640000 && ch.got_professions[1].guid == 108752770061963 &&
+                  ch.got_professions[1].tier == 1 && ch.got_professions[1].level == 11 && ch.got_professions[1].xp == 48400,
+              "SaveProgress sends the professions, each with its tier, level and XP");
+        svc::Progress none;
+        none.level = 3;
+        CHECK(s.save_progress("x", none) == svc::CallStatus::Ok && ch.got_professions.empty(), "a save without professions sends none");
+        svc::Progress a = p, b = p;
+        CHECK(a == b, "equal progress with equal professions");
+        b.professions[1].xp += 1;
+        CHECK(!(a == b), "progress that differs in a profession's XP is not equal (the saver skips a save only when nothing changed)");
+    }
+    ch.reply_professions.clear();
+    ch.progress_calls = 0;
 
     std::printf("save_position (plan A6)\n");
     ch.auth.clear();

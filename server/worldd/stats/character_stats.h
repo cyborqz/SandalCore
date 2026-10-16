@@ -31,6 +31,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <set>
 #include <span>
@@ -123,6 +124,10 @@ public:
     /// Plan E1, stage 3: this is an NPC (class_enum of an NPC profile, stats/stat_program.h kNpcClassBase): its elite rank and stat distribution.
     void set_npc(const NpcShape& npc) { npc_ = npc; }
     const NpcShape& npc() const { return npc_; }
+    /// Gathering stage 2: the level of each profession by name (GetPlayerProfessionLevel reads these; a profession that is not listed is level 1). Every evaluation made
+    /// after this call starts with them; Evaluation::set_profession_levels changes one evaluation's.
+    void set_profession_levels(std::map<std::string, int> levels) { profession_levels_ = std::move(levels); }
+    const std::map<std::string, int>& profession_levels() const { return profession_levels_; }
     /// Plan D2, stage 2: the stats that are class resources (a Ranger's Focus, a Cleric's DivinePower: kStatResource): each has a current value of its
     /// own between its limits, which the next run keeps, and a regeneration program that reads it. Flags the stats it has now and every later run.
     void set_resources(std::set<int64_t> guids);
@@ -133,13 +138,16 @@ public:
     /// maximum). Not thread safe, like the rest.
     class Evaluation {
     public:
-        Evaluation(const StatBundle& bundle, StatInputs inputs, bool moving, bool in_combat, const NpcShape& npc = {});
+        Evaluation(const StatBundle& bundle, StatInputs inputs, bool moving, bool in_combat, const NpcShape& npc = {},
+                   const std::map<std::string, int>& profession_levels = {});
         ~Evaluation();
         Evaluation(const Evaluation&) = delete;
         Evaluation& operator=(const Evaluation&) = delete;
         bool ok() const { return err_.empty(); }
         const std::string& error() const { return err_; }
         bool eval(int64_t program, ExprHost& host, double& out, std::string& err);
+        /// Gathering stage 2: the professions' levels the next programs read (GetPlayerProfessionLevel; a profession not listed is level 1).
+        void set_profession_levels(const std::map<std::string, int>& levels);
         /// The run's settled value of a stat (0 when the class has no such stat).
         double stat(int64_t guid) const;
         int faults() const;
@@ -191,6 +199,7 @@ private:
     std::vector<ActiveEffect> effects_;    // plan D2
     std::vector<SkillRank>    ranks_;      // plan D2
     std::set<int64_t>         resources_;  // plan D2, stage 2: the class resources (set_resources)
+    std::map<std::string, int> profession_levels_;   // Gathering stage 2
     bool                      moving_ = false, in_combat_ = false;
     NpcShape                  npc_;
     std::vector<StatValue> values_;

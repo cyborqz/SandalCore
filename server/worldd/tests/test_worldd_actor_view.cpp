@@ -15,6 +15,8 @@
 //                 ring closes with Dormancy, leaving the snapshot ring sends nothing, a never-dormant actor leaving closes with Relevancy;
 //                 a removed actor is closed with Destroyed (a dormant one opened and closed); a channel is held until its close is acknowledged;
 //                 the cap on opens per pass, nearest first; exports sent once the client acknowledged them
+//    state actor  (Gathering stage 3) a foliage cell's state actor: snapshot-only, closed with Dormancy 265 ms after its open, and the view keeps the shadow of its fast arrays: a change
+//                 or a delete re-opens it with the delta only, also after the player walked out of range and back; only a connection that never had it is shown its first-open form
 //    many actors  1,800 actors around a walking player for a simulated minute: the time of a pass and the bandwidth, measured
 // ============================================================================
 #include "bootstrap/constants.h"
@@ -632,6 +634,143 @@ static void test_view_owner_and_component_index() {
     CHECK(reg.add(std::move(d)) && reg.find_by_component(1016)->id == 1300, "and can be claimed again");
 }
 
+// ---- Gathering stage 3, "Foliage gathering": a foliage cell's state actor (a snapshot-only actor that keeps the shadow of its fast arrays) --------------------------------
+
+/// An AIntrepidStateIFA with `components` UIntrepidFoliageStateComponents, as FoliageCells makes one (without the map): `items[c]` instances in component c, all Empty.
+static world::WorldActor make_state_actor(uint64_t id, double x, double y, size_t components, size_t items_each) {
+    world::WorldActor w;
+    w.id = id;
+    w.kind = world::ActorKind::Foliage;
+    w.x = x;
+    w.y = y;
+    w.z = 12000;
+    w.snapshot_only = true;
+    w.keep_fast_shadow = true;
+    w.dormancy_delay = milliseconds(265);
+    repl::Actor& a = w.actor;
+    a.guid = guid(id);
+    a.obj.schema = &schema_named("AIntrepidStateIFA");
+    set_value(a.obj, "AuthServerIDReplicated", repl::Value::u64(60));
+    repl::RepMovement m;
+    m.location = repl::QuantVec{repl::QuantVec::Mode::Scaled, static_cast<int64_t>(x * 100), static_cast<int64_t>(y * 100), 1200000};
+    m.rotation = repl::Rot{0, 0, 0};
+    m.linear_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
+    set_value(a.obj, "ReplicatedMovement", repl::Value(m));
+    set_value(a.obj, "RemoteRole", repl::Value::u64(1));
+    set_value(a.obj, "Role", repl::Value::u64(4));
+    set_value(a.obj, "FoliageName", repl::Value(repl::NameValue::plain("InstancedFoliageActor_25600_-40_19", 1)));
+    a.open.archetype = aoc::worldd::bootstrap::foliage_state_actor_archetype_export();
+    a.open.level = aoc::worldd::bootstrap::persistent_level_export();
+    a.open.spawn.location = repl::QuantVec{repl::QuantVec::Mode::Scaled, static_cast<int64_t>(x * 10), static_cast<int64_t>(y * 10), 120000};
+    for (size_t c = 0; c < components; ++c) {
+        repl::Subobject sub;
+        sub.guid = guid(id + 2 + 2 * c);
+        sub.dynamic_class = aoc::worldd::bootstrap::foliage_state_component_class_export();
+        sub.obj.schema = &schema_named("UIntrepidFoliageStateComponent");
+        set_value(sub.obj, "FoliageComponentUUID", repl::Value(repl::NameValue::plain("IntrepidGatherableFISMC", static_cast<int32_t>(c + 1))));
+        set_value(sub.obj, "bInitialized", repl::Value::boolean(true));
+        repl::FastArrayState* fa = sub.obj.arrays.get(*sub.obj.schema, "IndexedStates");
+        for (size_t i = 0; i < items_each; ++i) {
+            repl::ElementState es;
+            es.values[1] = repl::Value::u64(3);
+            es.values[2] = repl::Value::u64(i);
+            fa->add(std::move(es));
+        }
+        a.subobjects.push_back(std::move(sub));
+    }
+    return w;
+}
+
+static size_t open_bits(const std::vector<Seen>& s) {
+    for (const Seen& x : s) {
+        if (x.open) return x.bits;
+    }
+    return 0;
+}
+// [C-O-A - C-Y-B]
+
+static void test_state_actor() {
+    std::printf("the view: a foliage cell's state actor (a snapshot-only actor with kept fast arrays)\n");
+    world::ActorRegistry reg;
+    Pair p;
+    ActorView v(reg, view_config(), reserved_3_to_6());
+    size_t first_forms = 0;
+    world::WorldActor w = make_state_actor(5000, 3000, 0, 3, 40);   // 30 m from the player: inside the awake ring
+    w.first_open_form = [&](repl::Actor&) { ++first_forms; };
+    reg.add(std::move(w));
+    run(v, p, 0, 0, 1);
+    auto s = take(p);
+    CHECK(v.state_of(5000) == world::ClientState::Snapshot && v.stats().snapshots == 1 && v.stats().opens == 0, "30 m away it is opened as a snapshot, not awake: it never is");
+    const size_t first_bits = open_bits(s);
+    CHECK(first_bits > 3000 && first_forms == 1, "the first open carries the whole list (3 components of 40 instances) and was shown the first-open form once");
+    p.t += milliseconds(10);   // 140 ms after the open
+    run(v, p, 0, 0, 1);
+    s = take(p);
+    bool closed = false;
+    for (const Seen& x : s) closed = closed || x.close;
+    CHECK(!closed && v.state_of(5000) == world::ClientState::Snapshot, "140 ms after the open it is still open: its Dormancy close is 265 ms after (the relevancy config's 134 ms is not its)");
+    run(v, p, 0, 0, 1);
+    s = take(p);
+    uint32_t reason = 99;
+    for (const Seen& x : s) {
+        if (x.close) reason = x.reason;
+    }
+    CHECK(reason == kCloseDormancy && v.state_of(5000) == world::ClientState::Dormant, "280 ms after the open it is closed with Dormancy");
+    // a harvest: one item changes; the open carries only that delta (the view kept the arrays' shadows)
+    reg.modify(5000, world::Change::State, [](world::WorldActor& a) {
+        repl::FastArrayState* fa = a.actor.subobjects[1].obj.arrays.get(*a.actor.subobjects[1].obj.schema, "IndexedStates");
+        repl::ElementState es;
+        es.values[1] = repl::Value::u64(0);
+        es.values[2] = repl::Value::u64(7);
+        fa->change(fa->items()[7].id, std::move(es));
+    });
+    run(v, p, 0, 0, 1);
+    s = take(p);
+    const size_t again_bits = open_bits(s);
+    CHECK(again_bits > 0 && again_bits < first_bits / 2 && v.stats().snapshots == 2 && first_forms == 1,
+          "a change makes a new snapshot that carries the changed item only: far fewer bits than the first open, and no first-open form");
+    // an instance whole again is DELETED from the list: the open names its ElementID (the client's copy is kept, not rebuilt)
+    run(v, p, 0, 0, 3);
+    take(p);
+    reg.modify(5000, world::Change::State, [](world::WorldActor& a) {
+        repl::FastArrayState* fa = a.actor.subobjects[2].obj.arrays.get(*a.actor.subobjects[2].obj.schema, "IndexedStates");
+        fa->remove(fa->items()[3].id);
+    });
+    run(v, p, 0, 0, 1);
+    s = take(p);
+    const size_t delete_bits = open_bits(s);
+    CHECK(delete_bits > 0 && delete_bits < first_bits / 2, "a deleted item is a delete in the open, not a rebuilt list");
+    run(v, p, 0, 0, 3);
+    take(p);
+    // the player walks 600 m away: the view forgets the actor (the client keeps it); coming back, the open is still only the changes since
+    run(v, p, 60000, 0, 2);
+    take(p);
+    CHECK(v.state_of(5000) == world::ClientState::None, "out of the snapshot ring the view forgets the actor");
+    reg.modify(5000, world::Change::State, [](world::WorldActor& a) {
+        repl::FastArrayState* fa = a.actor.subobjects[0].obj.arrays.get(*a.actor.subobjects[0].obj.schema, "IndexedStates");
+        repl::ElementState es;
+        es.values[1] = repl::Value::u64(1);
+        es.values[2] = repl::Value::u64(2);
+        fa->change(fa->items()[2].id, std::move(es));
+    });
+    run(v, p, 0, 0, 1);
+    s = take(p);
+    const size_t back_bits = open_bits(s);
+    CHECK(back_bits > 0 && back_bits < first_bits / 2 && first_forms == 1, "walking back, the open carries only what changed since the view last sent it (the shadow was kept), and no first-open form");
+    // a second connection (a second view) has never had the cell: it is sent the whole list in the first-open form
+    Pair p2;
+    ActorView v2(reg, view_config(), reserved_3_to_6());
+    run(v2, p2, 0, 0, 1);
+    s = take(p2);
+    CHECK(open_bits(s) > first_bits - 200 && first_forms == 2, "a connection that never had the cell is sent the whole list, in the first-open form");
+    // the removal of the actor from the registry closes it for the client that holds it dormant (the shadow is dropped with it)
+    run(v, p, 0, 0, 3);
+    take(p);
+    reg.remove(5000);
+    run(v, p, 0, 0, 2);
+    CHECK(v.state_of(5000) == world::ClientState::None || v.tracked() == 0, "a removed actor is let go");
+}
+
 int main() {
     test_view_owner_and_component_index();
     test_registry();
@@ -641,6 +780,7 @@ int main() {
     test_view_updates();
     test_view_never_dormant_and_removal();
     test_view_cap_and_exports();
+    test_state_actor();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

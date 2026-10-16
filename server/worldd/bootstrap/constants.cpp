@@ -88,6 +88,18 @@ ExportChain resource_storage_class_export() {
     return gameplay_class(11144499416456600109ull, "ResourceStorageComponent", 0xf3927ccd);
 }
 
+namespace {
+constexpr uint64_t kFoliagePackageId = 12703675336461722793ull;   // /Script/Foliage
+}  // namespace
+
+ExportChain foliage_state_actor_archetype_export() {
+    return {link(18292086725290287385ull, "Default__IntrepidStateIFA", false, 3015814482u), link(kFoliagePackageId, "/Script/Foliage", false, 0)};
+}
+
+ExportChain foliage_state_component_class_export() {
+    return {link(8959184318458680037ull, "IntrepidFoliageStateComponent", false, 480712344u), link(kFoliagePackageId, "/Script/Foliage", false, 0)};
+}
+
 ExportChain hud_class_export() {
     return asset(8463636446363390223ull, "BP_AOCHUD_C", 0xac6f1251, 7805116325763694055ull, "/Game/UI/Widgets/BP_AOCHUD");
 }
@@ -225,7 +237,9 @@ const StorageInfo& storage_info(StorageKind kind) {
         {StorageKind::Backpack, "BackpackComponent", 70, 0, 0},
         {StorageKind::Equipment, "EquipmentComponent", 83, 0, 0},
         {StorageKind::QuestStorage, "QuestStorageComponent", 100, 0, 0},
-        {StorageKind::Resource, "", 24, 6, 4},
+        {StorageKind::Resource0, "", 24, 6, 4},
+        {StorageKind::Resource1, "", 24, 6, 4},
+        {StorageKind::Resource2, "", 24, 6, 4},
     };
     return kInfo[static_cast<size_t>(kind)];
 }

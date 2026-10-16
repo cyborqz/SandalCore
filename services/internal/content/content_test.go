@@ -79,6 +79,9 @@ func TestCreateMakesTheDocumentedTables(t *testing.T) {
 		// the mounts (contentc version 11)
 		"mount", "mount_stat", "mount_ability", "mount_effect"}
 	want = append(want, NodeTables...)       // Nodes 1 (contentc version 12): the city node tables
+	want = append(want, GatherTables...)     // Gathering stage 2 (contentc version 13): the gathering tables
+	want = append(want, ResourceTables...)   // Gathering stage 3, "Resource storage" (contentc version 14): the resource bags' grids
+	want = append(want, FoliageTables...)    // Gathering stage 3, "Foliage gathering" (contentc version 15): the foliage defs and states, the gathering interactions
 	want = append(want, PopulationTables...) // plan E1 (contentc version 7): the NPC population chain and the vendors
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {

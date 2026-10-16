@@ -30,9 +30,29 @@ public:
         switch (fn) {
             case stats::kHostRandIntRange: {
                 if (n < 2) return 0;
-                const double lo = std::ceil(std::min(args[0], args[1])), hi = std::floor(std::max(args[0], args[1]));
+                // lo when hi < lo, as the other hosts (the ability pipeline's, the hit resolver's) and UE's RandRange(Min, Max): the quantity of a gathering reward with no
+                // table entry is RandIntRange(1, 0) = 1 (Gathering stage 2); no random number is used
+                const double lo = std::floor(args[0]), hi = std::floor(args[1]);
                 if (hi < lo) return lo;
                 return std::min(hi, lo + std::floor(rand_double() * (hi - lo + 1.0)));
+            }
+            case stats::kHostArtisanStat:
+            case stats::kHostRolledItemQuality:
+            case stats::kHostItemRarity:
+            case stats::kHostSourceCertTier:
+            case stats::kHostGatherBaseSecs: {
+                // Gathering stage 2: a harvest's reads (stats/gather_host.h); the rating of a stat is the player's settled value of it
+                double out = 0;
+                if (!c_.gather) return 0;
+                if (fn == stats::kHostArtisanStat && !name.empty()) {
+                    char* end = nullptr;
+                    const long long guid = std::strtoll(name.c_str(), &end, 10);
+                    if (end != name.c_str() + name.size() || (n >= 1 && static_cast<int>(args[0]) != stats::kRoleCaster)) return 0;
+                    const auto given = c_.gather->context.ratings.find(static_cast<int64_t>(guid));   // a rating the caller gave (the tests): else the player's settled value
+                    if (given != c_.gather->context.ratings.end()) return given->second;
+                    return c_.npc ? c_.npc->stat(static_cast<int64_t>(guid)) : 0.0;
+                }
+                return stats::gather_host_fn(c_.gather->context, fn, name, args, n, out) ? out : 0.0;
             }
             case stats::kHostLootMaxLevel: return c_.loot_max_level;
             case stats::kHostLootAvgLuck: return c_.avg_luck;
@@ -155,6 +175,7 @@ private:
         std::sort(out.begin(), out.end());
         return out;
     }
+// built by CoA with C-Y-B
 
     void container(const content::LootContainer& c) {
         if (c.pred != 0 && !truth(c.pred)) return;
@@ -165,10 +186,43 @@ private:
                 if (v && *v > 0) out_.xp.push_back({x.type, static_cast<int64_t>(std::llround(*v))});
             }
             for (const content::LootItem& it : r.items) {
+                // a harvest: the item's variation rolls its quality first (the quantity formula reads what it gave)
+                int quality = 0;
+                stats::GatherContext saved;
+                bool borrowed = false;
+                if (ctx_.gather && it.item != 0) {
+                    GatherRoll& g = *ctx_.gather;
+                    int64_t quality_program = 0;
+                    if (g.quality_expr && it.variation != 0) {
+                        const auto qe = g.quality_expr->find(it.variation);
+                        if (qe != g.quality_expr->end()) quality_program = qe->second;
+                    }
+                    if (quality_program != 0) {
+                        const std::optional<double> rolled = value(quality_program);
+                        if (rolled && *rolled >= 1.0 && *rolled <= 1000.0) {
+                            quality = static_cast<int>(std::floor(*rolled + 1e-9));
+                            const int rarity = g.rarity_of ? g.rarity_of(it.item, quality) : 0;
+                            if (g.primary_set) {   // a bonus drop: its own quality for its own quantity, the harvest's rarity stays what the interaction's own item rolled
+                                saved = g.context;
+                                borrowed = true;
+                            }
+                            g.context.quality = g.quality_literal ? quality : rarity;
+                            g.context.item_rarity = rarity;
+                            if (!g.primary_set) {
+                                g.primary_set = true;
+                                g.primary_quality = quality;
+                                g.primary_rarity = rarity;
+                            }
+                        } else {
+                            ++g.quality_failures;
+                        }
+                    }
+                }
                 const std::optional<double> q = value(it.qty);
+                if (borrowed) ctx_.gather->context = saved;
                 const int64_t qty = q ? static_cast<int64_t>(std::floor(*q + 1e-9)) : 0;
                 if (qty <= 0 || it.item == 0) continue;
-                add(c.grant == "Auto" ? out_.direct : out_.loot, {it.item, it.variation, qty});
+                add(c.grant == "Auto" ? out_.direct : out_.loot, {it.item, it.variation, qty, quality});
             }
             out_.currency += r.currency.size();
         }
@@ -176,7 +230,7 @@ private:
 
     void add(std::vector<RolledItem>& list, const RolledItem& item) {
         for (RolledItem& x : list) {
-            if (x.item == item.item && x.variation == item.variation) {
+            if (x.item == item.item && x.variation == item.variation && x.quality == item.quality) {
                 x.quantity += item.quantity;
                 return;
             }

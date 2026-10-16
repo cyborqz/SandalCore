@@ -51,20 +51,22 @@
 //                                are: CodecOptions::stat_int32_extended
 //
 //  AoC's own structs.  Each NetSerialize is slot 10 of the struct's
-//  TCppStructOps vtable (found from the struct's reflection record, as
-//  (`mov rcx, [rsp+0x28]; jmp F`) into the function F that does the work.
-//  payload that holds one of them to the last bit, and the C++ ports here are
+//  TCppStructOps vtable; for most it is a thunk into the function that does the work.
+//  Every captured block and field-loop payload that holds one of them reads to the last bit,
+//  and the C++ ports here are
 //  proven on the same bits (tests/test_repl_aoc_codecs.cpp).
 //
 //  FQuat
+//      Three doubles X, Y, Z.  With Ar.EngineNetVer() >= 22 and != 26 (AoC's is 35) X, Y
 //      and Z are 8 bytes each, else floats.  Saving first makes the quaternion
 //      unit and W non-negative (quat_to_wire), loading derives W (quat_from_wire).
 //      UE 5.6 TQuat<T>::NetSerialize (UnrealMath.cpp) is the same code.
 //  FGuidToBoolWrapper
+//      `Ar << GuidToBool`, a TMap<FGuid, bool>: int32 Num, then per pair the
 //      FGuid (four int32 A B C D) and the bool as an int32 that
 //      must be 0 or 1 (FArchive& operator<<(bool&) sets the archive error else).
 //  FAlignmentContainer
-//      `Ar << AlignmentInstanceMap; Ar << InstanceTimers`.  Ops vtable
+//      `Ar << AlignmentInstanceMap; Ar << InstanceTimers`.  The first is a
 //      TMap<int64, FGuidsSet>: int32 Num, per pair
 //      the 8-byte key and the FGuidsSet's TSet<FGuid>:
 //      int32 Num and per element the FGuid.  The second is a
@@ -103,6 +105,10 @@
 //  FLocalizedMessage (mounts milestone, stage 1)
 //      A PlayerController callout's LocalizedMessage: the string table and the key as FStrings and an empty argument list
 //      (callout_codec.h).  See LocalizedMessage (value.h).
+//
+//  FChannelingData (Gathering stage 2, the fix after test 1)
+//      The pawn's InteractInfo.ChannelingData: what the pawn is channeling (the node, when it started, how long, the tool).  Read from ten retail harvests
+//      (channeling_codec.h has the layout and what is inferred).  See ChannelingData (value.h).
 //
 //  A struct without a codec here (FCharacterServerMovePackedBits ...) is refused by name:
 //  no reader guesses.

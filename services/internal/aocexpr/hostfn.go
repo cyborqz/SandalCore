@@ -28,7 +28,7 @@ const (
 	// Plan E1, stage 3: other actors.
 	HostDistanceBetween = 12 // name: "A,B": the distance in cm between two actors
 	HostIsClient        = 13 // the server runs the expression: 0
-	HostRandIntRange    = 14 // args: lo, hi: a whole number from lo to hi inclusive
+	HostRandIntRange    = 14 // args: lo, hi: a whole number from lo to hi inclusive; lo when hi < lo (UE's RandRange(Min, Max) is Min + RandHelper(Max - Min + 1): RandIntRange(1, 0) is 1, and no random number is used)
 	HostSameActor       = 15 // name: "A,B": 1 when the two roles are the same actor
 	HostHitTriggerCount = 16 // name: the ability's guid; args[0]: the role of the actor: how often its hits of the ability landed lately
 	HostAbilityHitCount = 17 // name: the ability's guid; args[0]: the role of the actor: how often it was hit by the ability
@@ -76,6 +76,21 @@ const (
 	ActorPlayer = 100
 	// HostNodeLast is the last of the city node reads.
 	HostNodeLast = HostPlayerMayor
+)
+
+// The gathering reads (Gathering stage 2, "Gathering data"; contentc version 13): what the Artisan equations (the speed, rarity, quantity and experience of
+// a harvest) ask of the harvest in progress and of the player. They are host functions over numbers, like the city node reads: the host fills a plain
+// gathering context (worldd's harvest host in C++, statprog.GatherContext in Go) and answers from it. The equations compare the answers with whole
+// numbers (`rarity == 3`), so none is an enum.
+const (
+	HostArtisanStat       = 180 // GetArtisanshipModifiedStat(actor, stat): name: the stat's guid in decimal; args[0]: the role of the actor (the player is the caster); the rating, 0 for a stat the host has no value for
+	HostRolledItemQuality = 181 // GetRolledItemQuality(): the quality the harvest's rarity equation rolled (0 before one ran)
+	HostItemRarity        = 182 // GetItemRarity(): the EItemRarity ordinal of the harvest's item (Common 0 ... Artifact 6)
+	HostSourceCertTier    = 183 // GetSourceCertificationTier(): the CertificationTier of the interaction that is harvested (Novice 0 ... GrandMaster 4)
+	HostGatherBaseSecs    = 184 // GetGatheringInteractionBaseDuration(): the BaseGatheringDuration of the interaction, in seconds
+	// HostGatherFirst and HostGatherLast bound the gathering reads (the answer of one is a quality, a tier or a rating: the numbers it is given are not added to it).
+	HostGatherFirst = HostArtisanStat
+	HostGatherLast  = HostGatherBaseSecs
 )
 
 // TypeCityNode is the record type id of CityNodeRecordBase: the first number of $#<TypeId>:<Guid>$ for a node.

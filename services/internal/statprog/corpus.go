@@ -70,6 +70,11 @@ import (
 //	  nodes N                         the registry has N nodes; node RANK TYPE LEVEL (the ENodeType and ENodeLevel ordinals) follows for each, in rank order
 //	  ctx NODE BIOME ACTOR PLAYER     the evaluation's context: its node's rank (-1: none) and its biome, and the node of the expression's own actor and of the player
 //	  q FN ARGS... = WANT             a read of the host: the function (aocexpr.HostNodeBiome ...), 0 to 2 arguments and the answer
+//	gatherhost NAME               (Gathering stage 2) the gathering reads of a harvest, up to "end" (floats are hex bits, the rest decimal):
+//	  quality F64 | rarity N | tier N | duration F64      the rolled quality, the item's EItemRarity, the interaction's tier, its base duration in seconds
+//	  rating STATGUID F64             the instigator's artisanship rating of a stat (a stat with no line reads 0)
+//	  q FN NAME ROLE = F64            a read of the host: the function (aocexpr.HostArtisanStat ...), its name operand ("-" for none), the role it is given
+//	                                  (HostArtisanStat only: 0 is the player, the instigator) and the answer
 //	refuse NAME BUNDLE CLASS LEVEL  running the character must fail (a valid bundle that asks too much)
 //	fuzz BUNDLE SEED N ACCEPTED HASH  damage the bundle N times (FuzzParity): the count accepted and the hash
 //	                              of every verdict and result must be these
@@ -101,6 +106,8 @@ type Corpus struct {
 	Damages  []CorpusDamage
 	// NodeHosts are the worlds the city node reads are checked against (Nodes 1, stage 1): the block `nodehost` below.
 	NodeHosts []NodeHostCase
+	// GatherHosts are the harvests the gathering reads are checked against (Gathering stage 2): the block `gatherhost` below.
+	GatherHosts []GatherHostCase
 }
 
 // CorpusFuzz is a differential fuzz: damage a bundle N times from Seed (FuzzParity); the readers must
@@ -1015,6 +1022,31 @@ func BuildCorpus(dbPath string) ([]byte, error) {
 		w.line("end")
 	}
 
+	// Gathering stage 2: the gathering reads of a few harvests, for the C++ host to answer the same.
+	for _, gc := range gatherHostCases() {
+		w.line("gatherhost %s", gc.Name)
+		w.line("quality %s", f64hex(gc.Ctx.Quality))
+		w.line("rarity %d", gc.Ctx.ItemRarity)
+		w.line("tier %d", gc.Ctx.SourceTier)
+		w.line("duration %s", f64hex(gc.Ctx.BaseDuration))
+		var stats []int64
+		for g := range gc.Ctx.Ratings {
+			stats = append(stats, g)
+		}
+		sort.Slice(stats, func(i, j int) bool { return stats[i] < stats[j] })
+		for _, g := range stats {
+			w.line("rating %d %s", g, f64hex(gc.Ctx.Ratings[g]))
+		}
+		for _, q := range gc.Queries {
+			name := q.Name
+			if name == "" {
+				name = "-"
+			}
+			w.line("q %d %s %d = %s", q.Fn, name, q.Role, f64hex(q.Want))
+		}
+		w.line("end")
+	}
+
 	// The differential fuzz.
 	for _, fz := range []struct {
 		name string
@@ -1054,7 +1086,8 @@ func ParseCorpus(r io.Reader) (*Corpus, error) {
 	var cur *CorpusCase
 	var actor *CorpusActor // the actor block being read
 	var dmg damageCursor
-	var nh *NodeHostCase // the nodehost block being read
+	var nh *NodeHostCase   // the nodehost block being read
+	var gh *GatherHostCase // the gatherhost block being read
 	var curBundle string
 	var b64 strings.Builder
 	var bundleLen int
@@ -1143,12 +1176,31 @@ func ParseCorpus(r io.Reader) (*Corpus, error) {
 			}
 			c.NodeHosts = append(c.NodeHosts, NodeHostCase{Name: f[1]})
 			nh = &c.NodeHosts[len(c.NodeHosts)-1]
-		case "nodes", "node", "ctx", "q":
-			if nh == nil {
-				return fail("%q outside a nodehost block", f[0])
+		case "gatherhost":
+			if len(f) != 2 {
+				return fail("gatherhost NAME")
 			}
-			if err := nh.parseLine(f); err != nil {
+			c.GatherHosts = append(c.GatherHosts, GatherHostCase{Name: f[1], Ctx: GatherContext{Ratings: map[int64]float64{}}})
+			gh = &c.GatherHosts[len(c.GatherHosts)-1]
+		case "quality", "rarity", "tier", "duration", "rating":
+			if gh == nil {
+				return fail("%q outside a gatherhost block", f[0])
+			}
+			if err := gh.parseLine(f); err != nil {
 				return fail("%v", err)
+			}
+		case "nodes", "node", "ctx", "q":
+			switch {
+			case gh != nil:
+				if err := gh.parseLine(f); err != nil {
+					return fail("%v", err)
+				}
+			case nh != nil:
+				if err := nh.parseLine(f); err != nil {
+					return fail("%v", err)
+				}
+			default:
+				return fail("%q outside a nodehost or gatherhost block", f[0])
 			}
 		case "dprofile", "dp", "de", "dview", "v", "damage":
 			if _, err := c.parseDamageLine(f, &dmg); err != nil {
@@ -1157,6 +1209,10 @@ func ParseCorpus(r io.Reader) (*Corpus, error) {
 		case "end":
 			if nh != nil {
 				nh = nil
+				continue
+			}
+			if gh != nil {
+				gh = nil
 				continue
 			}
 			if dmg.open() {
@@ -1220,7 +1276,7 @@ func ParseCorpus(r io.Reader) (*Corpus, error) {
 			}
 		}
 	}
-	if curBundle != "" || cur != nil || actor != nil || dmg.open() || nh != nil {
+	if curBundle != "" || cur != nil || actor != nil || dmg.open() || nh != nil || gh != nil {
 		return nil, fmt.Errorf("corpus: unterminated bundle or case")
 	}
 	return c, sc.Err()
@@ -1406,6 +1462,11 @@ func parseCaseLine(c *CorpusCase, f []string) error {
 func (c *Corpus) Replay() error {
 	for _, nc := range c.NodeHosts {
 		if err := nc.check(); err != nil {
+			return err
+		}
+	}
+	for _, gc := range c.GatherHosts {
+		if err := gc.check(); err != nil {
 			return err
 		}
 	}

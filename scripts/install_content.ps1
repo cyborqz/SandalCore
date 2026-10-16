@@ -7,7 +7,7 @@
   Unpacks the game content database (content.db) and the mappings file (aoc.usmap) into dist\content, and gets the navigation mesh.
 
 .DESCRIPTION
-  content.db is about 311 MB, too big for one file on GitHub, so the repo keeps it zipped in two parts:
+  content.db is about 312 MB, too big for one file on GitHub, so the repo keeps it zipped in two parts:
   content\content.db.zip.part1 and .part2. This script joins them, unzips content.db, checks its SHA-256
   against content\content.db.sha256, and copies content\aoc.usmap next to it. It does nothing when
   dist\content\content.db is already there and matches.
@@ -40,7 +40,7 @@ $want = ((Get-Content (Join-Path $src 'content.db.sha256') -TotalCount 1) -split
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
 $usmap = Join-Path $src 'aoc.usmap'
 if (Test-Path $usmap) { Copy-Item -Force $usmap (Join-Path $dst 'aoc.usmap') }
-# Small optional tables worldd reads (mount speeds and riders, roads, NPC motion); each has a fallback when absent
+# Small optional tables worldd and contentc read (mount speeds and riders, roads, NPC motion, foliage, profession curves); each has a fallback when absent
 Get-ChildItem $src -Filter '*.tsv' | Copy-Item -Destination $dst -Force
 
 # -- C | O | A ~ Cyb --
@@ -60,7 +60,7 @@ function Install-ContentDb {
     $parts = @(Get-ChildItem $src -Filter 'content.db.zip.part*' | Sort-Object Name)
     if (-not $parts.Count) { throw "No content.db.zip.part* files in $src" }
     $zip = Join-Path $dst 'content.db.zip'
-    Write-Host "Joining $($parts.Count) parts and unpacking content.db (about 311 MB) ..."
+    Write-Host "Joining $($parts.Count) parts and unpacking content.db (about 312 MB) ..."
     $out = [System.IO.File]::Create($zip)
     try {
         foreach ($p in $parts) {

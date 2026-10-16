@@ -142,7 +142,9 @@ std::optional<PlayerSetup> captured_character_setup() {
     g.quest_storage = session_guid(10341550);
     g.reward_storage = session_guid(10341552);
     g.appearance = session_guid(10341554);
-    g.resource_storage = session_guid(10341556);
+    g.resource_storage[0] = session_guid(10341556);
+    g.resource_storage[1] = session_guid(10341580);   // (not in the capture, which has one container: ids after the XPTracker's)
+    g.resource_storage[2] = session_guid(10341582);
     g.collision_cylinder = session_guid(10341558);
     g.alignment = session_guid(10341560);
     g.ability = session_guid(10341564);

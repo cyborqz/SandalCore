@@ -173,6 +173,9 @@ func (s *Store) Create(ctx context.Context, n New) (Character, error) {
 		}
 	}
 	if err == nil {
+		err = insertNovices(ctx, tx, n.ID) // Gathering stage 2: Novice certification in all 22 professions, from the first login
+	}
+	if err == nil {
 		err = tx.Commit(ctx)
 	}
 	var pgErr *pgconn.PgError

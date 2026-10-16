@@ -318,6 +318,7 @@ void test_respawn(Fixture& f) {
 }
 
 // ---- hostile ------------------------------------------------------------------------------------------------------------------------
+// C_Y_B.C | O | A
 
 void test_hostile(Fixture& f) {
     std::printf("hostile: no fighter, the kill switch\n");
@@ -376,6 +377,82 @@ void test_hostile(Fixture& f) {
         CHECK(!world::add_loot(s.w.registry, 4242424242ull, [&] { return s.guids.next(); }, me, {me}, 1, why).has_value(), "nor to an actor that is none");
         CHECK(world::empty_loot(s.w.registry, id) && top_rarity_of(*s.w.registry.find(id)) == world::kLootEmptied, "emptying says 7");
         CHECK(!world::empty_loot(s.w.registry, 4242424242ull), "emptying nothing fails");
+    }
+}
+
+// ---- a huntable creature's corpse (Gathering stage 3, "Hunting") ------------------------------------------------------------------------------------
+
+void test_huntable(Fixture& f) {
+    std::printf("a huntable creature: no loot, the experience, a corpse that waits for the hunter\n");
+    constexpr int64_t kHuntDef = 777000111;
+    const auto make_huntable = [&](Scene& s, int level, double x) {
+        const uint64_t id = s.wolf(level, x);
+        if (id) s.w.registry.modify(id, world::Change::State, [&](world::WorldActor& a) { a.npc.interact_def = kHuntDef; });
+        return id;
+    };
+    Scene s(f, 12);   // the Glint falloff lets a level-10 Wolf drop for a level-12 player: a plain Wolf leaves loot about 38 times in a hundred
+    CHECKF(s.ok(), "the scene: %s %s", s.rig.problem.c_str(), s.w.problem.c_str());
+    if (!s.ok()) return;
+    s.after->set_huntable([](const world::NpcInfo& i) { return i.interact_def == kHuntDef; });
+    size_t plain_loot = 0, hunt_loot = 0, hunted_corpses = 0;
+    uint64_t huntable = 0, plain = 0;
+    for (int i = 0; i < 40; ++i) {
+        const uint64_t h = make_huntable(s, 10, 100.0 + 400.0 * i), p = s.wolf(10, 300.0 + 400.0 * i);
+        if (!h || !p) break;
+        s.kill(h);
+        s.kill(p);
+        const combat::Corpse* ch = s.after->corpse_of(h);
+        const combat::Corpse* cp = s.after->corpse_of(p);
+        hunt_loot += (ch && (ch->parts || !ch->loot.empty())) ? 1 : 0;
+        plain_loot += (cp && cp->parts) ? 1 : 0;
+        hunted_corpses += (ch && ch->huntable && !ch->hunted) ? 1 : 0;
+        if (!huntable) huntable = h;
+        if (!plain) plain = p;
+    }
+    CHECKF(hunted_corpses == 40 && hunt_loot == 0, "forty huntable Wolves leave forty hunt corpses and no loot at all (%zu with loot)", hunt_loot);
+    CHECKF(plain_loot > 0, "while the plain Wolves killed beside them left loot %zu times (the rolls work)", plain_loot);
+    CHECKF(s.player->kills.size() == 80 && s.player->kills.front().adventuring_xp > 0, "every kill of both reached the killer: %zu kills with Adventuring XP", s.player->kills.size());
+    const world::WorldActor* a = s.w.registry.find(huntable);
+    CHECK(a && count_sub(*a, "ULootComponent", true) == 0 && combat_rig::combat_flag(*a, "bIsDead"), "a huntable's corpse is dead and has no loot components");
+    const combat::Corpse* c = s.after->corpse_of(huntable);
+    CHECK(c && !c->parts && near(c->close_at - c->died_at, 120.0, 1e-6), "it waits 120 s for the hunter");
+    CHECK(s.after->corpse_by_interactable(a ? a->npc.interact_component : 1) == nullptr, "and the loot window finds nothing in it");
+    CHECK(!s.after->hunt_started(plain, s.now, 14.0) && !s.after->hunt_done(plain, s.now) && !s.after->hunt_started(1234567, s.now, 14.0), "a plain corpse and a corpse that is none are not hunted");
+
+    // the hunt: the corpse outlives its channel, and goes 4 s after it
+    s.run(100.0);   // 100 s after the deaths
+    CHECK(s.w.registry.find(huntable) != nullptr, "100 s on it stands");
+    s.run(10.0);
+    CHECK(s.after->hunt_started(huntable, s.now, 14.0), "a hunt starts at 110 s");
+    CHECKF(s.after->corpse_of(huntable) && s.after->corpse_of(huntable)->close_at >= s.now + 14.0 + 5.0 - 1e-6, "the corpse now stays until the channel is over and 5 s more (%.1f s from now)",
+           s.after->corpse_of(huntable) ? s.after->corpse_of(huntable)->close_at - s.now : -1.0);
+    s.run(14.0);
+    CHECK(s.w.registry.find(huntable) != nullptr, "124 s after its death (its 120 s are over) the corpse still stands: the hunt kept it");
+    const bool done = s.after->hunt_done(huntable, s.now);
+    CHECK(done, "the hunt is done");
+    const combat::Corpse* hunted = s.after->corpse_of(huntable);
+    CHECKF(hunted && near(hunted->close_at, s.now + 4.0, 0.01) && hunted->hunted, "the corpse goes 4.0 s after the hunt (%.2f)", hunted ? hunted->close_at - s.now : -1.0);
+    s.run(3.0);
+    CHECK(s.w.registry.find(huntable) != nullptr, "3 s on it is still there");
+    s.run(1.5);
+    CHECK(s.w.registry.find(huntable) == nullptr && s.after->corpse_of(huntable) == nullptr, "4.5 s on it is gone");
+    // a hunt that never comes: the 120 s
+    CHECK(s.w.registry.find(plain) == nullptr, "(the plain corpses are long gone)");
+
+    // the kill switch: the corpse is still hunted
+    {
+        combat::AftermathConfig cfg;
+        cfg.enabled = false;
+        Scene d(f, 20, cfg);
+        if (!d.ok()) {
+            CHECK(false, "the scene");
+            return;
+        }
+        d.after->set_huntable([](const world::NpcInfo& i) { return i.interact_def == kHuntDef; });
+        const uint64_t id = make_huntable(d, 10, 100);
+        d.kill(id);
+        const combat::Corpse* cd = d.after->corpse_of(id);
+        CHECK(cd && cd->huntable && near(cd->close_at - cd->died_at, 120.0, 1e-6) && d.player->kills.empty(), "--no-loot: no experience, the corpse still waits for the hunter");
     }
 }
 
@@ -470,6 +547,7 @@ int main() {
     test_kill(f);
     test_respawn(f);
     test_hostile(f);
+    test_huntable(f);
     test_zone(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

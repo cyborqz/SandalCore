@@ -6,6 +6,7 @@ package statprog
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 
 	"aocrop/services/internal/aocexpr"
@@ -142,6 +143,8 @@ type TableHost struct {
 	Fns          map[string]float64 // HostFn answers by "FN|NAME" (the numbers it is given are added to the answer)
 	// Nodes answers the city node reads (aocexpr.HostNodeBiome ... HostNodeLast) when it is set, instead of Fns (Nodes 1, stage 1).
 	Nodes *NodeWorld
+	// Gather answers the gathering reads (aocexpr.HostArtisanStat ... HostGatherLast) when it is set, instead of Fns (Gathering stage 2).
+	Gather *GatherContext
 }
 
 func (h *TableHost) AbilityProgress(g string) float64              { return h.Progress[g] }
@@ -156,9 +159,25 @@ func (h *TableHost) HostFn(fn int, name string, args []float64) float64 {
 		v, _ := h.Nodes.HostFn(fn, args)
 		return v
 	}
+	if fn == aocexpr.HostRandIntRange && len(args) >= 2 {
+		// the C++ hosts' answer: a whole number from lo to hi from the host's source, lo when the range is empty (UE's RandRange(Min, Max) is Min + RandHelper(Max - Min + 1):
+		// a quantity table with no entry is RandIntRange(1, 0) and gives 1) and then no random number is used
+		lo, hi := math.Floor(args[0]), math.Floor(args[1])
+		if hi < lo {
+			return lo
+		}
+		return lo + math.Floor(h.Rand.RandDouble()*(hi-lo+1))
+	}
+	if h.Gather != nil && fn >= aocexpr.HostGatherFirst && fn <= aocexpr.HostGatherLast {
+		v, _ := h.Gather.HostFn(fn, name, args)
+		return v
+	}
 	v := h.Fns[strconv.Itoa(fn)+"|"+name]
 	if fn >= aocexpr.HostNodeBiome && fn <= aocexpr.HostNodeLast {
 		return v // a node read's answer is a rank or an ordinal: the numbers it is given are not added to it
+	}
+	if fn >= aocexpr.HostGatherFirst && fn <= aocexpr.HostGatherLast {
+		return v // a gathering read's answer is a rating, a quality, a tier or a duration: the role it is given is not added to it
 	}
 	for _, a := range args {
 		v += a

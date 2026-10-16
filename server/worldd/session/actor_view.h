@@ -205,7 +205,8 @@ private:
     /// The actor as this connection sees it: `a.actor`, or `scratch` made from it with the player's guid in the interaction state maps.
     const protocol::repl::Actor& view_of(const world::WorldActor& a, protocol::repl::Actor& scratch) const;
     /// The open of `a` on a new channel (the shadow `work` is reset first), with the exports its blocks need.
-    std::optional<protocol::repl::Emission> build_open(const world::WorldActor& a, protocol::repl::ActorShadow& work);
+    /// `first`: the connection has never had the actor (a kept shadow is what it had), so the actor's `first_open_form` is what it is shown.
+    std::optional<protocol::repl::Emission> build_open(const world::WorldActor& a, protocol::repl::ActorShadow& work, bool first = true);
     uint32_t allocate_channel(const Connection& conn) const;
     void     release(Entry& e);
     /// Sends the open of `a` on a fresh channel (`snapshot`: its Dormancy close is due after the delay). False when it could not go out now.
@@ -223,6 +224,11 @@ private:
     std::function<bool(uint32_t)>       reserved_;
     uint32_t                            listener_ = 0;
     std::unordered_map<uint64_t, Entry> entries_;
+    /// Gathering stage 3: what the connection last had of the fast arrays of an actor flagged `keep_fast_shadow` (a foliage cell's state actor), by actor: kept when its channel closes,
+    /// whatever the reason and even when the view forgets the actor, and handed back at its next open so that only the changes since go out (UE keeps a dormant replicator's state;
+    /// the client keeps the actor and its list of cut instances).  Dropped with the actor.
+    std::unordered_map<uint64_t, protocol::repl::ActorShadow> kept_;
+    size_t                              foliage_opens_logged_ = 0;   // the state actors' opens of untouched cells said at info so far (the first 100)
     std::map<uint32_t, uint64_t>        channel_owner_;      // channel -> actor ObjectId, while the view holds it (open, or closed and waiting)
     std::vector<Removed>                removed_;
     protocol::repl::ExportAcks          acks_;

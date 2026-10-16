@@ -27,13 +27,13 @@ SessionGuids mint_session_guids(protocol::ServerGuidAllocator& a, const emit::FI
     g.quest_storage = a.next();
     g.reward_storage = a.next();
     g.appearance = a.next();
-    g.resource_storage = a.next();
+    g.resource_storage[0] = a.next();
     g.collision_cylinder = a.next();
     g.alignment = a.next();
     g.ability = a.next();
     g.stats = a.next();
     g.xp_tracker = a.next();   // plan D1: after the pawn's components, as the capture's 578 was
-    return g;
+    return g;   // (Resource1 and Resource2 are minted by the session when the character wears a bag for them: no other id moves)
 }
 
 }  // namespace aoc::worldd::bootstrap

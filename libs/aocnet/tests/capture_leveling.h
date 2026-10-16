@@ -50,6 +50,11 @@ struct Call {
     Text        dump;
 };
 
+struct MapEntry {
+    int64_t key;
+    int64_t value;
+};
+
 struct Case {
     const char* name;
     const char* source;     // the client's packet
@@ -4720,6 +4725,7 @@ inline constexpr Case kCases[] = {
     // a refund of a passive
     {"a refund of a passive", "0343 line 204", 781, {kT56, 1}, {kT57, 1}, 95, 2},
 };
+// ~ Cyb & C O A ~
 
 // 97 reply blocks, in the order of the cases
 inline constexpr Block kReplyBlocks[] = {
@@ -4918,6 +4924,7 @@ inline constexpr Block kReplyBlocks[] = {
     // 0343 pkt 212 ch 3: ULevelingComponent, 2799 bits
     {"0343 pkt 212 ch 3", "ULevelingComponent", 0, 2799, {kT250, 1}, {kT251, 1}},
 };
+// C O A + C | Y | B
 
 // 11 ClientReceiveActionbarSlotPayload calls of the retail server
 inline constexpr Call kPayloads[] = {
@@ -4959,6 +4966,62 @@ inline constexpr Call kSetSlots[] = {
     {"0541 line 368", "ServerSetActionbarSlotUseData", 466, {kT282, 1}, {kT283, 1}},
     // 0541 line 452: ServerSetActionbarSlotUseData, 466 bits
     {"0541 line 452", "ServerSetActionbarSlotUseData", 466, {kT284, 1}, {kT285, 1}},
+};
+
+// the retail join's LevelingCertificationsFastMap (the profession's leveling type -> its certification level) and ExperienceFastMap (the leveling type -> XP): 1198 pkt 1510's items in order
+inline constexpr MapEntry kJoinCertifications[] = {
+    {108651600696952ll, 108906339653240ll},
+    {109460729190018ll, 108906340767353ll},
+    {109460729190017ll, 108906339653240ll},
+    {109460729190016ll, 108906339653240ll},
+    {109460729190015ll, 108906339653240ll},
+    {109460729190014ll, 108906339653240ll},
+    {109460729190013ll, 108906339653240ll},
+    {109460729190012ll, 108906339653240ll},
+    {109460747540099ll, 108906339653240ll},
+    {109460747540100ll, 108906339653240ll},
+    {109460747540101ll, 108906339653240ll},
+    {109460747540102ll, 108906339653240ll},
+    {109460747540103ll, 108906340767353ll},
+    {109460747540104ll, 108906339653240ll},
+    {109460747540105ll, 108906339653240ll},
+    {109460747540106ll, 108906339653240ll},
+    {109460747540107ll, 108906339653240ll},
+    {109460719621753ll, 108906340767353ll},
+    {109273709237880ll, 108906342012538ll},
+    {109460724995707ll, 108906339653240ll},
+    {109460713264760ll, 108906340767353ll},
+    {109460722964090ll, 108906339653240ll},
+};
+
+inline constexpr MapEntry kJoinExperience[] = {
+    {108651085518458ll, 6585005ll},
+    {6064632150848765963ll, 23063ll},
+    {6064632150850666511ll, 30977ll},
+    {109460722964090ll, 20740ll},
+    {109273709237880ll, 184122ll},
+    {109460747540102ll, 250ll},
+    {109460724995707ll, 23622ll},
+    {109460719621753ll, 150451ll},
+    {109460747540103ll, 94538ll},
+    {109460747540101ll, 1750ll},
+    {109460729190018ll, 51266ll},
+    {6064632150849224716ll, 1024072ll},
+    {6064632150852108306ll, 4888963ll},
+    {109460713264760ll, 139428ll},
+    {109460729190015ll, 470ll},
+    {109460747540105ll, 1250ll},
+    {109460747540099ll, 36387ll},
+    {109460747540100ll, 900ll},
+    {109460729190017ll, 2846ll},
+    {6064632150835986432ll, 11013ll},
+    {109460729190013ll, 220ll},
+    {108651600696952ll, 200ll},
+    {109460747540106ll, 4150ll},
+    {109460729190012ll, 2029ll},
+    {6064632150847520777ll, 347869ll},
+    {6064632150845227015ll, 3513923ll},
+    {109460747540107ll, 250ll},
 };
 
 }  // namespace capture_leveling

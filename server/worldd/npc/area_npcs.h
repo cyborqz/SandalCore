@@ -34,6 +34,7 @@
 #include <array>
 #include <cstddef>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -73,6 +74,9 @@ struct SpeedModel {
     double patrol_default_factor = 0.4;
     double patrol_expression_gain = 1.05;
     double return_factor = 0.5;
+    /// Gathering stage 3, "Hunting": the PlayerInteractionDefs of the creatures that always stand (the huntable ones, gather/gathering.h hunting_defs).  A huntable creature is interacted with while
+    /// it stands still (the user, 2026-10-12; the client refuses the hunt of one that walks: "can't tame right now"), so its instance's Wander or Patrol is not lived.  Null: none.
+    const std::set<int64_t>* standing_defs = nullptr;
 };
 
 struct RetailMotion;

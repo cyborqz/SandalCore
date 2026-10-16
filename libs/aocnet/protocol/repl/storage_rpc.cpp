@@ -384,5 +384,87 @@ std::optional<RpcParams> remove_listener_params(const RpcSchema& rpc, const emit
     if (!set_rpc_param(rpc, params, "LootActor", Value(actor))) return std::nullopt;
     return params;
 }
+// C-Y-B.C.O.A
+
+// ---- ClientUpdateItemDurability ----------------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr std::string_view kDurabilityRpc = "ClientUpdateItemDurability";
+constexpr std::string_view kDurabilityContainer = "ItemDurabilityUpdate.TargetContainer";
+constexpr std::string_view kDurabilityArray = "ItemDurabilityUpdate.ItemDurabilityData";
+constexpr size_t kMaxDurabilityItems = 256;
+
+}  // namespace
+
+std::optional<RpcParams> item_durability_params(const RpcSchema& rpc, const ItemDurabilityUpdate& u) {
+    if (!rpc.name || kDurabilityRpc != rpc.name || u.items.empty() || u.items.size() > kMaxDurabilityItems) return std::nullopt;
+    const RepCommand* array = rpc_command(rpc, kDurabilityArray);
+    if (!rpc_command(rpc, kDurabilityContainer) || !array) return std::nullopt;
+    const auto elems = elements_of(rpc, *array);
+    const uint16_t ha = local(elems, "ItemDurabilityData.ItemGuid.A"), hb = local(elems, "ItemDurabilityData.ItemGuid.B"), hc = local(elems, "ItemDurabilityData.ItemGuid.C"),
+                   hd = local(elems, "ItemDurabilityData.ItemGuid.D"), hs = local(elems, "ItemDurabilityData.Slot"), hu = local(elems, "ItemDurabilityData.Durability");
+    if (!ha || !hb || !hc || !hd || !hs || !hu) return std::nullopt;
+    ArrayValue a;
+    for (const ItemDurability& d : u.items) {
+        ElementState e;
+        e.values[ha] = guid_part(d.item.a);
+        e.values[hb] = guid_part(d.item.b);
+        e.values[hc] = guid_part(d.item.c);
+        e.values[hd] = guid_part(d.item.d);
+        e.values[hs] = int32_value(d.slot);
+        e.values[hu] = Value::f32(d.durability);
+        a.elements.push_back(std::move(e));
+    }
+    RpcParams params;
+    if (!set_rpc_param(rpc, params, kDurabilityContainer, Value(u.container)) || !set_rpc_param(rpc, params, kDurabilityArray, Value(std::move(a)))) return std::nullopt;
+    return params;
+}
+
+std::optional<ItemDurabilityUpdate> parse_item_durability(const RpcSchema& rpc, const RpcParams& params) {
+    if (!rpc.name || kDurabilityRpc != rpc.name) return std::nullopt;
+    const RepCommand* array = rpc_command(rpc, kDurabilityArray);
+    if (!array || !rpc_command(rpc, kDurabilityContainer)) return std::nullopt;
+    const auto elems = elements_of(rpc, *array);
+    const uint16_t ha = local(elems, "ItemDurabilityData.ItemGuid.A"), hb = local(elems, "ItemDurabilityData.ItemGuid.B"), hc = local(elems, "ItemDurabilityData.ItemGuid.C"),
+                   hd = local(elems, "ItemDurabilityData.ItemGuid.D"), hs = local(elems, "ItemDurabilityData.Slot"), hu = local(elems, "ItemDurabilityData.Durability");
+    if (!ha || !hb || !hc || !hd || !hs || !hu) return std::nullopt;
+    ItemDurabilityUpdate out;
+    if (const auto* c = get_as<emit::FIntrepidNetworkGUID>(value_of(rpc, params, kDurabilityContainer))) out.container = *c;
+    const Value* v = value_of(rpc, params, kDurabilityArray);
+    if (!v) return out;   // an empty array is the default: not on the wire
+    const auto* a = v->get_if<ArrayValue>();
+    if (!a || a->elements.size() > kMaxDurabilityItems) return std::nullopt;
+    const auto word = [&](const ElementState& e, uint16_t h) -> std::optional<uint32_t> {
+        const Value* x = element_value(e, h);
+        if (!x) return 0u;   // a member at its default is not on the wire
+        const auto* i = x->get_if<int64_t>();
+        if (!i) return std::nullopt;
+        return static_cast<uint32_t>(*i);
+    };
+    for (const ElementState& e : a->elements) {
+        ItemDurability d;
+        const auto wa = word(e, ha), wb = word(e, hb), wc = word(e, hc), wd = word(e, hd);
+        if (!wa || !wb || !wc || !wd) return std::nullopt;
+        d.item = GuidValue{*wa, *wb, *wc, *wd};
+        if (const Value* s = element_value(e, hs)) {
+            const auto* i = s->get_if<int64_t>();
+            if (!i) return std::nullopt;
+            d.slot = static_cast<int32_t>(*i);
+        }
+        if (const Value* u = element_value(e, hu)) {
+            const auto* f = u->get_if<float>();
+            if (!f) return std::nullopt;
+            d.durability = *f;
+        }
+        out.items.push_back(d);
+    }
+    return out;
+}
+
+std::optional<ItemDurabilityUpdate> parse_item_durability(const RpcCall& call) {
+    if (!call.rpc || !call.decoded) return std::nullopt;
+    return parse_item_durability(*call.rpc, call.params);
+}
 
 }}}  // namespace aoc::protocol::repl

@@ -242,30 +242,61 @@ size_t write_rpc_field(const schema::ClassSchema& cls, const RpcSchema& rpc, con
     if (bad) return fail();
     return write_field(cls, rpc.field_index, payload, out);
 }
+// built with C | Y | B and C O A
 
 std::optional<std::vector<RpcCall>> read_rpc_fields(const schema::ClassSchema& cls, const uint8_t* data, size_t end,
-                                                    size_t& pos, const CodecOptions& opts) {
+                                                    size_t& pos, const CodecOptions& opts, SkippedFields* skipped) {
     std::vector<RpcCall> calls;
     size_t at = pos;
+    SkippedFields skipped_here;
     while (at < end) {
-        if (calls.size() >= kMaxClientRpcsPerBunch) return std::nullopt;
-        const auto h = read_field_header(cls, data, end, at);
-        if (!h) return std::nullopt;
-        const schema::NetField* f = cls.field(h->field);
-        if (!f || f->kind != schema::FieldKind::Function || f->rpc >= cls.rpcs.size()) return std::nullopt;
+        if (calls.size() + skipped_here.count >= kMaxClientRpcsPerBunch) return std::nullopt;
+        size_t payload_bits = 0;
+        const schema::NetField* f = nullptr;
+        if (skipped) {
+            // the client's form: the header is SerializeInt(field, field_max) and the payload's bit count, so a field the class has no RPC
+            // for (an index beyond it, a property) is skipped by its bits as UE skips a call it cannot find; only a header that does not
+            // read leaves the extent unknown
+            PacketReader r(data, (end + 7) / 8, end);
+            r.set_pos(at);
+            const uint32_t field = r.read_serialize_int(cls.field_max());
+            const auto payload = r.read_sip();
+            if (!payload || overran(r) || *payload > end - r.pos()) return std::nullopt;
+            at = r.pos();
+            payload_bits = static_cast<size_t>(*payload);
+            f = field < cls.num_fields() ? cls.field(field) : nullptr;
+            if (!f || f->kind != schema::FieldKind::Function || f->rpc >= cls.rpcs.size()) {
+                at += payload_bits;
+                ++skipped_here.count;
+                if (skipped_here.first.size() < kMaxSkippedKept) skipped_here.first.push_back(field);
+                continue;
+            }
+        } else {
+            const auto h = read_field_header(cls, data, end, at);
+            if (!h) return std::nullopt;
+            f = cls.field(h->field);
+            if (!f || f->kind != schema::FieldKind::Function || f->rpc >= cls.rpcs.size()) return std::nullopt;
+            payload_bits = h->payload_bits;
+        }
         RpcCall call;
         call.rpc = &cls.rpcs[f->rpc];
         call.param_pos = at;
-        call.param_bits = h->payload_bits;
+        call.param_bits = payload_bits;
         size_t p = at;
-        if (auto params = read_rpc_params(*call.rpc, data, at + h->payload_bits, p, opts)) {
+        if (auto params = read_rpc_params(*call.rpc, data, at + payload_bits, p, opts)) {
             call.params = std::move(*params);
             call.decoded = true;
         }
-        at += h->payload_bits;
+        at += payload_bits;
         calls.push_back(std::move(call));
     }
     pos = at;
+    if (skipped) {
+        skipped->count += skipped_here.count;
+        for (const uint32_t id : skipped_here.first) {
+            if (skipped->first.size() < kMaxSkippedKept) skipped->first.push_back(id);
+        }
+    }
     return calls;
 }
 
@@ -276,6 +307,14 @@ std::optional<ClientBunch> read_client_bunch(const schema::ClassSchema& actor_cl
     while (pos < bits) {
         const auto block = read_content_block(data, bits, pos, /*server_form=*/false);
         if (!block) return std::nullopt;
+        if (block->header.in_place) {
+            // a subobject the client names by path: the server never gave it a GUID.  Nothing resolves the name, so the block goes by its bit
+            // count (the rest of the bunch is the client's other calls); the first few are kept for the caller to say what they were
+            ++out.skipped_blocks;
+            if (++out.in_place_blocks > kMaxClientRpcsPerBunch) return std::nullopt;
+            if (out.in_place.size() < kMaxInPlaceKept) out.in_place.push_back({*block->header.in_place, block->payload_bits});
+            continue;
+        }
         const schema::ClassSchema* cls = block->header.is_actor ? &actor_class
                                                                 : (resolve ? resolve(block->header.object) : nullptr);
         if (block->header.has_rep_layout || !cls) {
@@ -283,8 +322,13 @@ std::optional<ClientBunch> read_client_bunch(const schema::ClassSchema& actor_cl
             continue;
         }
         size_t at = block->payload_pos;
-        auto calls = read_rpc_fields(*cls, data, block->payload_pos + block->payload_bits, at, opts);
-        if (!calls || out.rpcs.size() + calls->size() > kMaxClientRpcsPerBunch) return std::nullopt;
+        SkippedFields skipped;
+        auto calls = read_rpc_fields(*cls, data, block->payload_pos + block->payload_bits, at, opts, &skipped);
+        if (!calls || out.rpcs.size() + calls->size() + out.skipped_fields.count + skipped.count > kMaxClientRpcsPerBunch) return std::nullopt;
+        out.skipped_fields.count += skipped.count;
+        for (const uint32_t id : skipped.first) {
+            if (out.skipped_fields.first.size() < kMaxSkippedKept) out.skipped_fields.first.push_back(id);
+        }
         for (RpcCall& c : *calls) {
             ClientRpc r;
             r.on_actor = block->header.is_actor;

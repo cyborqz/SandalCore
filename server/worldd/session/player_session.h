@@ -240,8 +240,10 @@
 //  debug after, like the malformed bunches; the join's chains and the final save are always at info.
 // ============================================================================
 #pragma once
+// [Cyb :: C | O | A]
 
 #include "bootstrap/bootstrap.h"
+#include "gather/gathering.h"
 #include "items/inventory.h"
 #include "net/connection.h"
 #include "net/control_channel.h"
@@ -259,6 +261,7 @@
 #include "session/player_world.h"
 #include "session/riding.h"
 #include "session/position_saver.h"
+#include "session/professions.h"
 #include "session/talents.h"
 #include "stats/character_stats.h"
 #include "svc/services.h"
@@ -487,6 +490,32 @@ public:
     size_t uses_applied() const { return uses_applied_; }
     size_t uses_refused() const { return uses_refused_; }
     size_t levels_gained() const { return levels_gained_; }
+    /// Gathering stage 2: the character's 22 professions as the session plays them (certification tier, level, XP; not valid() when the world has no profession tables), and
+    /// the profession levels gained by items.
+    const professions::Professions& professions() const { return professions_; }
+    size_t profession_levels_gained() const { return profession_levels_gained_; }
+
+    // ---- Gathering stage 2, part "Harvesting" (session/player_gather.cpp; gather/gathering.h has the rules and the data) ----------------------------------------
+    /// The resource node this player is harvesting (its actor id in the registry; 0: none).
+    uint64_t harvesting_node() const { return gather_.node; }
+    size_t   harvests_started() const { return harvests_started_; }
+    size_t   foliage_interacts() const { return foliage_interacts_; }
+    // ---- Gathering stage 3, part "Foliage gathering" (session/player_foliage.cpp; foliage/foliage.h has the world's side) ----------------------------------------------------
+    /// The instance of the painted foliage (a row of foliage/foliage_map.h) this player is cutting; kNoInstance when none.
+    static constexpr uint32_t kNoInstance = 0xFFFFFFFFu;
+    uint32_t cutting_instance() const { return foliage_.row; }
+    size_t   foliage_started() const { return foliage_started_; }
+    size_t   foliage_completed() const { return foliage_completed_; }
+    size_t   foliage_cancelled() const { return foliage_cancelled_; }
+    size_t   foliage_refused() const { return foliage_refused_; }
+    size_t   foliage_interrupts_sent() const { return foliage_interrupts_sent_; }
+    const std::map<std::string, size_t>& foliage_refusals() const { return foliage_refusals_; }
+    size_t   harvests_completed() const { return harvests_completed_; }
+    size_t   harvests_cancelled() const { return harvests_cancelled_; }
+    size_t   harvests_refused() const { return harvests_refused_; }
+    /// The refusals by kind (the check that failed), and the piles a full bag made.
+    const std::map<std::string, size_t>& harvest_refusals() const { return harvest_refusals_; }
+    size_t   harvest_piles() const { return harvest_piles_; }
     size_t progress_handed_over() const { return progress_handed_over_; }
     bool   progress_changed() const { return progress_changed_; }
     /// Plan D1, stage 2: the character's ranks (null when the world has no talents catalog), its action bar, the KnownAbilities and the
@@ -724,6 +753,8 @@ private:
     static spdlog::level::level_enum level_for(size_t& count, size_t limit = kLoggedPerKind);
     void dispatch(Connection& conn, bootstrap::Role role, const protocol::repl::ClientRpc& rpc, const InBunch& bunch,
                   Clock::time_point now);
+    /// What the reader skipped in a bunch that read (calls on subobjects the client names by path, RPC fields the class has no RPC for): counted, and said once per name.
+    void note_unserved_blocks(bootstrap::Role role, const protocol::repl::ClientBunch& parsed, const InBunch& bunch);
     void on_move(Connection& conn, const protocol::repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now, bool on_mount);
     /// Whether the last good location differs from what was loaded or last handed to the sink (`with_yaw`: or its yaw).
     bool position_changed(bool with_yaw) const;
@@ -804,6 +835,17 @@ private:
                          std::vector<protocol::repl::SkillOnActionbar>& skill_updates);
     /// The AdventuringXPAddMult stat as the character has it (0 when it has none).
     double xp_add_mult() const;
+    /// Gathering stage 2: a profession as the XPTracker says it (its leveling type, the XP total, the certification level's guid).
+    struct ProfessionWire {
+        int64_t leveling_type = 0, xp = 0, certification = 0;
+    };
+    /// Makes `after` what the character holds in its professions: the stat engine's GetPlayerProfessionLevel answers, the levels gained are counted and the progress is due to be
+    /// handed over. Returns the professions that differ (before and after, in profession order); nothing changes for an invalid set or one of another book.
+    std::vector<professions::Change> set_professions(const professions::Professions& after);
+    /// What the XPTracker is told of these changes (set_profession for each, then the update), in profession order.
+    std::vector<ProfessionWire> profession_wire(const std::vector<professions::Change>& changes) const;
+    /// BroadcastPlayLevelUpEffects(the profession's leveling type, the level) for each change that gained a level (unreliable, as the Adventuring level-up's).
+    void queue_profession_level_ups(Connection& conn, const std::vector<professions::Change>& changes);
     /// Hands the progress (level, class, XP, debt) to the sink; `why` is for the log.
     void hand_over_progress(const char* why);
     /// A fresh instance guid no item of the inventory has (32 lowercase hex digits).
@@ -881,6 +923,63 @@ private:
     void apply_persist(Connection* conn, const MountController::Persist& p);
     std::optional<bootstrap::Send> mount_ack(float time_stamp);
     std::optional<bootstrap::Send> mount_correction(float time_stamp, const GoodPosition& good);
+    // ---- Gathering stage 2, part "Harvesting" ----
+    /// A resource node was interacted with: the checks (each logged and counted), then the channel starts (the node is Channeling for everyone).
+    void on_gather_interact(Connection& conn, const world::WorldActor& node, Clock::time_point now);
+    /// Gathering stage 3, "Hunting" (session/player_gather.cpp): the corpse of a huntable creature was interacted with: only a dead one is hunted; the rest is the node's channel (the
+    /// board, the pawn's ChannelingData, the heartbeats), with the creature's Hunting_<kind> interaction (the Bow, its tier) and the corpse writers of gather/node_wire.h.
+    void on_hunt_interact(Connection& conn, const world::WorldActor& corpse, Clock::time_point now);
+    /// The checks and the start both kinds of channel share: in reach, not busy, the requirements, the length, the board.  `noun` is the log's word ("harvest", "hunt"), `tag` its prefix.
+    void begin_channel(Connection& conn, const world::WorldActor& target, const content::GatherDefRow& def, const std::string& what, const char* tag, const char* noun, bool hunt, bool gives_nothing,
+                       Clock::time_point now);
+    /// The client's ServerInterruptChannel: a harvest in progress ends with no reward.
+    void on_interrupt_channel(Connection& conn, Clock::time_point now);
+    /// The client's ServerStartInteractionWithFoliage (F pressed on a tree or plant of the world's foliage): the checks (each logged and counted), then the channel starts.
+    void on_foliage_interact(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Every tick: respawns, the harvest's conditions (alive, on foot, the same tool, in range), its heartbeat, its completion, and what waits for its time (a pile, a callout).
+    void run_gather(Connection& conn, Clock::time_point now);
+    /// The channel's time has come: the rolls, the items (the bag or a pile), the tool's wear, the experience, the node gathered.  False when the frame waits for room in the reply queue.
+    bool complete_gather(Connection& conn, Clock::time_point now);
+    /// Why worldd itself ends a channel, for the client: the callout the retail server shows (the string table "Economy", GatheringInterruption_<key>; only Movement is captured) and,
+    /// for a tree or plant, ClientInterruptInteractionWithFoliage [R: 1464]; None: nothing is said (the client ended it, the tool changed, the session ended).
+    enum class Interrupt : uint8_t { None, Movement, Death, Mounted, Generic };
+    static const char* interrupt_key(Interrupt k);
+    /// Ends the harvest in progress (a node's or a tree's or plant's) with no reward; the node is available again.  `conn` may be null (a session that ends).
+    void cancel_gather(Connection* conn, const std::string& why, Interrupt interrupt = Interrupt::None);
+    /// Ends the cutting of a tree or plant with no reward: the lock released, FoliageData cleared, each logged.  Nothing when none is in progress.
+    void cancel_foliage(Connection* conn, const std::string& why, Interrupt interrupt = Interrupt::None);
+    /// Gives the client its gathering back: ClientInterruptInteractionWithFoliage, which sets the pawn's FoliageData (the client sets its own at its start) to its cleared value
+    /// whatever the parameters are (the instance, its owner and component; none is needed).  A refused start, a cancelled cutting, an unreadable start.
+    void unlock_foliage_client(Connection& conn, uint32_t index, const std::string& owner, const std::string& component);
+    /// Every tick: the regrowth that is due, the cutting's conditions (alive, on foot, the same tool, still, in reach), the FoliageData 116 ms after the start, the completion.
+    void run_foliage(Connection& conn, Clock::time_point now);
+    /// The cutting's time has come: the rolls, the items, the tool's wear, the experience, the instance Empty.  False when the frame waits for room in the reply queue.
+    bool complete_foliage(Connection& conn, Clock::time_point now);
+    /// Tells the client the pawn's UPlayerInfo.FoliageData (the bar and the animation): queued behind what is queued.
+    void send_foliage_data(Connection& conn, const bootstrap::PlayerBootstrap::FoliageChannel& data);
+    /// The callout of an interruption (Economy / GatheringInterruption_<key>) the movement refusal and every interruption of worldd's own show.
+    void send_interrupt_callout(Connection& conn, Interrupt key, Clock::time_point now);
+    /// Gathering stage 3: what a finished harvest of any kind (a resource node, a tree or plant of the foliage, a hunting corpse) hands to the common part, `deliver_harvest`.  The
+    /// frames' ORDER differs between the kinds (the node clears the pawn's ChannelingData between the items and the XPTracker, the foliage confirms right after the items [R: 1463
+    /// packet 833] and clears its FoliageData last), which the two hooks carry; both run at the point of the frame where they are called, `conn` captured by the caller.
+    struct HarvestFrame {
+        std::string                  what;            // the log's name of the thing harvested ("Plant_Daffodil_Medium_1 (node 12)"); also the pile's record
+        int64_t                      profession = 0;  // the profession whose XP the harvest gives
+        const gather::Harvest*       harvest = nullptr;
+        std::string                  tool_guid;       // the tool's instance and Equipment slot (the wear)
+        int                          tool_slot = 0;
+        std::function<void()>        after_items;     // queued after the storage events and the full-bag callout, before the XPTracker
+        std::function<void()>        after_experience;   // queued after the XPTracker, the level-up frames and the skill updates
+        std::string                  log_tail;        // appended to the log line ("; the node returns in 30 s")
+        std::string                  tag = "gather";  // the log line's prefix: [gather] for a node, [foliage] for a tree or plant
+    };
+    /// The common part of a harvest's result: the tool's wear, the rolled stacks into the resource containers (what does not fit goes to a pile 100 ms after the experience frame, with a
+    /// callout), the experience and its level-ups, the frames in the retail order, the log line and the hand-overs.  The caller has checked room in the reply queue (`room_for`).
+    void deliver_harvest(Connection& conn, Clock::time_point now, const HarvestFrame& frame);
+    /// Tells the client the pawn's InteractInfo.ChannelingData (the gather animation and the bar come from it; its end clears it): the property is queued behind what is queued.
+    void send_channeling(Connection& conn, const protocol::repl::ChannelingData& data);
+    /// The stat run the rolls read: the character's own, at its professions' levels.
+    std::unique_ptr<stats::CharacterStats::Evaluation> gather_run(std::string& why);
     // ---- plan E1, stage 3, part 2 ----
     /// An interaction with a corpse's loot component: the window opens (ClientReceiveLootStoragePayload).
     void open_loot(Connection& conn, const combat::Corpse& corpse, const world::WorldActor& actor, Clock::time_point now);
@@ -913,6 +1012,8 @@ private:
     const content::AbilityRules* ability_rules_;   // plan A7: PlayerWorld's, null in a test that wants no abilities
     items::Inventory inventory_;                   // plan B2
     const items::ItemCatalog* catalog_;
+    /// The catalog the grants route by (Gathering stage 3); a session without one knows no record, so everything goes to the Backpack.
+    const items::ItemCatalog& item_catalog() const;
     bool inventory_dirty_ = false;                 // changed since the last hand-over to the sink
     bool inventory_changed_ = false;               // changed at all this session
     std::optional<stats::CharacterStats> stats_;   // plan B3
@@ -922,6 +1023,63 @@ private:
     int                  class_id_ = 0;              // ECharacterClass, as the session plays it (a class scroll changes it)
     leveling::Progress   progress_;
     bool                 progress_changed_ = false;  // at all this session
+    professions::Professions professions_;           // Gathering stage 2: the 22 professions (not valid() without the world's book)
+    size_t               profession_levels_gained_ = 0;
+    // Gathering stage 2, part "Harvesting"
+    struct GatherRun {
+        uint64_t                     node = 0;          // the registry actor being harvested (0: none)
+        protocol::emit::FIntrepidNetworkGUID target;    // the node's guid as the client has it (the pawn's ChannelingData names it, and the clear names it again)
+        const content::GatherDefRow* def = nullptr;
+        int                          tool_slot = 0;     // the Equipment slot of the tool, its instance and the durability it had when the channel began
+        std::string                  tool_guid;
+        Clock::time_point            started{};
+        double                       seconds = 0;
+        double                       start_x = 0, start_y = 0;   // where the player stood when the channel began (the stand-still check measures from here)
+        bool                         hunt = false;      // Gathering stage 3: the node is a huntable creature's corpse (its channel is a hunt)
+        bool                         gives_nothing = false;   // ... of a kind whose reward table gives no usable item (the session drops the items)
+        std::string                  what;              // the log's name of what is harvested
+    } gather_;
+    struct GatherPile {          // the stacks a full bag could not take: an APlayerLootPile 100 ms after the experience frame [R: 1461 packets 897 and 904]
+        Clock::time_point due{};
+        std::vector<combat::LootStack> stacks;
+        double x = 0, y = 0, z = 0;
+        std::string node_name;
+    };
+    std::deque<GatherPile>           gather_piles_;
+    struct GatherCallout {       // the "not enough inventory space" callout and when it is taken off
+        Clock::time_point due{};
+        uint64_t          key = 0;
+    };
+    std::deque<GatherCallout>        gather_callouts_;
+    uint32_t                         gather_callout_seq_ = 0;
+    std::map<std::string, size_t>    harvest_refusals_;
+    size_t harvests_started_ = 0, harvests_completed_ = 0, harvests_cancelled_ = 0, harvests_refused_ = 0, harvest_piles_ = 0;
+    size_t gather_logged_ = 0, gather_refused_logged_ = 0, gather_done_logged_ = 0;
+    size_t foliage_interacts_ = 0;   // ServerStartInteractionWithFoliage calls
+    bool   gather_off_logged_ = false;
+    // Gathering stage 3, part "Foliage gathering": the tree or plant this player is cutting
+    struct FoliageRun {
+        uint32_t                       row = 0xFFFFFFFFu;   // the instance (foliage_map.h); kNoInstance: none
+        int                            state = 0;           // the state it is cut in (the client's and the world's agree)
+        uint32_t                       index = 0;           // as the client named it
+        std::string                    owner, component;
+        const content::GatherDefRow*   interaction = nullptr;
+        std::string                    name;                // the def's, for the log
+        int                            tool_slot = 0;
+        std::string                    tool_guid;
+        int64_t                        tool_record = 0;
+        Clock::time_point              started{}, data_at{}, completes{};
+        double                         seconds = 0;
+        double                         start_x = 0, start_y = 0;
+        bool                           data_sent = false;
+    } foliage_;
+    Clock::time_point                moved_at_{};              // the last accepted move that was a walk (a held direction or a speed)
+    Clock::time_point                last_now_{};              // the time of the last tick (what a cancel with no time of its own is stamped with)
+    size_t                           foliage_started_ = 0, foliage_completed_ = 0, foliage_cancelled_ = 0, foliage_refused_ = 0, foliage_interrupts_sent_ = 0;
+    size_t                           foliage_logged_ = 0, foliage_refused_logged_ = 0, foliage_done_logged_ = 0;
+    uint32_t                         foliage_callout_seq_ = 0;
+    std::map<std::string, size_t>    foliage_refusals_;
+    bool                             foliage_off_logged_ = false;
     // plan D1, stage 2
     std::optional<talents::Book> book_;
     actionbar::Bar               bar_;
@@ -1069,6 +1227,17 @@ private:
     uint32_t blocked_channel_ = 0;
     size_t blocked_unacked_ = 0;
     size_t malformed_bunches_ = 0;
+    /// The kinds of bunch that did not read (their size and first eight bytes), the first of each said whole: a new kind is not hidden by the budget the earlier ones used up.
+    static constexpr size_t kMaxUnreadKinds = 16;
+    std::set<std::string> unread_kinds_;
+    /// Every call that reached dispatch, by the schema's name pointer (the summary at the session's end says them by name).
+    std::unordered_map<const char*, size_t> client_calls_;
+    /// The client's calls on subobjects it names by path (the reader skips them): blocks, the bunches that held them, each name's count (by "outer ObjectId/path"; the first
+    /// kMaxInPlaceNames are said once each), the RPC fields skipped for want of an RPC of the class and how often that was said.
+    static constexpr size_t kMaxInPlaceNames = 12, kMaxInPlaceSharedLogged = 20;
+    size_t in_place_blocks_ = 0, in_place_bunches_ = 0, in_place_shared_logged_ = 0, skipped_fields_ = 0, skipped_fields_logged_ = 0;
+    std::unordered_map<std::string, size_t> in_place_names_;
+    size_t foliage_unreadable_logged_ = 0;   // the foliage starts whose parameters did not decode and were said (the first few)
     size_t moves_acked_ = 0;
     size_t moves_refused_ = 0, moves_stale_ = 0, corrections_ = 0, handed_over_ = 0, moves_borderline_ = 0;
     /// Moves dropped as TimeStampNotRising in a row (reset by any other verdict): a streak is logged once at info (the death of 2026-10-10 dropped 66 s of moves and showed nothing at info).
@@ -1102,6 +1271,9 @@ private:
     size_t combat_empty_logged_ = 0;
     size_t reply_sent_logged_ = 0;
 };
+
+/// The ItemEvents the bootstrap sends for an Outcome's events (Gathering stage 3: the one conversion, for the session and for a harvest).
+std::vector<bootstrap::ItemEvent> item_events_for(const items::Outcome& outcome);
 
 /// A joined player and its connection, as the Endpoint lists them (Endpoint::players) for the GM travel tools; both null for none.
 struct PlayerHandle {

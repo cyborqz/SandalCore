@@ -20,7 +20,7 @@ Sandal Core provides a full-featured, clean-room server emulation stack for the 
 - **Living World & Navigation**: Chunked navmesh windows, Riverlands region partitioning, NPC actor spawning, AI agro and leash state machines, combat engagement, loot drops, and respawn cycles.
 - **Mounts & Traversal**: Ground, flying, and aquatic mount summoning, riding possession, mount combat mechanics, sprint/dash abilities, and road speed modifiers.
 - **City Node Civilization**: Background `CityNodeService`, node experience accrual, level transitions, town layout replication, and citizenship/mayorship management.
-- **Resource Gathering**: Hunting interactions and drop notification pop-ups.
+- **Gathering & Professions**: the 22 gathering professions, node harvesting (mining, lumberjacking and herbalism), the Riverlands' trees, plants and stones that grow back, huntable animals, resource bags and the pick-up popup.
 
 ---
 
@@ -91,20 +91,17 @@ Run `powershell -File scripts\make_certs.ps1 -Force` to make new ones. Details: 
 
 ### 4. Game content
 
-`content\` holds the game numbers the servers use (`content.db`, zipped in two parts because GitHub limits files to 100 MB), the mappings file `aoc.usmap` and a few small tables (mount speeds, roads, NPC motion). `build_all.bat` and every launcher unpack them into `dist\content` (`scripts\install_content.ps1`, checked against `content\content.db.sha256`).
+`content\` holds the game numbers the servers use (`content.db`, zipped in two parts because GitHub limits files to 100 MB), the mappings file `aoc.usmap` and a few small tables (mount speeds, roads, NPC motion, foliage, profession curves). `build_all.bat` and every launcher unpack them into `dist\content` (`scripts\install_content.ps1`, checked against `content\content.db.sha256`).
 
 **Navigation mesh (required for combat).** `area_nav.bin` and `area_geom.bin` (1.2 GB unpacked, built from the game files by `tools\mapc`) are too big for the repo and ship as a GitHub Release asset, `sandal-core-navmesh-v1.zip` (about 456 MB, tag `navmesh-v1`). `worldd` starts its combat system only after `dist\content\area_nav.bin` loads; **without it every mob has 0 HP and damage does nothing** (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md)). `scripts\install_content.ps1` (run by `build_all.bat` and every launcher) gets it for you on the first launch and checks it against `content\navmesh.json` (SHA-256 of the zip and of both files). It looks for the zip, in this order:
 
 1. the file named by the environment variable `SANDAL_NAVMESH_ZIP` (a full path);
 2. `content\sandal-core-navmesh-v1.zip`, a copy you downloaded by hand from the repository's Releases page (it stays there and is not committed);
-3. a download from the `url` in `content\navmesh.json` (curl.exe, or Invoke-WebRequest when curl is missing); this step is skipped while the url is still the placeholder.
+3. a download from the `url` in `content\navmesh.json` (the `navmesh-v1` Release; curl.exe, or Invoke-WebRequest when curl is missing).
 
 If none works, the script prints a warning that combat is OFF and the rest of the server starts anyway. Later launches only compare a small stamp file (`dist\content\navmesh.ok`), so they do not re-hash 1.2 GB. `install_content.ps1 -Force` unpacks everything again, `-SkipNavmesh` leaves the mesh out.
 
-**For the repository owner, when publishing:** the url in `content\navmesh.json` is a placeholder (`https://github.com/OWNER/REPO/releases/download/navmesh-v1/sandal-core-navmesh-v1.zip`).
-
-1. On GitHub: Releases > Draft a new release > create the tag `navmesh-v1` > attach `sandal-core-navmesh-v1.zip` (the file the `zip_sha256` and `zip_size` in `navmesh.json` describe) > Publish.
-2. In `content\navmesh.json` replace `OWNER/REPO` in `url` with your account and repository name, and commit it. Leave the other fields as they are unless the zip is rebuilt (then update `zip_sha256`, `zip_size` and the two file hashes too).
+**If the navmesh zip is ever rebuilt:** publish it as a new Release and update `url`, `zip_sha256`, `zip_size` and the two file hashes in `content\navmesh.json`.
 
 ### Configuration & Environment Variables
 

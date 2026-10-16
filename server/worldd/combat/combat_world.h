@@ -44,6 +44,10 @@
 
 namespace aoc::worldd::combat {
 
+/// Whether an NPC may start a fight by noticing a player (retest 3): it is hostile to players, and its data does not switch its aggro off (the instance overrides the radius with 0: a Timid
+/// Grem).  A creature friendly to players (a huntable) never attacks first; either one still fights back what hurts it.
+inline bool notices_players(bool hostile_to_players, const world::NpcInfo& npc) { return hostile_to_players && !npc.aggro_off; }
+
 /// What an NPC attack did to a player: the hit as the confirmation and the player's Health need it.
 struct IncomingHit {
     uint64_t                 instigator = 0;      // the NPC's actor id (its ObjectId)
@@ -154,6 +158,12 @@ public:
 
     void set_death_hook(DeathHook hook) { death_hook_ = std::move(hook); }
 
+    /// Gathering stage 3, "Hunting" (retest 3): which creatures are huntable.  A huntable is no combatant (it fights nothing and its CombatInfo is the living huntable's, not a fighter's) but its
+    /// stats are filled as a combatant's are, the first time a player is near: retail's living huntable opens with the full list (914 packet 1561 and a hostile Raven's both carry 1563 bits of
+    /// them), so the hunt's done update can write Health 0 into one item, as the five captured hunts do (a 278-bit stats block beside the CombatInfo's and the interactable's).
+    using HuntablePredicate = std::function<bool(const world::NpcInfo&)>;
+    void set_huntable(HuntablePredicate fn) { huntable_ = std::move(fn); }
+
     // ---- players
     void add_player(PlayerPort* port);
     void remove_player(PlayerPort* port);
@@ -228,6 +238,7 @@ private:
     void  kill(Npc& n, uint64_t killer, double now);
     void  begin_reset(Npc& n, double now);
     void  set_flags(Npc& n, bool in_combat, uint64_t target_actor);
+    void  fill_huntable_stats(const world::WorldActor& a);
     PlayerPort* player(uint64_t actor_id);
     void  player_exchange(uint64_t player_id, double now);
 
@@ -246,6 +257,8 @@ private:
     std::map<uint64_t, double> player_combat_until_;   // actor id -> when its combat flag ends
     std::vector<Pending>   pending_;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
+    HuntablePredicate      huntable_;
+    std::set<uint64_t>     huntable_stats_;   // the huntables whose stats were filled
     double                 next_think_ = 0;
     double                 now_ = 0;
     Stats                  stats_;

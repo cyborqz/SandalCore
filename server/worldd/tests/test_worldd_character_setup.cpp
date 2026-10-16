@@ -149,11 +149,11 @@ static std::vector<std::string> diff_setups(const bs::PlayerSetup& a, const bs::
     const emit::FIntrepidNetworkGUID* ga[] = {&a.guids.player_state, &a.guids.player_controller, &a.guids.global_gm_commands, &a.guids.game_state,
                                               &a.guids.pawn, &a.guids.base_character_info, &a.guids.combat_info, &a.guids.owner_info, &a.guids.backpack,
                                               &a.guids.equipment, &a.guids.quest_storage, &a.guids.reward_storage, &a.guids.appearance,
-                                              &a.guids.resource_storage, &a.guids.collision_cylinder, &a.guids.alignment, &a.guids.ability, &a.guids.stats};
+                                              &a.guids.resource_storage[0], &a.guids.resource_storage[1], &a.guids.resource_storage[2], &a.guids.collision_cylinder, &a.guids.alignment, &a.guids.ability, &a.guids.stats};
     const emit::FIntrepidNetworkGUID* gb[] = {&b.guids.player_state, &b.guids.player_controller, &b.guids.global_gm_commands, &b.guids.game_state,
                                               &b.guids.pawn, &b.guids.base_character_info, &b.guids.combat_info, &b.guids.owner_info, &b.guids.backpack,
                                               &b.guids.equipment, &b.guids.quest_storage, &b.guids.reward_storage, &b.guids.appearance,
-                                              &b.guids.resource_storage, &b.guids.collision_cylinder, &b.guids.alignment, &b.guids.ability, &b.guids.stats};
+                                              &b.guids.resource_storage[0], &b.guids.resource_storage[1], &b.guids.resource_storage[2], &b.guids.collision_cylinder, &b.guids.alignment, &b.guids.ability, &b.guids.stats};
     bool guids = true;
     for (size_t i = 0; i < std::size(ga); ++i) guids = guids && *ga[i] == *gb[i];
     note(guids, "guids");

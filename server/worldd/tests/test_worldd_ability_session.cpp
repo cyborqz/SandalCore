@@ -3428,6 +3428,17 @@ static svc::InventoryItem stack_of(int64_t record, int32_t slot, int32_t quantit
     return it;
 }
 
+/// A level-25 Bard wearing the Sanctus resource bag in Equipment slot 23, as every class starts: Gathering stage 3 keeps a resource item (the Glint certificates a Wolf drops, the
+/// copper, the oak) in a resource container, and a character with no bag has no home for one.
+static constexpr int64_t kSanctusBag = 6064629382556287782ll;   // Bag_Resource_Sanctus: Resource0, 6 x 4
+static svc::Character bard25_bagged() {
+    svc::Character c = bard25();
+    svc::InventoryItem bag = stack_of(kSanctusBag, 23, 1, 90001);
+    bag.container = svc::ItemContainer::Equipment;
+    c.items.push_back(bag);
+    return c;
+}
+
 static int64_t held_of(const PlayerSession& s, int64_t record) {
     int64_t n = 0;
     for (const svc::InventoryItem& it : s.inventory().items()) {
@@ -3440,7 +3451,7 @@ static const char* kAftermathNote = "(plan E1, stage 3, part 2)";
 
 static void test_e1_whole_fight() {
     std::printf("E1 stage 3, part 2: a whole fight through the session (aggro, hits, kill, experience, loot, corpse) %s\n", kAftermathNote);
-    const svc::Character rec = bard25();
+    const svc::Character rec = bard25_bagged();
     std::vector<uint64_t> wolves;
     uint64_t far_wolf = 0, next_actor_id = 5000000;
     bool ground = false;
@@ -3738,8 +3749,15 @@ static uint64_t kill_for_loot(Run& r, const std::vector<uint64_t>& wolves) {
 
 static void test_e1_loot_with_full_bag() {
     std::printf("E1 stage 3, part 2: a full bag leaves the loot in the corpse %s\n", kAftermathNote);
-    svc::Character rec = bard25();
-    for (int i = 0; i < 70; ++i) rec.items.push_back(stack_of(kGlintT1, i, 10, static_cast<uint32_t>(i)));   // seventy full stacks: no room, nothing to merge into
+    svc::Character rec = bard25_bagged();
+    // Gathering stage 3: a Wolf's loot is a resource, so it needs room in a resource container.  Resource0 holds 24 full stacks of Glint certificates (one cell each: no room, nothing to
+    // merge into) and the Backpack seventy full stacks of copper, which the login could not move for want of room (they stay: nothing is deleted)
+    for (int i = 0; i < 24; ++i) {
+        svc::InventoryItem full = stack_of(kGlintT1, i, 10, static_cast<uint32_t>(i));
+        full.container = svc::ItemContainer::Resource0;
+        rec.items.push_back(full);
+    }
+    for (int i = 0; i < 70; ++i) rec.items.push_back(stack_of(kCopper, i, 20, 100 + static_cast<uint32_t>(i)));
     std::vector<uint64_t> wolves;
     uint64_t far_wolf = 0, next_actor_id = 5000000;
     bool ground = false;
@@ -3747,7 +3765,7 @@ static void test_e1_loot_with_full_bag() {
     Run r(0, true, &rec, prepare);
     CHECK(ground && wolves.size() == 14 && r.h.fx.world->aftermath(), "a world with Wolves and a character whose bag is full");
     if (!ground || wolves.size() != 14 || !r.h.fx.world->aftermath()) return;
-    CHECK(r.h.s->inventory().count(svc::ItemContainer::Backpack) == 70, "the bag holds seventy stacks");
+    CHECK(r.h.s->inventory().count(svc::ItemContainer::Backpack) == 70 && r.h.s->inventory().count(svc::ItemContainer::Resource0) == 24, "the Backpack holds seventy stacks and Resource0 24: no room anywhere");
     combat::Aftermath& after = *r.h.fx.world->aftermath();
     r.play(0.5, false);
     phase_in(r);
@@ -3768,12 +3786,12 @@ static void test_e1_loot_with_full_bag() {
     world_play(r, 0.3);
     CHECK(r.h.s->loot_taken() == 0 && after.corpse_of(looted)->remaining() == stacks, "taking with no room takes nothing: every stack stays in the corpse");
     CHECK(r.m.storage_events.empty() && r.m.listeners_removed == 0 && r.h.s->loot_actor() == looted, "the client was told of no removal, the window stays open");
-    CHECK(r.h.s->inventory().count(svc::ItemContainer::Backpack) == 70 && !r.h.s->abilities_failed(), "the bag is as it was");
+    CHECK(r.h.s->inventory().count(svc::ItemContainer::Backpack) == 70 && r.h.s->inventory().count(svc::ItemContainer::Resource0) == 24 && !r.h.s->abilities_failed(), "the bags are as they were");
 }
 
 static void test_e1_player_death() {
     std::printf("E1 stage 3, part 2: the player's death and respawn through the session %s\n", kAftermathNote);
-    svc::Character rec = bard25();
+    svc::Character rec = bard25_bagged();
     rec.items.push_back(stack_of(kCopper, 0, 20, 1));
     rec.items.push_back(stack_of(kOak, 1, 7, 2));
     rec.items.push_back(stack_of(kGlintT1, 2, 5, 3));       // item.resource.cert: a resource, by the tags (modelled: half of it is lost, too)

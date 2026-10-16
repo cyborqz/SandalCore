@@ -270,6 +270,99 @@ func TestItemsThroughTheServiceOnTheRealStore(t *testing.T) {
 
 // (C-O-A : C | Y | B)
 
+// Gathering stage 3, "Resource storage": the three resource containers are the enum values 4, 5 and 6 (add-only: the first three are the Backpack, the Equipment and the Quest
+// storage), they cross the boundary both ways with every field, and the real store keeps them.
+func resourceItems() ([]character.Item, []*characterv1.Item) {
+	return []character.Item{
+		{Container: character.Resource0, Slot: 0, ItemRecordID: 6064630000000000001, InstanceGUID: guidOf(0xd4), Quantity: 17, Quality: 6, Durability: 0, CreatedAt: itemTime.Add(3 * time.Second)},
+		{Container: character.Resource1, Slot: 39, ItemRecordID: 6064630000000000002, InstanceGUID: guidOf(0xe5), Quantity: 99, Quality: 1, Durability: 0, CreatedAt: itemTime.Add(4 * time.Second)},
+		{Container: character.Resource2, Slot: 255, ItemRecordID: 6064630000000000003, InstanceGUID: guidOf(0xf6), Quantity: 1, Quality: 200, Durability: 3.5, CreatedAt: itemTime.Add(5 * time.Second)},
+	}, []*characterv1.Item{
+		{Container: characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE0, Slot: 0, ItemRecordId: 6064630000000000001, InstanceGuid: guidOf(0xd4), Quantity: 17, Quality: 6, CreatedAtMs: itemTime.UnixMilli() + 3000},
+		{Container: characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE1, Slot: 39, ItemRecordId: 6064630000000000002, InstanceGuid: guidOf(0xe5), Quantity: 99, Quality: 1, CreatedAtMs: itemTime.UnixMilli() + 4000},
+		{Container: characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE2, Slot: 255, ItemRecordId: 6064630000000000003, InstanceGuid: guidOf(0xf6), Quantity: 1, Quality: 200, Durability: 3.5, CreatedAtMs: itemTime.UnixMilli() + 5000},
+	}
+}
+
+func TestResourceContainersAreTheEnumValues4To6(t *testing.T) {
+	for want, c := range map[int32]characterv1.ItemContainer{4: characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE0, 5: characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE1,
+		6: characterv1.ItemContainer_ITEM_CONTAINER_RESOURCE2} {
+		if int32(c) != want {
+			t.Errorf("%s = %d, want %d (the values are the wire contract with worldd)", c, int32(c), want)
+		}
+	}
+	if int32(characterv1.ItemContainer_ITEM_CONTAINER_QUEST) != 3 {
+		t.Error("the Quest storage moved")
+	}
+}
+
+func TestResourceItemsCrossTheGrpcBoundaryBothWays(t *testing.T) {
+	items, protoItems := resourceItems()
+	st := &recStore{ret: fullCharacter(), items: items}
+	c := dialRec(t, st)
+	got, err := c.GetCharacter(context.Background(), &characterv1.GetCharacterRequest{Id: "0123456789abcdef0123456789abcdef", IncludeItems: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fullProto()
+	want.Items = protoItems
+	wantProtoEqual(t, "the character with resource items", got.GetCharacter(), want)
+
+	st = &recStore{}
+	resp, err := dialRec(t, st).SaveInventory(context.Background(), &characterv1.SaveInventoryRequest{Id: "0123456789abcdef0123456789abcdef", Items: protoItems})
+	if err != nil || resp.GetSaved() != 3 {
+		t.Fatalf("SaveInventory = %v, %v", resp, err)
+	}
+	for i, w := range items {
+		if st.gotItems[i] != w {
+			t.Errorf("item %d reached the store as %+v, want %+v", i, st.gotItems[i], w)
+		}
+	}
+}
+
+func TestResourceItemsThroughTheServiceOnTheRealStore(t *testing.T) {
+	pool := dbtest.Pool(t)
+	ctx := context.Background()
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var account int64
+	if err := pool.QueryRow(ctx, `INSERT INTO accounts (username, password_hash) VALUES ('Owner', 'x') RETURNING id`).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	_, kit := someItems()
+	_, resource := resourceItems()
+	c := dialWith(t, character.NewStore(pool), &recKits{})
+	created, err := c.CreateCharacter(ctx, &characterv1.CreateCharacterRequest{AccountId: account, Name: "cyb", ClassId: 2, ClassName: "Bard", AppearanceJson: "{}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created.GetCharacter().GetId()
+	all := append(append([]*characterv1.Item{}, kit...), resource...)
+	if resp, err := c.SaveInventory(ctx, &characterv1.SaveInventoryRequest{Id: id, Items: all}); err != nil || resp.GetSaved() != 6 {
+		t.Fatalf("SaveInventory = %v, %v", resp, err)
+	}
+	got, err := c.GetCharacter(ctx, &characterv1.GetCharacterRequest{Id: id, IncludeItems: true})
+	if err != nil || len(got.GetCharacter().GetItems()) != 6 {
+		t.Fatalf("GetCharacter = %v, %v", got, err)
+	}
+	for i, want := range all {
+		if !proto.Equal(got.GetCharacter().GetItems()[i], want) {
+			t.Errorf("item %d came back as %v, want %v", i, got.GetCharacter().GetItems()[i], want)
+		}
+	}
+	// an instance guid is unique per character across the Backpack and a resource container: refused, nothing changed
+	clash := proto.Clone(resource[0]).(*characterv1.Item)
+	clash.InstanceGuid = kit[0].InstanceGuid
+	if _, err := c.SaveInventory(ctx, &characterv1.SaveInventoryRequest{Id: id, Items: []*characterv1.Item{kit[0], clash}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("one guid in the Backpack and a resource container: %v, want InvalidArgument", err)
+	}
+	got, _ = c.GetCharacter(ctx, &characterv1.GetCharacterRequest{Id: id, IncludeItems: true})
+	if len(got.GetCharacter().GetItems()) != 6 {
+		t.Errorf("the refused save changed the items: %v", got.GetCharacter().GetItems())
+	}
+}
+
 // The mounts milestone (migration 0007): a mount item's persisted Health, Mana and lock time cross the boundary both ways, and an item that keeps none
 // stays as it was (nil, nil and 0).
 func TestMountItemStateCrossesTheGrpcBoundary(t *testing.T) {

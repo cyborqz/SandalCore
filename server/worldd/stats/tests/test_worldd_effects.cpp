@@ -132,9 +132,16 @@ public:
     double targets = 0, xp_debt = 0;
     std::map<std::string, double> fns;   // by "FN|NAME"
     double host_fn(int fn, const std::string& name, const double* args, int n) override {
+        if (fn == kHostRandIntRange && n >= 2) {
+            // a whole number from lo to hi from the case's source; lo when the range is empty, and then no random number is used (statprog's TableHost)
+            const double lo = std::floor(args[0]), hi = std::floor(args[1]);
+            if (hi < lo) return lo;
+            return lo + std::floor(rng.rand_double() * (hi - lo + 1.0));
+        }
         const auto it = fns.find(std::to_string(fn) + "|" + name);
         double v = it == fns.end() ? 0 : it->second;
         if (fn >= kHostNodeBiome && fn <= kHostNodeLast) return v;   // a node read's answer is a rank or an ordinal: the numbers it is given are not added to it
+        if (fn >= kHostGatherFirst && fn <= kHostGatherLast) return v;   // a gathering read's answer is a rating, a quality, a tier or a duration: the role it is given is not added
         for (int i = 0; i < n; ++i) v += args[i];
         return v;
     }
@@ -235,7 +242,7 @@ bool load_corpus(const std::string& path, Corpus& c, std::string& err) {
         } else if (k == "derive") {
             if (w.size() != 4) return bad("derive");
             c.derived.push_back({w[1], w[2]});
-        } else if (k == "case" || k == "nodehost") {   // a plain case is test_worldd_stats's; a nodehost block is test_worldd_city_nodes's
+        } else if (k == "case" || k == "nodehost" || k == "gatherhost") {   // a plain case and a gatherhost block are test_worldd_stats's; a nodehost block is test_worldd_city_nodes's
             skipping = true;
         } else if (k == "fxcase") {
             if (w.size() != 5) return bad("fxcase");

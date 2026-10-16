@@ -8,6 +8,7 @@
 // ============================================================================
 #include "session/actor_view.h"
 
+#include "gather/node_wire.h"
 #include "world/interaction_state.h"
 
 #include <spdlog/spdlog.h>
@@ -127,13 +128,22 @@ const repl::Actor& ActorView::view_of(const world::WorldActor& a, repl::Actor& s
     if (!config_.player_guid || !world::is_interactable(a.actor)) return a.actor;
     scratch = a.actor;
     world::set_player(scratch, *config_.player_guid, true);
+    // Gathering stage 2: the harvester's own client has its pawn in the node's InteractingPlayer while the harvest shows it (no other connection does: gather/node_wire.h); Gathering stage 3: and
+    // in the corpse's of a huntable creature while a hunt of it runs
+    if (a.kind == world::ActorKind::Gatherable || (a.kind == world::ActorKind::Npc && a.gather.player_id != 0)) gather::show_interacting_player(a, config_.player_id, scratch);
     return scratch;
 }
 
-std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, repl::ActorShadow& work) {
+std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, repl::ActorShadow& work, bool first) {
     bool failed = false;
     repl::Actor scratch;
-    const repl::Actor& actor = view_of(a, scratch);
+    const repl::Actor* shown = &view_of(a, scratch);
+    if (first && a.first_open_form) {   // the connection's first look at the actor: its first-open form (a copy; the registry's actor is never touched)
+        if (shown != &scratch) scratch = *shown;
+        a.first_open_form(scratch);
+        shown = &scratch;
+    }
+    const repl::Actor& actor = *shown;
     if (a.open_exports.empty()) return repl::open_actor(actor, work, acks_, &failed);
     // the blocks by hand: the actor's block carries the exports its values name by path
     std::vector<repl::ContentBlock> blocks;
@@ -158,7 +168,16 @@ bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snap
         return false;
     }
     repl::ActorShadow work;   // a new channel: the client has nothing of the actor (the shadow's masks stay: there are none)
-    auto em = build_open(a, work);
+    bool first = true;
+    if (a.keep_fast_shadow) {   // ... but for the fast arrays of an actor it keeps them of: it has the list it was last sent, and the open sends the changes
+        const auto kept = kept_.find(a.id);
+        if (kept != kept_.end()) {
+            work = kept->second;
+            work.keep_fast = true;
+            first = false;
+        }
+    }
+    auto em = build_open(a, work, first);
     if (!em) {
         e.broken = true;
         ++stats_.broken;
@@ -176,7 +195,16 @@ bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snap
         spdlog::info("[scenery] open for player {} on channel {}: {} (node {}), level {}, {} items, PlotChangeVersion {}, {} payload bits, {} bits in the open", config_.player_id, channel,
                      a.scenery.name, a.scenery.node, a.scenery.level, a.scenery.items, a.scenery.plot_version, a.scenery.payload_bits, open_bits);
     }
+    if (a.kind == world::ActorKind::Foliage) {   // Gathering stage 3: the user's test reads these (the cell actor's states are what hides a cut tree; its mere presence is what lets the client offer one)
+        // every cell has an actor from the start, so the opens are many: the first 100 first looks are said, and every open of a cell that was ever cut or grew (its version moved) always is
+        const bool changed = a.version > 1;
+        const bool say = changed || foliage_opens_logged_ < 100;
+        if (!changed) ++foliage_opens_logged_;
+        spdlog::log(say ? spdlog::level::info : spdlog::level::debug, "[foliage] state actor open for player {} on channel {}: {} ({}, {} bits)", config_.player_id, channel, a.label,
+                    first ? "first look at the cell" : "the changes since the last look", open_bits);
+    }
     forget_chains(e);   // a new channel: the client has nothing, the open sends it all
+    kept_.erase(a.id);  // (the shadow is the entry's again until the channel closes)
     e.open_chain = open_chain;
     e.open_parts_left = open_parts;
     e.open_acked = false;
@@ -187,7 +215,7 @@ bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snap
     e.sent_version = a.version;
     e.sent_reliable = a.reliable_version;
     e.state = snapshot ? ClientState::Snapshot : ClientState::Awake;
-    e.close_due = now + config_.relevancy.dormancy_delay;
+    e.close_due = now + (a.dormancy_delay.count() > 0 ? a.dormancy_delay : config_.relevancy.dormancy_delay);
     channel_owner_[channel] = a.id;
     stats_.peak_channels = std::max(stats_.peak_channels, channel_owner_.size());
     if (snapshot) pending_snapshots_.push_back(a.id);
@@ -255,6 +283,10 @@ bool ActorView::close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, 
         }
     }
     release(e);
+    if (const world::WorldActor* held = registry_.find(id); held && held->keep_fast_shadow) {
+        kept_[id] = std::move(e.shadow);
+        kept_[id].keep_fast = true;
+    }
     e.shadow = repl::ActorShadow{};
     // A Dormancy close leaves the client's actor as the last updates left it: an update still in flight that is lost makes that stale, so
     // the ledger and the routing of its events stay until they come (on_ack).  Any other close ends the entry.
@@ -268,6 +300,7 @@ bool ActorView::close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, 
 // built by Cyb with C.O.A
 
 void ActorView::on_removed(const world::WorldActor& a) {
+    kept_.erase(a.id);
     const auto it = entries_.find(a.id);
     if (it == entries_.end() || it->second.state == ClientState::None) return;
     Removed r;
@@ -369,17 +402,20 @@ bool ActorView::update_now(Connection& conn, uint64_t actor) {
 void ActorView::tick(Connection& conn, double x, double y, Clock::time_point now) {
     if (finished_) return;
     flush_removed(conn);
-    // the Dormancy closes whose time has come: the snapshots in the order they were opened
-    while (!pending_snapshots_.empty()) {
-        const uint64_t id = pending_snapshots_.front();
+    // the Dormancy closes whose time has come: the snapshots in the order they were opened (an actor with a delay of its own may be due after one opened later)
+    for (size_t i = 0; i < pending_snapshots_.size();) {
+        const uint64_t id = pending_snapshots_[i];
         const auto it = entries_.find(id);
         if (it == entries_.end() || it->second.state != ClientState::Snapshot) {   // woke up, was destroyed or forgotten meanwhile
-            pending_snapshots_.pop_front();
+            pending_snapshots_.erase(pending_snapshots_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
-        if (now < it->second.close_due) break;
+        if (now < it->second.close_due) {
+            ++i;
+            continue;
+        }
         if (!close(conn, id, it->second, kCloseDormancy, ClientState::Dormant)) break;
-        pending_snapshots_.pop_front();
+        pending_snapshots_.erase(pending_snapshots_.begin() + static_cast<std::ptrdiff_t>(i));
     }
     if (passed_ && now - last_pass_ < config_.relevancy.tick) return;
     passed_ = true;
@@ -416,7 +452,9 @@ void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now
         const auto it = entries_.find(id);
         const ClientState prior = it == entries_.end() ? ClientState::None : it->second.state;
         const double d = world::horizontal_distance(a->x, a->y, x, y);
-        cands.push_back({d, id, world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, prior)});
+        world::Ring ring = world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, prior);
+        if (a->snapshot_only && ring == Ring::Awake) ring = Ring::Snapshot;   // never awake: a snapshot wherever it is in range
+        cands.push_back({d, id, ring});
         // a wide actor (a town's replicator, 1.45 km) is found by query_wide: raising the grid query's radius to it would make every view visit a quarter of the world's cells for good
         if (a->awake_radius_cm > largest_awake_ && a->awake_radius_cm <= world::ActorRegistry::kWideCm) largest_awake_ = a->awake_radius_cm;
     }

@@ -198,7 +198,13 @@ struct SplitMix {
         z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
         return z ^ (z >> 31);
     }
-    double rand_double() { return static_cast<double>(next() >> 11) * (1.0 / 9007199254740992.0); }
+    double rand_double() {
+        if (script && scripted < script->size()) return (*script)[scripted++];   // a test's forced draws come first
+        return static_cast<double>(next() >> 11) * (1.0 / 9007199254740992.0);
+    }
+    /// Gathering stage 2: numbers in [0, 1) that rand_double() returns before it draws from the generator (the tests' way to force a roll). Null: none. The draws used are counted.
+    const std::vector<double>* script = nullptr;
+    size_t                     scripted = 0;
 };
 // C.Y.B with CoA
 
