@@ -72,6 +72,8 @@ launch_worldd.bat
 ```
 It checks that the programs are built, then starts the full stack with `worldd` as the world server. The other launchers in `scripts\` (`launch_all.bat`, `launch_go.bat`, `launch_native.bat`) are for development.
 
+The client is started with `-UseEOS=false`, so it runs without Epic Online Services; no game files are modified.
+
 ### 2. Backend services only
 
 ```powershell

@@ -173,12 +173,13 @@ rem                          game server's address, so it connects straight away
 rem                          instead of stopping at the title screen and lobby
 set "SERVER_ARGS=--use-embedded-bootstrap --enable-live-world --live-world-hz 20 --send-hit-confirmations --send-level-visibility-acks"
 set "MODE_NAME=replay"
-set "CLIENT_ARGS="
+rem  The client runs without Epic Online Services.
+set "CLIENT_ARGS=-UseEOS=false"
 if /I "%~1"=="native" (
     set "SERVER_ARGS=--native --no-replay-loop"
     set "MODE_NAME=native"
     rem  Verbose client logs for possession and movement (AOC.log)
-    set "CLIENT_ARGS=-LogCmds="LogPlayerController Verbose, LogCharacterMovement Verbose, LogNetPlayerMovement Verbose""
+    set "CLIENT_ARGS=%CLIENT_ARGS% -LogCmds="LogPlayerController Verbose, LogCharacterMovement Verbose, LogNetPlayerMovement Verbose""
 )
 set "QUICK=0"
 set "CONNECT_URL="
