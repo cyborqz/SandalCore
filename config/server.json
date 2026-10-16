@@ -7,5 +7,5 @@
     "auth_server_host": "127.0.0.1",
     "auth_server_port": 8081,
     "log_level":        "debug",
-    "client_extra_args": ""
+    "client_extra_args": "-UseEOS=false"
 }
