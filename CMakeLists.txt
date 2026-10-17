@@ -21,6 +21,29 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${AOC_DIST_ROOT}/RelWithDebIn
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL     "${AOC_DIST_ROOT}/MinSizeRel")
 message(STATUS "AshesOfCreation dist/ root: ${AOC_DIST_ROOT}")
 
+# ── Game data the build includes ─────────────────────────────────────────
+# scripts/extract_game_data.ps1 (extract_game_data.bat) makes these from your own Ashes of Creation install; they are git-ignored.
+set(AOC_GENERATED_FILES
+    server/worldd/world/zoi_surface_table.h
+    server/worldd/world/node_constants.h
+    server/worldd/spawns/region_data.h
+    server/worldd/spawns/garden_defs.h
+    server/worldd/stats/testdata/corpus.txt
+    server/worldd/tests/talent_fixture.sql
+    server/worldd/tests/gear_fixture.h
+    server/worldd/tests/tooltip_key.h
+)
+set(AOC_MISSING_GENERATED "")
+foreach(f ${AOC_GENERATED_FILES})
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${f}")
+        list(APPEND AOC_MISSING_GENERATED ${f})
+    endif()
+endforeach()
+if(AOC_MISSING_GENERATED)
+    list(JOIN AOC_MISSING_GENERATED "\n    " AOC_MISSING_TEXT)
+    message(FATAL_ERROR "These files are made from your own Ashes of Creation install and are missing:\n    ${AOC_MISSING_TEXT}\nRun extract_game_data.bat (it builds all the game data), then build again.")
+endif()
+
 # ── Dependencies ────────────────────────────────────────────────────────────
 find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)

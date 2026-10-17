@@ -11,6 +11,7 @@
 #      .\scripts\run_tests.ps1 -SaveBaseline FILE      # write summary to FILE
 #      .\scripts\run_tests.ps1 -CompareTo FILE         # exit 1 if results differ
 #      .\scripts\run_tests.ps1 -Heavy                  # also run the heavy tests (below)
+#      .\scripts\run_tests.ps1 -Jobs 6                 # build at most 6 projects at a time (default: every core)
 #
 #  The heavy tests (test_worldd_region_load: 1 GB of ground, about a minute, wall-clock checks) are NOT in the default gate: on a PC that is also building or
 #  playing a timing check can flip, and the PC hard-resets under load.  -Heavy runs them (G1 review B I1); the plan's last task and the lead do, alone, under the
@@ -28,7 +29,8 @@ param(
     [switch] $NoBuild,
     [string] $SaveBaseline,
     [string] $CompareTo,
-    [switch] $Heavy
+    [switch] $Heavy,
+    [int]    $Jobs = 0
 )
 $ErrorActionPreference = 'Stop'
 if ($SaveBaseline -and $CompareTo) { throw "use -SaveBaseline or -CompareTo, not both" }
@@ -47,9 +49,10 @@ if (-not $NoBuild) {
     # MSBuild relinks the current ones below.
     Remove-Item (Join-Path $dist 'test_*.exe') -ErrorAction SilentlyContinue
     if (-not (Test-Path (Join-Path $build 'CMakeCache.txt'))) {
-        & (Join-Path $PSScriptRoot 'build.ps1') -Config $Config -Configure
+        & (Join-Path $PSScriptRoot 'build.ps1') -Config $Config -Configure -Jobs $Jobs
     }
-    & $cmake --build $build --config $Config -- /m /v:minimal /nologo
+    $mArg = if ($Jobs -gt 0) { "/m:$Jobs" } else { '/m' }
+    & $cmake --build $build --config $Config -- $mArg /nr:false /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
 }
 

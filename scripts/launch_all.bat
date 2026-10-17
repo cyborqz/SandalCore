@@ -112,9 +112,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem First launch: unpack content.db + aoc.usmap into dist\content, and create this machine's own
-rem TLS certificates in certs\ (local CA trusted for your user; no keys ship with Sandal Core).
-powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\install_content.ps1" || goto :fail
+rem First launch: build the game data (content.db, the tables, the navigation mesh) from your own game install into dist\content (a no-op once it is there),
+rem and create this machine's own TLS certificates in certs\ (local CA trusted for your user; no keys ship with Sandal Core).
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\extract_game_data.ps1" || goto :fail
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\make_certs.ps1" || goto :fail
 
 if exist "%CERTS_DIR%\" (

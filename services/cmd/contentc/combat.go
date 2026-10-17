@@ -5,7 +5,6 @@
 package main
 
 import (
-	_ "embed"
 	"errors"
 	"fmt"
 	"os"
@@ -20,11 +19,9 @@ import (
 )
 
 // The combat configuration (plan E1, stage 3): the DamageProfile of DefaultCombat.ini's [/Script/GameSystemsPlugin.CombatConfig] GameSettings.Stats,
-// the stats the game's damage formulas read, and the numbers of the combat rules. The client's Config directory is the source when given; without it the
-// copy of the file embedded here is (the profile is design data the server cannot work without, unlike StatRegenTime's documented default).
-
-//go:embed default_combat.ini
-var defaultCombatINI string
+// the stats the game's damage formulas read, and the numbers of the combat rules. The source is DefaultCombat.ini of the client's Config directory
+// (--config; `mapc export-config` writes it from the player's own game files): the profile is design data the server cannot work without, unlike
+// StatRegenTime's documented default.
 
 // parenSpan is the text of the parenthesised group that opens at s[open] ("(" at open), without the parentheses; quoted text is skipped.
 func parenSpan(s string, open int) (string, bool) {
@@ -203,19 +200,17 @@ func parseCombat(text, source string) (*combatConfig, error) {
 	return cc, nil
 }
 
-// loadCombat reads DefaultCombat.ini from the Config directory, or the embedded copy when there is none.
+// loadCombat reads DefaultCombat.ini from the Config directory.
 func loadCombat(configDir string) (*combatConfig, error) {
-	if configDir != "" {
-		path := filepath.Join(configDir, "DefaultCombat.ini")
-		data, err := os.ReadFile(path)
-		switch {
-		case err == nil:
-			return parseCombat(string(data), "DefaultCombat.ini")
-		case !errors.Is(err, os.ErrNotExist):
-			return nil, err
-		}
+	if configDir == "" {
+		return nil, errors.New("DefaultCombat.ini is needed: give the client's Config directory (--config, or AOC_CLIENT_CONFIG); scripts/extract_game_data.ps1 writes it with `mapc export-config`")
 	}
-	return parseCombat(defaultCombatINI, "DefaultCombat.ini (the copy built into contentc)")
+	path := filepath.Join(configDir, "DefaultCombat.ini")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseCombat(string(data), "DefaultCombat.ini")
 }
 
 // [C.Y.B - C-O-A]

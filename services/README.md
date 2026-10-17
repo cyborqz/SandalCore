@@ -589,7 +589,7 @@ Tests: `cmd/contentc/population_test.go` (`TestArchetypePath`, `TestSyntheticPop
 | `relationship`, `alignment_relation` | 25; 303 | the relationship records (`CombatPermissions`: 1 hostile, 2 friendly, 3 neutral) and every alignment's relationship to the others (`CharacterAlignment.RelationshipsIds`) |
 | `combat_config` | 9 | the numbers of `GameSettings`: the in-combat timer 6 s, the global damage and healing multipliers, the out-of-range distance, the hit distances |
 
-The file of the client's Config directory is the source when given (`--config`); without it the copy embedded in contentc (`cmd/contentc/default_combat.ini`) is. The stat program is **format version 3** (`internal/statprog/README.md`): the NPC profile classes and the native damage functions. `npc_motion.tsv` (`tools/mapc`) gains the `lists`, `dist`, `elite` and `rewards` columns. Tests: `cmd/contentc/combat_test.go`. **Rebuild `content.db` with this contentc after pulling it**: worldd refuses an older file (no combat tables, a version 2 stat program).
+The source is `DefaultCombat.ini` of the client's Config directory (`--config`; `mapc export-config` writes it). The stat program is **format version 3** (`internal/statprog/README.md`): the NPC profile classes and the native damage functions. `npc_motion.tsv` (`tools/mapc`) gains the `lists`, `dist`, `elite` and `rewards` columns. Tests: `cmd/contentc/combat_test.go`. **Rebuild `content.db` with this contentc after pulling it**: worldd refuses an older file (no combat tables, a version 2 stat program).
 
 ## Rewards (plan E1, stage 3, part 2, contentc version 10)
 
@@ -693,7 +693,7 @@ Enums are stored as their text and, where the host answers with them, as the ord
 
 **The node reads of an expression.** `GetNodeBiome`, `GetCurrentNode`, `GetNodeRecord`, `Node_GetNodeType`, `Node_GetLevel`, `Node_InLevelRangeInclusive`, `Node_IsPlayerCitizen`, `Node_IsPlayerCitizenOfNode` and `Node_IsPlayerMayor` (with `GetPlayer`, `GetPlayerGuid` and `EnumInt` around them) are host functions 170 to 177 (`internal/aocexpr/hostfn.go`, `internal/statprog/nodes.go`, worldd's `stats/stat_program.h`). A node is its **rank** in a program (a guid does not fit a float32; `-1` for none), an enum answer is the value's ordinal, and the compiler turns a node reference (`$#<CityNodeRecord type>:<guid>$` or `$CityNode:<record name>$`) and an enum literal compared with an answer into the same numbers. `Node_InLevelRangeInclusive` is the level the host gives compared with the two bounds, in the program. The 12 expressions of the loot tables that read `GetNodeBiome` compile now (the 43 biome-gated reward tables roll in worldd: `BaseLoot_Melee_RVR`, `_TUR`, `_NONE` ...). The citizen and mayor reads answer false until the citizenship milestone. The Go side's model of the host is `statprog.NodeWorld`; the shared corpus (`server/worldd/stats/testdata/corpus.txt`) has `nodehost` blocks it writes and worldd's `world::node_host_fn` must answer the same (`test_worldd_city_nodes`), and the tiny graph's expressions run all of it on both engines.
 
-**The constants the design DB lacks.** `tools/capture/gen_node_constants.py` reads `DefaultAoCRecordConstants.ini` of the Cache.db export (`--ini`, or `AOC_CLIENT_CONFIG`) and writes `internal/citynode/constants_gen.go` and `server/worldd/world/node_constants.h`: `CityNodeExpToLevel`, `CityNodeReputationToLevel`, `MaxNodeLevel` (Town), `MinimumOperationalNodeLevel` (Village), the citizenship level, the vassalship switches, the building, mayor and siege timers and the records the ini selects. Files rather than a `content.db` table because citynode does not open `content.db`, worldd needs them as compile-time numbers and contentc stays a function of `CacheDB.dbc`. `--check` is part of `scripts\generators.ps1` (skipped when the ini is not there).
+**The constants the design DB lacks.** `tools/capture/gen_node_constants.py` reads `DefaultAoCRecordConstants.ini` of the game's Config folder (`--ini`, or `AOC_CLIENT_CONFIG`; `mapc export-config` writes it) and writes `internal/citynode/constants_gen.go` and `server/worldd/world/node_constants.h`: `CityNodeExpToLevel`, `CityNodeReputationToLevel`, `MaxNodeLevel` (Town), `MinimumOperationalNodeLevel` (Village), the citizenship level, the vassalship switches, the building, mayor and siege timers and the records the ini selects. Files rather than a `content.db` table because citynode does not open `content.db`, worldd needs them as compile-time numbers and contentc stays a function of `CacheDB.dbc`. `--check` is part of `scripts\generators.ps1` (skipped when the ini is not there).
 
 **The ZOI surface.** `tools/capture/gen_zoi_surface.py` decodes the ZOI chunk grid of the export (30,558 files) into `server/worldd/world/zoi_surface_table.h`: the owner of every 512 cm cell of the world at the surface height, run-length coded (4,635 chunk columns, 58 owners), so that `world::zoi_at(x, y)` gives the zone at a point for the whole world. See `server/worldd/README.md`.
 
@@ -808,8 +808,8 @@ The inputs stay outside the repo and are given as flags with environment default
 | Flag | Environment | What |
 |---|---|---|
 | `--dbc` | `AOC_DESIGN_DB` | the client's `CacheDB.dbc`, in the game's `Game\AOC\Plugins\DesignDataPlugin\Generated\Client` |
-| `--usmap` | `AOC_USMAP` | the mappings file: `dist/content/aoc.usmap`, generated from the client (below), or the old `5.6.0-434126+++game+jvs_game_rel-AOC_FIXED.usmap`; both decode every table |
-| `--config` | `AOC_CLIENT_CONFIG` | optional: the Cache.db export's `AOC\Config` directory, for `StatRegenTime` in `DefaultCombat.ini` (without it the documented default, 1 s, is used and the rule's source says so) |
+| `--usmap` | `AOC_USMAP` | the mappings file: `layouts/aoc.usmap` (`extract_game_data.bat` copies it to `dist/content/aoc.usmap`) |
+| `--config` | `AOC_CLIENT_CONFIG` | the game's `AOC\Config` directory (`mapc export-config` writes it to `dist/content/client_config`): `DefaultCombat.ini` is the source of the combat tables and of `StatRegenTime` |
 | `--out` | | `dist/content/content.db` at the repo root (git-ignored) |
 | `--artisan-curves` | `AOC_ARTISAN_CURVES` | optional (Gathering stage 2): `mapc artisan-curves`' output, the profession level-up curves of the paks; default `dist/content/artisan_curves.tsv`. Without it the placeholder curves stay and the build says so |
 | `--record-encoding` | | `gzip+json` (default) or `json`, see below |
@@ -821,35 +821,18 @@ warns when it finds one, and `meta` records the names. Until 2026-10-01 there wa
 none of them one of the typed tables, and `meta` keeps a note of that. The folder holds only
 `CacheDB.dbc` now.
 
+`extract_game_data.bat` runs contentc with the right inputs. By hand:
+
 ```powershell
-python tools\ghidra\usmapgen.py                                  # writes dist\content\aoc.usmap from the client exe
-$env:AOC_DESIGN_DB = '<AOC_CLIENT_DIR>\...\Generated\Client\CacheDB.dbc'
-$env:AOC_USMAP = 'dist\content\aoc.usmap'   # or the old AOC_FIXED usmap
-$env:AOC_CLIENT_CONFIG = '<AOC_EXPORT_DIR>\AOC\Config'      # optional
+$env:AOC_DESIGN_DB = '<game>\Game\AOC\Plugins\DesignDataPlugin\Generated\Client\CacheDB.dbc'
+$env:AOC_USMAP = 'layouts\aoc.usmap'
+$env:AOC_CLIENT_CONFIG = 'dist\content\client_config'      # written by `mapc export-config`
 cd services; go run ./cmd/contentc
 ```
 
 ### The mappings file
 
-`tools/ghidra/usmapgen.py` writes a `.usmap` from the client executable's own reflection data
-(`AOCClient-Win64-Shipping.exe`, read only; `--exe` to point elsewhere), so the mappings match the
-exact client build. It enumerates every compiled-in class, struct and enum from the UHT registration
-tables (`FClassRegisterCompiledInInfo` and friends), adds the 158 NoExport core structs (`Vector`,
-`Guid`, ...) from a scan for their `FStructParams`, and the intrinsic classes (`Object`, `Class`, ...)
-from their single `RegisterCompiledInInfo` call sites, then reads each type's properties, supers and
-enumerators the way `UECodeGen_Private::ConstructFProperties` does. The output is usmap version 4,
-uncompressed, deterministic (72,456 names, 3,122 enums, 15,419 schemas for the 2026-01-29 client),
-and `--diff OLD.usmap` prints a structured comparison with another file (`--diff-out FILE` for all of
-it). Against the old usmap: 14,927 schemas identical, 422 identical but for the casing of names (the
-old file carries the FName pool's casing, the exe the declared one: `StatTypeDef.Base`, not `base`;
-contentc reads fields without regard to case, `record.data` keeps the usmap's spelling), 60 differ
-only in how static arrays are numbered, 10 differ (properties the client gained, `bMayCorrupt` among
-them), and 943 Blueprint classes and asset-defined structs are only in the old file (they are not in
-the exe; FModel reads them from the assets). The same run writes, with `--go`, the facts a `.usmap`
-cannot carry but the decoder needs, into `internal/designdb/exe_gen.go` (committed): the 398 record
-types by TypeId, the properties the database does not store (Transient), the four 16-byte-aligned
-record structs, and the natively serialized structs. Regenerate both after a client update:
-`python tools\ghidra\usmapgen.py --go services\internal\designdb\exe_gen.go`.
+`layouts/aoc.usmap` is the mappings file of the 2026-01-29 client, usmap version 4, uncompressed (72,456 names, 3,122 enums, 15,419 schemas): the names, types, properties, super classes and enumerators of the game's compiled-in classes, structs and enums, with no game content. contentc and mapc read it to decode the design database and the cooked assets. `internal/designdb/exe_gen.go` (committed) holds the facts a `.usmap` cannot carry but the decoder needs: the 398 record types by TypeId, the properties the database does not store (Transient), the four 16-byte-aligned record structs, and the natively serialized structs. Both files belong to this client build; the generator that made them is not part of this repository.
 
 The output is written beside `--out` and renamed over it when the run has succeeded; a failed run
 leaves the previous file alone. A run takes about 30 s (the table classification runs on all cores, the

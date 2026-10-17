@@ -5,14 +5,31 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"aocrop/services/internal/content"
 )
 
-// TestParseCombatDefault reads the copy of DefaultCombat.ini built into contentc.
+// exportedCombatINI is the DefaultCombat.ini that scripts/extract_game_data.ps1 writes from the player's own game files (AOC_CLIENT_CONFIG, else
+// dist/content/client_config of the checkout). The test skips without it.
+func exportedCombatINI(t *testing.T) string {
+	t.Helper()
+	dir := os.Getenv("AOC_CLIENT_CONFIG")
+	if dir == "" {
+		dir = filepath.Join(repoRoot(), "dist", "content", "client_config")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "DefaultCombat.ini"))
+	if err != nil {
+		t.Skip("DefaultCombat.ini is not at hand (run extract_game_data.bat, or set AOC_CLIENT_CONFIG): " + err.Error())
+	}
+	return string(data)
+}
+
+// TestParseCombatDefault reads the game's DefaultCombat.ini.
 func TestParseCombatDefault(t *testing.T) {
-	cc, err := parseCombat(defaultCombatINI, "default")
+	cc, err := parseCombat(exportedCombatINI(t), "default")
 	if err != nil {
 		t.Fatal(err)
 	}

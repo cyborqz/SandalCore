@@ -17,8 +17,8 @@
 #      -Scan        AOC_ACTORS_SCAN    the research's per-capture actor scan folder (gen_npc_appearance)
 #      -Cc          AOC_RESEARCH_CC    the research's decoded captures, flat/<id>.jsonl (gen_equip)
 #      -ContentDb   AOC_CONTENT_DB     dist\content\content.db (gen_tooltips, gen_gm_garden, gen_pop_golden, gen_node_pop_golden, gen_zoi_surface, gen_equip)
-#      -ClientConfig AOC_CLIENT_CONFIG the Cache.db export's AOC\Config directory (gen_node_constants: DefaultAoCRecordConstants.ini); without it that generator is skipped
-#      -ZoiChunks   AOC_ZOI_CHUNKS     the ZOI chunk folder of the export (gen_zoi_surface); without it that generator is skipped
+#      -ClientConfig AOC_CLIENT_CONFIG the game's AOC\Config directory (gen_node_constants: DefaultAoCRecordConstants.ini); default dist\content\client_config (extract_game_data.bat)
+#      -ZoiChunks   AOC_ZOI_CHUNKS     the ZOI chunk folder (gen_zoi_surface, gen_region_rects); default dist\content\zoi_chunks (extract_game_data.bat)
 #  gen_region.py (G1 stage 1) reads fixtures\region\*.json only;
 #  gen_gm_garden.py and gen_pop_golden.py (G1 stage 1, Part B) read content.db (the second also npc_motion.tsv and spawns\area_spawns.h); gen_node_pop_golden.py (Nodes 1, stage 3b) the same
 #  for the towns' people (tests\node_pop_golden.h).
@@ -43,6 +43,8 @@ param(
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 if (-not $ContentDb) { $ContentDb = Join-Path $root 'dist\content\content.db' }
+if (-not $ClientConfig) { $ClientConfig = Join-Path $root 'dist\content\client_config' }
+if (-not $ZoiChunks) { $ZoiChunks = Join-Path $root 'dist\content\zoi_chunks' }
 # Nodes 1: the research inputs outside the repository (nothing is searched for: set the variable or pass the parameter)
 $python = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $python) { throw "python is not on PATH" }
@@ -61,6 +63,7 @@ $gens = @(
     # Nodes 1, stage 1: the city node constants from the ini, and the world's ZOI surface table from the chunk grid (both inputs are outside the repository)
     @{ name = 'gen_node_constants';  args = @('--ini', $(if ($ClientConfig) { Join-Path $ClientConfig 'DefaultAoCRecordConstants.ini' } else { '' }), '--check'); needs = @('ClientConfig') },
     @{ name = 'gen_zoi_surface';     args = @('--chunks', $ZoiChunks, '--content-db', $ContentDb, '--check');  needs = @('ZoiChunks', 'ContentDb') },
+    @{ name = 'gen_region_rects';    args = @('--chunks', $ZoiChunks, '--content-db', $ContentDb, '--check');  needs = @('ZoiChunks', 'ContentDb') },
     @{ name = 'contentc roads';      go = @('run', './cmd/contentc', 'roads', '--content', $ContentDb, '--check');                       needs = @('ContentDb', 'RoadsRaw', 'RoadsTsv', 'Go') },
     @{ name = 'contentc roads --levels'; go = @('run', './cmd/contentc', 'roads', '--levels', '--content', $ContentDb, '--check');          needs = @('ContentDb', 'RoadsRaw', 'RoadsLevelsTsv', 'Go') }
 )
