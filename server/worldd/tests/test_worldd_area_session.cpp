@@ -282,11 +282,13 @@ struct Harness {
         }
     }
     void client_sends(std::vector<fake::Bunch> bunches) {
-        const auto pkt = client.packet(std::move(bunches));
-        const std::vector<InBunch> in = conn.receive(pkt, t);
-        s->take_acks(conn);
-        for (const InBunch& b : in) s->on_bunch(conn, b, t);
-        s->end_of_datagram(conn);
+        // a flood goes out as several datagrams, each within the packet size limit the server enforces
+        for (const auto& pkt : client.packets(std::move(bunches))) {
+            const std::vector<InBunch> in = conn.receive(pkt, t);
+            s->take_acks(conn);
+            for (const InBunch& b : in) s->on_bunch(conn, b, t);
+            s->end_of_datagram(conn);
+        }
     }
     void step(milliseconds d = milliseconds(20)) {
         t += d;

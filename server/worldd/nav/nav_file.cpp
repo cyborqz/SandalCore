@@ -58,13 +58,13 @@ struct Reader {
     template <typename T>
     T get() {
         T v{};
-        if (pos + sizeof(T) > size) { ok = false; return v; }
+        if (pos > size || sizeof(T) > size - pos) { ok = false; return v; }
         std::memcpy(&v, p + pos, sizeof(T));
         pos += sizeof(T);
         return v;
     }
     bool bytes(void* dst, size_t n) {
-        if (pos + n > size) { ok = false; return false; }
+        if (pos > size || n > size - pos) { ok = false; return false; }
         std::memcpy(dst, p + pos, n);
         pos += n;
         return true;
@@ -276,7 +276,9 @@ static bool parse_v2_index(const uint8_t* data, size_t size, NavFile* out, uint6
     const uint64_t terrain_dir = r.get<uint64_t>(), chunk_dir = r.get<uint64_t>(), blobs = r.get<uint64_t>(), total = r.get<uint64_t>();
     if (!r.ok || r.pos != kNavHeaderSize2) return fail("area_nav.bin is cut short (header)");
     if (!settings_sane(f) || f.chunk_tiles == 0 || f.chunk_tiles > 64 || nr > 100000 || ng > 100000 || nc > 1000000 || nt > 10000000) return fail("area_nav.bin header values are out of range");
-    if (terrain_dir != kNavHeaderSize2 + 32ull * nr || chunk_dir < terrain_dir + kTerrainDirRow * ng || blobs != chunk_dir + kChunkDirRow * nc || total < blobs) return fail("area_nav.bin offsets are inconsistent");
+    if (terrain_dir != kNavHeaderSize2 + 32ull * nr || chunk_dir < terrain_dir + kTerrainDirRow * ng ||
+        chunk_dir > blobs || blobs > size || blobs - chunk_dir != kChunkDirRow * nc || total < blobs) return fail("area_nav.bin offsets are inconsistent");
+    const uint64_t terrain_samples = terrain_dir + kTerrainDirRow * ng;
     if (file_size) *file_size = total;
     f.region.resize(nr);
     for (auto& q : f.region) { q.x0 = r.get<double>(); q.y0 = r.get<double>(); q.x1 = r.get<double>(); q.y1 = r.get<double>(); }
@@ -291,22 +293,22 @@ static bool parse_v2_index(const uint8_t* data, size_t size, NavFile* out, uint6
         offsets[i] = r.get<uint64_t>();
         if (!r.ok) return fail("area_nav.bin is cut short (terrain directory)");
         if (g.nx < 2 || g.ny < 2 || g.nx > 4096 || g.ny > 4096 || !(g.step_x > 0) || !(g.step_y > 0)) return fail("area_nav.bin terrain grid is out of range");
-        if (offsets[i] + 2ull * g.nx * g.ny > chunk_dir) return fail("area_nav.bin terrain samples are out of place");
+        if (offsets[i] < terrain_samples || offsets[i] > chunk_dir || 2ull * g.nx * g.ny > chunk_dir - offsets[i]) return fail("area_nav.bin terrain samples are out of place");
     }
     for (uint32_t i = 0; i < ng; ++i) {
         auto& g = f.terrain[i];
         const size_t n = static_cast<size_t>(g.nx) * g.ny;
-        if (offsets[i] + n * 2 > size) return fail("area_nav.bin is cut short (terrain heights)");
+        if (offsets[i] > size || n * 2 > size - offsets[i]) return fail("area_nav.bin is cut short (terrain heights)");
         g.raw.resize(n);
         std::memcpy(g.raw.data(), data + offsets[i], n * 2);
     }
-    if (chunk_dir + kChunkDirRow * nc > size) return fail("area_nav.bin is cut short (chunk directory)");
+    if (chunk_dir > size || kChunkDirRow * nc > size - chunk_dir) return fail("area_nav.bin is cut short (chunk directory)");
     Reader cr{data, size, static_cast<size_t>(chunk_dir)};
     f.chunks.resize(nc);
     uint64_t tiles = 0;
     for (auto& c : f.chunks) {
         c.cx = cr.get<int32_t>(); c.cy = cr.get<int32_t>(); c.tiles = cr.get<uint32_t>(); c.size = cr.get<uint32_t>(); c.offset = cr.get<uint64_t>(); c.hash = cr.get<uint64_t>();
-        if (c.offset < blobs || c.offset + c.size > total || c.tiles == 0 || c.size < 12ull * c.tiles) return fail("area_nav.bin has a chunk out of place");
+        if (c.offset < blobs || c.offset > total || c.size > total - c.offset || c.tiles == 0 || c.size < 12ull * c.tiles) return fail("area_nav.bin has a chunk out of place");
         // (review A M6, B M3) a row cannot hold more tiles than its chunk has room for, and a chunk is listed once, in the directory's order
         if (c.tiles > static_cast<uint64_t>(f.chunk_tiles) * f.chunk_tiles) return fail("area_nav.bin has a chunk with more tiles than a chunk holds");
         if (&c != &f.chunks.front() && !(ChunkKey{(&c - 1)->cx, (&c - 1)->cy} < ChunkKey{c.cx, c.cy})) return fail("area_nav.bin's chunk directory is not sorted or lists a chunk twice");

@@ -123,6 +123,16 @@ resolutions are 40/20/10 wide by 20 high), a climb of 45 cm (UE's `MaxStepHeight
   positions (players' ServerMovePacked and the NPCs' and other players' ReplicatedMovement, within 1.1 km of the login spot) lie on the heightfield or a floor of the
   navmesh, the 245 positions of walking players are all on the navmesh within 80 cm, and a path joins every pair of walked places; the one miss is a creature 787 cm under the terrain (a cave).
 
+## Geometry tests
+
+The geometry reader has a standalone regression executable. With the .NET 8 SDK and the pinned CUE4Parse source available, run:
+
+```powershell
+dotnet run --project tools/mapc/tests/Mapc.GeometryTests.csproj -c Release
+```
+
+It checks exact round trips, truncated fields, oversized counts, invalid mesh indices and placements, and trailing bytes. It needs no game files.
+
 ## Third-party code
 
 - **CUE4Parse** (Apache-2.0, `github.com/FabianFG/CUE4Parse`), commit `75983dc51608e0285e5d9ea5f28133e6a4951ccf` of 2025-12-19, 7.5 MB of source, compiled into mapc

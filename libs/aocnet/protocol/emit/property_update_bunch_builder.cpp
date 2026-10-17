@@ -12,6 +12,7 @@
 // ============================================================================
 #include "protocol/emit/property_update_bunch_builder.h"
 #include "protocol/emit/name_update_bunch.h"
+#include "protocol/wire/packet_parser.h"
 #include <cstring>   // memcpy for float→uint32 punning
 
 namespace aoc { namespace protocol { namespace emit {
@@ -895,8 +896,9 @@ void PropertyUpdateBunchBuilder::add_raw_payload(const uint8_t* data,
 //   bit     bHasPackageMapExports   = 0
 //   bit     bHasMustBeMappedGUIDs   = 0
 //   bit     bPartial                = 0
-//   bits    ChSequence (if bReliable) — ch=0 uses 10 bits, ch>0 uses 12 bits
-//   bits    BunchDataBits (SerializeIntPacked)
+//   bits    ChSequence (if bReliable) — SerializeInt(MAX_CHSEQ), 10 bits
+//   bits    ChName (if bReliable)
+//   bits    BunchDataBits (SerializeInt(MAX_PKT_BITS))
 
 void PropertyUpdateBunchBuilder::write_bunch_header(BunchWriter& out,
                                                      uint32_t bunch_data_bits) const {
@@ -922,7 +924,7 @@ void PropertyUpdateBunchBuilder::write_bunch_header(BunchWriter& out,
         // on the wire that drifted the client's ChName parser → CNSF.
         // This is the SAME bug that caused PC.Pawn link CNSF at PM53 test
         // (Size: 520251962 in client log around 13:13:47).
-        out.write_serialize_int(ch_sequence_, 1024);
+        out.write_serialize_int(ch_sequence_ % wire::MAX_CHSEQ, wire::MAX_CHSEQ);
     }
 
     // bPartial=0 → no sub-flags (bPartialInitial / bPartialFinal etc. skipped).
@@ -942,12 +944,9 @@ void PropertyUpdateBunchBuilder::write_bunch_header(BunchWriter& out,
         }
     }
 
-    // BunchDataBits — 13-bit fixed via SerializeInt(MAX_PKT_BITS=8192).
-    // Per RE: parser reads exactly 13 bits (sc_bunch_parser.h L204-206), and
-    // ActorBuilder writes via write_serialize_int(bdb, 1024*8) (actor_builder.cpp
-    // L172).  Earlier we used write_sip() which produced 8/16/24-bit varint —
-    // the client then misframed the bunch payload, silently dropping V3.
-    out.write_serialize_int(bunch_data_bits, 1024 * 8);
+    // The 1028-byte packet limit takes 14 bits for values below 32,
+    // and 13 bits otherwise. Keep this in sync with the canonical parser.
+    out.write_serialize_int(bunch_data_bits, wire::MAX_PKT_BITS);
 }
 // (C | Y | B + CoA)
 

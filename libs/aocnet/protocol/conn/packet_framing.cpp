@@ -107,10 +107,11 @@ size_t bunch_bits(const BunchHeader& h, size_t payload_bits) {
 }
 
 std::optional<DataPacket> read_data_packet(const uint8_t* data, size_t len, wire::Direction dir) {
-    if (len == 0 || data[len - 1] == 0) return std::nullopt;  // no termination bit
+    if (!data || len == 0 || len > kMaxPacketBytes || data[len - 1] == 0) return std::nullopt;
     const size_t eff = ::ue5::strip_termination(data, len);
     if (eff < 38 + 32 + kCustomFieldBytes * 8 + 1 + 1) return std::nullopt;
     const size_t end = eff - 1;  // the sentinel bit
+    if (::ue5::read_bits_at(data, len, end, 1) == 0) return std::nullopt;
     size_t off = 0;
     DataPacket p;
     p.outer.magic_header = static_cast<uint32_t>(::ue5::read_bits(data, len, off, 32));

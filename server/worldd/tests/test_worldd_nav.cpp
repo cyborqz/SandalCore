@@ -91,6 +91,11 @@ static void test_build() {
     wrongp.placements[0].mesh = 5;
     const auto wpb = nav::serialize_geometry(wrongp);
     CHECK(!nav::parse_geometry(wpb.data(), wpb.size(), &g2, &err), "a placement of an unknown mesh is refused");
+    auto excessive = nav::serialize_geometry(nav::Geometry{});
+    const uint32_t placements = 100000000;
+    std::memcpy(excessive.data() + 52, &placements, sizeof placements);
+    CHECK(!nav::parse_geometry(excessive.data(), excessive.size(), &g2, &err) && err.find("counts") != std::string::npos,
+          "a tiny geometry file cannot allocate millions of placements from its header");
 }
 
 static void test_ground() {
@@ -172,6 +177,7 @@ static void test_paths() {
     n.random_point({0, 0, 1000}, 500, 0.3, 0.6, &o2);
     CHECK(o1.x == o2.x && o1.y == o2.y, "the same numbers give the same point");
 }
+// CoA : C Y B
 
 // ---- the Riverlands' key (G1 stage 1): where the retail captures' players walked, anywhere in the region ----------------------------------------------
 static void test_region_key(nav::AreaNav& n) {

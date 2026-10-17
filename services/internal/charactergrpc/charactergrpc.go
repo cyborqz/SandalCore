@@ -162,6 +162,7 @@ func (s *Server) CreateCharacter(ctx context.Context, r *characterv1.CreateChara
 		RaceID: r.GetRaceId(), GenderID: r.GetGenderId(), ClassID: r.GetClassId(), ArchetypeID: archetype,
 		ClassName: className, AppearanceJSON: customization.Normalize(r.GetAppearanceJson()),
 		CreateInfo: r.GetCreateInfo(), Level: r.GetLevel(), Items: items, GMStarterSetGranted: granted,
+		MaxCharacters: character.DefaultMaxCharacters,
 	})
 	if err != nil {
 		return nil, toStatus(ctx, err)
@@ -350,6 +351,8 @@ func (s *Server) DeleteCharacter(ctx context.Context, r *characterv1.DeleteChara
 //     caller only as a generic Internal.
 func toStatus(ctx context.Context, err error) error {
 	switch {
+	case errors.Is(err, character.ErrCharacterLimit):
+		return status.Error(codes.ResourceExhausted, err.Error())
 	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken):
 		return status.Error(codes.AlreadyExists, err.Error())
 	case errors.Is(err, character.ErrNotFound):

@@ -251,11 +251,27 @@ bool CityNodes::apply_seed_file(const std::string& path, std::string& error, siz
     for (auto it = j["nodes"].begin(); it != j["nodes"].end(); ++it) {
         const CityNodeInfo* n = by_name(it.key());
         const auto& e = it.value();
-        if (!n || !e.is_object() || !e.contains("level") || !e["level"].is_number_integer()) {
+        if (!n || !e.is_object() || !e.contains("level") || !(e["level"].is_number_integer() || e["level"].is_number_unsigned())) {
             ++bad;
             continue;
         }
-        const int level = e["level"].get<int>();
+        const auto& level_value = e["level"];
+        int level = 0;
+        if (level_value.is_number_unsigned()) {
+            const uint64_t unsigned_level = level_value.get<uint64_t>();
+            if (unsigned_level > static_cast<uint64_t>(kMaxLevel)) {
+                ++bad;
+                continue;
+            }
+            level = static_cast<int>(unsigned_level);
+        } else {
+            const int64_t signed_level = level_value.get<int64_t>();
+            if (signed_level < 0 || signed_level > kMaxLevel) {
+                ++bad;
+                continue;
+            }
+            level = static_cast<int>(signed_level);
+        }
         if (level < 0 || level > kMaxLevel) {
             ++bad;
             continue;

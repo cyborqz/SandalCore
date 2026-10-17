@@ -104,6 +104,7 @@ bool RepState::set(const schema::ClassSchema& schema, std::string_view path, Val
 }
 
 const Value* RepState::get(uint32_t handle) const {
+    if (handle > UINT16_MAX) return nullptr;
     const auto it = values_.find(static_cast<uint16_t>(handle));
     return it == values_.end() ? nullptr : &it->second;
 }

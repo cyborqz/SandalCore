@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -84,7 +85,14 @@ func Handler(accounts Accounts) http.Handler {
 
 func readCredentials(w http.ResponseWriter, r *http.Request) (credentials, bool) {
 	var c credentials
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&c); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	if err := dec.Decode(&c); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Body must be JSON with username and password.")
+		return c, false
+	}
+	// Consume the whole bounded body: Decode alone accepts a valid prefix and
+	// never notices another document, trailing junk or an oversized tail.
+	if err := dec.Decode(new(any)); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Body must be JSON with username and password.")
 		return c, false
 	}

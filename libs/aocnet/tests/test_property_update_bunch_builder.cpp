@@ -15,6 +15,7 @@
 #include "protocol/emit/bunch_writer.h"
 #include "protocol/emit/name_update_bunch.h"
 #include "protocol/wire/packet_reader.h"
+#include "protocol/wire/packet_parser.h"
 #include "protocol/wire/ue5_primitives.h"
 
 #include <spdlog/spdlog.h>
@@ -72,7 +73,7 @@ void test_name_bunch_structure() {
 
     PropertyUpdateBunchBuilder b;
     b.set_channel(3);            // PC's actor channel
-    b.set_ch_sequence(1978);     // matches captured pkt#22's ChSeq
+    b.set_ch_sequence(1978);     // wraps to 954 in the 10-bit sequence field
     b.add_name_update("MyHero");
 
     // Expected queued payload = 216 bits (16B prefix + 4B len + 7B "MyHero\0")
@@ -107,9 +108,9 @@ void test_name_bunch_structure() {
     uint64_t b_partial = read_bits(out.data(), cursor, 1); cursor += 1;
     CHECK(b_partial == 0, "bPartial = 0 (key requirement)");
 
-    uint32_t ch_seq = static_cast<uint32_t>(read_bits(out.data(), cursor, 12));
-    cursor += 12;
-    CHECK(ch_seq == 1978, "ChSequence = 1978");
+    uint32_t ch_seq = ue5::read_serialize_int(out.data(), out.byte_size(), cursor,
+                                             aoc::protocol::wire::MAX_CHSEQ);
+    CHECK(ch_seq == 954, "ChSequence wraps 1978 to 954 (10 bits)");
 
     // ChName — emitted by the builder for reliable, non-partial bunches.
     // Defaults: hardcoded=1 + SIP(103) — empirical most-common EName from
@@ -121,12 +122,8 @@ void test_name_bunch_structure() {
     uint32_t ch_name_idx = read_sip(out.data(), cursor);
     CHECK(ch_name_idx == 103, "ChName.EName = 103 (empirical Actor default)");
 
-    // BDB = 13 bits fixed (CeilLog2(MAX_PKT_BITS=8192)=13). Matches
-    // sc_bunch_parser.h L204 and actor_builder.cpp L172. Earlier this test
-    // used read_sip() because the builder mistakenly wrote SIP — that bug
-    // misframed the bunch on the wire and silently dropped V3 emits.
-    uint32_t bdb = static_cast<uint32_t>(read_bits(out.data(), cursor, 13));
-    cursor += 13;
+    uint32_t bdb = ue5::read_serialize_int(out.data(), out.byte_size(), cursor,
+                                          aoc::protocol::wire::MAX_PKT_BITS);
     CHECK(bdb == 216, "BunchDataBits = 216 (matches payload)");
 
     // Remaining bits should be exactly the payload (216 bits).
@@ -143,7 +140,8 @@ void test_name_bunch_structure() {
     build_name_update_bunch_payload("MyHero", expected_payload);
 
     bool payload_ok = true;
-    for (size_t i = 0; i < payload_bits; ++i) {
+    payload_ok = payload_bits == expected_payload.bit_pos();
+    for (size_t i = 0; payload_ok && i < payload_bits; ++i) {
         int a_bit = (out.data()[(cursor + i) >> 3] >> ((cursor + i) & 7)) & 1;
         int b_bit = (expected_payload.data()[i >> 3] >> (i & 7)) & 1;
         if (a_bit != b_bit) {
@@ -154,6 +152,27 @@ void test_name_bunch_structure() {
         }
     }
     CHECK(payload_ok, "payload matches build_name_update_bunch_payload exactly");
+
+    aoc::protocol::wire::PacketReader reader(out.data(), out.byte_size(), total_bits);
+    const auto parsed = aoc::protocol::wire::parse_bunch_header(reader, total_bits);
+    CHECK(parsed && !reader.overflowed() && parsed->ch_sequence == 954 &&
+          parsed->bunch_data_bits == 216 && parsed->data_start_bit == cursor,
+          "canonical bunch parser agrees with the emitted header");
+}
+
+void test_empty_bunch() {
+    for (bool reliable : {false, true}) {
+        PropertyUpdateBunchBuilder b;
+        b.set_channel(3);
+        b.set_reliable(reliable);
+        BunchWriter out;
+        const size_t bits = b.build(out);
+        aoc::protocol::wire::PacketReader reader(out.data(), out.byte_size(), bits);
+        const auto parsed = aoc::protocol::wire::parse_bunch_header(reader, bits);
+        CHECK(parsed && !reader.overflowed() && parsed->is_reliable == reliable &&
+              parsed->bunch_data_bits == 0 && parsed->data_start_bit == bits,
+              "zero-bit bunch uses the current adaptive BunchDataBits width");
+    }
 }
 
 // ─── Test B: Reuse builder for multiple bunches ────────────────────────
@@ -207,6 +226,7 @@ int main() {
     test_name_bunch_structure();
     test_reset_queue();
     test_randomchar_payload_identity();
+    test_empty_bunch();
 
     spdlog::info("");
     spdlog::info("==========================================");

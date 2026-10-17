@@ -157,7 +157,9 @@ struct ObjectShadow {
     /// Forgets that `handle` was sent: the next update sends it again, whatever its value.  Unexplained: UE has no known
     /// mechanism that resends an unchanged value; the original server did, AuthServerIDReplicated's 0 at pkt#107, and
     /// this reproduces the capture.
-    void invalidate(uint32_t handle) { rep.sent.erase(static_cast<uint16_t>(handle)); }
+    void invalidate(uint32_t handle) {
+        if (handle <= UINT16_MAX) rep.sent.erase(static_cast<uint16_t>(handle));
+    }
 
     /// A new channel: the client has nothing of the object.  `active` stays.  `keep_fast`: the fast arrays' shadows stay too (the client keeps its copy of them across a
     /// Dormancy close, and the open sends the arrays as deltas against it: a foliage cell's list of cut instances).

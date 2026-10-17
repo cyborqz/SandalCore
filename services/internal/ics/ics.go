@@ -25,6 +25,7 @@ import (
 	characterv1 "aocrop/services/gen/aoc/character/v1"
 	icscommon "aocrop/services/gen/ics/common"
 	icsxclient "aocrop/services/gen/ics/xclient"
+	"aocrop/services/internal/character"
 )
 
 // Account is who a session belongs to.
@@ -77,7 +78,7 @@ type Config struct {
 	WorldName     string        // shown in the world list
 	ServerTag     string        // the server_id tag on every message sent
 	PlayPause     time.Duration // between the three writes that answer a PlayRequest
-	MaxCharacters int           // an account with this many characters cannot create another
+	MaxCharacters int           // cached per-stream guard; the character service enforces the shared account cap
 }
 
 // DefaultConfig matches the legacy server, so a client that last played there
@@ -88,7 +89,7 @@ func DefaultConfig() Config {
 		WorldName:     "[EMU] Local Server",
 		ServerTag:     "aoc-gateway",
 		PlayPause:     400 * time.Millisecond,
-		MaxCharacters: 16,
+		MaxCharacters: character.DefaultMaxCharacters,
 	}
 }
 

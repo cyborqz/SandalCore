@@ -234,7 +234,7 @@ func TestCreateCharacterPassesEveryFieldToTheStore(t *testing.T) {
 	want := character.New{
 		ID: "fedcba9876543210fedcba9876543210", AccountID: 77, Name: "Ann",
 		RaceID: 2, GenderID: 1, ClassID: 4, ArchetypeID: 17749, ClassName: "Fighter",
-		AppearanceJSON: `{"x":1}`, CreateInfo: []byte{1, 2, 3, 4}, Level: 21,
+		AppearanceJSON: `{"x":1}`, CreateInfo: []byte{1, 2, 3, 4}, Level: 21, MaxCharacters: character.DefaultMaxCharacters,
 	}
 	if !reflect.DeepEqual(st.gotNew, want) {
 		t.Errorf("store got %+v\n want %+v", st.gotNew, want)
@@ -455,6 +455,7 @@ func TestEveryRPCMapsEveryStoreError(t *testing.T) {
 		wantText string // the message must contain it
 	}{
 		{"name taken", character.ErrNameTaken, codes.AlreadyExists, "name taken"},
+		{"character limit", character.ErrCharacterLimit, codes.ResourceExhausted, "character count limit"},
 		{"id taken", character.ErrIDTaken, codes.AlreadyExists, "id taken"},
 		{"not found", character.ErrNotFound, codes.NotFound, "not found"},
 		{"invalid", invalid, codes.InvalidArgument, "name must be 3-20"},

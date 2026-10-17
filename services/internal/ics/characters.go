@@ -147,6 +147,8 @@ func characterID(fromClient string) (id string, ok bool) {
 // gets, and logs the ones that are not the client's doing.
 func codeFor(sess *session, what string, err error) icscommon.IcsStatusCode {
 	switch status.Code(err) {
+	case codes.ResourceExhausted:
+		return codeCharacterCount
 	case codes.AlreadyExists:
 		return codeNameTaken
 	case codes.InvalidArgument:

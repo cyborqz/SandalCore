@@ -21,7 +21,7 @@
 //  tiers of its roads at once.  The client redraws the roads itself when the node's level changes (the GameState's node maps); only the mounts' speed is the server's.
 //
 //  Without the file (or with it empty) there are no roads: a mount rides at its own speed.  The map is read once at start and held read-only: sessions
-//  share it.  A grid of 2,000 cm cells holds the segments, each in every cell its widened box touches; a query reads only the cell it falls in.
+//  share it.  A grid of 2,000 cm cells holds ordinary segments; unusually large segments are checked separately so indexing remains bounded.
 // ============================================================================
 #pragma once
 
@@ -55,7 +55,7 @@ public:
     /// (no roads).  A by-level road starts at `initial_level`.
     bool load(const std::string& path, std::string& error, int initial_level = 0);
     /// Adds a road (the tests'); false for a tier outside 0..4, a width that is not positive or fewer than two points.  A by-level road (Polyline::by_level) needs a tier of -1..4 and a
-    /// positive half width at every level that has a tier, and starts at `initial_level`.
+    /// positive half width at every level that has a tier, and starts at `initial_level`. Coordinates and active widths must fit the stored floats.
     bool add(Polyline road, int initial_level = 0);
 
     /// Sets every by-level road to the node level `level_of_zoi(its zone)` says (a negative answer: `default_level`).  Returns the roads whose tier or width changed.
@@ -97,6 +97,7 @@ private:
     std::vector<int>                                level_;                   // each road's level now (-1: not by-level)
     size_t                                          by_level_ = 0;
     std::vector<Seg>                                segs_;
+    std::vector<uint32_t>                           exceptional_;             // segment boxes outside the grid or covering more than 4096 cells
     std::unordered_map<int64_t, std::vector<uint32_t>> grid_;
     size_t                                          segments_ = 0;
     int                                             node_level_ = -1;

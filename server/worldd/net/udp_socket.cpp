@@ -5,6 +5,7 @@
 //  net/udp_socket.cpp
 // ============================================================================
 #include "net/udp_socket.h"
+#include <charconv>
 #include <cstdio>
 
 #ifdef _WIN32
@@ -60,12 +61,20 @@ std::string Address::to_string() const {
 }
 
 std::optional<Address> parse_address(const std::string& host_port) {
-    unsigned a = 0, b = 0, c = 0, d = 0, port = 0;
-    char tail = 0;
-    if (std::sscanf(host_port.c_str(), "%u.%u.%u.%u:%u%c", &a, &b, &c, &d, &port, &tail) != 5)
-        return std::nullopt;
-    if (a > 255 || b > 255 || c > 255 || d > 255 || port > 65535) return std::nullopt;
-    return Address{(a << 24) | (b << 16) | (c << 8) | d, static_cast<uint16_t>(port)};
+    unsigned parts[5]{};
+    const char* next = host_port.data();
+    const char* end = next + host_port.size();
+    for (size_t i = 0; i < 5; ++i) {
+        const auto parsed = std::from_chars(next, end, parts[i]);
+        if (parsed.ec != std::errc{} || parts[i] > (i == 4 ? 65535u : 255u)) return std::nullopt;
+        if (i == 4) {
+            if (parsed.ptr != end) return std::nullopt;
+        } else {
+            if (parsed.ptr == end || *parsed.ptr != (i == 3 ? ':' : '.')) return std::nullopt;
+            next = parsed.ptr + 1;
+        }
+    }
+    return Address{(parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3], static_cast<uint16_t>(parts[4])};
 }
 
 std::unique_ptr<UdpSocket> UdpSocket::open(const Address& local, std::string* error) {

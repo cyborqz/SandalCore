@@ -24,6 +24,10 @@ int main() {
     CHECK(!parse_address("localhost:7777") && !parse_address("192.0.2.4") && !parse_address("192.0.2.256:1") &&
           !parse_address("192.0.2.4:70000") && !parse_address("192.0.2.4:5x"),
           "refuses names, missing or bad ports and octets");
+    CHECK(!parse_address("4294967423.0.0.1:7777") && !parse_address("127.0.0.1:4294975073") &&
+          !parse_address("-0.0.0.0:7777") && !parse_address("+127.0.0.1:7777") &&
+          !parse_address(std::string("127.0.0.1:7777\0junk", 19)),
+          "oversized numbers, signed fields and embedded NULs cannot become valid addresses");
     CHECK(!parse_address("192.0.2.1:1")->is_loopback(), "192.0.2.1 is not loopback");
 
     std::printf("sockets\n");
