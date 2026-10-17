@@ -816,8 +816,18 @@ PlayerWorld::RespawnSpot PlayerWorld::respawn_spot(double from_x, double from_y)
             }
         }
     }
-    if (s.shrine) s.z = spot_height(nav_.get(), s.x, s.y, s.z);
+    if (s.shrine) s.z = spawn_height(s.x, s.y, s.z);
     return s;
+}
+
+double PlayerWorld::spawn_height(double x, double y, double data_z, bool* grounded) const {
+    // a shrine inside the footprint of a bowl whose platform is read comes back on the platform's floor (the baked ground there is the pit, 50 m under the town) with the slack of every
+    // put-down in a town
+    if (const auto bowl = bowl_floor_at(x, y)) {
+        if (grounded) *grounded = true;
+        return bowl->z + kCapsuleHalfHeightCm + kBowlSlackCm;
+    }
+    return spot_height(nav_.get(), x, y, data_z, grounded);
 }
 
 double PlayerWorld::spot_height(const nav::AreaNav* nav, double x, double y, double data_z, bool* grounded) {
@@ -850,9 +860,11 @@ world::Places PlayerWorld::places() const {
 }
 
 std::optional<double> PlayerWorld::ground_at(double x, double y) const {
+    // inside the footprint of a bowl whose platform is read the floor is the platform's (world/town_platform.h), with or without the baked ground: the baked terrain there is the pit
+    if (const auto floor = bowl_floor_at(x, y)) return floor->z + kBowlSlackCm;
     double z = 0;
     if (nav_ && nav_->terrain_height(x, y, &z) && std::isfinite(z)) {
-        // inside a city node's bowl the baked terrain is the pit under the town (world/town_floor.h): the town floor is where a player stands
+        // inside the bowl of a node whose layout is not read the baked terrain is the pit under the town (world/town_floor.h): the interim model's floor is where a player stands
         if (const auto town = town_ground_at(x, y)) return town->z + kBowlSlackCm;
         return z;
     }
@@ -866,6 +878,11 @@ void PlayerWorld::refresh_town_floor() const {
     town_floor_stamp_ = stamp;
     // each node's people where the data put them (the placement's own height, which the NPC world never moves to the terrain for a node's people) over the baked ground under them
     for (const auto& entry : node_pops_->entries()) {
+        // a node whose platform is read has its floor from the platform: the model never answers for it (outside the footprint the baked ground meets the platform at the rim)
+        if (platforms_ && platforms_->has_node(entry.first)) {
+            town_floor_.set(entry.first, {});
+            continue;
+        }
         std::vector<world::TownFloor::Person> people;
         for (const uint64_t id : node_pops_->actors_of(entry.first)) {
             const world::WorldActor* a = registry_.find(id);
@@ -887,20 +904,94 @@ world::TownFloor& PlayerWorld::town_floor() const {
     return town_floor_;
 }
 
+std::optional<PlayerWorld::TownGround> PlayerWorld::bowl_floor_at(double x, double y) const {
+    if (!platforms_) return std::nullopt;
+    const auto hit = platforms_->floor_at(x, y);
+    if (!hit) return std::nullopt;
+    // The client has both surfaces inside the footprint, the platform and the baked landscape, and a player stands on the higher.  The baked one is the pit, 50 m under the platform, almost
+    // everywhere; but a hill of the landscape pokes through the town (Joeva has one 115 m over its platform, at about 130 m from the node's place) and there it is the ground.
+    double z = hit->z, baked = 0;
+    if (nav_ && nav_->terrain_height(x, y, &baked) && std::isfinite(baked) && baked > z) z = baked;
+    return TownGround{hit->node, z, true};
+}
+
 std::optional<PlayerWorld::TownGround> PlayerWorld::town_ground_at(double x, double y) const {
+    if (const auto floor = bowl_floor_at(x, y)) return floor;   // (inside a footprint the baked pit is never the answer)
     double ground = 0;
     if (!nav_ || !nav_->terrain_height(x, y, &ground) || !std::isfinite(ground)) return std::nullopt;
     const auto floor = town_floor().at(x, y, ground);
     if (!floor) return std::nullopt;
-    return TownGround{floor->node, ground + floor->lift};
+    return TownGround{floor->node, ground + floor->lift, false};
 }
 
 std::optional<PlayerWorld::BowlLift> PlayerWorld::lift_out_of_bowl(double x, double y, double z) const {
     const auto town = town_ground_at(x, y);
     if (!town || !std::isfinite(z)) return std::nullopt;
     const double stands = town->z + kCapsuleHalfHeightCm;   // where a player's origin is on the town floor
-    if (stands - z < world::TownFloor::kBowlCm) return std::nullopt;   // (a terrace is not "under the floor": only the pit under the town is)
+    // the platform's floor is exact, so a character more than 25 m under it is in the pit under the town (45 to 55 m down for most of the footprint; the outer ring under 25 m is the
+    // natural slope at the foot of the rim, where a character can stand outside the walls); the interim model is off by up to 12 m on a terrace (a terrace is not "under the floor"),
+    // so it needs 15 m
+    const double under = town->platform ? kPlatformUnderCm : world::TownFloor::kBowlCm;
+    if (stands - z < under) return std::nullopt;
     return BowlLift{town->node, stands + kBowlSlackCm, stands - z};
+}
+
+bool PlayerWorld::load_town_platforms(const std::string& path, std::string& error) {
+    auto set = std::make_unique<world::TownPlatforms>();
+    if (!set->load(path, &error)) return false;
+    size_t placed = 0;
+    for (const world::TownBowl& bowl : world::kTownBowls) {
+        const world::CityNodeInfo* node = city_nodes_ ? city_nodes_->by_guid(bowl.node) : nullptr;
+        if (!node) {
+            spdlog::warn("[floor] {} is not in the node registry: its platform is not placed (the interim town floor model answers there)", bowl.name);
+            continue;
+        }
+        if (!set->place(bowl.node, bowl.layout, {node->x, node->y, node->z, node->yaw})) {
+            spdlog::warn("[floor] {}: the file has no layout {}: its platform is not placed", node->display_name, bowl.layout);
+            continue;
+        }
+        ++placed;
+        // the one number that tells the frame is right, in the log: the platform's floor at the node's place against the baked pit under it (about 50 m down at the five)
+        std::string pit;
+        double terrain = 0;
+        const auto floor = set->floor_at(node->x, node->y);
+        if (floor && nav_ && nav_->terrain_height(node->x, node->y, &terrain)) pit = fmt::format(", the baked pit under it {:.1f} m lower", (floor->z - terrain) / 100.0);
+        spdlog::info("[floor] {} (node {}): platform {} at the record ({:.0f}, {:.0f}, {:.0f}) facing {:.2f}; the floor at its place is z {:.1f}{}", node->display_name, bowl.node, bowl.layout, node->x,
+                     node->y, node->z, node->yaw, floor ? floor->z : 0.0, pit);
+    }
+    spdlog::info("[floor] {} platform layout(s) read from {}: {} bowl(s) placed; the footprint is the platform's non-hole part (a rounded square of about 900 m), the floor inside it the "
+                 "platform's, never the baked pit; the interim town floor model answers only for nodes whose layout is not read",
+                 set->layouts(), path, placed);
+    platforms_ = std::move(set);
+    return true;
+}
+
+std::optional<PlayerWorld::FloorRescue> PlayerWorld::floor_rescue(double x, double y, double z) const {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return std::nullopt;
+    const auto name_of = [&](int64_t node) {
+        const world::CityNodeInfo* n = city_nodes_ ? city_nodes_->by_guid(node) : nullptr;
+        return n ? n->display_name : std::to_string(node);
+    };
+    if (const auto bowl = bowl_floor_at(x, y)) {
+        const FloorRescue back{x, y, bowl->z + kCapsuleHalfHeightCm + kBowlSlackCm, bowl->node, "the floor of " + name_of(bowl->node)};
+        if (z < bowl->z - kBelowFloorCm || z < kKillPlaneCm) return back;
+        // standing in the pit: its feet on the baked ground that lies more than kPlatformUnderCm under the platform (a pawn the landscape's collision caught 50 m under a town whose floor
+        // was not there yet; the platform stands over it now, and nothing else would bring it up).  The caller waits a second: a pawn falling through that height is not on it.
+        double baked = 0;
+        const auto platform = platforms_ ? platforms_->floor_at(x, y) : std::nullopt;
+        if (platform && nav_ && nav_->terrain_height(x, y, &baked) && std::isfinite(baked) && platform->z - baked > kPlatformUnderCm && std::fabs(z - kCapsuleHalfHeightCm - baked) < kPitStandCm) {
+            FloorRescue pit = back;
+            pit.where = "the floor of " + name_of(bowl->node) + " (it stands on the pit " + std::to_string(static_cast<int>((platform->z - baked) / 100.0)) + " m under it)";
+            return pit;
+        }
+        return std::nullopt;
+    }
+    if (z >= kKillPlaneCm) return std::nullopt;
+    // under the kill plane outside a platform's footprint: the town floor of a bowl whose layout is not read, else the ground under the point, else the login spot
+    if (const auto town = town_ground_at(x, y)) return FloorRescue{x, y, town->z + kCapsuleHalfHeightCm + kBowlSlackCm, town->node, "the floor of " + name_of(town->node)};
+    double ground = 0;
+    if (nav_ && nav_->terrain_height(x, y, &ground) && std::isfinite(ground)) return FloorRescue{x, y, ground + kCapsuleHalfHeightCm + kBowlSlackCm, 0, "the ground"};
+    return FloorRescue{area_.center_x, area_.center_y, spawns::kLoginSpotZ, 0, "the login spot"};
 }
 
 double PlayerWorld::place_height(const world::Place& place) const {

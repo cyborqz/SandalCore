@@ -1331,6 +1331,28 @@ static void test_real_bowls() {
                           user ? (ut + user->lift - uz) / 100.0 : 0.0);
             CHECK(user && ut + user->lift + 98.0 - uz > 4000.0, msg);
             std::printf("    %s\n", msg);
+            // The login fix: where a login in Joeva lands.  The client's pawn phases in when a trace of 1,000 cm straight down from its origin finds ground, so
+            // the join z must be within [floor + 98, floor + 1,000] of the town's floor.  PlayerWorld::lift_out_of_bowl puts a character saved on the baked ground under the town at the
+            // town's floor + the capsule's half height (98) + kBowlSlackCm (200), and a GM teleport to a point without a z lands at the same height.
+            struct JoinSpot { const char* what; double x, y; };
+            const JoinSpot join_spots[] = {{"the node's place (worldctl tp <character> joeva)", info->x, info->y},
+                                           {"Joeva's market square (the Market_v3 plot in the node record's frame)", -1087417.6, 503591.5},
+                                           {"a spot saved on the baked ground under the town", ux, uy}};
+            for (const JoinSpot& sp : join_spots) {
+                const double ground = terrain(sp.x, sp.y);
+                const auto floor_here = tf.at(sp.x, sp.y, ground);
+                if (!floor_here) {
+                    CHECK(false, sp.what);
+                    continue;
+                }
+                const double model_floor = ground + floor_here->lift;
+                const bool lifted = model_floor + PlayerWorld::kCapsuleHalfHeightCm - (ground + 98.0) >= world::TownFloor::kBowlCm;   // (saved on the baked ground, as the pit's characters are)
+                const double join_z = model_floor + PlayerWorld::kCapsuleHalfHeightCm + PlayerWorld::kBowlSlackCm;
+                std::snprintf(msg, sizeof(msg), "Joeva, %s (%.0f, %.0f): baked ground %.1f, the model's floor %.1f; joined from the pit at z %.1f = floor + %.0f cm (the trace needs 98 to 1,000)", sp.what,
+                              sp.x, sp.y, ground, model_floor, join_z, join_z - model_floor);
+                CHECK(lifted && join_z - model_floor >= 98.0 && join_z - model_floor <= 1000.0, msg);
+                std::printf("    %s\n", msg);
+            }
             // retail's 9 anchors (capture 721): the model's height over the terrain against the height retail's NPC stood at
             struct Anchor { double x, y, z; };
             const Anchor anchors[] = {{-1081432, 516570, 14753}, {-1097474, 509458, 14024}, {-1091333, 510020, 13408}, {-1085254, 503627, 12608}, {-1089840, 503696, 12625},

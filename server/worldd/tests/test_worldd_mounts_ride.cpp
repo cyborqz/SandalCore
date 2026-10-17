@@ -21,6 +21,7 @@
 //    other cases     relog while mounted, the player's death, the summon of another mount, hostile requests
 // ============================================================================
 #include "content_db_fixture.h"
+#include "town_platform_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
 #include "bootstrap/character_setup.h"
@@ -2009,6 +2010,95 @@ static void test_relog_flying_over_a_bowl() {
         CHECK(std::fabs(h.s->last_position().z - 1098.0) < 2.0, "over the open plain the rider is saved on the baked ground, 1,098");
     }
 }
+// == C Y B | C O A ==
+
+// ---- the towns' real ground: a bowl whose floor is the layout's platform (world/town_platform.h) ---------------------------------------
+
+/// The fixture's plain (the pit: terrain 1,000) with a platform bowl on it: a disc of 27 m round the origin whose floor is 6,060.
+static void adopt_a_platform_bowl(PlayerWorld& w) {
+    adopt_the_ground(w);
+    w.set_town_platforms(tpfix::platforms_at(4242, 0, 0, 6060.0, 0.0, tpfix::grid(30, 0.0, 0.0, 2700.0)));
+}
+
+/// The character saved standing `above` cm over that floor at the origin.
+static svc::Character cyb_in_a_platform_bowl(double above) {
+    svc::Character c = cyb_record();
+    c.has_position = true;
+    c.position = {0.0, 0.0, 6060.0 + 98.0 + above, 0.0f};
+    return c;
+}
+
+static void test_summon_in_a_platform_bowl() {
+    std::printf("the towns' ground: a mount is summoned on a street of a bowl (its floor is the platform's), refused on a tower\n");
+    {
+        Harness h(cyb_in_a_platform_bowl(0.0), adopt_a_platform_bowl);
+        h.play();
+        CHECK(std::fabs(h.s->movement().good().z - (6060.0 + 98.0)) < 0.01, "(the character stands on the floor: joined where it was saved)");
+        summon_with(h, kMountSlot, 91);
+        h.run(milliseconds(1900));
+        const world::WorldActor* m = h.mount();
+        CHECK(h.s->mounts()->stats().summons == 1 && h.s->mounts()->stats().refused == 0 && m != nullptr && h.s->mounts()->phase() == MountController::Phase::Out,
+              "a summon on a street of the town works (it was refused in every town: the baked ground is the pit, 50 m down)");
+        CHECK(m && std::fabs(m->z - (6060.0 + MountController::kMountFootOffsetCm)) < 2.0, "the mount stands on the platform's floor, 575 cm ahead of the player");
+        // desummoned, the mount runs ahead and stays on the floor (its z follows the same ground)
+        desummon_with(h, kMountSlot);
+        h.run(milliseconds(1000));
+        m = h.mount();
+        CHECK(m && m->x > 575.0 + 200.0 && m->x < 2500.0 && std::fabs(m->z - (6060.0 + MountController::kMountFootOffsetCm)) < 2.0, "the desummoned mount runs off over the floor and does not sink into the pit");
+    }
+    {
+        Harness h(cyb_in_a_platform_bowl(3000.0), adopt_a_platform_bowl);
+        h.play();
+        summon_with(h, kMountSlot, 92);
+        h.run(milliseconds(1900));
+        CHECK(h.s->mounts()->stats().refused == 1 && h.s->mounts()->stats().summons == 0 && h.mount() == nullptr, "on a tower top 30 m over the floor the refusal stays (the modelled 2.5 m rule)");
+    }
+    {
+        Harness h(cyb_in_a_platform_bowl(300.0), adopt_a_platform_bowl);
+        h.play();
+        summon_with(h, kMountSlot, 93);
+        h.run(milliseconds(1900));
+        CHECK(h.s->mounts()->stats().refused == 1, "...and 3 m over the floor, past the 2.5 m a ground mount tolerates, it is refused too");
+    }
+    {
+        Harness h(cyb_in_a_platform_bowl(100.0), adopt_a_platform_bowl);
+        h.play();
+        summon_with(h, kMountSlot, 94);
+        h.run(milliseconds(1900));
+        CHECK(h.s->mounts()->stats().summons == 1, "1 m over the floor (a step): allowed");
+    }
+    {
+        // the same spot without the platform: the baked pit is the ground and the summon is refused
+        Harness h(cyb_in_a_platform_bowl(0.0), adopt_the_ground);
+        h.play();
+        summon_with(h, kMountSlot, 95);
+        h.run(milliseconds(1900));
+        CHECK(h.s->mounts()->stats().refused == 1, "(without the platform file: refused, as before)");
+    }
+}
+
+/// The platform for the flight: a disc of 55 m round (0, 7000) whose floor is 4,000; the flyer takes off along +y from the origin and is over it at 50 m up.
+static void adopt_a_platform_bowl_for_the_flight(PlayerWorld& w) {
+    adopt_the_ground(w);
+    w.set_town_platforms(tpfix::platforms_at(4242, 0, 7000, 4000.0, 0.0, tpfix::grid(60, 0.0, 0.0, 5500.0)));
+}
+
+static void test_relog_flying_over_a_platform_bowl() {
+    std::printf("the towns' ground: relog while flying over a town whose floor is the platform: saved on the floor + the slack\n");
+    Harness h(cyb_on_the_ground(), adopt_a_platform_bowl_for_the_flight);
+    h.play();
+    CHECK(ride_on(h, kFlyingSlot), "(the player rides a flyer)");
+    if (!h.s->mounted()) return;
+    Rider r = start_riding(h);
+    take_off(h, r, 5000.0);
+    const GoodPosition up = h.s->movement().good();
+    const GoodPosition saved = h.s->last_position();
+    const double want = 4000.0 + PlayerWorld::kBowlSlackCm + 98.0;
+    CHECK(up.z > want + 1000.0 && std::fabs(saved.z - want) < 2.0 && std::hypot(saved.x - up.x, saved.y - up.y) < 100.0,
+          "the rider 50 m up over the town is saved on the platform's floor (4,000 + the slack + the capsule), 3 m over the street, not at 1,098 under it");
+    h.s->finish("the test");
+    CHECK(!h.sink.positions.empty() && std::fabs(h.sink.positions.back().z - want) < 2.0, "the session's end hands that position to the saver");
+}
 
 static void test_mounts_remain() {
     std::printf("stage 4: a mount that has appeared stays through a fight (a hit never desummons it)\n");
@@ -2264,6 +2354,8 @@ int main() {
     test_water_dismount();
     test_air_dismount_and_relog();
     test_relog_flying_over_a_bowl();
+    test_summon_in_a_platform_bowl();
+    test_relog_flying_over_a_platform_bowl();
     test_mounts_remain();
     test_distance_desummon();
     test_real_roads();

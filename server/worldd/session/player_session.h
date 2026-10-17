@@ -189,7 +189,11 @@
 //  ActorView on the world's registry: once the join and the phase-in are on the wire it gives the view the player's last good position
 //  every tick, and the view opens, updates and closes the NPCs and resource nodes around the player on channels of its own (the first
 //  indexes are the player's four actors', and the zone actors' ones, which it never takes).  The ack events the session takes are forwarded
-//  to it, so that exports are marked delivered.  The session's own part of the area is the GM vendor:
+//  to it, so that exports are marked delivered.  One exception to "after the phase-in": the towns' scenery, the
+//  replicators within 1.45 km, is opened by ActorView::open_scenery in the first ticks after the join, before the phase-in; the
+//  client's pawn phases in when a
+//  trace down finds ground and in a town's bowl the replicator builds the only ground it has.  "[join] <name>: phase-in after N s" says how
+//  long the join took to the client's ready call.  The session's own part of the area is the GM vendor:
 //
 //    pawn          ServerInteractWithInteractableComponent    the component names an NPC of the registry; it must be one the client has open
 //                                                             (the view's awake state), within kInteractRangeCm of the last good position and a GM
@@ -611,6 +615,9 @@ public:
     size_t   kills_rewarded() const { return kills_rewarded_; }
     /// This session's view of the world's other actors (null for a session without a registry).
     const ActorView* actor_view() const { return view_.get(); }
+    /// The towns' replicators the join opened before the phase-in (0 for a join farther than 1.45 km from every town), and the session second the last of them went out (-1: none).
+    size_t scenery_opened() const { return scenery_opened_; }
+    double scenery_opened_at() const { return scenery_at_; }
     /// The mounts milestone, stage 2: this player's mount (null for a session of a world without mount tables), and the requests the session took.
     const MountController* mounts() const { return mounts_.get(); }
     size_t mount_item_uses() const { return mount_item_uses_; }
@@ -661,6 +668,12 @@ public:
     /// mounted player is dismounted first; the mount stays and desummons by distance.  Not a dead player (Dead), not a point outside the world box (OutsideWorld), not when the
     /// reply queue is full (Busy).  `by` is who asked, for the log; the log has the from and the to.
     GmMoveResult gm_teleport(Connection& conn, double x, double y, double z, Clock::time_point now, const std::string& by);
+    /// The floor net (PlayerWorld::floor_rescue): puts the player back on the floor when its last good position is under the kill plane (z -10,000 cm) or
+    /// more than 100 m under the floor of a bowl, or its feet stand on the baked pit more than 25 m under a bowl's platform, once it has been so for kNetHoldSeconds.  A repeat comes no sooner than kNetRepeatSeconds.  Called from tick(); public for the tests.
+    void   run_floor_net(Connection& conn, Clock::time_point now);
+    size_t floor_net_rescues() const { return net_rescues_; }
+    static constexpr double kNetHoldSeconds = 1.0;     // the position must stay under the plane this long (a glitch in one move is not a fall)
+    static constexpr double kNetRepeatSeconds = 3.0;   // ... and a rescue that did not hold (the client had no floor yet) is tried again after this
     /// The GM's run speed multiplier (a factor of MoveSpeedMult, 1: none): the pawn's stat, the mount's while riding, and the move checker's limits.  The caller keeps it inside 0.5 to 10.
     struct GmSpeedChange {
         double previous = 1.0, now = 1.0;
@@ -1165,6 +1178,13 @@ private:
     Clock::time_point              gm_grace_until_{};
     RequestBudget                  gm_budget_{4, std::chrono::milliseconds(250)};
     size_t gm_rpcs_ = 0, gm_rpcs_answered_ = 0, gm_teleports_ = 0, gm_logged_ = 0;
+    // the floor net: when the last good position was first seen under the plane (the debounce), when the last rescue went, how many
+    std::optional<Clock::time_point> net_since_;
+    Clock::time_point              net_last_{};
+    bool                           net_last_valid_ = false;
+    size_t                         net_rescues_ = 0;
+    /// The move of gm_teleport, shared with the floor net: `gm` counts it as a GM teleport and logs it as one.
+    GmMoveResult move_to(Connection& conn, double x, double y, double z, Clock::time_point now, const std::string& by, bool gm);
     // Nodes 1, stage 2
     std::deque<int64_t>            siege_wait_, node_summary_wait_;      // the nodes asked for, in the order asked
     std::set<int64_t>              siege_queued_, node_summary_queued_;  // ... and which are waiting (a repeated request is one answer)
@@ -1188,6 +1208,10 @@ private:
     std::unique_ptr<MountController> mounts_;
     size_t                         mount_item_uses_ = 0, mount_summon_requests_ = 0, mount_desummon_requests_ = 0, mount_ignored_ = 0, mount_logged_ = 0;
     bool                           phase_in_done_ = false;       // the phase-in is built: the view may start
+    // The towns' scenery is opened in the join, before the phase-in (the rest of the view waits for it, as before)
+    bool                           scenery_done_ = false;        // nothing is left for open_scenery to open (none within reach of the join, or all opened)
+    size_t                         scenery_opened_ = 0;          // replicators the join opened
+    double                         scenery_at_ = -1.0;           // ... when the last of them went out (the session's seconds; -1: none)
     size_t                         item_ability_syncs_ = 0;      // the pawn updates sync_item_abilities sent
     // E1 stage 3 fix: when the client's synchronized clock is set again (ClientSetTime): 1 s and 5 s after the phase-in, then every 120 s
     static constexpr std::chrono::seconds kTimeSyncAfterPhaseIn{1};

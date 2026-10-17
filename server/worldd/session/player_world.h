@@ -73,6 +73,7 @@
 #include "world/places.h"
 #include "world/roads.h"
 #include "world/town_floor.h"
+#include "world/town_platform.h"
 // [C.O.A - Cyb]
 
 #include <chrono>
@@ -294,6 +295,9 @@ public:
     /// chunk is here, the data's own height when it is not (a chunk that is not here has none of its navmesh floors: grounding on the terrain alone would put a shrine on a bridge, or
     /// a platform, under it).  `grounded` (optional) says which.  A world without ground gives the data's.
     static double spot_height(const nav::AreaNav* nav, double x, double y, double data_z, bool* grounded = nullptr);
+    /// The height a player is put at over a spawn point (a respawn shrine) whose data height is `data_z`: inside the footprint of a bowl whose platform is read, the platform's floor plus the
+    /// capsule and kBowlSlackCm; anywhere else spot_height().  `grounded` says whether a ground or a floor was found.
+    double spawn_height(double x, double y, double data_z, bool* grounded = nullptr) const;
     /// The default quality of an item record, cached (the loot's stacks).
     int item_quality(int64_t item) const;
     /// The name of an item record ("Certificate_T1_Glint"), cached; empty when content.db has none (the log's loot lines).
@@ -323,17 +327,45 @@ public:
     world::TownFloor& town_floor() const;
     struct TownGround {
         int64_t node = 0;
-        double  z = 0;   // the town's floor: the baked ground plus its lift (where a player's feet are; no slack)
+        double  z = 0;   // the town's floor (where a player's feet are; no slack): the platform's, or for a node whose layout is not read the baked ground plus its lift
+        bool    platform = false;   // true: the layout's own platform (world/town_platform.h); false: the interim model (world/town_floor.h)
     };
-    /// The floor of the town whose bowl holds (x, y); none outside every bowl and where the server has no ground.
+    /// The floor of the town whose bowl holds (x, y): inside the footprint of a node whose platform is read, the platform's (never the baked pit); for the other nodes the interim model's
+    /// (it needs the server's ground there); none outside every bowl.
     std::optional<TownGround> town_ground_at(double x, double y) const;
+    /// Only the platform's floor (the five bowls whose layouts mapc read): what a mount's summon judges the ground by.
+    std::optional<TownGround> bowl_floor_at(double x, double y) const;
     struct BowlLift {
         int64_t node = 0;
         double  z = 0;          // where to put the character (its origin): the town's floor + the capsule's half height + kBowlSlackCm
         double  under_cm = 0;   // how far under the town's floor it was saved
     };
-    /// A position saved on the baked ground under a town (the floor of its bowl is 15 m or more over the character): where to put the character instead; none otherwise.
+    /// A position saved on the baked ground under a town (the floor of its bowl is kBowlCm = 15 m or more over the character with the interim model, kPlatformUnderCm = 25 m with the
+    /// platform): where to put the character instead; none otherwise.
     std::optional<BowlLift> lift_out_of_bowl(double x, double y, double z) const;
+    /// The platform floors: `mapc town-floors`' file read and each bowl's platform stood at its node record (city nodes must be set); false with `error`
+    /// when the file is missing or wrong.  A test's own platforms go in with set_town_platforms.
+    bool load_town_platforms(const std::string& path, std::string& error);
+    void set_town_platforms(std::unique_ptr<world::TownPlatforms> platforms) { platforms_ = std::move(platforms); }
+    const world::TownPlatforms* town_platforms() const { return platforms_.get(); }
+    /// A character saved more than this far under a platform floor (cm) joins on it, and one that stands on the baked ground that far under it is put back (floor_rescue): that is the
+    /// pit under the town.  On the five footprints the baked ground is 45 to 55 m under the platform for 69 % of the area, 25 to 45 m (the pit's inner slope) for 13 %, and under 25 m
+    /// for the outer ring (15 %): the natural slope at the foot of the town's rim, where a character can stand outside the walls, so that is not under the town.
+    static constexpr double kPlatformUnderCm = 2500.0;
+    /// ... a player stands on the baked ground when its feet are within this of it.
+    static constexpr double kPitStandCm = 300.0;
+    /// The floor net.  The client has no kill plane of its own: a pawn put where the client has no collision yet (a long teleport into a town whose floor it has
+    /// not streamed) falls without end.  A player below kKillPlaneCm anywhere, or more than kBelowFloorCm
+    /// under the floor of a bowl, or has stood on the pit under one (see kPlatformUnderCm: a pawn that fell through a town with no floor yet and was caught by the landscape's collision
+    /// 50 m down), is put back on the floor (or the ground) with the same slack a teleport has.
+    static constexpr double kKillPlaneCm = -10000.0;
+    static constexpr double kBelowFloorCm = 10000.0;
+    struct FloorRescue {
+        double      x = 0, y = 0, z = 0;   // where to put the character (its origin)
+        int64_t     node = 0;              // the bowl whose floor it is (0: the ground, or the login spot)
+        std::string where;                 // for the log
+    };
+    std::optional<FloorRescue> floor_rescue(double x, double y, double z) const;
     /// A player's capsule is this far from its feet to its origin (cm): where a player stands on the ground, its origin is this much above it.
     static constexpr double kCapsuleHalfHeightCm = 98.0;
     /// A named place stands this far above its recorded z where the server has no ground (a short fall, never a place under the ground).
@@ -442,6 +474,7 @@ private:
     PileHook                             pile_hook_;
     int                                  road_default_level_ = 0;
     uint64_t                             roads_seen_version_ = ~0ull;
+    std::unique_ptr<world::TownPlatforms> platforms_;            // the five bowls' platforms at their node records (load_town_platforms); null: the interim model only
     mutable world::TownFloor             town_floor_;           // the towns in a bowl (town_floor())
     mutable uint64_t                     town_floor_stamp_ = ~0ull;   // the node people it was built from (their made + removed counts)
     bool                                 gm_commands_ = false;

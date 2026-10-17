@@ -390,6 +390,62 @@ void ActorView::on_ack(const AckEvent& e) {
     }
     if (c.outstanding > 0 && --c.outstanding == 0) exports_.erase(it);   // a lost unreliable part is final, too
 }
+// (CoA | C_Y_B)
+
+bool ActorView::open_scenery(Connection& conn, double x, double y, Clock::time_point now, size_t* opened) {
+    if (opened) *opened = 0;
+    if (finished_) return true;
+    const world::RelevancyConfig& cfg = config_.relevancy;
+    struct Cand {
+        double   d;
+        uint64_t id;
+    };
+    std::vector<Cand> cands;
+    scratch_.clear();
+    registry_.query_wide(x, y, cfg.hysteresis_cm, scratch_);   // the towns' replicators are wide actors: the grid query never finds them
+    for (const uint64_t id : scratch_) {
+        const world::WorldActor* a = registry_.find(id);
+        if (!a || a->kind != world::ActorKind::NodeLayout) continue;
+        if (a->owner != 0 && a->owner != config_.player_id) continue;
+        if (entries_.count(id) != 0) continue;   // the view has it already (open, or given up as broken): the passes look after it
+        const double d = world::horizontal_distance(a->x, a->y, x, y);
+        if (world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, ClientState::None) != Ring::Awake) continue;   // (a replicator is awake or nothing)
+        cands.push_back({d, id});
+    }
+    std::sort(cands.begin(), cands.end(), [](const Cand& l, const Cand& r) { return l.d != r.d ? l.d < r.d : l.id < r.id; });
+    cands.erase(std::unique(cands.begin(), cands.end(), [](const Cand& l, const Cand& r) { return l.id == r.id; }), cands.end());   // (query_wide may name an actor twice)
+    if (cands.empty()) return true;
+    // the pass's pacing: the player's own data goes first on a busy connection, and the opens of one call are capped
+    if (conn.packets_in_flight() > config_.max_packets_in_flight || conn.queued_bunches() > config_.max_queued_bunches) {
+        ++stats_.throttled;
+        return false;
+    }
+    size_t n = 0;
+    bool all = true;
+    for (const Cand& c : cands) {
+        if (n >= cfg.max_opens_per_tick) {
+            ++stats_.capped;
+            all = false;
+            break;
+        }
+        if (conn.queued_bunches() > config_.max_queued_bunches) {   // this call's own sends filled the queue
+            ++stats_.throttled;
+            all = false;
+            break;
+        }
+        world::WorldActor* a = registry_.find(c.id);
+        if (!a) continue;
+        Entry& e = entries_.emplace(c.id, Entry{}).first->second;
+        if (open(conn, *a, e, /*snapshot=*/false, now)) {
+            ++n;
+        } else if (!e.broken) {   // refused by the connection (its window): no entry, the next call tries again
+            entries_.erase(c.id);
+            all = false;
+        }   // (an actor that does not build stays as a broken entry, as in the passes: never retried, so nothing waits for it)
+    }
+    if (opened) *opened = n;
+    return all;
+}
 
 bool ActorView::update_now(Connection& conn, uint64_t actor) {
     if (finished_) return false;

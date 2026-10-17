@@ -14,6 +14,7 @@
     dist\content\artisan_curves.tsv,           profession curves, mount speeds and riders        (mapc, from the game's containers)
       mount_speeds.tsv, mount_riders.tsv
     dist\content\npc_motion.tsv, region_foliage.tsv, roads_raw.tsv, roads.tsv, roads_levels.tsv
+    dist\content\town_platforms.bin            the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
     dist\content\area_geom.bin, area_nav.bin   the navigation mesh (combat needs it)             (mapc and aoc_navbuild)
     dist\content\client_config\, zoi_chunks\   the game's Config files and its zone-of-influence grid (read by the generators below)
     the sources the build includes             world\zoi_surface_table.h, node_constants.h, constants_gen.go, region_data.h, garden_defs.h,
@@ -32,7 +33,7 @@
 .PARAMETER GameRoot
   The game's "Game" folder (the one that holds AOCClient.exe and AOC\). Default: GAME_ROOT, config\paths.json, Steam's libraries, the usual folders.
 .PARAMETER Only
-  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, navmesh.
+  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, townfloors, navmesh.
 .PARAMETER Skip
   Leave these steps out (for example -Skip fixtures when you do not build the tests).
 .PARAMETER Force
@@ -378,6 +379,7 @@ function Get-Id([string]$step) {
         'fixtures' { Get-TextHash ("fixtures " + (Get-CodeGens) + (Get-CodeContentc) + (Get-Id 'database')) }
         'navbuild' { Get-TextHash ("navbuild " + (Get-CodeNav)) }
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
+        'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
         'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild')) }
     }
     $ids[$step] = $v
@@ -473,6 +475,10 @@ $steps = @(
         $raw = Join-Path $outDir 'roads_raw.tsv'
         Invoke-Checked $contentc @('roads', '--content', $db, '--raw', $raw, '--out', (Join-Path $outDir 'roads.tsv')) 'contentc_roads'
         Invoke-Checked $contentc @('roads', '--levels', '--content', $db, '--raw', $raw, '--out', (Join-Path $outDir 'roads_levels.tsv')) 'contentc_roads_levels'
+    } },
+    @{ Name = 'townfloors'; Title = 'Read the floor of the five towns from the two city platform maps (mapc; a few seconds)'; Outputs = @('dist\content\town_platforms.bin'); Run = {
+        Assert-Files @('tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools step first'
+        Invoke-Checked $dotnet @($mapcDll, 'town-floors', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_town_floors'
     } },
     @{ Name = 'navmesh'; Title = 'Read the map and build the navigation mesh, the NPC motion table and the foliage (mapc; the longest step)'; Outputs = @('dist\content\npc_motion.tsv', 'dist\content\region_foliage.tsv', 'dist\content\area_geom.bin', 'dist\content\area_nav.bin'); Run = {
         Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the earlier steps first'
