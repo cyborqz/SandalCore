@@ -1,7 +1,7 @@
-# Sandal Core — Project Roadmap
+# SandalCore — Project Roadmap
 
 > [!NOTE]
-> This roadmap reflects the ongoing development progress of Sandal Core. Sandal Core is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
+> This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
 **Last updated:** October 2026
 

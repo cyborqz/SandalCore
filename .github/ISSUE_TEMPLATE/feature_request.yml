@@ -1,12 +1,12 @@
 name: Feature Request
-description: Propose an idea or enhancement for Sandal Core
+description: Propose an idea or enhancement for SandalCore
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Have an idea or architectural suggestion for Sandal Core? We welcome well-reasoned proposals aligned with the emulator roadmap.
+        Have an idea or architectural suggestion for SandalCore? We welcome well-reasoned proposals aligned with the emulator roadmap.
   - type: input
     id: title
     attributes:

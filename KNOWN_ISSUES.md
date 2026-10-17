@@ -1,4 +1,4 @@
-# Sandal Core — Known Issues & Backlog
+# SandalCore — Known Issues & Backlog
 
 This document tracks known issues, behaviors under active investigation, workarounds, and the project backlog.
 

@@ -1,18 +1,18 @@
-# Sandal Core
+# SandalCore
 
 An independent, open-source server emulator compatible with the Ashes of Creation client, developed by Cyb.
 
 > [!IMPORTANT]
-> **Not affiliated with Intrepid Studios.** Sandal Core is an independent project. It is not affiliated with, sponsored by or endorsed by Intrepid Studios, Inc. *Ashes of Creation* is a trademark of Intrepid Studios, Inc., named here only to say which game client this server works with. The repository contains no game client, game files or Intrepid code: the data the servers need is built on your PC from your own installed copy of the game.
+> **Not affiliated with Intrepid Studios.** SandalCore is an independent project. It is not affiliated with, sponsored by or endorsed by Intrepid Studios, Inc. *Ashes of Creation* is a trademark of Intrepid Studios, Inc., named here only to say which game client this server works with. The repository contains no game client, game files or Intrepid code: the data the servers need is built on your PC from your own installed copy of the game.
 
 > [!WARNING]
-> **Work in Progress**: Sandal Core is **NOT** a final product. It is under active and consistent development; expect bugs, incomplete features, and ongoing protocol refinements. Please refer to [ROADMAP.md](ROADMAP.md) for milestone progress and [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for current known limitations, workarounds, and backlog items.
+> **Work in Progress**: SandalCore is **NOT** a final product. It is under active and consistent development; expect bugs, incomplete features, and ongoing protocol refinements. Please refer to [ROADMAP.md](ROADMAP.md) for milestone progress and [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for current known limitations, workarounds, and backlog items.
 
 ---
 
 ## What Works Today
 
-Sandal Core provides an independent server emulation stack for the Ashes of Creation client: the Go services (accounts, characters, city nodes, world placement and the client's gateway) and the C++ world server `worldd`, with the tether and the launcher window. The old replay-based login server is retired: this is the only server path.
+SandalCore provides an independent server emulation stack for the Ashes of Creation client: the Go services (accounts, characters, city nodes, world placement and the client's gateway) and the C++ world server `worldd`, with the tether and the launcher window. The old replay-based login server is retired: this is the only server path.
 
 - **Protocol & Network Transport**: Full UE5 / IntrepidNetDriver handshake, stateless connect, packet framing, bunch replication, and dynamic NetGUID allocation.
 - **Authentication & Character Management**: gRPC and REST-based authentication services, account profiles, character creation with full visual appearance customization serialization, and character select lobby transitions.
@@ -29,7 +29,7 @@ Sandal Core provides an independent server emulation stack for the Ashes of Crea
 
 ## Build and run (Windows)
 
-You need a Windows 10/11 x64 PC with your own installed copy of Ashes of Creation. Sandal Core contains no game data: the first build reads your installed client (the files are only read, nothing in the game folder is changed) and builds the data the servers need.
+You need a Windows 10/11 x64 PC with your own installed copy of Ashes of Creation. SandalCore contains no game data: the first build reads your installed client (the files are only read, nothing in the game folder is changed) and builds the data the servers need.
 
 ### 1. What to install
 
@@ -127,7 +127,7 @@ powershell -File scripts\services.ps1 stop
 
 ### 3. TLS Certificates
 
-Sandal Core ships no keys or certificates. On the first launch `scripts\make_certs.ps1` (OpenSSL from Git for Windows) creates your own:
+SandalCore ships no keys or certificates. On the first launch `scripts\make_certs.ps1` (OpenSSL from Git for Windows) creates your own:
 - `certs\ca.crt`: a local CA, added to your Windows *CurrentUser* Trusted Root store (the game client checks the server against it). Its private key is deleted right after signing.
 - `certs\server.pem` and `certs\server.key`: the server certificate for `127.0.0.1` / `localhost`.
 
@@ -149,7 +149,7 @@ Key runtime environment variables and settings include:
 
 ## Captures
 
-Sandal Core includes no packet captures. The community's own repository holds the plaintext captures of the live game that this project's protocol work started from: [AshesEmulatorTeam/PCAPRepo](https://github.com/AshesEmulatorTeam/PCAPRepo), captured by the Creation of Ashes (CoA) community. Thank you.
+SandalCore includes no packet captures. The community's own repository holds the plaintext captures of the live game that this project's protocol work started from: [AshesEmulatorTeam/PCAPRepo](https://github.com/AshesEmulatorTeam/PCAPRepo), captured by the Creation of Ashes (CoA) community. Thank you.
 
 ---
 

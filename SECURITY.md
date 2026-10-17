@@ -2,7 +2,7 @@
 
 ## Reporting Security Issues
 
-We take the security of Sandal Core seriously. If you discover a security vulnerability or sensitive data exposure, please report it privately rather than creating a public issue.
+We take the security of SandalCore seriously. If you discover a security vulnerability or sensitive data exposure, please report it privately rather than creating a public issue.
 
 ### How to Report
 
