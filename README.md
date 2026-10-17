@@ -22,7 +22,8 @@ SandalCore provides an independent server emulation stack for the Ashes of Creat
 - **Complete Combat & Ability Runtime**: Authoritative ability pipeline supporting all retail classes, cast validation steps, cooldown ledgers, projectile trajectories, hit confirmation RPCs, floating combat numbers, shields, songs, and buff/debuff effect stacks.
 - **Living World & Navigation**: Chunked navmesh windows, Riverlands region partitioning, NPC actor spawning, AI agro and leash state machines, combat engagement, loot drops, and respawn cycles.
 - **Mounts & Traversal**: Ground, flying, and aquatic mount summoning, riding possession, mount combat mechanics, sprint/dash abilities, and road speed modifiers.
-- **City Node Civilization**: Background `CityNodeService`, node experience accrual, level transitions, town layout replication, and citizenship/mayorship management.
+- **City Node Civilization**: Background `CityNodeService`, node experience accrual, level transitions, town layout replication, the real floor of the five towns with a safety net under it, and citizenship/mayorship management.
+- **Launcher**: the launcher window finds your game, signs in (with "Keep me signed in" it signs in by itself at start) and starts the game when you press LAUNCH GAME.
 - **Gathering & Professions**: the 22 gathering professions, node harvesting (mining, lumberjacking and herbalism), the Riverlands' trees, plants and stones that grow back, huntable animals, resource bags and the pick-up popup.
 
 ---
@@ -53,7 +54,7 @@ Disk: allow about 20 GB free on the repository's drive for the first build. The 
 
 1. `install_dependencies.bat`
 2. `build_all.bat`: runs `extract_game_data.bat` first (the game data, section 3), then builds `tether_server`, `launcher` and `worldd` into `dist\Release`. The first run takes about 10 minutes for the game data on a fast PC, plus the first build of the C++ libraries through vcpkg (grpc compiles from source, so this part can take a long time). Later runs take seconds when nothing changed.
-3. `launch_worldd.bat`: starts PostgreSQL and NATS (Docker), the Go services, the `worldd` world server, the tether and the launcher window. Sign in and press Play. On the first launch your own TLS certificates are created in `certs\` (Windows asks you once to trust the local CA; choose Yes).
+3. `launch_worldd.bat`: starts PostgreSQL and NATS (Docker), the Go services, the `worldd` world server, the tether and the launcher window. Sign in (or let "Keep me signed in" do it) and press LAUNCH GAME, which starts the game. On the first launch your own TLS certificates are created in `certs\` (Windows asks you once to trust the local CA; choose Yes).
 
 To make only the game data (for example before `go test ./...` or `scripts\run_tests.ps1`), run `extract_game_data.bat` on its own.
 
@@ -64,11 +65,12 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 **What it makes** (all of it git-ignored; [`.gitignore`](.gitignore) lists the generated sources):
 - `dist\content\content.db` (311 MB): the game numbers the servers use (`contentc`, from the client's `CacheDB.dbc`);
 - `dist\content\*.tsv`: mount speeds and riders, profession curves, NPC motion, foliage and roads (`tools\mapc`, from the game's containers, and `contentc roads`);
+- `dist\content\town_platforms.bin` (4 MB): the floor of the five towns (`tools\mapc`, from two of the game's map packages);
 - `dist\content\area_nav.bin` (950 MB) and `area_geom.bin` (223 MB): the navigation mesh (`tools\mapc` and `aoc_navbuild`);
 - `dist\content\client_config\` and `zoi_chunks\`: the game's config files and its zone grid, which the generators read;
 - the generated sources and test fixtures the build includes (for example `zoi_surface_table.h`, `node_constants.h`, `region_data.h`).
 
-**How long:** about 10 minutes the first time on a fast PC (24 threads, 31 GB: 10.3 minutes in all, of which the map read and the navigation mesh take 8); a slower PC takes longer. Every step is skipped when what it reads has not changed, so running it again takes about a second. `extract_game_data.bat -CheckOnly` says what would run, `-Only <step>` runs one step (the steps are `tools`, `config`, `curves`, `database`, `region`, `headers`, `fixtures`, `navbuild`, `roads`, `navmesh`), `-Skip <step>` leaves one out and `-Force` runs everything again. The output of every program is kept in `dist\content\.extract\`; `last_run.log` has all of it.
+**How long:** about 10 minutes the first time on a fast PC (24 threads, 31 GB: 10.3 minutes in all, of which the map read and the navigation mesh take 8); a slower PC takes longer. Every step is skipped when what it reads has not changed, so running it again takes about a second. `extract_game_data.bat -CheckOnly` says what would run, `-Only <step>` runs one step (the steps are `tools`, `config`, `curves`, `database`, `region`, `headers`, `fixtures`, `navbuild`, `roads`, `townfloors`, `navmesh`), `-Skip <step>` leaves one out and `-Force` runs everything again. The output of every program is kept in `dist\content\.extract\`; `last_run.log` has all of it.
 
 **Network:** the first run needs it once, for CUE4Parse (a git clone of github.com/FabianFG/CUE4Parse at a pinned commit; the script keeps its 7.5 MB of source), the NuGet packages that `tools\mapc\mapc.csproj` names (from nuget.org), the Go modules that `services\go.mod` names, and, in the first C++ build, the vcpkg libraries. Nothing is downloaded after that.
 
@@ -114,7 +116,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 ```bat
 launch_worldd.bat
 ```
-It checks that the programs are built, then starts the full stack with `worldd` as the world server; `scripts\launch_all.bat` does the work.
+It checks that the programs are built, then starts the full stack with `worldd` as the world server; `scripts\launch_all.bat` does the work. The launcher window opens: sign in there and press LAUNCH GAME, which starts the game client. With "Keep me signed in" ticked the sign-in is saved in Windows Credential Manager (`SandalCore/LauncherSignIn`, for your Windows account only) and the launcher signs in by itself the next time; Logout forgets it.
 
 The client is started with `-UseEOS=false`, so it runs without Epic Online Services; no game files are modified.
 
