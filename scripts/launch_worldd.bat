@@ -4,12 +4,10 @@ REM Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemos
 REM GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
 rem ============================================================================
-rem  launch_worldd.bat - launch_go.bat worldd, for double-clicking
+rem  launch_worldd.bat - the whole stack, for double-clicking
 rem
-rem  Starts the Go services with worldd as the world server (not aoc_server),
-rem  the tether and the launcher window; sign in and press Play.  Arguments are
-rem  passed on (e.g. launch_worldd.bat native); quick is refused, as in
-rem  launch_go.bat worldd.
+rem  Starts the Go services with worldd as the world server, the tether and the
+rem  launcher window; sign in and press Play.  Takes no arguments.
 rem ============================================================================
-call "%~dp0launch_go.bat" worldd %*
+call "%~dp0launch_all.bat" %*
 exit /b %errorlevel%

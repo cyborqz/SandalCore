@@ -4,11 +4,11 @@
 
 // Package aocchar encodes character records in the client's aoc_character
 // wire format. There is no .proto for it in this repository: the layout is
-// the one the legacy emulator sends (src/services/xclient/xclient_service.h,
-// build_character_proto and build_create_reply_info), which the client
-// accepts and renders in character select, with the field meanings of the
-// client's own protobuf descriptors (embedded in the executable) where the
-// legacy server's reading of a capture was wrong (plan B1).
+// the one the old login server sent (its xclient service, build_character_proto
+// and build_create_reply_info), which the client accepts and renders in
+// character select, with the field meanings of the client's own protobuf
+// descriptors (embedded in the executable) where the old server's reading of
+// a capture was wrong (plan B1).
 //
 // CharacterInformation, the message in field 100 of a list record and the
 // character_info of a create reply: json_blob_map 1 (the customization),

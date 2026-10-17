@@ -26,9 +26,9 @@ void NmtBuilder::write_fstring_ansi(BunchWriter& out, const std::string& s) {
 
 // ─── Bunch-header writer (NMT format) ──────────────────────────────────────
 //
-// Mirrors the byte layout from game_server.h send_nmt (lines 2487-2519)
-// for the channel-already-open case.  NMT uses the 10-bit ChSequence and
-// 13-bit BunchDataBits "C>S format" per the existing server code.
+// Mirrors the byte layout of the retired login server's send_nmt for the
+// channel-already-open case.  NMT uses the 10-bit ChSequence and
+// 13-bit BunchDataBits "C>S format", as that server did.
 // [CoA ~ C:Y:B]
 
 size_t NmtBuilder::write_nmt_bunch_header(BunchWriter& out,

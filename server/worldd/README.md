@@ -382,7 +382,7 @@ and ignored.
 | `--no-node-people` | `AOC_NO_NODE_PEOPLE` | off | no town people (Nodes 1, stage 3b): the layouts' and buildings' populations are not spawned and a node's level changes none |
 | `--roads-levels` | `AOC_ROADS_LEVELS` | `dist/content/roads_levels.tsv` | the roads of every node level with their owner zones (`contentc roads --levels`): used instead of `--roads` when the file exists, so that a road's tier follows its zone's node level |
 
-The default path is relative to the working directory, like `--service-token-file`; `scripts\services.ps1 run -World worldd` runs
+The default path is relative to the working directory, like `--service-token-file`; `scripts\services.ps1 run` runs
 worldd from the repo root and passes `--content-db` explicitly (`AOC_CONTENT_DB` if set), and warns when the file is not there.
 
 **What the log shows** after the lines of a login (below): `[session] cyb: joining as ServerId 60, PlayerId 1, GameState tier2;
@@ -1267,8 +1267,8 @@ The 53 `Hunting_<kind>` creatures of the data (17 kinds spawn in the Riverlands 
 
 ## Run
 
-`scripts\services.ps1 run -World worldd` starts it with the Go services, and
-`scripts\launch_go.bat worldd` starts the whole stack with the game client. Build it first:
+`scripts\services.ps1 run` starts it with the Go services, and
+`launch_worldd.bat` starts the whole stack with the game client. Build it first:
 
 ```powershell
 scripts\build.ps1 -Target worldd

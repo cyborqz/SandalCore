@@ -4,7 +4,7 @@ REM Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemos
 REM GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
 REM Builds the game data from your own Ashes of Creation install (content.db, the tables, the navigation mesh: scripts\extract_game_data.ps1; a no-op
-REM when it is already there), then every server component the launchers need: auth_server, tether_server, launcher, worldd, aoc_server.
+REM when it is already there), then every server component the launcher needs: tether_server, launcher, worldd.
 REM Output goes to dist\Release. The first build also downloads and compiles the C++ libraries through vcpkg
 REM (grpc, protobuf, openssl, ...), which can take a long time. Extra arguments go to scripts\build.ps1
 REM (e.g. -Config Debug, -Clean, -Configure, -Jobs 6).

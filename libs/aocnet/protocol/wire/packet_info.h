@@ -5,7 +5,7 @@
 //  protocol/wire/packet_info.h
 //
 //  PacketInfo block reader, shared by wire::parse_packet() and the live
-//  C>S path in net/game_server.h so the two cannot drift apart.
+//  C>S path so the two cannot drift apart.
 //
 //  Layout (read right after the AoC 48-bit custom field):
 //

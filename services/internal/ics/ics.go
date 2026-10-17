@@ -5,9 +5,8 @@
 // Package ics serves the game client's ICS XClient stream: the one gRPC
 // method the client calls (/ics_xclient.XClientService/ProcessXClientMessage),
 // a bidirectional stream of ics_common.MessageWrapper carrying its session,
-// world, character and play requests. The replies follow the legacy emulator
-// (src/services/xclient/xclient_service.h), which the client is proven to
-// accept.
+// world, character and play requests. The replies follow the old login
+// server's, which the client is proven to accept.
 package ics
 
 import (

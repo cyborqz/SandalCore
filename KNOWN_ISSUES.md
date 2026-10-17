@@ -28,7 +28,7 @@ This document tracks known issues, behaviors under active investigation, workaro
 ## Codebase Markers Summary
 
 An audit of internal code markers across active services and servers indicates:
-- **`TODO` markers**: 27 instances across 13 files (focused on edge-case protocol fields, auxiliary telemetry, and stubbed RPC fallbacks).
+- **`TODO` markers**: 18 instances across 6 files (focused on edge-case protocol fields, auxiliary telemetry, and stubbed RPC fallbacks).
 - **`FIXME` markers**: 0 active instances.
 
 ---
@@ -46,4 +46,3 @@ An audit of internal code markers across active services and servers indicates:
 
 ### Infrastructure & Tooling
 - **Distributed Cell Sharding**: Multi-process cell partitioning for high-concurrency world instances.
-- **Automated Replay Regression Runner**: CI integration for continuous replay packet validation.

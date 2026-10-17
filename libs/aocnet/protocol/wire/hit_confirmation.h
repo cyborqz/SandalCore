@@ -18,7 +18,7 @@
 //  these at 53/54; base = APlayerController's 98 fields + 19 AAoCPC props
 //  = 117 (98 + 19 + 908 = 1025 = the SerializeInt max every ch=3 RPC uses;
 //  the same formula gives ClientSetDialogue=258, ServerChooseDialogueOption
-//  =424, ServerSelectDialogueChoice=834 as already used in game_server.h).
+//  =424, ServerSelectDialogueChoice=834).
 //
 //  UAoCAbilityComponent::ProxyMulticastHitConfirmation (ability field 21) is
 //  NOT client-callable: its FunctionFlags (0x00080C60) have no NetClient /

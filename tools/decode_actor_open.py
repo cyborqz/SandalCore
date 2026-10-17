@@ -4,9 +4,9 @@
 
 """Decode actor-channel opens the way the AoC client reads them.
 
-Input is JSON lines of raw bunches, as printed by replay_bunches (the original
-server's traffic) or the native-bunch harness (ours).  For each actor channel
-the decoder follows the client:
+Input is JSON lines of raw bunches, one object per bunch with the fields pkt,
+ch, chseq, open, mustmap, hex, bits, exports, partial, pinit and pfinal.  For
+each actor channel the decoder follows the client:
 
   per raw bunch   UChannel::ReceivedRawBunch -> ReceiveNetGUIDBunch when the
                   bunch has package-map exports:
@@ -30,7 +30,6 @@ object + FString name; flags&4 -> uint32 checksum.
 Variants the client chooses by engine network version or cvar are switches:
 --vector new|legacy (quantized vector format), --rotation raw|compressed.
 
-    replay_bunches fixtures/replay_data.bin --to 140 | python tools/decode_actor_open.py -
     python tools/decode_actor_open.py bunches.jsonl --channel 3 --verbose
 """
 import argparse

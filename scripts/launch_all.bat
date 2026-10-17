@@ -5,8 +5,14 @@ REM GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
 setlocal EnableExtensions EnableDelayedExpansion
 
+if not "%~1"=="" goto :no_arguments
+
 rem ============================================================================
-rem  launch_all.bat - start the full emulator stack + game client
+rem  launch_all.bat - start the full stack + game client
+rem
+rem  Starts the Go services and worldd (the world server), the tether and the
+rem  launcher window; sign in there and press Play. The game client starts by
+rem  itself once you have signed in. Takes no arguments.
 rem
 rem  Paths are derived from this script's location. Override the game client
 rem  location via GAME_ROOT if yours is not at one of the detected defaults.
@@ -16,7 +22,6 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 set "DIST_DIR=%REPO_ROOT%\dist\Release"
 set "CONFIG_DIR=%REPO_ROOT%\config"
-set "CERTS_DIR=%REPO_ROOT%\certs"
 
 if not defined GAME_EXE if exist "%CONFIG_DIR%\paths.json" (
     for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$p='%CONFIG_DIR%\paths.json'; if (Test-Path $p) { (Get-Content $p -Raw | ConvertFrom-Json).game_executable }" 2^>nul`) do (
@@ -57,20 +62,16 @@ if not exist "%DIST_DIR%\" (
 )
 
 set "MISSING_BINARIES=0"
-if not exist "%DIST_DIR%\auth_server.exe" (
-    echo Missing: "%DIST_DIR%\auth_server.exe"
-    set "MISSING_BINARIES=1"
-)
-if not exist "%DIST_DIR%\aoc_server.exe" (
-    echo Missing: "%DIST_DIR%\aoc_server.exe"
-    set "MISSING_BINARIES=1"
-)
 if not exist "%DIST_DIR%\tether_server.exe" (
     echo Missing: "%DIST_DIR%\tether_server.exe"
     set "MISSING_BINARIES=1"
 )
 if not exist "%DIST_DIR%\launcher.exe" (
     echo Missing: "%DIST_DIR%\launcher.exe"
+    set "MISSING_BINARIES=1"
+)
+if not exist "%DIST_DIR%\worldd.exe" (
+    echo Missing: "%DIST_DIR%\worldd.exe"
     set "MISSING_BINARIES=1"
 )
 if "%MISSING_BINARIES%"=="1" (
@@ -117,106 +118,32 @@ rem and create this machine's own TLS certificates in certs\ (local CA trusted f
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\extract_game_data.ps1" || goto :fail
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\make_certs.ps1" || goto :fail
 
-if exist "%CERTS_DIR%\" (
-    if not exist "certs" mkdir "certs"
-    xcopy "%CERTS_DIR%" "certs" /E /I /Y >nul
-)
-
 echo Cleaning up old emulator processes from this dist ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$dist = (Resolve-Path -LiteralPath $env:DIST_DIR).Path; Get-Process auth_server,aoc_server,tether_server,launcher -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dist, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$dist = (Resolve-Path -LiteralPath $env:DIST_DIR).Path; Get-Process tether_server,launcher -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dist, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"
 
-set "GO_STACK=0"
-if /I "%AOC_STACK%"=="go" set "GO_STACK=1"
-rem  AOC_WORLD=worldd (launch_go.bat worldd): worldd serves the world, not aoc_server.
-set "WORLDD=0"
-if "%GO_STACK%"=="1" if /I "%AOC_WORLD%"=="worldd" set "WORLDD=1"
-rem  quick skips character select, and with it the join ticket worldd needs.
-if "%WORLDD%"=="1" if /I "%~2"=="quick" goto :worldd_no_quick
-
-rem  Go services left running by launch_go.bat would hold :8081, :443 and :50055 (citynode) and
-rem  answer in place of the legacy servers: stop them in both modes. This needs
-rem  neither Go nor Docker.
+rem  Go services or worldd left running from an earlier launch would hold :8081, :443, :50055 (citynode)
+rem  and UDP :7777: stop them first. This needs neither Go nor Docker.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" stop || goto :fail
 
-if "%GO_STACK%"=="1" goto :start_go_services
-echo [1/5] Starting auth_server.exe (HTTP :8081) ...
-start "Auth Server" /D "%DIST_DIR%" /MIN cmd /c "auth_server.exe 8081 logs\mock_auth.log & pause"
-
-echo        Waiting for auth_server to bind TCP port 8081 ...
-call :wait_tcp 8081 auth_server 30 || goto :fail
-echo        auth_server READY.
-goto :services_ready
-
-:start_go_services
-set "WORLD_ARG=legacy"
-if "%WORLDD%"=="1" set "WORLD_ARG=worldd"
-echo [1/5] Starting the Go services: auth, character, citynode, mesh, gateway (world: %WORLD_ARG%) ...
+echo [1/5] Starting the Go services and worldd: auth, character, citynode, mesh, gateway, worldd ...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" up || goto :fail
-powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" run -World %WORLD_ARG% || goto :fail
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" run || goto :fail
 call :wait_tcp 8081 auth 30 || goto :fail
 call :wait_tcp 443 gateway 30 || goto :fail
 rem  citynode (Nodes 1) serves the city node levels; migration 0009 runs and the seed is applied at its first start
 call :wait_tcp 50055 citynode 30 || goto :fail
-if not "%WORLDD%"=="1" goto :go_services_up
 call :wait_udp 7777 worldd 30 || goto :fail
-:go_services_up
 echo        Go services READY.
 
-:services_ready
-
-rem  launch_all.bat          replay mode (the captured session drives the world)
-rem  launch_all.bat native   native mode (NativeConnectSequencer builds world entry;
-rem                          captured bytes only where its bootstrap plan splices them)
-rem  launch_all.bat native quick
-rem                          also skip the launcher window and hand the client the
-rem                          game server's address, so it connects straight away
-rem                          instead of stopping at the title screen and lobby
-set "SERVER_ARGS=--use-embedded-bootstrap --enable-live-world --live-world-hz 20 --send-hit-confirmations --send-level-visibility-acks"
-set "MODE_NAME=replay"
 rem  The client runs without Epic Online Services.
 set "CLIENT_ARGS=-UseEOS=false"
-if /I "%~1"=="native" (
-    set "SERVER_ARGS=--native --no-replay-loop"
-    set "MODE_NAME=native"
-    rem  Verbose client logs for possession and movement (AOC.log)
-    set "CLIENT_ARGS=%CLIENT_ARGS% -LogCmds="LogPlayerController Verbose, LogCharacterMovement Verbose, LogNetPlayerMovement Verbose""
-)
-set "QUICK=0"
-set "CONNECT_URL="
-if /I "%~2"=="quick" (
-    set "QUICK=1"
-    rem  Unreal opens a URL given as the first argument instead of the default map
-    set "CONNECT_URL=127.0.0.1:7777"
-)
-set "ICS_PORT=443"
 set "TOKEN_FILE=%DIST_DIR%\data\ics_auth_token.txt"
-set "TETHER_CMD=tether_server.exe"
-set "SIGN_IN_NOTE=Credentials: test222 / test  (or register a new account)"
-if "%GO_STACK%"=="1" (
-    rem  The gateway owns :443; aoc_server's own ICS moves out of its way.
-    set "SERVER_ARGS=!SERVER_ARGS! --port 8443"
-    set "ICS_PORT=8443"
-    rem  The tether hands the client the login token the launcher saved.
-    set "TETHER_CMD=tether_server.exe --login-token-file"
-    set "SIGN_IN_NOTE=Sign in with an account registered through the launcher."
-)
-if "%GO_STACK%"=="1" if "%QUICK%"=="1" set "SIGN_IN_NOTE=Signed in with the account in config\dev_login.local.json."
+rem  The tether hands the client the login token the launcher saved.
+set "TETHER_CMD=tether_server.exe --login-token-file"
+set "SIGN_IN_NOTE=Sign in with an account registered through the launcher."
 
 echo.
-if "%WORLDD%"=="1" goto :worldd_world
-echo [2/5] Starting aoc_server.exe in %MODE_NAME% mode (gRPC :%ICS_PORT% + UDP game server) ...
-start "AOC Server" /D "%DIST_DIR%" /MIN cmd /c "aoc_server.exe %SERVER_ARGS% --verbose-bunches --verbose-bunch-limit 0 --verbose-bunch-log logs\bunches_liveworld.log & pause"
-
-echo        Waiting for aoc_server to bind TCP port %ICS_PORT% ...
-call :wait_tcp %ICS_PORT% aoc_server 45 || goto :fail
-echo        aoc_server READY.
-goto :world_ready
-
-:worldd_world
-echo [2/5] worldd serves the world on UDP :7777 (started with the Go services). Plan A4:
-echo        the client logs in and loads the map, then waits; the world comes with plan A5.
-
-:world_ready
+echo [2/5] worldd serves the world on UDP :7777 (started with the Go services).
 
 echo.
 echo [3/5] Starting tether_server.exe (UDP ARQ :19021) ...
@@ -231,23 +158,14 @@ if errorlevel 1 (
     echo        tether_server READY.
 )
 
-rem  Go stack: a login token left from an earlier sign-in would open the game
-rem  as that account, so only this run's sign-in may provide one.
-if not "%GO_STACK%"=="1" goto :login_done
+rem  A login token left from an earlier sign-in would open the game as that
+rem  account, so only this run's sign-in may provide one.
 if exist "%TOKEN_FILE%" del /f /q "%TOKEN_FILE%"
 if exist "%TOKEN_FILE%" goto :token_not_deleted
-if not "%QUICK%"=="1" goto :login_done
-echo        Quick mode: signing in with config\dev_login.local.json ...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" login || goto :fail
-:login_done
 
 echo.
-if "%QUICK%"=="1" (
-    echo [4/5] Quick mode: no launcher window.
-) else (
-    echo [4/5] Opening launcher.exe ...
-    start "" /D "%DIST_DIR%" "%DIST_DIR%\launcher.exe"
-)
+echo [4/5] Opening launcher.exe ...
+start "" /D "%DIST_DIR%" "%DIST_DIR%\launcher.exe"
 
 echo.
 echo Starting real-time background auto-logger ...
@@ -269,11 +187,8 @@ echo  No need to press any key or close anything.
 echo ============================================================
 echo.
 
-rem  Go stack with the launcher window: the client asks the tether for its
-rem  login token some seconds after it starts, so it starts once the player
-rem  has signed in (the launcher then writes the token file).
-if not "%GO_STACK%"=="1" goto :start_game
-if "%QUICK%"=="1" goto :start_game
+rem  The client asks the tether for its login token some seconds after it starts, so
+rem  it starts once the player has signed in (the launcher then writes the token file).
 if not exist "%GAME_EXE%" goto :start_game
 echo  Sign in through the launcher window: the game client starts by itself
 echo  once you have. Do not also press the launcher's Launch button, or a
@@ -286,7 +201,7 @@ echo.
 :start_game
 if exist "%GAME_EXE%" (
     echo [5/5] Launching game client ...
-    start "" /D "%GAME_ROOT%\AOC\Binaries\Win64" "%GAME_EXE%" %CONNECT_URL% -LauncherTetherPort=19021 %CLIENT_ARGS%
+    start "" /D "%GAME_ROOT%\AOC\Binaries\Win64" "%GAME_EXE%" -LauncherTetherPort=19021 %CLIENT_ARGS%
     echo Game client launched.
 ) else (
     echo NOTE: Shipping binary not found at "%GAME_EXE%". Launch via launcher.exe.
@@ -330,27 +245,21 @@ echo ERROR: Could not delete the login token left by an earlier sign-in:
 echo        "%TOKEN_FILE%"
 goto :fail
 
-:worldd_no_quick
-echo ERROR: quick skips character select and connects straight to 127.0.0.1:7777, so the
-echo        client has no join ticket for worldd. Run launch_go.bat worldd and press Play.
+:no_arguments
+echo ERROR: launch_all.bat takes no arguments. The native and quick options belonged to the retired
+echo        replay-based login server; the Go services and worldd are the only server path.
 pause
 exit /b 1
 
 :sign_in_timeout
 echo ERROR: No sign-in within 5 minutes: "%TOKEN_FILE%" did not appear.
-echo        Run launch_go.bat again and sign in through the launcher window.
+echo        Run launch_worldd.bat again and sign in through the launcher window.
 goto :fail
 
 :fail
 echo.
-if "%GO_STACK%"=="1" goto :fail_go
-echo Launch failed. Check the opened server window for the active error.
-pause
-exit /b 1
-
-:fail_go
-echo Launch failed. The Go services log to %REPO_ROOT%\dist\services\logs\
-echo   auth.log, character.log, citynode.log, mesh.log and gateway.log. aoc_server and
-echo   tether_server show their errors in their own windows.
+echo Launch failed. The Go services and worldd log to %REPO_ROOT%\dist\services\logs\
+echo   auth.log, character.log, citynode.log, mesh.log, gateway.log and worldd.log.
+echo   tether_server shows its errors in its own window.
 pause
 exit /b 1

@@ -11,10 +11,10 @@
 //  executables run from dist\<Config>, so the file lives next to them:
 //  data\ics_auth_token.txt.
 //
-//  The tether reads the file only when started with --login-token-file (the
-//  Go stack, scripts\launch_go.bat), and hands the saved token only to a game
+//  The tether reads the file only when started with --login-token-file
+//  (scripts\launch_all.bat does), and hands the saved token only to a game
 //  client on this machine (client_tokens). Without the flag it sends the
-//  emulator token, which the legacy aoc_server's own ICS accepts.
+//  emulator token, which the gateway refuses.
 // ============================================================================
 #pragma once
 

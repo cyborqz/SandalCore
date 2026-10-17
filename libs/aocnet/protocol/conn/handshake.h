@@ -6,7 +6,7 @@
 //
 //  The stateless connect handshake (UE5 StatelessConnectHandlerComponent)
 //  with Intrepid's 94-byte extension, as the AoC client and the original
-//  server speak it (2026-09-28 capture; legacy src/net/game_server.h ue5_hs).
+//  server speak it (2026-09-28 capture; the retired login server's ue5_hs).
 //
 //      client  Initial   (type 0)  extension: marker, character id, join ticket
 //      server  Challenge (type 1)  timestamp + cookie, the server's extension

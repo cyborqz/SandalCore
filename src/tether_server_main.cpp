@@ -12,9 +12,9 @@
 ///   port                overrides the value in server.json (default 19021 if
 ///                       absent): the first argument that is not the flag.
 ///   --login-token-file  hand a game client on this machine the login token
-///                       launcher.exe saved in data\ics_auth_token.txt (the Go
-///                       stack, scripts\launch_go.bat). Without it the client
-///                       gets the emulator token and the file is never read.
+///                       launcher.exe saved in data\ics_auth_token.txt
+///                       (scripts\launch_all.bat starts it so). Without it the
+///                       client gets the emulator token and the file is never read.
 /// ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN

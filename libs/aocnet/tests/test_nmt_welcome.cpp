@@ -14,8 +14,7 @@
 //  If the bunch-bit stream matches, Session H.2a is done for the Welcome
 //  opcode — our emitter is a drop-in replacement for the replay's bytes.
 //  The outer packet framing (FNetPacketNotify + custom field +
-//  termination) is not in scope for H.2a; UdpPacketEmitter::wrap_and_send
-//  already handles that and will be hooked up in H.2's final step.
+//  termination) is not in scope for H.2a; the packet's sender handles that.
 //
 //  Captured packet #2 payload (from replay_full.jsonl via catalog):
 //      level        = "/Game/Levels/Verra_World_Master/Verra_World_Master"

@@ -102,8 +102,8 @@ WalkResult walk_bunches_ex(const uint8_t* data, size_t byte_len,
 /// Visits every bunch between `start_bit` and `end_bit`, calling
 /// on_bunch(const ParsedBunch&) for each.  Returns the number visited.
 ///
-/// Shared by parse_packet() and the live C>S path in net/game_server.h.  The callers that
-/// ignore how a walk ended (the legacy server, the tools) walk as they always did: a header cut
+/// Shared by parse_packet() and the live C>S path.  The callers that
+/// ignore how a walk ended (the tools) walk as they always did: a header cut
 /// off by the end of the packet still reads as a bunch (see detail::walk); only the limit
 /// of bunches per packet is higher.  worldd uses walk_bunches_ex.
 template <class OnBunch>
