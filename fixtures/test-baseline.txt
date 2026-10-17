@@ -4,6 +4,7 @@ test_generated_schemas               PASS exit=0
 test_handshake                       PASS exit=0
 test_hit_confirmation                PASS exit=0
 test_ics_token_file                  PASS exit=0
+test_launcher_saved_sign_in          PASS exit=0
 test_level_visibility                PASS exit=0
 test_name_update_bunch               FAIL exit=1
 test_nmt_challenge                   PASS exit=0

@@ -7,7 +7,7 @@ rem ============================================================================
 rem  launch_worldd.bat - the whole stack, for double-clicking
 rem
 rem  Starts the Go services with worldd as the world server, the tether and the
-rem  launcher window; sign in and press Play.  Takes no arguments.
+rem  launcher window; sign in and press LAUNCH GAME.  Takes no arguments.
 rem ============================================================================
 call "%~dp0launch_all.bat" %*
 exit /b %errorlevel%
