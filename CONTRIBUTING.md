@@ -1,6 +1,6 @@
 # Contributing to Sandal Core
 
-Thank you for your interest in contributing to Sandal Core! Sandal Core is an open-source server emulator for Ashes of Creation developed for preservation and educational research.
+Thank you for your interest in contributing to Sandal Core! Sandal Core is an independent, open-source server emulator compatible with the Ashes of Creation client, developed for preservation and educational research.
 
 ---
 

@@ -1,6 +1,9 @@
 # Sandal Core
 
-A server emulator for the Ashes of Creation client, developed by Cyb.
+An independent, open-source server emulator compatible with the Ashes of Creation client, developed by Cyb.
+
+> [!IMPORTANT]
+> **Not affiliated with Intrepid Studios.** Sandal Core is an independent project. It is not affiliated with, sponsored by or endorsed by Intrepid Studios, Inc. *Ashes of Creation* is a trademark of Intrepid Studios, Inc., named here only to say which game client this server works with. The repository contains no game client, game files or Intrepid code: the data the servers need is built on your PC from your own installed copy of the game.
 
 > [!WARNING]
 > **Work in Progress**: Sandal Core is **NOT** a final product. It is under active and consistent development; expect bugs, incomplete features, and ongoing protocol refinements. Please refer to [ROADMAP.md](ROADMAP.md) for milestone progress and [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for current known limitations, workarounds, and backlog items.
@@ -9,7 +12,7 @@ A server emulator for the Ashes of Creation client, developed by Cyb.
 
 ## What Works Today
 
-Sandal Core provides a full-featured, clean-room server emulation stack for the Ashes of Creation client:
+Sandal Core provides an independent server emulation stack for the Ashes of Creation client:
 
 - **Protocol & Network Transport**: Full UE5 / IntrepidNetDriver handshake, stateless connect, packet framing, bunch replication, and dynamic NetGUID allocation.
 - **Authentication & Character Management**: gRPC and REST-based authentication services, account profiles, character creation with full visual appearance customization serialization, and character select lobby transitions.
@@ -177,4 +180,4 @@ This program is free software: you can redistribute it and/or modify it under th
 
 ## Disclaimer
 
-Not affiliated with or endorsed by Intrepid Studios; Ashes of Creation is their trademark; no game client, game assets or Intrepid code included; use your own legally obtained client; for preservation and education.
+Not affiliated with, sponsored by or endorsed by Intrepid Studios, Inc.; Ashes of Creation is their trademark, named only to identify the compatible client; no game client, game files or Intrepid code included; the game data is built on your PC from your own legally obtained client; for preservation and education.
