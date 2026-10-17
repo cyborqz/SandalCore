@@ -22,6 +22,8 @@ namespace Mapc;
 ///   mapc artisan-curves [--check]    read the three profession level-up curves (Gathering, Processing, Crafting: pak assets the design database does not hold; no map:
 ///                                    seconds), write DIR/artisan_curves.tsv; with --check write nothing and exit 1 when DIR's file differs from a fresh read (Gathering stage 2)
 ///   mapc roads [--check]             read the BP_RoadActor_C splines of the area's MainGrid cells, write DIR/roads_raw.tsv (a map read: run it alone; mounts milestone, stage 4)
+///   mapc town-floors [--check]       read the two city-node platform umaps (Landscape_Flat_D_Master_01, Landscape_River_C_Master_01: 48 MB, no map read), write DIR/town_platforms.bin
+///                                    (the heights and holes of the five bowls' floor); with --check write nothing and exit 1 when DIR's file differs
 ///   mapc probe KEY.tsv               the answer key's hit rate on the extracted geometry (diagnostic)
 ///   mapc inspect NAME...             what one static mesh holds (diagnostic)
 /// Options: --paks DIR, --usmap FILE, --navbuild EXE, --center X,Y, --radius CM, --margin CM, --threads N.
@@ -101,8 +103,8 @@ public static class Cli
             switch (o.Cmd)
             {
                 case "help": case "build": case "extract": o.Cmd = "check"; break;   // the E1 gate: rebuild all three in a scratch folder and compare
-                case "check": case "mount-speeds": case "roads": case "artisan-curves": break;   // these compare themselves
-                default: throw new ArgumentException("--check goes with build, mount-speeds, artisan-curves or roads (or alone: the E1 check), not with " + o.Cmd);
+                case "check": case "mount-speeds": case "roads": case "artisan-curves": case "town-floors": break;   // these compare themselves
+                default: throw new ArgumentException("--check goes with build, mount-speeds, artisan-curves, roads or town-floors (or alone: the E1 check), not with " + o.Cmd);
             }
         }
         // review B I7: E1's circle is not the default area any more; its build must not land in (or be compared with) the Riverlands' files in dist/content
@@ -160,10 +162,11 @@ public static class Cli
                 case "mount-speeds": return MountSpeedsCommand(o);
                 case "artisan-curves": return ArtisanCurvesCommand(o);
                 case "roads": return RoadsCommand(o);
+                case "town-floors": return TownFloorsCommand(o);
                 case "bp": { var game = new Game(o.Paks, o.Usmap); Inspect.Bp(game, o.Rest[0], o.Rest.Count > 1 ? o.Rest[1] : null); return 0; }
                 case "inspect": { var game = new Game(o.Paks, o.Usmap); Inspect.Run(game, new[] { "inspect" }.Concat(o.Rest).ToArray()); return 0; }
                 default:
-                    Console.WriteLine("mapc extract | build | --check | probe-cells | export-config | export-zoi | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
+                    Console.WriteLine("mapc extract | build | --check | probe-cells | export-config | export-zoi | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | town-floors [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
                     return o.Cmd == "help" ? 0 : 2;
             }
         }
@@ -208,6 +211,50 @@ public static class Cli
         return res.Warnings.Count == 0 ? 0 : 1;
     }
 // Cyb : C.O.A
+
+    /// <summary>mapc town-floors: the two city-node platform umaps (Landscape_Flat_D_Master_01, Landscape_River_C_Master_01: 48 MB, not a map read) into DIR/town_platforms.bin, or with
+    /// --check a byte comparison with the file that is there.  It runs as a child under a heap limit (--heap-gb, 3 by default) behind the same guard as the map read (free memory, no game
+    /// or build running); `--probe` lists what the two umaps hold and writes nothing.</summary>
+    static int TownFloorsCommand(Opt o)
+    {
+        void Log(string m) => Console.WriteLine(m);
+        if (o.Rest.Contains("--probe")) return TownFloors.Probe(new Game(o.Paks, o.Usmap), Log);
+        if (Environment.GetEnvironmentVariable("DOTNET_GCHeapHardLimit") == null)
+        {
+            // the guard, then this same command line again as a child under DOTNET_GCHeapHardLimit
+            if (!Sys.WaitForRoom(o.MinFreeGb, o.WaitMinutes, Log)) { Console.Error.WriteLine("mapc: no room on this machine"); return 1; }
+            var psi = new ProcessStartInfo(Environment.ProcessPath ?? "dotnet") { UseShellExecute = false };
+            psi.ArgumentList.Add(typeof(Cli).Assembly.Location);
+            foreach (var a in Environment.GetCommandLineArgs().Skip(1)) psi.ArgumentList.Add(a);
+            double heapGb = o.HeapGb > 0 ? o.HeapGb : 3;
+            psi.Environment["DOTNET_GCHeapHardLimit"] = ((ulong)(heapGb * 1073741824.0)).ToString("X", CultureInfo.InvariantCulture);
+            psi.Environment["DOTNET_gcConcurrent"] = "0";
+            Log($"town-floors: running under a heap limit of {heapGb:F1} GB ({Sys.FreePhysicalGb():F1} GB free)");
+            using var child = Process.Start(psi) ?? throw new InvalidOperationException("cannot start " + psi.FileName);
+            child.WaitForExit();
+            return child.ExitCode;
+        }
+        var sw = Stopwatch.StartNew();
+        var game = new Game(o.Paks, o.Usmap);
+        var bytes = TownFloors.Build(game, m => Console.WriteLine(m), out int notes);
+        var proc = Process.GetCurrentProcess();
+        Log($"town-floors: {sw.Elapsed.TotalSeconds:F1} s, peak working set {proc.PeakWorkingSet64 / 1073741824.0:F2} GB, GC heap {GC.GetGCMemoryInfo().HeapSizeBytes / 1073741824.0:F2} GB");
+        string file = Path.Combine(o.OutDir, TownFloors.FileName);
+        if (o.CheckFlag)
+        {
+            if (!File.Exists(file)) { Log($"{TownFloors.FileName}: missing in {o.OutDir}"); return 1; }
+            var have = File.ReadAllBytes(file);
+            bool same = have.AsSpan().SequenceEqual(bytes);
+            Log(same ? $"{TownFloors.FileName}: identical ({have.Length} bytes)" : $"{TownFloors.FileName}: DIFFERS (file {have.Length} bytes, fresh {bytes.Length})");
+            return same ? 0 : 1;
+        }
+        Directory.CreateDirectory(o.OutDir);
+        string tmp = file + ".tmp";
+        File.WriteAllBytes(tmp, bytes);
+        File.Move(tmp, file, true);
+        Log($"wrote {file} ({bytes.Length} bytes)");
+        return 0;
+    }
 
     /// <summary>mapc mount-speeds: the speeds of the mount Blueprints into DIR/mount_speeds.tsv, or with --check a byte comparison with the file that is there.</summary>
     static int MountSpeedsCommand(Opt o)

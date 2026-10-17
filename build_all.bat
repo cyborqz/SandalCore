@@ -3,7 +3,7 @@ REM SPDX-License-Identifier: AGPL-3.0-only
 REM Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 REM GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
-REM Builds the game data from your own Ashes of Creation install (content.db, the tables, the navigation mesh: scripts\extract_game_data.ps1; a no-op
+REM Builds the game data from your own Ashes of Creation install (content.db, the tables, the towns' floor, the navigation mesh: scripts\extract_game_data.ps1; a no-op
 REM when it is already there), then every server component the launcher needs: tether_server, launcher, worldd.
 REM Output goes to dist\Release. The first build also downloads and compiles the C++ libraries through vcpkg
 REM (grpc, protobuf, openssl, ...), which can take a long time. Extra arguments go to scripts\build.ps1

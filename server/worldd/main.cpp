@@ -196,6 +196,11 @@ int main(int argc, char** argv) {
     app.add_option("--roads", roads_path, "the area's roads, dist/content/roads.tsv (mapc roads, then contentc roads --node-level <the --spawn-node-level>; a missing file: no roads, a mount rides at its own speed)")
         ->envname("AOC_ROADS")
         ->capture_default_str();
+    // the floor of the five city nodes' bowls (tools/mapc `mapc town-floors` reads the two platform umaps)
+    std::string town_platforms_path = "dist/content/town_platforms.bin";
+    app.add_option("--town-platforms", town_platforms_path, "the floor of the five city nodes' bowls, dist/content/town_platforms.bin (mapc town-floors; a missing file: the interim town floor model answers in a bowl, and a long teleport into a town can fall through)")
+        ->envname("AOC_TOWN_PLATFORMS")
+        ->capture_default_str();
     app.add_flag("--no-npc-movement", no_npc_movement, "NPCs stand still where the data puts them (stage 1's behaviour)");
     // plan E1, stage 2 fix: the NPCs no retail capture opened are made from their Blueprints (spawns/generic_npc.h)
     bool no_generic_npcs = false;
@@ -520,6 +525,14 @@ int main(int argc, char** argv) {
         }
         // the GM garden needs the ground (load_ground places it); without a ground file it stands at the login spot's height
         if (players.area_report() && players.gm_garden_requested() && !players.garden_report()) players.place_gm_garden();
+        // each of the five bowls' platform at its node record (the city nodes and the ground are set by now)
+        {
+            std::string platforms_error;
+            if (!players.load_town_platforms(town_platforms_path, platforms_error)) {
+                spdlog::warn("[floor] no town platforms ({}): the floor of a town's bowl is the interim model's, and a player put where the client has no floor yet falls through to the kill plane at -10,000 cm "
+                             "(run tools/mapc: mapc town-floors)", platforms_error);
+            }
+        }
         // Nodes 1, stage 3a: the towns' scenery, once the node levels are known (the seed's, and the service's as they come)
         {
             world::NodeScenery::Config scenery;

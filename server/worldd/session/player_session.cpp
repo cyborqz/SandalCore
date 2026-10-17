@@ -381,9 +381,14 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         owner.server_id = p->pb_.setup().server_id;
         PlayerWorld* w = &world;
         p->mounts_ = std::make_unique<MountController>(world.registry(), *world.mounts(), [w] { return w->mint_guid(); }, std::move(owner));
-        if (world.nav()) {
+        if (world.nav() || world.town_platforms()) {
             p->mounts_->set_ground([w](double x, double y, double hint) -> std::optional<double> {
+                // inside the footprint of a bowl whose platform is read the ground is the platform's floor: the baked terrain there is the pit under the town,
+                // 50 m down, which is why a summon was refused in every town ("Cannot summon mount here.").  A tower top or a high wall stands far over the platform and keeps the
+                // refusal (the mount's rule: at most 2.5 m between the feet and the ground).
+                if (const auto bowl = w->bowl_floor_at(x, y)) return bowl->z;
                 const nav::AreaNav* nav = w->nav();
+                if (!nav) return hint;   // (a world with platforms and no ground file: nothing to judge outside the bowls)
                 double z = 0;
                 // (review A I4) a chunk that is not loaded yet (the first moments after a login or a teleport) has none of its navmesh floors: the terrain alone would refuse a summon on
                 // a bridge.  Where the terrain exists but the floors are not here to judge, the player's own height stands.
@@ -600,6 +605,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_timers(conn, now);
     run_gather(conn, now);
     run_foliage(conn, now);
+    run_floor_net(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
@@ -609,6 +615,19 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
         const double world_time = pb_.setup().world_time + session_seconds(now);
         ++time_syncs_sent_;
         queue("clock", [world_time](bootstrap::PlayerBootstrap& pb) { return pb.set_time(world_time); }, conn);
+    }
+    // A town's scenery (its ANodeLayoutReplicator) is opened in the join, before the phase-in.  The client's pawn phases in when a 10 m trace down finds a blocking object, or after 120 s,
+    // and in a town's bowl the only ground the client has is what the replicator builds: opened by the pass below, after the phase-in, it left the player waiting out the cap
+    // (about two minutes, against about 30 s without a bowl).  Every join asks, whether or not it stands in a bowl: the replicator is relevant within its own radius
+    // (1.45 km) and a join farther from every town finds none, so nothing changes there.  Only the scenery: the NPCs and every other actor keep waiting for the phase-in (below).
+    if (view_ && !phase_in_done_ && !scenery_done_ && join_.empty()) {
+        const GoodPosition at = checker_.good();
+        size_t opened = 0;
+        scenery_done_ = view_->open_scenery(conn, at.x, at.y, now, &opened);
+        if (opened > 0) {   // (each open has its own "[scenery] open for player" line; the join's one line is the phase-in's below)
+            scenery_opened_ += opened;
+            scenery_at_ = session_seconds(now);
+        }
     }
     // plan E1: the other actors, once the join and the phase-in are out (their opens need the client's world to exist)
     if (view_ && phase_in_done_ && join_.empty() && replies_.empty() && delayed_.empty()) {
@@ -633,6 +652,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     if (position_changed(/*with_yaw=*/false)) hand_over("periodic save", /*periodic=*/true);
     if (inventory_dirty_) hand_over_inventory("periodic save", /*periodic=*/true);
 }
+// -- C Y B & CoA --
 
 void PlayerSession::log_position(Clock::time_point) {
     // The investigation of 2026-10-10: the periodic save logs its first three at info, so a 5-minute stretch of a test had no position in the log.  This line is every 30 s and says what
@@ -1053,6 +1073,14 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
             if (phase_in_requested_ || !room_for(1)) return;
             phase_in_requested_ = true;
             spdlog::info("[session] {}: the client is ready to phase in", name());
+            // The join to the phase-in, the one number the login fix is judged by (a healthy login takes about 30 s; waiting out the client's own cap takes 120 s or more).
+            // The seconds run from the session's first tick, a few milliseconds after the join.
+            if (scenery_opened_ > 0) {
+                spdlog::info("[join] {}: phase-in after {:.1f} s (join to the client's ready call; {} town replicator{} sent before it, the last at {:.1f} s)", name(), session_seconds(now),
+                             scenery_opened_, scenery_opened_ == 1 ? "" : "s", scenery_at_);
+            } else {
+                spdlog::info("[join] {}: phase-in after {:.1f} s (join to the client's ready call; no town replicator was sent before it)", name(), session_seconds(now));
+            }
             queue("phase-in", [this](bootstrap::PlayerBootstrap& pb) {
                 auto send = pb.phase_in();
                 if (send) phase_in_done_ = true;
@@ -3925,6 +3953,10 @@ const char* gm_refusal(PlayerSession::GmMoveResult::Status s) {
 }  // namespace
 
 PlayerSession::GmMoveResult PlayerSession::gm_teleport(Connection& conn, double x, double y, double z, Clock::time_point now, const std::string& by) {
+    return move_to(conn, x, y, z, now, by, /*gm=*/true);
+}
+
+PlayerSession::GmMoveResult PlayerSession::move_to(Connection& conn, double x, double y, double z, Clock::time_point now, const std::string& by, bool gm) {
     GmMoveResult r;
     r.from = last_position();
     r.to = r.from;
@@ -3951,15 +3983,40 @@ PlayerSession::GmMoveResult PlayerSession::gm_teleport(Connection& conn, double 
     pending_fix_.reset();   // a correction a refused move left would put the client back where it was
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
     constexpr uint8_t mode = repl::kMoveFalling;   // the client lands and walks again by itself
-    queue("GM teleport", [ts, x, y, z, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{x, y, z}, repl::Vec3d{}, mode); }, conn, /*must_build=*/true);
-    ++gm_teleports_;
+    queue(gm ? "GM teleport" : "floor net teleport", [ts, x, y, z, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{x, y, z}, repl::Vec3d{}, mode); }, conn, /*must_build=*/true);
+    if (gm) ++gm_teleports_;
     r.to = checker_.good();
-    spdlog::info("[gm] {}: teleported by {} from ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f}){}", name(), by, r.from.x, r.from.y, r.from.z, x, y, z,
+    spdlog::info("[{}] {}: teleported by {} from ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f}){}", gm ? "gm" : "floor-net", name(), by, r.from.x, r.from.y, r.from.z, x, y, z,
                  r.dismounted ? "; dismounted first" : "");
-    if (position_changed(/*with_yaw=*/false)) hand_over("a GM teleport", /*periodic=*/false);   // (a crash must not take the player back)
+    if (position_changed(/*with_yaw=*/false)) hand_over(gm ? "a GM teleport" : "the floor net", /*periodic=*/false);   // (a crash must not take the player back)
     return r;
 }
 // C_Y_B with C.O.A
+
+void PlayerSession::run_floor_net(Connection& conn, Clock::time_point now) {
+    if (!phase_in_done_ || dead_ || finished_ || failed_ || !npc_world_) return;   // (before the phase-in the pawn is held at the join height and cannot fall)
+    const GoodPosition g = checker_.good();
+    const auto rescue = npc_world_->floor_rescue(g.x, g.y, g.z);
+    if (!rescue) {
+        net_since_.reset();
+        return;
+    }
+    if (!net_since_) net_since_ = now;
+    if (std::chrono::duration<double>(now - *net_since_).count() < kNetHoldSeconds) return;
+    if (net_last_valid_ && std::chrono::duration<double>(now - net_last_).count() < kNetRepeatSeconds) return;
+    const GmMoveResult r = move_to(conn, rescue->x, rescue->y, rescue->z, now, "the floor net", /*gm=*/false);
+    if (r.status == GmMoveResult::Status::Busy) return;   // (the reply queue is full: the next tick tries again)
+    net_last_ = now;
+    net_last_valid_ = true;
+    net_since_.reset();
+    if (r.status != GmMoveResult::Status::Moved) {
+        spdlog::warn("[floor-net] {}: at ({:.0f}, {:.0f}, {:.0f}) cm, under the floor, and the move back is refused ({})", name(), g.x, g.y, g.z, gm_refusal(r.status));
+        return;
+    }
+    ++net_rescues_;
+    spdlog::warn("[floor-net] {}: its last good position ({:.0f}, {:.0f}, {:.0f}) cm is {:.0f} m under {}: put back at ({:.0f}, {:.0f}, {:.0f}) cm (rescue {} of this session)", name(), g.x, g.y, g.z,
+                 (rescue->z - g.z) / 100.0, rescue->where, rescue->x, rescue->y, rescue->z, net_rescues_);
+}
 
 double PlayerSession::gm_limit_scale(Clock::time_point now) const {
     double m = gm_speed_;

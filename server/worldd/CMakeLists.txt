@@ -301,6 +301,8 @@ add_library(worldd_core STATIC
     world/node_wire.h
     world/town_floor.cpp
     world/town_floor.h
+    world/town_platform.cpp
+    world/town_platform.h
     world/corpse.cpp
     world/corpse.h
     world/actor_registry.cpp
@@ -539,6 +541,14 @@ target_compile_definitions(test_worldd_node_pop PRIVATE
     NODES_SEED_PATH="${PROJECT_SOURCE_DIR}/deploy/citynode_seed.json"
     NODES_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv"
     NODES_ROADS_LEVELS_PATH="${PROJECT_SOURCE_DIR}/dist/content/roads_levels.tsv")
+
+# the towns' real ground: the platform reader and sampler on bytes made in the test, the frames, and - when dist/content/town_platforms.bin exists (mapc town-floors) - the real
+# platforms at the real node records and the world's ground queries on them; AOC_REAL_GROUND=1 adds the baked pit
+worldd_add_test(test_worldd_town_platform)
+target_compile_definitions(test_worldd_town_platform PRIVATE
+    NODES_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+    NODES_NAV_PATH="${PROJECT_SOURCE_DIR}/dist/content/area_nav.bin"
+    TOWN_PLATFORMS_PATH="${PROJECT_SOURCE_DIR}/dist/content/town_platforms.bin")
 
 # the spawn filter (plan E1, stage 3) on the same content.db and dist/content/npc_motion.tsv
 worldd_add_test(test_worldd_spawn_filter)

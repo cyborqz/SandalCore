@@ -18,16 +18,26 @@
 //                  location (or the record's); a level change is a new FULL payload and PlotChangeVersion + 1; a level with nothing to draw removes the actor
 //    the view      an ActorView opens the replicator for a player within 1.45 km, keeps it, closes it with a Relevancy close beyond, sends one update on the same channel for a
 //                  level change, and a second player is sent the same; the world (PlayerWorld) makes the scenery and follows the levels in tick_world
+//    the login fix
+//                  the client's pawn phases in when a trace down finds ground, and in a town's bowl the only ground the client has is what the replicator builds, so the scenery
+//                  is opened in the join, before the phase-in.  ActorView::open_scenery opens the replicators within reach and nothing else, a
+//                  later pass leaves them alone, and a session joined in the Joeva bowl is sent the replicator after its pawn and before the phase-in, the NPCs only after it; a
+//                  session joined far from every town is sent nothing of the world before the phase-in, as before
 // ============================================================================
 #include "capture_node_layout.h"
 #include "content_db_fixture.h"
+#include "cyb_appearance.h"
+#include "fake_client.h"
 #include "bootstrap/constants.h"
 #include "net/connection.h"
 #include "protocol/repl/node_layout.h"
 #include "protocol/repl/block_reader.h"
 #include "protocol/repl/replicator.h"
+#include "protocol/repl/rpc.h"
+#include "protocol/repl/subobject.h"
 #include "protocol/schema/generated/index.h"
 #include "session/actor_view.h"
+#include "session/player_session.h"
 #include "session/player_world.h"
 #include "world/actor_registry.h"
 #include "world/city_nodes.h"
@@ -36,6 +46,7 @@
 #include "world/node_scenery.h"
 #include "world/node_wire.h"
 
+#include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -43,11 +54,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -709,6 +722,402 @@ static void test_reach() {
     }
 }
 
+// ---- the scenery in the join ------------------------------------------------------------------------------------
+
+namespace {
+
+/// A copy of a replicator's actor under a new id, as an actor of `kind` at (x, y): a stand-in for another actor of the world (the view needs an actor it can open, nothing more).
+world::WorldActor stand_in(const world::WorldActor& from, const emit::FIntrepidNetworkGUID& guid, world::ActorKind kind, double x, double y) {
+    world::WorldActor w = from;
+    w.actor.guid = guid;
+    w.id = guid.ObjectId;
+    w.kind = kind;
+    w.x = x;
+    w.y = y;
+    if (kind != world::ActorKind::NodeLayout) {   // a creature: the relevancy config's radius, dormant when farther
+        w.awake_radius_cm = 0;
+        w.never_dormant = false;
+    }
+    return w;
+}
+
+/// The replicators of the registry whose awake radius holds (x, y), nearest first.
+std::vector<uint64_t> scenery_in_reach(const world::ActorRegistry& registry, double x, double y) {
+    std::vector<std::pair<double, uint64_t>> found;
+    registry.for_each([&](const world::WorldActor& a) {
+        const double d = world::horizontal_distance(a.x, a.y, x, y);
+        if (a.kind == world::ActorKind::NodeLayout && d <= a.awake_radius_cm) found.push_back({d, a.id});
+    });
+    std::sort(found.begin(), found.end());
+    std::vector<uint64_t> out;
+    for (const auto& f : found) out.push_back(f.second);
+    return out;
+}
+
+/// A point at least 1.5 km clear of every replicator's reach, searched on rings round (cx, cy).
+bool point_far_from_towns(const world::ActorRegistry& registry, double cx, double cy, double* out_x, double* out_y) {
+    const double pi = 3.14159265358979323846;
+    for (const double radius : {300000.0, 600000.0, 900000.0}) {
+        for (int k = 0; k < 8; ++k) {
+            const double x = cx + radius * std::cos(k * pi / 4), y = cy + radius * std::sin(k * pi / 4);
+            bool clear = true;
+            registry.for_each([&](const world::WorldActor& a) {
+                if (a.kind == world::ActorKind::NodeLayout && world::horizontal_distance(a.x, a.y, x, y) <= a.awake_radius_cm + 10000.0) clear = false;
+            });
+            if (clear) {
+                *out_x = x;
+                *out_y = y;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+/// ActorView::open_scenery: the replicators within reach, alone, once; the passes that follow leave them as they are.
+static void test_scenery_first() {
+    std::printf("the view: the towns' scenery is opened alone, before the rest of the world (the login fix)\n");
+    Scene s;
+    s.scenery->start();
+    const world::WorldActor* joeva = s.actor_of(kJoeva);
+    if (!joeva) {
+        CHECK(false, "Joeva has a replicator");
+        return;
+    }
+    const uint64_t id = joeva->id;
+    const double jx = joeva->x, jy = joeva->y;
+    const double px = jx + 100000, py = jy;   // the player, 1 km east of the replicator
+    const world::WorldActor templ = *joeva;   // (a copy: adding actors may move the registry's storage)
+    const emit::FIntrepidNetworkGUID npc_guid = s.guids.next();
+    const uint64_t npc_id = npc_guid.ObjectId;
+    CHECK(s.registry.add(stand_in(templ, npc_guid, world::ActorKind::Npc, px + 2000, py)), "(a stand-in for an NPC, 20 m from the player)");
+    const auto reach = scenery_in_reach(s.registry, px, py);
+    CHECK(!reach.empty() && reach.front() == id, "(Joeva's replicator is the nearest one within reach)");
+// CoA with C:Y:B
+
+    Pair p;
+    ActorView v(s.registry, ActorView::Config{}, reserved_3_to_6());
+    size_t opened = 99;
+    bool done = v.open_scenery(p.s, px, py, p.t, &opened);
+    p.step(&v);
+    auto seen = take(p);
+    CHECKF(done && opened == reach.size() && v.state_of(id) == world::ClientState::Awake && v.channel_of(id) == 7,
+           "open_scenery opens the %zu replicator(s) within reach, Joeva's awake on channel 7, and says nothing is left", reach.size());
+    const size_t open_bits = bits_on(seen, 7);
+    CHECKF(open_bits >= 58881 && open_bits < 58881 + 6000, "...with the whole payload (58,881 bits and the actor's header and exports: %zu bits)", open_bits);
+    CHECK(v.state_of(npc_id) == world::ClientState::None && v.channel_of(npc_id) == 0 && v.tracked() == reach.size() && v.stats().opens == reach.size(),
+          "the NPC 20 m from the player is not touched: the call is for the scenery alone");
+    done = v.open_scenery(p.s, px, py, p.t, &opened);
+    p.step(&v);
+    CHECK(done && opened == 0 && take(p).empty() && v.stats().opens == reach.size(), "asked again it has nothing to do and sends nothing");
+    run(v, p, px, py, 12);
+    seen = take(p);
+    CHECK(v.state_of(npc_id) == world::ClientState::Awake && v.channel_of(id) == 7 && v.stats().opens == reach.size() + 1 && v.stats().updates == 0 && bits_on(seen, 7) == 0,
+          "the passes that follow open the NPC and leave the replicator as it is: the same channel, no second open, no update");
+
+    // the opens cap holds: two replicators within reach and one open a call: the nearest first, "again" until the last
+    {
+        Scene s2;
+        s2.scenery->start();
+        const world::WorldActor templ2 = *s2.actor_of(kJoeva);
+        const emit::FIntrepidNetworkGUID second = s2.guids.next();
+        CHECK(s2.registry.add(stand_in(templ2, second, world::ActorKind::NodeLayout, templ2.x + 5000, templ2.y)), "(a second replicator, 50 m east of Joeva's)");
+        const size_t in_reach = scenery_in_reach(s2.registry, px, py).size();
+        ActorView::Config capped;
+        capped.relevancy.max_opens_per_tick = 1;
+        Pair q;
+        ActorView w(s2.registry, capped, reserved_3_to_6());
+        const bool first_done = w.open_scenery(q.s, px, py, q.t, &opened);
+        CHECK(!first_done && opened == 1 && w.state_of(second.ObjectId) == world::ClientState::Awake && w.state_of(templ2.id) == world::ClientState::None && w.stats().capped == 1,
+              "with a cap of one open a call, the first call opens the nearest replicator and says it is not done");
+        bool last_done = false;
+        size_t calls = 1, total = opened;
+        while (!last_done && calls < 10) {
+            last_done = w.open_scenery(q.s, px, py, q.t, &opened);
+            total += opened;
+            ++calls;
+        }
+        CHECKF(last_done && total == in_reach && w.state_of(templ2.id) == world::ClientState::Awake, "...and the next calls open the rest (%zu replicators in %zu calls)", total, calls);
+    }
+
+    // far from every town: nothing within reach; done at once, nothing sent
+    {
+        double fx = 0, fy = 0;
+        CHECK(point_far_from_towns(s.registry, jx, jy, &fx, &fy), "(a point 1.5 km or more clear of every replicator)");
+        Pair q;
+        ActorView w(s.registry, ActorView::Config{}, reserved_3_to_6());
+        const bool far_done = w.open_scenery(q.s, fx, fy, q.t, &opened);
+        q.step(&w);
+        CHECK(far_done && opened == 0 && w.tracked() == 0 && take(q).empty(), "far from every town: nothing within reach, nothing sent, nothing tracked");
+    }
+}
+
+namespace {
+
+const std::string kCyb = "bbec5c86eb101fe5f38c87f0fa22e7d0";
+const std::string kMachine = "DESKTOP-EXAMPLE1-US-45739BC044607BD9A50196AF41F22492";
+
+const schema::ClassSchema& class_named(const char* name) {
+    const schema::ClassSchema* c = gen::find_class_schema(name);
+    if (!c) {
+        std::printf("  [FAIL] no schema %s\n", name);
+        std::exit(2);
+    }
+    return *c;
+}
+
+/// An actor-channel RPC with no parameters, from the client.
+emit::BunchWriter actor_rpc(const schema::ClassSchema& cls, const char* name) {
+    emit::BunchWriter out;
+    const schema::RpcSchema* rpc = cls.rpc(name);
+    if (!rpc) return out;
+    emit::BunchWriter field;
+    bool failed = false;
+    repl::write_rpc_field(cls, *rpc, repl::RpcParams{}, field, {}, &failed);
+    if (failed) return out;
+    repl::BlockHeader header;
+    repl::write_content_block(out, header, field, /*server_form=*/false);
+    return out;
+}
+// -- C.O.A . Cyb --
+
+svc::Character cyb_at(double x, double y, double z) {
+    svc::Character c;
+    c.id = kCyb;
+    c.account_id = 3;
+    c.name = "cyb";
+    c.race_id = 0;
+    c.gender_id = 0;
+    c.class_id = 2;
+    c.archetype_id = 17747;
+    c.class_name = "Bard";
+    c.appearance_json = cyb::kAppearanceJsonb;
+    c.level = 1;
+    c.has_position = true;
+    c.position.x = x;
+    c.position.y = y;
+    c.position.z = z;
+    return c;
+}
+
+/// A world of the real nodes (Joeva a Town, Halcyon a Village, the rest at the start) with the towns' scenery started, over the fixture content.db.
+struct TownWorld {
+    fs::path dir;
+    std::optional<content::ContentDb> content;
+    aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
+    std::unique_ptr<world::CityNodes> nodes;
+    std::unique_ptr<PlayerWorld> world;
+
+    TownWorld() {
+        dir = cf::make_temp_dir("worldd_node_layout_join_");
+        const fs::path db = dir / "content.db";
+        if (!cf::make_db(db)) std::exit(2);
+        std::string error;
+        content = content::ContentDb::open(db.string(), error);
+        if (!content) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+            std::exit(2);
+        }
+        nodes = world::CityNodes::load(db_path(), error);
+        if (!nodes || !nodes->apply_seed_file(NODES_SEED_PATH, error)) {
+            std::printf("  [FAIL] the nodes do not load: %s\n", error.c_str());
+            std::exit(2);
+        }
+        world = std::make_unique<PlayerWorld>(&*content, "", bootstrap::GameStateMode::Tier3, kServerId, guids);
+        world->set_city_nodes(nodes.get());
+        world->set_node_wire(g_wire.get());
+        world->set_node_layout_data(g_data.get());
+        if (world->start_scenery(world::NodeScenery::Config{}) < 2) {
+            std::printf("  [FAIL] the scenery does not start\n");
+            std::exit(2);
+        }
+    }
+    ~TownWorld() {
+        world.reset();
+        content.reset();
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+    TownWorld(const TownWorld&) = delete;
+    TownWorld& operator=(const TownWorld&) = delete;
+
+    /// A stand-in NPC (a copy of Joeva's replicator, an Npc) at (x, y); its id.
+    uint64_t add_npc(double x, double y) {
+        const world::WorldActor* joeva = nullptr;
+        world->registry().for_each([&](const world::WorldActor& a) {
+            if (a.kind == world::ActorKind::NodeLayout && a.scenery.node == kJoeva) joeva = &a;
+        });
+        if (!joeva) std::exit(2);
+        const emit::FIntrepidNetworkGUID g = world->mint_guid();
+        if (!world->registry().add(stand_in(*joeva, g, world::ActorKind::Npc, x, y))) std::exit(2);
+        return g.ObjectId;
+    }
+};
+
+/// One player joined to a TownWorld, with a fake client on the other end of its connection.
+struct Joined {
+    Connection conn{server_config(), t0};
+    fake::Client client{kOuter, kCf, 14265, 15870};
+    std::unique_ptr<PlayerSession> s;
+    Clock::time_point t = t0;
+    std::vector<fake::Delivered> got;
+    std::vector<Clock::time_point> got_at;   // when each of them reached the client
+    uint32_t pawn_ch = 0;
+    std::string error;
+
+    bool join(PlayerWorld& world, const svc::Character& record) {
+        s = PlayerSession::join(conn, world, record, bootstrap::LoginIdentity{kMachine, kMachine}, std::chrono::duration<double>(t - t0).count(), error);
+        if (!s) {
+            std::printf("  [FAIL] the session does not join: %s\n", error.c_str());
+            return false;
+        }
+        pawn_ch = s->channel_of(bootstrap::Role::Pawn);
+        return true;
+    }
+    void flush() {
+        for (auto& pkt : conn.flush(t)) {
+            const auto r = client.receive(pkt);
+            for (const auto& d : r.delivered) {
+                got.push_back(d);
+                got_at.push_back(t);
+            }
+        }
+    }
+    void client_sends(std::vector<fake::Bunch> bunches) {
+        const auto pkt = client.packet(std::move(bunches));
+        const std::vector<InBunch> in = conn.receive(pkt, t);
+        s->take_acks(conn);
+        for (const InBunch& b : in) s->on_bunch(conn, b, t);
+        s->end_of_datagram(conn);
+    }
+    void step(milliseconds d = milliseconds(20)) {
+        t += d;
+        s->tick(conn, t);
+        flush();
+        s->take_acks(conn);
+        client_sends({});
+    }
+    void run(milliseconds total) {
+        for (milliseconds done{0}; done < total; done += milliseconds(20)) step();
+    }
+    void settle() {
+        for (int quiet = 0, i = 0; quiet < 5 && i < 600; ++i) {
+            const size_t before = got.size();
+            step();
+            quiet = (got.size() == before && s->join_pending() == 0 && s->replies_pending() == 0) ? quiet + 1 : 0;
+        }
+    }
+    void request_phase_in() {
+        client_sends({client.actor(pawn_ch, actor_rpc(class_named("PlayerPawn_C"), "ServerClientIsReadyToPhaseIn"), true)});
+        settle();
+    }
+    bool player_channel(uint32_t c) const {
+        return c == s->channel_of(bootstrap::Role::PlayerController) || c == pawn_ch || c == s->channel_of(bootstrap::Role::GameState) || c == s->channel_of(bootstrap::Role::PlayerState);
+    }
+    /// The indexes (in arrival order) of the opens of the world's actors, the player's four left out.
+    std::vector<size_t> world_opens() const {
+        std::vector<size_t> out;
+        for (size_t i = 0; i < got.size(); ++i) {
+            if (got[i].open && !player_channel(got[i].channel)) out.push_back(i);
+        }
+        return out;
+    }
+    /// The index of the first chain that opens the pawn's channel (npos: none).
+    size_t pawn_open() const {
+        for (size_t i = 0; i < got.size(); ++i) {
+            if (got[i].open && got[i].channel == pawn_ch) return i;
+        }
+        return static_cast<size_t>(-1);
+    }
+};
+// [Cyb ~ C O A]
+
+}  // namespace
+
+/// A session joined in Joeva's bowl is sent the replicator after its pawn and before the phase-in, the NPCs after it; one joined far from every town is sent the world as before.
+static void test_join() {
+    std::printf("the session: joined in Joeva's bowl, the town's scenery comes before the phase-in\n");
+    TownWorld w;
+    // Joeva's market square: the Market_v3 plot in the node record's frame
+    const double mx = -1087417.6, my = 503591.5, mz = 12626.0;
+    const uint64_t npc = w.add_npc(mx + 2000, my);   // 20 m from the square
+    const auto reach = scenery_in_reach(w.world->registry(), mx, my);
+    CHECK(!reach.empty(), "(Joeva's replicator is within reach of the square)");
+
+    // the log line is read through a logger of its own
+    std::ostringstream log_text;
+    const auto previous = spdlog::default_logger();
+    const auto previous_level = spdlog::get_level();
+    spdlog::set_default_logger(std::make_shared<spdlog::logger>("join_test", std::make_shared<spdlog::sinks::ostream_sink_mt>(log_text)));
+    spdlog::set_level(spdlog::level::info);
+
+    Joined j;
+    const bool joined = j.join(*w.world, cyb_at(mx, my, mz));
+    CHECK(joined, "cyb joins at Joeva's market square");
+    if (!joined) {
+        spdlog::set_default_logger(previous);
+        spdlog::set_level(previous_level);
+        return;
+    }
+    j.run(milliseconds(5000));   // five seconds of the client loading, no phase-in asked for
+    const ActorView& v = *j.s->actor_view();
+    const std::vector<size_t> before = j.world_opens();
+    CHECKF(before.size() == reach.size() && j.s->scenery_opened() == reach.size(), "before the phase-in the client has been sent the %zu replicator(s) within reach (the session says %zu)", reach.size(),
+           j.s->scenery_opened());
+    bool all_open = true;
+    for (const uint64_t id : reach) all_open = all_open && v.state_of(id) == world::ClientState::Awake;
+    CHECK(all_open && v.state_of(npc) == world::ClientState::None, "...and nothing else of the world: the NPC 20 m from the square waits for the phase-in");
+    const size_t pawn = j.pawn_open();
+    CHECK(!before.empty() && pawn != static_cast<size_t>(-1) && pawn < before.front(),
+          "the pawn opens first and the replicator after it");
+    CHECK(!before.empty() && j.got_at[before.front()] - t0 < seconds(1) && j.s->scenery_opened_at() >= 0.0 && j.s->scenery_opened_at() < 1.0,
+          "...within a second of the join");
+    const size_t chains_before = j.got.size();
+    j.request_phase_in();
+    j.run(milliseconds(1500));
+    CHECK(v.state_of(npc) == world::ClientState::Awake, "after the phase-in the NPC is opened, as before");
+    size_t reopened = 0;
+    for (const size_t i : j.world_opens()) {
+        for (const uint64_t id : reach) {
+            if (i >= chains_before && v.channel_of(id) == j.got[i].channel) ++reopened;
+        }
+    }
+    CHECK(reopened == 0 && v.stats().opens == reach.size() + 1, "...and the replicators are not opened a second time");
+    const std::string text = log_text.str();
+    const size_t at = text.find("[join] cyb: phase-in after ");
+    double seconds_logged = -1.0;
+    if (at != std::string::npos) seconds_logged = std::atof(text.c_str() + at + std::strlen("[join] cyb: phase-in after "));
+    CHECKF(at != std::string::npos && seconds_logged > 4.8 && seconds_logged < 5.4, "the log says it: \"[join] cyb: phase-in after %.1f s\" (the client asked at about 5 s)", seconds_logged);
+    size_t join_lines = 0;
+    for (size_t pos = text.find("[join] cyb:"); pos != std::string::npos; pos = text.find("[join] cyb:", pos + 1)) ++join_lines;
+    const std::string join_line = at == std::string::npos ? std::string() : text.substr(at, text.find('\n', at) - at);
+    std::printf("    the join's log line: %s\n", join_line.c_str());
+    std::printf("    %zu replicator(s) within reach of the square; sent at %.2f s of the session; the client's ready call at %.1f s\n", reach.size(), j.s->scenery_opened_at(), seconds_logged);
+    CHECK(join_lines == 1 && join_line.find("town replicator") != std::string::npos && join_line.find("no town replicator") == std::string::npos,
+          "...one \"[join]\" line for the join, and it says the town's replicator(s) were sent before the phase-in");
+    j.s->finish("test");
+
+    // far from every town: nothing of the world before the phase-in, the NPC after it, as before
+    double fx = 0, fy = 0;
+    CHECK(point_far_from_towns(w.world->registry(), mx, my, &fx, &fy), "(a point 1.5 km or more clear of every town)");
+    const uint64_t far_npc = w.add_npc(fx + 2000, fy);
+    Joined k;
+    if (k.join(*w.world, cyb_at(fx, fy, 12000.0))) {
+        k.run(milliseconds(5000));
+        CHECK(k.world_opens().empty() && k.s->scenery_opened() == 0 && k.s->actor_view()->tracked() == 0, "joined far from every town: nothing of the world is sent before the phase-in");
+        k.request_phase_in();
+        k.run(milliseconds(1500));
+        CHECK(k.s->actor_view()->state_of(far_npc) == world::ClientState::Awake && k.world_opens().size() == 1, "...the NPC comes with the phase-in, alone");
+        const std::string all = log_text.str();
+        CHECK(all.find("no town replicator was sent before it") != std::string::npos, "...and its log line says no town replicator was sent before the phase-in");
+        k.s->finish("test");
+    }
+    spdlog::set_default_logger(previous);
+    spdlog::set_level(previous_level);
+}
+
 // ---- the world ------------------------------------------------------------------------------------------------------------------------------
 
 static void test_world() {
@@ -778,6 +1187,8 @@ int main() {
     test_level_change();
     test_view();
     test_reach();
+    test_scenery_first();
+    test_join();
     test_world();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

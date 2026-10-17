@@ -107,4 +107,5 @@ test_worldd_spawn_filter             PASS exit=0
 test_worldd_stats                    PASS exit=0
 test_worldd_talents                  PASS exit=0
 test_worldd_tooltips                 PASS exit=0
+test_worldd_town_platform            PASS exit=0
 test_worldd_udp_socket               PASS exit=0

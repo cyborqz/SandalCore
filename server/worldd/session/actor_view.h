@@ -24,6 +24,9 @@
 //    removal    an actor removed from the registry (killed, despawned, a lingering effect that ended) is closed with Destroyed on the
 //               channel that holds it; one the client holds dormant is opened and closed with Destroyed so that the client forgets it.
 //
+//    scenery    open_scenery() is the same open for the towns' replicators (ActorKind::NodeLayout) alone, and the session runs it in the join, before the phase-in;
+//               the passes, which start after the phase-in, then treat those actors like any open one.
+//
 //  The channel of an actor is held until its close is acknowledged (Connection::channel_closing: UE's GetFreeChannelIndex), so a re-open
 //  never races its own close.  The first indexes of a connection belong to the player's four actors (`reserved`).
 //
@@ -125,6 +128,14 @@ public:
     /// Does what is due at `now`: the Dormancy closes whose time has come, the pending destroys and, when the pass is due, a relevancy pass
     /// around (x, y). Chains that the connection cannot take now are tried again next call.
     void tick(Connection& conn, double x, double y, Clock::time_point now);
+
+    /// Opens, now, the towns' scenery around (x, y) and nothing else (the login fix).  Every ActorKind::NodeLayout actor (a town's replicator, awake within
+    /// 1.45 km) whose radius holds the point and that the view does not hold yet is opened awake, nearest first, on the first free channel, by the pass's own rules for it (the opens cap,
+    /// the pacing of a busy connection).  The NPCs and every other actor are left to tick(), which the session runs after the phase-in; when it does, it finds the replicators open and
+    /// sends them only what changes.  The reason: the client's pawn phases in when a trace down finds ground, and in a town's bowl the only ground the client has is what the replicator
+    /// builds, so the replicator is opened in the join.
+    /// True when nothing is left to open (none within reach, or all open); false when the connection was too busy or refused an open: call again.  `opened` gets the count of this call.
+    bool open_scenery(Connection& conn, double x, double y, Clock::time_point now, size_t* opened = nullptr);
 
     /// The mounts milestone, stage 3: sends what changed on an actor the client holds awake now, without waiting for the next pass (the three packets of getting on a mount
     /// go out together: retail sends them within a millisecond). False when the actor is not awake on this connection, or the update could not go out (the pass sends it).
