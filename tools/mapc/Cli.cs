@@ -15,6 +15,8 @@ namespace Mapc;
 ///   mapc build   [--out-dir DIR]     extract, run aoc_navbuild (DIR/area_nav.bin) and read the NPC Blueprints (DIR/npc_motion.tsv)
 ///   mapc --check [--out-dir DIR]     rebuild all three in a scratch folder and compare them byte for byte with DIR's; exit 1 on a difference
 ///                                    (`mapc build --check` is the same; `--check` stands anywhere: `mapc --check roads` is `mapc roads --check`; `--explain` prints what a line means and stops)
+///   mapc export-config               the client's Config directory (AOC/Config: DefaultCombat.ini, DefaultAoCRecordConstants.ini ...) as the game ships it, into DIR/client_config
+///   mapc export-zoi                  the zone-of-influence chunk packages of layer 0 (C_x_y_0.uasset) as the game ships them, into DIR/zoi_chunks (no map read: seconds)
 ///   mapc mount-speeds [--check]      read the 141 mount Blueprints' MaxWalkSpeed, MaxFlySpeed and MaxSwimSpeed (no map: seconds), write DIR/mount_speeds.tsv;
 ///                                    with --check write nothing and exit 1 when DIR's file differs from a fresh read (mounts milestone)
 ///   mapc artisan-curves [--check]    read the three profession level-up curves (Gathering, Processing, Crafting: pak assets the design database does not hold; no map:
@@ -153,13 +155,15 @@ public static class Cli
                 case "foliage-probe": { var game = new Game(o.Paks, o.Usmap); return Diag.FoliageProbe(game, MakeScope(o), o.Rest.Count > 0 ? int.Parse(o.Rest[0]) : 4); }
                 case "foliage-detail": { var game = new Game(o.Paks, o.Usmap); return Diag.FoliageDetail(game, o.Rest[0], o.Rest.Count > 1 ? int.Parse(o.Rest[1]) : 3); }
                 case "cell-exports": { var game = new Game(o.Paks, o.Usmap); return Diag.CellExports(game, o.Rest[0], o.Rest.Count > 1 ? o.Rest[1] : null, 12); }
+                case "export-config": return Export.Config(new Game(o.Paks, o.Usmap), o.OutDir);
+                case "export-zoi": return Export.Zoi(new Game(o.Paks, o.Usmap), o.OutDir);
                 case "mount-speeds": return MountSpeedsCommand(o);
                 case "artisan-curves": return ArtisanCurvesCommand(o);
                 case "roads": return RoadsCommand(o);
                 case "bp": { var game = new Game(o.Paks, o.Usmap); Inspect.Bp(game, o.Rest[0], o.Rest.Count > 1 ? o.Rest[1] : null); return 0; }
                 case "inspect": { var game = new Game(o.Paks, o.Usmap); Inspect.Run(game, new[] { "inspect" }.Concat(o.Rest).ToArray()); return 0; }
                 default:
-                    Console.WriteLine("mapc extract | build | --check | probe-cells | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
+                    Console.WriteLine("mapc extract | build | --check | probe-cells | export-config | export-zoi | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
                     return o.Cmd == "help" ? 0 : 2;
             }
         }

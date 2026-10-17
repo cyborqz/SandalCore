@@ -22,6 +22,8 @@ To keep the repository clean, legal, and safe for everyone, all contributors mus
 
 Before submitting changes, ensure your modifications compile cleanly and pass all test suites.
 
+Run `extract_game_data.bat` once first (`build_all.bat` does): the build and the tests need the game data it makes from your own Ashes of Creation install. Everything it writes is git-ignored (`dist/` and the files listed in `.gitignore`); never commit any of it.
+
 - **Go Services** (in `services/`):
   ```bash
   go vet ./...

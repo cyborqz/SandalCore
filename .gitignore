@@ -112,12 +112,19 @@ capture_*.bin
 Dumped*.txt
 
 # ──────────────────────────────────────────────────────────────────────────
-# Navmesh (too big for git: a Release asset; content/navmesh.json describes it and IS committed)
-# ──────────────────────────────────────────────────────────────────────────
-/content/sandal-core-navmesh-*.zip
-/content/area_nav.bin
-/content/area_geom.bin
-!/content/navmesh.json
+# Game data and sources made by extract_game_data.bat from your own game install (dist/content is under dist/; nothing of it is committed)
+/server/worldd/world/zoi_surface_table.h
+/server/worldd/world/node_constants.h
+/server/worldd/spawns/region_data.h
+/server/worldd/spawns/garden_defs.h
+/server/worldd/stats/testdata/corpus.txt
+/server/worldd/tests/talent_fixture.sql
+/server/worldd/tests/gear_fixture.h
+/server/worldd/tests/tooltip_key.h
+/services/internal/citynode/constants_gen.go
+/tools/mapc/region_rects.tsv
+/fixtures/region/riverlands_rects.json
+/fixtures/region/riverlands_zoi_rects.json
 
 # ──────────────────────────────────────────────────────────────────────────
 # OS & Editor Cruft

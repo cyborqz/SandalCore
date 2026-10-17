@@ -16,6 +16,7 @@
 #      .\scripts\build.ps1 -Config Debug
 #      .\scripts\build.ps1 -Clean           # clean first
 #      .\scripts\build.ps1 -Test            # build, then run scripts\run_tests.ps1
+#      .\scripts\build.ps1 -Jobs 6          # at most 6 projects at a time (default: MSBuild uses every core)
 # ============================================================================
 
 [CmdletBinding()]
@@ -25,7 +26,8 @@ param(
     [string]   $Config  = 'Release',
     [switch]   $Clean,
     [switch]   $Test,
-    [switch]   $Configure
+    [switch]   $Configure,
+    [int]      $Jobs = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,10 +145,11 @@ $targets = if ($Target -eq 'all') {
     @($Target)
 }
 
+$mArg = if ($Jobs -gt 0) { "/m:$Jobs" } else { '/m' }
 foreach ($t in $targets) {
     Write-Host ""
     Write-Host "Building $t ..."
-    & $cmake --build $buildDir --config $Config --target $t -- /m /v:minimal /nologo
+    & $cmake --build $buildDir --config $Config --target $t -- $mArg /nr:false /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed for target: $t"
     }
@@ -160,7 +163,7 @@ foreach ($t in $targets) {
 if ($Test) {
     Write-Host ""
     Write-Host "Running scripts\run_tests.ps1 ..."
-    & (Join-Path $PSScriptRoot 'run_tests.ps1') -Config $Config
+    & (Join-Path $PSScriptRoot 'run_tests.ps1') -Config $Config -Jobs $Jobs
     exit $LASTEXITCODE
 }
 
