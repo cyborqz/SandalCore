@@ -11,7 +11,7 @@
 
 **Current Milestone:** `9- City Nodes and Civilization` (In progress)
 
-Milestones through October 2026 (login, world bootstrap, stats, talents, combat/abilities, navigation, mounts, and gathering and professions) were completed and validated against retail captures and test suites in `server/worldd/tests`. The city node services (node experience and level state, town scenery and people) work; the current focus is solid ground in the five towns and the node stages.
+Milestones through October 2026 (login, world bootstrap, stats, talents, combat/abilities, navigation, mounts, and gathering and professions) were completed and validated against retail captures and test suites in `server/worldd/tests`. The city node services (node experience and level state, town scenery and people) work; the five towns have their real floor, and the current focus is their buildings and walkable streets and the node stages.
 
 ---
 
@@ -25,7 +25,7 @@ Milestones through October 2026 (login, world bootstrap, stats, talents, combat/
 6. **6- Combat and Class Abilities** — [Done] Ability pipeline across all classes, cast verification, cooldown ledger, projectiles, hit confirmations, floating text, and status effects.
 7. **7- Living World and Navigation** — [Done] Chunked navmesh windows, Riverlands region partitioning, NPC actor spawning, AI agro/leash behavior, and respawn cycles.
 8. **8- Mounts and Traversal** — [Done] Ground, aquatic, and flying mount summoning, riding possession, mount combat on mount health, dash, and road traversal.
-9. **9- City Nodes and Civilization** — [In progress] CityNodeService, node experience and level state, town asset replication, and citizenship/mayorship structures; next: solid ground in the five towns and the node stages.
+9. **9- City Nodes and Civilization** — [In progress] CityNodeService, node experience and level state, town asset replication, and citizenship/mayorship structures; the five towns have their real floor; next: the towns' buildings and walkable streets, and the node stages.
 10. **10- Gathering and Professions** — [Done] Gathering professions, node harvesting, the Riverlands' foliage, hunting, resource bags and the pick-up popup.
 11. **11- Quests and Narrative** — [Next] Quest acceptance, objective condition tracking, NPC dialogue interactions, reward fulfillment, and journal state.
 12. **12- Guilds and Social Systems** — [Planned] Guild creation, ranks, member permissions, party/raid formations, chat channels, and mail delivery.
