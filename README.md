@@ -12,7 +12,7 @@ An independent, open-source server emulator compatible with the Ashes of Creatio
 
 ## What Works Today
 
-Sandal Core provides an independent server emulation stack for the Ashes of Creation client:
+Sandal Core provides an independent server emulation stack for the Ashes of Creation client: the Go services (accounts, characters, city nodes, world placement and the client's gateway) and the C++ world server `worldd`, with the tether and the launcher window. The old replay-based login server is retired: this is the only server path.
 
 - **Protocol & Network Transport**: Full UE5 / IntrepidNetDriver handshake, stateless connect, packet framing, bunch replication, and dynamic NetGUID allocation.
 - **Authentication & Character Management**: gRPC and REST-based authentication services, account profiles, character creation with full visual appearance customization serialization, and character select lobby transitions.
@@ -52,7 +52,7 @@ Disk: allow about 20 GB free on the repository's drive for the first build. The 
 ### 2. The commands, in this order
 
 1. `install_dependencies.bat`
-2. `build_all.bat`: runs `extract_game_data.bat` first (the game data, section 3), then builds `auth_server`, `tether_server`, `launcher`, `worldd` and `aoc_server` into `dist\Release`. The first run takes about 10 minutes for the game data on a fast PC, plus the first build of the C++ libraries through vcpkg (grpc compiles from source, so this part can take a long time). Later runs take seconds when nothing changed.
+2. `build_all.bat`: runs `extract_game_data.bat` first (the game data, section 3), then builds `tether_server`, `launcher` and `worldd` into `dist\Release`. The first run takes about 10 minutes for the game data on a fast PC, plus the first build of the C++ libraries through vcpkg (grpc compiles from source, so this part can take a long time). Later runs take seconds when nothing changed.
 3. `launch_worldd.bat`: starts PostgreSQL and NATS (Docker), the Go services, the `worldd` world server, the tether and the launcher window. Sign in and press Play. On the first launch your own TLS certificates are created in `certs\` (Windows asks you once to trust the local CA; choose Yes).
 
 To make only the game data (for example before `go test ./...` or `scripts\run_tests.ps1`), run `extract_game_data.bat` on its own.
@@ -95,7 +95,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 ### 5. More build options
 
 - **Everything:** `build_all.bat` (the game data, then `powershell -File scripts\build.ps1 -Target all`).
-- **One program:** `powershell -File scripts\build.ps1 -Target worldd` (targets: `aoc_server`, `auth_server`, `tether_server`, `launcher`, `worldd`). `build_server.bat` and `build_launcher.bat` build just `aoc_server` or `launcher`. The game data has to be made first.
+- **One program:** `powershell -File scripts\build.ps1 -Target worldd` (targets: `tether_server`, `launcher`, `worldd`). `build_launcher.bat` builds just `launcher`. The game data has to be made first.
 - **Options:** `-Config Debug`, `-Clean`, `-Configure` (re-run CMake), `-Test`, `-Jobs N` (build at most N projects at a time); `build_all.bat` passes them on.
 - **Plain CMake:**
   ```bat
@@ -114,7 +114,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 ```bat
 launch_worldd.bat
 ```
-It checks that the programs are built, then starts the full stack with `worldd` as the world server. The other launchers in `scripts\` (`launch_all.bat`, `launch_go.bat`, `launch_native.bat`) are for development.
+It checks that the programs are built, then starts the full stack with `worldd` as the world server; `scripts\launch_all.bat` does the work.
 
 The client is started with `-UseEOS=false`, so it runs without Epic Online Services; no game files are modified.
 
@@ -142,7 +142,7 @@ Key runtime environment variables and settings include:
 - `AOC_CONTENT_DB`: Path to game content database fixtures (defaults to `dist\content`).
 - `AOC_MIRROR_LOGS_ROOT`: Log mirror destination (defaults to `logs\mirror`).
 - **Database Connection**: Configured via `deploy/docker-compose.yml` or connection string (`postgres://aoc:aoc@127.0.0.1:5432/aoc?sslmode=disable`).
-- **Network Ports**: gRPC listen port (`--port 443`), UDP game server (`--game-port 7777`), game IP (`--game-ip 127.0.0.1`).
+- **Network Ports**: the gateway (the game client's session, over TLS) on TCP 443, the auth service's HTTP API on TCP 8081, `worldd` on UDP 7777 (`worldd --bind`) and the tether on UDP 19021.
 - **Launcher Path**: Configured in `config/paths.json` (auto-detected from `GAME_ROOT`).
 
 ---

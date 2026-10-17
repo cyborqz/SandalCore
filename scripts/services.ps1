@@ -5,19 +5,18 @@
                                  character creation rules and of the character service's content.db use
                                  $env:AOC_CONTENT_DB (or dist\content\content.db) when that file exists, and skip without it
     scripts\services.ps1 build   build auth, character, citynode, nodectl, worldctl, charimport, mesh, gateway into dist\services
-    scripts\services.ps1 run     build, then start auth, character, citynode, mesh and gateway hidden; each logs
+    scripts\services.ps1 run     build, then start auth, character, citynode, mesh, gateway and worldd hidden; each logs
                                  to dist\services\logs\<name>.log (the previous run's: <name>.prev.log).  citynode
                                  (Nodes 1) serves the city nodes on :50055 and applies deploy\citynode_seed.json once, at its
                                  first start; dist\services\nodectl.exe is its command line (services\README.md, "City nodes").
                                  worldctl.exe (the GM travel tools: players, places, tp, speed) talks to worldd's admin API on
                                  :50056 (services\README.md, "GM travel tools")
-         run -World legacy       (the default) mesh places players on the legacy aoc_server, UDP :7777
-         run -World worldd       also start dist\Release\worldd.exe (scripts\build.ps1 -Target worldd),
-                                 which registers with mesh; no static world.  worldd gets
+                                 worldd (dist\Release\worldd.exe, scripts\build.ps1 -Target worldd) registers with mesh;
+                                 there is no static world.  worldd gets
                                  --content-db dist\content\content.db (or $env:AOC_CONTENT_DB): the file
                                  contentc builds; without it worldd starts but refuses every login.
-                                 $env:AOC_GAMESTATE_MODE (tier1, tier2, tier3, captured; default tier3) reaches worldd as it is
-         run (either world)      the character service gets the same --content-db (plan B1): it checks a new
+                                 $env:AOC_GAMESTATE_MODE (tier1, tier2, tier3, captured; default tier3) reaches worldd as it is.
+                                 The character service gets the same --content-db (plan B1): it checks a new
                                  character's race, gender, class and customization against it; without it
                                  the service starts but refuses to create characters, saying why
     scripts\services.ps1 stop    stop those processes, worldd included (drops the gateway's live
@@ -33,8 +32,7 @@
 # GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
 param(
-    [Parameter(Mandatory)] [ValidateSet('up', 'test', 'build', 'run', 'stop', 'login', 'down')] [string] $Action,
-    [ValidateSet('legacy', 'worldd')] [string] $World = 'legacy'
+    [Parameter(Mandatory)] [ValidateSet('up', 'test', 'build', 'run', 'stop', 'login', 'down')] [string] $Action
 )
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -63,7 +61,7 @@ $tokenFile = Join-Path $out 'service.token'
 $contentDb = if ($env:AOC_CONTENT_DB) { $env:AOC_CONTENT_DB } else { Join-Path $root 'dist\content\content.db' }
 
 # The auth, character, citynode, mesh, gateway and worldd processes running from this
-# checkout (not the legacy servers, and not another checkout's copy).
+# checkout (not another checkout's copy).
 function Get-ServiceProcess {
     $exes = @('auth', 'character', 'citynode', 'mesh', 'gateway' | ForEach-Object { Join-Path $out "$_.exe" }) + $worldd
     Get-Process -Name auth, character, citynode, mesh, gateway, worldd -ErrorAction SilentlyContinue |
@@ -177,11 +175,11 @@ try {
             if ($running.Count -gt 0) {
                 throw ("already running from ${out}: " + (Format-Process $running) + ". Run 'scripts\services.ps1 stop' first.")
             }
-            if ($World -eq 'worldd' -and -not (Test-Path $worldd)) {
+            if (-not (Test-Path $worldd)) {
                 throw "$worldd is missing: build it with scripts\build.ps1 -Target worldd"
             }
             if (-not (Test-Path $contentDb)) {
-                $who = if ($World -eq 'worldd') { 'the character service will refuse to create characters and worldd every login' } else { 'the character service will refuse to create characters' }
+                $who = 'the character service will refuse to create characters and worldd every login'
                 Write-Host "warning: $contentDb does not exist: $who. Build it: cd services; go run ./cmd/contentc (services\README.md, 'Content')" -ForegroundColor Yellow
             }
             Build
@@ -191,18 +189,11 @@ try {
             # output goes to dist\services\logs; the previous run's is kept.
             New-Item -ItemType Directory -Force $logs | Out-Null
             # citynode starts before mesh and the gateway: worldd (started last) asks it for the node levels, and retries if it is late
-            $names = @('auth', 'character', 'citynode', 'mesh', 'gateway')
+            $names = @('auth', 'character', 'citynode', 'mesh', 'gateway', 'worldd')
             $savedStatic = $env:AOC_MESH_STATIC_WORLD
-            if ($World -eq 'legacy') {
-                # The legacy aoc_server never registers with mesh: mesh places
-                # everyone on it as the static world.
-                if (-not $env:AOC_MESH_STATIC_WORLD) { $env:AOC_MESH_STATIC_WORLD = '127.0.0.1:7777' }
-            } else {
-                # worldd registers itself; a static world would take players
-                # whenever its heartbeats lapse, and worldd cannot redeem its tickets.
-                $env:AOC_MESH_STATIC_WORLD = ''
-                $names += 'worldd'
-            }
+            # worldd registers itself; a static world would take players
+            # whenever its heartbeats lapse, and worldd cannot redeem its tickets.
+            $env:AOC_MESH_STATIC_WORLD = ''
             try {
                 foreach ($name in $names) {
                     $exe = if ($name -eq 'worldd') { $worldd } else { Join-Path $out "$name.exe" }

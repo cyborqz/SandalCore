@@ -9,7 +9,7 @@ Sandal Core does not ship private keys or server certificates. If you run the se
 On the first launch, `scripts/make_certs.ps1` (run by every launcher) creates:
 
 - `ca.crt`: your own local CA, added to your Windows CurrentUser Trusted Root store (Windows asks you to confirm). The game client validates the server against it. The CA's private key is deleted right after signing.
-- `server.pem` + `server.key`: the server certificate for `IP:127.0.0.1` and `DNS:localhost`, signed by that CA. The Go gateway reads them from here (`AOC_GATEWAY_TLS_CERT`, `AOC_GATEWAY_TLS_KEY`); the launchers copy them next to the C++ servers.
+- `server.pem` + `server.key`: the server certificate for `IP:127.0.0.1` and `DNS:localhost`, signed by that CA. The Go gateway reads them from here (`AOC_GATEWAY_TLS_CERT`, `AOC_GATEWAY_TLS_KEY`).
 
 `powershell -File scripts/make_certs.ps1 -Force` makes new ones and replaces the old CA in the trust store. None of these files are committed (`.gitignore`).
 
@@ -33,16 +33,4 @@ Or generate a combined PEM file:
 cat certs/server.crt certs/server.key > certs/server.pem
 ```
 
-The server inspects the following paths in order:
-1. `certs/server.pem`
-2. `certs/server.crt` and `certs/server.key`
-
----
-
-## Disabling TLS for Local Testing
-
-If you do not wish to use TLS during local development or debugging, start the server with the `--no-tls` flag:
-
-```powershell
-.\build\bin\aoc_server.exe --no-tls
-```
+The gateway reads `certs/server.pem` and `certs/server.key` (`AOC_GATEWAY_TLS_CERT` and `AOC_GATEWAY_TLS_KEY` point it elsewhere); it never falls back to plaintext.

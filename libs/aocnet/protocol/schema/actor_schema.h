@@ -14,8 +14,8 @@
 //    - Property type (how to serialize the value)
 //    - Optional default-value encoding parameters
 //
-//  Game rules, RPC handlers, and RepNotify callbacks are the job of
-//  `src/game_logic/systems/` and `src/net/opcode_dispatcher`, not schemas.
+//  Game rules, RPC handlers, and RepNotify callbacks are the job of the
+//  world server (server/worldd), not schemas.
 //
 //  LAYER:  Protocol / schema
 //  SESSION: B

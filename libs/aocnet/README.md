@@ -11,28 +11,21 @@ needed to read and write the bits on the wire, independent of any server.
 | `protocol/schema/` | The older hand-derived class schemas and the schema registry (`actor_rep_handles.h`, the per-actor `*_schema.cpp`); new code uses `generated/` |
 | `protocol/schema/generated/` | The client's net classes as C++ tables (RepLayout commands, field tables, RPC parameters), generated from the client exe by `tools/ghidra/schemagen.py`; `MANIFEST.sha256` and `schemagen.py --check` keep them honest |
 | `protocol/repl/` | The replication core (plan A4R): replicated values, per-object state, NetSerialize codecs, RepLayout blocks with a per-connection shadow, fast arrays, RPCs, exports and content blocks, and the replicator that emits an actor's open, updates and RPCs for worldd's `Connection`. Tested bit for bit against the original server's captured bunches |
-| `protocol/net_guid_allocator.h` | NetGUID allocation per player (the legacy server) |
+| `protocol/net_guid_allocator.h` | NetGUID allocation per player (the retired login server used it; no target includes it now) |
 | `protocol/server_guid_allocator.h` | NetGUIDs minted under a world server's ServerId (worldd) |
 
 ## Boundary rule
 
 Files here may include only the C++ standard library, `spdlog`, and headers
 under `libs/aocnet`. The `aocnet` target's only include directory is this
-folder, so anything else fails to compile. Replay-era code (`src/protocol/
-bootstrap`, `actors`, `emit/replay_mutator`) stays in `src/`.
+folder, so anything else fails to compile.
 
 Include paths keep the `protocol/` prefix: `#include "protocol/wire/packet_parser.h"`.
 
-Two gaps in that enforcement:
-
-- A header is only checked when some translation unit of the `aocnet` target
-  or its tests includes it. `net_guid_allocator.h` and `wire/server_move_parser.h`
-  are compiled only by legacy targets (`aoc_server`, some `src/tools` tests)
-  that have `src/` on their include path, so a forbidden include there would
-  first fail in a new consumer such as worldd.
-- Never add a file under `src/protocol/{wire,emit,schema}/` with the same name
-  as one here. `aoc_server` searches `src/` first, so its own files would pick
-  up the `src/` copy while the `aocnet` objects use this one.
+One gap in that enforcement: a header is only checked when some translation unit of the
+`aocnet` target, its tests or worldd includes it. `net_guid_allocator.h` and `emit/actor_bunch.h`
+are included by none (the retired login server used them), so a forbidden include there would
+first fail in a new consumer.
 
 Consumers on Windows get `NOMINMAX` from the target (`ue5_primitives.h` calls
 `std::min`).
@@ -91,14 +84,6 @@ Two property types are not modelled, `TOptional` and `TSet`, in four properties:
 `Quests.GeneralQuestMarker`, and `AAoCPlayerController`'s `QuestInstance.QuestObjectiveMarker.MapMarkerOverride`,
 `SpawnQueryResults.ChildSocketGuids` and `.UsedChildSocketGuids`. schemagen warns, the header carries a NOTE,
 and the command has `PropType::Unknown`, which no `Value` fits, so `RepState::set` refuses it.
-`tools/ghidra/schema_check.py` decodes the captured blocks with these schemas and `fast_array_check.py` the
-fast arrays (below); both read `replay_bunches` output:
-
-```
-dist\Release\replay_bunches.exe fixtures\replay_data.bin --to 100000 > bunches.jsonl
-python tools/ghidra/schema_check.py bunches.jsonl
-python tools/ghidra/fast_array_check.py bunches.jsonl
-```
 
 ## Replication core (`protocol/repl/`)
 
@@ -241,8 +226,7 @@ python tools/capture/gen_all.py            # about 45 s; says "unchanged" for ea
 python tools/capture/gen_all.py --check    # write nothing, exit 1 when a header would change
 ```
 
-It needs `dist\Release\replay_bunches.exe`. See `tools/capture/README.md` for what each part cuts and how
-to add a block.
+`gen_all.py` and the captures it reads (`fixtures/replay_data.bin`) are not in this repository; the headers they made are.
 
 Plan E1's: `capture_npc.h` (`python tools/capture/gen_npc.py [--retail-dir DIR] [--check]`, about 60 s): every NPC and gatherable open of capture 957 (330 NPCs of 25 archetypes, 220 gatherables) and the 2,620 updates that followed the NPC opens, as content blocks (hex, bit count, the schema class that reads it), and the nine vendor NPC opens of capture 716; `capture_vendor.h`
 (`python tools/capture/gen_vendor.py`): the five vendor RPCs of the client and the one the server answered with (captures 716, 863, 1531, 1536). The server's own copy of the NPC opens it makes actors from is `server/worldd/spawns/area_spawns.h` (`gen_area_spawns.py`, see `tools/capture/README.md`).
@@ -252,7 +236,7 @@ Three headers have a generator of their own: `capture_moves.h` (`gen_moves.py`),
 Python decoder (`items_wire.py`) read from each. The retail captures are not in the repository: `--retail-dir` (or `AOC_RETAIL_JL`) is the folder of the converted PCAPRepo files
 (`NNNN_<name>.jsonl`; the login is `1198_*`). The header is 300 KB, most of it the 125 + 13 events and ten distinct storage payloads as hex.
 
-Two more, for the leveling and hit codecs of plans D1 and D2, built the same way from the retail captures (`--retail-dir`, `dist/Release/replay_bunches`, the exe), about 35 and 15 s: `capture_hits.h`
+Two more, for the leveling and hit codecs of plans D1 and D2, built the same way from the retail captures (`--retail-dir`, the exe), about 35 and 15 s: `capture_hits.h`
 (`python tools/capture/gen_hits.py [--retail-dir DIR] [--check]`: 41 `ClientHitConfirmations*` calls of the retail server and 12 `RequestHitVerification_Server` of the retail client, picked out of the 7,115 + 6,955 captured calls for every variant
 of the layout, and five synthetic ones at the exe's limits, each with the text of `hit_wire.py`, an independent decoder written from the exe's code) and `capture_leveling.h`
 (`python tools/capture/gen_leveling.py`: 12 XPTracker blocks picked out of 443, 17 retail purchases, refunds, swaps and respecs each with the client's request and the server's whole answer (97 blocks), 11 action-bar payloads and the 6 slot calls the client sent;

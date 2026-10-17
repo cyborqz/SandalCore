@@ -102,7 +102,7 @@ static const char* kSmallReliableThenMove =
     "06";
 
 // Bunches as the live server sees them: header offset computed the way
-// GameServer::handle_game_data does, then wire::walk_bunches.  `left` is
+// the retired login server's handle_game_data did, then wire::walk_bunches.  `left` is
 // the number of bits after the last bunch (1 = just the AoC sentinel).
 static std::vector<ParsedBunch> live_walk(const char* hex, std::vector<uint8_t>& raw,
                                           size_t* left = nullptr) {

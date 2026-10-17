@@ -25,7 +25,7 @@ type Config struct {
 	GMStarterSet      bool          // AOC_GM_STARTER_SET=1: new characters get the GM starter set, existing ones once at a start (plan D1)
 
 	MeshGRPCAddr     string        // AOC_MESH_GRPC_ADDR
-	MeshStaticWorld  string        // AOC_MESH_STATIC_WORLD: a world server that never registers (the legacy aoc_server); "" for none
+	MeshStaticWorld  string        // AOC_MESH_STATIC_WORLD: a world server that never registers; "" for none
 	MeshHeartbeatTTL time.Duration // AOC_MESH_HEARTBEAT_TTL: a world server silent this long is not placed
 
 	GatewayICSAddr    string        // AOC_GATEWAY_ICS_ADDR: the game client's ICS gRPC, over TLS

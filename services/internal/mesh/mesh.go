@@ -4,8 +4,8 @@
 
 // Package mesh keeps the registry of world servers (worldd) and decides where
 // a character plays. Milestone A runs one world server: placement picks the
-// live registered one, or the configured static world (the legacy aoc_server,
-// which never registers) while none is live.
+// live registered one, or the configured static world (a world server that
+// never registers) while none is live.
 package mesh
 
 import (

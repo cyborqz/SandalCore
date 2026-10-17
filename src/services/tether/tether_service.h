@@ -788,8 +788,7 @@ private:
         // With --login-token-file (the Go stack) the launcher saves the
         // player's login token (ics_token_file.h) and the Go gateway resolves
         // it to the account; only a client on this machine gets it. Otherwise
-        // the client gets the emulator token, which aoc_server's own ICS
-        // accepts and the gateway refuses.
+        // the client gets the emulator token, which the gateway refuses.
         const bool peer_is_loopback =
             aoc::ics_token::is_loopback_ipv4(ntohl(session_.peer.sin_addr.s_addr));
         const auto tokens = aoc::ics_token::client_tokens(token_file_, peer_is_loopback);

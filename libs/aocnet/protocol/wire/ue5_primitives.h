@@ -6,14 +6,9 @@
 //
 //  Canonical UE5 wire-format primitives.  Consolidates the `write_sip` /
 //  `read_sip` / `read_bits` helpers that used to live in three separate
-//  places:
-//
-//      net/game_server.h        (standalone ue5::write_sip)
-//      net/ue5_replication.h    (Writer::write_sip, Writer::write_sip64)
-//      protocol/bunch_builder.h (BunchBuffer::write_sip)
-//
-//  All three had identical encoding logic.  This file is now the ONE source
-//  of truth.  Downstream code includes this header and calls `ue5::*`.
+//  places of the retired login server, which had identical encoding logic.
+//  This file is now the ONE source of truth.  Downstream code includes this
+//  header and calls `ue5::*`.
 //
 //  This header is header-only and dependency-free beyond <cstdint>, <string>,
 //  <cstring>, <sstream>, <iomanip> — so it can be included from anywhere

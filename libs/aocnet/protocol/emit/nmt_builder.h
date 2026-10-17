@@ -11,14 +11,13 @@
 //  plus the NMT opcode byte and its type-specific FString payload.
 //  The OUTER packet framing (MagicHeader, FNetPacketNotify packed header,
 //  history words, AoC custom field, PacketInfo, termination) is handled
-//  by UdpPacketEmitter::wrap_and_send — this file only cares about bunch
+//  by the sender of the packet — this file only cares about bunch
 //  bits that go into the outer packet.
 //
-//  Source of the wire format:  the existing send_nmt() in game_server.h
-//  (lines ~2472-2544) written from real-AoC-server captures.
-//  Session H.2 ports that logic into a standalone builder so it can be
-//  called from LiveWorld's OpcodeDispatcher in response to incoming NMT
-//  messages, replacing the legacy replay bytes for these specific opcodes.
+//  Source of the wire format:  the send_nmt() of the retired login server,
+//  written from real-AoC-server captures.  Session H.2 ported that logic
+//  into this standalone builder; the tests compare it bit for bit with the
+//  captured NMT messages.
 //
 //  LAYER:   Protocol / emit
 //  SESSION: H.2
@@ -32,7 +31,7 @@
 namespace aoc { namespace protocol { namespace emit {
 
 /// Per-bunch context for building NMT messages.  Matches the fields set
-/// by game_server.h's send_nmt (with the channel-already-open variant,
+/// by the retired login server's send_nmt (with the channel-already-open variant,
 /// since the control channel opens via NMT_Challenge which is the first
 /// S>C NMT and stays open through the entire connection).
 struct NmtBunchContext {

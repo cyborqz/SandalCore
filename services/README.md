@@ -9,11 +9,11 @@ Platform services for the live backend (architecture spec:
 | `character` | gRPC `127.0.0.1:50052` | `CharacterService`: the runtime writer of character records (`charimport` is the offline exception); checks a new character's race, gender, class and customization against `content.db` (below), gives it its class's starting kit and saves its items ("Items and inventory") |
 | `citynode` | gRPC `127.0.0.1:50055` | `CityNodeService` (Nodes 1): the live state of the game world's city nodes (level, XP, vassal link), the node clock and the stream of changes; API-first, see "City nodes" below |
 | `charimport` | - | Carries the legacy `dist/Release/data/characters.json` into the database (race, gender, class and appearance taken from each character's `create_info`) |
-| `mesh` | gRPC `127.0.0.1:50053` | `MeshService`: world-server registry and placement (one world: worldd when it has registered, else the configured static world, the legacy aoc_server on `127.0.0.1:7777`) |
+| `mesh` | gRPC `127.0.0.1:50053` | `MeshService`: world-server registry and placement (one world: worldd when it has registered, else the configured static world `AOC_MESH_STATIC_WORLD`, none by default) |
 | `gateway` | ICS gRPC over TLS `127.0.0.1:443`, gRPC `127.0.0.1:50054` | The game client's session, world and character screens and Play; `GatewayService.RedeemTicket` for world servers |
 
-The C++ world server, `worldd` (`server/worldd`, UDP `127.0.0.1:7777`), is started by `run -World
-worldd`; see `server/worldd/README.md`.
+The C++ world server, `worldd` (`server/worldd`, UDP `127.0.0.1:7777`), is started by `run`; see
+`server/worldd/README.md`.
 
 Every internal gRPC server (auth, character, citynode, mesh, and the gateway's internal port) refuses calls
 without the service token (`internal/svcauth`): "authorization: Bearer" and 64 hex digits from
@@ -25,73 +25,61 @@ gateway and worldd send it. The game client's ICS stream does not use it.
 ```powershell
 scripts\services.ps1 up      # PostgreSQL + NATS in Docker
 scripts\services.ps1 build   # build auth, character, citynode, nodectl, worldctl, charimport, mesh and gateway into dist\services
-scripts\services.ps1 run     # build, then start auth, character, citynode, mesh and gateway hidden, logging to files
-scripts\services.ps1 run -World worldd   # and dist\Release\worldd.exe, with no static world
+scripts\services.ps1 run     # build, then start auth, character, citynode, mesh, gateway and dist\Release\worldd.exe hidden, logging to files
 scripts\services.ps1 stop    # stop those processes (worldd included)
 scripts\services.ps1 login   # sign in with config\dev_login.local.json, save the token for tether_server
 scripts\services.ps1 down    # stop the containers (the data volume is kept)
 ```
 
-`run` starts auth, character, citynode, mesh and gateway without windows. Each writes its log (slog, on
+`run` starts auth, character, citynode, mesh, gateway and worldd without windows. Each writes its log (slog, on
 stderr) to `dist\services\logs\<name>.log` and anything on stdout to `<name>.out.log`; the previous
 run's files are kept as `<name>.prev.log` and `<name>.out.prev.log`. It waits a moment and fails,
 naming the service, its exit code and its log, if one has already exited. It refuses to start
-while any of the five from `dist\services` are still running: `stop` them first. `stop`
+while any of them is still running from this checkout: `stop` them first. `stop`
 terminates the processes outright (there is no graceful drain). The services keep no state that
 outlives them, but the gateway's live client sessions are dropped: a game client connected to it
 loses its session. `stop` needs neither Go nor Docker.
 
-`run` (like `-World legacy`) sets `AOC_MESH_STATIC_WORLD=127.0.0.1:7777` unless it is already set,
-so mesh places players on the legacy aoc_server. `-World worldd` clears it: worldd registers
-itself, and a static world would take players whenever worldd's heartbeats lapse, with tickets
-worldd could never redeem.
+`run` clears `AOC_MESH_STATIC_WORLD`: worldd registers itself, and a static world would take players
+whenever worldd's heartbeats lapse, with tickets worldd could never redeem.
 
-The whole stack with the game client is `scripts\launch_go.bat [native [quick]]` (`quick` only
-works as the second argument): it runs `launch_all.bat` with the Go services in place of
-`auth_server` and aoc_server's own ICS (which moves to :8443). `scripts\launch_go.bat worldd` uses
-worldd instead of aoc_server (build it first: `scripts\build.ps1 -Target worldd`); `quick` does not
-work with it, since only Play in character select issues the join ticket. Plain `scripts\launch_all.bat`
-keeps the legacy servers; both first stop any Go services left running from this checkout.
-`launch_all.bat` checks that the process on each port it waits for (TCP, and tether_server's UDP
-19021) is the expected program running from this checkout. The same program from another checkout
-or worktree fails the launch, as does anything else, with `port N is held by <name> (pid P) at
-<path>`. Stop the other stack's servers first. When the Go stack fails, it points to the log
-files above.
+The whole stack with the game client is `launch_worldd.bat` (`scripts\launch_all.bat` does the work and
+takes no arguments): the Go services and worldd, the tether and the launcher window. Build worldd
+first (`scripts\build.ps1 -Target worldd`). It first stops any of them left running from this checkout.
+`launch_all.bat` checks that the process on each port it waits for (TCP, and the UDP ports of worldd, 7777,
+and tether_server, 19021) is the expected program running from this checkout. The same program from another
+checkout or worktree fails the launch, as does anything else, with `port N is held by <name> (pid P) at
+<path>`. Stop the other checkout's servers first. When it fails, it points to the log files above.
 
-The game client learns its session token from tether_server. `launch_go.bat` starts it with
+The game client learns its session token from tether_server. `launch_all.bat` starts it with
 `--login-token-file`, which makes it hand a game client on this machine (127.0.0.0/8 only) the
-token launcher.exe saved at login, `dist\Release\data\ics_auth_token.txt`; without the flag (plain
-`launch_all.bat`) it sends the emulator token and never reads the file. `launch_go.bat` deletes
-the file from an earlier sign-in first. With the launcher window it then waits, up to 5 minutes,
-until you have signed in there and starts the game client itself: do not also press the
-launcher's Launch button, or a second client opens. For `quick` launches, which skip the launcher
-window, put an account registered through the launcher in `config\dev_login.local.json`
+token launcher.exe saved at login, `dist\Release\data\ics_auth_token.txt`; without the flag it sends
+the emulator token, which the gateway refuses, and never reads the file. `launch_all.bat` deletes
+the file from an earlier sign-in first. It then waits, up to 5 minutes,
+until you have signed in in the launcher window and starts the game client itself: do not also press the
+launcher's Launch button, or a second client opens. To sign in without the launcher window, put an
+account registered through the launcher in `config\dev_login.local.json`
 (git-ignored; `launch_all.bat` does not copy `*.local.json` into `dist`):
 
     {"username": "admin", "password": "..."}
 
-and `scripts\services.ps1 login` (run by `launch_go.bat native quick`) signs in with it. The file
+and `scripts\services.ps1 login` signs in with it and saves the token for tether_server. The file
 is read as UTF-8, so passwords with non-ASCII characters work.
 
 The gateway serves TLS with `certs\server.pem` and `certs\server.key`, relative to the directory
 it runs in (the repo root under `services.ps1`), the certificate `launch_all.bat` makes the client
 trust. The key is not in git, so a fresh clone or worktree has none, and the gateway refuses to
 start without it (it never falls back to plaintext). It checks the key before it opens the
-database. For `launch_go.bat` in a worktree, copy the main checkout's `certs\server.key` into the
-worktree's `certs\`: `certs/*.key` is git-ignored, and aoc_server needs the key there too.
+database. For `launch_all.bat` in a worktree, copy the main checkout's `certs\server.key` into the
+worktree's `certs\`: `certs/*.key` is git-ignored.
 `AOC_GATEWAY_TLS_KEY` and `AOC_GATEWAY_TLS_CERT` point the gateway alone elsewhere.
 
 A client whose TLS handshake fails is logged as `WARN ics: TLS handshake failed remote=...
 err=...` in `gateway.log`. The gateway's gRPC library requires the client to offer ALPN `h2`. If
 the log says `missing selected ALPN property`, set `GRPC_ENFORCE_ALPN_ENABLED=false` for the
-gateway: the game client has only been proven against the legacy grpc-c++ server, which does not
+gateway: the game client has only been proven against the retired grpc-c++ login server, which does not
 enforce ALPN. `services.ps1 run` passes its environment on, so in a console run
-`set GRPC_ENFORCE_ALPN_ENABLED=false` and then `scripts\launch_go.bat` from that console.
-
-Until worldd exists (plan A4) the world is the legacy aoc_server, which spawns its own last
-`dist\Release\data\characters.json` character, not the one chosen in character select. `dist` is
-not in git, so a fresh worktree has no such file: copy the main checkout's to get the same
-character in the world.
+`set GRPC_ENFORCE_ALPN_ENABLED=false` and then `scripts\launch_all.bat` from that console.
 
 What the gateway answers the game client:
 - Replies echo the request's `system_data`; pushes echo nothing.
@@ -108,7 +96,7 @@ What the gateway answers the game client:
   character service refuses every creation, and the client gets an internal error, 22 (the reason is in
   the gateway's and the character service's logs). A refused create is a `CreateCharacterReply` with an
   empty body that echoes the request's tracking tag.
-- Deleting a character that is not there answers SUCCESS, like the legacy server.
+- Deleting a character that is not there answers SUCCESS, like the old login server.
 - `AuthRefreshRequest` checks the login token again: once it has expired (after 24 h) the session
   ends with 40. A session request with a token the auth service does not know is answered 40 as well,
   and any other request on a stream with no session 43.
@@ -123,10 +111,8 @@ left a call that got one waiting for its 10 s expiry: a refused create hung that
 create said "Cannot set new client state". Only 0 and 1 have been seen answered in play; that an error
 number shows the client's dialog at once is what the executable's enum says, not yet a recording.
 
-The legacy servers use the same ports: `auth_server.exe` (started by `scripts\launch_all.bat`)
-listens on 8081 like auth, and aoc_server's own ICS on 443 like the gateway. Run one stack or the
-other. With the Go auth service, register once through the launcher's Register button.
-Then, to keep a legacy character:
+With the Go auth service, register once through the launcher's Register button.
+Then, to keep a character the retired login server saved in `dist\Release\data\characters.json`:
 
 ```powershell
 dist\services\charimport.exe -account <your username>

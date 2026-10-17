@@ -5,8 +5,8 @@
 //  protocol/wire/bunch_types.h
 //
 //  Data structures for parsed UE5 bunches.  Pure data — no parsing logic
-//  lives here.  Shared between bunch_parser (producer) and opcode_dispatcher
-//  (consumer).
+//  lives here.  Shared between bunch_parser (producer) and the code that
+//  reads the parsed bunches (consumers).
 //
 //  LAYER:  Protocol / wire
 //  SESSION: A (the parser)

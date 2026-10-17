@@ -332,8 +332,8 @@ public:
 
     /// The acknowledgement of a ServerMovePacked: ClientMoveResponsePacked with FCharacterMoveResponsePackedBits' header
     /// for "good move" (10 bits, 645) and the client's TimeStamp (a float), an unreliable bunch of 68 bits on the pawn's
-    /// channel, as the original's 4,191 (pkt#1900 on) and the legacy server's ClientAckGoodMove (src/net/game_server.h
-    /// send_client_ack_good_move; the wire field is ClientMoveResponsePacked, field 35). Touches no shadow.
+    /// channel, as the original's 4,191 (pkt#1900 on) and the retired login server's ClientAckGoodMove (the wire field
+    /// is ClientMoveResponsePacked, field 35). Touches no shadow.
     std::optional<Send> good_move_ack(float time_stamp) const;
 
     /// The correction of a move the checks refused (plan A6, spec section 10): ClientAdjustPosition on the pawn's channel,
