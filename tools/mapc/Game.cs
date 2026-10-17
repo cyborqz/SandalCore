@@ -26,13 +26,16 @@ public sealed class Game
     {
         Log.Logger = new LoggerConfiguration().MinimumLevel.Fatal().WriteTo.Console().CreateLogger();
         // CUE4Parse 1.2.2 reads usmap versions up to 3; the game's is 4 (see UsmapCompat)
-        var tmp = Path.Combine(Path.GetTempPath(), "mapc_aoc_v3.usmap");
-        File.WriteAllBytes(tmp, UsmapCompat.DowngradeToV3(File.ReadAllBytes(usmap)));
-        Provider = new DefaultFileProvider(paks, SearchOption.TopDirectoryOnly, new VersionContainer(EGame.GAME_UE5_6), StringComparer.OrdinalIgnoreCase);
-        Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(tmp);
-        Provider.Initialize();
-        Provider.SubmitKey(new FGuid(), new FAesKey(new byte[32]));   // the containers are not encrypted: the all-zero key mounts them
-        File.Delete(tmp);
+        var tmp = Path.Combine(Path.GetTempPath(), $"mapc_{Guid.NewGuid():N}.usmap");
+        try
+        {
+            File.WriteAllBytes(tmp, UsmapCompat.DowngradeToV3(File.ReadAllBytes(usmap)));
+            Provider = new DefaultFileProvider(paks, SearchOption.TopDirectoryOnly, new VersionContainer(EGame.GAME_UE5_6), StringComparer.OrdinalIgnoreCase);
+            Provider.MappingsContainer = new FileUsmapTypeMappingsProvider(tmp);
+            Provider.Initialize();
+            Provider.SubmitKey(new FGuid(), new FAesKey(new byte[32]));   // the containers are not encrypted: the all-zero key mounts them
+        }
+        finally { File.Delete(tmp); }
     }
 
     public IPackage? Load(string path)

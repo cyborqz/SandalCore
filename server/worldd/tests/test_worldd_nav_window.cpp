@@ -43,9 +43,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <limits>
 #include <random>
 #include <set>
 #include <string>
@@ -150,6 +152,28 @@ static void test_file() {
     std::vector<uint8_t> pad = bytes;
     pad.push_back(0);
     CHECK(!nav::parse_nav_file(pad.data(), pad.size(), &f, &err), "a trailing byte is refused");
+
+    uint64_t terrain_dir = 0, chunk_dir = 0;
+    std::memcpy(&terrain_dir, bytes.data() + 128, sizeof terrain_dir);
+    std::memcpy(&chunk_dir, bytes.data() + 136, sizeof chunk_dir);
+    const auto with_offset = [&](size_t at, uint64_t value) {
+        auto malformed = bytes;
+        std::memcpy(malformed.data() + at, &value, sizeof value);
+        return malformed;
+    };
+    for (const uint64_t offset : {std::numeric_limits<uint64_t>::max() - 3, uint64_t{0}}) {
+        const auto malformed = with_offset(static_cast<size_t>(terrain_dir) + 56, offset);
+        CHECK(!nav::parse_nav_file(malformed.data(), malformed.size(), &f, &err), "terrain samples outside their section are refused before reading them");
+    }
+    const auto overflow_chunk = with_offset(static_cast<size_t>(chunk_dir) + 16, std::numeric_limits<uint64_t>::max() - 3);
+    CHECK(!nav::parse_nav_file(overflow_chunk.data(), overflow_chunk.size(), &f, &err), "a chunk offset that would wrap around is refused");
+    auto overflow_dir = with_offset(136, std::numeric_limits<uint64_t>::max() - 15);
+    // The writer's in-memory file has tiles, so use the parsed directory's count from the header.
+    uint32_t chunk_count = 0;
+    std::memcpy(&chunk_count, bytes.data() + 120, sizeof chunk_count);
+    const uint64_t blob_offset = std::numeric_limits<uint64_t>::max() - 15 + 32ull * chunk_count;
+    std::memcpy(overflow_dir.data() + 144, &blob_offset, sizeof blob_offset);
+    CHECK(!nav::parse_nav_file(overflow_dir.data(), overflow_dir.size(), &f, &err), "a chunk directory whose end wraps around is refused");
 
     const std::string path = "nav_window_roundtrip.bin";
     CHECK(nav::write_nav_file(reg, path, &err), "the file is written to disk");

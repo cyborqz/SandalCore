@@ -6,6 +6,7 @@ package aocexpr
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -70,9 +71,16 @@ type Curve struct {
 }
 
 // NewCurve returns a curve of the keys, which are sorted by Time. Two keys at
-// one time are an error.
+// one time, or a non-finite key member, are an error.
 func NewCurve(keys []Key) (*Curve, error) {
 	ks := append([]Key(nil), keys...)
+	for i, k := range ks {
+		for _, v := range []float64{k.Time, k.Value, k.Arrive, k.Leave} {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				return nil, fmt.Errorf("curve key %d has a non-finite member", i)
+			}
+		}
+	}
 	sort.SliceStable(ks, func(i, j int) bool { return ks[i].Time < ks[j].Time })
 	for i := 1; i < len(ks); i++ {
 		if ks[i].Time == ks[i-1].Time {
@@ -88,6 +96,8 @@ func (c *Curve) Eval(t float64) (float64, error) {
 	switch {
 	case len(ks) == 0:
 		return 0, &Error{Msg: "the curve has no keys"}
+	case math.IsNaN(t):
+		return 0, &Error{Msg: "the curve lookup time is NaN"}
 	case t <= ks[0].Time:
 		return ks[0].Value, nil
 	case t >= ks[len(ks)-1].Time:

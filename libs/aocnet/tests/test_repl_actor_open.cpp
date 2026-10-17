@@ -1044,6 +1044,12 @@ static void test_noop_update_copies_nothing() {
 }
 
 int main() {
+    ObjectShadow invalidation;
+    invalidation.rep.sent[1] = Value::boolean(true);
+    invalidation.invalidate(65537);
+    CHECK(invalidation.rep.sent.count(1) == 1, "out-of-range invalidation cannot alias a valid shadow handle");
+    invalidation.invalidate(1);
+    CHECK(invalidation.rep.sent.empty(), "valid invalidation still clears the shadow value");
     test_pc_open();
     test_player_state_open();
     test_pawn_open();

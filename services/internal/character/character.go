@@ -33,13 +33,18 @@ import (
 )
 
 var (
-	ErrNameTaken = errors.New("character name taken")
-	ErrIDTaken   = errors.New("character id taken")
-	ErrNotFound  = errors.New("character not found")
-	ErrInvalid   = errors.New("invalid character data")
+	ErrNameTaken      = errors.New("character name taken")
+	ErrIDTaken        = errors.New("character id taken")
+	ErrNotFound       = errors.New("character not found")
+	ErrInvalid        = errors.New("invalid character data")
+	ErrCharacterLimit = errors.New("character count limit reached")
 )
 
 // [CoA + C.Y.B]
+
+// DefaultMaxCharacters is the runtime account limit. Offline imports may
+// preserve more characters by leaving New.MaxCharacters unset.
+const DefaultMaxCharacters = 16
 
 type Position struct {
 	X, Y, Z float64
@@ -82,6 +87,9 @@ type New struct {
 	// GMStarterSetGranted says the Items hold the GM starter set too (plan D1, AOC_GM_STARTER_SET=1): the character is
 	// marked as given it (gm_starter_set_granted_at), so the backfill at the next start leaves it alone.
 	GMStarterSetGranted bool
+	// MaxCharacters limits this account's characters atomically with creation.
+	// Zero leaves offline imports uncapped; runtime callers supply the limit.
+	MaxCharacters int
 }
 
 // State is what play changes; a zero Level leaves the level alone.
@@ -115,12 +123,17 @@ const columns = `id, account_id, name, COALESCE(race, 0), COALESCE(gender, 0), C
 // loggedUnderived holds the ids of the characters whose NULL race or gender was reported, each is reported once.
 var loggedUnderived sync.Map
 
+// -- C O A & Cyb --
+
 func (s *Store) Create(ctx context.Context, n New) (Character, error) {
 	if err := ValidateName(n.Name); err != nil {
 		return Character{}, err
 	}
 	if n.AccountID <= 0 {
 		return Character{}, fmt.Errorf("%w: account id must be positive", ErrInvalid)
+	}
+	if n.MaxCharacters < 0 {
+		return Character{}, fmt.Errorf("%w: character limit must not be negative", ErrInvalid)
 	}
 	if err := ValidateLevel(n.Level); err != nil {
 		return Character{}, err
@@ -159,6 +172,24 @@ func (s *Store) Create(ctx context.Context, n New) (Character, error) {
 		return Character{}, err
 	}
 	defer tx.Rollback(ctx) // a no-op once committed
+	if n.MaxCharacters > 0 {
+		// Lock the account before counting, so creations on different streams
+		// (or gateway processes) cannot all claim the same final free slot.
+		var accountID int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE id = $1 FOR UPDATE`, n.AccountID).Scan(&accountID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return Character{}, fmt.Errorf("%w: no account %d", ErrInvalid, n.AccountID)
+			}
+			return Character{}, err
+		}
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM characters WHERE account_id = $1`, n.AccountID).Scan(&count); err != nil {
+			return Character{}, err
+		}
+		if count >= n.MaxCharacters {
+			return Character{}, ErrCharacterLimit
+		}
+	}
 	row := tx.QueryRow(ctx, `
 		INSERT INTO characters (id, account_id, name, race, gender, class_id, archetype_id, class_name,
 		                        appearance, create_info, level, gm_starter_set_granted_at, gm_starter_mounts_granted_at)

@@ -52,7 +52,9 @@ public:
     /// Forgets a value (plan E1: a template's value an instance leaves unset, say an NPC's Instigator): nothing of the handle is sent to a
     /// connection that never had it.  False when the handle was not set.  (A connection that already holds it keeps what it has: UE has no
     /// "unset" either.)
-    bool erase(uint32_t handle) { return values_.erase(static_cast<uint16_t>(handle)) != 0; }
+    bool erase(uint32_t handle) {
+        return handle <= UINT16_MAX && values_.erase(static_cast<uint16_t>(handle)) != 0;
+    }
 
     const Value* get(uint32_t handle) const;
     const Value* get(const schema::ClassSchema& schema, std::string_view path) const;

@@ -51,7 +51,7 @@ public static class GeomFile
             {
                 var m = g.Meshes[mi];
                 var name = Encoding.UTF8.GetBytes(m.Name);
-                w.Write((ushort)name.Length); w.Write(name);
+                w.Write(checked((ushort)name.Length)); w.Write(name);
                 w.Write((uint)(m.V.Count / 3)); w.Write((uint)m.I.Count);
                 foreach (var f in m.V) w.Write(f);
                 foreach (var i in m.I) w.Write((uint)i);
@@ -74,7 +74,7 @@ public static class GeomFile
     public static AreaGeometry Read(byte[] data)
     {
         using var r = new BinaryReader(new MemoryStream(data, false), Encoding.UTF8);
-        if (Encoding.ASCII.GetString(r.ReadBytes(8)) != Magic) throw new InvalidDataException("not an area_geom.bin");
+        if (Encoding.ASCII.GetString(ReadBytesExactly(r, 8)) != Magic) throw new InvalidDataException("not an area_geom.bin");
         if (r.ReadUInt32() != Version) throw new InvalidDataException("unsupported area_geom.bin version");
         var g = new AreaGeometry { CenterX = r.ReadDouble(), CenterY = r.ReadDouble(), Radius = r.ReadDouble(), Margin = r.ReadDouble() };
         ulong hash = r.ReadUInt64();
@@ -94,19 +94,21 @@ public static class GeomFile
         for (uint i = 0; i < nt; i++)
         {
             var t = new TerrainTile { X0 = r.ReadDouble(), Y0 = r.ReadDouble(), StepX = r.ReadDouble(), StepY = r.ReadDouble(), ZBase = r.ReadDouble(), ZScale = r.ReadDouble() };
-            t.Nx = (int)r.ReadUInt32(); t.Ny = (int)r.ReadUInt32();
-            t.Raw = new ushort[t.Nx * t.Ny];
-            var bytes = r.ReadBytes(t.Raw.Length * 2);
+            t.Nx = checked((int)r.ReadUInt32()); t.Ny = checked((int)r.ReadUInt32());
+            if (t.Nx < 2 || t.Ny < 2 || t.Nx > 4096 || t.Ny > 4096) throw new InvalidDataException("terrain dimensions are out of range");
+            var bytes = ReadBytesExactly(r, checked(t.Nx * t.Ny * 2));
+            t.Raw = new ushort[checked(t.Nx * t.Ny)];
             Buffer.BlockCopy(bytes, 0, t.Raw, 0, bytes.Length);
             g.Tiles.Add(t);
         }
         for (uint i = 0; i < nm; i++)
         {
             int nl = r.ReadUInt16();
-            var m = new MeshGeo { Name = Encoding.UTF8.GetString(r.ReadBytes(nl)), Kind = "part" };
-            int nv = (int)r.ReadUInt32(), ni = (int)r.ReadUInt32();
-            var vb = r.ReadBytes(nv * 12);
-            var fl = new float[nv * 3];
+            var m = new MeshGeo { Name = Encoding.UTF8.GetString(ReadBytesExactly(r, nl)), Kind = "part" };
+            int nv = checked((int)r.ReadUInt32()), ni = checked((int)r.ReadUInt32());
+            if (ni % 3 != 0) throw new InvalidDataException("mesh indices do not form triangles");
+            var vb = ReadBytesExactly(r, checked(nv * 12));
+            var fl = new float[checked(nv * 3)];
             Buffer.BlockCopy(vb, 0, fl, 0, vb.Length);
             m.V = new List<float>(fl);
             for (int k = 0; k < fl.Length; k += 3)
@@ -115,20 +117,31 @@ public static class GeomFile
                 m.MinY = Math.Min(m.MinY, fl[k + 1]); m.MaxY = Math.Max(m.MaxY, fl[k + 1]);
                 m.MinZ = Math.Min(m.MinZ, fl[k + 2]); m.MaxZ = Math.Max(m.MaxZ, fl[k + 2]);
             }
-            var ib = r.ReadBytes(ni * 4);
+            var ib = ReadBytesExactly(r, checked(ni * 4));
             var il = new int[ni];
             Buffer.BlockCopy(ib, 0, il, 0, ib.Length);
+            if (il.Any(index => index < 0 || index >= nv)) throw new InvalidDataException("triangle index is out of range");
             m.I = new List<int>(il);
             g.Meshes.Add(m);
         }
         for (uint i = 0; i < np; i++)
         {
-            int mesh = (int)r.ReadUInt32();
+            int mesh = checked((int)r.ReadUInt32());
+            if (mesh >= g.Meshes.Count) throw new InvalidDataException("placement names an unknown mesh");
             double m00 = r.ReadSingle(), m01 = r.ReadSingle(), m02 = r.ReadSingle(), m10 = r.ReadSingle(), m11 = r.ReadSingle(), m12 = r.ReadSingle(), m20 = r.ReadSingle(), m21 = r.ReadSingle(), m22 = r.ReadSingle();
             double tx = r.ReadDouble(), ty = r.ReadDouble(), tz = r.ReadDouble();
             g.Placements.Add(new Placement(mesh, new Xf(m00, m01, m02, tx, m10, m11, m12, ty, m20, m21, m22, tz)));
         }
+        if (r.BaseStream.Position != r.BaseStream.Length) throw new InvalidDataException("area_geom.bin has trailing bytes");
         return g;
+    }
+
+    static byte[] ReadBytesExactly(BinaryReader reader, int count)
+    {
+        if (count < 0 || count > reader.BaseStream.Length - reader.BaseStream.Position) throw new EndOfStreamException("area_geom.bin is cut short");
+        var bytes = reader.ReadBytes(count);
+        if (bytes.Length != count) throw new EndOfStreamException("area_geom.bin is cut short");
+        return bytes;
     }
 
     /// <summary>A part's sidecar: the Src of each placement, in the order the part file lists them.</summary>

@@ -32,13 +32,13 @@ struct Rd {
     template <typename T>
     T get() {
         T v{};
-        if (pos + sizeof(T) > size) { ok = false; return v; }
+        if (pos > size || sizeof(T) > size - pos) { ok = false; return v; }
         std::memcpy(&v, p + pos, sizeof(T));
         pos += sizeof(T);
         return v;
     }
     bool bytes(void* dst, size_t n) {
-        if (pos + n > size) { ok = false; return false; }
+        if (pos > size || n > size - pos) { ok = false; return false; }
         std::memcpy(dst, p + pos, n);
         pos += n;
         return true;
@@ -66,6 +66,8 @@ bool parse_geometry(const uint8_t* data, size_t size, Geometry* out, std::string
     }
     const uint32_t nt = r.get<uint32_t>(), nm = r.get<uint32_t>(), np = r.get<uint32_t>();
     if (!r.ok || nt > 100000 || nm > 10000000 || np > 100000000) return fail("area_geom.bin header is out of range");
+    // Check the minimum encoded size before allocating vectors from untrusted counts.
+    if (56ull * nt + 10ull * nm + 64ull * np > r.size - r.pos) return fail("area_geom.bin is cut short (header counts)");
     g.terrain.resize(nt);
     for (auto& t : g.terrain) {
         t.x0 = r.get<double>(); t.y0 = r.get<double>(); t.step_x = r.get<double>(); t.step_y = r.get<double>();

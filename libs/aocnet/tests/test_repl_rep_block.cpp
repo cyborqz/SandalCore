@@ -417,6 +417,9 @@ static void test_set_refusals() {
     CHECK(!st.set(pawn, "RemoteRole", Value::boolean(true)), "an enum command with a bool");
     CHECK(!st.set(pawn, "RemoteRole", Value::u64(8)), "an enum of 3 bits with 8");
     CHECK(st.set(pawn, "RemoteRole", Value::u64(7)), "and with 7 is fine");
+    const uint32_t role = pawn.command("RemoteRole")->handle;
+    CHECK(!st.get(role + 65536) && !st.erase(role + 65536) && st.get(role),
+          "an out-of-range handle cannot alias or erase a valid 16-bit handle");
     CHECK(!st.set(pawn, "Owner", Value::u64(5)), "an object command with an integer");
     CHECK(!st.set(pawn, "Owner", Value(guid(1))), "an object command with ObjectId 1 (the export form)");
     CHECK(!st.set(pawn, "ReplicatedMovement", Value(Vec3d{})), "an FRepMovement command with an FVector");

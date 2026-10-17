@@ -594,6 +594,33 @@ func TestCurveMap(t *testing.T) {
 	}
 }
 
+func TestCurveNaNInputIsAnError(t *testing.T) {
+	for _, keys := range [][]Key{
+		{{Time: 1, Value: 10}},
+		{{Time: 1, Value: 10}, {Time: 2, Value: 20}},
+	} {
+		c, err := NewCurve(keys)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Eval(math.NaN()); err == nil {
+			t.Errorf("a NaN lookup in a %d-key curve returned no error", len(keys))
+		}
+	}
+}
+
+func TestCurveRejectsNonFiniteKeys(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(-1), math.Inf(1)} {
+		for _, key := range []Key{
+			{Time: value}, {Value: value}, {Arrive: value}, {Leave: value},
+		} {
+			if _, err := NewCurve([]Key{key}); err == nil {
+				t.Errorf("non-finite key accepted: %+v", key)
+			}
+		}
+	}
+}
+
 // TestSingle: float32 arithmetic gives another integer where a product sits on
 // a half. 335 is the Constitution curve's value at level 20, 1.3 the Tank's
 // multiplier; of the 2400 primary attribute values 80 are on a half, and for

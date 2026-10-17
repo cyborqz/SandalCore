@@ -92,6 +92,52 @@ func realRules(t *testing.T) *customization.Rules {
 	return rules
 }
 
+type acceptCreationRules struct{}
+
+func (acceptCreationRules) Check(customization.New) error { return nil }
+
+func TestConcurrentSessionsCannotExceedCharacterLimit(t *testing.T) {
+	svc, store := realService(t, acceptCreationRules{})
+	ctx := context.Background()
+	for i := range 15 {
+		if _, err := store.Create(ctx, character.New{AccountID: me.ID, Name: fmt.Sprintf("Char%02d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clients := []*harness{newHarness(t, &fakeCharacters{via: viaService{svc}}), newHarness(t, &fakeCharacters{via: viaService{svc}})}
+	for _, h := range clients {
+		h.open(goodToken, success)
+	}
+	for i, h := range clients {
+		h.send("ics_xclient.CreateCharacterRequest", &icsxclient.CreateCharacterRequest{
+			CharacterName: fmt.Sprintf("LastSlot%d", i), WorldId: worldID, CreateCharacterInfoRaw: createInfo(`{}`, 2),
+		}, "")
+	}
+	counts := map[icscommon.IcsStatusCode]int{}
+	for _, h := range clients {
+		m, err := h.stream.Recv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.GetMessageTypeName() != "ics_xclient.CreateCharacterReply" {
+			t.Fatalf("reply type = %s", m.GetMessageTypeName())
+		}
+		counts[m.GetStatusCode()]++
+	}
+	if counts[success] != 1 || counts[codeCharacterCount] != 1 {
+		t.Fatalf("concurrent create statuses = %v, want one success and one character-count error", counts)
+	}
+	chars, err := store.List(ctx, me.ID)
+	if err != nil || len(chars) != 16 {
+		t.Fatalf("stored characters = %d, err %v; want 16", len(chars), err)
+	}
+	// Offline imports still preserve all existing characters, even beyond the
+	// runtime cap. Their internal Create call does not ask for a limit.
+	if _, err := store.Create(ctx, character.New{AccountID: me.ID, Name: "Imported"}); err != nil {
+		t.Fatalf("offline creation above the runtime cap: %v", err)
+	}
+}
+
 // listed is CharacterInformation (field 100) of the character list's record i, as the client reads it.
 func listed(t *testing.T, h *harness, i int) map[protowire.Number]uint64 {
 	t.Helper()

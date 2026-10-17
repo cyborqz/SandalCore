@@ -25,6 +25,8 @@ _deps/
 /third_party/CUE4Parse/
 /tools/mapc/bin/
 /tools/mapc/obj/
+/tools/mapc/tests/bin/
+/tools/mapc/tests/obj/
 
 # ──────────────────────────────────────────────────────────────────────────
 # CMake

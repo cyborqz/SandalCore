@@ -45,6 +45,7 @@ foreach(t
     test_packet_notify
     test_handshake
     test_packet_framing
+    test_packet_reader
     test_server_guid_allocator
     test_generated_schemas
     test_repl_codecs

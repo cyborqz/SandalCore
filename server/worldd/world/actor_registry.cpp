@@ -110,10 +110,12 @@ bool ActorRegistry::move(uint64_t id, double x, double y, double z, double yaw_d
 }
 
 void ActorRegistry::query(double x, double y, double radius_cm, std::vector<uint64_t>& out) const {
-    if (!std::isfinite(x) || !std::isfinite(y) || !(radius_cm >= 0)) return;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(radius_cm) || radius_cm < 0) return;
     const int32_t x0 = cell_of(x - radius_cm), x1 = cell_of(x + radius_cm), y0 = cell_of(y - radius_cm), y1 = cell_of(y + radius_cm);
     // a radius that spans more cells than the grid holds is cheaper walked as the whole grid
-    const int64_t span = (static_cast<int64_t>(x1) - x0 + 1) * (static_cast<int64_t>(y1) - y0 + 1);
+    // Either dimension can span all 2^32 cells; their product does not fit in an integer.
+    const long double span = static_cast<long double>(static_cast<int64_t>(x1) - x0 + 1) *
+                             static_cast<long double>(static_cast<int64_t>(y1) - y0 + 1);
     const double r2 = radius_cm * radius_cm;
     const auto take = [&](const std::vector<uint64_t>& ids) {
         for (const uint64_t id : ids) {
@@ -122,13 +124,13 @@ void ActorRegistry::query(double x, double y, double radius_cm, std::vector<uint
             if (dx * dx + dy * dy <= r2) out.push_back(id);
         }
     };
-    if (span > static_cast<int64_t>(grid_.size()) * 2) {
+    if (span > static_cast<long double>(grid_.size()) * 2) {
         for (const auto& [key, ids] : grid_) take(ids);
         return;
     }
-    for (int32_t cx = x0; cx <= x1; ++cx) {
-        for (int32_t cy = y0; cy <= y1; ++cy) {
-            const auto it = grid_.find(cell_key(cx, cy));
+    for (int64_t cx = x0; cx <= x1; ++cx) {
+        for (int64_t cy = y0; cy <= y1; ++cy) {
+            const auto it = grid_.find(cell_key(static_cast<int32_t>(cx), static_cast<int32_t>(cy)));
             if (it != grid_.end()) take(it->second);
         }
     }

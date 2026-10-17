@@ -272,6 +272,16 @@ static void test_framing_edges() {
     zero_tail.push_back(0);
     CHECK(!read_data_packet(zero_tail.data(), zero_tail.size(), wire::Direction::ClientToServer),
           "a data packet whose last byte is zero is refused");
+    auto no_sentinel = hello;
+    ::ue5::patch_bits(no_sentinel.data(), no_sentinel.size(), eff - 1, 0, 1);
+    CHECK(!read_data_packet(no_sentinel.data(), no_sentinel.size(), wire::Direction::ClientToServer),
+          "a data packet missing its sentinel is refused");
+    CHECK(!read_data_packet(nullptr, hello.size(), wire::Direction::ClientToServer),
+          "null packet data is refused before dereferencing");
+    auto oversized = hello;
+    oversized.resize(kMaxPacketBytes + 1, 0xff);
+    CHECK(!read_data_packet(oversized.data(), oversized.size(), wire::Direction::ClientToServer),
+          "a data packet beyond the datagram limit is refused");
 
     // A server packet with a frame-time byte before the bunches.
     NotifyHeader n;

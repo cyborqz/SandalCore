@@ -234,11 +234,12 @@ void test_live(world::CityNodes& nodes) {
     CHECK(!nodes.apply_seed_file(write("nonodes.json", "{\"comment\": \"x\"}"), error) && error.find("nodes") != std::string::npos, "a seed with no nodes object is refused");
     CHECK(!nodes.apply_seed_file((dir / "missing.json").string(), error), "a missing seed is refused");
     CHECK(nodes.level_of(joeva->guid) == 4, "a refused seed changes nothing");
-    CHECK(nodes.apply_seed_file(write("some.json", "{\"nodes\": {\"Joeva\": {\"level\": 2}, \"Atlantis\": {\"level\": 1}, \"Halcyon\": {\"level\": 9}, \"Miraleth\": {}, \"New Aela\": {\"level\": 3}}}"),
+    CHECK(nodes.apply_seed_file(write("some.json", "{\"nodes\": {\"Joeva\": {\"level\": 2}, \"Atlantis\": {\"level\": 1}, \"Halcyon\": {\"level\": 9}, \"Miraleth\": {\"level\": 4294967297}, \"New Aela\": {\"level\": 3}}}"),
                                 error, &applied, &skipped),
           "a seed with entries the registry cannot use is read");
-    CHECKF(applied == 2 && skipped == 3, "two applied, three skipped (an unknown node, a level of 9, no level): %zu, %zu", applied, skipped);
-    CHECK(nodes.level_of(joeva->guid) == 2 && nodes.level_of(aela->guid) == 3 && nodes.level_of(halcyon->guid) == 0, "and the levels are the file's (a node left out is Wilderness)");
+    CHECKF(applied == 2 && skipped == 3, "two applied, three skipped (an unknown node and invalid levels): %zu, %zu", applied, skipped);
+    CHECK(nodes.level_of(joeva->guid) == 2 && nodes.level_of(aela->guid) == 3 && nodes.level_of(halcyon->guid) == 0 && nodes.level_of(nodes.by_name("Miraleth")->guid) == 0,
+            "and invalid levels are not narrowed into valid ones");
 
     // the service's state
     const uint64_t v0 = nodes.version();

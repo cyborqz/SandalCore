@@ -191,6 +191,30 @@ func TestOversizedBodyIs400(t *testing.T) {
 	}
 }
 
+func TestCredentialsRequireOneBoundedJSONValue(t *testing.T) {
+	valid := `{"username":"cyb","password":"secret1"}`
+	for _, path := range []string{"/api/v1/auth/login", "/api/v1/auth/register"} {
+		for name, tail := range map[string]string{
+			"second object":        `{}`,
+			"trailing junk":        `junk`,
+			"oversized whitespace": strings.Repeat(" ", 4096),
+		} {
+			t.Run(path+"/"+name, func(t *testing.T) {
+				accounts := &fakeAccounts{users: map[string]string{"cyb": "secret1"}}
+				rec, out := postFull(t, Handler(accounts), path, valid+tail)
+				if rec.Code != http.StatusBadRequest || out["error"] != "invalid_request" || out["access_token"] != nil {
+					t.Errorf("%d %v, want 400 invalid_request and no token", rec.Code, out)
+				}
+			})
+		}
+	}
+	// A complete document may still end with JSON whitespace.
+	rec, _ := postFull(t, Handler(&fakeAccounts{users: map[string]string{"cyb": "secret1"}}), "/api/v1/auth/login", valid+" \r\n\t")
+	if rec.Code != http.StatusOK {
+		t.Errorf("JSON with trailing whitespace: %d, want 200", rec.Code)
+	}
+}
+
 func TestHealth(t *testing.T) {
 	h := Handler(&fakeAccounts{users: map[string]string{}})
 	rec := httptest.NewRecorder()
