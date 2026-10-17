@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report an issue or bug encountered in Sandal Core
+description: Report an issue or bug encountered in SandalCore
 title: "[Bug]: "
 labels: ["bug"]
 body:
@@ -71,7 +71,7 @@ body:
     id: server_commit
     attributes:
       label: Server Commit
-      description: Git commit hash of Sandal Core you tested with.
+      description: Git commit hash of SandalCore you tested with.
       placeholder: e.g., 8cdd9ed or latest main
     validations:
       required: true

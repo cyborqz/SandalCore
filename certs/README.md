@@ -1,6 +1,6 @@
 # TLS Certificates
 
-Sandal Core does not ship private keys or server certificates. If you run the server with TLS enabled (default on port 443 for gRPC / Auth services), you must provide your own certificates.
+SandalCore does not ship private keys or server certificates. If you run the server with TLS enabled (default on port 443 for gRPC / Auth services), you must provide your own certificates.
 
 ---
 
