@@ -55,9 +55,9 @@ The game client learns its session token from tether_server. `launch_all.bat` st
 `--login-token-file`, which makes it hand a game client on this machine (127.0.0.0/8 only) the
 token launcher.exe saved at login, `dist\Release\data\ics_auth_token.txt`; without the flag it sends
 the emulator token, which the gateway refuses, and never reads the file. `launch_all.bat` deletes
-the file from an earlier sign-in first. It then waits, up to 5 minutes,
-until you have signed in in the launcher window and starts the game client itself: do not also press the
-launcher's Launch button, or a second client opens. To sign in without the launcher window, put an
+the file from an earlier sign-in first. It then just opens the launcher window: you sign in there
+(or "Keep me signed in" does it) and press LAUNCH GAME, which starts the game client with the tether
+port and the arguments of `config\server.json`. To sign in without the launcher window, put an
 account registered through the launcher in `config\dev_login.local.json`
 (git-ignored; `launch_all.bat` does not copy `*.local.json` into `dist`):
 

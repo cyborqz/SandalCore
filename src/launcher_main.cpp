@@ -2,9 +2,67 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ===========================================================================
-//  launcher_main.cpp  –  Sandal Core Emulator Launcher (Modern UI)
+//  launcher_main.cpp  –  SandalCore Emulator Launcher (Modern UI)
 //
 //  Win32 GUI. No gRPC/protobuf — WinInet + nlohmann_json only.
+//
+//  The only things it talks to or touches:
+//    config\server.json         read   auth_server_host / auth_server_port (the
+//                                      local auth server, plain HTTP), tether_port,
+//                                      client_extra_args
+//    config\paths.json          read, and write next to the exe: game_executable
+//    data\ics_auth_token.txt    write  the session token after a sign-in; the
+//                                      tether hands it to the game client
+//                                      (services/tether/ics_token_file.h)
+//    %APPDATA%\SandalCore\launcher.json
+//                               read + write: the username, never the password
+//    Windows Credential Manager one entry, "SandalCore/LauncherSignIn":
+//                               read + write + delete: "Keep me signed in"
+//                               (below, src/launcher_sign_in.h)
+//    Steam's registry key and steamapps\libraryfolders.vdf   read (Auto-Detect)
+//    the Windows file dialog (Browse)
+//    the list of running programs, names only: LAUNCH GAME looks for a game
+//                               client that already runs
+//    the game client: LAUNCH GAME starts it, and only a press of that button does
+//
+//  Keep me signed in:
+//    The sign-in form has a "Keep me signed in" box.  A sign-in by hand that
+//    works with the box ticked saves the user name and password in Windows
+//    Credential Manager (for this Windows user on this PC; no file, no log).
+//    At the next start, in any copy of the launcher, a saved sign-in shows
+//    "Signing in as <name>..." with a Cancel button for 3 seconds, then signs in
+//    against this run's auth server (asking again for up to 60 seconds while it
+//    is not up yet) and writes the token file exactly as a sign-in by hand does.
+//    It only does that for an auth server on this PC: the host in
+//    config\server.json must be exactly 127.0.0.1, localhost or ::1, and the
+//    host and port read at the start are used for every retry.  A refusal (wrong
+//    password, unknown account, another database) keeps the saved sign-in and
+//    shows the form with the username filled in; a sign-in by hand with the box
+//    ticked replaces it, with the box not ticked deletes it, and Switch Account
+//    / Logout deletes it.  It never presses LAUNCH GAME or skips the game's own
+//    screens: the player presses it.
+//
+//  LAUNCH GAME (enabled once signed in and the game is found) starts the game
+//  client the way the launch script used to: "<game exe>" -LauncherTetherPort=
+//  <tether_port> <client_extra_args> (config\server.json), in the client's own
+//  folder.  While that client runs the button reads GAME RUNNING and is off; it
+//  is on again when the client exits.  With a game client already running on the
+//  PC it starts nothing and says so.
+//
+//  Command line:
+//    (none)                     sign in, then press LAUNCH GAME
+//    --screenshot <file>        draw the window into <file> (BMP data) and exit;
+//                               no network, no file writes
+//    --preview-state <name>     with --screenshot: draw that state instead of
+//                               the signed-out form (signed-in, signing-in,
+//                               form-kept: the box ticked, game-running)
+//
+//  Keyboard: the window is not a dialog, so the message loop in WinMain runs
+//  every message through IsDialogMessage.  Tab / Shift+Tab walk the controls;
+//  the focused owner-drawn button gets an outline (on_draw_item).  Enter presses
+//  the focused button, else the default one: Login on the form, LAUNCH GAME once
+//  signed in (DM_GETDEFID -> default_button_id).  The focus starts in the
+//  password box when a username was remembered, else in the username box.
 // ===========================================================================
 #ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
@@ -28,11 +86,14 @@
 #pragma comment(lib, "shell32.lib")
 
 #include <nlohmann/json.hpp>
+#include "launcher_sign_in.h"
 #include "services/tether/ics_token_file.h"
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -61,6 +122,7 @@ static const COLORREF kTxtDim    = RGB( 88,  98, 120); // Muted text
 static const COLORREF kTxtOk     = RGB( 52, 199,  89); // Green
 static const COLORREF kTxtErr    = RGB(255,  69,  58); // Red
 static const COLORREF kTxtWarn   = RGB(255, 179,  64); // Amber
+// (C.O.A) (Cyb)
 
 // ===========================================================================
 //  Window & Box Layout Dimensions (Only Login, Client Path, Launch Game)
@@ -70,13 +132,22 @@ constexpr int kW = 450;
 constexpr int kCardX   = 0;
 constexpr int kCardW   = kW;
 constexpr int kCard1Y  = 0;
-constexpr int kCard1H  = 192; // Box 1: Account Login
-constexpr int kCard2Y  = 192;
+constexpr int kCard1H  = 220; // Box 1: Account Login (the form, the session, "Signing in as ...")
+constexpr int kCard2Y  = 220;
 constexpr int kCard2H  = 82;  // Box 2: Client path
-constexpr int kCard3Y  = 274;
+constexpr int kCard3Y  = 302;
 constexpr int kCard3H  = 96;  // Box 3: Launch Game
 
-constexpr int kH       = 370;
+constexpr int kH       = 398;
+
+// Box 1, top to bottom
+constexpr int kKeepY      = 136;  // "Keep me signed in" (form)
+constexpr int kAuthBtnY   = 164;  // Login / Register (form)
+constexpr int kFormFbY    = 200;  // feedback line, form
+constexpr int kSessLineY  = 56;   // "Signed in as ..." and "Signing in as ..."
+constexpr int kSessNoteY  = 84;   // the line under it
+constexpr int kSessBtnY   = 120;  // Switch Account / Logout, Cancel
+constexpr int kSessFbY    = 166;  // feedback line, session and "Signing in as ..."
 
 // ===========================================================================
 //  Control IDs
@@ -90,6 +161,8 @@ enum {
     ID_BROWSE     = 106,
     ID_AUTODETECT = 107,
     ID_LOGOUT     = 108,
+    ID_KEEP       = 109,   // "Keep me signed in"
+    ID_CANCEL     = IDCANCEL,   // Cancel the automatic sign-in (Esc presses it, as in a dialog)
 };
 
 // ===========================================================================
@@ -98,7 +171,6 @@ enum {
 static HBRUSH g_brBg      = nullptr;
 static HBRUSH g_brCard    = nullptr;
 static HBRUSH g_brField   = nullptr;
-static HFONT  g_fntTitle  = nullptr;
 static HFONT  g_fntHeader = nullptr;
 static HFONT  g_fntMed    = nullptr;
 static HFONT  g_fntBig    = nullptr;
@@ -114,6 +186,15 @@ static std::wstring g_username;
 static std::wstring g_feedback;
 static bool         g_feedbackErr = false;
 static std::string  g_gameExe;
+static bool         g_gameExeOk   = false;   // g_gameExe exists; checked when it changes, not at every paint
+
+// Command line (parse_command_line)
+static bool         g_screenshotMode   = false;
+static std::wstring g_previewState;
+
+// The game client this window started and that still runs (LAUNCH GAME reads GAME RUNNING)
+static bool         g_gameRunning      = false;
+// C O A with Cyb
 
 // Hover flags
 static bool g_hoverLogin      = false;
@@ -122,10 +203,26 @@ static bool g_hoverLaunch     = false;
 static bool g_hoverBrowse     = false;
 static bool g_hoverAutoDetect = false;
 static bool g_hoverLogout     = false;
+static bool g_hoverKeep       = false;
+static bool g_hoverCancel     = false;
+
+// Keep me signed in
+static bool         g_keepSignedIn = false;  // the box on the form; ticked while a sign-in is saved
+static bool         g_autoActive   = false;  // "Signing in as <g_autoUser>..." is showing
+static std::wstring g_autoUser;
+static std::wstring g_autoStatus;            // the small line under it
+static std::atomic<bool> g_autoCancel{false};
 
 static std::atomic<bool> g_authBusy{false};
-constexpr UINT WM_AUTH_DONE = WM_APP + 1;
-struct AuthResult { bool ok; std::string message; std::string username; };
+constexpr UINT WM_AUTH_DONE   = WM_APP + 1;
+constexpr UINT WM_AUTO_STATUS = WM_APP + 2;
+constexpr UINT WM_AUTO_DONE   = WM_APP + 3;
+constexpr UINT WM_GAME_EXITED = WM_APP + 4;   // the game client this window started has ended
+// message is the sentence shown to the player; username is what was typed; note
+// is an extra sentence for a sign-in that worked (the sign-in could not be saved).
+struct AuthResult { bool ok; std::string message; std::string username; std::string note; };
+// How the automatic sign-in ended (launcher_sign_in.h).
+struct AutoDone { aoc::launcher::AutoOutcome outcome; std::string message; std::wstring username; };
 
 static HWND g_hwnd = nullptr;
 static HWND g_lastFocus = nullptr;
@@ -153,13 +250,21 @@ static std::string to_utf8(const wchar_t* w)
     return s;
 }
 
+// The folder of launcher.exe with its closing backslash, in the narrow form the
+// file functions below take.  The wide API, with a buffer that grows until the
+// whole path fits: a long install folder is never cut short.
 static std::string exe_dir()
 {
-    char buf[MAX_PATH]{};
-    ::GetModuleFileNameA(nullptr, buf, MAX_PATH);
-    std::string s(buf);
-    auto p = s.find_last_of("\\/");
-    return (p != std::string::npos) ? s.substr(0, p + 1) : "";
+    std::wstring w = aoc::launcher::wide_path_from(
+        [](wchar_t* buf, DWORD size) { return ::GetModuleFileNameW(nullptr, buf, size); });
+    const auto p = w.find_last_of(L"\\/");
+    if (p == std::wstring::npos) return "";
+    w.resize(p + 1);
+    const int n = WideCharToMultiByte(CP_ACP, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return "";
+    std::string s(n, '\0');
+    WideCharToMultiByte(CP_ACP, 0, w.data(), (int)w.size(), s.data(), n, nullptr, nullptr);
+    return s;
 }
 
 static std::string json_str(const std::string& path, const std::string& key,
@@ -171,16 +276,18 @@ static std::string json_str(const std::string& path, const std::string& key,
     } catch (...) { return def; }
 }
 
-static int json_int(const std::string& path, const std::string& key, int def)
+// True if the file exists.  The error_code overload: an odd path (a dead
+// network share, a bad character) reads as "not there" instead of throwing.
+static bool file_exists(const std::string& p)
 {
-    try {
-        std::ifstream f(path); if (!f) return def;
-        return json::parse(f).value(key, def);
-    } catch (...) { return def; }
+    if (p.empty()) return false;
+    std::error_code ec;
+    const bool e = std::filesystem::exists(std::filesystem::path(p), ec);
+    return e && !ec;
 }
 
 // ===========================================================================
-//  Paths Configuration Persistence
+//  Game Path (config\paths.json, key game_executable)
 // ===========================================================================
 static std::vector<std::string> config_paths_candidates()
 {
@@ -191,17 +298,18 @@ static std::vector<std::string> config_paths_candidates()
     paths.push_back(dir + "..\\config\\paths.json");
     return paths;
 }
+// (C O A ~ C | Y | B)
 
 static std::string load_game_exe()
 {
     for (const auto& p : config_paths_candidates()) {
-        if (std::filesystem::exists(p)) {
+        if (file_exists(p)) {
             std::string exe = json_str(p, "game_executable", "");
-            if (!exe.empty() && std::filesystem::exists(exe)) return exe;
+            if (file_exists(exe)) return exe;
         }
     }
     for (const auto& p : config_paths_candidates()) {
-        if (std::filesystem::exists(p)) {
+        if (file_exists(p)) {
             std::string exe = json_str(p, "game_executable", "");
             if (!exe.empty()) return exe;
         }
@@ -209,30 +317,41 @@ static std::string load_game_exe()
     return json_str(exe_dir() + "config\\paths.json", "game_executable", "");
 }
 
-static bool save_paths_json(const std::string& exe_path)
+// Saves game_executable into config\paths.json next to the exe, and only
+// there, and only when it differs from what the file holds.  The other
+// candidates above are read as a fallback and never written: two folders up
+// from dist\Release is the repo's own tracked config\paths.json.
+static bool save_game_exe(const std::string& exe_path)
 {
-    bool saved = false;
-    for (const auto& p : config_paths_candidates()) {
-        try {
-            std::filesystem::path fp(p);
-            if (std::filesystem::exists(fp.parent_path().parent_path()) || std::filesystem::exists(fp.parent_path())) {
-                std::filesystem::create_directories(fp.parent_path());
-                json j;
-                std::ifstream in(p);
-                if (in) {
-                    try { j = json::parse(in); } catch (...) {}
-                    in.close();
-                }
-                j["game_executable"] = exe_path;
-                std::ofstream out(p, std::ios::trunc);
-                if (out) {
-                    out << j.dump(4) << "\n";
-                    saved = true;
-                }
+    const std::string p = exe_dir() + "config\\paths.json";
+    try {
+        json j = json::object();
+        {
+            std::ifstream in(p);
+            if (in) {
+                try { j = json::parse(in); } catch (...) { j = json::object(); }
             }
-        } catch (...) {}
-    }
-    return saved;
+        }
+        if (!j.is_object()) j = json::object();
+        if (j.contains("game_executable") && j["game_executable"].is_string() &&
+            j["game_executable"].get<std::string>() == exe_path)
+            return true;
+        j["game_executable"] = exe_path;
+
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(p).parent_path(), ec);
+        std::ofstream out(p, std::ios::trunc);
+        if (!out) return false;
+        out << j.dump(4, ' ', false, json::error_handler_t::replace) << "\n";
+        out.flush();
+        return static_cast<bool>(out);
+    } catch (...) { return false; }
+}
+
+static void set_game_exe(const std::string& path)
+{
+    g_gameExe = path;
+    g_gameExeOk = file_exists(path);
 }
 
 // ===========================================================================
@@ -242,20 +361,10 @@ static std::string auto_detect_game()
 {
     std::vector<std::string> searchRoots;
 
+    // aoc::launcher::registry_string reads with RegGetValueW and RRF_RT_REG_SZ: a text
+    // value, always ended by a terminator, never read past its buffer.
     auto queryRegString = [](HKEY root, const wchar_t* subkey, const wchar_t* valName) -> std::string {
-        HKEY hKey = nullptr;
-        if (RegOpenKeyExW(root, subkey, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            wchar_t buf[MAX_PATH] = { 0 };
-            DWORD len = sizeof(buf);
-            DWORD type = 0;
-            if (RegQueryValueExW(hKey, valName, nullptr, &type, (LPBYTE)buf, &len) == ERROR_SUCCESS &&
-                (type == REG_SZ || type == REG_EXPAND_SZ)) {
-                RegCloseKey(hKey);
-                return to_utf8(buf);
-            }
-            RegCloseKey(hKey);
-        }
-        return "";
+        return to_utf8(aoc::launcher::registry_string(root, subkey, valName).c_str());
     };
 
     std::string steamPath = queryRegString(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath");
@@ -299,11 +408,14 @@ static std::string auto_detect_game()
         }
     }
 
+    // The usual install folders on every fixed drive.  Network, removable and
+    // optical drives are skipped: probing an offline share can stall the window.
     DWORD drives = GetLogicalDrives();
     for (int i = 0; i < 26; ++i) {
-        if (drives & (1 << i)) {
+        if (drives & (1u << i)) {
             char dLetter = 'A' + i;
             std::string d = std::string(1, dLetter) + ":";
+            if (GetDriveTypeA((d + "\\").c_str()) != DRIVE_FIXED) continue;
             searchRoots.push_back(d);
             searchRoots.push_back(d + "\\Program Files (x86)\\Steam");
             searchRoots.push_back(d + "\\Steam");
@@ -332,17 +444,16 @@ static std::string auto_detect_game()
     for (const auto& root : uniqueRoots) {
         for (const auto& sub : subPaths) {
             std::string full = root + sub;
-            try {
-                if (std::filesystem::exists(full)) {
-                    if (full.size() >= 13 && full.ends_with("AOCClient.exe")) {
-                        std::string ship = full.substr(0, full.size() - 13) + "AOCClient-Win64-Shipping.exe";
-                        if (std::filesystem::exists(ship)) return ship;
-                    }
-                    return full;
+            if (file_exists(full)) {
+                if (full.size() >= 13 && full.ends_with("AOCClient.exe")) {
+                    std::string ship = full.substr(0, full.size() - 13) + "AOCClient-Win64-Shipping.exe";
+                    if (file_exists(ship)) return ship;
                 }
-            } catch (...) {}
+                return full;
+            }
         }
     }
+// -- Cyb x C-O-A --
 
     return "";
 }
@@ -366,7 +477,7 @@ static std::string browse_for_game(HWND hwnd, const std::string& current_path)
     if (!current_path.empty()) {
         try {
             std::filesystem::path p(current_path);
-            if (std::filesystem::exists(p.parent_path())) {
+            if (file_exists(p.parent_path().string())) {
                 initDir = p.parent_path().wstring();
                 ofn.lpstrInitialDir = initDir.c_str();
             }
@@ -379,7 +490,7 @@ static std::string browse_for_game(HWND hwnd, const std::string& current_path)
             std::filesystem::path sp(selected);
             if (sp.filename() == "AOCClient.exe") {
                 auto ship = sp.parent_path() / "AOCClient-Win64-Shipping.exe";
-                if (std::filesystem::exists(ship)) {
+                if (file_exists(ship.string())) {
                     selected = ship.string();
                 }
             }
@@ -392,126 +503,292 @@ static std::string browse_for_game(HWND hwnd, const std::string& current_path)
 // ===========================================================================
 //  HTTP POST (WinInet)
 // ===========================================================================
-static std::string http_post(const std::string& host, int port,
-                             const std::string& path, const std::string& body)
+// The auth server is on this PC and answers in milliseconds.  One request gets
+// kHttpDeadlineMs in all (connecting, sending and reading its reply together),
+// each wait inside it at most kHttpWaitMs, and a reply of at most
+// aoc::launcher::kMaxReplyBytes.  A redirect is never followed.
+// Plain HTTP on purpose: the saved password only goes to this PC (loopback), so it never crosses a network.
+constexpr DWORD kHttpDeadlineMs = 15000;
+constexpr DWORD kHttpWaitMs     = 10000;
+
+// The waits above only time the silence between two bytes, and WinInet keeps
+// reading until its buffer is full: a server that sends a byte every few seconds
+// could hold a request for hours.  So the deadline is kept by an
+// aoc::launcher::DeadlineWatch that, when the time is up, closes the request from
+// another thread; that makes the call blocked on it fail.
+static aoc::launcher::ReadResult http_post(const aoc::launcher::AuthEndpoint& ep,
+                                           const std::string& path, const std::string& body)
 {
+    namespace sign_in = aoc::launcher;
+    const auto deadline_tp = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHttpDeadlineMs);
+    const auto steady_now = [] {
+        return std::chrono::duration_cast<sign_in::Ms>(std::chrono::steady_clock::now().time_since_epoch());
+    };
+    const sign_in::Ms deadline_at = std::chrono::duration_cast<sign_in::Ms>(deadline_tp.time_since_epoch());
+
+    sign_in::ReadResult out;   // Failed until a reply has been read
     HINTERNET hI = InternetOpenA("AoCEmu/3.0", INTERNET_OPEN_TYPE_DIRECT,
                                  nullptr, nullptr, 0);
-    if (!hI) return "";
-    HINTERNET hC = InternetConnectA(hI, host.c_str(), (INTERNET_PORT)port,
+    if (!hI) return out;
+    DWORD wait = kHttpWaitMs;
+    InternetSetOptionA(hI, INTERNET_OPTION_CONNECT_TIMEOUT, &wait, sizeof(wait));
+    InternetSetOptionA(hI, INTERNET_OPTION_SEND_TIMEOUT,    &wait, sizeof(wait));
+    InternetSetOptionA(hI, INTERNET_OPTION_RECEIVE_TIMEOUT, &wait, sizeof(wait));
+    HINTERNET hC = InternetConnectA(hI, ep.host.c_str(), (INTERNET_PORT)ep.port,
                                     nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
-    if (!hC) { InternetCloseHandle(hI); return ""; }
+    if (!hC) { InternetCloseHandle(hI); return out; }
     HINTERNET hR = HttpOpenRequestA(hC, "POST", path.c_str(), nullptr, nullptr,
-                                    nullptr, INTERNET_FLAG_NO_CACHE_WRITE, 0);
-    if (!hR) { InternetCloseHandle(hC); InternetCloseHandle(hI); return ""; }
+                                    nullptr, INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_AUTO_REDIRECT, 0);
+    if (!hR) { InternetCloseHandle(hC); InternetCloseHandle(hI); return out; }
+
+    // Without the watch (no thread to be had) the waits above still apply.
+    std::unique_ptr<sign_in::DeadlineWatch> watch;
+    try {
+        watch = std::make_unique<sign_in::DeadlineWatch>([hR] { InternetCloseHandle(hR); }, deadline_tp);
+    } catch (...) {}
 
     const char* hdrs = "Content-Type: application/json\r\n";
-    std::string result;
     if (HttpSendRequestA(hR, hdrs, (DWORD)strlen(hdrs),
-                         const_cast<char*>(body.c_str()), (DWORD)body.size())) {
-        char buf[4096]; DWORD n;
-        while (InternetReadFile(hR, buf, sizeof(buf)-1, &n) && n) {
-            buf[n] = 0; result += buf;
+                         const_cast<char*>(body.data()), (DWORD)body.size())) {
+        DWORD status = 0, size = sizeof(status);
+        if (HttpQueryInfoA(hR, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &size, nullptr) &&
+            status >= 300 && status < 400) {
+            out.end = sign_in::ReadEnd::Redirected;
+        } else {
+            // The bytes by length (a NUL inside is data), within the size and the
+            // time that are left; each wait is cut to what is left of the deadline.
+            const auto read_some = [hR](char* buf, std::size_t n, sign_in::Ms left) -> long {
+                DWORD t = (DWORD)std::min<long long>(left.count(), kHttpWaitMs);
+                InternetSetOptionA(hR, INTERNET_OPTION_RECEIVE_TIMEOUT, &t, sizeof(t));
+                DWORD got = 0;
+                if (!InternetReadFile(hR, buf, (DWORD)n, &got)) return -1;
+                return (long)got;
+            };
+            out = sign_in::read_reply(read_some, steady_now, deadline_at);
         }
     }
-    InternetCloseHandle(hR); InternetCloseHandle(hC); InternetCloseHandle(hI);
-    return result;
+
+    bool request_open = true;
+    if (watch && watch->stop()) {                       // the deadline came first
+        request_open = false;                           // the watch closed the request, once
+        if (out.end != sign_in::ReadEnd::Complete) { out.end = sign_in::ReadEnd::TimedOut; out.body.clear(); }
+    }
+    if (request_open) InternetCloseHandle(hR);
+    InternetCloseHandle(hC); InternetCloseHandle(hI);
+    return out;
 }
 
 // ===========================================================================
 //  Game Launcher Process Execution
 // ===========================================================================
-static std::string launch_game()
+// config\server.json as the JSON object it holds ({} when it is missing or broken).
+static json load_server_json()
 {
-    const std::string exe = g_gameExe;
-    if (exe.empty())
-        return "No game executable configured. Use Auto-Detect or Browse.";
-    if (!std::filesystem::exists(exe))
-        return "Executable not found at:\n" + exe;
+    try {
+        std::ifstream f(exe_dir() + "config\\server.json");
+        if (!f) return json::object();
+        json j = json::parse(f);
+        return j.is_object() ? j : json::object();
+    } catch (...) { return json::object(); }
+}
 
-    const std::string dir = exe_dir();
-    const int tport = json_int(dir + "config\\server.json", "tether_port", 19021);
-    const std::string extra = json_str(dir + "config\\server.json", "client_extra_args", "");
+// LAUNCH GAME: starts the game client exactly as the launch script used to
+// ("<game exe>" -LauncherTetherPort=<tether_port> <client_extra_args>, in the
+// client's own folder; aoc::launcher::client_command).  Returns "" and the
+// client's process handle (the caller closes it), or the sentence for the player.
+static std::string start_game(HANDLE* process)
+{
+    *process = nullptr;
+    if (g_gameExe.empty() || !file_exists(g_gameExe))
+        return "The game was not found. Use Auto-Detect or Browse to select it.";
 
-    std::string cmd = "\"" + exe + "\" -LauncherTetherPort=" + std::to_string(tport);
-    if (!extra.empty()) cmd += ' ' + extra;
-
-    std::string wd = exe;
-    { auto p = wd.find_last_of("\\/"); if (p != std::string::npos) wd.resize(p+1); }
+    const aoc::launcher::ClientCommand cmd =
+        aoc::launcher::client_command(g_gameExe, aoc::launcher::launch_settings(load_server_json()));
+    std::string line = cmd.command_line;   // CreateProcessA may write into it
+// C.Y.B with CoA
 
     STARTUPINFOA si{}; si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
-    if (!::CreateProcessA(exe.c_str(), cmd.data(), nullptr, nullptr,
+    if (!::CreateProcessA(g_gameExe.c_str(), line.data(), nullptr, nullptr,
                           FALSE, 0, nullptr,
-                          wd.empty() ? nullptr : wd.c_str(), &si, &pi)) {
-        return "CreateProcess failed (error " + std::to_string(::GetLastError()) + ")";
+                          cmd.working_dir.empty() ? nullptr : cmd.working_dir.c_str(), &si, &pi)) {
+        return "The game could not be started (error " + std::to_string(::GetLastError()) + ").";
     }
 
-    ::CloseHandle(pi.hProcess);
     ::CloseHandle(pi.hThread);
+    *process = pi.hProcess;
     return "";
+}
+
+// Waits for the game client to end, then tells the window (WM_GAME_EXITED), so
+// LAUNCH GAME is on again.  Takes over the process handle.
+static void watch_game(HWND hwnd, HANDLE process)
+{
+    std::thread([hwnd, process] {
+        ::WaitForSingleObject(process, INFINITE);
+        ::CloseHandle(process);
+        ::PostMessageW(hwnd, WM_GAME_EXITED, 0, 0);
+    }).detach();
 }
 
 // ===========================================================================
 //  Auth Worker Thread
 // ===========================================================================
-static void auth_worker(HWND hwnd, std::string user, std::string pass, bool is_reg)
+// The auth server this run talks to: config\server.json (the start script
+// puts its own copy next to the exe).  Read once per sign-in, not once per request.
+static aoc::launcher::AuthEndpoint read_auth_endpoint()
 {
-    const std::string dir = exe_dir();
-    const std::string host = json_str(dir + "config\\server.json", "auth_server_host", "127.0.0.1");
-    const int port = json_int(dir + "config\\server.json", "auth_server_port", 8081);
-    const std::string ep = is_reg ? "/api/v1/auth/register" : "/api/v1/auth/login";
+    return aoc::launcher::auth_endpoint(load_server_json());
+}
 
-    json bj; bj["username"] = user; bj["password"] = pass;
-    const std::string resp = http_post(host, port, ep, bj.dump());
+// One login or register request to `server`, and what the auth server answered.
+// Every copy of the password made here (the request body) is wiped after it is sent.
+static aoc::launcher::Reply request_token(const aoc::launcher::AuthEndpoint& server,
+                                          const std::string& user, const std::string& pass, bool is_reg)
+{
+    const std::string path = is_reg ? "/api/v1/auth/register" : "/api/v1/auth/login";
+
+    std::string body = aoc::launcher::login_body(user, pass);
+    const aoc::launcher::ReadResult got = http_post(server, path, body);
+    aoc::launcher::wipe(body);
+
+    return aoc::launcher::reply_from_read(got);
+}
+
+// Hands the token to tether_server, which gives it to the game client as its
+// ICS auth token (services/tether/ics_token_file.h).  A sign-in by hand and the
+// automatic one write it the same way.
+static bool store_token(const std::string& token)
+{
+    return aoc::ics_token::write(aoc::ics_token::path_in(exe_dir()), token);
+}
+
+static void auth_worker(HWND hwnd, std::wstring wuser, std::wstring wpass, bool is_reg, bool keep)
+{
+    namespace sign_in = aoc::launcher;
+    const std::string user = to_utf8(wuser.c_str());
+    std::string pass = to_utf8(wpass.c_str());
+    const sign_in::Reply reply = request_token(read_auth_endpoint(), user, pass, is_reg);
+    sign_in::wipe(pass);   // the UTF-8 copy; the request body was wiped in request_token
 
     auto* r = new AuthResult{};
     r->username = user;
-    if (resp.empty()) {
+    if (reply.kind != sign_in::ReplyKind::Token) {
         r->ok = false;
-        r->message = "Cannot connect to auth server. Ensure services are running.";
+        r->message = reply.message;
+    } else if (!store_token(reply.token)) {
+        r->ok = false;
+        r->message = sign_in::kMsgNotPassedOn;
     } else {
-        try {
-            auto j = json::parse(resp);
-            if (j.contains("access_token")) {
-                const std::string token =
-                    j["access_token"].is_string() ? j["access_token"].get<std::string>() : std::string{};
-                if (token.empty()) {
-                    r->ok = false;
-                    r->message = "Auth server reply has an empty access_token.";
-                } else if (!aoc::ics_token::write(aoc::ics_token::path_in(dir), token)) {
-                    r->ok = false;
-                    r->message = "Failed to save session token to data\\ics_auth_token.txt.";
-                } else {
-                    r->ok = true;
-                    r->message = is_reg ? "Registered and signed in as " + user
-                                        : "Successfully signed in as " + user;
-                }
-            } else {
-                r->ok = false;
-                r->message = j.value("message", j.value("error", "Authentication failed."));
-            }
-        } catch (...) {
-            r->ok = false;
-            r->message = "Unexpected response from auth server.";
+        r->ok = true;
+        r->message = is_reg ? "Registered and signed in as " + user
+                            : "Successfully signed in as " + user;
+        // Keep me signed in: a sign-in by hand that worked saves (box ticked) or
+        // forgets (box not ticked) the saved sign-in.
+        switch (sign_in::remember_action(false, true, keep)) {
+        case sign_in::Remember::Save:
+            if (!sign_in::credential_save(sign_in::kCredentialTarget, sign_in::SavedSignIn{wuser, wpass}))
+                r->note = "Signed in, but Windows would not save the sign-in.";
+            break;
+        case sign_in::Remember::Delete:
+            sign_in::credential_remove(sign_in::kCredentialTarget);
+            break;
+        case sign_in::Remember::Leave:
+            break;
         }
     }
+    if (!wpass.empty()) SecureZeroMemory(wpass.data(), wpass.size() * sizeof(wchar_t));
     ::PostMessageW(hwnd, WM_AUTH_DONE, 0, (LPARAM)r);
     g_authBusy.store(false);
 }
+
+// The automatic sign-in at start (launcher_sign_in.h: auto_sign_in), on its own
+// thread.  It talks to the window with two messages: WM_AUTO_STATUS (the small
+// line) and, once, WM_AUTO_DONE.
+static void auto_worker(HWND hwnd, aoc::launcher::SavedSignIn saved, aoc::launcher::AuthEndpoint server)
+{
+    namespace sign_in = aoc::launcher;
+    sign_in::AutoOps ops;
+    ops.cancelled = [] { return g_autoCancel.load(); };
+    ops.show = [hwnd](const std::string& s) {
+        auto* w = new std::wstring(to_wide(s));
+        if (!::PostMessageW(hwnd, WM_AUTO_STATUS, 0, (LPARAM)w)) delete w;
+    };
+    ops.sleep = [](sign_in::Ms ms) { std::this_thread::sleep_for(ms); };
+    ops.now = [] {
+        return std::chrono::duration_cast<sign_in::Ms>(std::chrono::steady_clock::now().time_since_epoch());
+    };
+    // Every request, the retries too, goes to `server`: the host and port that were
+    // read and checked once when this sign-in began.
+    ops.request = [server](const sign_in::SavedSignIn& s) {
+        std::string pass = to_utf8(s.password.c_str());
+        const sign_in::Reply r = request_token(server, to_utf8(s.username.c_str()), pass, false);
+        sign_in::wipe(pass);   // the UTF-8 copy; the request body was wiped in request_token
+        return r;
+    };
+    ops.store_token = [](const std::string& token) { return store_token(token); };
+
+    const sign_in::AutoResult res = sign_in::auto_sign_in(saved, ops);
+
+    auto* d = new AutoDone{res.outcome, res.message, saved.username};
+    if (!::PostMessageW(hwnd, WM_AUTO_DONE, 0, (LPARAM)d)) delete d;
+}
+
+// Starts the automatic sign-in for a saved sign-in, if the auth server is on
+// this PC; otherwise the form stays and says why.
+static void begin_auto_sign_in(HWND hwnd, const aoc::launcher::SavedSignIn& saved)
+{
+    // config\server.json is read here, once.  The server that is checked is the
+    // server the thread gets, for every request and every retry.
+    const std::optional<aoc::launcher::AuthEndpoint> server =
+        aoc::launcher::auto_sign_in_endpoint(load_server_json());
+    if (!server) {
+        g_feedback = L"Automatic sign-in only works with a server on this PC.";
+        g_feedbackErr = true;
+        return;
+    }
+    g_autoActive = true;
+    g_autoUser = saved.username;
+    g_autoStatus.clear();
+    g_autoCancel.store(false);
+    std::thread([hwnd, saved, endpoint = *server] { auto_worker(hwnd, saved, endpoint); }).detach();
+}
+// Cyb + C.O.A
 
 // ===========================================================================
 //  Remembered User Persistence
 // ===========================================================================
 constexpr int kUserMaxChars = 64;
 
-static std::filesystem::path remembered_user_path()
+// %APPDATA%\<folder>\launcher.json ("" when APPDATA is not set).
+static std::filesystem::path remembered_user_path(const wchar_t* folder = L"SandalCore")
 {
     wchar_t buf[MAX_PATH]{};
     const DWORD n = ::GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return {};
-    return std::filesystem::path(buf) / L"AoCRiseOfPhoenix" / L"launcher.json";
+    return std::filesystem::path(buf) / folder / L"launcher.json";
 }
+
+// An optional header that is not part of every checkout: the names an earlier
+// version of the launcher saved its state under (kLegacyUserFolder, the folder
+// under %APPDATA%, and kLegacyCredentialTarget).  Where it exists, the first
+// start moves what was saved under them to the current names; where it does not,
+// nothing is moved.
+#if __has_include("launcher_legacy_names.h")
+#  include "launcher_legacy_names.h"
+#endif
+
+#ifdef AOC_LAUNCHER_LEGACY_NAMES
+// Once, silently, at the start: the remembered user name and the saved sign-in of
+// an earlier version move to the current names, and only where the current names
+// hold nothing yet.  The old user name file stays; the old credential is deleted
+// once the new one is saved.  Nothing is printed or logged.
+static void move_legacy_state()
+{
+    aoc::launcher::copy_if_missing(remembered_user_path(aoc::launcher::kLegacyUserFolder), remembered_user_path());
+    aoc::launcher::credential_move(aoc::launcher::kLegacyCredentialTarget, aoc::launcher::kCredentialTarget);
+}
+#endif
 
 static std::wstring load_remembered_user()
 {
@@ -566,19 +843,7 @@ static void fill_rect(HDC dc, int x, int y, int w, int h, COLORREF c)
     FillRect(dc, &r, br);
     DeleteObject(br);
 }
-
-static void draw_rounded_card(HDC dc, int x, int y, int w, int h, COLORREF bg, COLORREF bdr)
-{
-    HBRUSH br = CreateSolidBrush(bg);
-    HPEN pen  = CreatePen(PS_SOLID, 1, bdr);
-    HBRUSH ob = (HBRUSH)SelectObject(dc, br);
-    HPEN op   = (HPEN)SelectObject(dc, pen);
-    RoundRect(dc, x, y, x + w, y + h, 8, 8);
-    SelectObject(dc, ob);
-    SelectObject(dc, op);
-    DeleteObject(br);
-    DeleteObject(pen);
-}
+// [C-Y-B - CoA]
 
 static void draw_text_ex(HDC dc, const wchar_t* txt, int x, int y, int w, int h,
                          HFONT fnt, COLORREF col, UINT flags)
@@ -642,8 +907,14 @@ static void render_launcher(HWND hwnd, HDC dc)
     // Clean unified dark background (no black borders)
     fill_rect(dc, 0, 0, kW, kH, kBg);
 
-    // ── Box 1: Account Login / Session ──────────────────────────────────────
-    if (!g_loggedIn) {
+    // ── Box 1: Account Login / Session / "Signing in as ..." ────────────────
+    if (g_autoActive) {
+        draw_text_ex(dc, L"SIGNING IN", 18, 14, 260, 20, g_fntHeader, kTxtWht, DT_LEFT | DT_SINGLELINE);
+
+        std::wstring sUser = L"Signing in as  " + g_autoUser + L"\u2026";
+        draw_text_ex(dc, sUser.c_str(), 18, kSessLineY, kW - 36, 26, g_fntBig, kTxtWht, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        draw_text_ex(dc, g_autoStatus.c_str(), 18, kSessNoteY, kW - 36, 18, g_fntSmall, kTxtSub, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    } else if (!g_loggedIn) {
         draw_text_ex(dc, L"ACCOUNT LOGIN", 18, 14, 200, 20, g_fntHeader, kTxtWht, DT_LEFT | DT_SINGLELINE);
 
         draw_text_ex(dc, L"USERNAME", 18, 38, 120, 16, g_fntLabel, kTxtSub, DT_LEFT | DT_SINGLELINE);
@@ -652,32 +923,32 @@ static void render_launcher(HWND hwnd, HDC dc)
         draw_text_ex(dc, L"PASSWORD", 18, 86, 120, 16, g_fntLabel, kTxtSub, DT_LEFT | DT_SINGLELINE);
         draw_field_outline(dc, 18, 102, kW - 36, 26);
     } else {
-        draw_text_ex(dc, L"AUTHENTICATED SESSION", 18, 14, 260, 20, g_fntHeader, kTxtWht, DT_LEFT | DT_SINGLELINE);
+        draw_text_ex(dc, L"ACCOUNT", 18, 14, 260, 20, g_fntHeader, kTxtWht, DT_LEFT | DT_SINGLELINE);
 
         std::wstring sUser = L"\u2713  Signed in as  " + g_username;
-        draw_text_ex(dc, sUser.c_str(), 18, 52, kW - 36, 26, g_fntBig, kTxtOk, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        draw_text_ex(dc, L"Session token active in data\\ics_auth_token.txt",
-                     18, 80, kW - 36, 18, g_fntSmall, kTxtDim, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        draw_text_ex(dc, sUser.c_str(), 18, kSessLineY + 12, kW - 36, 26, g_fntBig, kTxtOk,
+                     DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
     // Feedback message line
     if (!g_feedback.empty()) {
-        const int fbY = g_loggedIn ? 154 : 174;
+        const int fbY = (g_loggedIn || g_autoActive) ? kSessFbY : kFormFbY;
         draw_text_ex(dc, g_feedback.c_str(), 18, fbY, kW - 36, 18,
-                     g_fntSmall, g_feedbackErr ? kTxtErr : kTxtOk, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                     g_fntSmall, g_feedbackErr ? kTxtErr : kTxtOk,
+                     DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
     // Divider line between Box 1 and Box 2
     fill_rect(dc, 0, kCard2Y - 1, kW, 1, kCardBdr);
 
     // ── Box 2: Game Client ──────────────────────────────────────────────────
-    const bool exeOk = !g_gameExe.empty() && std::filesystem::exists(g_gameExe);
+    const bool exeOk = g_gameExeOk;
     draw_text_ex(dc, L"GAME CLIENT", 18, kCard2Y + 10, 100, 18, g_fntHeader, kTxtWht, DT_LEFT | DT_SINGLELINE);
 
     if (exeOk) {
         draw_text_ex(dc, L"\u2713  READY", 120, kCard2Y + 11, 100, 18, g_fntLabel, kTxtOk, DT_LEFT | DT_SINGLELINE);
     } else {
-        draw_text_ex(dc, L"\u26a0  NOT CONFIGURED", 120, kCard2Y + 11, 150, 18, g_fntLabel, kTxtErr, DT_LEFT | DT_SINGLELINE);
+        draw_text_ex(dc, L"\u26a0  NOT FOUND", 120, kCard2Y + 11, 150, 18, g_fntLabel, kTxtErr, DT_LEFT | DT_SINGLELINE);
     }
 
     // Path display box
@@ -685,24 +956,31 @@ static void render_launcher(HWND hwnd, HDC dc)
     fill_rect(dc, pbx, pby, pbw, pbh, kFieldBg);
     draw_field_outline(dc, pbx, pby, pbw, pbh);
 
-    std::wstring pathStr = exeOk ? to_wide(g_gameExe) : L"No client selected (use buttons \u2192)";
+    std::wstring pathStr = exeOk ? to_wide(g_gameExe) : L"No game selected (use the buttons \u2192)";
     draw_text_ex(dc, pathStr.c_str(), pbx + 8, pby + 4, pbw - 16, pbh - 8,
                  g_fntSmall, exeOk ? kTxtSub : kTxtDim, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     // Divider line between Box 2 and Box 3
     fill_rect(dc, 0, kCard3Y - 1, kW, 1, kCardBdr);
+// C | Y | B / CoA
 
     // ── Box 3: Launch Game ──────────────────────────────────────────────────
     std::wstring launchHint;
     COLORREF hintCol = kTxtSub;
     if (!exeOk) {
-        launchHint = L"\u26a0  Game client executable not found. Use Auto-Detect or Browse.";
+        launchHint = L"\u26a0  The game was not found. Use Auto-Detect or Browse.";
         hintCol = kTxtErr;
+    } else if (g_gameRunning) {
+        launchHint = L"The game is running.";
+        hintCol = kTxtSub;
+    } else if (g_autoActive) {
+        launchHint = L"Signing in with your saved sign-in\u2026";
+        hintCol = kTxtSub;
     } else if (!g_loggedIn) {
         launchHint = L"Please sign in or register above to launch.";
         hintCol = kTxtWarn;
     } else {
-        launchHint = L"\u2713  Ready to connect to emulator world server on port 7777.";
+        launchHint = L"\u2713  Ready to play.";
         hintCol = kTxtOk;
     }
     draw_text_ex(dc, launchHint.c_str(), 18, kCard3Y + 68, kW - 36, 18,
@@ -722,6 +1000,45 @@ static void on_paint(HWND hwnd)
 // ===========================================================================
 //  WM_DRAWITEM (Custom Rounded Buttons)
 // ===========================================================================
+
+// The "Keep me signed in" box, drawn in the window's own colours (a system
+// check box would be white on this dark window).
+static void draw_keep_checkbox(DRAWITEMSTRUCT* dis)
+{
+    HDC dc = dis->hDC;
+    const RECT r = dis->rcItem;
+    const bool enabled = (dis->itemState & ODS_DISABLED) == 0;
+    fill_rect(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, kBg);
+
+    const int box = 14;
+    const int bx = r.left + 6, by = r.top + ((r.bottom - r.top) - box) / 2;
+    const COLORREF fill = g_keepSignedIn ? kAccent : kFieldBg;
+    const COLORREF edge = g_keepSignedIn ? kAccent : (g_hoverKeep ? kAccentHv : kFieldBdr);
+    HBRUSH br = CreateSolidBrush(fill);
+    HPEN   pen = CreatePen(PS_SOLID, 1, edge);
+    HBRUSH ob = (HBRUSH)SelectObject(dc, br);
+    HPEN   op = (HPEN)SelectObject(dc, pen);
+    RoundRect(dc, bx, by, bx + box, by + box, 4, 4);
+    SelectObject(dc, ob);
+    SelectObject(dc, op);
+    DeleteObject(br);
+    DeleteObject(pen);
+
+    if (g_keepSignedIn) {
+        HPEN tick = CreatePen(PS_SOLID, 2, kTxtWht);
+        HPEN old  = (HPEN)SelectObject(dc, tick);
+        MoveToEx(dc, bx + 3, by + 7, nullptr);
+        LineTo(dc, bx + 6, by + 10);
+        LineTo(dc, bx + 11, by + 4);
+        SelectObject(dc, old);
+        DeleteObject(tick);
+    }
+
+    draw_text_ex(dc, L"Keep me signed in", bx + box + 8, r.top, r.right - (bx + box + 8), r.bottom - r.top,
+                 g_fntSmall, !enabled ? kTxtDim : g_hoverKeep ? kTxtWht : kTxtSub,
+                 DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+}
+
 static void on_draw_item(DRAWITEMSTRUCT* dis)
 {
     const bool pressed = (dis->itemState & ODS_SELECTED) != 0;
@@ -763,8 +1080,20 @@ static void on_draw_item(DRAWITEMSTRUCT* dis)
                          kTxtWht, kCardBdr, true);
         break;
 
+    case ID_CANCEL:
+        draw_rounded_btn(dis->hDC, r, L"Cancel", g_fntMed,
+                         g_hoverCancel, pressed, enabled,
+                         kBtnDark, kBtnDkHv, kBtnDkPs, kBtnDark,
+                         kTxtWht, kCardBdr, true);
+        break;
+// C | O | A x C.Y.B
+
+    case ID_KEEP:
+        draw_keep_checkbox(dis);
+        break;
+
     case ID_LAUNCH:
-        draw_rounded_btn(dis->hDC, r, L"LAUNCH GAME", g_fntBig,
+        draw_rounded_btn(dis->hDC, r, g_gameRunning ? L"GAME RUNNING" : L"LAUNCH GAME", g_fntBig,
                          g_hoverLaunch, pressed, enabled,
                          kAccent, kAccentHv, kAccentPs, kAccentDs);
         break;
@@ -833,6 +1162,7 @@ static bool capture_launcher_to_file(HWND hwnd, const std::wstring& path)
 
             const int id = GetDlgCtrlID(c);
             const LONG style = GetWindowLongW(c, GWL_STYLE);
+// [C Y B - C-O-A]
 
             if ((style & BS_OWNERDRAW) == BS_OWNERDRAW) {
                 DRAWITEMSTRUCT dis{};
@@ -848,6 +1178,10 @@ static bool capture_launcher_to_file(HWND hwnd, const std::wstring& path)
                 draw_field_outline(memDC, r.left, r.top, r.right - r.left, r.bottom - r.top);
                 wchar_t buf[256]{};
                 GetWindowTextW(c, buf, 256);
+                if ((style & ES_PASSWORD) != 0) {
+                    // never draw a typed password: one bullet per character
+                    for (wchar_t* p = buf; *p; ++p) *p = L'\u2022';
+                }
                 if (buf[0] != L'\0') {
                     draw_text_ex(memDC, buf, r.left + 6, r.top + 4, r.right - r.left - 12, r.bottom - r.top - 8,
                                  g_fntForm, kTxtWht, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -872,15 +1206,19 @@ static bool capture_launcher_to_file(HWND hwnd, const std::wstring& path)
 static void sync_controls(HWND hwnd)
 {
     const bool lo = g_loggedIn;
+    const bool form = !lo && !g_autoActive;   // the form shows unless signed in or the automatic sign-in runs
 
-    ShowWindow(GetDlgItem(hwnd, ID_USER),   lo ? SW_HIDE : SW_SHOW);
-    ShowWindow(GetDlgItem(hwnd, ID_PASS),   lo ? SW_HIDE : SW_SHOW);
-    ShowWindow(GetDlgItem(hwnd, ID_LOGIN),  lo ? SW_HIDE : SW_SHOW);
-    ShowWindow(GetDlgItem(hwnd, ID_REG),    lo ? SW_HIDE : SW_SHOW);
+    ShowWindow(GetDlgItem(hwnd, ID_USER),   form ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, ID_PASS),   form ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, ID_KEEP),   form ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, ID_LOGIN),  form ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, ID_REG),    form ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, ID_LOGOUT), lo ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, ID_CANCEL), g_autoActive ? SW_SHOW : SW_HIDE);
 
-    const bool canLaunch = lo && !g_gameExe.empty() && std::filesystem::exists(g_gameExe);
-    EnableWindow(GetDlgItem(hwnd, ID_LAUNCH), canLaunch);
+    // LAUNCH GAME: on when signed in and the game is found, off while the
+    // client this window started still runs (it reads GAME RUNNING then).
+    EnableWindow(GetDlgItem(hwnd, ID_LAUNCH), lo && g_gameExeOk && !g_gameRunning);
 
     InvalidateRect(hwnd, nullptr, FALSE);
 }
@@ -890,24 +1228,27 @@ static void sync_controls(HWND hwnd)
 // ===========================================================================
 static int default_button_id(HWND hwnd)
 {
-    int id = g_loggedIn ? ID_LAUNCH : ID_LOGIN;
+    // While "Signing in as ..." shows, a stray Enter does nothing (Esc and the
+    // Cancel button cancel).
+    int id = g_autoActive ? 0 : g_loggedIn ? ID_LAUNCH : ID_LOGIN;
     const HWND f = GetFocus();
     if (f && IsChild(hwnd, f)) {
         const int fid = GetDlgCtrlID(f);
         if (fid == ID_LOGIN || fid == ID_REG || fid == ID_LAUNCH ||
-            fid == ID_BROWSE || fid == ID_AUTODETECT || fid == ID_LOGOUT) {
+            fid == ID_BROWSE || fid == ID_AUTODETECT || fid == ID_LOGOUT || fid == ID_CANCEL) {
             id = fid;
         }
     }
-    const HWND b = GetDlgItem(hwnd, id);
+    const HWND b = id ? GetDlgItem(hwnd, id) : nullptr;
     return (b && IsWindowVisible(b) && IsWindowEnabled(b)) ? id : 0;
 }
 
 static HWND default_focus(HWND hwnd)
 {
+    if (g_autoActive) return nullptr;   // no control takes the focus; Tab reaches Cancel
     if (g_loggedIn) {
         const HWND l = GetDlgItem(hwnd, ID_LAUNCH);
-        return IsWindowEnabled(l) ? l : nullptr;
+        return (IsWindowVisible(l) && IsWindowEnabled(l)) ? l : nullptr;
     }
     const HWND u = GetDlgItem(hwnd, ID_USER);
     return GetWindowTextLengthW(u) > 0 ? GetDlgItem(hwnd, ID_PASS) : u;
@@ -940,19 +1281,19 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         g_hwnd = hwnd;
         HINSTANCE hi = GetModuleHandleW(nullptr);
 
-        // Load configured path from paths.json
-        g_gameExe = load_game_exe();
-        if (g_gameExe.empty() || !std::filesystem::exists(g_gameExe)) {
-            std::string detected = auto_detect_game();
+        // Game path from config\paths.json; if it is missing, look for Steam's
+        // copy and save what was found.  Not with --screenshot (no file writes).
+        set_game_exe(load_game_exe());
+        if (!g_screenshotMode && !g_gameExeOk) {
+            const std::string detected = auto_detect_game();
             if (!detected.empty()) {
-                g_gameExe = detected;
-                save_paths_json(g_gameExe);
-                g_feedback = L"Auto-detected client: " + to_wide(g_gameExe);
+                set_game_exe(detected);
+                save_game_exe(detected);
+                g_feedback = L"Found the game.";
                 g_feedbackErr = false;
             }
-        } else {
-            save_paths_json(g_gameExe);
         }
+// built by CoA with C-Y-B
 
         // Account Input fields (Box 1)
         HWND hU = CreateWindowExW(0, L"EDIT", L"",
@@ -967,8 +1308,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             hwnd, (HMENU)(INT_PTR)ID_PASS, hi, nullptr);
         SendMessageW(hP, EM_SETLIMITTEXT, 128, 0);
 
+        // "Keep me signed in" (drawn by draw_keep_checkbox; a click flips g_keepSignedIn)
+        CreateWindowW(L"BUTTON", L"Keep me signed in",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+            18, kKeepY - 2, 190, 24,
+            hwnd, (HMENU)(INT_PTR)ID_KEEP, hi, nullptr);
+
         // Account Buttons
-        const int authBtnY = 138;
+        const int authBtnY = kAuthBtnY;
         const int authBtnW = (kW - 36 - 10) / 2;
         CreateWindowW(L"BUTTON", L"Login",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW | BS_DEFPUSHBUTTON,
@@ -983,8 +1330,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         // Switch Account / Logout button (shown when logged in)
         CreateWindowW(L"BUTTON", L"Switch Account / Logout",
             WS_CHILD | WS_TABSTOP | BS_OWNERDRAW,
-            (kW - 210) / 2, 114, 210, 34,
+            (kW - 210) / 2, kSessBtnY, 210, 34,
             hwnd, (HMENU)(INT_PTR)ID_LOGOUT, hi, nullptr);
+
+        // Cancel button (shown while "Signing in as ..." counts down)
+        CreateWindowW(L"BUTTON", L"Cancel",
+            WS_CHILD | WS_TABSTOP | BS_OWNERDRAW,
+            (kW - 210) / 2, kSessBtnY, 210, 34,
+            hwnd, (HMENU)(INT_PTR)ID_CANCEL, hi, nullptr);
 
         // Browse & Auto-Detect buttons (Box 2)
         CreateWindowW(L"BUTTON", L"Browse\u2026",
@@ -1009,9 +1362,39 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         SendMessageW(hU, WM_SETFONT, (WPARAM)g_fntForm, TRUE);
         SendMessageW(hP, WM_SETFONT, (WPARAM)g_fntForm, TRUE);
 
-        // Load remembered user
-        const std::wstring remembered = load_remembered_user();
-        if (!remembered.empty()) SetWindowTextW(hU, remembered.c_str());
+        if (g_screenshotMode) {
+            // --screenshot [--preview-state <name>]: draws a made-up state.  It
+            // reads no saved sign-in and no remembered user, and asks no server.
+            if (g_previewState == L"signed-in") {
+                g_loggedIn = true;
+                g_username = L"Example";
+            } else if (g_previewState == L"signing-in") {
+                g_autoActive = true;
+                g_autoUser = L"Example";
+                g_autoStatus = L"Starting in 3 s. Press Cancel to use another account.";
+            } else if (g_previewState == L"form-kept") {
+                g_keepSignedIn = true;
+            } else if (g_previewState == L"game-running") {
+                g_loggedIn = true;
+                g_username = L"Example";
+                g_gameRunning = true;
+            }
+        } else {
+            // The user remembered from the last sign-in; a saved sign-in (Keep me
+            // signed in) names the account itself, and is signed in at once:
+            // "Signing in as <name>..." with Cancel, then the token file.
+#ifdef AOC_LAUNCHER_LEGACY_NAMES
+            move_legacy_state();     // what an earlier version saved comes along, once
+#endif
+            std::wstring remembered = load_remembered_user();
+            const auto saved = aoc::launcher::credential_load(aoc::launcher::kCredentialTarget);
+            if (saved) {
+                remembered = saved->username;
+                g_keepSignedIn = true;
+            }
+            if (!remembered.empty()) SetWindowTextW(hU, remembered.c_str());
+            if (saved) begin_auto_sign_in(hwnd, *saved);
+        }
 
         sync_controls(hwnd);
         return 0;
@@ -1047,6 +1430,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_PRINTCLIENT:
         render_launcher(hwnd, (HDC)wp);
         return 0;
+// -- C O A x C_Y_B --
 
     case WM_ERASEBKGND:
         return 1;
@@ -1077,7 +1461,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_MOUSEMOVE:
     {
         const int mx = LOWORD(lp), my = (SHORT)HIWORD(lp);
-        HWND hit = ChildWindowFromPoint(hwnd, {mx, my});
+        // Hidden controls share places with visible ones (Logout sits over the
+        // form): skip them, or the wrong button would show as hovered.
+        HWND hit = ChildWindowFromPointEx(hwnd, {mx, my}, CWP_SKIPINVISIBLE);
 
         auto refresh_btn = [&](HWND h, bool& flag, bool want) {
             if (flag != want) { flag = want; if (h) InvalidateRect(h, nullptr, FALSE); }
@@ -1088,11 +1474,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         refresh_btn(GetDlgItem(hwnd, ID_REG),        g_hoverReg,        hit == GetDlgItem(hwnd, ID_REG));
         refresh_btn(GetDlgItem(hwnd, ID_LOGOUT),     g_hoverLogout,     hit == GetDlgItem(hwnd, ID_LOGOUT));
         refresh_btn(GetDlgItem(hwnd, ID_LAUNCH),     g_hoverLaunch,     hit == GetDlgItem(hwnd, ID_LAUNCH));
+        refresh_btn(GetDlgItem(hwnd, ID_KEEP),       g_hoverKeep,       hit == GetDlgItem(hwnd, ID_KEEP));
+        refresh_btn(GetDlgItem(hwnd, ID_CANCEL),     g_hoverCancel,     hit == GetDlgItem(hwnd, ID_CANCEL));
         return 0;
     }
 
     case WM_MOUSELEAVE:
         g_hoverBrowse = g_hoverAutoDetect = g_hoverLogin = g_hoverReg = g_hoverLogout = g_hoverLaunch = false;
+        g_hoverKeep = g_hoverCancel = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         return 0;
 
@@ -1103,7 +1492,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (ok) {
             g_loggedIn = true;
             g_username = to_wide(r->username);
-            g_feedback.clear();
+            g_feedback = to_wide(r->note);        // "" unless the sign-in could not be saved
+            g_feedbackErr = !r->note.empty();
             save_remembered_user(r->username);
         } else {
             g_feedbackErr = true;
@@ -1115,18 +1505,102 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
 
+    // The automatic sign-in's small status line (a new std::wstring).
+    case WM_AUTO_STATUS:
+    {
+        std::unique_ptr<std::wstring> line((std::wstring*)lp);
+        if (g_autoActive) {                       // not after Cancel
+            g_autoStatus = *line;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+    }
+// C-Y-B - C O A
+
+    // The automatic sign-in is over (an AutoDone).  After Cancel the form has
+    // been showing for a while and nothing here applies, except a sign-in that
+    // had already written its token a moment before Cancel: the game starts
+    // then, so the window says signed in.
+    case WM_AUTO_DONE:
+    {
+        std::unique_ptr<AutoDone> d((AutoDone*)lp);
+        if (!g_autoActive && d->outcome != aoc::launcher::AutoOutcome::SignedIn) return 0;
+        g_autoActive = false;
+        g_feedback.clear();
+        g_feedbackErr = false;
+        switch (d->outcome) {
+        case aoc::launcher::AutoOutcome::SignedIn:
+            g_loggedIn = true;
+            g_username = d->username;
+            save_remembered_user(to_utf8(d->username.c_str()));
+            break;
+        case aoc::launcher::AutoOutcome::Refused:
+            // The saved sign-in stays: the account may exist in another
+            // database, or the password was changed.  Signing in by hand with
+            // the box ticked replaces it.
+            g_feedback = L"Saved sign-in refused: " + to_wide(d->message) + L" Sign in again.";
+            g_feedbackErr = true;
+            break;
+        case aoc::launcher::AutoOutcome::GaveUp:
+            g_feedback = to_wide(d->message) + L" Try again when the server is running.";
+            g_feedbackErr = true;
+            break;
+        case aoc::launcher::AutoOutcome::TokenNotSaved:
+            g_feedback = to_wide(d->message);
+            g_feedbackErr = true;
+            break;
+        case aoc::launcher::AutoOutcome::Cancelled:
+            g_feedback = L"Automatic sign-in cancelled.";
+            break;
+        }
+        sync_controls(hwnd);
+        focus_control(hwnd, default_focus(hwnd));
+        return 0;
+    }
+
+    // The game client this window started has ended: LAUNCH GAME is on again.
+    case WM_GAME_EXITED:
+        g_gameRunning = false;
+        g_feedback.clear();
+        g_feedbackErr = false;
+        sync_controls(hwnd);
+        return 0;
+
     case WM_COMMAND:
     {
         int id = LOWORD(wp);
         if (id == IDOK) id = default_button_id(hwnd);
 
+        // Keep me signed in: the box
+        if (id == ID_KEEP) {
+            g_keepSignedIn = !g_keepSignedIn;
+            InvalidateRect(GetDlgItem(hwnd, ID_KEEP), nullptr, FALSE);
+            return 0;
+        }
+
+        // Cancel (the button, or Esc) during "Signing in as ...": the form shows
+        // at once; the saved sign-in stays, and a token that is still on its way
+        // is dropped (auto_sign_in checks g_autoCancel before it writes one).
+        // Esc outside "Signing in as ..." does nothing.
+        if (id == ID_CANCEL) {
+            if (g_autoActive) {
+                g_autoCancel.store(true);
+                g_autoActive = false;
+                g_feedback = L"Automatic sign-in cancelled.";
+                g_feedbackErr = false;
+                sync_controls(hwnd);
+                focus_control(hwnd, default_focus(hwnd));
+            }
+            return 0;
+        }
+
         // Browse Executable
         if (id == ID_BROWSE) {
             std::string picked = browse_for_game(hwnd, g_gameExe);
             if (!picked.empty()) {
-                g_gameExe = picked;
-                save_paths_json(g_gameExe);
-                g_feedback = L"Game path updated.";
+                set_game_exe(picked);
+                save_game_exe(picked);
+                g_feedback = L"Game location updated.";
                 g_feedbackErr = false;
                 sync_controls(hwnd);
             }
@@ -1137,12 +1611,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (id == ID_AUTODETECT) {
             std::string found = auto_detect_game();
             if (!found.empty()) {
-                g_gameExe = found;
-                save_paths_json(g_gameExe);
-                g_feedback = L"Found Steam client: " + to_wide(g_gameExe);
+                set_game_exe(found);
+                save_game_exe(found);
+                g_feedback = L"Found the game on Steam.";
                 g_feedbackErr = false;
             } else {
-                g_feedback = L"Could not auto-detect Steam client. Please use Browse.";
+                g_feedback = L"Couldn't find the game. Please use Browse.";
                 g_feedbackErr = true;
             }
             sync_controls(hwnd);
@@ -1151,10 +1625,17 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
         // Logout
         if (id == ID_LOGOUT) {
+            // Switch Account / Logout forgets the saved sign-in: the next start
+            // shows the form, with the username filled in.
+            const bool wasKept = g_keepSignedIn;   // the box is ticked while a sign-in is saved
+            const bool gone = aoc::launcher::credential_remove(aoc::launcher::kCredentialTarget);
+            g_keepSignedIn = false;
             g_loggedIn = false;
             g_username.clear();
-            g_feedback = L"Logged out.";
-            g_feedbackErr = false;
+            g_feedback = !gone   ? L"Logged out, but Windows would not delete the saved sign-in."
+                       : wasKept ? L"Logged out. The saved sign-in is forgotten."
+                                 : L"Logged out.";
+            g_feedbackErr = !gone;
             SetDlgItemTextW(hwnd, ID_PASS, L"");
             sync_controls(hwnd);
             focus_control(hwnd, GetDlgItem(hwnd, ID_USER));
@@ -1166,9 +1647,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             wchar_t wu[128]{}, wp2[128]{};
             GetDlgItemTextW(hwnd, ID_USER, wu, 128);
             GetDlgItemTextW(hwnd, ID_PASS, wp2, 128);
-            std::string user = to_utf8(wu), pass = to_utf8(wp2);
+            std::wstring user = wu, pass = wp2;
+            SecureZeroMemory(wp2, sizeof(wp2));
 
             if (user.empty() || pass.empty()) {
+                aoc::launcher::wipe(pass);
                 g_feedback = L"Username and password are required.";
                 g_feedbackErr = true;
                 g_authBusy.store(false);
@@ -1176,40 +1659,54 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 break;
             }
 
-            g_feedback = L"Contacting auth server\u2026";
+            g_feedback = L"Signing in\u2026";
             g_feedbackErr = false;
             InvalidateRect(hwnd, nullptr, FALSE);
+// -- C | O | A x Cyb --
 
             const bool is_reg = (id == ID_REG);
-            std::thread([hwnd, user, pass, is_reg]{
-                auth_worker(hwnd, user, pass, is_reg);
+            const bool keep = g_keepSignedIn;     // the box as it was when the button was pressed
+            // The thread gets its own copy of the password; every copy is wiped when
+            // it is done with: auth_worker's, the thread's, and this one.
+            std::thread([hwnd, user, pass, is_reg, keep]() mutable {
+                auth_worker(hwnd, user, pass, is_reg, keep);
+                aoc::launcher::wipe(pass);
             }).detach();
+            aoc::launcher::wipe(pass);
         }
 
-        // Launch Game
+        // Launch Game: only the player's press starts the game (a sign-in, by
+        // hand or by itself, never does), and never a second client.
         if (id == ID_LAUNCH && g_loggedIn) {
-            EnableWindow(GetDlgItem(hwnd, ID_LAUNCH), FALSE);
-            g_feedback = L"Launching game client\u2026";
+            if (g_gameRunning || aoc::launcher::game_is_running()) {
+                g_feedback = L"The game is already running.";
+                g_feedbackErr = false;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+            g_feedback = L"Starting the game\u2026";
             g_feedbackErr = false;
             InvalidateRect(hwnd, nullptr, FALSE);
             UpdateWindow(hwnd);
 
-            std::string err = launch_game();
+            HANDLE process = nullptr;
+            const std::string err = start_game(&process);
             if (err.empty()) {
-                g_feedback = L"Game client launched successfully.";
-                g_feedbackErr = false;
+                g_gameRunning = true;           // the button reads GAME RUNNING until the client ends
+                g_feedback.clear();
+                watch_game(hwnd, process);
             } else {
-                EnableWindow(GetDlgItem(hwnd, ID_LAUNCH), TRUE);
                 g_feedback = to_wide(err);
                 g_feedbackErr = true;
-                MessageBoxA(hwnd, err.c_str(), "Launch Failed", MB_OK | MB_ICONERROR);
+                MessageBoxA(hwnd, err.c_str(), "SandalCore", MB_OK | MB_ICONERROR);
             }
-            InvalidateRect(hwnd, nullptr, FALSE);
+            sync_controls(hwnd);
         }
         return 0;
     }
 
     case WM_DESTROY:
+        g_autoCancel.store(true);   // an automatic sign-in still running must not write a token after the window is gone
         PostQuitMessage(0);
         return 0;
     }
@@ -1217,10 +1714,33 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 // ===========================================================================
+//  Command Line
+// ===========================================================================
+// Sets g_screenshotMode / g_previewState; returns the --screenshot file ("" when
+// there is none).
+static std::wstring parse_command_line()
+{
+    std::wstring screenshot;
+    int n = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &n);
+    if (!argv) return screenshot;
+    for (int i = 1; i < n; ++i) {
+        const std::wstring a = argv[i];
+        if (a == L"--screenshot" && i + 1 < n)           screenshot = argv[++i];
+        else if (a == L"--preview-state" && i + 1 < n)   g_previewState = argv[++i];
+    }
+    LocalFree(argv);
+    g_screenshotMode = !screenshot.empty();
+    return screenshot;
+}
+
+// ===========================================================================
 //  WinMain Entry Point
 // ===========================================================================
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 {
+    const std::wstring screenshotPath = parse_command_line();
+
     INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_STANDARD_CLASSES };
     InitCommonControlsEx(&icc);
 
@@ -1228,9 +1748,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     g_brCard  = CreateSolidBrush(kCardBg);
     g_brField = CreateSolidBrush(kFieldBg);
 
-    g_fntTitle  = CreateFontW(20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                              DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
     g_fntHeader = CreateFontW(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                               DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                               CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
@@ -1266,33 +1783,28 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     const int sx = (GetSystemMetrics(SM_CXSCREEN) - ww) / 2;
     const int sy = (GetSystemMetrics(SM_CYSCREEN) - wh) / 2;
 
+    // WS_EX_CONTROLPARENT: the window's children are tab stops (see the loop below).
     HWND hwnd = CreateWindowExW(WS_EX_CONTROLPARENT,
         L"SandalCoreLauncher",
-        L"Sandal Core \u2014 Ashes of Creation Emulator",
+        L"SandalCore \u2014 Ashes of Creation Emulator",
         style | WS_VISIBLE,
         sx, sy, ww, wh, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
 
     int exitCode = 0;
-
-    // Check for --screenshot <path> argument (e.g. for testing / headless preview)
-    int numArgs = 0;
-    LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &numArgs);
-    if (argvW) {
-        for (int i = 1; i < numArgs; ++i) {
-            if (std::wstring(argvW[i]) == L"--screenshot" && i + 1 < numArgs) {
-                capture_launcher_to_file(hwnd, argvW[i + 1]);
-                LocalFree(argvW);
-                DestroyWindow(hwnd);
-                goto cleanup;
-            }
-        }
-        LocalFree(argvW);
-    }
-
-    {
+    if (g_screenshotMode) {
+        // --screenshot <file>: draw the window and leave (headless preview).
+        exitCode = capture_launcher_to_file(hwnd, screenshotPath) ? 0 : 2;
+        DestroyWindow(hwnd);
+    } else {
+        // The main window is a plain window, not a dialog: IsDialogMessage gives
+        // it the dialog keys (Tab moves between the WS_TABSTOP controls, Enter
+        // presses the default button via DM_GETDEFID).  Whatever it does not take
+        // is translated and dispatched as usual.
         MSG m{};
         while (GetMessageW(&m, nullptr, 0, 0) > 0) {
+            // A held-down Enter must not repeat into the default button (Login
+            // would be followed by LAUNCH GAME as soon as the login succeeds).
             if (m.message == WM_KEYDOWN && m.wParam == VK_RETURN && (m.lParam & (1 << 30)))
                 continue;
             if (!IsDialogMessageW(hwnd, &m)) {
@@ -1303,8 +1815,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         exitCode = (int)m.wParam;
     }
 
-cleanup:
-    DeleteObject(g_fntTitle);
     DeleteObject(g_fntHeader);
     DeleteObject(g_fntMed);
     DeleteObject(g_fntBig);

@@ -144,3 +144,23 @@ if(MSVC)
     target_compile_definitions(test_ics_token_file PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 set_target_properties(test_ics_token_file PROPERTIES FOLDER "Tools")
+
+# test_launcher_saved_sign_in: "Keep me signed in" for launcher.exe (src/launcher_sign_in.h): the Windows Credential Manager
+# round trip under a test-only target name, how the auth server's answers are read, and the automatic sign-in at start
+# (fake clock, fake auth server)
+if(WIN32)
+    add_executable(test_launcher_saved_sign_in
+        src/tools/test_launcher_saved_sign_in.cpp
+    )
+    target_include_directories(test_launcher_saved_sign_in PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(test_launcher_saved_sign_in PRIVATE nlohmann_json::nlohmann_json)
+    target_compile_features(test_launcher_saved_sign_in PRIVATE cxx_std_20)
+    target_compile_definitions(test_launcher_saved_sign_in PRIVATE
+        _CRT_SECURE_NO_WARNINGS
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    set_target_properties(test_launcher_saved_sign_in PROPERTIES FOLDER "Tools")
+endif()

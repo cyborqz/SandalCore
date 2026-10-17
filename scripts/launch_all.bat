@@ -11,8 +11,8 @@ rem ============================================================================
 rem  launch_all.bat - start the full stack + game client
 rem
 rem  Starts the Go services and worldd (the world server), the tether and the
-rem  launcher window; sign in there and press Play. The game client starts by
-rem  itself once you have signed in. Takes no arguments.
+rem  launcher window; sign in there (or "Keep me signed in" does it) and press
+rem  LAUNCH GAME, which starts the game client. Takes no arguments.
 rem
 rem  Paths are derived from this script's location. Override the game client
 rem  location via GAME_ROOT if yours is not at one of the detected defaults.
@@ -135,12 +135,10 @@ call :wait_tcp 50055 citynode 30 || goto :fail
 call :wait_udp 7777 worldd 30 || goto :fail
 echo        Go services READY.
 
-rem  The client runs without Epic Online Services.
-set "CLIENT_ARGS=-UseEOS=false"
 set "TOKEN_FILE=%DIST_DIR%\data\ics_auth_token.txt"
 rem  The tether hands the client the login token the launcher saved.
 set "TETHER_CMD=tether_server.exe --login-token-file"
-set "SIGN_IN_NOTE=Sign in with an account registered through the launcher."
+set "SIGN_IN_NOTE=Sign in in the launcher window, then press LAUNCH GAME."
 
 echo.
 echo [2/5] worldd serves the world on UDP :7777 (started with the Go services).
@@ -187,26 +185,10 @@ echo  No need to press any key or close anything.
 echo ============================================================
 echo.
 
-rem  The client asks the tether for its login token some seconds after it starts, so
-rem  it starts once the player has signed in (the launcher then writes the token file).
-if not exist "%GAME_EXE%" goto :start_game
-echo  Sign in through the launcher window: the game client starts by itself
-echo  once you have. Do not also press the launcher's Launch button, or a
-echo  second game client opens.
-echo        Waiting up to 5 minutes for the sign-in ...
-call :wait_file "%TOKEN_FILE%" 300 || goto :sign_in_timeout
-echo        Signed in.
-echo.
-
-:start_game
-if exist "%GAME_EXE%" (
-    echo [5/5] Launching game client ...
-    start "" /D "%GAME_ROOT%\AOC\Binaries\Win64" "%GAME_EXE%" -LauncherTetherPort=19021 %CLIENT_ARGS%
-    echo Game client launched.
-) else (
-    echo NOTE: Shipping binary not found at "%GAME_EXE%". Launch via launcher.exe.
-)
-
+rem  The player signs in in the launcher window ("Keep me signed in" does it when the box is
+rem  ticked) and presses LAUNCH GAME, which starts the game client. The launcher writes the token
+rem  file at the sign-in and the client asks the tether for it some seconds after it starts, so the
+rem  client never starts before the sign-in.
 exit /b 0
 
 rem  :wait_tcp <port> <process name> <seconds>
@@ -228,18 +210,6 @@ set "WAIT_MAX=%~3"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$port = [int]$env:WAIT_PORT; $name = $env:WAIT_NAME; $root = $env:REPO_ROOT.TrimEnd('\') + '\'; $deadline = (Get-Date).AddSeconds([int]$env:WAIT_MAX); while ((Get-Date) -lt $deadline) { if ($env:WAIT_PROTO -eq 'UDP') { $eps = Get-NetUDPEndpoint -LocalPort $port -ErrorAction SilentlyContinue } else { $eps = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue }; $ids = @($eps | Select-Object -ExpandProperty OwningProcess -Unique); $found = $false; foreach ($id in $ids) { $p = Get-Process -Id $id -ErrorAction SilentlyContinue; if (-not $p) { continue }; $elsewhere = $p.Path -and -not $p.Path.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase); if ($p.ProcessName -ne $name -or $elsewhere) { Write-Host ('ERROR: port {0} is held by {1} (pid {2}) at {3}, not {4} from {5}' -f $port, $p.ProcessName, $id, $p.Path, $name, $root); exit 2 }; $found = $true }; if ($found) { exit 0 }; Start-Sleep -Milliseconds 500 }; if ($env:WAIT_PROTO -eq 'TCP') { Write-Host ('ERROR: {0} did not bind TCP :{1} after {2} seconds.' -f $name, $port, $env:WAIT_MAX) }; exit 1"
 exit /b %errorlevel%
 
-rem  :wait_file <path> <seconds>
-:wait_file
-set "WAIT_FILE=%~1"
-set "WAIT_MAX=%~2"
-set "WAIT_TRIES=0"
-:wait_file_loop
-if exist "%WAIT_FILE%" exit /b 0
-set /a WAIT_TRIES+=1
-if %WAIT_TRIES% GEQ %WAIT_MAX% exit /b 1
-timeout /t 1 /nobreak >nul
-goto :wait_file_loop
-
 :token_not_deleted
 echo ERROR: Could not delete the login token left by an earlier sign-in:
 echo        "%TOKEN_FILE%"
@@ -250,11 +220,6 @@ echo ERROR: launch_all.bat takes no arguments. The native and quick options belo
 echo        replay-based login server; the Go services and worldd are the only server path.
 pause
 exit /b 1
-
-:sign_in_timeout
-echo ERROR: No sign-in within 5 minutes: "%TOKEN_FILE%" did not appear.
-echo        Run launch_worldd.bat again and sign in through the launcher window.
-goto :fail
 
 :fail
 echo.
