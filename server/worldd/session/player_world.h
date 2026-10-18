@@ -329,12 +329,30 @@ public:
         int64_t node = 0;
         double  z = 0;   // the town's floor (where a player's feet are; no slack): the platform's, or for a node whose layout is not read the baked ground plus its lift
         bool    platform = false;   // true: the layout's own platform (world/town_platform.h); false: the interim model (world/town_floor.h)
+        bool    raised = false;     // true: a floor over the street (a terrace, the floor of a building, a roof: the walking map's), found by town_ground_at(x, y, z); false: the street itself
     };
     /// The floor of the town whose bowl holds (x, y): inside the footprint of a node whose platform is read, the platform's (never the baked pit); for the other nodes the interim model's
     /// (it needs the server's ground there); none outside every bowl.
     std::optional<TownGround> town_ground_at(double x, double y) const;
-    /// Only the platform's floor (the five bowls whose layouts mapc read): what a mount's summon judges the ground by.
+    /// Only the platform's floor (the five bowls whose layouts mapc read): the street of a bowl.
     std::optional<TownGround> bowl_floor_at(double x, double y) const;
+
+    // ---- the floors of a place (the layers of the walking map: street, terrace, floor of a building, roof, tower) -------------------------------------------
+    /// A body whose feet are over a floor by no more than this (cm) stands on it: the step of a stair, the rounding of the map's surface.
+    static constexpr double kFloorReachCm = 150.0;
+    /// How far from a wall (cm) the walking map may lack a polygon at a place: it keeps the agent's radius (35 cm) off an obstacle, and its cells are 25 cm.  A person who stands closer than
+    /// that to a wall takes the floor of the nearest polygon within this radius instead of having none.
+    static constexpr double kNearWallCm = 100.0;
+    /// Every floor at (x, y) from z_lo to z_hi (cm), highest first, floors within 25 cm of each other once: the walking map's polygons there (a terrace, a roof, the floor of a building, the street, the
+    /// pit's terrain) and, inside a bowl whose platform is read, the platform's street (whether or not the map has it: a tile that is not loaded yet).  Where the map has no polygon at the exact place
+    /// (within kNearWallCm of a wall) the floor of the nearest polygon within that radius stands in for it.
+    std::vector<double> floors_at(double x, double y, double z_lo, double z_hi) const;
+    /// The floor a body whose feet are at z stands over: the highest floor of floors_at that is at most `above` cm over z and at most `below` cm under it (a trace down from `above` over the feet);
+    /// none when there is none.
+    std::optional<double> floor_under(double x, double y, double z, double below, double above = kFloorReachCm) const;
+    /// The town's floor under a body whose feet are at z: inside a bowl whose platform is read, the floor it stands over (a terrace, the floor of a building, a roof: floor_under, searched 600 m down,
+    /// `raised`) when that is higher than the street; else what town_ground_at(x, y) says.
+    std::optional<TownGround> town_ground_at(double x, double y, double z) const;
     struct BowlLift {
         int64_t node = 0;
         double  z = 0;          // where to put the character (its origin): the town's floor + the capsule's half height + kBowlSlackCm
@@ -389,6 +407,21 @@ private:
     void check_ground_covers_area() const;
     void drive_window(double now_seconds);
     void log_window(double now_seconds, const nav::WindowStats& w);
+    /// The towns' check: one line for each city node's people once they are on the ground and their numbers have been still for a few seconds: the level, how many stand
+    /// on a floor within 30 cm of where the data puts them, how many on a floor farther away, how many have none, how many of those have no walkable ground near either (in a wall, a stall, under a floor or in the air) and how many would walk if they had ground.  It runs again for a node
+    /// whose level or people changed (a level change brings other people, and its line comes as soon as they are on the ground), at most once a minute for the same level.
+    void check_towns(double now_seconds);
+    struct TownCheck {
+        int    level = -1;
+        size_t people = 0, ready = 0;       // what the check saw last: the NPCs the NPC world holds and how many of them have their ground
+        double changed_at = 0;              // when the numbers last changed
+        double logged_at = -1.0e9;
+        int    logged_level = -1;           // the level of the last line
+        bool   logged = true;               // the numbers it saw have been logged
+    };
+    std::map<int64_t, TownCheck>         town_checks_;
+    double                               last_town_check_ = -1.0e9;
+    static constexpr double kTownCheckSeconds = 2.0, kTownSettleSeconds = 4.0, kTownRelogSeconds = 60.0;
 public:
     /// G1 stage 1: what driving the ground window cost the world tick (the longest of each part, ms) since the start: the interest set, the pump (the net thread's share of the
     /// loading), and standing the NPCs of the chunks that arrived on their ground.  The load test and the log read it.

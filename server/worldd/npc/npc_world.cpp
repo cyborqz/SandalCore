@@ -154,7 +154,7 @@ bool NpcWorld::ground_npc(Npc& n, world::WorldActor& actor) {
         found = nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
     } else {
         // a city node's person has a height that is right to 1-168 cm: a tight window, so that it never takes a roof, a ledge or the pit's terrain for its floor
-        found = a->npc.ground_by_data ? nav_->ground_height(a->x, a->y, hint, &gz, cfg_.data_ground_below_cm, cfg_.data_ground_above_cm)
+        found = a->npc.ground_by_data ? ground_by_data_at(a->x, a->y, hint, &gz)
                                       : nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
         // (a city node's people keep their data height when no surface is within reach: their town's floor is not in the baked ground, whose terrain lies 50 m below it)
         if (!found && !a->npc.ground_by_data && nav_->terrain_height(a->x, a->y, &terrain)) {
@@ -163,6 +163,9 @@ bool NpcWorld::ground_npc(Npc& n, world::WorldActor& actor) {
             found = nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
         }
     }
+    n.grounded = found;
+    n.data_feet = hint;
+    n.ground_dz = found ? gz - hint : 0.0;
     if (!found) {
         // no ground there (outside the extracted area, or over a hole): it keeps its height and stands
         n.mover.place(a->x, a->y, hint, setup.home_yaw);
@@ -204,6 +207,51 @@ bool NpcWorld::ground_npc(Npc& n, world::WorldActor& actor) {
     registry_.move(n.id, a->x, a->y, n.mover.origin_z(), yaw);
     write_replicated(*a, a->x, a->y, n.mover.origin_z(), yaw, {}, false, now_);
     return true;
+}
+
+bool NpcWorld::ground_by_data_at(double x, double y, double hint, double* gz) const {
+    if (nav_->ground_height(x, y, hint, gz, cfg_.data_ground_below_cm, cfg_.data_ground_above_cm)) return true;
+    // within the agent's radius of a wall the map has no polygon at the exact place (a villager posted at a stall): the floor of the nearest polygon within a small radius, in the same window
+    const double lo = hint - cfg_.data_ground_below_cm, hi = hint + cfg_.data_ground_above_cm;
+    nav::Vec3 stand;
+    if (!nav_->nearest_point({x, y, 0.5 * (lo + hi)}, cfg_.data_ground_near_cm, 0.5 * (hi - lo), &stand) || std::hypot(stand.x - x, stand.y - y) > cfg_.data_ground_near_cm || stand.z < lo || stand.z > hi)
+        return false;   // (the nearest polygon is found by bounding boxes: it may be farther than the radius)
+    *gz = stand.z;
+    return true;
+}
+
+NpcWorld::StandReport NpcWorld::stand_report(const std::vector<uint64_t>& ids) const {
+    StandReport r;
+    for (const uint64_t id : ids) {
+        const auto it = npcs_.find(id);
+        if (it == npcs_.end()) continue;
+        const Npc& n = it->second;
+        ++r.people;
+        if (n.pending_ground) {
+            ++r.waiting;
+            continue;
+        }
+        if (n.grounded) {
+            if (std::fabs(n.ground_dz) <= kStandNearCm) {
+                ++r.on_floor;
+            } else {
+                ++r.moved;
+                r.max_moved_cm = std::max(r.max_moved_cm, std::fabs(n.ground_dz));
+            }
+            continue;
+        }
+        ++r.no_floor;
+        if (n.setup.ambient != Ambient::Stationary) ++r.stuck;
+        // no floor in reach: is there any walkable ground near it at all?  If not it stands in a wall, a stall, under a floor or in the air
+        const world::WorldActor* a = registry_.find(id);
+        nav::Vec3 near_ground;
+        if (a) {
+            const bool ground_near = nav_->nearest_point({a->x, a->y, n.data_feet + 0.5 * (kBlockedAboveCm - kBlockedBelowCm)}, kBlockedCm, 0.5 * (kBlockedAboveCm + kBlockedBelowCm), &near_ground) &&
+                                     std::hypot(near_ground.x - a->x, near_ground.y - a->y) <= kBlockedCm && near_ground.z >= n.data_feet - kBlockedBelowCm && near_ground.z <= n.data_feet + kBlockedAboveCm;
+            if (!ground_near) ++r.blocked;
+        }
+    }
+    return r;
 }
 
 void NpcWorld::chunks_resident(const std::vector<nav::ChunkKey>& chunks) {

@@ -32,6 +32,7 @@
 #include "node_pop_golden.h"
 #include "content/content_db.h"
 #include "nav/area_nav.h"
+#include "npc/area_npcs.h"
 #include "npc/motion_table.h"
 #include "npc/npc_world.h"
 #include "protocol/schema/generated/index.h"
@@ -51,6 +52,7 @@
 #include "world/town_floor.h"
 
 #include <nlohmann/json.hpp>
+#include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -1554,6 +1556,31 @@ static void test_bowl_world() {
     world.tick_world(5.0);
     world.town_ground_at(px, py);   // (asking is what rebuilds it)
     CHECK(world.town_floor().floor_persons(kJoeva) != town_persons, "after a level change the floor is rebuilt from the people the new level has");
+
+    // the towns' check: one [towns] line once the people stand and their numbers have been still, none while they change, one more for the new level after a level change
+    auto count_lines = [](const std::string& text) {
+        size_t n = 0;
+        for (size_t at = text.find("[towns]"); at != std::string::npos; at = text.find("[towns]", at + 1)) ++n;
+        return n;
+    };
+    std::ostringstream captured;
+    auto logger = std::make_shared<spdlog::logger>("towns_check", std::make_shared<spdlog::sinks::ostream_sink_mt>(captured));
+    logger->set_level(spdlog::level::info);
+    const auto previous = spdlog::default_logger();
+    spdlog::set_default_logger(logger);
+    world.tick_world(100.0);   // the people were noted at the tick above (95 s ago) and have not changed: the line
+    world.tick_world(105.0);   // nothing changed: no second line
+    world.tick_world(110.0);
+    const std::string first = captured.str();
+    set_level(synth, kJoeva, 4);
+    world.tick_world(120.0);   // the people of the new level are made and noted
+    world.tick_world(125.0);   // still: the line of the new level, though the last one is not a minute old
+    const std::string second = captured.str();
+    spdlog::set_default_logger(previous);
+    CHECK(count_lines(first) == 1 && first.find("Joeva (Wilderness)") != std::string::npos, "the towns' check makes one line for the town (Wilderness) once its numbers are still, and not another while they stay so");
+    CHECK(count_lines(second) == 2 && second.find("Joeva (Town)") != std::string::npos, "after a level change: one more line, for the new level, as soon as its people are on the ground");
+    CHECK(first.find(" people, ") != std::string::npos && first.find("on a floor within 30 cm of where the data puts them") != std::string::npos && first.find("would walk if they had ground") != std::string::npos,
+          "the line counts the people on a floor, on a floor farther away, without a floor, with no walkable ground near, and those that would walk");
 }
 
 // ---- the five bowls on the real ground ---------------------------------------------------------------------------------------------------------
@@ -1683,6 +1710,247 @@ static void test_real_bowls() {
         }
     }
 }
+// ---- the two seed towns with their buildings on the real walking map ----------------------------------------------------------------------------
+
+/// Whether a step of a walker (its origin, 96 cm over its feet or so) stays on the walkable ground: a ray along the map from feet to feet; or, when the step runs along the edge of the walkable ground (a path
+/// that hugs a corner is on the edge, where a float puts the ray a hair outside), its middle is on the map within the agent's radius.  A step through a wall has its middle in the wall.
+static bool step_on_ground(const nav::AreaNav& map, const nav::Vec3& a, const nav::Vec3& b) {
+    const nav::Vec3 fa{a.x, a.y, a.z - 96.0}, fb{b.x, b.y, b.z - 96.0};
+    if (map.raycast(fa, fb)) return true;
+    return map.on_navmesh({(fa.x + fb.x) / 2, (fa.y + fb.y) / 2, (fa.z + fb.z) / 2}, 40.0, 150.0);
+}
+
+/// A file of dist/content next to content.db.
+static std::string content_file(const char* name) { return (std::filesystem::path(db_path()).parent_path() / name).string(); }
+
+struct RealTown {
+    int64_t     node;
+    int         level;
+    const char* routes[3];   // routes of the town (names), the walks the owner will see
+};
+
+/// Opt-in (AOC_REAL_GROUND=1: it opens dist/content/area_nav.bin and loads the chunks round the town): a town at its seed level with its people on the real walking map, built with the buildings
+/// of that level.  What the card says: nobody walks through a wall, the people who stand on raised floors stand on them, the guard's round is on the ground, a mount is summoned where there is
+/// room and refused over a drop.
+static void test_real_town_buildings() {
+    const char* env = std::getenv("AOC_REAL_GROUND");
+    if (!env || !*env) {
+        std::printf("the seed towns with their buildings on the real map: opt-in (AOC_REAL_GROUND=1 reads dist/content/area_nav.bin)\n");
+        return;
+    }
+    const RealTown towns[] = {{kJoeva, 4, {"Patrol_Node_Flat_D_L4_Middle_Guard_02", "Node_Flat_D_L4_Upper_Filler_Scholar_01", "Node_Flat_D_L4_Upper_Filler_Carry_01"}},
+                              {kHalcyon, 3, {"Node_River_C_L3_GuardMidPatrol", "Node_River_C_Upper_L3_Filler_Carry_01", "Node_River_C_Upper_L3_Filler_Guard_02"}}};
+    for (const RealTown& rt : towns) {
+        std::string error;
+        const world::CityNodeInfo* real = g_env.nodes->by_guid(rt.node);
+        if (!real) {
+            CHECK(false, "the town is in the registry");
+            continue;
+        }
+        std::printf("%s at level %d on the real walking map (%s)\n", real->display_name.c_str(), rt.level, content_file("area_nav.bin").c_str());
+        world::CityNodeInfo info = *real;
+        std::vector<world::CityZoneInfo> zones{*g_env.nodes->zone_by_guid(info.zoi_guid)};
+        world::CityNodes synth({info}, zones);
+        set_level(synth, rt.node, rt.level);
+        auto wire = world::NodeWire::load(db_path(), synth, error);
+        auto nav = nav::AreaNav::load(content_file("area_nav.bin"), &error);
+        if (!wire || !nav) {
+            CHECK(false, "the node wire and the walking map load");
+            std::printf("    %s\n", error.c_str());
+            continue;
+        }
+        aoc::protocol::ServerGuidAllocator guids{60, 0x6ee87ee4u};
+        PlayerWorld world(&*g_env.db, "", bs::GameStateMode::Tier3, 60, guids);
+        world.set_spawn_context(g_env.base);
+        if (!world.ready() || !world.load_blueprints(motion_path(), error)) {
+            CHECK(false, "the world is ready and the Blueprint table loads");
+            continue;
+        }
+        world.set_city_nodes(&synth);
+        world.set_node_wire(wire.get());
+        world.set_node_population_data(g_env.data.get());
+        if (!world.load_town_platforms(content_file("town_platforms.bin"), error)) {
+            CHECK(false, "the platforms load");
+            std::printf("    %s\n", error.c_str());
+            continue;
+        }
+        spawns::AreaConfig circle;
+        circle.center_x = info.x;
+        circle.center_y = info.y;
+        circle.radius_cm = 90000.0;
+        if (!world.load_area(circle, error) || !world.adopt_ground(std::move(nav), error)) {
+            CHECK(false, "the area loads and the real ground is adopted");
+            std::printf("    %s\n", error.c_str());
+            continue;
+        }
+        const size_t made = world.start_node_people({});
+        CHECK(made == golden_npcs(real->name, rt.level), "the town's people are made");
+        const std::vector<uint64_t> ids = world.node_people()->actors_of(rt.node);
+        npc::NpcWorld& npcs = *world.npcs();
+        const nav::AreaNav& map = *world.nav();
+
+        // how they stand: the report the log line makes
+        const npc::NpcWorld::StandReport rep = npcs.stand_report(ids);
+        std::printf("    %zu people: %zu on a floor within %.0f cm of where the data puts them, %zu on a floor up to %.0f cm from it, %zu with none (%zu of them with no walkable ground within %.0f cm; %zu would walk), %zu waiting\n",
+                    rep.people, rep.on_floor, npc::NpcWorld::kStandNearCm, rep.moved, rep.max_moved_cm, rep.no_floor, rep.blocked, npc::NpcWorld::kBlockedCm, rep.stuck, rep.waiting);
+        CHECK(rep.people == made && rep.waiting == 0, "all of them have their ground (the area's chunks are resident)");
+        {
+            // who has no floor and would walk (a person the data gives a life, left standing for want of ground)
+            std::map<std::string, size_t> stuck_by_kind;
+            for (const uint64_t id : ids) {
+                const npc::NpcWorld::StandReport one = npcs.stand_report({id});
+                if (one.stuck == 0) continue;
+                const world::WorldActor* a = world.registry().find(id);
+                ++stuck_by_kind[a ? spawns::blueprint_leaf(a->npc.archetype) : std::string("?")];
+            }
+            std::string list;
+            for (const auto& [kind, n] : stuck_by_kind) list += (list.empty() ? "" : ", ") + kind + " x" + std::to_string(n);
+            std::printf("    no floor, would walk: %s\n", list.empty() ? "none" : list.c_str());
+        }
+        CHECK(rep.on_floor * 100 >= rep.people * 60, "at least six in ten stand on a floor within 30 cm of where the data puts them");
+        CHECK(rep.no_floor * 100 <= rep.people * 8, "at most 8 in 100 have no floor in reach");
+
+        // the raised people (feet over 3 m above the platform) and the others
+        size_t raised = 0, raised_on_floor = 0, street = 0, street_on_floor = 0;
+        std::vector<std::array<double, 3>> raised_spots, street_spots;   // x, y, feet
+        for (const uint64_t id : ids) {
+            const world::WorldActor* a = world.registry().find(id);
+            if (!a) continue;
+            const double feet = a->npc.home_z - 88.0;
+            const auto plat = world.bowl_floor_at(a->npc.home_x, a->npc.home_y);
+            if (!plat) continue;
+            const npc::NpcWorld::StandReport one = npcs.stand_report({id});
+            if (feet - plat->z > 300.0) {
+                ++raised;
+                raised_on_floor += one.on_floor;
+                raised_spots.push_back({a->npc.home_x, a->npc.home_y, feet});
+            } else if (feet - plat->z > -100.0) {
+                ++street;
+                street_on_floor += one.on_floor;
+                street_spots.push_back({a->npc.home_x, a->npc.home_y, feet});
+            }
+        }
+        std::printf("    people over 3 m above the platform: %zu, of them on a floor within 30 cm: %zu (the 2a map had none); at the street: %zu, on a floor within 30 cm: %zu\n", raised, raised_on_floor,
+                    street, street_on_floor);
+        CHECK(raised > 0 && raised_on_floor * 100 >= raised * 55, "more than half of the people on terraces and towers stand on a floor of the map");
+        // the same people on an earlier walking map (AOC_NAV_BEFORE: the file the town had before its buildings were in it), for the before and after
+        if (const char* before_path = std::getenv("AOC_NAV_BEFORE"); before_path && *before_path) {
+            std::string before_error;
+            auto before = nav::AreaNav::load(before_path, &before_error);
+            if (before && before->load_around(info.x, info.y, 2)) {
+                size_t before_on_floor = 0;
+                for (const auto& s : raised_spots) {
+                    double gz = 0;
+                    if (before->ground_height(s[0], s[1], s[2], &gz, npc::NpcWorldConfig{}.data_ground_below_cm, npc::NpcWorldConfig{}.data_ground_above_cm) && std::fabs(gz - s[2]) <= npc::NpcWorld::kStandNearCm) ++before_on_floor;
+                }
+                std::printf("    the same %zu raised people on the walking map of %s: %zu on a floor within 30 cm (now %zu)\n", raised_spots.size(), before_path, before_on_floor, raised_on_floor);
+            } else {
+                std::printf("    (AOC_NAV_BEFORE %s does not load: %s)\n", before_path, before_error.c_str());
+            }
+        }
+
+        // the routes: the ground along each, and a path between the waypoints
+        for (const char* name : rt.routes) {
+            const content::NpcRouteRow* route = nullptr;
+            for (const auto& [guid, r] : g_env.pop->routes) {
+                if (r.name == name) route = &r;
+            }
+            if (!route || route->waypoints.size() < 2) {
+                CHECK(false, name);
+                continue;
+            }
+            std::vector<nav::Vec3> pts;
+            for (const auto& w : route->waypoints) {
+                nav::Vec3 p;
+                npc::place_node_route(info, w[0], w[1], w[2], &p.x, &p.y, &p.z);
+                pts.push_back(p);
+            }
+            if (route->looping) pts.push_back(pts.front());
+            size_t samples = 0, covered = 0, legs = 0, legs_found = 0;
+            double worst_ratio = 0;
+            for (size_t i = 0; i + 1 < pts.size(); ++i) {
+                const double len = std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+                const int k = std::max(1, static_cast<int>(len / 50.0));
+                for (int s = 0; s <= k; ++s) {
+                    const double t = static_cast<double>(s) / k;
+                    double gz = 0;
+                    ++samples;
+                    if (map.ground_height(pts[i].x + (pts[i + 1].x - pts[i].x) * t, pts[i].y + (pts[i + 1].y - pts[i].y) * t, pts[i].z + (pts[i + 1].z - pts[i].z) * t, &gz, 100.0, 300.0)) ++covered;
+                }
+                ++legs;
+                const nav::PathResult path = map.find_path(pts[i], pts[i + 1], 150.0, 300.0, 60000);
+                if (path.complete) {
+                    ++legs_found;
+                    if (len > 300.0) worst_ratio = std::max(worst_ratio, path.length / len);
+                }
+            }
+            std::printf("    route %s: %zu waypoints, ground within -1..+3 m of its height on %.0f %% of %zu samples; a path between the waypoints for %zu of %zu legs (the longest is %.2f times the straight line)\n", name,
+                        route->waypoints.size(), 100.0 * static_cast<double>(covered) / static_cast<double>(samples), samples, legs_found, legs, worst_ratio);
+        }
+
+        // a summon at the places people stand: the answer of the mount's ground rule (the point 575 cm ahead; a floor from 1.6 m over the feet to 10 m under them, within 2.5 m of the feet)
+        const auto summon_answers = [&](const std::vector<std::array<double, 3>>& spots, size_t* allowed, size_t* total, size_t* spots_with_none) {
+            *allowed = *total = *spots_with_none = 0;
+            for (const auto& s : spots) {
+                size_t ok_here = 0;
+                for (int k = 0; k < 8; ++k) {
+                    const double a = k * 3.14159265358979323846 / 4.0;
+                    const auto g = world.floor_under(s[0] + 575.0 * std::cos(a), s[1] + 575.0 * std::sin(a), s[2], 1000.0, 160.0);
+                    ++*total;
+                    if (g && std::fabs(*g - s[2]) <= 250.0) { ++*allowed; ++ok_here; }
+                }
+                *spots_with_none += ok_here == 0 ? 1 : 0;
+            }
+        };
+        size_t allowed = 0, total = 0, none = 0;
+        summon_answers(street_spots, &allowed, &total, &none);
+        std::printf("    a summon at %zu street places, 8 headings each: allowed %zu of %zu, no heading allowed at %zu places\n", street_spots.size(), allowed, total, none);
+        CHECK(total > 0 && allowed * 100 >= total * 90 && none * 100 <= street_spots.size() * 3, "on the street a summon is allowed in nine headings in ten (not facing a drop)");
+        std::vector<std::array<double, 3>> terraces, towers;
+        for (const auto& s : raised_spots) {
+            const auto plat = world.bowl_floor_at(s[0], s[1]);
+            (s[2] - plat->z > 1500.0 ? towers : terraces).push_back(s);
+        }
+        summon_answers(terraces, &allowed, &total, &none);
+        std::printf("    at %zu places 3 to 15 m up (terraces, upper floors): allowed %zu of %zu, no heading allowed at %zu places\n", terraces.size(), allowed, total, none);
+        summon_answers(towers, &allowed, &total, &none);
+        std::printf("    at %zu places over 15 m up (towers, high walls): allowed %zu of %zu, no heading allowed at %zu places\n", towers.size(), allowed, total, none);
+
+        // the walkers: two minutes with a player in the town's square; a ray along every step stays on the walkable ground and nobody ends up in a wall
+        struct Track { nav::Vec3 last; bool have = false; };
+        std::map<uint64_t, Track> tracks;
+        std::vector<uint64_t> walkers;
+        world.registry().for_each([&](const world::WorldActor& a) {
+            if (a.kind == world::ActorKind::Npc && std::hypot(a.x - info.x, a.y - info.y) < 14000.0 && !npcs.stands(a.id)) walkers.push_back(a.id);
+        });
+        size_t rays = 0, off_ground = 0, walking_at_all = 0;
+        std::set<uint64_t> moved;
+        double t = world.nav()->windowed() ? 1.0 : 0.0;
+        for (int tick = 0; tick < 15 * 120; ++tick) {
+            t += 1.0 / 15.0;
+            world.note_player(7, info.x, info.y);
+            world.tick_world(t);
+            for (const uint64_t id : walkers) {
+                const world::WorldActor* a = world.registry().find(id);
+                if (!a) continue;
+                Track& tr = tracks[id];
+                const nav::Vec3 p{a->x, a->y, a->z};
+                if (tr.have && std::hypot(p.x - tr.last.x, p.y - tr.last.y) > 0.5) {
+                    ++rays;
+                    moved.insert(id);
+                    if (!step_on_ground(map, tr.last, p)) ++off_ground;
+                }
+                tr.last = p;
+                tr.have = true;
+            }
+        }
+        walking_at_all = moved.size();
+        std::printf("    %zu walkers (people and animals) near the square; in 2 minutes %zu of them walked, %zu steps, %zu of them not along the walkable ground\n", walkers.size(), walking_at_all, rays, off_ground);
+        CHECK(walking_at_all > 0 && rays > 100, "people and animals walk");
+        CHECK(off_ground * 1000 <= rays, "no more than one step in a thousand leaves the walkable ground (a ray along it stays on the map)");
+    }
+}
+
 // == C O A | C_Y_B ==
 
 int main() {
@@ -1743,6 +2011,7 @@ int main() {
     test_town_floor_class();
     test_bowl_world();
     test_real_bowls();
+    test_real_town_buildings();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

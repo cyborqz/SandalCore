@@ -33,6 +33,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -722,6 +724,169 @@ static void test_cost() {
     CHECK(total_us / static_cast<double>(ticks) < 2000.0, "a step takes under 2 ms on average with the area's crowd awake");
     CHECK(st.active_now > 100 && st.moves_started > 100, "the NPCs around the player were awake and walking");
 }
+// ---- a town's people near walls, on raised floors, and how they stand (the towns' buildings) ----------------------------------------------------
+
+static world::WorldActor town_person(uint64_t id, double x, double y, double feet) {
+    world::WorldActor p = make_npc(id, x, y, feet + 96.0);
+    p.npc.ground_by_data = true;
+    return p;
+}
+
+static void test_near_walls_and_report() {
+    std::printf("a city node's person near a wall: the nearest polygon's floor; the report of how a town's people stand\n");
+    auto& n = navfix::shared_nav();
+    world::ActorRegistry reg;
+    reg.add(town_person(3000, -2880, 0, 1000));      // 20 cm from the wall's east face: the map keeps 35 cm off the wall, so no polygon at this place
+    reg.add(town_person(3002, -2700, 0, 1000));      // 2 m from it: a floor at the exact place
+    reg.add(town_person(3004, 9000, -5000, 1540));   // on the floating platform: a floor at the exact place, 5 m over the plain
+    reg.add(town_person(3006, 9000, -5000, 1000));   // under that platform, on the plain
+    reg.add(town_person(3008, -2700, 200, 1080));    // 80 cm over the plain: a floor 80 cm under the feet
+    reg.add(town_person(3010, -3000, 0, 1320));      // in the middle of the wall (1 m from either face), the plain's terrain 3.2 m under its feet, the wall's top 2.8 m over them
+    reg.add(town_person(3012, 1000, 1000, 5000));    // 40 m over the plain, nothing near
+    reg.add(town_person(3014, -2780, 0, 1000));      // 120 cm from the wall's face: the map has the plain here
+    npc::NpcWorld w(reg, &n);
+    npc::NpcMotionSetup stand = wander_setup();
+    stand.ambient = npc::Ambient::Stationary;
+    std::vector<uint64_t> ids;
+    bool found = false;
+    for (const uint64_t id : {3000, 3002, 3004, 3006, 3008, 3010, 3012, 3014}) {
+        CHECK(w.add(id, stand, &found), "(added)");
+        ids.push_back(id);
+    }
+    for (const uint64_t id : ids) std::printf("    person %llu: stands at origin %.1f (feet %.1f)\n", static_cast<unsigned long long>(id), reg.find(id)->z, reg.find(id)->z - 96.0);
+    const world::WorldActor* near_wall = reg.find(3000);
+    CHECK(near_wall && std::fabs(near_wall->z - (1000.0 + 96.0)) < 15.0 && std::fabs(near_wall->x - (-2880.0)) < 1e-6, "20 cm from the wall: it stays at its place and takes the floor of the nearest polygon (the plain), not none");
+    CHECK(std::fabs(reg.find(3004)->z - (1540.0 + 96.0)) < 15.0 && std::fabs(reg.find(3006)->z - (1000.0 + 96.0)) < 15.0, "on the platform and under it: each on its own floor");
+    CHECK(std::fabs(reg.find(3008)->z - (1000.0 + 96.0)) < 15.0, "80 cm over the plain: put on it");
+    CHECK(std::fabs(reg.find(3010)->z - (1320.0 + 96.0)) < 1e-6 && std::fabs(reg.find(3012)->z - (5000.0 + 96.0)) < 1e-6, "in the wall and 40 m up: no floor, they keep the data's height");
+    const npc::NpcWorld::StandReport r = w.stand_report(ids);
+    std::printf("    %zu people: %zu on a floor within %.0f cm, %zu on a floor farther (up to %.0f cm), %zu with none, %zu of those with no ground within %.0f cm\n", r.people, r.on_floor,
+                npc::NpcWorld::kStandNearCm, r.moved, r.max_moved_cm, r.no_floor, r.blocked, npc::NpcWorld::kBlockedCm);
+    CHECK(r.people == 8 && r.waiting == 0, "the report holds the eight people, none waiting for its ground");
+    CHECK(r.on_floor == 5 && r.moved == 1 && r.no_floor == 2 && r.blocked == 1 && r.stuck == 0,
+          "five on a floor within 30 cm, one 80 cm from its floor, two without a floor: the one in the air has no ground near, the one in the wall has the wall's top within 3 m over its feet; none of them would walk");
+    CHECK(r.max_moved_cm > 60.0 && r.max_moved_cm < 100.0, "the farthest move to a floor is the 80 cm one");
+    CHECK(w.stand_report({9999, 3000}).people == 1, "a person the world does not hold is not counted");
+    // a walker next to the wall is grounded and walks (it was frozen with no ground before)
+    reg.add(town_person(3100, -2880, 0, 1000));
+    npc::NpcWorld w2(reg, &n);
+    npc::NpcMotionSetup walker = wander_setup(800);
+    bool grounded = false;
+    CHECK(w2.add(3100, walker, &grounded) && grounded && !w2.stands(3100), "a wanderer posted 20 cm from the wall has a ground and a life");
+    const Vec3 start{reg.find(3100)->x, reg.find(3100)->y, 0};
+    double far = 0;
+    run(w2, 0, 60, -2880, 0, [&](double) { far = std::max(far, dist2(*reg.find(3100), start)); });
+    CHECK(far > 150.0, "...and it walks away from the wall");
+}
+
+/// The fixture's town with the floating platform taken out: the map before the buildings are in it.
+static nav::AreaNav& map_without_buildings() {
+    static std::unique_ptr<nav::AreaNav> n = [] {
+        nav::Geometry g = navfix::test_geometry();
+        g.placements.erase(g.placements.begin() + 1);   // [0] the wall, [1] the floating platform
+        nav::BuildOptions opt;
+        opt.threads = 2;
+        opt.nav_margin_cm = 3000;
+        nav::NavFile f;
+        nav::BuildStats st;
+        std::string err;
+        if (!nav::build_nav(g, 7, opt, &f, &st, &err)) { std::printf("  [FAIL] the map does not build: %s\n", err.c_str()); std::exit(2); }
+        auto p = nav::AreaNav::from_file(f, &err);
+        if (!p) { std::printf("  [FAIL] the map does not load: %s\n", err.c_str()); std::exit(2); }
+        return p;
+    }();
+    return *n;
+}
+
+static void test_raised_people_before_and_after() {
+    std::printf("raised standing people: on a floor with the buildings in the map, in the air without them\n");
+    const double xs[] = {8400, 8700, 9000, 9300, 9600}, ys[] = {-5600, -5300, -5000, -4700, -4400};
+    size_t before = 0, after = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        nav::AreaNav& map = pass == 0 ? map_without_buildings() : navfix::shared_nav();
+        world::ActorRegistry reg;
+        std::vector<uint64_t> ids;
+        for (int i = 0; i < 5; ++i) {
+            reg.add(town_person(4000 + 2 * i, xs[i], ys[i], 1540.0));   // on the platform's top (an actor's id is even)
+            ids.push_back(4000 + 2 * i);
+        }
+        npc::NpcWorld w(reg, &map);
+        npc::NpcMotionSetup stand = wander_setup();
+        stand.ambient = npc::Ambient::Stationary;
+        for (const uint64_t id : ids) w.add(id, stand);
+        const npc::NpcWorld::StandReport rep = w.stand_report(ids);
+        std::printf("    %s: %zu people, %zu on a floor within 30 cm, %zu on a floor farther, %zu with none, %zu waiting\n", pass == 0 ? "without the platform" : "with the platform", rep.people, rep.on_floor, rep.moved, rep.no_floor, rep.waiting);
+        (pass == 0 ? before : after) = rep.on_floor;
+    }
+    {
+        auto& map = navfix::shared_nav();
+        for (int i = 0; i < 5; ++i) {
+            const auto floors = map.floors_at(xs[i], ys[i], 0, 3000);
+            std::printf("    person %d at (%.0f, %.0f): floors", i, xs[i], ys[i]);
+            for (const double f : floors) std::printf(" %.1f", f);
+            std::printf("\n");
+        }
+    }
+    std::printf("    on a floor within 30 cm of the data's height: %zu of 5 before, %zu of 5 after\n", before, after);
+    CHECK(before == 0 && after == 5, "five people on a platform 5 m over the plain: none has a floor in the map without it, all five have one with it");
+}
+
+/// Whether a step of a walker (its origin, 96 cm over its feet) stays on the walkable ground: a ray along the map from feet to feet; or, when the step runs along the edge of the walkable ground (a path that
+/// hugs a wall's corner is on the edge, where a float puts the ray a hair outside), its middle is on the map within the agent's radius.  A step through a wall (270 cm of it) has its middle in the wall.
+static bool step_on_ground(const nav::AreaNav& map, const Vec3& a, const Vec3& b) {
+    const Vec3 fa{a.x, a.y, a.z - 96.0}, fb{b.x, b.y, b.z - 96.0};
+    if (map.raycast(fa, fb)) return true;
+    return map.on_navmesh({(fa.x + fb.x) / 2, (fa.y + fb.y) / 2, (fa.z + fb.z) / 2}, 40.0, 80.0);
+}
+
+static void test_walkers_do_not_cross_walls() {
+    std::printf("walkers and a wall: a ray along every step stays on the walkable ground, nobody is inside the wall\n");
+    auto& n = navfix::shared_nav();
+    world::ActorRegistry reg;
+    reg.add(make_npc(5000, -3600, 0, 1096));
+    reg.add(make_npc(5002, -2500, 100, 1096));
+    reg.add(make_npc(5004, -3500, -600, 1096));
+    for (const uint64_t id : {5000, 5002, 5004}) reg.find(id)->npc.ground_by_data = true;
+    npc::NpcWorld w(reg, &n);
+    npc::NpcMotionSetup patrol;
+    patrol.ambient = npc::Ambient::Patrol;
+    patrol.foot_offset = 96;
+    patrol.patrol_speed = 240;
+    patrol.run_speed = 400;
+    patrol.route = {{-3600, 0, 1000}, {-2500, 0, 1000}};   // the wall (y -2000..2000) stands between the two
+    patrol.loop = false;
+    patrol.start_closest = true;
+    CHECK(w.add(5000, patrol), "(the guard is added)");
+    npc::NpcMotionSetup wander = wander_setup(1200);
+    CHECK(w.add(5002, wander) && w.add(5004, wander), "(two wanderers beside the wall)");
+    struct Track { Vec3 last; bool have = false; size_t rays = 0, blocked = 0, inside = 0; double min_x = 1e18, max_x = -1e18; };
+    std::map<uint64_t, Track> tracks;
+    run(w, 0, 300, -3000, 0, [&](double) {
+        for (const uint64_t id : {5000, 5002, 5004}) {
+            const world::WorldActor& a = *reg.find(id);
+            Track& t = tracks[id];
+            const Vec3 p{a.x, a.y, a.z};
+            if (std::fabs(a.x + 3000.0) < 100.0 - 1.0 && std::fabs(a.y) < 2000.0) ++t.inside;   // inside the wall's body (x -3100..-2900)
+            t.min_x = std::min(t.min_x, a.x);
+            t.max_x = std::max(t.max_x, a.x);
+            if (t.have && std::hypot(p.x - t.last.x, p.y - t.last.y) > 0.5) {
+                ++t.rays;
+                if (!step_on_ground(n, t.last, p)) ++t.blocked;
+            }
+            t.last = p;
+            t.have = true;
+        }
+    });
+    for (const uint64_t id : {5000, 5002, 5004}) {
+        const Track& t = tracks[id];
+        std::printf("    walker %llu: %zu steps along the ground, %zu not on the walkable ground, %zu inside the wall; x from %.0f to %.0f\n", static_cast<unsigned long long>(id), t.rays, t.blocked,
+                    t.inside, t.min_x, t.max_x);
+        CHECK(t.inside == 0 && t.blocked == 0, "no step leaves the walkable ground and nobody stands in the wall");
+    }
+    CHECK(tracks[5000].rays > 1000 && tracks[5000].min_x < -3400.0 && tracks[5000].max_x > -2600.0, "the guard walked from one side of the wall to the other (round it)");
+    CHECK(tracks[5002].rays > 100 && tracks[5004].rays > 100, "and the wanderers walked");
+}
+
 // Cyb with C.O.A
 
 int main() {
@@ -738,6 +903,9 @@ int main() {
     test_mover();
     test_table_and_hostile();
     test_cost();
+    test_near_walls_and_report();
+    test_raised_people_before_and_after();
+    test_walkers_do_not_cross_walls();
     std::printf("test_worldd_npc_move: %d passed, %d failed (%.1f s)\n", g_pass, g_fail, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     return g_fail == 0 ? 0 : 1;
 }

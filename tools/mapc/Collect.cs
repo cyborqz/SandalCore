@@ -61,7 +61,7 @@ public sealed class AreaGeometry
 public static class Collector
 {
     // collision profiles by what the pawn (the player's and the NPCs' capsules) does against them; the game's DefaultEngine.ini lists them
-    static readonly HashSet<string> NonBlockingProfiles = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> NonBlockingProfiles = new(StringComparer.Ordinal)
     {
         "NoCollision", "OverlapAll", "OverlapAllDynamic", "IgnoreOnlyPawn", "OverlapOnlyPawn", "Trigger", "UI", "Spectator", "CharacterMesh", "Ragdoll",
         "Audio", "WaterBodyCollision", "WorldOnlyProjectile", "BlockNPC", "DeployableNoOverlap", "DeployableMustOverlap", "DeployableFootprint",
@@ -293,7 +293,7 @@ public static class Collector
         }
     }
 
-    static string Fnv32(string s)
+    internal static string Fnv32(string s)
     {
         uint h = 2166136261u;
         foreach (char ch in s) { h ^= ch; h *= 16777619u; }

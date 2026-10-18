@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 
 namespace aoc::worldd::nav {
 
@@ -29,6 +30,22 @@ using Clock = std::chrono::steady_clock;
 double ms_since(Clock::time_point t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); }
 
 uint64_t cell_key(int64_t cx, int64_t cy) { return (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32) | static_cast<uint32_t>(cy); }
+
+constexpr int kStackPolys = 64;       // polygons a floor-stack query may meet over one point (a tall box: the street, a terrace, a roof, the pit's terrain, and the neighbours that share an edge)
+
+/// The height of polygon `ref` at `pos` (local coordinates; pos[1] is the height the caller searched around).  On a polygon's edge (a path's corner, a tile's border) the point may be a
+/// rounding error outside it: the closest point of the polygon within 3 cm sideways counts.  False when the polygon is not at the point.
+bool poly_height_at(const dtNavMeshQuery* query, dtPolyRef ref, const float* pos, float* height) {
+    float h = 0;
+    if (dtStatusFailed(query->getPolyHeight(ref, pos, &h))) {
+        float closest[3];
+        bool over = false;
+        if (dtStatusFailed(query->closestPointOnPoly(ref, pos, closest, &over)) || std::fabs(closest[0] - pos[0]) > 3.0f || std::fabs(closest[2] - pos[2]) > 3.0f) return false;
+        h = closest[1];
+    }
+    *height = h;
+    return true;
+}
 
 /// Detour trusts a tile's header: a tile cut short or with a wrong count would be read past its end.  The layout is dtCreateNavMeshData's.
 bool tile_is_sound(const NavTileBlob& t, int max_polys, std::string* why) {
@@ -212,14 +229,7 @@ bool AreaNav::ground_height(double x, double y, double z_hint, double* z, double
         for (int i = 0; i < n; ++i) {
             float pos[3] = {static_cast<float>(x - file_.center_x), c[1], static_cast<float>(y - file_.center_y)};
             float h = 0;
-            if (dtStatusFailed(query_->getPolyHeight(polys[i], pos, &h))) {
-                // on a polygon's edge (a path's corner, a tile's border) the point may be a rounding error outside it: the closest point of the polygon within
-                // 3 cm sideways counts
-                float closest[3];
-                bool over = false;
-                if (dtStatusFailed(query_->closestPointOnPoly(polys[i], pos, closest, &over)) || std::fabs(closest[0] - pos[0]) > 3.0f || std::fabs(closest[2] - pos[2]) > 3.0f) continue;
-                h = closest[1];
-            }
+            if (!poly_height_at(query_, polys[i], pos, &h)) continue;
             if (h < z_hint - below || h > z_hint + above) continue;
             if (!have || std::fabs(h - z_hint) < std::fabs(best - z_hint)) { best = h; have = true; }
         }
@@ -234,6 +244,28 @@ bool AreaNav::ground_height(double x, double y, double z_hint, double* z, double
     if (!have) return false;
     *z = best;
     return true;
+}
+
+std::vector<double> AreaNav::floors_at(double x, double y, double z_lo, double z_hi) const {
+    std::vector<double> out;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z_lo) || !std::isfinite(z_hi) || z_hi < z_lo) return out;
+    float c[3];
+    to_local({x, y, (z_lo + z_hi) * 0.5}, c);
+    const float ext[3] = {3.0f, static_cast<float>((z_hi - z_lo) * 0.5), 3.0f};
+    dtPolyRef polys[kStackPolys];
+    int n = 0;
+    if (dtStatusFailed(query_->queryPolygons(c, ext, filter_, polys, &n, kStackPolys))) return out;
+    const float pos[3] = {static_cast<float>(x - file_.center_x), c[1], static_cast<float>(y - file_.center_y)};
+    for (int i = 0; i < n; ++i) {
+        float h = 0;
+        if (!poly_height_at(query_, polys[i], pos, &h)) continue;
+        if (h < z_lo || h > z_hi) continue;
+        out.push_back(h);
+    }
+    std::sort(out.begin(), out.end(), std::greater<double>());
+    // a point on the edge two polygons share is on both: one floor
+    out.erase(std::unique(out.begin(), out.end(), [](double a, double b) { return a - b < 5.0; }), out.end());
+    return out;
 }
 
 bool AreaNav::nearest_point(const Vec3& p, double half_h, double half_v, Vec3* out) const {

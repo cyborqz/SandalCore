@@ -2100,6 +2100,162 @@ static void test_relog_flying_over_a_platform_bowl() {
     CHECK(!h.sink.positions.empty() && std::fabs(h.sink.positions.back().z - want) < 2.0, "the session's end hands that position to the saver");
 }
 
+// ---- the towns' buildings: floors over the street (a terrace, a tower), the summon and the relog ---------------------------------------
+
+/// The fixture's plain with the street and three buildings of a town on it, as boxes the walking map is built from (a stand-in for the town's collision): the street, a slab 55 m round whose top is the
+/// platform's floor (6,060); a terrace 8 m square with its top 4 m over the street (x 1,000..1,800, y -400..400); a tower 4 m square and 20 m high (x -1,600..-1,200, y -200..200); a roof 20 m by 20 m and
+/// 12 m up (x -800..1,200, y 2,000..4,000) that is wide enough to ride onto.
+static aoc::worldd::nav::Geometry town_with_buildings_geometry() {
+    aoc::worldd::nav::Geometry g = aoc::worldd::navfix::test_geometry();
+    namespace nf = aoc::worldd::navfix;
+    nf::place_box(g, 0, -2700, 2700, -2700, 2700, 5900, 6060);       // the street
+    nf::place_box(g, 0, 1000, 1800, -400, 400, 6060, 6460);          // the terrace
+    nf::place_box(g, 0, -1600, -1200, -200, 200, 6060, 8060);        // the tower
+    nf::place_box(g, 0, -800, 1200, 2000, 4000, 6060, 7260);         // the roof
+    return g;
+}
+
+static aoc::worldd::nav::NavFile build_walking_map(const aoc::worldd::nav::Geometry& g) {
+    aoc::worldd::nav::BuildOptions opt;
+    opt.threads = 2;
+    opt.nav_margin_cm = 3000;
+    aoc::worldd::nav::NavFile f;
+    aoc::worldd::nav::BuildStats st;
+    std::string err;
+    if (!aoc::worldd::nav::build_nav(g, 7, opt, &f, &st, &err)) {
+        std::printf("  [FAIL] the town's walking map does not build: %s\n", err.c_str());
+        std::exit(2);
+    }
+    return f;
+}
+
+static void adopt_a_walking_map(PlayerWorld& w, const aoc::worldd::nav::NavFile& file) {
+    std::string err;
+    auto nav = aoc::worldd::nav::AreaNav::from_file(file, &err);
+    if (!nav || !w.adopt_ground(std::move(nav), err)) {
+        std::printf("  [FAIL] the ground does not load: %s\n", err.c_str());
+        std::exit(2);
+    }
+}
+
+static void adopt_a_town_with_buildings(PlayerWorld& w) {
+    static const aoc::worldd::nav::NavFile file = build_walking_map(town_with_buildings_geometry());
+    adopt_a_walking_map(w, file);
+    w.set_town_platforms(tpfix::platforms_at(4242, 0, 0, 6060.0, 0.0, tpfix::grid(30, 0.0, 0.0, 2700.0)));
+}
+
+/// The character saved with its feet at (x, y, feet), facing `yaw` degrees.
+static svc::Character cyb_standing(double x, double y, double feet, float yaw = 0.0f) {
+    svc::Character c = cyb_record();
+    c.has_position = true;
+    c.position = {x, y, feet + 98.0, yaw};
+    return c;
+}
+
+/// Summons at the character's place and says whether the mount was allowed (the refusal is counted by the controller); `mount_z` is where the mount stands.
+static bool summon_allowed(const svc::Character& c, double* mount_z = nullptr) {
+    Harness h(c, adopt_a_town_with_buildings);
+    h.play();
+    summon_with(h, kMountSlot, 91);
+    h.run(milliseconds(1900));
+    const bool allowed = h.s->mounts()->stats().summons == 1 && h.s->mounts()->stats().refused == 0;
+    if (mount_z) {
+        const world::WorldActor* m = h.mount();
+        *mount_z = m ? m->z : 0.0;
+    }
+    return allowed;
+}
+
+static void test_floors_of_a_town() {
+    std::printf("the towns' buildings: the floors of a place (PlayerWorld on a street, a terrace, a tower, a roof)\n");
+    Harness h(cyb_standing(0, 1500, 6060), adopt_a_town_with_buildings);
+    PlayerWorld& w = *h.fx.world;
+    const auto stack = w.floors_at(1400, 0, 5000, 9000);
+    CHECK(stack.size() == 2 && std::fabs(stack[0] - 6460.0) < 15.0 && std::fabs(stack[1] - 6060.0) < 15.0, "over the terrace: two floors, its top (6,460) and the street under it (the platform's 6,060, once, not twice)");
+    const auto tower = w.floors_at(-1400, 0, 5000, 9000);
+    CHECK(tower.size() == 2 && std::fabs(tower[0] - 8060.0) < 15.0 && std::fabs(tower[1] - 6060.0) < 15.0, "on the tower: the top (8,060) and the street");
+    const auto street = w.floors_at(0, 1500, 5000, 9000);
+    CHECK(street.size() == 1 && std::fabs(street[0] - 6060.0) < 15.0, "on the street: one floor");
+    CHECK(w.floors_at(0, 1500, 7000, 9000).empty(), "a range over every floor: none");
+    CHECK(w.floors_at(0, 100000, 0, 9000).empty(), "outside the bowl and the map: none");
+    // the floor under the feet: the highest at most 1.5 m over them
+    const auto under_terrace = w.floor_under(1400, 0, 6460.0, 1000.0, 160.0);
+    CHECK(under_terrace && std::fabs(*under_terrace - 6460.0) < 15.0, "standing on the terrace: the terrace");
+    const auto under_flyer = w.floor_under(1400, 0, 6460.0 + 5000.0, 60000.0, 150.0);
+    CHECK(under_flyer && std::fabs(*under_flyer - 6460.0) < 15.0, "50 m over the terrace: the terrace, not the street under it");
+    const auto off_terrace = w.floor_under(2300, 0, 6460.0, 1000.0, 160.0);
+    CHECK(off_terrace && std::fabs(*off_terrace - 6060.0) < 15.0, "at the terrace's height beside it: the street, 4 m down");
+    CHECK(!w.floor_under(-1400, 1000, 8060.0, 1000.0, 160.0), "at the tower's height beside it: the street is 20 m down, out of reach");
+    const auto town_flyer = w.town_ground_at(1400, 0, 6460.0 + 5000.0);
+    CHECK(town_flyer && town_flyer->raised && town_flyer->platform && std::fabs(town_flyer->z - 6460.0) < 15.0, "town_ground_at with a height: the terrace under a flyer is a raised floor");
+    const auto town_street = w.town_ground_at(0, 1500, 6060.0 + 5000.0);
+    CHECK(town_street && !town_street->raised && std::fabs(town_street->z - 6060.0) < 5.0, "...and over the street it is the street");
+    const auto town_under = w.town_ground_at(1400, 0, 6060.0 - 5000.0);
+    CHECK(town_under && !town_under->raised && std::fabs(town_under->z - 6060.0) < 5.0, "...and a body under the platform is never put on a floor over it: the street");
+}
+
+static void test_summon_in_a_town_with_buildings() {
+    std::printf("the towns' buildings: a mount is summoned on a street and on a terrace, refused at a terrace's edge and on a tower top\n");
+    double z = 0;
+    CHECK(summon_allowed(cyb_standing(0, 1500, 6060), &z) && std::fabs(z - (6060.0 + MountController::kMountFootOffsetCm)) < 15.0, "on the street, facing the open street: allowed, the mount stands on the street");
+    CHECK(summon_allowed(cyb_standing(1125, 0, 6460), &z) && std::fabs(z - (6460.0 + MountController::kMountFootOffsetCm)) < 15.0,
+          "on the terrace with the point ahead on the terrace: allowed, the mount stands on the terrace's floor, not 4 m under it on the street");
+    CHECK(!summon_allowed(cyb_standing(1700, 0, 6460)), "at the terrace's edge, facing out over the street 4 m down: refused (past the 2.5 m a ground mount tolerates)");
+    CHECK(!summon_allowed(cyb_standing(-1400, 0, 8060)), "on the tower top facing along the street: refused, the street is 20 m down");
+    CHECK(!summon_allowed(cyb_standing(-1400, 0, 8060, 180.0f)) && !summon_allowed(cyb_standing(-1400, 0, 8060, 90.0f)) && !summon_allowed(cyb_standing(-1400, 0, 8060, -90.0f)),
+          "...in every direction (a tower top is smaller than the 5.75 m the mount appears ahead)");
+    CHECK(summon_allowed(cyb_standing(100, 3000, 7260), &z) && std::fabs(z - (7260.0 + MountController::kMountFootOffsetCm)) < 15.0,
+          "on a roof wide enough to hold the point ahead: allowed like any floor, the mount stands on the roof");
+    CHECK(!summon_allowed(cyb_standing(1000, 3000, 7260)), "...and refused at the roof's edge facing out (12 m up)");
+    CHECK(!summon_allowed(cyb_standing(1125, 0, 6460 + 1100.0)), "11 m over the terrace in the air: refused, nothing under the point within reach");
+}
+
+static void test_relog_in_a_town_with_buildings() {
+    std::printf("the towns' buildings: a relog on a terrace or a tower comes back there, not in the street below\n");
+    {
+        Harness h(cyb_standing(1125, 0, 6460), adopt_a_town_with_buildings);
+        h.play();
+        const GoodPosition g = h.s->movement().good();
+        CHECK(std::fabs(g.z - (6460.0 + 98.0)) < 0.01 && std::fabs(g.x - 1125.0) < 0.01, "a character saved on the terrace joins on the terrace (its z is the saved one, not the street's)");
+        CHECK(std::fabs(h.s->last_position().z - (6460.0 + 98.0)) < 0.01, "...and the position the session would save is that one");
+    }
+    {
+        Harness h(cyb_standing(-1400, 0, 8060), adopt_a_town_with_buildings);
+        h.play();
+        CHECK(std::fabs(h.s->movement().good().z - (8060.0 + 98.0)) < 0.01, "a character saved on the tower top joins on the tower top");
+    }
+    {
+        // 30 m under the street (the pit) is still put back on the street, as before
+        Harness h(cyb_standing(1125, 0, 6060 - 3000.0), adopt_a_town_with_buildings);
+        h.play();
+        CHECK(std::fabs(h.s->movement().good().z - (6060.0 + 98.0 + PlayerWorld::kBowlSlackCm)) < 0.01, "a character saved 30 m under the street joins on the street (floor + capsule + slack), not on the terrace over it");
+    }
+}
+
+static void test_relog_flying_over_a_terrace() {
+    std::printf("the towns' buildings: a rider flying over a terrace is saved on the terrace\n");
+    Harness h(cyb_on_the_ground(), [](PlayerWorld& w) {
+        static const aoc::worldd::nav::NavFile file = [] {
+            aoc::worldd::nav::Geometry g = aoc::worldd::navfix::test_geometry();
+            aoc::worldd::navfix::place_box(g, 0, -3000, 3000, 500, 13500, 3900, 4000);       // the street: a slab whose top is the platform's floor (4,000)
+            aoc::worldd::navfix::place_box(g, 0, -2000, 2000, 5000, 8000, 4000, 4400);       // a terrace 40 m by 30 m, 4 m over the street, under the flight
+            return build_walking_map(g);
+        }();
+        adopt_a_walking_map(w, file);
+        w.set_town_platforms(tpfix::platforms_at(4242, 0, 7000, 4000.0, 0.0, tpfix::grid(60, 0.0, 0.0, 5500.0)));
+    });
+    h.play();
+    CHECK(ride_on(h, kFlyingSlot), "(the player rides a flyer)");
+    if (!h.s->mounted()) return;
+    Rider r = start_riding(h);
+    take_off(h, r, 5000.0);
+    const GoodPosition up = h.s->movement().good();
+    const GoodPosition saved = h.s->last_position();
+    CHECK(up.y > 5000.0 && up.y < 8000.0 && up.z > 4400.0 + 1000.0, "(the rider is 10 m or more over the terrace)");
+    CHECK(std::fabs(saved.z - (4400.0 + 98.0)) < 20.0 && std::hypot(saved.x - up.x, saved.y - up.y) < 100.0,
+          "it is saved on the terrace's floor (4,400 + the capsule), not on the street 4 m under it (4,000 + the slack + the capsule)");
+}
+
 static void test_mounts_remain() {
     std::printf("stage 4: a mount that has appeared stays through a fight (a hit never desummons it)\n");
     Harness h(cyb_record());
@@ -2356,6 +2512,10 @@ int main() {
     test_relog_flying_over_a_bowl();
     test_summon_in_a_platform_bowl();
     test_relog_flying_over_a_platform_bowl();
+    test_floors_of_a_town();
+    test_summon_in_a_town_with_buildings();
+    test_relog_in_a_town_with_buildings();
+    test_relog_flying_over_a_terrace();
     test_mounts_remain();
     test_distance_desummon();
     test_real_roads();

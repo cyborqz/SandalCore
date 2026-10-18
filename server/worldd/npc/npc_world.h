@@ -88,6 +88,9 @@ struct NpcWorldConfig {
     /// roof or a ledge farther than that is not (the open world's reach is 15 m each way).
     double data_ground_below_cm = 300.0;
     double data_ground_above_cm = 150.0;
+    /// Within the agent's radius (35 cm) of a wall the walking map has no polygon at a place, and a posted person stands that close to a stall or a house: where there is none at its exact place, the
+    /// floor of the nearest polygon within this radius (cm), in the same window, is its ground.
+    double data_ground_near_cm = 100.0;
 };
 
 class NpcWorld {
@@ -167,6 +170,21 @@ public:
     const NpcWorldConfig& config() const { return cfg_; }
     double now() const { return now_; }
 
+    /// How a group of NPCs (a town's people) stand on the ground, for the log and the tests.  The height the data gave an NPC is what it is judged against.
+    struct StandReport {
+        size_t people = 0;       // the NPCs asked about that this world holds
+        size_t waiting = 0;      // ... whose chunk of the ground is not resident yet (their ground cannot be asked): counted in no other field
+        size_t on_floor = 0;     // ... on a floor within kStandNearCm of the height the data gave them
+        size_t moved = 0;        // ... on a floor farther than that (within the reach of the window)
+        size_t no_floor = 0;     // ... with no floor within reach: they stand at the data's height
+        size_t blocked = 0;      // ... of those, the ones with no walkable ground within kBlockedCm sideways and from kBlockedBelowCm under their feet to kBlockedAboveCm over: in a wall, a stall, under a floor or in the air
+        size_t stuck = 0;        // ... of those with no floor, the ones whose data gives them a life (they would wander or patrol): they stand for want of ground
+        double max_moved_cm = 0; // the farthest any of them moved to reach its floor
+    };
+    static constexpr double kStandNearCm = 30.0;
+    static constexpr double kBlockedCm = 100.0, kBlockedBelowCm = 150.0, kBlockedAboveCm = 300.0;
+    StandReport stand_report(const std::vector<uint64_t>& ids) const;
+
 private:
     enum class Mode : uint8_t { Stand, Idle, Wander, Patrol, PatrolPause, Return, Ordered };
     struct Npc {
@@ -187,6 +205,9 @@ private:
         bool         pending_ground = false;  // its chunk is not resident: it stands on the terrain and sleeps until `chunks_resident` says its ground is there
         bool         pending_ground_done = false;
         double       data_z = 0;              // the height the data gave it (an origin), kept while it waits: the ground it is stood on is the surface nearest to that
+        bool         grounded = false;        // the last grounding found a surface for it
+        double       data_feet = 0;           // where the data put its feet at that grounding (the height the surface was searched around)
+        double       ground_dz = 0;           // how far the surface it was stood on is from that (cm, over is positive)
     };
 
     double next_unit(Npc& n);
@@ -200,6 +221,9 @@ private:
     void   refresh_active(double t);
     /// Stands the NPC on the ground nearest the height it has and gives it its behaviour; true when a ground was found.
     bool   ground_npc(Npc& n, world::WorldActor& a);
+    /// The ground of a city node's person (`ground_by_data`) whose feet the data puts at `hint`: the floor nearest the feet within the tight window at its place, or, where the map has no polygon at
+    /// the exact place (within the agent's radius of a wall), the floor of the nearest polygon within data_ground_near_cm.
+    bool   ground_by_data_at(double x, double y, double hint, double* gz) const;
     bool   awake_for_someone(const world::WorldActor& a) const;
 
     world::ActorRegistry&         registry_;

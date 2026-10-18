@@ -15,6 +15,9 @@
       mount_speeds.tsv, mount_riders.tsv
     dist\content\npc_motion.tsv, region_foliage.tsv, roads_raw.tsv, roads.tsv, roads_levels.tsv
     dist\content\town_platforms.bin            the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
+    dist\content\town_layout_items.tsv,        the buildings, walls and terraces of the five towns' layouts at the level each town starts at (deploy\citynode_seed.json):
+                                               what stands where (a python list from content.db),
+      town_layouts.bin                         then their collision geometry (mapc, from the game's containers)
     dist\content\area_geom.bin, area_nav.bin   the navigation mesh (combat needs it)             (mapc and aoc_navbuild)
     dist\content\client_config\, zoi_chunks\   the game's Config files and its zone-of-influence grid (read by the generators below)
     the sources the build includes             world\zoi_surface_table.h, node_constants.h, constants_gen.go, region_data.h, garden_defs.h,
@@ -33,7 +36,7 @@
 .PARAMETER GameRoot
   The game's "Game" folder (the one that holds AOCClient.exe and AOC\). Default: GAME_ROOT, config\paths.json, Steam's libraries, the usual folders.
 .PARAMETER Only
-  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, townfloors, navmesh.
+  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, navmesh.
 .PARAMETER Skip
   Leave these steps out (for example -Skip fixtures when you do not build the tests).
 .PARAMETER Force
@@ -364,6 +367,17 @@ function Get-CodeMapc     { Get-CodeHash @('tools\mapc') }
 function Get-CodeContentc { Get-CodeHash @('services\cmd\contentc', 'services\internal\content', 'services\internal\designdb', 'services\internal\usmap', 'services\internal\aocexpr', 'services\internal\chardef', 'services\internal\statprog', 'services\go.mod', 'services\go.sum') }
 function Get-CodeGens     { Get-CodeHash @('tools\capture\gen_zoi_surface.py', 'tools\capture\gen_region_rects.py', 'tools\capture\gen_region.py', 'tools\capture\gen_node_constants.py', 'tools\capture\gen_gm_garden.py', 'tools\capture\gen_tooltips.py', 'tools\worldd\gen_gear_fixture.py', 'tools\worldd\gen_talent_fixture.py') }
 function Get-CodeNav      { Get-CodeHash @('server\worldd\nav', 'third_party\recastnavigation', 'CMakeLists.txt', 'server\worldd\CMakeLists.txt', 'vcpkg.json') }
+# The level each node starts at in the server's seed file (deploy\citynode_seed.json): the towns' buildings are listed at those levels (tools\capture\gen_town_layouts.py), so a change of a
+# level there changes the list and the navigation mesh.  Only "nodes" counts: the workshops and the comment do not change what the map holds.
+function Get-SeedLevels {
+    $path = Join-Path $repoRoot 'deploy\citynode_seed.json'
+    if (-not (Test-Path -LiteralPath $path)) { return 'no seed file' }
+    try { $seed = [IO.File]::ReadAllText($path) | ConvertFrom-Json } catch { return 'seed file unreadable' }
+    $pairs = New-Object System.Collections.Generic.List[string]
+    if ($seed.nodes) { foreach ($p in $seed.nodes.PSObject.Properties) { $pairs.Add(('{0}={1}' -f $p.Name, $p.Value.level)) } }
+    return (($pairs | Sort-Object) -join ';')
+}
+function Get-CodeLayouts  { (Get-CodeHash @('tools\capture\gen_town_layouts.py')) + ' ' + (Get-SeedLevels) }
 $ids = @{}
 
 # A step's id says what its output is a function of: the player's game files, the code that makes it and the ids of the steps it reads.
@@ -380,7 +394,8 @@ function Get-Id([string]$step) {
         'navbuild' { Get-TextHash ("navbuild " + (Get-CodeNav)) }
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
-        'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-Id 'database')) }
+        'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-CodeLayouts) + (Get-Id 'database')) }
+        'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-Id 'townlayouts') + (Get-Id 'database')) }
     }
     $ids[$step] = $v
     return $v
@@ -480,8 +495,13 @@ $steps = @(
         Assert-Files @('tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools step first'
         Invoke-Checked $dotnet @($mapcDll, 'town-floors', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_town_floors'
     } },
+    @{ Name = 'townlayouts'; Title = 'Read the buildings, walls and terraces of the five towns (a list from content.db, then the meshes it names from the game, mapc; a few seconds)'; Outputs = @('dist\content\town_layout_items.tsv', 'dist\content\town_layouts.bin'); Run = {
+        Assert-Files @('dist\content\content.db', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools and database steps first'
+        Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\capture\gen_town_layouts.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out', (Join-Path $outDir 'town_layout_items.tsv'))) 'gen_town_layouts'
+        Invoke-Checked $dotnet @($mapcDll, 'town-layouts', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir, '--min-free-gb', '8') 'mapc_town_layouts'
+    } },
     @{ Name = 'navmesh'; Title = 'Read the map and build the navigation mesh, the NPC motion table and the foliage (mapc; the longest step)'; Outputs = @('dist\content\npc_motion.tsv', 'dist\content\region_foliage.tsv', 'dist\content\area_geom.bin', 'dist\content\area_nav.bin'); Run = {
-        Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll', 'dist\content\town_platforms.bin', 'dist\content\content.db') 'run the earlier steps first'
+        Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll', 'dist\content\town_platforms.bin', 'dist\content\town_layouts.bin', 'dist\content\content.db') 'run the earlier steps first'
         $savedHeap = $env:DOTNET_GCHeapHardLimit
         if (-not $env:DOTNET_GCHeapHardLimit) { $env:DOTNET_GCHeapHardLimit = '0x100000000' }     # the NPC Blueprint pass peaks at 7.7 GB without this limit and at 4.0 GB with it, in the same time; the map read's child programs set their own
         try {

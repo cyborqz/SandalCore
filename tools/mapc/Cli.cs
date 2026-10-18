@@ -25,6 +25,10 @@ namespace Mapc;
 ///   mapc roads [--check]             read the BP_RoadActor_C splines of the area's MainGrid cells, write DIR/roads_raw.tsv (a map read: run it alone; mounts milestone, stage 4)
 ///   mapc town-floors [--check]       read the two city-node platform umaps (Landscape_Flat_D_Master_01, Landscape_River_C_Master_01: 48 MB, no map read), write DIR/town_platforms.bin
 ///                                    (the heights and holes of the five bowls' floor); with --check write nothing and exit 1 when DIR's file differs
+///   mapc town-layouts [--check]      read the static meshes and level instances that the five towns' layouts place (dist/content/town_layout_items.tsv, made by
+///                                    tools/capture/gen_town_layouts.py) from the game's containers, write DIR/town_layouts.bin (their collision geometry, in area_geom.bin's format;
+///                                    `mapc build` merges it into area_geom.bin); with --check write nothing and exit 1 when DIR's file differs.  --only NAME, --levels HEX, --probe PATH...
+///   mapc merge-geometry BASE LAYER OUT [--box X0,Y0,X1,Y1]   two geometry files as one (a scratch measurement: the box replaces the footprint, so that aoc_navbuild builds only its tiles)
 ///   mapc probe KEY.tsv               the answer key's hit rate on the extracted geometry (diagnostic)
 ///   mapc inspect NAME...             what one static mesh holds (diagnostic)
 /// Options: --paks DIR, --usmap FILE, --navbuild EXE, --center X,Y, --radius CM, --margin CM, --threads N.
@@ -58,6 +62,10 @@ public static class Cli
         public int Threads = 0;
         public bool CheckFlag;       // --check anywhere on the line: the command compares instead of writing (resolved against the command by Parse)
         public bool Explain;         // --explain: print what the line means and stop (no work): the argument handling's test
+        public string? Items;        // --items FILE: the town layouts' list (default DIR/town_layout_items.tsv)
+        public string? Only;         // --only TEXT: the bowls whose name contains it
+        public string? Levels;       // --levels HEX: the node levels (a bit each) the layouts are read for (default all seven)
+        public string? Box;          // --box X0,Y0,X1,Y1: merge-geometry's footprint
         public List<string> Rest = new();
     }
 
@@ -91,6 +99,10 @@ public static class Cli
                 case "--stop-after": o.StopAfter = int.Parse(Val()); break;
                 case "--margin": o.Margin = double.Parse(Val()); break;
                 case "--threads": o.Threads = int.Parse(Val()); break;
+                case "--items": o.Items = Val(); break;
+                case "--only": o.Only = Val(); break;
+                case "--levels": o.Levels = Val(); break;
+                case "--box": o.Box = Val(); break;
                 default:
                     if (a.StartsWith("--")) throw new ArgumentException("unknown option " + a);
                     if (o.Cmd == "help") o.Cmd = a; else o.Rest.Add(a);
@@ -104,8 +116,8 @@ public static class Cli
             switch (o.Cmd)
             {
                 case "help": case "build": case "extract": o.Cmd = "check"; break;   // the E1 gate: rebuild all three in a scratch folder and compare
-                case "check": case "mount-speeds": case "roads": case "artisan-curves": case "town-floors": break;   // these compare themselves
-                default: throw new ArgumentException("--check goes with build, mount-speeds, artisan-curves, roads or town-floors (or alone: the E1 check), not with " + o.Cmd);
+                case "check": case "mount-speeds": case "roads": case "artisan-curves": case "town-floors": case "town-layouts": break;   // these compare themselves
+                default: throw new ArgumentException("--check goes with build, mount-speeds, artisan-curves, roads, town-floors or town-layouts (or alone: the E1 check), not with " + o.Cmd);
             }
         }
         // review B I7: E1's circle is not the default area any more; its build must not land in (or be compared with) the Riverlands' files in dist/content
@@ -164,10 +176,12 @@ public static class Cli
                 case "artisan-curves": return ArtisanCurvesCommand(o);
                 case "roads": return RoadsCommand(o);
                 case "town-floors": return TownFloorsCommand(o);
+                case "town-layouts": return TownLayoutsCommand(o);
+                case "merge-geometry": return MergeGeometryCommand(o);
                 case "bp": { var game = new Game(o.Paks, o.Usmap); Inspect.Bp(game, o.Rest[0], o.Rest.Count > 1 ? o.Rest[1] : null); return 0; }
                 case "inspect": { var game = new Game(o.Paks, o.Usmap); Inspect.Run(game, new[] { "inspect" }.Concat(o.Rest).ToArray()); return 0; }
                 default:
-                    Console.WriteLine("mapc extract | build | --check | probe-cells | export-config | export-zoi | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | town-floors [--check] | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
+                    Console.WriteLine("mapc extract | build | --check | probe-cells | export-config | export-zoi | mount-speeds [--check] | artisan-curves [--check] | roads [--check] | town-floors [--check] | town-layouts [--check] | merge-geometry BASE LAYER OUT | probe KEY.tsv | inspect NAME...   [--out-dir D --paks D --usmap F --navbuild EXE --region FILE | --center X,Y --radius CM  --margin CM --threads N --batches M --heap-gb G --min-free-gb G --work-dir D --stop-after N]");
                     return o.Cmd == "help" ? 0 : 2;
             }
         }
@@ -254,6 +268,88 @@ public static class Cli
         File.WriteAllBytes(tmp, bytes);
         File.Move(tmp, file, true);
         Log($"wrote {file} ({bytes.Length} bytes)");
+        return 0;
+    }
+
+    /// <summary>mapc town-layouts: the collision geometry of what the five towns' layouts place (TownLayouts.cs) into DIR/town_layouts.bin, or with --check a byte comparison with the file
+    /// that is there.  A package read: it runs as a child under a heap limit (--heap-gb, 4 by default) behind the map read's guard (--min-free-gb free memory, no game or build running).
+    /// `--probe PATH...` lists what the named level instances hold and writes nothing.</summary>
+    static int TownLayoutsCommand(Opt o)
+    {
+        void Log(string m) => Console.WriteLine(m);
+        if (o.Rest.Contains("--probe")) return TownLayouts.Probe(new Game(o.Paks, o.Usmap), o.Rest.Where(a => a != "--probe"), Log);
+        string itemsFile = o.Items ?? Path.Combine(o.OutDir, TownLayouts.ItemsFileName);
+        if (!File.Exists(itemsFile)) { Console.Error.WriteLine($"mapc: {itemsFile} is missing (python tools/capture/gen_town_layouts.py writes it)"); return 1; }
+        if (Environment.GetEnvironmentVariable("DOTNET_GCHeapHardLimit") == null)
+        {
+            if (!Sys.WaitForRoom(o.MinFreeGb, o.WaitMinutes, Log)) { Console.Error.WriteLine("mapc: no room on this machine"); return 1; }
+            var psi = new ProcessStartInfo(Environment.ProcessPath ?? "dotnet") { UseShellExecute = false };
+            psi.ArgumentList.Add(typeof(Cli).Assembly.Location);
+            foreach (var a in Environment.GetCommandLineArgs().Skip(1)) psi.ArgumentList.Add(a);
+            double heapGb = o.HeapGb > 0 ? o.HeapGb : 4;
+            psi.Environment["DOTNET_GCHeapHardLimit"] = ((ulong)(heapGb * 1073741824.0)).ToString("X", CultureInfo.InvariantCulture);
+            psi.Environment["DOTNET_gcConcurrent"] = "0";
+            Log($"town-layouts: running under a heap limit of {heapGb:F1} GB ({Sys.FreePhysicalGb():F1} GB free)");
+            using var child = Process.Start(psi) ?? throw new InvalidOperationException("cannot start " + psi.FileName);
+            child.WaitForExit();
+            return child.ExitCode;
+        }
+        var sw = Stopwatch.StartNew();
+        int levelMask = o.Levels == null ? TownLayouts.AllLevels : int.Parse(o.Levels, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        var items = TownLayouts.Parse(File.ReadLines(itemsFile), itemsFile);
+        HashSet<long>? nodes = null;
+        if (o.Only != null)
+        {
+            nodes = items.Bowls.Where(b => b.Name.Contains(o.Only, StringComparison.OrdinalIgnoreCase)).Select(b => b.Node).ToHashSet();
+            if (nodes.Count == 0) { Console.Error.WriteLine($"mapc: no bowl of {itemsFile} has '{o.Only}' in its name"); return 1; }
+        }
+        Log($"town-layouts: {items.Bowls.Count} bowls, {items.Assets.Count} assets ({items.Assets.Count(a => a.Kind == 'L')} level instances), {items.Rows.Count} rows; levels {levelMask:X}" + (nodes != null ? $"; only {string.Join(", ", items.Bowls.Where(b => nodes.Contains(b.Node)).Select(b => b.Name))}" : ""));
+        var game = new Game(o.Paks, o.Usmap);
+        var g = new AreaGeometry();
+        var src = new TownLayouts.GameSource(game, g, Log);
+        TownLayouts.Compose(items, src, levelMask, nodes, g);
+        var bytes = GeomFile.Write(g);
+        var proc = Process.GetCurrentProcess();
+        foreach (var kv in g.Stats) Log($"  {kv.Key} = {kv.Value}");
+        Log($"town-layouts: {TownLayouts.Describe(g)}; {src.Packages} packages read, {g.Warnings.Count} warnings; {bytes.Length} bytes in {sw.Elapsed.TotalSeconds:F1} s, peak working set {proc.PeakWorkingSet64 / 1073741824.0:F2} GB, GC heap {GC.GetGCMemoryInfo().HeapSizeBytes / 1073741824.0:F2} GB");
+        string file = Path.Combine(o.OutDir, TownLayouts.FileName);
+        if (o.CheckFlag)
+        {
+            if (!File.Exists(file)) { Log($"{TownLayouts.FileName}: missing in {o.OutDir}"); return 1; }
+            var have = File.ReadAllBytes(file);
+            bool same = have.AsSpan().SequenceEqual(bytes);
+            Log(same ? $"{TownLayouts.FileName}: identical ({have.Length} bytes)" : $"{TownLayouts.FileName}: DIFFERS (file {have.Length} bytes, fresh {bytes.Length})");
+            return same ? 0 : 1;
+        }
+        Directory.CreateDirectory(o.OutDir);
+        string tmp = file + ".tmp";
+        File.WriteAllBytes(tmp, bytes);
+        File.Move(tmp, file, true);
+        Log($"wrote {file} ({bytes.Length} bytes)");
+        return 0;
+    }
+
+    /// <summary>mapc merge-geometry BASE LAYER OUT: two geometry files as one, the way `mapc build` merges the towns' layers into the map's (a scratch measurement).  --box replaces the footprint
+    /// by one rectangle, so that aoc_navbuild builds only the tiles that touch it.</summary>
+    static int MergeGeometryCommand(Opt o)
+    {
+        if (o.Rest.Count != 3) { Console.Error.WriteLine("mapc: merge-geometry BASE.bin LAYER.bin OUT.bin [--box X0,Y0,X1,Y1]"); return 2; }
+        var baseGeometry = GeomFile.Read(File.ReadAllBytes(o.Rest[0]));
+        var layer = TownLayouts.ReadLayer(o.Rest[1]);
+        var g = GeomFile.Merge(new[] { baseGeometry, layer });
+        baseGeometry = null; layer = null;
+        if (o.Box != null)
+        {
+            var p = o.Box.Split(',').Select(s => double.Parse(s, CultureInfo.InvariantCulture)).ToArray();
+            if (p.Length != 4 || !(p[2] > p[0] && p[3] > p[1])) { Console.Error.WriteLine("mapc: --box X0,Y0,X1,Y1"); return 2; }
+            var reg = new Region { Source = "box " + o.Box, Hash = 0xB0B0B0B0B0B0B0B0ul };
+            reg.Rects.Add((p[0], p[1], p[2], p[3]));
+            reg.MinX = p[0]; reg.MinY = p[1]; reg.MaxX = p[2]; reg.MaxY = p[3];
+            g.Region = reg;
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(o.Rest[2]))!);
+        File.WriteAllBytes(o.Rest[2], GeomFile.Write(g));
+        Console.WriteLine($"merge-geometry: {g.Tiles.Count} terrain tiles, {TownLayouts.Describe(g)} -> {o.Rest[2]} ({new FileInfo(o.Rest[2]).Length} bytes)");
         return 0;
     }
 
@@ -453,7 +549,22 @@ public static class Cli
     static void ExtractAndWrite(Opt o, string dir)
     {
         var g = Extract(o, dir);
+        g = AddTownLayouts(o, g);
         WriteGeometry(o, g, dir);
+    }
+
+    /// <summary>The towns' layers (mapc town-layouts: the buildings, walls, terraces and towers of the five bowls) into the region's geometry, when DIR holds the file (like the towns' floors, it is
+    /// read from the output folder, not from the scratch folder of --check).  A layer is not read for E1's circle.</summary>
+    static AreaGeometry AddTownLayouts(Opt o, AreaGeometry g)
+    {
+        string file = Path.Combine(o.OutDir, TownLayouts.FileName);
+        if (g.Region == null || !File.Exists(file)) return g;
+        var sw = Stopwatch.StartNew();
+        var layer = TownLayouts.ReadLayer(file);
+        int meshes = layer.Meshes.Count, placements = layer.Placements.Count;
+        var merged = GeomFile.Merge(new[] { g, layer });
+        Console.WriteLine($"town layouts: {meshes} meshes and {placements} placements of {file} merged in {sw.Elapsed.TotalSeconds:F1} s: {merged.Meshes.Count} meshes and {merged.Placements.Count} placements in all");
+        return merged;
     }
 
     static int Build(Opt o, string dir)

@@ -43,6 +43,10 @@ using protocol::emit::FIntrepidNetworkGUID;
 
 namespace {
 
+/// Where a mount's ground is looked for over the point it appears at (inside a bowl, where there are floors above each other): from 1.6 m over the player's feet down to 10 m under them.
+constexpr double kMountGroundUpCm = 160.0;
+constexpr double kMountGroundDownCm = 1000.0;
+
 const char* role_name(Role r) {
     switch (r) {
         case Role::PlayerController: return "PlayerController";
@@ -383,10 +387,11 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         p->mounts_ = std::make_unique<MountController>(world.registry(), *world.mounts(), [w] { return w->mint_guid(); }, std::move(owner));
         if (world.nav() || world.town_platforms()) {
             p->mounts_->set_ground([w](double x, double y, double hint) -> std::optional<double> {
-                // inside the footprint of a bowl whose platform is read the ground is the platform's floor: the baked terrain there is the pit under the town,
-                // 50 m down, which is why a summon was refused in every town ("Cannot summon mount here.").  A tower top or a high wall stands far over the platform and keeps the
-                // refusal (the mount's rule: at most 2.5 m between the feet and the ground).
-                if (const auto bowl = w->bowl_floor_at(x, y)) return bowl->z;
+                // inside the footprint of a bowl whose platform is read the ground is a floor of the place: the street, a terrace, the floor of a building (the baked terrain there is the pit under
+                // the town, 50 m down, which is why a summon was refused in every town: "Cannot summon mount here.").  It is the highest floor from 1.6 m over the player's feet down to 10 m
+                // under them, as a trace down from over the player would meet it: a terrace the player stands on is the ground, and a tower top, whose point ahead is over the street far
+                // below, has none and keeps the refusal (the mount's rule then: at most 2.5 m between the feet and the ground).
+                if (w->bowl_floor_at(x, y)) return w->floor_under(x, y, hint, kMountGroundDownCm, kMountGroundUpCm);
                 const nav::AreaNav* nav = w->nav();
                 if (!nav) return hint;   // (a world with platforms and no ground file: nothing to judge outside the bowls)
                 double z = 0;
@@ -2144,10 +2149,11 @@ std::optional<double> PlayerSession::ground_below(double x, double y, double z) 
     std::optional<double> below;
     // a flyer can be a hundred metres up: the search reaches far below, and 150 cm above (the world's own tolerance)
     if (nav && nav->ground_height(x, y, z, &ground, 60000.0, 150.0)) below = ground;
-    // over a city node's town the baked ground is the pit under it (world/town_floor.h, about 50 m down): the town floor, when the flyer is above it, is the ground
+    // over a city node's town the baked ground is the pit under it (world/town_floor.h, about 50 m down): the town floor, when the flyer is above it, is the ground.  That is the floor under
+    // the flyer: a terrace, the floor of a building or a roof when it is over one (as it is, a covered floor has no room for a slack), else the street plus the slack.
     if (world_) {
-        if (const auto town = world_->town_ground_at(x, y)) {
-            const double floor = town->z + PlayerWorld::kBowlSlackCm;
+        if (const auto town = world_->town_ground_at(x, y, z)) {
+            const double floor = town->z + (town->raised ? 0.0 : PlayerWorld::kBowlSlackCm);
             if (floor <= z + 150.0 && (!below || floor > *below)) below = floor;
         }
     }

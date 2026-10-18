@@ -120,6 +120,11 @@ public:
     /// (a navmesh floor within 40 cm of it) or when no floor is there.  False when neither exists.
     bool ground_height(double x, double y, double z_hint, double* z, double below = 400, double above = 150) const;
 
+    /// Every walkable floor at (x, y) from z_lo to z_hi (cm), the highest first, floors within 5 cm of each other counted once: the stack of a place with layers (the street, a terrace
+    /// over it, a roof, the pit's terrain under it).  The landscape's heightfield is not asked, only the navmesh's polygons are (the terrain's own polygons too, where the mesh has them).
+    /// Empty when the tile is not loaded or nothing is there.
+    std::vector<double> floors_at(double x, double y, double z_lo, double z_hi) const;
+
     /// The navmesh point nearest to p within a box of half extents (horizontal, vertical); false when there is none.
     bool nearest_point(const Vec3& p, double half_h, double half_v, Vec3* out) const;
 

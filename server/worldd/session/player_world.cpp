@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -603,6 +604,34 @@ void PlayerWorld::log_window(double now_seconds, const nav::WindowStats& w) {
                  ns.moving_now, w.chunk_loads, w.chunk_unloads, w.load_failures, w.retries, w.deferred_by_cap, w.evicted_for_room, w.plans, w.plans_skipped);
 }
 
+void PlayerWorld::check_towns(double now_seconds) {
+    if (!node_pops_ || !npcs_ || !nav_ || now_seconds - last_town_check_ < kTownCheckSeconds) return;
+    last_town_check_ = now_seconds;
+    for (const auto& [node, entry] : node_pops_->entries()) {
+        if (entry.npcs == 0) continue;
+        const npc::NpcWorld::StandReport r = npcs_->stand_report(node_pops_->actors_of(node));
+        const size_t ready = r.people - r.waiting;
+        TownCheck& c = town_checks_[node];
+        if (c.level != entry.level || c.people != r.people || c.ready != ready) {
+            c.level = entry.level;
+            c.people = r.people;
+            c.ready = ready;
+            c.changed_at = now_seconds;
+            c.logged = false;
+        }
+        // the numbers are still (a window that is loading grounds the people a few at a time), and this level was not logged a moment ago
+        if (c.logged || ready == 0 || now_seconds - c.changed_at < kTownSettleSeconds || (c.level == c.logged_level && now_seconds - c.logged_at < kTownRelogSeconds)) continue;
+        c.logged = true;
+        c.logged_at = now_seconds;
+        c.logged_level = c.level;
+        const world::CityNodeInfo* info = city_nodes_ ? city_nodes_->by_guid(node) : nullptr;
+        spdlog::info("[towns] {} ({}): {} people, {} on a floor within {:.0f} cm of where the data puts them, {} on a floor up to {:.0f} cm from it, {} with no floor in reach ({} of them with no walkable "
+                     "ground within {:.0f} cm either: in a wall, a stall, under a floor or in the air; {} of the {} would walk if they had ground), {} waiting for their ground to load",
+                     info ? info->display_name : std::to_string(node), spawns::node_level_name(entry.level), r.people, r.on_floor, npc::NpcWorld::kStandNearCm, r.moved, r.max_moved_cm, r.no_floor,
+                     r.blocked, npc::NpcWorld::kBlockedCm, r.stuck, r.no_floor, r.waiting);
+    }
+}
+
 void PlayerWorld::start_combat() {
     if (!combat_config_.enabled) {
         spdlog::info("[combat] OFF (--no-combat): the NPCs do not fight and take no hits");
@@ -649,6 +678,7 @@ void PlayerWorld::tick_world(double now_seconds) {
     window_cost_.max_people_ms = std::max(window_cost_.max_people_ms, ms(t));
     t = std::chrono::steady_clock::now();
     if (npcs_) npcs_->tick(now_seconds);
+    check_towns(now_seconds);
     window_cost_.max_npcs_ms = std::max(window_cost_.max_npcs_ms, ms(t));
     t = std::chrono::steady_clock::now();
     if (combat_) combat_->tick(now_seconds);
@@ -938,6 +968,43 @@ std::optional<PlayerWorld::TownGround> PlayerWorld::town_ground_at(double x, dou
     const auto floor = town_floor().at(x, y, ground);
     if (!floor) return std::nullopt;
     return TownGround{floor->node, ground + floor->lift, false};
+}
+
+std::vector<double> PlayerWorld::floors_at(double x, double y, double z_lo, double z_hi) const {
+    std::vector<double> out;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z_lo) || !std::isfinite(z_hi) || z_hi < z_lo) return out;
+    if (nav_ && nav_->ready_at(x, y)) {
+        out = nav_->floors_at(x, y, z_lo, z_hi);
+        if (out.empty()) {
+            // within the agent's radius of a wall the map has no polygon at the exact place: the nearest polygon's floor within a small radius stands in for it
+            nav::Vec3 stand;
+            if (nav_->nearest_point({x, y, 0.5 * (z_lo + z_hi)}, kNearWallCm, 0.5 * (z_hi - z_lo), &stand) && std::hypot(stand.x - x, stand.y - y) <= kNearWallCm && stand.z >= z_lo && stand.z <= z_hi)
+                out.push_back(stand.z);
+        }
+    }
+    // the platform's street is a floor of the place in a bowl, with or without the map's polygon for it
+    if (const auto bowl = bowl_floor_at(x, y); bowl && bowl->z >= z_lo && bowl->z <= z_hi) out.push_back(bowl->z);
+    // the map's polygon and the platform's exact street are one floor when they agree to the map's resolution (its cells are 10 cm high): no body stands between two floors 25 cm apart
+    std::sort(out.begin(), out.end(), std::greater<double>());
+    out.erase(std::unique(out.begin(), out.end(), [](double a, double b) { return a - b < 25.0; }), out.end());
+    return out;
+}
+
+std::optional<double> PlayerWorld::floor_under(double x, double y, double z, double below, double above) const {
+    if (!std::isfinite(z) || !(below >= 0) || !(above >= 0)) return std::nullopt;
+    const std::vector<double> floors = floors_at(x, y, z - below, z + above);
+    if (floors.empty()) return std::nullopt;
+    return floors.front();
+}
+
+std::optional<PlayerWorld::TownGround> PlayerWorld::town_ground_at(double x, double y, double z) const {
+    const auto street = town_ground_at(x, y);
+    if (!street || !street->platform || !std::isfinite(z)) return street;
+    // a body over a terrace, the floor of a building or a roof is on that, not on the street under it
+    const auto floor = floor_under(x, y, z, 60000.0, kFloorReachCm);
+    // (the map's street polygon is within its cell height, 10 cm, of the platform's exact street: that is the street, not a floor over it)
+    if (floor && *floor > street->z + 25.0) return TownGround{street->node, *floor, true, true};
+    return street;
 }
 
 std::optional<PlayerWorld::BowlLift> PlayerWorld::lift_out_of_bowl(double x, double y, double z) const {

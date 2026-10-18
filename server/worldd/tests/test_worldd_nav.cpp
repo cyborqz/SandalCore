@@ -123,6 +123,31 @@ static void test_ground() {
     CHECK(n.polygon_count() > 100, "the navmesh has polygons");
 }
 
+static void test_floor_stack() {
+    std::printf("floor stack (every floor at a place)\n");
+    auto& n = navfix::shared_nav();
+    // the platform at (9000, -5000) floats 500 cm over the plain: two floors, the platform's top over the plain
+    auto stack = n.floors_at(9000, -5000, 0, 3000);
+    CHECK(stack.size() == 2 && std::fabs(stack[0] - 1540.0) < 15.0 && std::fabs(stack[1] - 1000.0) < 15.0, "under and on the floating platform: two floors, the top first (1,540) and the plain under it (1,000)");
+    stack = n.floors_at(9000, -5000, 1200, 3000);
+    CHECK(stack.size() == 1 && std::fabs(stack[0] - 1540.0) < 15.0, "a range from 1,200 up: the platform's top alone");
+    stack = n.floors_at(9000, -5000, 0, 1300);
+    CHECK(stack.size() == 1 && std::fabs(stack[0] - 1000.0) < 15.0, "a range up to 1,300: the plain alone");
+    stack = n.floors_at(1000, 1000, 0, 3000);
+    CHECK(stack.size() == 1 && std::fabs(stack[0] - 1000.0) < 15.0, "on the open plain: one floor");
+    stack = n.floors_at(6000, 0, 0, 3000);
+    CHECK(stack.size() == 1 && stack[0] > 1340.0 && stack[0] < 1420.0, "on the hill: one floor, near its top (1,400)");
+    CHECK(n.floors_at(-3000, 0, 1100, 1550).empty(), "inside the wall (half way up): none");
+    CHECK(n.floors_at(1000, 1000, 3000, 5000).empty(), "a range far over every surface: none");
+    CHECK(n.floors_at(500000, 500000, 0, 3000).empty(), "far outside: none");
+    CHECK(n.floors_at(std::nan(""), 0, 0, 3000).empty() && n.floors_at(0, 0, 3000, 0).empty() && n.floors_at(0, 0, std::nan(""), 3000).empty(), "NaN and a reversed range: none");
+    // the nearest floor to a hint is the stack's member nearest to it
+    double z = 0;
+    stack = n.floors_at(9000, -5000, 0, 3000);
+    CHECK(n.ground_height(9000, -5000, 1560, &z) && stack.size() == 2 && std::fabs(z - stack[0]) < 1e-3 && n.ground_height(9000, -5000, 1000, &z) && std::fabs(z - stack[1]) < 15.0,
+          "ground_height picks from the same stack: the hint chooses the floor");
+}
+
 static double path_ground_error(nav::AreaNav& n, const nav::PathResult& p) {
     double worst = 0;
     for (const auto& pt : p.points) {
@@ -407,6 +432,7 @@ int main() {
     const auto t0 = std::chrono::steady_clock::now();
     test_build();
     test_ground();
+    test_floor_stack();
     test_paths();
     test_real_area();
     std::printf("test_worldd_nav: %d passed, %d failed (%.1f s)\n", g_pass, g_fail, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
