@@ -27,12 +27,15 @@
 //    the roads       world/roads.h's by-level roads (roadn lines): a road is worth what its level says, apply_levels moves the tiers and widths, the real roads_levels.tsv agrees with the
 //                    one-level roads.tsv at Wilderness and a node's roads change when its level does
 // ============================================================================
+#include "fake_client.h"
 #include "nav_chunk_fixture.h"
 #include "node_pop_golden.h"
 #include "content/content_db.h"
 #include "nav/area_nav.h"
 #include "npc/motion_table.h"
 #include "npc/npc_world.h"
+#include "protocol/schema/generated/index.h"
+#include "session/actor_view.h"
 #include "session/player_world.h"
 #include "spawns/captured_spawns.h"
 #include "spawns/generic_npc.h"
@@ -51,6 +54,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -71,6 +75,8 @@
 using namespace aoc::worldd;
 namespace bs = aoc::worldd::bootstrap;
 namespace fs = std::filesystem;
+namespace conn = aoc::protocol::conn;
+namespace repl = aoc::protocol::repl;
 using aoc::protocol::emit::FIntrepidNetworkGUID;
 using spawns::Why;
 
@@ -833,6 +839,142 @@ static bool read_roads_levels(const std::string& path, RoadFile& out) {
     return true;
 }
 
+// ---- the town people's health ---------------------------------------------------------------------------------------------------------------
+
+/// The EveryoneProxy stat items an actor holds (record -> value), the ones its open carries.
+static std::map<int64_t, float> stat_items(const world::WorldActor& a) {
+    std::map<int64_t, float> out;
+    for (const repl::Subobject& sub : a.actor.subobjects) {
+        if (!sub.obj.schema || std::string(sub.obj.schema->name) != "UAoCStatsComponent") continue;
+        const auto* arr = const_cast<repl::FastArrays&>(sub.obj.arrays).get(*sub.obj.schema, "StatRepInt32EveryoneProxy");
+        if (!arr) continue;
+        for (const repl::FastArrayItem& it : arr->items()) {
+            const auto v = it.values.values.find(1);
+            const auto* s = v == it.values.values.end() ? nullptr : v->second.get_if<repl::StatInt32Inst>();
+            if (s) out[s->record] = std::bit_cast<float>(s->value);
+        }
+    }
+    return out;
+}
+
+static bool has_full_health(const std::map<int64_t, float>& items) {
+    const auto h = items.find(content::kGuidHealth);
+    const auto m = items.find(content::kGuidMaxHealth);
+    return h != items.end() && m != items.end() && m->second > 0 && h->second == m->second;
+}
+
+/// The stat items a client reads in the open chain `d` of actor `a`: what the wire carries, not what the registry holds.
+static std::map<int64_t, float> stat_items_in_chain(const fake::Delivered& d, const world::WorldActor& a) {
+    std::map<int64_t, float> out;
+    const repl::Subobject* comp = nullptr;
+    for (const repl::Subobject& s : a.actor.subobjects) {
+        if (s.obj.schema && std::string(s.obj.schema->name) == "UAoCStatsComponent") comp = &s;
+    }
+    if (!comp || d.close) return out;
+    const size_t end = d.content.bit_pos();
+    std::optional<std::vector<repl::BlockView>> blocks;
+    for (size_t start = 0; start < (d.open ? 2000u : 1u) && start < end; ++start) {
+        auto got = repl::read_content_blocks(d.content.data(), end, start);
+        if (!got || got->empty() || !(*got)[0].header.is_actor) continue;
+        if (d.open && got->size() != a.actor.subobjects.size() + 1) continue;
+        blocks = std::move(got);
+        break;
+    }
+    if (!blocks) return out;
+    for (const repl::BlockView& b : *blocks) {
+        if (b.header.is_actor || b.header.object.ObjectId != comp->guid.ObjectId) continue;
+        const size_t block_end = b.payload_pos + b.payload_bits;
+        size_t pos = b.payload_pos;
+        if (b.header.has_rep_layout && !repl::read_rep_block(*comp->obj.schema, d.content.data(), block_end, pos, comp->obj.opts)) return out;
+        if (pos >= block_end) return out;
+        const auto fields = repl::read_fast_array_fields(*comp->obj.schema, d.content.data(), block_end, pos, comp->obj.opts);
+        const auto* f = comp->obj.schema->field("StatRepInt32EveryoneProxy");
+        if (!fields || !f) return out;
+        for (const repl::FastArrayField& field : *fields) {
+            if (field.field != f->index) continue;
+            for (const auto& ch : field.delta.changed) {
+                const auto v = ch.values.values.find(1);
+                const auto* s = v == ch.values.values.end() ? nullptr : v->second.get_if<repl::StatInt32Inst>();
+                if (s) out[s->record] = std::bit_cast<float>(s->value);
+            }
+        }
+    }
+    return out;
+}
+
+/// Every node NPC in the registry: its Health item exists, Health == MaxHealth > 0, and two people of one Blueprint and level hold the same number.
+static void check_town_health(PlayerWorld& world, const char* when) {
+    size_t total = 0, lacking = 0, bad = 0, wizards = 0, villagers = 0, unequal = 0;
+    std::map<std::pair<std::string, int>, float> by_kind;
+    world.registry().for_each([&](const world::WorldActor& a) {
+        if (a.kind != world::ActorKind::Npc || a.npc.spawn_ref < spawns::kNodeRefBase) return;
+        ++total;
+        const std::string leaf = spawns::blueprint_leaf(a.npc.archetype);
+        wizards += leaf == "Guard_Wizard" ? 1 : 0;
+        villagers += leaf.rfind("Node_Villager", 0) == 0 ? 1 : 0;
+        const auto items = stat_items(a);
+        if (!items.count(content::kGuidHealth) || !items.count(content::kGuidMaxHealth)) {
+            ++lacking;
+            return;
+        }
+        if (!has_full_health(items)) ++bad;
+        const auto key = std::make_pair(leaf, static_cast<int>(a.npc.level));
+        const auto [it, fresh] = by_kind.emplace(key, items.at(content::kGuidMaxHealth));
+        if (!fresh && it->second != items.at(content::kGuidMaxHealth)) ++unequal;
+    });
+    for (const auto& [kind, health] : by_kind) {
+        if (kind.first == "Guard_Wizard" || kind.first == "Guard_Captain" || kind.first.rfind("Node_Villager", 0) == 0) std::printf("    %s L%d: Health %.1f\n", kind.first.c_str(), kind.second, health);
+    }
+    std::printf("    %s: %zu town people, %zu without a Health item, %zu with Health != MaxHealth or 0, %zu guard wizards, %zu villagers\n", when, total, lacking, bad, wizards, villagers);
+    CHECK(total > 0 && wizards > 0 && villagers > 0, "(the town's people include guard wizards and villagers, two templates that have no stats of their own)");
+    CHECK(lacking == 0, "after the node people start, no node NPC lacks a Health item");
+    CHECK(bad == 0, "every node NPC has Health == MaxHealth > 0");
+    CHECK(unequal == 0, "people of one Blueprint and level hold one and the same MaxHealth");
+}
+
+/// A fake client takes the awake ring around a guard wizard: the open it receives carries its Health, full.
+static void check_open_carries_health(PlayerWorld& world) {
+    const world::WorldActor* wiz = nullptr;
+    world.registry().for_each([&](const world::WorldActor& a) {
+        if (!wiz && a.kind == world::ActorKind::Npc && a.npc.spawn_ref >= spawns::kNodeRefBase && spawns::blueprint_leaf(a.npc.archetype) == "Guard_Wizard") wiz = &a;
+    });
+    CHECK(wiz != nullptr, "(a guard wizard stands in the town)");
+    if (!wiz) return;
+    const conn::OuterHeader outer{0x500c7696u, 0, 5};
+    const conn::CustomField cf{0x38, 0x21, 0xc7, 0x0d, 0x43, 0x5d};
+    const Clock::time_point t0{std::chrono::seconds(5000)};
+    Connection server{ConnectionConfig{outer, cf, 14265, 15870}, t0};
+    fake::Client client{outer, cf, 14265, 15870};
+    ActorView view(world.registry(), ActorView::Config{}, [](uint32_t i) { return i >= 3 && i <= 6; });
+    std::vector<fake::Delivered> got;
+    Clock::time_point t = t0;
+    const uint64_t id = wiz->id;
+    const auto pass = [&] {
+        t += std::chrono::milliseconds(60);
+        view.tick(server, wiz->x, wiz->y, t);
+        for (const auto& pkt : server.flush(t)) {
+            for (const auto& d : client.receive(pkt).delivered) got.push_back(d);
+        }
+        for (const auto& pkt : client.packets({})) server.receive(pkt, t);
+        for (const AckEvent& e : server.take_ack_events()) view.on_ack(e);
+    };
+    uint32_t channel = 0;
+    for (int i = 0; i < 400 && channel == 0; ++i) {
+        pass();
+        channel = view.channel_of(id);
+    }
+    for (int i = 0; i < 20; ++i) pass();   // (the open's parts arrive over a few passes)
+    CHECK(channel != 0, "the view opens the guard wizard for a client standing at it");
+    std::map<int64_t, float> seen;
+    for (const fake::Delivered& d : got) {
+        if (d.channel != channel || !d.open) continue;
+        seen = stat_items_in_chain(d, *wiz);
+        break;
+    }
+    std::printf("    the open of the guard wizard on channel %u carries %zu stat items\n", channel, seen.size());
+    CHECK(has_full_health(seen), "the open a fake client receives for a guard wizard carries Health == MaxHealth > 0");
+}
+
 static void test_world() {
     std::printf("PlayerWorld: start_node_people, tick_world, respawn_npc and the roads\n");
     std::string error;
@@ -878,6 +1020,8 @@ static void test_world() {
         }
     });
     CHECK(with_ref == made && vendors > 0, "the town's NPCs carry node references, and some are vendors");
+    check_town_health(world, "after start_node_people");
+    check_open_carries_health(world);
 // [C | Y | B ~ CoA]
 
     // the roads at the seed's levels: a road of Joeva's zone is worth what Town gives it
@@ -926,6 +1070,8 @@ static void test_world() {
     const uint64_t again = world.respawn_npc(ref, 11.0);
     const world::WorldActor* back = world.registry().find(again);
     CHECK(again != 0 && back && back->npc.spawn_ref == ref && back->npc.asset_guid == asset, "respawn_npc brings a node NPC back through the node manager");
+    CHECK(back && has_full_health(stat_items(*back)), "...and the NPC that came back has its Health, full");
+    check_town_health(world, "after the level change and the respawn");
     CHECK(world.respawn_npc(spawns::kNodeRefBase + 7777777u, 11.0) == 0, "...and a reference that is no slot is nothing");
 }
 

@@ -179,7 +179,7 @@ void test_captured_npcs(Fixture& f) {
     CHECKF(captured.has_value(), "the captured data loads: %s", err.c_str());
     if (!captured) return;
     combat::NpcStatBook book(*f.ctx->bundle, *f.ctx->gear);
-    size_t n = 0, hp_ok = 0, mp_ok = 0, ms_ok = 0;
+    size_t n = 0, hp_ok = 0, mp_ok = 0, ms_ok = 0, no_stats = 0, no_stats_full = 0;
     for (const spawns::OpenTemplate& o : captured->opens()) {
         if (o.category != "npc") continue;
         const spawns::ParsedBlock* info = nullptr;
@@ -190,19 +190,36 @@ void test_captured_npcs(Fixture& f) {
             if (b.cls == "UNPCInfo") info = &b;
             if (b.cls == "UAoCStatsComponent") st = &b;
         }
-        if (!info || !st || !st->schema) continue;
+        if (!info || !info->schema) continue;
+        // (a villager's or a merchant's open carries no level: the town's data gives it one; the engine is asked at a synthetic level here)
         const aoc::protocol::repl::Value* lv = info->state.state.get(*info->schema, "Level");
-        const int64_t* level = lv ? lv->get_if<int64_t>() : nullptr;
-        const auto* arr = const_cast<aoc::protocol::repl::ObjectState&>(st->state).arrays.get(*st->schema, "StatRepInt32EveryoneProxy");
-        if (!level || !arr) continue;
+        const int64_t synthetic_level = 20;
+        const int64_t* found_level = lv ? lv->get_if<int64_t>() : nullptr;
+        const int64_t* level = found_level ? found_level : &synthetic_level;
+        const auto* arr = st && st->schema ? const_cast<aoc::protocol::repl::ObjectState&>(st->state).arrays.get(*st->schema, "StatRepInt32EveryoneProxy") : nullptr;
         std::map<int64_t, float> cap;
-        for (const aoc::protocol::repl::FastArrayItem& it : arr->items()) {
-            const auto v = it.values.values.find(1);
-            const auto* s = v == it.values.values.end() ? nullptr : v->second.get_if<aoc::protocol::repl::StatInt32Inst>();
-            if (s) cap[s->record] = std::bit_cast<float>(s->value);
+        if (arr) {
+            for (const aoc::protocol::repl::FastArrayItem& it : arr->items()) {
+                const auto v = it.values.values.find(1);
+                const auto* s = v == it.values.values.end() ? nullptr : v->second.get_if<aoc::protocol::repl::StatInt32Inst>();
+                if (s) cap[s->record] = std::bit_cast<float>(s->value);
+            }
         }
         const auto bp = f.motion.find(o.archetype_path);
-        if (!bp || !cap.count(content::kGuidMaxHealth)) continue;
+        // A template whose open carries no MaxHealth (a guard wizard, a villager) is not skipped: the engine must still give it a Health that is its MaxHealth, above 0.
+        if (!cap.count(content::kGuidMaxHealth)) {
+            ++no_stats;
+            auto own = bp ? book.make(*bp, static_cast<int>(*level), err) : nullptr;
+            const stats::StatValue* mh = own ? own->find(content::kGuidMaxHealth) : nullptr;
+            const stats::StatValue* h = own ? own->find(content::kGuidHealth) : nullptr;
+            const bool full = mh && h && mh->value > 0 && h->value == mh->value;
+            if (full) ++no_stats_full;
+            CHECKF(full, "%s at level %lld: its open has no MaxHealth, and the engine gives it a Health equal to its MaxHealth, above 0", spawns::blueprint_leaf(o.archetype_path).c_str(),
+                   static_cast<long long>(*level));
+            if (mh) std::printf("    %-40s L%-3lld engine Health %.1f / MaxHealth %.1f (its open has none)\n", spawns::blueprint_leaf(o.archetype_path).c_str(), static_cast<long long>(*level), h ? h->value : -1.0, mh->value);
+            continue;
+        }
+        if (!bp || !found_level) continue;   // (its open has stats but no level to compare them at)
         auto cs = book.make(*bp, static_cast<int>(*level), err);
         if (!cs) continue;
         ++n;
@@ -236,6 +253,8 @@ void test_captured_npcs(Fixture& f) {
     }
     std::printf("  %zu captured NPCs: MaxHealth within 1 %% for %zu, MaxMana for %zu, MoveSpeedMult 1.05 + 0.1 x rank for %zu\n", n, hp_ok, mp_ok, ms_ok);
     CHECK(n >= 20 && hp_ok == n, "every captured NPC's MaxHealth is the engine's, within 1 %");
+    std::printf("  %zu captured NPCs without stats in their open: the engine gives full Health to %zu\n", no_stats, no_stats_full);
+    CHECK(no_stats > 0 && no_stats_full == no_stats, "every captured NPC whose open has no stats gets a Health equal to its MaxHealth, above 0, from the engine");
 }
 
 #include "combat_tests.inc"

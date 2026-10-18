@@ -6,6 +6,8 @@
 // ============================================================================
 #include "session/player_world.h"
 
+#include "combat/npc_replicator.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -621,7 +623,7 @@ void PlayerWorld::start_combat() {
         spdlog::warn("[combat] off: {}", e);
         return;
     }
-    npc_book_.emplace(*bundle_, *gear_);
+    if (!npc_book_) npc_book_.emplace(*bundle_, *gear_);
     combat_ = std::make_unique<combat::CombatWorld>(registry_, npcs_.get(), nav_.get(), *combat_data_, *ability_catalog(), *npc_book_, motion_, combat_config_);
     start_aftermath();
     spdlog::info("[combat] on: {} abilities in the tables, damage profile of {} elements, in combat for {} s, NPCs fight within their aggro radius (default {} cm) and leash at {} cm",
@@ -722,6 +724,19 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
     config.shown_humanoids.insert(leaves.begin(), leaves.end());
     spawns::NodePopulations::Hooks hooks;
     hooks.spawned = [this](uint64_t id, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route) {
+        // A town person opens with the stats its template carried, and some templates carry none (a guard wizard, a villager), which the client shows as 0 health: every one gets the stat
+        // program's numbers for its Blueprint and level (Health at its maximum), with or without a ground, fights or players.
+        if (bundle_ && gear_) {
+            if (const world::WorldActor* person = registry_.find(id); person && person->kind == world::ActorKind::Npc) {
+                if (!npc_book_) npc_book_.emplace(*bundle_, *gear_);
+                std::string why;
+                if (const auto cs = npc_book_->make(motion_.get(person->npc.archetype), person->npc.level, why)) {
+                    combat::write_stats(registry_, id, *cs);
+                } else {
+                    spdlog::warn("[people] {} ({}): its stats do not run, it keeps its template's: {}", id, spawns::blueprint_leaf(person->npc.archetype), why);
+                }
+            }
+        }
         if (!npcs_) return;   // no ground: the NPC stands where the data put it
         const world::WorldActor* a = registry_.find(id);
         if (!a) return;
