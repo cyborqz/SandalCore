@@ -6,6 +6,8 @@
 // ============================================================================
 #include "spawns/node_populations.h"
 
+#include "npc/area_npcs.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -91,6 +93,12 @@ uint64_t NodePopulations::make(Live& l, double now, const world::CityNodeInfo& i
     // a town's people keep the height the data gave them (the layout's, retail's to 1-168 cm): the baked terrain under a city node's bowl lies about 50 m below the town's floor.  A
     // random point of a PopulationArea has no height of its own (ground_by_terrain): the ground under it decides, as in the open world.
     w->npc.ground_by_data = !w->npc.ground_by_terrain;
+    // a creature whose data says SnapToGround stands on the ground nearest the height the data gave it even where no floor is within the tight reach of that height: the data draws a town's wolves 4 to
+    // 13 m over its street and ten of its animals under it.  A person keeps the data's height (a guard on a tower), and a flyer is only lifted out of the ground.
+    if (const content::NpcInstanceRow* inst = l.spawn.spawn.instance; w->npc.ground_by_data && inst && inst->snapping_rule == "SnapToGround" && npc::is_beast_archetype(w->npc.archetype)) {
+        w->npc.snaps_to_ground = true;
+        w->npc.flies = npc::is_flying_beast_archetype(w->npc.archetype);
+    }
     const uint64_t id = w->id;
     if (!registry_.add(std::move(*w))) {
         spdlog::warn("[people] {}: an NPC ({}) was refused by the registry", info.display_name, l.spawn.spawn.asset ? l.spawn.spawn.asset->name : std::string("?"));

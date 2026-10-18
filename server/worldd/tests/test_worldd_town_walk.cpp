@@ -9,7 +9,7 @@
 //    the floor     a synthetic platform (a layout's grid with a hole) goes into a geometry with nav/town_geometry, the navmesh is built from it, and the ground queries find the platform's
 //                  floor at the node's place, in the node's yaw, and nothing at the hole or at the pit's terrain 25 m under it
 //    the routes    a route placed by a city node is walked at the node's record (world = record + R(yaw) (x, y), z = record z + z); an open-world route is not moved
-//    the kinds     vendors, clerks and stations stand whatever their instance says; a villager and a guard keep the instance's life
+//    the kinds     vendors, clerks and stations stand whatever their instance says; a villager and a guard keep the instance's life; a beast, and a flyer among the beasts, is told by its archetype's path
 //    the speeds    a guard's patrol is MaxWalkSpeed x the expression (no gain), a villager's has the 1.05 gain
 // ============================================================================
 #include "nav/area_nav.h"
@@ -211,6 +211,22 @@ static void test_kinds_and_speeds() {
               npc::stands_by_kind("Commission_Board_Lionhold_Temp_C") && npc::stands_by_kind("KAE_L3_ServiceDesk_C"),
           "the construction crate vendor (the caravansary's crate salesman), the caravan master, a service building's general NPC and the boards stand");
     CHECK(npc::is_guard_leaf("Guard_Soldier_C") && npc::is_guard_leaf("Guard_Wizard_C") && !npc::is_guard_leaf("Node_Villager_F_C") && !npc::is_guard_leaf("Wolf_C"), "guards are told by their Blueprint");
+
+    // the beasts (the creatures a SnapToGround instance stands on the ground) and the flyers among them, told by the archetype's path
+    const std::string npc_dir = "/Game/DesignAssets/Population/NPC/";
+    const std::string wolf = npc_dir + "Beast/Canine/Wolf.Default__Wolf_C", rabid = npc_dir + "Beast/Rabid/Rabid.Default__Rabid_C", pig = npc_dir + "Beast/Pig/Pig_0.Default__Pig_0_C";
+    const std::string raven = npc_dir + "Beast/Bird/Raven/Raven.Default__Raven_C", bat = npc_dir + "Beast/Bat/Bat.Default__Bat_C", gryphon = npc_dir + "Beast/Gryphon/Gryphon.Default__Gryphon_C";
+    const std::string dragon = npc_dir + "Beast/ElderDragon/ElderDragon_Base.Default__ElderDragon_Base_C", insects = npc_dir + "Beast/InsectCloud/InsectCloud.Default__InsectCloud_C";
+    const std::string guard_wizard = npc_dir + "PCRaces/Guards/Guard_Wizard.Default__Guard_Wizard_C", goblin = npc_dir + "Humanoid/Goblin/Goblin_Gravehide.Default__Goblin_Gravehide_C";
+    const std::string zom = npc_dir + "Monster/Aberration/Beholder/Ocular/BloodshotZom.Default__BloodshotZom_C";
+    CHECK(npc::is_beast_archetype(wolf) && npc::is_beast_archetype(rabid) && npc::is_beast_archetype(pig) && npc::is_beast_archetype(raven) && npc::is_beast_archetype(bat) && npc::is_beast_archetype(gryphon),
+          "wolves, rabids, pigs, ravens, bats and gryphons are beasts");
+    CHECK(!npc::is_beast_archetype(guard_wizard) && !npc::is_beast_archetype(goblin) && !npc::is_beast_archetype(zom) && !npc::is_beast_archetype("Wolf_C") && !npc::is_beast_archetype(""),
+          "a guard, a goblin, a monster, a bare class name and nothing are not");
+    CHECK(npc::is_flying_beast_archetype(raven) && npc::is_flying_beast_archetype(bat) && npc::is_flying_beast_archetype(gryphon) && npc::is_flying_beast_archetype(dragon) && npc::is_flying_beast_archetype(insects),
+          "ravens, bats, gryphons, elder dragons and insect clouds fly");
+    CHECK(!npc::is_flying_beast_archetype(wolf) && !npc::is_flying_beast_archetype(rabid) && !npc::is_flying_beast_archetype(pig) && !npc::is_flying_beast_archetype(guard_wizard) && !npc::is_flying_beast_archetype(""),
+          "wolves, rabids, pigs, a guard and nothing do not");
 
     npc::MotionTable table;
     const npc::SpeedModel speeds;

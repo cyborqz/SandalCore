@@ -520,7 +520,7 @@ static void test_golden() {
     std::printf("    %zu cases selected in %lld ms (%zu NPCs in all)\n", tests::kNodePopCaseCount, static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count()),
                 total_npcs);
     CHECK(mismatches == 0, "every node at every level has the oracle's sets, points, NPCs, losses, Blueprints and digest");
-    // the numbers the user will see
+    // the counts of people by node level and by source (layout or building) in the data
     CHECK(golden_npcs("Verra_RVR_Joeva", 4) > golden_npcs("Verra_RVR_Joeva", 3) && golden_npcs("Verra_RVR_Joeva", 3) > golden_npcs("Verra_RVR_Joeva", 0) &&
               golden_npcs("Verra_RVR_Joeva", 5) < golden_npcs("Verra_RVR_Joeva", 3) && golden_npcs("Verra_RVR_Joeva", 5) == golden_npcs("Verra_RVR_Joeva", 6),
           "(the data) Joeva has more people at Town than at Village, more at Village than at Wilderness, and at City (as at Metropolis) fewer than at Village: the Town-only sets are gone");
@@ -1660,7 +1660,7 @@ static void test_real_bowls() {
                 std::printf("    %s\n", msg);
             }
             if (std::string(name) != "Verra_RVR_Joeva") continue;
-            // the user's saved position (the rider's last good position was the baked ground + 98), under Joeva's town
+            // a position saved under Joeva's town (a rider's last good position was the baked ground + 98)
             const double ux = -1079493.1, uy = 508464.4, uz = 7748.6, ut = terrain(ux, uy);
             const auto user = tf.at(ux, uy, ut);
             std::snprintf(msg, sizeof(msg), "Joeva: the user's saved spot (z %.1f, baked ground %.1f) is in the bowl: the town's floor %.0f, %.0f m over it", uz, ut, user ? ut + user->lift : 0.0,
@@ -1726,20 +1726,21 @@ static std::string content_file(const char* name) { return (std::filesystem::pat
 struct RealTown {
     int64_t     node;
     int         level;
-    const char* routes[3];   // routes of the town (names), the walks the owner will see
+    const char* routes[3];   // routes of the town (names): the guard's round and two walks of the town's other people
+    size_t      snapped_far; // creatures the data draws more than 3 m from the street that come to it, at least (0: none is moved that far)
 };
 
 /// Opt-in (AOC_REAL_GROUND=1: it opens dist/content/area_nav.bin and loads the chunks round the town): a town at its seed level with its people on the real walking map, built with the buildings
-/// of that level.  What the card says: nobody walks through a wall, the people who stand on raised floors stand on them, the guard's round is on the ground, a mount is summoned where there is
-/// room and refused over a drop.
+/// of that level.  What it checks: nobody walks through a wall, the people who stand on raised floors stand on them, the guard's round is on the ground, a mount is summoned where there is
+/// room and refused over a drop, and an animal the data draws far from the street stands on it.
 static void test_real_town_buildings() {
     const char* env = std::getenv("AOC_REAL_GROUND");
     if (!env || !*env) {
         std::printf("the seed towns with their buildings on the real map: opt-in (AOC_REAL_GROUND=1 reads dist/content/area_nav.bin)\n");
         return;
     }
-    const RealTown towns[] = {{kJoeva, 4, {"Patrol_Node_Flat_D_L4_Middle_Guard_02", "Node_Flat_D_L4_Upper_Filler_Scholar_01", "Node_Flat_D_L4_Upper_Filler_Carry_01"}},
-                              {kHalcyon, 3, {"Node_River_C_L3_GuardMidPatrol", "Node_River_C_Upper_L3_Filler_Carry_01", "Node_River_C_Upper_L3_Filler_Guard_02"}}};
+    const RealTown towns[] = {{kJoeva, 4, {"Patrol_Node_Flat_D_L4_Middle_Guard_02", "Node_Flat_D_L4_Upper_Filler_Scholar_01", "Node_Flat_D_L4_Upper_Filler_Carry_01"}, 9},
+                              {kHalcyon, 3, {"Node_River_C_L3_GuardMidPatrol", "Node_River_C_Upper_L3_Filler_Carry_01", "Node_River_C_Upper_L3_Filler_Guard_02"}, 0}};
     for (const RealTown& rt : towns) {
         std::string error;
         const world::CityNodeInfo* real = g_env.nodes->by_guid(rt.node);
@@ -1809,6 +1810,36 @@ static void test_real_town_buildings() {
         }
         CHECK(rep.on_floor * 100 >= rep.people * 60, "at least six in ten stand on a floor within 30 cm of where the data puts them");
         CHECK(rep.no_floor * 100 <= rep.people * 8, "at most 8 in 100 have no floor in reach");
+
+        // the creatures the data says to snap to the ground (NpcInfo::snaps_to_ground): none is without a floor, the ones the data draws far from the street come to it, and a person is never one
+        {
+            size_t snapping = 0, flying = 0, without_floor = 0, persons = 0, far_moved = 0, far_moved_at_street = 0;
+            for (const uint64_t id : ids) {
+                const world::WorldActor* a = world.registry().find(id);
+                if (!a || !a->npc.snaps_to_ground) continue;
+                ++snapping;
+                flying += a->npc.flies ? 1 : 0;
+                persons += npc::is_beast_archetype(a->npc.archetype) ? 0 : 1;
+                const npc::NpcWorld::StandReport one = npcs.stand_report({id});
+                without_floor += one.no_floor;
+                if (one.max_moved_cm <= 300.0) continue;
+                // it was moved more than 3 m: the data drew it over the street or under it
+                const double foot = g_env.table.get(a->npc.archetype).half_height * npc::actor_scale_z(*a);
+                const auto street_floor = world.bowl_floor_at(a->npc.home_x, a->npc.home_y);
+                const double was = street_floor ? a->npc.home_z - foot - street_floor->z : 0.0, now = street_floor ? a->z - foot - street_floor->z : 0.0;
+                ++far_moved;
+                far_moved_at_street += street_floor && std::fabs(now) <= 250.0 ? 1 : 0;
+                std::printf("      %s (%s): the data puts its feet at %+.0f cm to the street, it stands at %+.0f cm\n", spawns::blueprint_leaf(a->npc.archetype).c_str(), a->npc.flies ? "flies" : "walks", was, now);
+            }
+            std::printf("    %zu creatures the data says to snap to the ground (%zu of them fly): %zu without a floor, %zu moved more than 3 m, %zu of those now within 2.5 m of the street\n", snapping, flying, without_floor,
+                        far_moved, far_moved_at_street);
+            CHECK(snapping > 0 && persons == 0, "creatures of the town snap to the ground, and no person is one");
+            CHECK(without_floor == 0, "every one of them has a floor of the walking map under it");
+            char msg[200];
+            std::snprintf(msg, sizeof(msg), "%s: the creatures the data draws more than 3 m from the street come to it (%zu, %s %zu), each within 2.5 m of it", real->display_name.c_str(), far_moved, rt.snapped_far ? "at least" : "exactly",
+                          rt.snapped_far);
+            CHECK(far_moved_at_street == far_moved && (rt.snapped_far ? far_moved >= rt.snapped_far : far_moved == 0), msg);
+        }
 
         // the raised people (feet over 3 m above the platform) and the others
         size_t raised = 0, raised_on_floor = 0, street = 0, street_on_floor = 0;

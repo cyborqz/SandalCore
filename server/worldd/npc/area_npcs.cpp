@@ -94,6 +94,15 @@ bool stands_by_kind(const std::string& leaf) {
 
 bool is_guard_leaf(const std::string& leaf) { return leaf.rfind("Guard_", 0) == 0; }
 
+bool is_beast_archetype(const std::string& archetype_path) { return archetype_path.find("/NPC/Beast/") != std::string::npos; }
+
+bool is_flying_beast_archetype(const std::string& archetype_path) {
+    for (const char* family : {"/NPC/Beast/Bird/", "/NPC/Beast/Bat/", "/NPC/Beast/Gryphon/", "/NPC/Beast/ElderDragon/", "/NPC/Beast/InsectCloud/"}) {
+        if (archetype_path.find(family) != std::string::npos) return true;
+    }
+    return false;
+}
+
 void place_node_route(const world::CityNodeInfo& node, double wx, double wy, double wz, double* x, double* y, double* z) {
     const double yaw = node.yaw * 3.14159265358979323846 / 180.0;
     const double c = std::cos(yaw), s = std::sin(yaw);

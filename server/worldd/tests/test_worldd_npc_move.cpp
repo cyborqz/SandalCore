@@ -224,6 +224,44 @@ static void test_ground_by_data() {
     CHECK(npc::NpcWorldConfig{}.data_ground_below_cm == 300.0 && npc::NpcWorldConfig{}.data_ground_above_cm == 150.0, "the window is 300 cm under and 150 cm over");
 }
 
+// ---- a creature the data says to snap to the ground -------------------------------------------------------------------------------------------
+
+static void test_snap_to_ground() {
+    std::printf("a city node's creature whose data says SnapToGround\n");
+    auto& n = navfix::shared_nav();
+    world::ActorRegistry reg;
+    // a node's person at (1000, 1000), where the only floor is the plain at 1,000, with its feet at the height the data gave it (the origin is 96 cm over the feet)
+    const auto put = [&](uint64_t id, double x, double y, double feet, bool snaps, bool flies) {
+        world::WorldActor a = make_npc(id, x, y, feet + 96.0);
+        a.npc.ground_by_data = true;
+        a.npc.snaps_to_ground = snaps;
+        a.npc.flies = flies;
+        reg.add(std::move(a));
+    };
+    put(1300, 1000, 1000, 2200, true, false);    // a wolf the data draws 12 m over the street
+    put(1302, 1000, 1000, 500, true, false);     // a wolf drawn 5 m under it
+    put(1304, 1000, 1000, 2200, false, false);   // a guard on a tower: the same height, no rule of the data for a creature
+    put(1306, 1000, 1000, 2200, true, true);     // a bird 12 m over the street
+    put(1308, 1000, 1000, 500, true, true);      // a bird 5 m under it
+    put(1310, 1000, 1000, 5000, true, false);    // a wolf 40 m over the street: no ground within 15 m of it
+    put(1312, 9000, -5000, 1500, true, false);   // a wolf 40 cm under the platform's top: the tight window has a floor, the plain 5 m down is not taken
+    put(1314, 1000, 1000, 1100, true, false);    // a wolf 1 m over the street: the tight window finds the plain
+    npc::NpcWorld w(reg, &n);
+    const npc::NpcMotionSetup s = wander_setup();
+    bool found = false;
+    CHECK(w.add(1300, s, &found) && found && std::fabs(reg.find(1300)->z - 1096.0) < 0.5, "a wolf the data draws 12 m over the street stands on the street");
+    CHECK(std::fabs(read_rm(*reg.find(1300)).loc.z - 1096.0) < 0.02 && !w.stands(1300), "...in the replicated movement too, and it is no longer stuck: its life (a wander) runs");
+    CHECK(w.add(1302, s, &found) && found && std::fabs(reg.find(1302)->z - 1096.0) < 0.5, "a wolf drawn 5 m under the street comes up onto it");
+    CHECK(w.add(1304, s, &found) && !found && std::fabs(reg.find(1304)->z - 2296.0) < 0.01 && w.stands(1304), "a guard on a tower, 12 m up, stays where the data put it");
+    CHECK(w.add(1306, s, &found) && !found && std::fabs(reg.find(1306)->z - 2296.0) < 0.01, "a bird 12 m over the street keeps its height");
+    CHECK(w.add(1308, s, &found) && found && std::fabs(reg.find(1308)->z - 1096.0) < 0.5, "a bird drawn 5 m under the street is lifted out of the ground onto it");
+    CHECK(w.add(1310, s, &found) && !found && std::fabs(reg.find(1310)->z - 5096.0) < 0.01, "a wolf 40 m over the street, out of the open world's reach, keeps its height");
+    CHECK(w.add(1312, s, &found) && found && std::fabs(reg.find(1312)->z - (1540.0 + 96.0)) < 12.0, "a wolf with a floor in the tight reach stands on that floor (the platform), not on the plain");
+    CHECK(w.add(1314, s, &found) && found && std::fabs(reg.find(1314)->z - 1096.0) < 0.5, "a wolf 1 m over the street stands on it, as it did before");
+    const npc::NpcWorld::StandReport r = w.stand_report({1300, 1302, 1304, 1306, 1308, 1310});
+    CHECK(r.people == 6 && r.moved == 3 && r.no_floor == 3 && r.stuck == 3 && r.max_moved_cm > 1100.0, "the report counts the three that came to the street as moved (12 m at the most) and the three that kept their height as without a floor");
+}
+
 // ---- dormant ----------------------------------------------------------------------------------------------------------------------------
 
 static void test_dormant() {
@@ -894,6 +932,7 @@ int main() {
     const auto t0 = std::chrono::steady_clock::now();
     test_standing();
     test_ground_by_data();
+    test_snap_to_ground();
     test_dormant();
     test_wander();
     test_wander_determinism();

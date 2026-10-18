@@ -60,9 +60,9 @@ mapc roads [--check]                          the road splines of the region's M
 
 | Output | What | Size |
 |---|---|---|
-| `dist/content/area_geom.bin` | geometry v2 (`GeomFile.cs`): the region's rectangles, 324 terrain tiles, 2,599 meshes, 495,776 placements (336 M triangles: the map's 324,427 placements of 2,261 meshes and the towns' buildings, below). One file: it is read once, offline, by aoc_navbuild (about 1 GB of memory); the bounded-memory half is the nav file | 240.8 MB |
-| `dist/content/area_nav.bin` | the chunked navmesh v2 (`server/worldd/nav/nav_file.h`): 324 terrain grids (161 MB, resident in worldd), 31,195 tiles in 544 chunks of up to 8 x 8 tiles (4.37 M polygons), the chunk directory with a hash per chunk | 980 MB |
-| `dist/content/town_layout_items.tsv`, `town_layouts.bin` | the buildings of the five towns: what each layout places (185,021 rows, 1,118 assets) and its collision geometry (899 meshes, 172,322 placements), see "The towns' buildings" above | 27.4 MB, 22.2 MB |
+| `dist/content/area_geom.bin` | geometry v2 (`GeomFile.cs`): the region's rectangles, 324 terrain tiles, 2,571 meshes, 361,181 placements (304 M triangles: the map's 324,427 placements of 2,261 meshes and the towns' buildings, below). One file: it is read once, offline, by aoc_navbuild (about 1 GB of memory); the bounded-memory half is the nav file | 232.0 MB |
+| `dist/content/area_nav.bin` | the chunked navmesh v2 (`server/worldd/nav/nav_file.h`): 324 terrain grids (161 MB, resident in worldd), 31,195 tiles in 544 chunks of up to 8 x 8 tiles (4.33 M polygons), the chunk directory with a hash per chunk | 974 MB |
+| `dist/content/town_layout_items.tsv`, `town_layouts.bin` | the buildings of the five towns: what each layout places at its node's starting level (37,934 rows, 1,033 assets) and its collision geometry (845 meshes, 36,777 placements), see "The towns' buildings" above | 5.7 MB, 13.3 MB |
 | `dist/content/region_foliage.tsv` | the gatherable foliage | 19.3 MB |
 | `dist/content/roads_raw.tsv`, `roads.tsv` | the roads | 0.6 MB, 0.34 MB |
 

@@ -123,7 +123,8 @@ public:
     /// its place and starts its behaviour.  False for an unknown actor, one that is not an NPC, one already held, or a setup that is not a number.
     /// `ground_found` (optional) says whether a ground was there (when not, the NPC stays at the height it had and never moves).
     /// A city node's people (`NpcInfo::ground_by_data`) keep the height the data gave them: the terrain is never their ground (the baked terrain under a town's bowl is 50 m below its floor), so
-    /// they stand at that height while their chunk is not resident and when no surface is within the tight reach of NpcWorldConfig::data_ground_below_cm / above of it.
+    /// they stand at that height while their chunk is not resident and when no surface is within the tight reach of NpcWorldConfig::data_ground_below_cm / above of it.  The exception is a creature
+    /// whose data says SnapToGround (`NpcInfo::snaps_to_ground`): with no surface in that reach it takes the ground nearest its height within 15 m (a flyer, `NpcInfo::flies`, only when that ground is over it).
     /// With a chunk window (nav/area_nav.h, G1 stage 1) the ground of an NPC whose chunk is not resident cannot be asked yet: it stands on the terrain, is dormant, `pending` (optional) says so, and
     /// it is grounded for good when `chunks_resident` reports its chunk (the same standing as above).
     bool add(uint64_t actor_id, const NpcMotionSetup& setup, bool* ground_found = nullptr, bool* pending = nullptr);

@@ -78,7 +78,7 @@ struct SpeedModel {
     double guard_expression_gain = 1.00;
     double return_factor = 0.5;
     /// Gathering stage 3, "Hunting": the PlayerInteractionDefs of the creatures that always stand (the huntable ones, gather/gathering.h hunting_defs).  A huntable creature is interacted with while
-    /// it stands still (the user, 2026-10-12; the client refuses the hunt of one that walks: "can't tame right now"), so its instance's Wander or Patrol is not lived.  Null: none.
+    /// it stands still (the client refuses the hunt of one that walks: "can't tame right now"), so its instance's Wander or Patrol is not lived.  Null: none.
     const std::set<int64_t>* standing_defs = nullptr;
 };
 
@@ -101,6 +101,12 @@ constexpr double kWorkshopRadiusCm = 600.0;
 
 /// True for a guard's Blueprint (`Guard_Soldier`, `Guard_Wizard`).
 bool is_guard_leaf(const std::string& leaf);
+
+/// True for a creature of the data's Beast family (an archetype path under /NPC/Beast/: wolves, rabids, ravens, pigs ...), never a person (/NPC/PCRaces/, /NPC/Humanoid/) or a monster.
+bool is_beast_archetype(const std::string& archetype_path);
+
+/// True for a beast that flies (a bird, a bat, a gryphon, an elder dragon, an insect cloud): `NpcInfo::flies`.  A rule that stands creatures on the ground only lifts such a creature out of the ground.
+bool is_flying_beast_archetype(const std::string& archetype_path);
 
 /// The z scale an actor's open carries (1 when it has none).
 double actor_scale_z(const world::WorldActor& a);

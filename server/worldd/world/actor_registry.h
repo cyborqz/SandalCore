@@ -96,6 +96,12 @@ struct NpcInfo {
     bool        ground_by_terrain = false;   // its height is not known (a PopulationArea's random point): the ground under it decides
     bool        ground_by_data = false;      // its height is known and right (a city node's people: retail's z to 1-168 cm) while the baked terrain under a bowl is not: the data's height
                                              // stands unless a surface of the ground is within reach of it (NpcWorld never moves it to the terrain)
+    /// A city node's creature whose data says SnapToGround (an archetype of the Beast family: a wolf, a rabid, a raven; never a person): where no floor is within the tight reach of the height the data
+    /// gave it, the ground nearest that height within the open world's reach (15 m each way) is its floor (NpcWorld::ground_npc), so an animal the data draws over a street stands on it and one drawn
+    /// under it comes up.  A person keeps the data's height (a guard on a tower stays up).
+    bool        snaps_to_ground = false;
+    /// ... and one of them that flies (a bird, a bat, a gryphon, a dragon) is only lifted out of the ground, never pulled down out of the air.
+    bool        flies = false;
 };
 
 /// What a town's replicator (ActorKind::NodeLayout) is to the server: which node it shows, at which level, and what its LayoutAssetSetGuids holds (the log and the tests).

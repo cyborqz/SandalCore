@@ -162,6 +162,15 @@ bool NpcWorld::ground_npc(Npc& n, world::WorldActor& actor) {
             hint = terrain;
             found = nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
         }
+        // a creature whose data says SnapToGround (`snaps_to_ground`) with no floor within the tight reach: the ground nearest the height the data gave it, within the open world's reach, is its floor (the
+        // data draws a town's wolves 4 to 13 m over its street and ten of its animals under it).  A flyer is only lifted out of the ground, never pulled down out of the air.
+        if (!found && a->npc.snaps_to_ground) {
+            double wide = 0;
+            if (nav_->ground_height(a->x, a->y, hint, &wide, 1500.0, 1500.0) && (!a->npc.flies || wide >= hint)) {
+                gz = wide;
+                found = true;
+            }
+        }
     }
     n.grounded = found;
     n.data_feet = hint;
