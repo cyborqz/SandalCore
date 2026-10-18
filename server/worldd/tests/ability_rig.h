@@ -30,8 +30,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ability_rig {
@@ -143,14 +145,64 @@ struct Seen {
     std::vector<bootstrap::ZoneOp>     zones;   // the lingering zones' actors this step opens, fades or closes
 };
 
+/// What a Rig reads from content.db and no test changes: the file, its stat context, the ability tables and rules, and the talent catalog. A test that
+/// builds hundreds of Rigs (one per captured session) used to open and parse all of it again for each one; it is loaded once per file for the life of the
+/// process now, and every Rig holds it by pointer. Nothing in it is written after it is loaded.
+struct RigContent {
+    std::string                         path;
+    std::optional<content::ContentDb>   db;
+    const bootstrap::StatContext*       ctx = nullptr;
+    std::optional<abilities::Catalog>   catalog;          // not loaded when the Rig is built without the ability tables
+    content::AbilityRules               rules;
+    std::optional<talents::Catalog>     talent_catalog;   // the production path's: the ranks the character holds come from a talents::Book
+    std::string                         problem;          // why it could not be loaded (empty: it is there)
+};
+
+/// The shared content of `path`, loaded on the first call (with the ability tables or without them).
+inline std::shared_ptr<const RigContent> rig_content(const std::string& path, bool with_catalog) {
+    static std::map<std::pair<std::string, bool>, std::shared_ptr<const RigContent>> loaded;
+    std::shared_ptr<const RigContent>& slot = loaded[{path, with_catalog}];
+    if (slot) return slot;
+    auto c = std::make_shared<RigContent>();
+    c->path = path;
+    std::string error;
+    c->db = content::ContentDb::open(path, error);
+    if (!c->db) {
+        c->problem = "content.db: " + error;
+        return slot = c;
+    }
+    c->ctx = &world_stats::of(*c->db);
+    if (with_catalog) {
+        c->catalog = abilities::Catalog::load(path, *c->ctx->bundle, error);
+        if (!c->catalog) {
+            c->problem = "the ability tables: " + error;
+            return slot = c;
+        }
+    }
+    const auto r = c->db->ability_rules(error);
+    if (!r) {
+        c->problem = "ability rules: " + error;
+        return slot = c;
+    }
+    c->rules = *r;
+    auto talent_rows = c->db->talent_data(error);
+    if (talent_rows) c->talent_catalog = talents::Catalog::from(std::move(*talent_rows), error);
+    if (!c->talent_catalog) {
+        c->problem = "the talents: " + error;
+        return slot = c;
+    }
+    return slot = c;
+}
+
 struct Rig {
-    std::string                                 path;
-    std::optional<content::ContentDb>           db;
+    std::shared_ptr<const RigContent>           shared;   // what the Rig reads from content.db (shared by every Rig of the process, never written)
+    const std::string&                          path;
+    const std::optional<content::ContentDb>&    db;
     const bootstrap::StatContext*               ctx = nullptr;
-    std::optional<abilities::Catalog>           catalog;
-    content::AbilityRules                       rules;
+    const std::optional<abilities::Catalog>&    catalog;
+    const content::AbilityRules&                rules;
+    const std::optional<talents::Catalog>&      talent_catalog;   // the production path's: the ranks the character holds come from a talents::Book
     std::optional<stats::CharacterStats>        cs;
-    std::optional<talents::Catalog>             talent_catalog;   // the production path's: the ranks the character holds come from a talents::Book
     std::optional<talents::Book>                book;
     std::vector<stats::SkillRank>               base_ranks;   // what the Book holds (held_ranks()) and the named skills it has no rank for
     std::optional<AbilityRuntime>               a7;
@@ -168,32 +220,12 @@ struct Rig {
     /// of the level with the skills bought, whose held_ranks() are what GetSkillPurchased reads and whose passives() are the stat mods of the ranks
     /// (Endurance Training's MaxStamina +10), as build_player_setup and the session hand them to the stat engine. A skill that is in no tree the
     /// character can buy from is a skill-typed rank the test names alone (a talent inferred from a capture).
-    Rig(int class_enum, int level, const std::vector<std::string>& extra_skills = {}, bool with_catalog = true, uint64_t seed = 7) {
-        path = real_db_path();
+    Rig(int class_enum, int level, const std::vector<std::string>& extra_skills = {}, bool with_catalog = true, uint64_t seed = 7)
+        : shared(rig_content(real_db_path(), with_catalog)), path(shared->path), db(shared->db), ctx(shared->ctx), catalog(shared->catalog), rules(shared->rules),
+          talent_catalog(shared->talent_catalog) {
         std::string error;
-        db = content::ContentDb::open(path, error);
-        if (!db) {
-            problem = "content.db: " + error;
-            return;
-        }
-        ctx = &world_stats::of(*db);
-        if (with_catalog) {
-            catalog = abilities::Catalog::load(path, *ctx->bundle, error);
-            if (!catalog) {
-                problem = "the ability tables: " + error;
-                return;
-            }
-        }
-        const auto r = db->ability_rules(error);
-        if (!r) {
-            problem = "ability rules: " + error;
-            return;
-        }
-        rules = *r;
-        auto talent_rows = db->talent_data(error);
-        if (talent_rows) talent_catalog = talents::Catalog::from(std::move(*talent_rows), error);
-        if (!talent_catalog) {
-            problem = "the talents: " + error;
+        if (!shared->problem.empty()) {
+            problem = shared->problem;
             return;
         }
         book.emplace(*talent_catalog, class_record_guid(class_enum), level);

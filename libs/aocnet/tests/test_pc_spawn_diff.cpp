@@ -24,8 +24,9 @@
 //  stream tail as remaining diff — that's the RepLayout handle content
 //  which needs Session I-style schema-value calibration.
 //
-//  Fixture:
-//    * captured_pc_spawn_reassembled.bin (608 bytes, 4864 bits)
+//  Recording:
+//    * a reassembled bunch payload (608 bytes, 4864 bits; recordings.h).
+//      Without it the test prints SKIP and exits 0.
 // ============================================================================
 #include "protocol/emit/actor_builder.h"
 #include "protocol/emit/bunch_writer.h"
@@ -33,6 +34,7 @@
 #include "protocol/emit/intrepid_netguid.h"
 #include "protocol/emit/schema_value.h"
 #include "protocol/schema/schema_registry.h"
+#include "recordings.h"
 #include <cstdio>
 #include <cstdint>
 #include <fstream>
@@ -96,16 +98,15 @@ static emit::ExportEntry build_three_level(uint64_t leaf_obj,
 }
 
 int main() {
-    std::printf("=== Session H.3d PC spawn diff — full captured fixture ===\n\n");
+    std::printf("=== Session H.3d PC spawn diff — full recorded bunch ===\n\n");
 
-    // Load the captured reassembled bunch payload (608 bytes, 4864 bits).
-    const std::string fixture_path =
-        "src\\protocol\\tools\\captured_pc_spawn_reassembled.bin";
+    // Load the recorded reassembled bunch payload (608 bytes, 4864 bits).
+    const std::string fixture_path = recordings::find(recordings::kBunch);
+    if (fixture_path.empty()) return recordings::skip_test(recordings::kBunch);
     auto captured = read_binary(fixture_path);
     if (captured.empty()) {
-        std::fprintf(stderr, "[FAIL] Could not read fixture: %s\n",
+        std::fprintf(stderr, "[FAIL] Could not read the recording: %s\n",
                      fixture_path.c_str());
-        std::fprintf(stderr, "       Run: python src/protocol/tools/reassemble_pc_spawn.py\n");
         return 1;
     }
     std::printf("  captured bunch payload : %zu bytes (%zu bits)\n",
@@ -122,8 +123,8 @@ int main() {
 
     // ── Build the 3 captured export entries ───────────────────────────────
     //
-    // Values extracted by running src/protocol/tools/decode_pc_spawn_v2.py
-    // against the captured reassembled bunch.  Exact byte-for-byte content.
+    // Values read from the recorded reassembled bunch.  Exact byte-for-byte
+    // content.
     std::vector<emit::ExportEntry> exports;
 
     // [0] AoCPlayerControllerBP class — 2-level with bHasPath+bHasChecksum (0x05)
@@ -203,7 +204,7 @@ int main() {
     // -7750527)).  bSerializeRotation/Scale/Velocity = 0 — no rotation,
     // scale, or velocity body follows.
     //
-    // See decode_transform_body.py for the walk.  Note the format is
+    // Note the format is
     // OFFSET-BINARY (sign in MSB), not sign+magnitude.  Transform body
     // is 82 bits total (bSerializeLocation + bQuantizeLocation + 5-bit
     // BitsNeeded + 3 × 24-bit offset-binary + 3 flag bits = 82).

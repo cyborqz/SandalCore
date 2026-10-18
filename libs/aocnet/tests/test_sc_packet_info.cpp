@@ -7,10 +7,12 @@
 //  S>C PacketInfo: when bHasPacketInfoPayload is 0 nothing else follows —
 //  no bHasServerFrameTime bit, no FrameTimeByte (stock UE5 ReadPacketInfo
 //  early-return, the same rule as C>S).  Checked against the original
-//  server's packets in fixtures/replay_data.bin: packets without PacketInfo
-//  make up the bootstrap stream right after the PC ActorOpen.
+//  server's packets in the recorded session (recordings.h): packets without
+//  PacketInfo make up the bootstrap stream right after the PC ActorOpen.
+//  Without the recording the test prints SKIP and exits 0.
 // ============================================================================
 #include "protocol/wire/packet_parser.h"
+#include "recordings.h"
 
 #include <cstdio>
 #include <cstring>
@@ -26,7 +28,7 @@ static int g_pass = 0, g_fail = 0;
     else { std::printf("  [FAIL] %s\n", msg); g_fail++; } \
 } while (0)
 
-// Raw S>C packet payloads from replay_data.bin ('RPLY' v1).
+// Raw S>C packet payloads from the recorded session ('RPLY' v1).
 static std::vector<std::vector<uint8_t>> load_packets(const std::string& path) {
     std::vector<std::vector<uint8_t>> out;
     std::ifstream f(path, std::ios::binary);
@@ -52,8 +54,10 @@ static std::vector<std::vector<uint8_t>> load_packets(const std::string& path) {
 // ~ C Y B :: CoA ~
 
 int main() {
-    const auto packets = load_packets(std::string(AOC_REPO_ROOT) + "/fixtures/replay_data.bin");
-    CHECK(packets.size() == 29010, "replay_data.bin holds 29010 packets");
+    const std::string session = recordings::find(recordings::kSession);
+    if (session.empty()) return recordings::skip_test(recordings::kSession);
+    const auto packets = load_packets(session);
+    CHECK(packets.size() == 29010, "the recorded session holds 29010 packets");
     if (packets.size() != 29010) {
         std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
         return 1;

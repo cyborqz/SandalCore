@@ -390,7 +390,11 @@ inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
         if (db) sqlite3_close(db);
         return false;
     }
-    bool ok = exec(db, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID");
+    // The file is written here once and read back by this process only: no rollback journal and no sync. Every statement below is its own
+    // transaction, and with a journal file and an fsync each, making the file took about 0.7 s.
+    bool ok = exec(db, "PRAGMA journal_mode = OFF");
+    ok = exec(db, "PRAGMA synchronous = OFF") && ok;
+    ok = exec(db, "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID") && ok;
     ok = exec(db, (std::string("INSERT INTO meta VALUES ('schema_version', '") + o.schema_version + "')").c_str()) && ok;
     if (o.contentc_version) ok = exec(db, (std::string("INSERT INTO meta VALUES ('contentc.version', '") + o.contentc_version_value + "')").c_str()) && ok;
     if (o.source_sha) {

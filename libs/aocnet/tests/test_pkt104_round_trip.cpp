@@ -27,11 +27,11 @@
 //  The cmd_index at bit 1592 is a separate preamble — we read it for
 //  identification but don't yet validate its interpretation.
 //
-//  Fixture: src/protocol/tools/captured_pkt_104.bin
-//           (extract via extract_pkt_fixture.py 104 captured_pkt_104)
+//  Recording: one raw 978-byte server packet (recordings.h); without it the
+//             test prints SKIP and exits 0.
 //
 //  PHASE 1 (this file):
-//    * Load fixture
+//    * Load the recording
 //    * Verify header/bunch metadata
 //    * Read cmd_index at bit 1592
 //    * Decode FString at bit 1624 via our FString codec
@@ -48,6 +48,7 @@
 #include "protocol/emit/replayout/encoders/fstring_codec.h"
 #include "protocol/emit/bunch_writer.h"
 #include "protocol/wire/packet_reader.h"
+#include "recordings.h"
 // C-O-A : C Y B
 
 #include "spdlog/spdlog.h"
@@ -65,8 +66,7 @@ using namespace aoc::protocol::emit::replayout;
 using aoc::protocol::emit::BunchWriter;
 using aoc::protocol::wire::PacketReader;
 
-constexpr const char* FIXTURE_PATH =
-    "src\\protocol\\tools\\captured_pkt_104.bin";
+std::string g_recording;   // the recording's path in the folder AOC_RECORDINGS_DIR names (main sets it)
 
 constexpr size_t RAW_BITS            = 7824;
 constexpr size_t BUNCH_START         = 152;
@@ -144,8 +144,8 @@ static std::string bits_to_string(const uint8_t* data, size_t bit_off, size_t n)
 // ─── Phase 1: metadata verification ──────────────────────────────────────
 
 void phase1_verify(const std::vector<uint8_t>& data) {
-    spdlog::info("== fixture ==");
-    spdlog::info("  path  : {}", FIXTURE_PATH);
+    spdlog::info("== recording ==");
+    spdlog::info("  path  : {}", g_recording);
     spdlog::info("  size  : {} bytes ({} bits, expected {})",
                  data.size(), data.size() * 8, RAW_BITS);
     CHECK(data.size() * 8 == RAW_BITS, "raw size matches expected");
@@ -298,10 +298,11 @@ int main() {
     spdlog::info("  pkt#104 (HUD character name) round-trip harness");
     spdlog::info("================================================================");
 
-    auto data = read_binary(FIXTURE_PATH);
+    g_recording = recordings::find(recordings::kPacketA);
+    if (g_recording.empty()) return recordings::skip_test(recordings::kPacketA);
+    auto data = read_binary(g_recording);
     if (data.empty()) {
-        spdlog::error("Could not read fixture: {}", FIXTURE_PATH);
-        spdlog::error("Extract with: python src/protocol/tools/extract_pkt_fixture.py 104 captured_pkt_104");
+        spdlog::error("Could not read the recording: {}", g_recording);
         return 1;
     }
 

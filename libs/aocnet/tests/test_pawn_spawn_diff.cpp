@@ -17,7 +17,8 @@
 //
 //  STATE (2026-04-24)
 //  ------------------
-//  - Fixture: src/protocol/tools/captured_pkt_78.bin (816-byte raw packet)
+//  - Recording: an 816-byte raw packet (recordings.h; the test prints SKIP and
+//    exits 0 without it)
 //  - Archetype paths confirmed:
 //      "Default__PlayerPawn_C"  (FString 22 bytes)
 //      "/Game/ThirdPersonCPP/Blueprints/PlayerPawn"  (FString 43 bytes)
@@ -50,6 +51,7 @@
 #include "protocol/emit/package_map_exporter.h"
 #include "protocol/emit/schema_value.h"
 #include "protocol/schema/schema_registry.h"
+#include "recordings.h"
 // -- C:Y:B . C O A --
 
 #include <cstdio>
@@ -90,17 +92,12 @@ static emit::ExportEntry build_two_level(uint64_t leaf_obj,
 int main() {
     std::printf("=== test_pawn_spawn_diff — baseline calibration run ===\n\n");
 
-#ifndef AOC_REPO_ROOT
-#  define AOC_REPO_ROOT "."
-#endif
-    const std::string fixture_path =
-        std::string(AOC_REPO_ROOT) +
-        "/src/protocol/tools/captured_pkt_78.bin";
+    const std::string fixture_path = recordings::find(recordings::kPacketB);
+    if (fixture_path.empty()) return recordings::skip_test(recordings::kPacketB);
     auto captured = read_binary(fixture_path);
     if (captured.empty()) {
-        std::fprintf(stderr, "[FAIL] Could not read fixture: %s\n",
+        std::fprintf(stderr, "[FAIL] Could not read the recording: %s\n",
                      fixture_path.c_str());
-        std::fprintf(stderr, "       Run: python src/protocol/tools/extract_pawn_spawn_fixture.py\n");
         return 1;
     }
     std::printf("  captured packet : %zu bytes (%zu bits)\n",
@@ -124,7 +121,7 @@ int main() {
     //   outer: "/Game/ThirdPersonCPP/Blueprints/PlayerPawn"  (43 bytes incl NUL)
     //
     // NetGUID OIDs and checksums are TODO — extract them via a targeted
-    // pkt#78 bunch decode (same pattern as decode_pc_spawn_v2.py).
+    // pkt#78 bunch decode (same pattern as the PC spawn test).
     std::vector<emit::ExportEntry> exports;
     {
         auto e = build_two_level(

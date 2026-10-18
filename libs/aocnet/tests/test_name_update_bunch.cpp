@@ -5,15 +5,17 @@
 //  tools/test_name_update_bunch.cpp
 //
 //  Validates that build_name_update_bunch_payload produces bit-identical
-//  output to the captured pkt#104 Name-update region when invoked with
+//  output to the recorded pkt#104 Name-update region when invoked with
 //  name="RandomChar".  This is the anchor test proving our synthesizer
-//  faithfully reproduces the wire format.
+//  faithfully reproduces the wire format.  Test A needs the recorded packet
+//  (recordings.h): without it test A prints SKIP and tests B and C still run.
 //
 //  LAYER:   tools
 //  OWNER:   Phase III M1
 // ============================================================================
 #include "protocol/emit/name_update_bunch.h"
 #include "protocol/emit/bunch_writer.h"
+#include "recordings.h"
 
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -26,13 +28,7 @@
 using aoc::protocol::emit::BunchWriter;
 using aoc::protocol::emit::build_name_update_bunch_payload;
 
-#ifndef AOC_REPO_ROOT
-#  define AOC_REPO_ROOT "."
-#endif
-constexpr const char* FIXTURE_PATH =
-    AOC_REPO_ROOT "/src/protocol/tools/captured_pkt_104.bin";
-
-// Captured pkt#104 wire coordinates for the Name-update region.
+// Recorded pkt#104 wire coordinates for the Name-update region.
 // (Ground truth from test_pkt104_round_trip constants.)
 constexpr size_t REGION_START_BIT = 1496;  // first bit of 16-byte prefix
 constexpr size_t REGION_END_BIT   = 1744;  // one past last bit of FString
@@ -77,7 +73,12 @@ void test_identity_match() {
     spdlog::info("");
     spdlog::info("== test A: synth(\"RandomChar\") == captured bits 1496..1744 ==");
 
-    std::vector<uint8_t> captured = read_binary(FIXTURE_PATH);
+    const std::string fixture = recordings::find(recordings::kPacketA);
+    if (fixture.empty()) {
+        recordings::print_skip(recordings::kPacketA);
+        return;
+    }
+    std::vector<uint8_t> captured = read_binary(fixture);
     CHECK(!captured.empty(), "fixture loaded");
     if (captured.empty()) return;
 // [C.O.A x C:Y:B]

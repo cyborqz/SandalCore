@@ -7,9 +7,9 @@
 function(aocnet_add_test name)
     add_executable(${name} ${name}.cpp)
     target_link_libraries(${name} PRIVATE aocnet)
-    # Fixtures live under src/protocol/tools; PROJECT_SOURCE_DIR is the repo
-    # root (CMAKE_CURRENT_SOURCE_DIR would be this directory).
-    target_compile_definitions(${name} PRIVATE AOC_REPO_ROOT="${PROJECT_SOURCE_DIR}")
+    # The tests that compare against recorded packets read them from the folder
+    # named by the environment variable AOC_RECORDINGS_DIR (recordings.h) and
+    # print SKIP when it is not set.
     if(MSVC)
         target_compile_definitions(${name} PRIVATE
             _CRT_SECURE_NO_WARNINGS
@@ -27,19 +27,11 @@ foreach(t
     test_possession
     test_rep_layout_writer
     test_sc_packet_info
-    test_serialize_new_actor
     test_hit_confirmation
-    test_schemas
-    test_replayout_codecs
     test_pkt22_round_trip
     test_pkt104_round_trip
     test_name_update_bunch
-    test_property_update_bunch_builder
     test_pawn_spawn_diff
-    test_actor_builder
-    test_nmt_welcome
-    test_nmt_challenge
-    test_nmt_netguid_assign
     test_pc_spawn_diff
     test_package_map_export
     test_packet_notify

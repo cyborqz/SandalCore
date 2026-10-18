@@ -100,19 +100,15 @@ add_library(aocnet STATIC
     protocol/repl/node_layout.h
     # emit
     protocol/emit/actor_builder.cpp
-    protocol/emit/nmt_builder.cpp
     protocol/emit/package_map_exporter.cpp
     protocol/emit/name_update_bunch.cpp
-    protocol/emit/property_update_bunch_builder.cpp
     protocol/emit/actor_builder.h
     protocol/emit/actor_bunch.h
     protocol/emit/bunch_writer.h
     protocol/emit/intrepid_netguid.h
     protocol/emit/name_update_bunch.h
     protocol/emit/net_serializers.h
-    protocol/emit/nmt_builder.h
     protocol/emit/package_map_exporter.h
-    protocol/emit/property_update_bunch_builder.h
     protocol/emit/rep_layout_writer.h
     protocol/emit/schema_value.h
     # emit/replayout — RepLayout property codecs

@@ -7,8 +7,9 @@
 //  pkt#22 (PC ActorOpen) round-trip harness.  Goal: decode the RepLayout
 //  property stream → re-encode → bit-identical with captured bytes.
 //
-//  Fixture: src/protocol/tools/captured_pc_spawn_reassembled.bin
-//           608 B / 4864 bits, 4859 effective (last 5 bits = byte padding).
+//  Recording: one reassembled bunch payload (recordings.h), 608 B / 4864 bits,
+//           4859 effective (last 5 bits = byte padding); without it the test
+//           prints SKIP and exits 0.
 //
 //  Known bunch structure (docs/aoc-wire-format-decoded.md):
 //
@@ -56,6 +57,7 @@
 #include "protocol/emit/replayout/decoder.h"
 #include "protocol/emit/bunch_writer.h"
 #include "protocol/wire/packet_reader.h"
+#include "recordings.h"
 // C.Y.B and C-O-A
 
 #include "spdlog/spdlog.h"
@@ -81,8 +83,7 @@ constexpr size_t EFFECTIVE_BITS      = 4859;   // last 5 bits of byte-aligned bu
 constexpr size_t BUFFER_BITS         = 4864;   // total bits in the file
 constexpr uint32_t DEADBEEF          = 0xDEADBEEF;
 
-constexpr const char* FIXTURE_PATH =
-    "src\\protocol\\tools\\captured_pc_spawn_reassembled.bin";
+std::string g_recording;   // the recording's path in the folder AOC_RECORDINGS_DIR names (main sets it)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -113,8 +114,8 @@ static uint32_t read_bits_at(const uint8_t* data, size_t data_size,
 // ─── Phase 1: load and header diagnostics ─────────────────────────────────
 
 void report_header(const std::vector<uint8_t>& data) {
-    spdlog::info("== fixture ==");
-    spdlog::info("  path           : {}", FIXTURE_PATH);
+    spdlog::info("== recording ==");
+    spdlog::info("  path           : {}", g_recording);
     spdlog::info("  bytes          : {}", data.size());
     spdlog::info("  bits           : {} (effective {})", data.size() * 8, EFFECTIVE_BITS);
     spdlog::info("  transform body : bit {}..{}  ({} bits)",
@@ -396,9 +397,11 @@ int main() {
     spdlog::info("  pkt#22 (PC ActorOpen) round-trip harness — phase 1 diagnostic");
     spdlog::info("================================================================");
 
-    auto data = read_binary(FIXTURE_PATH);
+    g_recording = recordings::find(recordings::kBunch);
+    if (g_recording.empty()) return recordings::skip_test(recordings::kBunch);
+    auto data = read_binary(g_recording);
     if (data.empty()) {
-        spdlog::error("Could not read fixture: {}", FIXTURE_PATH);
+        spdlog::error("Could not read the recording: {}", g_recording);
         return 1;
     }
     if (data.size() * 8 != BUFFER_BITS) {
