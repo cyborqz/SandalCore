@@ -98,8 +98,9 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 
 - **Everything:** `build_all.bat` (the game data, then `powershell -File scripts\build.ps1 -Target all`).
 - **One program:** `powershell -File scripts\build.ps1 -Target worldd` (targets: `tether_server`, `launcher`, `worldd`). `build_launcher.bat` builds just `launcher`. The game data has to be made first.
-- **Options:** `-Config Debug`, `-Clean`, `-Configure` (re-run CMake), `-Test`, `-Jobs N` (build at most N projects at a time); `build_all.bat` passes them on.
-- **Plain CMake:**
+- **Options:** `-Config Debug`, `-Clean`, `-Configure` (re-run CMake), `-Test`, `-Jobs N` (build at most N projects and at most N compiler processes at a time; without it the compilers use as many processors as the free memory allows); `build_all.bat` passes them on.
+- **Why it is fast:** the build compiles the files of one project in parallel, and it copies the libraries' DLLs into `dist\Release` once after the build instead of after every program. A `build\x64` folder made by an earlier version keeps working as it was; `build.ps1 -Configure` switches it over.
+- **Plain CMake** (it works, but it is slower: one file at a time inside a project, and the DLLs are copied after every program):
   ```bat
   cmake -S . -B build\x64 -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
   cmake --build build\x64 --config Release

@@ -11,7 +11,7 @@
 #      .\scripts\run_tests.ps1 -SaveBaseline FILE      # write summary to FILE
 #      .\scripts\run_tests.ps1 -CompareTo FILE         # exit 1 if results differ
 #      .\scripts\run_tests.ps1 -Heavy                  # also run the heavy tests (below)
-#      .\scripts\run_tests.ps1 -Jobs 6                 # build at most 6 projects at a time (default: every core)
+#      .\scripts\run_tests.ps1 -Jobs 6                 # build at most 6 projects and 6 compiler processes at a time (see build.ps1)
 #
 #  The heavy tests (test_worldd_region_load: 1 GB of ground, about a minute, wall-clock checks) are NOT in the default gate: on a PC that is also building or
 #  playing a timing check can flip, and the PC hard-resets under load.  -Heavy runs them (G1 review B I1); the plan's last task and the lead do, alone, under the
@@ -35,11 +35,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($SaveBaseline -and $CompareTo) { throw "use -SaveBaseline or -CompareTo, not both" }
 $root  = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$build = Join-Path $root 'build\x64'
 $dist  = Join-Path $root "dist\$Config"
-
-$cmake = (Get-Command cmake -ErrorAction SilentlyContinue).Source
-if (-not $cmake) { $cmake = 'C:\Program Files\CMake\bin\cmake.exe' }
 # ~ CoA :: C Y B ~
 
 if (-not $NoBuild) {
@@ -48,12 +44,9 @@ if (-not $NoBuild) {
     # link straight into dist\<Config> via CMAKE_RUNTIME_OUTPUT_DIRECTORY, so
     # MSBuild relinks the current ones below.
     Remove-Item (Join-Path $dist 'test_*.exe') -ErrorAction SilentlyContinue
-    if (-not (Test-Path (Join-Path $build 'CMakeCache.txt'))) {
-        & (Join-Path $PSScriptRoot 'build.ps1') -Config $Config -Configure -Jobs $Jobs
-    }
-    $mArg = if ($Jobs -gt 0) { "/m:$Jobs" } else { '/m' }
-    & $cmake --build $build --config $Config -- $mArg /nr:false /v:minimal /nologo
-    if ($LASTEXITCODE -ne 0) { throw "build failed" }
+    # build.ps1 sets the build folder up when there is none, builds every target the fast way and copies the vcpkg DLLs next to the programs;
+    # it stops with an error when the build fails
+    & (Join-Path $PSScriptRoot 'build.ps1') -Target ALL_BUILD -Config $Config -Jobs $Jobs
 }
 
 # Windows PowerShell 5.1 turns a native program's redirected stderr into a
