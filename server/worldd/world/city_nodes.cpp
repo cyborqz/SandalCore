@@ -289,9 +289,31 @@ bool CityNodes::apply_seed_file(const std::string& path, std::string& error, siz
         if (const CityNodeInfo* lord = by_name(p->second)) ln.parent_guid = lord->guid;
     }
     set_all(live, LevelSource::Seed);
+    // the workshops the nodes start with: a node the registry does not have, or an entry with no plot name or no building kind, is left out
+    plot_choices_.clear();
+    if (j.contains("plots") && j["plots"].is_object()) {
+        for (auto it = j["plots"].begin(); it != j["plots"].end(); ++it) {
+            const CityNodeInfo* n = by_name(it.key());
+            if (!n || !it.value().is_array()) continue;
+            std::vector<PlotChoice> list;
+            for (const auto& e : it.value()) {
+                if (!e.is_object() || !e.contains("plot") || !e["plot"].is_string() || !e.contains("building") || !e["building"].is_string()) continue;
+                PlotChoice c;
+                c.plot = e["plot"].get<std::string>();
+                c.building = e["building"].get<std::string>();
+                if (!c.plot.empty() && !c.building.empty()) list.push_back(std::move(c));
+            }
+            if (!list.empty()) plot_choices_[n->guid] = std::move(list);
+        }
+    }
     if (applied) *applied = ok;
     if (skipped) *skipped = bad;
     return true;
+}
+
+const std::vector<CityNodes::PlotChoice>& CityNodes::plot_choices(int64_t guid) const {
+    const auto it = plot_choices_.find(guid);
+    return it == plot_choices_.end() ? no_plot_choices_ : it->second;
 }
 // CoA + C.Y.B
 

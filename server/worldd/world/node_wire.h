@@ -42,6 +42,7 @@ struct PlotRow {
     uint8_t state = 0;       // EBuildingState: Empty 0, UnderConstruction 1, Operational 2
     uint8_t starting_state = 0;   // the plot's StartingState in the design data (the five NodeXP projects: UnderConstruction 1); `state` is what this world starts them at
     bool    pre_construct = false;
+    std::string name;        // the plot's record name ("Plot_17_Service")
     double  qx = 0, qy = 0, qz = 0, qw = 1, tx = 0, ty = 0, tz = 0, sx = 1, sy = 1, sz = 1;   // the plot's transform in the layout
 };
 
@@ -74,6 +75,9 @@ public:
 
     /// The plots of `layout` at `level`, in the layout's order (the shared source of the summary and the scenery).
     const std::vector<PlotRow>& plot_rows(int64_t layout, int level) const;
+    /// The plots of the node `node_guid` at `level`: plot_rows() of its layout, with the workshops the seed starts the node with (CityNodes::plot_choices) built on the
+    /// service plots it names (Operational, the building of that kind among the plot's own).  The summary, the scenery and the people all read this.
+    std::vector<PlotRow> plot_rows_of(int64_t node_guid, int level) const;
     /// What the node's level grants: the highest defined level at or below `level` (nothing before the first).
     LevelGrants grants(int64_t node_guid, int level) const;
     /// The layout record of a node (0: none) and whether the record is a real node of a map (the dungeons and the jungle are not).
@@ -101,6 +105,12 @@ private:
     std::map<std::pair<int64_t, int>, std::vector<PlotRow>> plots_;   // (layout, level)
     std::vector<int64_t>                                   estates_;
     std::vector<PlotRow>                                   none_;
+    struct Candidate {
+        int64_t     building = 0;
+        std::string name;   // the building's record name ("Construction_Support_Factory_Building")
+    };
+    std::map<int64_t, std::vector<Candidate>>              candidates_;   // a plot's buildings, by plot
+    const CityNodes*                                       nodes_ = nullptr;
 };
 
 /// The bounty commodity every node of the retail capture carries (ItemRecordBase PlayerCommodity_Test_KyleJusto); the ocean node's is 0.

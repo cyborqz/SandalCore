@@ -23,7 +23,7 @@
 //                 speed the retail captures show for its archetype (else a quarter of its Blueprint's walk speed), idles again.  A point with no path is
 //                 dropped and another is tried.
 //    Patrol       walks its PathingRoute's waypoints in order, pausing at each as the route says; a looping route goes round, any other goes
-//                 there and back.  A route placed by a city node or an encounter is not walked in the open world: its NPC stands.
+//                 there and back.  A route placed by a city node is walked at that node's record (a town person); one placed by an encounter is not walked: its NPC stands.
 //    Return home  an NPC that is further from home than twice its radius (or that stage 3's AI sends) walks back at a run.
 //  "Default" (7,335 instances) is Wander: the retail captures show Default instances wandering.
 //
@@ -84,6 +84,10 @@ struct NpcWorldConfig {
     size_t max_pathfinds_per_step = 24;  // the paths asked for in one step (the rest decide on the next)
     int    max_search_iterations_per_step = 60000;   // the A* node expansions of one step's searches together (review A I5: 24 searches at the old cap of 2,500; about 43 ms at 0.7 us a node): the rest decide on the next step
     double max_wander_path_factor = 3.0; // a wander path longer than this times the walk's straight distance is dropped
+    /// The reach of the ground of a city node's person (`ground_by_data`): its data height is within 1 to 168 cm of the town's floor, so a surface 3 m under it or 1.5 m over it is its ground, and a
+    /// roof or a ledge farther than that is not (the open world's reach is 15 m each way).
+    double data_ground_below_cm = 300.0;
+    double data_ground_above_cm = 150.0;
 };
 
 class NpcWorld {
@@ -116,7 +120,7 @@ public:
     /// its place and starts its behaviour.  False for an unknown actor, one that is not an NPC, one already held, or a setup that is not a number.
     /// `ground_found` (optional) says whether a ground was there (when not, the NPC stays at the height it had and never moves).
     /// A city node's people (`NpcInfo::ground_by_data`) keep the height the data gave them: the terrain is never their ground (the baked terrain under a town's bowl is 50 m below its floor), so
-    /// they stand at that height while their chunk is not resident and when no surface is within 15 m of it.
+    /// they stand at that height while their chunk is not resident and when no surface is within the tight reach of NpcWorldConfig::data_ground_below_cm / above of it.
     /// With a chunk window (nav/area_nav.h, G1 stage 1) the ground of an NPC whose chunk is not resident cannot be asked yet: it stands on the terrain, is dormant, `pending` (optional) says so, and
     /// it is grounded for good when `chunks_resident` reports its chunk (the same standing as above).
     bool add(uint64_t actor_id, const NpcMotionSetup& setup, bool* ground_found = nullptr, bool* pending = nullptr);

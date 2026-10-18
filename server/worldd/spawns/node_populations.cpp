@@ -105,7 +105,7 @@ uint64_t NodePopulations::make(Live& l, double now, const world::CityNodeInfo& i
         if (inst && inst->patrol_route != 0) {
             if (const auto r = population_->routes.find(inst->patrol_route); r != population_->routes.end()) route = &r->second;
         }
-        hooks_.spawned(id, inst, route);
+        hooks_.spawned(id, inst, route, info, l.spawn.plot);
     }
     return id;
 }

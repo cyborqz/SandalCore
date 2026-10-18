@@ -19,6 +19,14 @@ import (
 type Seed struct {
 	Levels  map[int64]int   // node guid -> level (0..MaxNodeLevel)
 	Parents map[int64]int64 // vassal guid -> its lord's guid
+	// Plots is the workshops each node starts with (the file's "plots").  citynode only checks them: worldd reads them from the file.
+	Plots map[int64][]SeedPlot
+}
+
+// SeedPlot is one workshop of a node's start: a service plot of the node's layout (Plot_17_Service) and the kind of building on it (Factory, Farm).
+type SeedPlot struct {
+	Plot     string `json:"plot"`
+	Building string `json:"building"`
 }
 
 // seedFile is the file's JSON.  "comment" is free text for the person who edits the file.
@@ -28,6 +36,7 @@ type seedFile struct {
 		Level  *int   `json:"level"`
 		Parent string `json:"parent"`
 	} `json:"nodes"`
+	Plots map[string][]SeedPlot `json:"plots"`
 }
 
 // LoadSeed reads a seed file.
@@ -56,7 +65,7 @@ func ParseSeed(b []byte, r *Roster) (*Seed, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%w: text after the JSON object", ErrInvalid)
 	}
-	s := &Seed{Levels: map[int64]int{}, Parents: map[int64]int64{}}
+	s := &Seed{Levels: map[int64]int{}, Parents: map[int64]int64{}, Plots: map[int64][]SeedPlot{}}
 	// in a stable order, so a message about the file is the same every time
 	names := make([]string, 0, len(f.Nodes))
 	for name := range f.Nodes {
@@ -90,6 +99,36 @@ func ParseSeed(b []byte, r *Roster) (*Seed, error) {
 				return nil, fmt.Errorf("%w: node %q is its own parent", ErrInvalid, name)
 			}
 			s.Parents[n.Guid] = p.Guid
+		}
+	}
+	// the workshops: each key is a node of the roster (named once), each entry names a plot and a building kind, and a plot is listed once per node
+	plotNodes := make([]string, 0, len(f.Plots))
+	for name := range f.Plots {
+		plotNodes = append(plotNodes, name)
+	}
+	sort.Strings(plotNodes)
+	plotted := map[int64]string{}
+	for _, name := range plotNodes {
+		n, err := r.Resolve(0, name)
+		if err != nil {
+			return nil, fmt.Errorf("plots of node %q: %w", name, err)
+		}
+		if first, dup := plotted[n.Guid]; dup {
+			return nil, fmt.Errorf("%w: the plots of %q and %q are the same node (%s)", ErrInvalid, first, name, n.Name)
+		}
+		plotted[n.Guid] = name
+		seen := map[string]bool{}
+		for i, p := range f.Plots[name] {
+			if p.Plot == "" || p.Building == "" {
+				return nil, fmt.Errorf("%w: plots of node %q: entry %d needs a plot and a building", ErrInvalid, name, i)
+			}
+			if seen[p.Plot] {
+				return nil, fmt.Errorf("%w: plots of node %q: plot %q is listed twice", ErrInvalid, name, p.Plot)
+			}
+			seen[p.Plot] = true
+		}
+		if len(f.Plots[name]) > 0 {
+			s.Plots[n.Guid] = f.Plots[name]
 		}
 	}
 	// A parent is a node like any other: it may be left out of "nodes" (Wilderness).  A loop is refused.

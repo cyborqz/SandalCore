@@ -5,6 +5,7 @@
 //  aoc_navbuild  (plan E1, stage 2; chunked output: G1 stage 1): mapc's area_geom.bin into area_nav.bin.
 //
 //      aoc_navbuild --geometry dist/content/area_geom.bin --out dist/content/area_nav.bin [--threads N] [--nav-margin-cm 10000]
+//      ... --town-floors dist/content/town_platforms.bin --content dist/content/content.db      also stand the five towns' platforms at their node records (nav/town_geometry.h)
 //      aoc_navbuild --compare A.bin B.bin      two chunked files: the same header, region, terrain and chunk hashes?  (exit 0 / 1; `mapc --check` uses it)
 //      aoc_navbuild --info FILE.bin            the numbers of a file (tiles, chunks, sizes, terrain); with --verify every chunk is read back and its hash checked
 //
@@ -12,6 +13,10 @@
 //  region (mapc's version 2 file) gives the chunked file (nav/nav_file.h version 2); a geometry of E1's circle gives the flat version 1.
 // ============================================================================
 #include "nav/nav_build.h"
+#include "nav/town_geometry.h"
+#include "world/town_platform.h"
+
+#include <sqlite3.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -103,8 +108,45 @@ static int info_file(const std::string& path, bool verify) {
     return 0;
 }
 
+// The node records of the five towns (content.db's city_node): where each platform stands.
+static bool read_town_frames(const std::string& content_db, std::vector<TownFrame>* out, std::string* err) {
+    sqlite3* db = nullptr;
+    if (sqlite3_open_v2(content_db.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        *err = "cannot open " + content_db;
+        if (db) sqlite3_close(db);
+        return false;
+    }
+    bool ok = true;
+    for (const auto& bowl : aoc::worldd::world::kTownBowls) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT x, y, z, yaw FROM city_node WHERE guid = ?", -1, &st, nullptr) != SQLITE_OK) {
+            *err = content_db + ": city_node cannot be read (" + sqlite3_errmsg(db) + ")";
+            ok = false;
+            break;
+        }
+        sqlite3_bind_int64(st, 1, bowl.node);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            TownFrame f;
+            f.node = bowl.node;
+            f.layout = bowl.layout;
+            f.x = sqlite3_column_double(st, 0);
+            f.y = sqlite3_column_double(st, 1);
+            f.z = sqlite3_column_double(st, 2);
+            f.yaw_degrees = sqlite3_column_double(st, 3);
+            out->push_back(std::move(f));
+        } else {
+            *err = std::string("city_node has no record of ") + bowl.name;
+            ok = false;
+        }
+        sqlite3_finalize(st);
+        if (!ok) break;
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
 int main(int argc, char** argv) {
-    std::string geom, out;
+    std::string geom, out, town_floors, content;
     BuildOptions opt;
     std::string cmp_a, cmp_b, info;
     bool verify = false;
@@ -116,6 +158,8 @@ int main(int argc, char** argv) {
         };
         if (a == "--geometry") geom = val("--geometry");
         else if (a == "--out") out = val("--out");
+        else if (a == "--town-floors") town_floors = val("--town-floors");
+        else if (a == "--content") content = val("--content");
         else if (a == "--threads") opt.threads = std::atoi(val("--threads"));
         else if (a == "--nav-margin-cm") opt.nav_margin_cm = std::atof(val("--nav-margin-cm"));
         else if (a == "--verbose") opt.verbose = true;
@@ -126,8 +170,12 @@ int main(int argc, char** argv) {
     }
     if (!cmp_a.empty()) return compare_files(cmp_a, cmp_b);
     if (!info.empty()) return info_file(info, verify);
+    if (town_floors.empty() != content.empty()) {
+        std::fprintf(stderr, "aoc_navbuild: --town-floors and --content go together (the platforms and the node records they stand at)\n");
+        return 2;
+    }
     if (geom.empty() || out.empty()) {
-        std::fprintf(stderr, "usage: aoc_navbuild --geometry area_geom.bin --out area_nav.bin [--threads N] [--nav-margin-cm N]\n"
+        std::fprintf(stderr, "usage: aoc_navbuild --geometry area_geom.bin --out area_nav.bin [--threads N] [--nav-margin-cm N] [--town-floors town_platforms.bin --content content.db]\n"
                              "       aoc_navbuild --compare A.bin B.bin | --info FILE.bin [--verify]\n");
         return 2;
     }
@@ -141,6 +189,19 @@ int main(int argc, char** argv) {
     }
     std::printf("geometry: %zu terrain grids, %zu meshes, %zu placements%s\n", g.terrain.size(), g.meshes.size(), g.placements.size(),
                 g.region.empty() ? " (E1's circle)" : (", a region of " + std::to_string(g.region.size()) + " rectangles").c_str());
+    if (!town_floors.empty()) {
+        std::vector<aoc::worldd::world::PlatformLayout> layouts;
+        std::vector<TownFrame> frames;
+        if (!aoc::worldd::world::read_town_platforms(town_floors, &layouts, &err) || !read_town_frames(content, &frames, &err)) { std::fprintf(stderr, "aoc_navbuild: %s\n", err.c_str()); return 1; }
+        const size_t first_mesh = g.meshes.size(), first_placement = g.placements.size();
+        TownGeometryStats ts;
+        if (!add_town_platforms(&g, layouts, frames, &ts, &err)) { std::fprintf(stderr, "aoc_navbuild: %s\n", err.c_str()); return 1; }
+        if (!ts.unplaced.empty() || ts.nodes != frames.size()) { std::fprintf(stderr, "aoc_navbuild: %zu of the %zu towns have no platform in %s\n", frames.size() - ts.nodes, frames.size(), town_floors.c_str()); return 1; }
+        // the file's geometry hash covers the map's file and what the platforms added
+        const uint64_t pair[2] = {geometry_hash, town_geometry_hash(g, first_mesh, first_placement)};
+        geometry_hash = fnv1a64(reinterpret_cast<const uint8_t*>(pair), sizeof pair);
+        std::printf("towns: %zu platforms of %zu layouts (%zu blocks, %zu triangles, %zu quads left out for holes), %zu placements\n", ts.nodes, ts.layouts, ts.blocks, ts.triangles, ts.holes_skipped, ts.placements);
+    }
     NavFile f;
     BuildStats st;
     if (!build_nav(g, geometry_hash, opt, &f, &st, &err)) {

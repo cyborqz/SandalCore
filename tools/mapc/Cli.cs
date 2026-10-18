@@ -12,7 +12,8 @@ namespace Mapc;
 ///   mapc probe-cells [--batches M]   the master umap alone: the cells the area reads, per grid, and how M batches would cut them
 ///   mapc extract [--out-dir DIR]     read the cooked map for the area (a region: in --batches M child processes under a heap limit), write DIR/area_geom.bin
 ///                                    (and, for a region, DIR/region_foliage.tsv: the gatherable foliage)
-///   mapc build   [--out-dir DIR]     extract, run aoc_navbuild (DIR/area_nav.bin) and read the NPC Blueprints (DIR/npc_motion.tsv)
+///   mapc build   [--out-dir DIR]     extract, run aoc_navbuild (DIR/area_nav.bin) and read the NPC Blueprints (DIR/npc_motion.tsv); when DIR has town_platforms.bin and content.db
+///                                    aoc_navbuild also stands the five towns' platforms at their node records (the navigation mesh then has the towns' own floors)
 ///   mapc --check [--out-dir DIR]     rebuild all three in a scratch folder and compare them byte for byte with DIR's; exit 1 on a difference
 ///                                    (`mapc build --check` is the same; `--check` stands anywhere: `mapc --check roads` is `mapc roads --check`; `--explain` prints what a line means and stops)
 ///   mapc export-config               the client's Config directory (AOC/Config: DefaultCombat.ini, DefaultAoCRecordConstants.ini ...) as the game ships it, into DIR/client_config
@@ -418,6 +419,13 @@ public static class Cli
         var psi = new ProcessStartInfo(o.Navbuild) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         psi.ArgumentList.Add("--geometry"); psi.ArgumentList.Add(geom);
         psi.ArgumentList.Add("--out"); psi.ArgumentList.Add(nav);
+        // the towns' floors: the platforms (mapc town-floors) and the node records they stand at (content.db) are read from the output folder when both are there
+        string floors = Path.Combine(o.OutDir, TownFloors.FileName), content = Path.Combine(o.OutDir, "content.db");
+        if (File.Exists(floors) && File.Exists(content))
+        {
+            psi.ArgumentList.Add("--town-floors"); psi.ArgumentList.Add(floors);
+            psi.ArgumentList.Add("--content"); psi.ArgumentList.Add(content);
+        }
         // the navmesh build runs on the machine's cores; the output does not depend on how many.  Half of them by default (the PC hard-resets under heavy load; a run takes 2 to 3 minutes).
         int threads = o.Threads > 0 ? o.Threads : Math.Max(2, Environment.ProcessorCount / 2);
         psi.ArgumentList.Add("--threads"); psi.ArgumentList.Add(threads.ToString());

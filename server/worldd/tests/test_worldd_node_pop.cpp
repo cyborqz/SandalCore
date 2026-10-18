@@ -50,6 +50,7 @@
 #include "world/roads.h"
 #include "world/town_floor.h"
 
+#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -124,6 +125,8 @@ struct Env {
     std::optional<spawns::GenericNpcs>       generic;
     std::unique_ptr<world::CityNodes>        nodes;
     std::unique_ptr<world::NodeWire>         wire;
+    std::unique_ptr<world::CityNodes>        shipped_nodes;   // the same nodes with the shipped seed's workshops
+    std::unique_ptr<world::NodeWire>         shipped_wire;
     std::unique_ptr<spawns::NodePopulationData> data;
     spawns::SpawnContext                     base;
     std::set<std::string>                    shown;
@@ -131,7 +134,22 @@ struct Env {
 };
 static Env g_env;
 
-static std::unique_ptr<world::CityNodes> fresh_nodes() {
+/// The seed's levels with the file's plot list (the workshops the nodes start with) taken out, in a file of the temp directory: the oracle's counts are of towns that start with no workshop.
+static std::string seed_without_plots() {
+    std::ifstream in(NODES_SEED_PATH);
+    nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+        std::printf("  [FAIL] the seed file does not read: %s\n", NODES_SEED_PATH);
+        std::exit(2);
+    }
+    j.erase("plots");
+    const std::string path = (std::filesystem::temp_directory_path() / "node_pop_seed_no_plots.json").string();
+    std::ofstream(path) << j.dump();
+    return path;
+}
+
+/// The nodes with the seed's levels.  `with_plots` keeps the shipped seed's workshops; the baseline (the oracle's world) has none.
+static std::unique_ptr<world::CityNodes> fresh_nodes(bool with_plots = false) {
     std::string error;
     auto nodes = world::CityNodes::load(db_path(), error);
     if (!nodes) {
@@ -139,7 +157,7 @@ static std::unique_ptr<world::CityNodes> fresh_nodes() {
         std::exit(2);
     }
     size_t applied = 0;
-    nodes->apply_seed_file(NODES_SEED_PATH, error, &applied);
+    nodes->apply_seed_file(with_plots ? std::string(NODES_SEED_PATH) : seed_without_plots(), error, &applied);
     return nodes;
 }
 
@@ -357,6 +375,67 @@ static void test_data() {
     CHECK(checked && building_frame, "a building's sets are placed at the plot's translation rotated by the node's yaw, at the node's height plus the plot's, with the plot's yaw added to the node's");
 }
 
+// ---- the workshops the seed starts the towns with ------------------------------------------------------------------------------------------
+
+/// The NPCs a selection put at a plot, by their Blueprint's leaf (name and path of the asset): {villagers, hammer smiths, shovel farmers, others}.
+struct PlotFolk { size_t total = 0, villager_f = 0, hammer = 0, shovel = 0; };
+static PlotFolk folk_at(const std::vector<spawns::NodeSpawn>& list, int64_t plot) {
+    PlotFolk f;
+    for (const spawns::NodeSpawn& s : list) {
+        if (plot == 0 || s.plot != plot || !s.spawn.asset) continue;
+        const std::string id = s.spawn.asset->name + " " + s.spawn.asset->archetype_path;
+        ++f.total;
+        if (id.find("Villager_M_Hammer") != std::string::npos) ++f.hammer;
+        else if (id.find("Villager_M_Shovel") != std::string::npos) ++f.shovel;
+        else if (id.find("Villager_F") != std::string::npos || id.find("Villager_M") != std::string::npos) ++f.villager_f;   // a man or a woman of the filler pair
+    }
+    return f;
+}
+
+static void test_workshops() {
+    std::printf("the workshops the seed starts the towns with\n");
+    world::CityNodes& shipped = *g_env.shipped_nodes;
+    const world::NodeWire& swire = *g_env.shipped_wire;
+    CHECK(shipped.plot_choices(kJoeva).size() == 5 && shipped.plot_choices(kHalcyon).size() == 1 && shipped.plot_choices(kWinstead).empty() && g_env.nodes->plot_choices(kJoeva).empty(),
+          "the shipped seed lists 5 workshops for Joeva and 1 for Halcyon, none for Winstead; the baseline nodes (the seed without its plots) have none");
+
+    struct Town { const char* name; int64_t guid; int level; size_t factories, farms; };
+    const Town towns[] = {{"Joeva", kJoeva, 4, 4, 1}, {"Halcyon", kHalcyon, 3, 1, 0}};
+    for (const Town& t : towns) {
+        const world::CityNodeInfo& info = *g_env.nodes->by_guid(t.guid);
+        const std::vector<world::PlotRow> rows = swire.plot_rows_of(t.guid, t.level), base_rows = g_env.wire->plot_rows_of(t.guid, t.level);
+        size_t changed = 0;
+        for (size_t i = 0; i < rows.size() && i < base_rows.size(); ++i) changed += rows[i].building != base_rows[i].building || rows[i].state != base_rows[i].state;
+        char msg[240];
+        std::snprintf(msg, sizeof msg, "%s at level %d: %zu plots change (the workshops of the list), the others are as the layout has them", t.name, t.level, t.factories + t.farms);
+        CHECK(rows.size() == base_rows.size() && changed == t.factories + t.farms, msg);
+
+        spawns::NodePopStats st0, st1;
+        const auto base = select(*g_env.nodes, *g_env.wire, info, t.level, st0, spawns::AreaConfig::riverlands());
+        const auto with = select(shipped, swire, info, t.level, st1, spawns::AreaConfig::riverlands());
+        size_t villagers = 0, hammers = 0, shovels = 0, at_plots = 0;
+        for (size_t i = 0; i < rows.size() && i < base_rows.size(); ++i) {
+            if (rows[i].building == base_rows[i].building && rows[i].state == base_rows[i].state) continue;
+            const PlotFolk was = folk_at(base, rows[i].plot), now = folk_at(with, rows[i].plot);
+            villagers += now.villager_f - was.villager_f;
+            hammers += now.hammer - was.hammer;
+            shovels += now.shovel - was.shovel;
+            at_plots += now.total - was.total;
+        }
+        std::printf("    %s: %zu NPCs without workshops, %zu with (%zu at the workshops: %zu villagers, %zu hammer smiths, %zu farmers)\n", t.name, base.size(), with.size(), at_plots, villagers, hammers, shovels);
+        std::snprintf(msg, sizeof msg, "%s: a factory brings 2 villagers and 2 hammer smiths, a farm 2 shovel farmers", t.name);
+        CHECK(villagers == 2 * t.factories && hammers == 2 * t.factories && shovels == 2 * t.farms, msg);
+        std::snprintf(msg, sizeof msg, "%s has %zu NPCs more than with no workshop", t.name, 4 * t.factories + 2 * t.farms);
+        CHECK(with.size() == base.size() + 4 * t.factories + 2 * t.farms, msg);
+    }
+
+    // a node the list does not name is the baseline's
+    spawns::NodePopStats a, b;
+    const world::CityNodeInfo& winstead = *g_env.nodes->by_guid(kWinstead);
+    CHECK(select(shipped, swire, winstead, 3, a, spawns::AreaConfig::riverlands()).size() == select(*g_env.nodes, *g_env.wire, winstead, 3, b, spawns::AreaConfig::riverlands()).size(),
+          "Winstead (no list) has the same people with the shipped seed");
+}
+
 // ---- retail's NPCs --------------------------------------------------------------------------------------------------------------------------
 
 static void test_anchors() {
@@ -463,14 +542,17 @@ struct Rig {
     world::ActorRegistry           registry;
     std::vector<uint64_t>          spawned, despawned;
     std::unique_ptr<spawns::NodePopulations> pops;
+    /// Set before start(): sees each NPC with the node it was made for.
+    std::function<void(uint64_t, const content::NpcInstanceRow*, const content::NpcRouteRow*, const world::CityNodeInfo&, int64_t)> on_spawn;
 // -- C | O | A & C Y B --
 
     Rig(const world::CityNodes& nodes, const world::NodeWire& wire, const spawns::AreaConfig& area, std::function<void(uint64_t, const content::NpcInstanceRow*, const content::NpcRouteRow*)> extra = {},
         std::shared_ptr<const content::PopulationData> population = nullptr, const spawns::NodePopulationData* data = nullptr) {
         spawns::NodePopulations::Hooks hooks;
-        hooks.spawned = [this, extra](uint64_t id, const content::NpcInstanceRow* inst, const content::NpcRouteRow* route) {
+        hooks.spawned = [this, extra](uint64_t id, const content::NpcInstanceRow* inst, const content::NpcRouteRow* route, const world::CityNodeInfo& node, int64_t plot) {
             spawned.push_back(id);
             if (extra) extra(id, inst, route);
+            if (on_spawn) on_spawn(id, inst, route, node, plot);
         };
         hooks.despawned = [this](uint64_t id) { despawned.push_back(id); };
         spawns::NodePopulations::Config cfg;
@@ -482,6 +564,87 @@ struct Rig {
 };
 
 static std::set<uint64_t> as_set(const std::vector<uint64_t>& v) { return {v.begin(), v.end()}; }
+
+/// How the people of the world made with the shipped seed live: what the walking world is given for each of them (the same call the world server makes), by node.
+static void test_walkers() {
+    std::printf("how the towns' people live (make_setup, the shipped seed's workshops)\n");
+    struct Count { size_t total = 0, patrol = 0, wander = 0, stand = 0, guards_patrol = 0, service_walking = 0, patrol_unplaced = 0, stationary_routed = 0, villager_patrol = 0, carriers_walk = 0, workers_walk = 0, farmers_stand = 0,
+                 services = 0, crate_vendors = 0, crate_vendors_walking = 0, building_wanderers = 0, workers_off_plot = 0, workers_far = 0; };
+    std::map<int64_t, Count> by_node;
+    Rig rig(*g_env.shipped_nodes, *g_env.shipped_wire, spawns::AreaConfig::riverlands());
+    const npc::SpeedModel speeds;
+    rig.on_spawn = [&](uint64_t id, const content::NpcInstanceRow* inst, const content::NpcRouteRow* route, const world::CityNodeInfo& node, int64_t plot) {
+        const world::WorldActor* a = rig.registry.find(id);
+        if (!a) return;
+        npc::NpcMotionSetup s = npc::make_setup(*a, g_env.table, inst, route, speeds, nullptr, &node);
+        if (plot != 0) npc::keep_to_workshop(&s, npc::kWorkshopRadiusCm);   // as the world server does
+        const std::string leaf = spawns::blueprint_leaf(a->npc.archetype);
+        Count& c = by_node[node.guid];
+        ++c.total;
+        // everyone who sells, serves or runs a station, found by the words of the Blueprint (wider than the rule) and by the data's vendor: none may move
+        static const char* const kServiceWords[] = {"Vendor", "Clerk", "Manager", "_KAE", "Salesman", "Caravan", "Station", "Board", "ServiceBuilding", "TurnInBox", "Mailbox", "ServiceDesk"};
+        bool service = inst && inst->vendor != 0;
+        for (const char* w : kServiceWords) service = service || leaf.find(w) != std::string::npos;
+        if (service) {
+            ++c.services;
+            if (s.ambient != npc::Ambient::Stationary) { ++c.service_walking; std::printf("    WALKS: %s at %s\n", leaf.c_str(), node.name.c_str()); }
+        }
+        if (leaf == "ServiceBuilding_Caravansary_CrateSalesman") { ++c.crate_vendors; c.crate_vendors_walking += s.ambient != npc::Ambient::Stationary; }
+        if (plot != 0 && s.ambient == npc::Ambient::Wander) {
+            // a workshop worker: its anchor (where it stands) lies at its own plot and its stroll is a few metres
+            double ox = node.x, oy = node.y;
+            bool found = false;
+            const double yaw = node.yaw * 3.14159265358979323846 / 180.0;
+            for (const world::PlotRow& r : g_env.shipped_wire->plot_rows_of(node.guid, g_env.shipped_nodes->level_of(node.guid))) {
+                if (r.plot != plot) continue;
+                ox = node.x + r.tx * std::cos(yaw) - r.ty * std::sin(yaw);
+                oy = node.y + r.tx * std::sin(yaw) + r.ty * std::cos(yaw);
+                found = true;
+            }
+            ++c.building_wanderers;
+            if (!found || std::hypot(a->x - ox, a->y - oy) > 3000.0) ++c.workers_off_plot;
+            if (s.wander_max > npc::kWorkshopRadiusCm) ++c.workers_far;
+        }
+        const bool patrol = s.ambient == npc::Ambient::Patrol && s.route.size() >= 2;
+        c.patrol += patrol ? 1 : 0;
+        c.wander += (s.ambient == npc::Ambient::Wander || (s.ambient == npc::Ambient::Patrol && !patrol)) ? 1 : 0;
+        c.stand += s.ambient == npc::Ambient::Stationary ? 1 : 0;
+        if (patrol && npc::is_guard_leaf(leaf)) ++c.guards_patrol;
+        if (patrol && !npc::is_guard_leaf(leaf)) ++c.villager_patrol;
+        if (patrol && leaf.find("Carrying") != std::string::npos) ++c.carriers_walk;
+        const bool workshop = inst && inst->name.rfind("Node_Filler_Villager", 0) == 0;   // the instances a Factory's and a Farm's people live by
+        if (workshop && s.ambient == npc::Ambient::Wander && leaf.find("Shovel") == std::string::npos) ++c.workers_walk;
+        if (workshop && s.ambient == npc::Ambient::Stationary && leaf.find("Shovel") != std::string::npos) ++c.farmers_stand;
+        if (npc::stands_by_kind(leaf) && s.ambient != npc::Ambient::Stationary) ++c.service_walking;
+        if (s.ambient == npc::Ambient::Stationary && !s.route.empty()) ++c.stationary_routed;
+        // a placed route is in the node's frame: its first stop is within a few hundred metres of the record
+        if (patrol && std::hypot(s.route.front().x - node.x, s.route.front().y - node.y) > 60000.0) ++c.patrol_unplaced;
+    };
+    rig.pops->start(0.0);
+    size_t service_walking = 0, stationary_routed = 0, unplaced = 0;
+    for (const auto& [guid, c] : by_node) {
+        const world::CityNodeInfo* n = g_env.shipped_nodes->by_guid(guid);
+        std::printf("    %s (level %d): %zu NPCs: %zu walk a route (%zu guards, %zu carriers, %zu animals and others), %zu wander (%zu of them workshop workers), %zu stand (%zu farmers)\n",
+                    n ? n->name.c_str() : "?", n ? g_env.shipped_nodes->level_of(guid) : -1, c.total, c.patrol, c.guards_patrol, c.carriers_walk, c.villager_patrol - c.carriers_walk, c.wander, c.workers_walk, c.stand,
+                    c.farmers_stand);
+        service_walking += c.service_walking;
+        stationary_routed += c.stationary_routed;
+        unplaced += c.patrol_unplaced;
+    }
+    const Count& joeva = by_node[kJoeva];
+    const Count& halcyon = by_node[kHalcyon];
+    CHECK(joeva.total == 603 && halcyon.total == 350, "Joeva (Town) has 603 NPCs and Halcyon (Village) 350 with the workshops");
+    CHECK(joeva.patrol > 0 && joeva.guards_patrol > 0 && joeva.wander > 0 && joeva.stand > 0, "Joeva has people that walk a route, guards among them, people that wander and people that stand");
+    CHECK(joeva.workers_walk == 16 && joeva.farmers_stand == 2 && halcyon.workers_walk == 4, "the workshops' people: 16 workers walk and 2 farmers stand at Joeva, 4 workers walk at Halcyon");
+    CHECK(joeva.carriers_walk == 0 && joeva.guards_patrol == 1 && halcyon.carriers_walk == 2 && halcyon.guards_patrol == 2, "Joeva's carriers stand (its guard walks); Halcyon's 2 carriers and 2 guards walk their routes");
+    CHECK(service_walking == 0 && joeva.services > 0 && halcyon.services > 0, "no vendor, clerk, merchant stand or station of any node walks (Joeva's and Halcyon's, the building sets' included)");
+    CHECK(joeva.crate_vendors > 0 && joeva.crate_vendors_walking == 0 && halcyon.crate_vendors_walking == 0, "the construction crate vendor (the caravansary's crate salesman) stands in Joeva and Halcyon");
+    CHECK(joeva.building_wanderers == 16 && halcyon.building_wanderers == 4, "the workshops' wanderers are the 16 of Joeva and the 4 of Halcyon");
+    CHECK(joeva.workers_off_plot == 0 && halcyon.workers_off_plot == 0, "every workshop worker stands within 30 m of its own plot (its anchor)");
+    CHECK(joeva.workers_far == 0 && halcyon.workers_far == 0, "every workshop worker strolls at most 6 m from its anchor");
+    CHECK(stationary_routed == 0, "nobody that stands has a route");
+    CHECK(unplaced == 0, "every route that is walked starts within 600 m of its node's record (the node-local waypoints were placed)");
+}
 
 static void test_manager() {
     std::printf("the live manager: the people follow the nodes' levels\n");
@@ -1553,6 +1716,12 @@ int main() {
         std::printf("  [FAIL] the node wire does not load: %s\n", error.c_str());
         return 2;
     }
+    g_env.shipped_nodes = fresh_nodes(true);
+    g_env.shipped_wire = world::NodeWire::load(db_path(), *g_env.shipped_nodes, error);
+    if (!g_env.shipped_wire) {
+        std::printf("  [FAIL] the node wire of the shipped seed does not load: %s\n", error.c_str());
+        return 2;
+    }
     g_env.data = spawns::NodePopulationData::load(db_path(), error);
     if (!g_env.data) {
         std::printf("  [FAIL] the node population data does not load: %s\n", error.c_str());
@@ -1562,6 +1731,8 @@ int main() {
     g_env.shown = g_env.captured->npc_leaves();
     test_filter();
     test_data();
+    test_workshops();
+    test_walkers();
     test_anchors();
     test_golden();
     test_manager();

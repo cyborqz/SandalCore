@@ -84,8 +84,32 @@ double numeric_expression(std::string e) {
 
 }  // namespace
 
+bool stands_by_kind(const std::string& leaf) {
+    for (const char* prefix : {"CraftingStation_", "ProcessingStation_", "CommissionBoard_", "Node_Warehouse_", "Node_Mayor", "Node_TownHall_", "ServiceBuilding_", "Commission_Board", "KAE_"}) {
+        if (leaf.rfind(prefix, 0) == 0) return true;
+    }
+    const auto has = [&](const char* part) { return leaf.find(part) != std::string::npos; };
+    return has("Vendor") || has("Manager") || has("Clerk") || has("_KAE") || has("TurnInBox") || has("Mailbox") || has("Salesman") || has("Caravan") || has("ServiceDesk");
+}
+
+bool is_guard_leaf(const std::string& leaf) { return leaf.rfind("Guard_", 0) == 0; }
+
+void place_node_route(const world::CityNodeInfo& node, double wx, double wy, double wz, double* x, double* y, double* z) {
+    const double yaw = node.yaw * 3.14159265358979323846 / 180.0;
+    const double c = std::cos(yaw), s = std::sin(yaw);
+    *x = node.x + wx * c - wy * s;
+    *y = node.y + wx * s + wy * c;
+    *z = node.z + wz;
+}
+
+void keep_to_workshop(NpcMotionSetup* s, double radius_cm) {
+    if (s->ambient != Ambient::Wander) return;
+    s->wander_max = std::min(s->wander_max, radius_cm);
+    s->wander_min = std::min(s->wander_min, s->wander_max);
+}
+
 NpcMotionSetup make_setup(const world::WorldActor& a, const MotionTable& table, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route, const SpeedModel& speeds,
-                          bool* default_motion) {
+                          bool* default_motion, const world::CityNodeInfo* node) {
     NpcMotionSetup s;
     const auto found = table.find(a.npc.archetype);
     if (default_motion) *default_motion = !found;
@@ -110,16 +134,29 @@ NpcMotionSetup make_setup(const world::WorldActor& a, const MotionTable& table, 
     s.wander_delay = instance->wander_delay;
     s.wander_delay_deviation = instance->wander_delay_deviation;
     s.arrival_distance = instance->arrival_distance > 0 ? instance->arrival_distance : 100.0;
-    if (const double e = numeric_expression(instance->speed_expr); e > 0) s.patrol_speed = m.max_walk_speed * e * speeds.patrol_expression_gain;
+    const std::string leaf = archetype_leaf(a.npc.archetype);
+    if (const double e = numeric_expression(instance->speed_expr); e > 0) s.patrol_speed = m.max_walk_speed * e * (is_guard_leaf(leaf) ? speeds.guard_expression_gain : speeds.patrol_expression_gain);
     else if (retail && retail->patrol_speed >= 20.0f && retail->patrol_speed <= 0.9 * m.max_walk_speed) s.patrol_speed = retail->patrol_speed;
     const std::string& amb = instance->ambient_behavior;
     if (speeds.standing_defs && a.npc.interact_def != 0 && speeds.standing_defs->count(a.npc.interact_def)) s.ambient = Ambient::Stationary;   // a huntable creature stands (SpeedModel)
     else if (amb.find("Wander") != std::string::npos || amb.find("Default") != std::string::npos || amb.empty()) s.ambient = Ambient::Wander;
     else if (amb.find("Patrol") != std::string::npos) s.ambient = Ambient::Patrol;
     else s.ambient = Ambient::Stationary;
+    if (stands_by_kind(leaf)) s.ambient = Ambient::Stationary;   // a vendor, a clerk or a station stays at its post (by Blueprint)
+    // a town person that sells (its instance or its template names a vendor) or has an interaction of its own, other than a guard, stays at its post too
+    if (node && !is_guard_leaf(leaf) && (instance->vendor != 0 || a.npc.vendor_guid != 0 || a.npc.interact_def != 0)) s.ambient = Ambient::Stationary;
     if (s.ambient == Ambient::Patrol) {
-        if (route && !route->relative_city_node && !route->relative_encounter && route->waypoints.size() >= 2) {
-            for (const auto& w : route->waypoints) s.route.push_back({w[0], w[1], w[2]});   // already placed (see the header)
+        const bool usable = route && !route->relative_encounter && route->waypoints.size() >= 2 && (!route->relative_city_node || node);
+        if (usable) {
+            for (const auto& w : route->waypoints) {
+                if (route->relative_city_node) {
+                    double x, y, z;
+                    place_node_route(*node, w[0], w[1], w[2], &x, &y, &z);   // node-local: the node's record places it
+                    s.route.push_back({x, y, z});
+                } else {
+                    s.route.push_back({w[0], w[1], w[2]});   // already placed (see the header)
+                }
+            }
             s.pauses = route->pauses;
             s.loop = route->looping;
             s.start_closest = route->start_closest;

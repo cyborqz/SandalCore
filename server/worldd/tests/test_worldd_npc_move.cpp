@@ -201,6 +201,13 @@ static void test_ground_by_data() {
     reg.add(std::move(bowl));
     reg.add(std::move(reach));
     reg.add(make_npc(1104, 1000, 1000, 9000));                   // the open world's NPC at the same height: the terrain is the ground (unchanged)
+    world::WorldActor high = make_npc(1106, 1000, 1000, 1700);   // a roof's height over the plain (the feet's hint 1,604: the plain, at 1,000, is 604 cm under it)
+    high.npc.ground_by_data = true;
+    world::WorldActor low = make_npc(1108, 1000, 1000, 800);     // under the plain: the feet's hint (704) is 296 cm under it
+    low.npc.ground_by_data = true;
+    reg.add(std::move(high));
+    reg.add(std::move(low));
+    reg.add(make_npc(1110, 1000, 1000, 1700));                   // the open world's NPC at the roof's height: the wide window still finds the plain
     npc::NpcWorld w(reg, &n);
     npc::NpcMotionSetup s = wander_setup();
     bool found = true;
@@ -209,6 +216,10 @@ static void test_ground_by_data() {
           "...it keeps the height the data gave it (not the terrain's 1,096), here and in the replicated movement, and it stands (a wanderer has no navmesh to wander on)");
     CHECK(w.add(1102, s, &found) && found && std::fabs(reg.find(1102)->z - 1096.0) < 0.5, "a surface within reach of its height: it stands on it as any NPC does");
     CHECK(w.add(1104, s, &found) && found && std::fabs(reg.find(1104)->z - 1096.0) < 0.5, "the open world's NPC (no flag) at the first one's height: still moved to the terrain");
+    CHECK(w.add(1106, s, &found) && !found && std::fabs(reg.find(1106)->z - 1700.0) < 0.01, "a node's person 5 m over the only surface: the tight window does not reach it, it keeps its height (no snap down to the pit's ground)");
+    CHECK(w.add(1108, s, &found) && !found && std::fabs(reg.find(1108)->z - 800.0) < 0.01, "a surface more than 150 cm over its feet is not its floor either");
+    CHECK(w.add(1110, s, &found) && found && std::fabs(reg.find(1110)->z - 1096.0) < 0.5, "the open world's NPC at the roof's height: the 15 m window still stands it on the plain");
+    CHECK(npc::NpcWorldConfig{}.data_ground_below_cm == 300.0 && npc::NpcWorldConfig{}.data_ground_above_cm == 150.0, "the window is 300 cm under and 150 cm over");
 }
 
 // ---- dormant ----------------------------------------------------------------------------------------------------------------------------

@@ -163,7 +163,7 @@ std::vector<PlacedSet> placed_sets(const NodePopulationData& data, const world::
     }
     const double yaw = site.yaw * kPi / 180.0;
     const double c = std::cos(yaw), s = std::sin(yaw);
-    for (const world::PlotRow& plot : wire.plot_rows(site.layout, site.level)) {
+    for (const world::PlotRow& plot : wire.plot_rows_of(site.guid, site.level)) {
         if (plot.building == 0 || (plot.state != 1 && plot.state != 2)) continue;
         const int64_t spawn = data.spawn_for(plot.building, site.level);
         if (spawn == 0) continue;

@@ -1,7 +1,23 @@
 {
-  "comment": "The node world a fresh server starts with (Nodes 1). citynode applies this file ONCE, at its first start (city_node_seed.applied_at). Edits later need: nodectl seed --force (it overwrites every node's level and parent, and says so). A node left out is Wilderness (level 0) with no parent. Levels: 0 Wilderness, 1 Crossroads, 2 Encampment, 3 Village, 4 Town (the most the data allows). A node is named by its record name (Verra_RVR_Joeva), the same without Verra_ (RVR_Joeva), or its display name (Joeva). A parent is a vassal's lord: Halcyon is Joeva's vassal, as in retail.",
+  "comment": "The node world a fresh server starts with (Nodes 1). citynode applies this file ONCE, at its first start (city_node_seed.applied_at). Edits later need: nodectl seed --force (it overwrites every node's level and parent, and says so). A node left out is Wilderness (level 0) with no parent. Levels: 0 Wilderness, 1 Crossroads, 2 Encampment, 3 Village, 4 Town (the most the data allows). A node is named by its record name (Verra_RVR_Joeva), the same without Verra_ (RVR_Joeva), or its display name (Joeva). A parent is a vassal's lord: Halcyon is Joeva's vassal, as in retail. plots lists the workshops a node starts with, by node: each entry is a service plot of the node's layout (Plot_17_Service) and the kind of building on it (Factory or Farm). A factory brings four workshop villagers, a farm two. The list is read by worldd from this file at its start, it is not stored in the database, and it shows once the node is at a level whose layout has that plot (Village or above).",
   "nodes": {
     "Verra_RVR_Joeva": { "level": 4 },
     "Verra_RVR_Halcyon": { "level": 3, "parent": "Verra_RVR_Joeva" }
+  },
+  "plots": {
+    "Verra_RVR_Joeva": [
+      { "plot": "Plot_19_Service", "building": "Factory" },
+      { "plot": "Plot_32_Service", "building": "Factory" },
+      { "plot": "Plot_33_Service", "building": "Factory" },
+      { "plot": "Plot_51_Service", "building": "Factory" },
+      { "plot": "Plot_54_Service", "building": "Farm" }
+    ],
+    "Verra_RVR_Halcyon": [
+      { "plot": "Plot_19_Service", "building": "Factory" }
+    ],
+    "Verra_RVR_Miraleth": [
+      { "plot": "Plot_19_Service", "building": "Factory" },
+      { "plot": "Plot_54_Service", "building": "Farm" }
+    ]
   }
 }

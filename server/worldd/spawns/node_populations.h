@@ -13,10 +13,10 @@
 //
 //  No races.  The world runs on one thread: tick_world drives the ground's window (the chunks that arrived ground the NPCs waiting for them), THEN this manager, then the NPC world's step,
 //  the fights and the corpses.  The manager only touches the registry and calls two hooks:
-//    spawned(id, instance, route)   the world puts the new actor under the NPC world's care (npc::NpcWorld::add: an NPC whose chunk of the ground is not resident stands on the terrain
+//    spawned(id, instance, route, node)   the world puts the new actor under the NPC world's care (npc::NpcWorld::add: an NPC whose chunk of the ground is not resident stands on the terrain
 //                                   and waits for it, pending, exactly as the area's NPCs do - so a town far from every player is grounded when the first player comes near).  A node's NPC keeps
 //                                   the height the data gave it (NpcInfo::ground_by_data, set by make): the baked terrain under a city node's bowl is 50 m below the town's floor, so it
-//                                   waits at that height, and is stood on a surface only when one is within 15 m of it
+//                                   waits at that height, and is stood on a surface only when one is within a tight reach of it (npc::NpcWorldConfig::data_ground_below_cm).  `plot` is the service plot of the workshop or building the person stands at (0: a person of the layout); `node` is the city node the person belongs to (its route is placed at its record)
 //    despawned(id)                  the fights forget the actor (combat::CombatWorld::forget); the NPC world forgets it by itself (the registry's removal listener), also an NPC that
 //                                   is still waiting for its chunk
 //  A corpse that is still lying there when its node's people change is removed with the rest; the aftermath's closing of a corpse that is gone is harmless.
@@ -57,7 +57,7 @@ public:
         std::set<std::string> shown_humanoids;
     };
     struct Hooks {
-        std::function<void(uint64_t actor, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route)> spawned;
+        std::function<void(uint64_t actor, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route, const world::CityNodeInfo& node, int64_t plot)> spawned;
         std::function<void(uint64_t actor)> despawned;
     };
 

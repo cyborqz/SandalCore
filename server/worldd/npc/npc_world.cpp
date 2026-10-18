@@ -153,7 +153,9 @@ bool NpcWorld::ground_npc(Npc& n, world::WorldActor& actor) {
         hint = terrain;   // a PopulationArea's random point has no height of its own: the ground under it is the height
         found = nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
     } else {
-        found = nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
+        // a city node's person has a height that is right to 1-168 cm: a tight window, so that it never takes a roof, a ledge or the pit's terrain for its floor
+        found = a->npc.ground_by_data ? nav_->ground_height(a->x, a->y, hint, &gz, cfg_.data_ground_below_cm, cfg_.data_ground_above_cm)
+                                      : nav_->ground_height(a->x, a->y, hint, &gz, 1500.0, 1500.0);
         // (a city node's people keep their data height when no surface is within reach: their town's floor is not in the baked ground, whose terrain lies 50 m below it)
         if (!found && !a->npc.ground_by_data && nav_->terrain_height(a->x, a->y, &terrain)) {
             // the data's height is out of reach of any surface here (a placement drawn at the wrong height): the terrain's is the ground

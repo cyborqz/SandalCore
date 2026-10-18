@@ -723,7 +723,7 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
     const std::set<std::string> leaves = captured_->npc_leaves();
     config.shown_humanoids.insert(leaves.begin(), leaves.end());
     spawns::NodePopulations::Hooks hooks;
-    hooks.spawned = [this](uint64_t id, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route) {
+    hooks.spawned = [this](uint64_t id, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route, const world::CityNodeInfo& node, int64_t plot) {
         // A town person opens with the stats its template carried, and some templates carry none (a guard wizard, a villager), which the client shows as 0 health: every one gets the stat
         // program's numbers for its Blueprint and level (Health at its maximum), with or without a ground, fights or players.
         if (bundle_ && gear_) {
@@ -740,8 +740,9 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
         if (!npcs_) return;   // no ground: the NPC stands where the data put it
         const world::WorldActor* a = registry_.find(id);
         if (!a) return;
-        npc::NpcMotionSetup setup = npc::make_setup(*a, motion_, instance, route, speeds());
+        npc::NpcMotionSetup setup = npc::make_setup(*a, motion_, instance, route, speeds(), nullptr, &node);   // (a route of the node is walked at its record)
         if (setup.ambient == npc::Ambient::Patrol && setup.route.size() < 2) setup.ambient = npc::Ambient::Wander;
+        if (plot != 0) npc::keep_to_workshop(&setup, npc::kWorkshopRadiusCm);   // a building's person strolls round its own building
         npcs_->add(id, setup);   // (a chunk of the ground that is not resident yet: the NPC waits for it, as the area's do)
     };
     hooks.despawned = [this](uint64_t id) {

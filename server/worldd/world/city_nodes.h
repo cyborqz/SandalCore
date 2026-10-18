@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -122,6 +123,15 @@ public:
     /// The registry's levels as text, for the log: "Joeva 4, Halcyon 3" (the nodes above Wilderness).
     std::string describe_levels() const;
 
+    /// A workshop the seed starts a node with: a service plot (by its record name, "Plot_17_Service") and the kind of building on it ("Factory", "Farm").
+    struct PlotChoice {
+        std::string plot;
+        std::string building;
+    };
+    /// The seed's plot list of a node (the file's "plots": {"Verra_RVR_Joeva": [{"plot": "Plot_17_Service", "building": "Factory"}]}); empty for a node that has none.
+    /// Read by apply_seed_file, once at the start; a node's list does not depend on the level the service gives it.
+    const std::vector<PlotChoice>& plot_choices(int64_t guid) const;
+
 private:
     static constexpr int kMaxLevel = 6;   // Metropolis: the most a level number can be (the service allows 4)
     void set_all(const std::vector<LiveNode>& nodes, LevelSource source);
@@ -135,6 +145,8 @@ private:
     std::vector<LiveNode>                     live_;     // by rank, for the XP and the parent
     std::atomic<LevelSource>                  source_{LevelSource::Default};
     std::atomic<uint64_t>                     version_{0};
+    std::map<int64_t, std::vector<PlotChoice>> plot_choices_;
+    std::vector<PlotChoice>                   no_plot_choices_;
 };
 
 /// The evaluation context of an expression's node reads: where it runs.

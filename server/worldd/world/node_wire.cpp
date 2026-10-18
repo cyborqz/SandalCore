@@ -51,6 +51,7 @@ std::unique_ptr<NodeWire> NodeWire::load(const std::string& path, const CityNode
         ~Closer() { sqlite3_close(db); }
     } closer{db};
     auto out = std::unique_ptr<NodeWire>(new NodeWire());
+    out->nodes_ = &nodes;
 
     const auto prepare = [&](Stmt& st, const char* sql, const char* what) {
         if (sqlite3_prepare_v2(db, sql, -1, &st.s, nullptr) == SQLITE_OK) return true;
@@ -122,6 +123,7 @@ std::unique_ptr<NodeWire> NodeWire::load(const std::string& path, const CityNode
             // and Halcyon say so (the three live Riverlands nodes), and its under-construction scaffold is filtered out of a Town's scenery.  The mayor's service plots start Empty.
             const char* plot_name = reinterpret_cast<const char*>(sqlite3_column_text(st.s, 18));
             const bool large_project = plot_name && std::string(plot_name).find("ConstructionProject_Large") != std::string::npos;
+            r.name = plot_name ? plot_name : "";
             r.starting_state = static_cast<uint8_t>(sqlite3_column_int(st.s, 17));
             r.state = !r.pre_construct ? 0 : large_project ? r.starting_state : 2;
             r.qx = sqlite3_column_double(st.s, 7);
@@ -135,6 +137,20 @@ std::unique_ptr<NodeWire> NodeWire::load(const std::string& path, const CityNode
             r.sy = sqlite3_column_double(st.s, 15);
             r.sz = sqlite3_column_double(st.s, 16);
             out->plots_[{layout, level}].push_back(r);
+        }
+    }
+    // the buildings each plot may carry (the mayor's service plots have fourteen)
+    {
+        Stmt st;
+        if (!prepare(st, "SELECT b.plot_guid, b.building_guid, COALESCE(r.name, '') FROM service_plot_building b LEFT JOIN record r ON r.guid = b.building_guid ORDER BY b.plot_guid, b.ord",
+                     "the plots' buildings"))
+            return nullptr;
+        while (sqlite3_step(st.s) == SQLITE_ROW) {
+            Candidate c;
+            c.building = sqlite3_column_int64(st.s, 1);
+            const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st.s, 2));
+            c.name = n ? n : "";
+            out->candidates_[sqlite3_column_int64(st.s, 0)].push_back(std::move(c));
         }
     }
     // the estates
@@ -159,6 +175,29 @@ bool NodeWire::in_roster(int rank) const { return std::binary_search(roster_.beg
 const std::vector<PlotRow>& NodeWire::plot_rows(int64_t layout, int level) const {
     const auto it = plots_.find({layout, level});
     return it == plots_.end() ? none_ : it->second;
+}
+
+std::vector<PlotRow> NodeWire::plot_rows_of(int64_t node_guid, int level) const {
+    std::vector<PlotRow> rows = plot_rows(layout_of(node_guid), level);
+    if (!nodes_) return rows;
+    for (const CityNodes::PlotChoice& choice : nodes_->plot_choices(node_guid)) {
+        const std::string tail = "_" + choice.building + "_Building";
+        for (PlotRow& row : rows) {
+            if (row.name != choice.plot) continue;
+            const auto cands = candidates_.find(row.plot);
+            if (cands == candidates_.end()) break;
+            for (const Candidate& c : cands->second) {
+                if (c.name.size() < tail.size() || c.name.compare(c.name.size() - tail.size(), tail.size(), tail) != 0) continue;
+                row.building = c.building;
+                row.pre_construct = true;
+                row.state = 2;
+                row.starting_state = 2;
+                break;
+            }
+            break;
+        }
+    }
+    return rows;
 }
 
 LevelGrants NodeWire::grants(int64_t node_guid, int level) const {
@@ -221,7 +260,7 @@ std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes
     s.layout = layout_of(guid);
     s.level = level;
     s.culture = 0;
-    for (const PlotRow& r : plot_rows(s.layout, level)) {
+    for (const PlotRow& r : plot_rows_of(guid, level)) {
         repl::PlotEntry e;
         e.plot = r.plot;
         e.building = r.building;

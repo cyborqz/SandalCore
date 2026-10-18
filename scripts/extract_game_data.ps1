@@ -380,7 +380,7 @@ function Get-Id([string]$step) {
         'navbuild' { Get-TextHash ("navbuild " + (Get-CodeNav)) }
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
-        'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild')) }
+        'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-Id 'database')) }
     }
     $ids[$step] = $v
     return $v
@@ -481,7 +481,7 @@ $steps = @(
         Invoke-Checked $dotnet @($mapcDll, 'town-floors', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_town_floors'
     } },
     @{ Name = 'navmesh'; Title = 'Read the map and build the navigation mesh, the NPC motion table and the foliage (mapc; the longest step)'; Outputs = @('dist\content\npc_motion.tsv', 'dist\content\region_foliage.tsv', 'dist\content\area_geom.bin', 'dist\content\area_nav.bin'); Run = {
-        Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the earlier steps first'
+        Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll', 'dist\content\town_platforms.bin', 'dist\content\content.db') 'run the earlier steps first'
         $savedHeap = $env:DOTNET_GCHeapHardLimit
         if (-not $env:DOTNET_GCHeapHardLimit) { $env:DOTNET_GCHeapHardLimit = '0x100000000' }     # the NPC Blueprint pass peaks at 7.7 GB without this limit and at 4.0 GB with it, in the same time; the map read's child programs set their own
         try {

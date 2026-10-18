@@ -112,13 +112,17 @@ add_library(worldd_nav STATIC
     nav/nav_build.h
     nav/nav_file.cpp
     nav/nav_file.h
+    nav/town_geometry.cpp
+    nav/town_geometry.h
+    world/town_platform.cpp
+    world/town_platform.h
 )
 target_include_directories(worldd_nav PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(worldd_nav PUBLIC recast_detour)
 set_target_properties(worldd_nav PROPERTIES FOLDER "Servers/worldd")
 
 add_executable(aoc_navbuild nav/navbuild_main.cpp)
-target_link_libraries(aoc_navbuild PRIVATE worldd_nav)
+target_link_libraries(aoc_navbuild PRIVATE worldd_nav unofficial::sqlite3::sqlite3)
 set_target_properties(aoc_navbuild PROPERTIES FOLDER "Servers")
 
 # ── ability_content: the ability tables of content.db (plan D2), a connection of its own ───────────────────
@@ -301,8 +305,6 @@ add_library(worldd_core STATIC
     world/node_wire.h
     world/town_floor.cpp
     world/town_floor.h
-    world/town_platform.cpp
-    world/town_platform.h
     world/corpse.cpp
     world/corpse.h
     world/actor_registry.cpp
@@ -395,6 +397,7 @@ foreach(t
     test_worldd_nav
     test_worldd_nav_window
     test_worldd_npc_move
+    test_worldd_town_walk
     test_worldd_repl_acks
     test_worldd_services
     test_worldd_session

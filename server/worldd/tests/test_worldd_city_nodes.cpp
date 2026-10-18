@@ -221,6 +221,16 @@ void test_live(world::CityNodes& nodes) {
         CHECK(parent, "Halcyon is Joeva's vassal in the seed");
     }
     CHECK(nodes.describe_levels() == "Joeva 4, Halcyon 3" || nodes.describe_levels() == "Halcyon 3, Joeva 4", "describe_levels lists the nodes above Wilderness");
+    {
+        const auto& joeva_plots = nodes.plot_choices(joeva->guid);
+        size_t factories = 0, farms = 0;
+        for (const auto& c : joeva_plots) {
+            factories += c.building == "Factory";
+            farms += c.building == "Farm";
+        }
+        CHECK(joeva_plots.size() == 5 && factories == 4 && farms == 1 && nodes.plot_choices(halcyon->guid).size() == 1 && nodes.plot_choices(aela->guid).empty() && nodes.plot_choices(7).empty(),
+              "the seed starts Joeva with 4 factories and a farm, Halcyon with 1 factory, New Aela with none; a guid that is no node has none");
+    }
 
     // a bad seed
     const fs::path dir = fs::temp_directory_path() / "worldd_city_nodes_test";
@@ -240,6 +250,13 @@ void test_live(world::CityNodes& nodes) {
     CHECKF(applied == 2 && skipped == 3, "two applied, three skipped (an unknown node and invalid levels): %zu, %zu", applied, skipped);
     CHECK(nodes.level_of(joeva->guid) == 2 && nodes.level_of(aela->guid) == 3 && nodes.level_of(halcyon->guid) == 0 && nodes.level_of(nodes.by_name("Miraleth")->guid) == 0,
             "and invalid levels are not narrowed into valid ones");
+    CHECK(nodes.plot_choices(joeva->guid).empty(), "a seed with no plot list leaves no workshops");
+    CHECK(nodes.apply_seed_file(write("plots.json", "{\"nodes\": {\"Joeva\": {\"level\": 4}}, \"plots\": {\"Joeva\": [{\"plot\": \"Plot_9_Service\", \"building\": \"Farm\"}, {\"plot\": \"\", \"building\": \"Factory\"}, "
+                                            "{\"plot\": \"Plot_8_Service\"}, 5], \"Atlantis\": [{\"plot\": \"Plot_1_Service\", \"building\": \"Factory\"}], \"Halcyon\": \"no\"}}"),
+                                error, &applied, &skipped),
+          "a seed with a plot list that has unusable entries is read");
+    CHECK(nodes.plot_choices(joeva->guid).size() == 1 && nodes.plot_choices(joeva->guid)[0].plot == "Plot_9_Service" && nodes.plot_choices(joeva->guid)[0].building == "Farm" && nodes.plot_choices(halcyon->guid).empty(),
+          "an entry with no plot or no building, a node that is no node and a list that is no list are left out");
 
     // the service's state
     const uint64_t v0 = nodes.version();

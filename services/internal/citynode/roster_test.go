@@ -195,6 +195,13 @@ func TestParseSeed(t *testing.T) {
 	if good.Levels[joeva] != 4 || good.Levels[halcyon] != 3 || good.Parents[halcyon] != joeva || len(good.Parents) != 1 || len(good.Levels) != 3 {
 		t.Errorf("seed = %+v", good)
 	}
+	withPlots, err := citynode.ParseSeed([]byte(`{"nodes":{"Joeva":{"level":4}},"plots":{"Joeva":[{"plot":"Plot_17_Service","building":"Factory"},{"plot":"Plot_31_Service","building":"Farm"}],"Halcyon":[]}}`), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withPlots.Plots) != 1 || len(withPlots.Plots[joeva]) != 2 || withPlots.Plots[joeva][1].Building != "Farm" || withPlots.Levels[joeva] != 4 {
+		t.Errorf("plots = %+v", withPlots.Plots)
+	}
 	if s, err := citynode.ParseSeed([]byte(`{}`), r); err != nil || len(s.Levels) != 0 {
 		t.Errorf("an empty seed is every node at Wilderness: %+v, %v", s, err)
 	}
@@ -210,6 +217,11 @@ func TestParseSeed(t *testing.T) {
 		"unknown parent":    `{"nodes":{"Joeva":{"level":1,"parent":"Atlantis"}}}`,
 		"parent loop":       `{"nodes":{"Joeva":{"level":1,"parent":"Halcyon"},"Halcyon":{"level":1,"parent":"Joeva"}}}`,
 		"text after object": `{"nodes":{}} {}`,
+		"plots of unknown":  `{"plots":{"Atlantis":[{"plot":"Plot_17_Service","building":"Factory"}]}}`,
+		"plots node twice":  `{"plots":{"Joeva":[],"Verra_RVR_Joeva":[]}}`,
+		"plot without kind": `{"plots":{"Joeva":[{"plot":"Plot_17_Service"}]}}`,
+		"plot twice":        `{"plots":{"Joeva":[{"plot":"Plot_17_Service","building":"Factory"},{"plot":"Plot_17_Service","building":"Farm"}]}}`,
+		"plot unknown key":  `{"plots":{"Joeva":[{"plot":"Plot_17_Service","building":"Factory","state":2}]}}`,
 	} {
 		if _, err := citynode.ParseSeed([]byte(body), r); err == nil {
 			t.Errorf("%s: accepted %s", name, body)
@@ -225,5 +237,26 @@ func TestDeploySeed(t *testing.T) {
 	}
 	if len(s.Levels) != 2 || s.Levels[joeva] != 4 || s.Levels[halcyon] != 3 || len(s.Parents) != 1 || s.Parents[halcyon] != joeva {
 		t.Errorf("deploy/citynode_seed.json = %+v; want Joeva Town (4), Halcyon Village (3) as Joeva's vassal, nothing else", s)
+	}
+	// the workshops: Joeva four factories and a farm, Halcyon a factory, Miraleth a factory and a farm
+	kinds := func(node int64) (factories, farms int) {
+		for _, p := range s.Plots[node] {
+			switch p.Building {
+			case "Factory":
+				factories++
+			case "Farm":
+				farms++
+			}
+		}
+		return
+	}
+	if f, a := kinds(joeva); f != 4 || a != 1 {
+		t.Errorf("Joeva's workshops = %d factories, %d farms; want 4 and 1", f, a)
+	}
+	if f, a := kinds(halcyon); f != 1 || a != 0 {
+		t.Errorf("Halcyon's workshops = %d factories, %d farms; want 1 and 0", f, a)
+	}
+	if len(s.Plots) != 3 {
+		t.Errorf("nodes with workshops = %d; want 3 (Joeva, Halcyon, Miraleth)", len(s.Plots))
 	}
 }

@@ -141,7 +141,7 @@ std::vector<repl::NodeLayoutItem> NodeLayoutData::items(const NodeWire& wire, co
             out.push_back(std::move(it));
         }
     }
-    for (const PlotRow& row : wire.plot_rows(layout, req.context.level)) {
+    for (const PlotRow& row : wire.plot_rows_of(req.node, req.context.level)) {
         uint8_t state;
         if (req.plot_states) {
             const auto s = req.plot_states->find(row.plot);
