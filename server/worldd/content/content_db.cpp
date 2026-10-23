@@ -2076,6 +2076,18 @@ std::optional<PopulationData> ContentDb::population_data(std::string& error) con
         }
         if (step != SQLITE_DONE) return failed(table);
     }
+    {   // quests slice 0 (contentc version 17): the conversation root of an instance; a file without the table has none
+        Stmt q(db_, "SELECT source_guid, root_guid FROM npc_dialogue WHERE source_kind = 'instance'");
+        if (q.ok()) {
+            int step;
+            while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+                if (!column_is_int(q.get(), 0) || !column_is_int(q.get(), 1)) return bad("npc_dialogue");
+                const auto it = out.instances.find(sqlite3_column_int64(q.get(), 0));
+                if (it != out.instances.end()) it->second.dialogue_root = sqlite3_column_int64(q.get(), 1);
+            }
+            if (step != SQLITE_DONE) return failed("npc_dialogue");
+        }
+    }
     {   // sets and their members
         Stmt q(db_, kNpcSetSql);
         if (!q.ok()) return failed("npc_set");
@@ -2610,6 +2622,158 @@ std::string shown_mount_name(const std::string& name) {
 }
 
 }  // namespace
+
+namespace {
+
+/// A condition as the dialogue tables hold it ({"tok": [...], "q": [{...}]}); false when the text does not read.
+bool parse_dialogue_requirement(const std::string& text, DialogueRequirement& out) {
+    out = DialogueRequirement{};
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return false;
+    const auto tok = j.find("tok");
+    const auto q = j.find("q");
+    if (tok == j.end() || !tok->is_array() || q == j.end() || !q->is_array()) return false;
+    for (const auto& t : *tok) {
+        if (!t.is_number_integer()) return false;
+        out.tokens.push_back(t.get<int>());
+    }
+    const auto str = [](const nlohmann::json& o, const char* key) { const auto it = o.find(key); return it != o.end() && it->is_string() ? it->get<std::string>() : std::string(); };
+    const auto num = [](const nlohmann::json& o, const char* key) { const auto it = o.find(key); return it != o.end() && it->is_number_integer() ? it->get<int64_t>() : int64_t(0); };
+    for (const auto& c : *q) {
+        if (!c.is_object()) return false;
+        DialogueCriterion d;
+        d.kind = str(c, "t");
+        d.op = str(c, "op");
+        d.value = num(c, "v");
+        d.quest = num(c, "q");
+        d.quest_query = str(c, "qq");
+        d.objective = num(c, "o");
+        d.objective_query = str(c, "oq");
+        d.variable = str(c, "var");
+        d.currency = num(c, "cur");
+        d.expression = str(c, "x");
+        d.right_variable = str(c, "rv");
+        if (const auto it = c.find("items"); it != c.end() && it->is_array()) {
+            for (const auto& v : *it) {
+                if (v.is_number_integer()) d.items.push_back(v.get<int64_t>());
+            }
+        }
+        if (const auto it = c.find("tags"); it != c.end() && it->is_array()) {
+            for (const auto& v : *it) {
+                if (v.is_string()) d.tags.push_back(v.get<std::string>());
+            }
+        }
+        out.criteria.push_back(std::move(d));
+    }
+    return true;
+}
+
+/// A list of actions ([{"a": "OpenWindow", "w": "Vendor"}]); false when the text does not read.
+bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionRow>& out) {
+    out.clear();
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_array()) return false;
+    for (const auto& a : j) {
+        if (!a.is_object()) return false;
+        DialogueActionRow r;
+        if (const auto it = a.find("a"); it != a.end() && it->is_string()) r.action = it->get<std::string>();
+        if (const auto it = a.find("w"); it != a.end() && it->is_string()) r.window = it->get<std::string>();
+        out.push_back(std::move(r));
+    }
+    return true;
+}
+
+}  // namespace
+
+std::optional<DialogueData> ContentDb::dialogue_data(std::string& error) const {
+    DialogueData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the dialogue tables are contentc version 17's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    const auto unread = [&](const char* table, int64_t guid) {
+        error = std::string("content.db ") + table + " row " + std::to_string(guid) + " does not read";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT guid, top_node FROM dialogue_root");
+        if (!q.ok()) return failed("dialogue_root");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            if (!column_is_int(q.get(), 0) || !column_is_int(q.get(), 1)) return unread("dialogue_root", 0);
+            out.roots[sqlite3_column_int64(q.get(), 0)] = sqlite3_column_int64(q.get(), 1);
+        }
+        if (step != SQLITE_DONE) return failed("dialogue_root");
+    }
+    {
+        Stmt q(db_, "SELECT guid, name, node_type, exhaust, quest_guid, on_enter, on_exit FROM dialogue_node");
+        if (!q.ok()) return failed("dialogue_node");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 4)) return unread("dialogue_node", 0);
+            DialogueNodeRow n;
+            n.guid = sqlite3_column_int64(s, 0);
+            n.name = column_text(s, 1);
+            n.type = column_text(s, 2);
+            n.exhaust = column_text(s, 3);
+            n.quest = sqlite3_column_int64(s, 4);
+            if (!parse_dialogue_actions(column_text(s, 5), n.on_enter) || !parse_dialogue_actions(column_text(s, 6), n.on_exit)) return unread("dialogue_node", n.guid);
+            out.nodes[n.guid] = std::move(n);
+        }
+        if (step != SQLITE_DONE) return failed("dialogue_node");
+    }
+    {
+        Stmt q(db_, "SELECT node_guid, idx, next_node, requirement, actions FROM dialogue_choice ORDER BY node_guid, idx");
+        if (!q.ok()) return failed("dialogue_choice");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1) || !column_is_int(s, 2)) return unread("dialogue_choice", 0);
+            const int64_t node = sqlite3_column_int64(s, 0);
+            const auto it = out.nodes.find(node);
+            if (it == out.nodes.end()) return unread("dialogue_choice", node);
+            if (sqlite3_column_int64(s, 1) != static_cast<int64_t>(it->second.choices.size())) return unread("dialogue_choice", node);   // the indexes run 0, 1, 2 ...
+            DialogueChoiceRow c;
+            c.next = sqlite3_column_int64(s, 2);
+            if (!parse_dialogue_requirement(column_text(s, 3), c.requirement) || !parse_dialogue_actions(column_text(s, 4), c.actions)) return unread("dialogue_choice", node);
+            it->second.choices.push_back(std::move(c));
+        }
+        if (step != SQLITE_DONE) return failed("dialogue_choice");
+    }
+    {
+        Stmt q(db_, "SELECT guid, name, disabled, repeatable, activation FROM dialogue_quest");
+        if (!q.ok()) return failed("dialogue_quest");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3)) return unread("dialogue_quest", 0);
+            DialogueQuestRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.disabled = sqlite3_column_int64(s, 2) != 0;
+            r.repeatable = sqlite3_column_int64(s, 3) != 0;
+            if (!parse_dialogue_requirement(column_text(s, 4), r.activation)) return unread("dialogue_quest", r.guid);
+            out.quests[r.guid] = std::move(r);
+        }
+        if (step != SQLITE_DONE) return failed("dialogue_quest");
+    }
+    {
+        Stmt q(db_, "SELECT source_kind, source_guid, root_guid FROM npc_dialogue");
+        if (!q.ok()) return failed("npc_dialogue");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 1) || !column_is_int(s, 2)) return unread("npc_dialogue", 0);
+            const std::string kind = column_text(s, 0);
+            (kind == "instance" ? out.instance_roots : out.asset_roots)[sqlite3_column_int64(s, 1)] = sqlite3_column_int64(s, 2);
+        }
+        if (step != SQLITE_DONE) return failed("npc_dialogue");
+    }
+    return out;
+}
 
 std::optional<MountData> ContentDb::mount_data(std::string& error) const {
     MountData out;

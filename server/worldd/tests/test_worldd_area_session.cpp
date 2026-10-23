@@ -21,15 +21,18 @@
 //    many actors       1,500 NPCs around the player: the opens come in at the cap per tick, nearest first; per-tick time and bandwidth are measured
 // ============================================================================
 #include "capture_packets.h"
+#include "recordings.h"
 #include "capture_vendor.h"
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
+#include "dialogue/talk.h"
 #include "fake_client.h"
 #include "bootstrap/character_setup.h"
 #include "items/inventory.h"
 #include "nav/area_nav.h"
 #include "net/endpoint.h"
 #include "npc/npc_world.h"
+#include "protocol/repl/dialogue_rpc.h"
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
 #include "protocol/schema/generated/index.h"
@@ -46,12 +49,15 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 // ~ C Y B :: C.O.A ~
@@ -206,7 +212,7 @@ struct Fixture {
     }
 
     /// Adds an NPC (or node) made from `t` at (x, y); the id of its actor.
-    uint64_t add(const spawns::OpenTemplate& t, double x, double y, bool gm_vendor = false, int64_t vendor_def = 0, const char* name = nullptr) {
+    uint64_t add(const spawns::OpenTemplate& t, double x, double y, bool gm_vendor = false, int64_t vendor_def = 0, const char* name = nullptr, int64_t dialogue_root = 0) {
         spawns::InstanceParams p;
         p.x = x;
         p.y = y;
@@ -227,7 +233,8 @@ struct Fixture {
         }
         w->npc.is_gm_vendor = gm_vendor;
         w->npc.vendor_guid = vendor_def;
-        if (gm_vendor) world::allow_inputs(w->actor);   // as the area loader makes a GM vendor
+        w->npc.dialogue_root = dialogue_root;
+        if (gm_vendor || dialogue_root != 0) world::allow_inputs(w->actor);   // as the area loader makes a GM vendor
         if (name) w->npc.name = name;
         const uint64_t id = w->id;
         if (!world->registry().add(std::move(*w))) {
@@ -1323,6 +1330,16 @@ static void test_interaction_per_connection() {
     CHECK(listed(w, "InteractVisibleStateMap") == 0 && b.view->state_of(id) == world::ClientState::Awake, "when alice's view ends the registry and bob's view are as they were");
 }
 
+/// ServerSelectDialogueChoice: every move the player makes in the talking window.
+static BunchWriter dialogue_choice(const repl::DialogueResponse& response) {
+    const schema::ClassSchema& pc = class_named("AoCPlayerControllerBP_C");
+    const schema::RpcSchema* rpc = pc.rpc("ServerSelectDialogueChoice");
+    const auto params = repl::dialogue_response_params(*rpc, response);
+    return params ? actor_rpc(pc, "ServerSelectDialogueChoice", *params) : BunchWriter();
+}
+
+#include "dialogue_session_tests.inc"
+
 int main() {
     spdlog::set_level(spdlog::level::off);
     test_view();
@@ -1335,6 +1352,10 @@ int main() {
     test_interaction_per_connection();
     test_crowd();
     test_crowd_moving();
+    test_dialogue_book();
+    test_dialogue_town_crier();
+    test_dialogue_session();
+    test_dialogue_1531();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

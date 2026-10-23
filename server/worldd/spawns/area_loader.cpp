@@ -71,6 +71,8 @@ std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minte
     w->npc.asset_guid = p.pop_asset;
     w->npc.instance_guid = p.pop_instance;
     w->npc.vendor_guid = s.instance ? s.instance->vendor : 0;
+    // its conversation: the instance's own root, else its asset's
+    w->npc.dialogue_root = (s.instance && s.instance->dialogue_root != 0) ? s.instance->dialogue_root : (s.asset ? s.asset->dialogue_root : 0);
     w->npc.home_x = s.x;
     w->npc.home_y = s.y;
     w->npc.home_z = s.z;

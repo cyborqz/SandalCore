@@ -63,6 +63,7 @@ foreach(t
     test_repl_foliage
     test_repl_hunting
     test_repl_node_layout
+    test_repl_dialogue
 )
     aocnet_add_test(${t})
 endforeach()

@@ -764,5 +764,8 @@ func Create(db *sql.DB) error {
 	if err := createResource(db); err != nil {
 		return err
 	}
-	return createFoliage(db)
+	if err := createFoliage(db); err != nil {
+		return err
+	}
+	return createDialogue(db)
 }

@@ -21,6 +21,7 @@ test_repl_ability_rpc                PASS exit=0
 test_repl_actor_open                 PASS exit=0
 test_repl_aoc_codecs                 PASS exit=0
 test_repl_codecs                     PASS exit=0
+test_repl_dialogue                   PASS exit=0
 test_repl_fast_array                 PASS exit=0
 test_repl_foliage                    PASS exit=0
 test_repl_gather                     PASS exit=0

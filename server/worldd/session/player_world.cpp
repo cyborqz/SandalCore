@@ -244,6 +244,15 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     }
     captured_ = std::move(*captured);
     gm_ = std::move(*gm);
+    {   // quests, slice 0: the NPC conversations; a content.db of an older version has none and the NPCs keep their answer
+        std::string de;
+        if (auto data = content_->dialogue_data(de)) {
+            dialogue_.emplace(std::move(*data));
+            spdlog::info("[world] conversations: {} nodes of {} roots, {} quests named by conditions", dialogue_->nodes(), dialogue_->roots(), dialogue_->quests());
+        } else {
+            spdlog::warn("[world] the NPC conversations do not load, so the NPCs that have one answer as before: {}", de);
+        }
+    }
     // Gathering stage 3, "Hunting": the creatures whose asset names a Hunting_<kind> interaction get the hunting interactable (spawns/generic_npc.h); an older content.db has none
     if (generic_config_.hunting && generic_config_.hunting_defs.empty()) {
         std::string fe;

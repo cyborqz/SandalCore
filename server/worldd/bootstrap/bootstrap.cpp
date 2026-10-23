@@ -24,6 +24,7 @@
 #include "bootstrap/captured_level_list.h"
 #include "bootstrap/captured_replies.h"
 #include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
 #include "protocol/repl/hit_rpc.h"
 #include "protocol/schema/generated/index.h"
 
@@ -1233,6 +1234,47 @@ std::optional<Send> PlayerBootstrap::open_vendor(int64_t merch_set, const emit::
     call.rpc = "ClientOpenVendor";
     call.params = std::move(*params);
     return rpcs(Role::PlayerController, "ClientOpenVendor", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::dialogue_update(const DialogueView& view) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::ClassSchema& cls = *pc_.obj.schema;
+    constexpr const char* kBase = "CurrentDialogueInstance.";
+    const auto path = [&](const char* tail) { return std::string(kBase) + tail; };
+    repl::ArrayValue lines;
+    for (const DialogueLine& l : view.lines) {
+        repl::ElementState e;
+        e.values[1] = Value::i64(l.node);                              // SourceNodeId.Guid
+        e.values[2] = Value::i64(repl::kDialogueNodeTypeId);           // SourceNodeId.TypeId
+        e.values[3] = Value(repl::NameValue::hardcoded_name(0));       // SourceNodeId.Name: None
+        e.values[4] = Value::i64(l.index);                             // ChoiceIndex
+        e.values[5] = Value::u64(0);                                   // ChoiceType: Default
+        lines.elements.push_back(std::move(e));
+    }
+    // A property at its default that the connection never got is left out of the state: the client holds the default already, and a value that is set goes out on its
+    // first send, zero or not.  One that was sent before is set again, to its default, so that the client takes the change (the clear of a conversation).
+    const auto put = [&](const char* tail, Value v, bool is_default) {
+        const std::string full = path(tail);
+        const schema::RepCommand* cmd = cls.command(full);
+        if (!cmd) return false;
+        if (is_default && pc_shadow_.actor.rep.sent.count(cmd->handle) == 0) {
+            pc_.obj.state.erase(cmd->handle);
+            return true;
+        }
+        return pc_.obj.state.set(cls, full, std::move(v));
+    };
+    const bool no_lines = lines.elements.empty();
+    bool good = true;
+    good = good && put("PreviousNode.Guid", Value::i64(view.previous_node), view.previous_node == 0);
+    good = good && put("PreviousSelectedChoice.SourceNodeId.Guid", Value::i64(view.previous_choice_node), view.previous_choice_node == 0);
+    good = good && put("PreviousSelectedChoice.ChoiceIndex", Value::i64(view.previous_choice_index), view.previous_choice_index == 0);
+    good = good && put("CurrentNode.Guid", Value::i64(view.current_node), view.current_node == 0);
+    good = good && put("CurrentChoices", Value(std::move(lines)), no_lines);
+    good = good && put("SourceHandle.ObjectSource", Value(view.source), view.source == emit::FIntrepidNetworkGUID{});
+    good = good && put("ResponseText.DialogueNodeId.Guid", Value::i64(view.shown_node), view.shown_node == 0);
+    good = good && put("bIsInGreeting", Value::boolean(view.greeting), !view.greeting);
+    if (!good) return std::nullopt;
+    return update(Role::PlayerController, "dialogue", pc_, pc_shadow_);
 }
 
 std::optional<Send> PlayerBootstrap::node_tax_table(const repl::NodeTaxDetails& details) {

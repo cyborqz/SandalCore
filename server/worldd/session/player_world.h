@@ -67,6 +67,7 @@
 #include "world/actor_registry.h"
 #include "world/city_nodes.h"
 #include "world/node_control.h"
+#include "dialogue/requirement.h"
 #include "world/node_layout_data.h"
 #include "world/node_scenery.h"
 #include "world/node_wire.h"
@@ -191,6 +192,10 @@ public:
     const spawns::AreaReport*     area_report() const { return area_report_ ? &*area_report_ : nullptr; }
     const spawns::AreaConfig&     area() const { return area_; }
     const vendor::GmVendors*      gm_vendors() const { return gm_ ? &*gm_ : nullptr; }
+    /// Quests, slice 0: the NPC conversations (dialogue/requirement.h), read with the area; null for a content.db older than contentc version 17 (the NPCs answer as before).
+    const dialogue::Book*         dialogue() const { return dialogue_ ? &*dialogue_ : nullptr; }
+    /// A test's conversations (load_area reads the real ones).
+    void                          set_dialogue(dialogue::Book book) { dialogue_ = std::move(book); }
     /// G1 stage 1: the GM garden (spawns/gm_garden.h), off by default.  `set_gm_garden(true)` before load_area; the garden is placed once the ground is known
     /// (load_ground), or by place_gm_garden() when there is no ground file.  Once.
     void                          set_gm_garden(bool on) { gm_garden_ = on; }
@@ -502,6 +507,7 @@ private:
     world::CityNodes*                    city_nodes_ = nullptr;
     const world::NodeWire*               node_wire_ = nullptr;
     world::NodeControl*                  node_control_ = nullptr;
+    std::optional<dialogue::Book>        dialogue_;
     const world::NodeLayoutData*         node_layout_data_ = nullptr;
     std::unique_ptr<world::NodeScenery>  scenery_;
     const spawns::NodePopulationData*    node_pop_data_ = nullptr;

@@ -69,6 +69,7 @@ struct NpcInfo {
     int64_t     asset_guid = 0;      // PopulationAsset, PopulationInstance (0 for a captured one)
     int64_t     instance_guid = 0;
     int64_t     vendor_guid = 0;     // VendorDef the NPC sells from (0: none)
+    int64_t     dialogue_root = 0;   // the conversation the NPC opens when a player uses it (a DialogueRoot; 0: none)
     double      home_x = 0, home_y = 0, home_z = 0;   // where it spawned: it returns here (stage 2, 3)
     double      respawn_seconds = 0;
     double      respawn_variance = 0;

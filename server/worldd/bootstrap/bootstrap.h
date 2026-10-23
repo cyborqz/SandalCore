@@ -261,6 +261,25 @@ public:
     /// ClientSetNodeTaxTable: the answer to the vendor window's ServerGetNodeTaxTable (fix 4; vendor/node_tax.h).
     std::optional<Send> node_tax_table(const repl::NodeTaxDetails& details);
 
+    /// Quests, slice 0: what the PlayerController's CurrentDialogueInstance holds for the talking window.  Every field is set, and the update carries only what differs from
+    /// what the connection has (the greeting: the lines, the NPC, the shown node and the greeting flag; a step: where it came from and went to; the clear: all of them back to nothing).
+    struct DialogueLine {
+        int64_t node = 0;      // SourceNodeId.Guid: the node the line belongs to
+        int32_t index = 0;     // ChoiceIndex: the line's index in the node's whole list
+    };
+    struct DialogueView {
+        int64_t                   previous_node = 0;             // PreviousNode.Guid
+        int64_t                   previous_choice_node = 0;      // PreviousSelectedChoice.SourceNodeId.Guid
+        int32_t                   previous_choice_index = 0;     // PreviousSelectedChoice.ChoiceIndex
+        int64_t                   current_node = 0;              // CurrentNode.Guid
+        std::vector<DialogueLine> lines;                         // CurrentChoices
+        emit::FIntrepidNetworkGUID source;                       // SourceHandle.ObjectSource: the NPC (the zero reference: nobody)
+        int64_t                   shown_node = 0;                // ResponseText.DialogueNodeId.Guid
+        bool                      greeting = false;              // bIsInGreeting
+    };
+    /// The update for `view` (reliable); nullopt when it differs from what the connection has in nothing, before the pawn's second state, or when the schema refuses a value.
+    std::optional<Send> dialogue_update(const DialogueView& view);
+
     /// The join's events of one storage: an Add for each item the bootstrap holds in it, by slot, in chains of kMaxEventsPerChain.
     /// nullopt when an event does not build; an empty list for a storage with no items.
     std::optional<std::vector<Send>> storage_adds(ItemStorage storage);

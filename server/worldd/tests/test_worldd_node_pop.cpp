@@ -733,11 +733,19 @@ static void test_manager() {
     size_t building_npcs = 0;
     for (const uint64_t id : rig.pops->actors_of(kJoeva)) building_npcs += rig.registry.find(id)->npc.vendor_guid != 0 ? 1 : 0;
     CHECK(building_npcs > 0, "(the Town's people include vendors again)");
+    // quests slice 0: the Town Criers of the Town carry the conversation the data gives them
+    constexpr int64_t kTownCrierRoot = 6064634349883577684ll;
+    size_t criers = 0;
+    for (const uint64_t id : rig.pops->actors_of(kJoeva)) criers += rig.registry.find(id)->npc.dialogue_root == kTownCrierRoot ? 1 : 0;
+    CHECK(criers == 2, "(and its two Town Criers open the Town Crier's conversation)");
     CHECK(rig.pops->rebuilds() == 3, "three rebuilds in all");
     // two nodes change in one tick
     set_level(*nodes, kHalcyon, 4);
     set_level(*nodes, kWinstead, 3);
     CHECK(rig.pops->tick(8.0) == 2 && rig.npcs_of(kHalcyon) == golden_npcs("Verra_RVR_Halcyon", 4) && rig.npcs_of(kWinstead) == golden_npcs("Verra_RVR_Winstead", 3), "two nodes that changed together are both rebuilt");
+    size_t halcyon_criers = 0;
+    for (const uint64_t id : rig.pops->actors_of(kHalcyon)) halcyon_criers += rig.registry.find(id)->npc.dialogue_root == kTownCrierRoot ? 1 : 0;
+    CHECK(halcyon_criers == 1, "(Halcyon's Town Crier opens the same conversation)");
 // ~ C-O-A :: C-Y-B ~
 
     // a point whose Blueprint another level draws: replaced, and the dead one's reference is closed

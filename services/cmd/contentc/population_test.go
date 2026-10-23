@@ -520,7 +520,7 @@ func TestRealPopulation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta["contentc.version"] != "16" || meta["typed.npc_placement"] != "15179" {
+	if meta["contentc.version"] != Version || meta["typed.npc_placement"] != "15179" {
 		t.Errorf("meta contentc.version %q, typed.npc_placement %q", meta["contentc.version"], meta["typed.npc_placement"])
 	}
 }

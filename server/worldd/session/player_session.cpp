@@ -11,7 +11,10 @@
 #include "bootstrap/character_setup.h"
 #include "combat/combat_world.h"
 #include "content/content_db.h"
+#include "dialogue/talk.h"
 #include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
 #include "protocol/repl/hit_rpc.h"
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/move_packed.h"
@@ -611,6 +614,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_gather(conn, now);
     run_foliage(conn, now);
     run_floor_net(conn, now);
+    run_dialogue(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
@@ -1053,6 +1057,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerUpdateAccountCombatSettings") return on_combat_settings(conn, rpc, now);
         if (name_of_rpc == "ServerRequestStorageEvent") return on_storage_event_request(conn, rpc, now);
         if (name_of_rpc == "ServerSetActionbarSlotUseData") return on_set_slot(conn, rpc, now);
+        if (name_of_rpc == "ServerSelectDialogueChoice") return on_dialogue_choice(conn, rpc, now);
         if (name_of_rpc == "ServerHandleVendorPurchase") return on_vendor_purchase(conn, rpc, now);
         if (name_of_rpc == "ServerRequestLootStorageEvents") return on_loot_request(conn, rpc, now);
         if (name_of_rpc == "ServerGetNodeTaxTable") return on_node_tax_request(conn, rpc, now);
@@ -3024,6 +3029,8 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (npc_world_ && npc_world_->aftermath()) {
         if (const combat::Corpse* corpse = npc_world_->aftermath()->corpse_by_interactable(req->interactable.ObjectId)) return open_loot(conn, *corpse, *a, now);
     }
+    // quests, slice 0: an NPC with a conversation opens the talking window
+    if (a->kind == world::ActorKind::Npc && a->npc.dialogue_root != 0 && open_dialogue(conn, *a, now)) return;
     const vendor::GmVendors* gm = world_ ? world_->gm_vendors() : nullptr;
     const vendor::GmVendor* def = (gm && a->npc.is_gm_vendor) ? gm->find(a->npc.vendor_guid) : nullptr;
     if (!def) return ignore("the actor " + a->npc.name + " has nothing to offer yet");
@@ -3036,6 +3043,214 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     spdlog::log(level_for(vendor_logged_), "[session] {}: opens the window of {} ({}, {} listing(s) in {} tab(s))", name(), def->label, def->name, def->listings, def->tabs);
     queue("ClientOpenVendor", [merch, npc](bootstrap::PlayerBootstrap& pb) { return pb.open_vendor(merch, npc); }, conn, /*must_build=*/true);
 }
+
+// -- quests, slice 0: the talking window --------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+/// How far from its NPC a conversation may go before the server ends it (the client closes its own window sooner: the interaction range is 25 m).
+constexpr double kDialogueRangeCm = 4000.0;
+
+/// What a conversation's conditions ask of the character who talks: the bag, the level, where the player and the NPC stand.
+class TalkFacts final : public dialogue::Facts {
+public:
+    std::vector<svc::InventoryItem> items;
+    int                             level = 1;
+    double                          player_x = 0, player_y = 0, npc_x = 0, npc_y = 0;
+    bool                            has_npc = false;
+    int64_t                         citizen_node = 0;
+    const world::CityNodes*         nodes = nullptr;
+
+    int64_t item_count(const std::vector<int64_t>& records, const std::vector<std::string>& /*tags*/) const override {
+        if (records.empty()) return 0;   // a count by tag needs the items' tags, which the bag does not hold
+        int64_t n = 0;
+        for (const svc::InventoryItem& it : items) {
+            if (std::find(records.begin(), records.end(), it.item_record_id) != records.end()) n += it.quantity;
+        }
+        return n;
+    }
+
+    std::optional<dialogue::ExprValue> call(const std::string& name, const std::vector<dialogue::ExprValue>& args) const override {
+        using dialogue::ExprValue;
+        constexpr int64_t kPlayer = 1, kNpc = 2;   // the objects an expression passes around
+        if (name == "GetPlayer") return ExprValue::of(kPlayer);
+        if (name == "GetInteractionTarget") return ExprValue::of(has_npc ? kNpc : 0);
+        if (name == "GetCurrentNode") return ExprValue::of(node_at(player_x, player_y));
+        if (name == "Node_GetActorCityNode") {
+            if (args.size() != 1) return std::nullopt;
+            return ExprValue::of(args[0].i == kNpc && has_npc ? node_at(npc_x, npc_y) : node_at(player_x, player_y));
+        }
+        if (name == "GetCharacterLevel" || name == "GetPlayerLevel") return ExprValue::of(level);
+        if (name == "Node_IsPlayerCitizen") return ExprValue::of(citizen_node != 0 ? 1 : 0);
+        if (name == "Node_IsPlayerCitizenOfNode") {
+            if (args.size() != 2) return std::nullopt;
+            return ExprValue::of(citizen_node != 0 && citizen_node == args[1].i ? 1 : 0);
+        }
+        // the world around: worldd runs no elections, constructions, expansions or buy orders yet, and has no mayors
+        static const char* const kNodeActivity[] = {"Node_NumOfServiceBuildingsInState", "Node_NumOfServiceBuilding", "Node_IsNodeMayorElectionActive", "Node_IsNodeMayorPrevoteActive",
+                                                    "Node_IsExpansionInGivenState", "Node_IsBuyOrderActive", "Node_IsPlayerMayorCandidate", "Node_IsPlayerMayorCurrentNode",
+                                                    "Node_HasPlayerCitizenshipCooldown", "Node_CanPlayerBecomeCitizen"};
+        for (const char* f : kNodeActivity) {
+            if (name == f) return ExprValue::of(0);
+        }
+        return std::nullopt;
+    }
+
+private:
+    int64_t node_at(double x, double y) const {
+        if (!nodes) return 0;
+        const world::NodeSite site = nodes->node_at(x, y);
+        const world::CityNodeInfo* n = nodes->by_rank(site.node_rank);
+        return n ? n->guid : 0;
+    }
+};
+
+}  // namespace
+
+std::unique_ptr<dialogue::Facts> PlayerSession::dialogue_facts(const world::WorldActor* npc) const {
+    auto f = std::make_unique<TalkFacts>();
+    f->items = inventory_.items();
+    f->level = progress_.level;
+    const GoodPosition at = checker_.good();
+    f->player_x = at.x;
+    f->player_y = at.y;
+    if (npc) {
+        f->has_npc = true;
+        f->npc_x = npc->x;
+        f->npc_y = npc->y;
+    }
+    f->citizen_node = pb_.setup().citizen_node;
+    f->nodes = world_ ? world_->city_nodes() : nullptr;
+    return f;
+}
+
+bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc, Clock::time_point /*now*/) {
+    const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
+    if (!book) return false;   // a content.db without the conversations: the NPC answers as it did
+    if (talk_.open()) {
+        // the window is open already (the client does not click through its own window): a second click on the same NPC changes nothing, on another is ignored
+        ++dialogue_refused_;
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: a click on {} while the talking window is open: ignored", name(), npc.npc.name);
+        return true;
+    }
+    if (!room_for(1)) return true;
+    const auto facts = dialogue_facts(&npc);
+    dialogue::Evaluator ev(*book, *facts, [this](const std::string& what) {
+        if (dialogue_told_.insert(what).second) spdlog::info("[session] {}: a condition of a conversation could not be answered and does not hold: {} (told once)", name(), what);
+    });
+    const dialogue::Result r = talk_.begin(*book, ev, npc.id, npc.npc.dialogue_root);
+    for (const std::string& s : r.skipped) {
+        if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
+    }
+    if (r.outcome != dialogue::Outcome::Changed) {
+        ++dialogue_refused_;
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: {} has a conversation that cannot be shown ({}): it answers as before", name(), npc.npc.name, r.why);
+        return false;
+    }
+    ++dialogue_opens_;
+    const dialogue::Talk::State& s = talk_.state();
+    spdlog::log(level_for(dialogue_logged_), "[session] {}: talks to {} (node {}, {} line(s) shown)", name(), npc.npc.name, s.shown_node, s.lines.size());
+    send_dialogue(conn, "greeting");
+    return true;
+}
+
+void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/) {
+    const dialogue::Talk::State s = talk_.state();   // a copy: the reply is built when the connection has room for it
+    bootstrap::PlayerBootstrap::DialogueView v;
+    v.previous_node = s.previous_node;
+    v.previous_choice_node = s.previous_choice_node;
+    v.previous_choice_index = s.previous_choice_index;
+    v.current_node = s.current_node;
+    v.shown_node = s.shown_node;
+    v.greeting = s.greeting;
+    for (const dialogue::Talk::Line& l : s.lines) v.lines.push_back({l.node, l.index});
+    if (s.source != 0 && registry_) {
+        if (const world::WorldActor* a = registry_->find(s.source)) v.source = a->actor.guid;
+    }
+    queue("dialogue", [v](bootstrap::PlayerBootstrap& pb) { return pb.dialogue_update(v); }, conn);
+}
+
+void PlayerSession::end_dialogue(Connection& conn, const char* why) {
+    const dialogue::Result r = talk_.close();
+    if (r.outcome != dialogue::Outcome::Changed) return;
+    ++dialogue_closes_;
+    spdlog::log(level_for(dialogue_logged_), "[session] {}: the conversation ends: {}", name(), why);
+    send_dialogue(conn, why);
+}
+
+void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    const auto response = repl::parse_dialogue_response(rpc.call);
+    if (!response) {
+        if (dialogue_told_.insert("unreadable").second) {
+            spdlog::warn("[session] {}: a ServerSelectDialogueChoice does not read ({} parameter bits): ignored (further ones are not logged)", name(), rpc.call.param_bits);
+        }
+        return;
+    }
+    if (!within_budget(dialogue_budget_, "ServerSelectDialogueChoice", now)) return;
+    using repl::DialogueResponseType;
+    using repl::SubDialogueResponse;
+    if (response->response_type == static_cast<uint8_t>(DialogueResponseType::SubDialogue) && response->quest_response == static_cast<uint8_t>(SubDialogueResponse::Close)) {
+        // the window closes: the client says it twice and then names the window it opened; the first clears, the others find nothing to clear
+        end_dialogue(conn, "the client closed the window");
+        return;
+    }
+    if (response->response_type == static_cast<uint8_t>(DialogueResponseType::ActionWindow)) return;   // a window a line opened was closed: no window opens yet
+    if (response->response_type != static_cast<uint8_t>(DialogueResponseType::Choice)) {
+        if (dialogue_told_.insert("response " + std::to_string(response->response_type) + "/" + std::to_string(response->quest_response)).second) {
+            spdlog::info("[session] {}: a talking-window response of type {} (quest response {}) is not answered yet (told once)", name(), response->response_type, response->quest_response);
+        }
+        return;
+    }
+    const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
+    if (dead_ || !book || !talk_.open() || !room_for(1)) {
+        ++dialogue_refused_;
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: a talking-window choice is refused: {}", name(), dead_ ? "the player is dead" : !talk_.open() ? "no conversation is open" : "the world has no conversations");
+        return;
+    }
+    const world::WorldActor* npc = registry_ ? registry_->find(talk_.state().source) : nullptr;
+    if (!npc) {
+        end_dialogue(conn, "the NPC is gone");
+        return;
+    }
+    const GoodPosition at = checker_.good();
+    if (std::hypot(npc->x - at.x, npc->y - at.y) > kDialogueRangeCm) {
+        end_dialogue(conn, "the player is too far from the NPC");
+        return;
+    }
+    const auto facts = dialogue_facts(npc);
+    dialogue::Evaluator ev(*book, *facts, [this](const std::string& what) {
+        if (dialogue_told_.insert(what).second) spdlog::info("[session] {}: a condition of a conversation could not be answered and does not hold: {} (told once)", name(), what);
+    });
+    const dialogue::Result r = talk_.choose(*book, ev, *response);
+    for (const std::string& s : r.skipped) {
+        if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
+    }
+    switch (r.outcome) {
+        case dialogue::Outcome::Changed:
+            ++dialogue_steps_;
+            if (!talk_.open()) ++dialogue_closes_;
+            spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: {}", name(), response->choice_index, response->node,
+                        talk_.open() ? "on to node " + std::to_string(talk_.state().shown_node) : std::string("the conversation ends"));
+            send_dialogue(conn, "a line was chosen");
+            break;
+        case dialogue::Outcome::Nothing:
+            spdlog::log(level_for(dialogue_logged_), "[session] {}: line {} of node {} changes nothing: {}", name(), response->choice_index, response->node, r.why);
+            break;
+        case dialogue::Outcome::Refused:
+            ++dialogue_refused_;
+            spdlog::log(level_for(dialogue_logged_), "[session] {}: a talking-window choice is refused: {}", name(), r.why);
+            break;
+    }
+}
+
+void PlayerSession::run_dialogue(Connection& conn, Clock::time_point /*now*/) {
+    if (!talk_.open()) return;
+    const world::WorldActor* npc = registry_ ? registry_->find(talk_.state().source) : nullptr;
+    if (!npc) return end_dialogue(conn, "the NPC is gone");
+    const GoodPosition at = checker_.good();
+    if (std::hypot(npc->x - at.x, npc->y - at.y) > kDialogueRangeCm) end_dialogue(conn, "the player walked away");
+}
+
 
 // The vendor window waits for this answer (vendor/node_tax.h): the exe's UVendorMenu::InitializeVendor sent the request, and only the table's
 // arrival makes the window fill its listings, taxes and funds.  Retail answers the next packet with the node's table.
@@ -3194,6 +3409,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     death_z_ = at.z;
     loot_actor_ = 0;
     vendor_actor_ = 0;   // the windows close with the death: a purchase or a loot take from a dead character is refused (E1 review A4)
+    end_dialogue(conn, "the player died");
     // the frame of the retail captures: where it fell, the restart of the pawn, the pawn dead with no Health and no Mana
     set_current_value(content::kGuidMana, 0.0f);
     pb_.set_dead(true);

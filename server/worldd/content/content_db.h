@@ -591,6 +591,7 @@ struct NpcInstanceRow {
     double      respawn_time = 0, respawn_variance = 0;
     std::string respawn_rule;
     int64_t     patrol_route = 0, vendor = 0, interact_component = 0, interact_response = 0, dialogue = 0;
+    int64_t     dialogue_root = 0;   // quests slice 0 (contentc version 17): the conversation root the instance opens (npc_dialogue; 0: none, or a file of an older version)
     std::string ambient_behavior;
     double      min_radius = 0, max_radius = 0, arrival_distance = 0, wander_speed_mult = 0, wander_delay = 0, wander_delay_deviation = 0;
     std::string speed_expr, snapping_rule, orientation_type, spawn_location_type;
@@ -748,6 +749,65 @@ struct LootTable {
 };
 
 /// The chain, whole: 4,576 assets, 16,902 instances, 4,728 sets, 15,179 placements, 608 areas.
+// ---- quests, slice 0 (contentc version 17): NPC conversations (dialogue_*, npc_dialogue) ------------------------------------------------------------
+
+/// One thing a requirement compares: a quest's or objective's state, an item count, an expression, a currency or a variable, against a number.
+struct DialogueCriterion {
+    std::string              kind;         // QuestState, ObjectiveState, Item, Expression, Currency, PlayerVariable, WorldVariable
+    std::string              op;           // Equal, NotEqual, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual
+    int64_t                  value = 0;    // the number it is compared with
+    int64_t                  quest = 0, objective = 0, currency = 0;
+    std::string              quest_query;      // Available, Active, Completed, ReadyForHandIn
+    std::string              objective_query;  // Active, Succeeded, Hidden, Completed, cCount
+    std::string              variable;         // the name of a player or world variable
+    std::string              right_variable;   // compare with this variable instead of `value` (empty: with `value`)
+    std::string              expression;
+    std::vector<int64_t>     items;            // the item records an Item criterion counts
+    std::vector<std::string> tags;             // or the item tags
+};
+
+/// A condition: a tree (tokens: node := type count child..., type 0 AND and 2 OR over nodes, 1 ALL, 3 ANY and 5 NONE over criterion indexes) and its criteria.
+struct DialogueRequirement {
+    std::vector<int>               tokens;
+    std::vector<DialogueCriterion> criteria;
+    bool empty() const { return tokens.empty(); }
+};
+
+struct DialogueActionRow {
+    std::string action;   // OpenWindow, ActionResponse, GiveItems, IncrementDialogueObjective, ...
+    std::string window;   // for OpenWindow: Vendor
+};
+
+struct DialogueChoiceRow {
+    int64_t                        next = 0;   // 0: the line ends the conversation
+    DialogueRequirement            requirement;
+    std::vector<DialogueActionRow> actions;
+};
+
+struct DialogueNodeRow {
+    int64_t                        guid = 0;
+    std::string                    name, type, exhaust;   // type: Response, Automatic, AcceptQuest, TurnIn, Confirmation, BuyOrderFulfillment
+    int64_t                        quest = 0;
+    std::vector<DialogueChoiceRow> choices;                // by the line's index
+    std::vector<DialogueActionRow> on_enter, on_exit;
+};
+
+/// A quest a condition names, with the rule that makes it available.
+struct DialogueQuestRow {
+    int64_t             guid = 0;
+    std::string         name;
+    bool                disabled = false, repeatable = false;
+    DialogueRequirement activation;
+};
+
+struct DialogueData {
+    std::map<int64_t, int64_t>         roots;           // root guid -> the node it starts at (0: none)
+    std::map<int64_t, DialogueNodeRow> nodes;
+    std::map<int64_t, DialogueQuestRow> quests;
+    std::map<int64_t, int64_t>         instance_roots;  // PopulationInstance guid -> root
+    std::map<int64_t, int64_t>         asset_roots;     // PopulationAsset guid -> root
+};
+
 struct PopulationData {
     std::map<int64_t, NpcAssetRow>                         assets;
     std::map<int64_t, std::vector<std::pair<int64_t, double>>> asset_sets;   // set guid -> (asset guid, weight) in order
@@ -971,6 +1031,9 @@ public:
     /// Plan E1: the NPC population chain (npc_*), read whole. nullopt with `error` set when a table is missing (a file of another shape: the
     /// fixtures of the tests have none) or a column is of another storage class than the column's.
     std::optional<PopulationData> population_data(std::string& error) const;
+    /// Quests, slice 0 (contentc version 17): the NPC conversations (dialogue_root, dialogue_node, dialogue_choice, dialogue_quest, npc_dialogue), read whole.
+    /// nullopt with `error` set when a table is missing (a file of an older version) or a row does not read.
+    std::optional<DialogueData> dialogue_data(std::string& error) const;
     /// Plan E1: a vendor (vendor_def with its inventories and their listings) by its VendorDef guid; nullopt with `error` empty when there is none.
     std::optional<VendorDefRow> vendor_def(int64_t guid, std::string& error) const;
     /// Plan E1: a vendor by name ("PTR_ONLY_Vendor_Gear_0-9"); nullopt with `error` empty when there is none.

@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "16"
+const Version = "17"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -222,6 +222,9 @@ var keep = map[string]bool{
 	"CertificationLevelRecordBase":       true,
 	"CharacterProfessionsRecordBase":     true,
 	"ItemVariationRecordBase":            true,
+	// quests, slice 0 (version 17): the NPC conversations (dialogue.go; PopulationInstanceRecordBase, PopulationAssetRecordBase and NarrativeQuestV2 are kept above)
+	"DialogueRoot": true,
+	"DialogueNode": true,
 }
 
 // -- C Y B x C.O.A --
@@ -408,6 +411,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildNodes(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildDialogue(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
 

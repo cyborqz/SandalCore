@@ -247,6 +247,7 @@
 // [Cyb :: C | O | A]
 
 #include "bootstrap/bootstrap.h"
+#include "dialogue/talk.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
 #include "net/connection.h"
@@ -653,6 +654,13 @@ public:
     size_t   vendor_purchases() const { return vendor_purchases_; }
     size_t   vendor_refused() const { return vendor_refused_; }
     size_t   interactions_ignored() const { return interact_ignored_; }
+    /// Quests, slice 0: the talking window.  The NPC the player talks to (0: nobody), the conversation, and how many were opened, lines chosen, closed and refused.
+    uint64_t talk_actor() const { return talk_.state().source; }
+    const dialogue::Talk& talk() const { return talk_; }
+    size_t   dialogue_opens() const { return dialogue_opens_; }
+    size_t   dialogue_steps() const { return dialogue_steps_; }
+    size_t   dialogue_closes() const { return dialogue_closes_; }
+    size_t   dialogue_refused() const { return dialogue_refused_; }
     /// The tax-table requests of the vendor windows, and the tables sent in answer.
     size_t   tax_requests() const { return tax_requests_; }
     size_t   tax_tables_sent() const { return tax_tables_sent_; }
@@ -766,6 +774,19 @@ private:
     static spdlog::level::level_enum level_for(size_t& count, size_t limit = kLoggedPerKind);
     void dispatch(Connection& conn, bootstrap::Role role, const protocol::repl::ClientRpc& rpc, const InBunch& bunch,
                   Clock::time_point now);
+    // ---- quests, slice 0: the talking window ------------------------------------------------------------------------------------------
+    /// What the conditions of a conversation ask of this character (the bag, the level, where the player and the NPC stand).
+    std::unique_ptr<dialogue::Facts> dialogue_facts(const world::WorldActor* npc) const;
+    /// The click on an NPC that has a conversation: opens the window with its greeting.  False when the NPC has none that can be shown (the caller then answers as before).
+    bool open_dialogue(Connection& conn, const world::WorldActor& npc, Clock::time_point now);
+    /// ServerSelectDialogueChoice: a line chosen, the window closed, a window the line opened closed.
+    void on_dialogue_choice(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Sends the conversation as it is now (the PlayerController's CurrentDialogueInstance).
+    void send_dialogue(Connection& conn, const char* why);
+    /// Ends the conversation on the server's side (the player walked away or died, the NPC is gone) and tells the client.
+    void end_dialogue(Connection& conn, const char* why);
+    /// Every tick: a conversation whose NPC is gone or far away ends.
+    void run_dialogue(Connection& conn, Clock::time_point now);
     /// What the reader skipped in a bunch that read (calls on subobjects the client names by path, RPC fields the class has no RPC for): counted, and said once per name.
     void note_unserved_blocks(bootstrap::Role role, const protocol::repl::ClientBunch& parsed, const InBunch& bunch);
     void on_move(Connection& conn, const protocol::repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now, bool on_mount);
@@ -1226,6 +1247,11 @@ private:
     size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;
     size_t vendor_opens_ = 0, vendor_purchases_ = 0, vendor_refused_ = 0, interact_ignored_ = 0, vendor_logged_ = 0, interact_logged_ = 0;
     bool   vendor_unreadable_logged_ = false, vendor_sale_logged_ = false;
+    // quests, slice 0: the talking window
+    dialogue::Talk talk_;
+    RequestBudget  dialogue_budget_{kVendorBurst, kVendorInterval};
+    size_t         dialogue_opens_ = 0, dialogue_steps_ = 0, dialogue_closes_ = 0, dialogue_refused_ = 0, dialogue_logged_ = 0;
+    std::set<std::string> dialogue_told_;   // what the conversation skipped or could not answer, told once for each text
     Clock::time_point last_save_{};
     bool save_clock_started_ = false;
     bool finished_ = false;
