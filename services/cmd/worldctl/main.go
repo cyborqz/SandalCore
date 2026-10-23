@@ -10,6 +10,8 @@
 //	worldctl tp <character> <place>                   moves the player to a place (joeva, "New Aela", Verra_RVR_Joeva, login ...)
 //	worldctl tp <character> <x> <y> [<z>]             moves the player to a point (cm); without z, the ground height under it
 //	worldctl speed <character> <multiplier>           the character's run speed, 0.5 to 10 (1 resets); until relog
+//	worldctl give-money <character> <copper>          adds copper to the character's purse (100 copper = 1 silver, 100 silver = 1 gold; the purse holds 10,000,000 at most)
+//	worldctl give-item <character> <item> [<count>]   gives an item by its record name or Guid (count 1 by default), into the bag its kind belongs to
 //
 // A mounted player is dismounted first. A <place> is matched as nodectl matches a node: the record name (Verra_RVR_Joeva), the same
 // without Verra_, or the display name (Joeva); case, spaces and punctuation do not count.
@@ -57,6 +59,8 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   tp <character> <place>            move a player to a city node or to "login"
   tp <character> <x> <y> [<z>]      move a player to a point (cm); without z, the ground height
   speed <character> <multiplier>    run speed, 0.5 to 10; 1 resets (until relog)
+  give-money <character> <copper>   add copper to the purse (a test command)
+  give-item <character> <item> [n]  give an item by record name or Guid, into the right bag (a test command)
 every command takes --addr and --token-file`
 
 type usageError string
@@ -71,7 +75,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed":
+	case "players", "places", "tp", "speed", "give-money", "give-item":
 	case "help", "-h", "--help":
 		fmt.Fprintln(out, usage)
 		return 0
@@ -141,6 +145,8 @@ func explain(err error, addr string) string {
 			return "refused: " + s.Message()
 		case codes.NotFound:
 			return "not found: " + s.Message()
+		case codes.FailedPrecondition:
+			return "not done: " + s.Message()
 		}
 		return fmt.Sprintf("%s: %s", strings.ToLower(s.Code().String()), s.Message())
 	}
@@ -185,6 +191,46 @@ func parse(cmd string, pos []string) (call, error) {
 			} else {
 				fmt.Fprintf(out, "%s: run speed x%g (was x%g); it lasts until relog or `worldctl speed %s 1`\n", r.GetCharacter(), r.GetMultiplier(), r.GetPrevious(), r.GetCharacter())
 			}
+			return nil
+		}, nil
+	case "give-money":
+		if len(pos) != 2 {
+			return nil, usageError("needs a character and an amount of copper: worldctl give-money <character> <copper>")
+		}
+		copper, err := strconv.ParseInt(strings.TrimSpace(pos[1]), 10, 64)
+		if err != nil || copper < 1 {
+			return nil, usageError(fmt.Sprintf("the amount %q is not a whole number of copper of 1 or more (100 copper = 1 silver, 10,000 copper = 1 gold)", pos[1]))
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.GiveMoney(ctx, &worldadminv1.GiveMoneyRequest{Character: pos[0], Copper: copper})
+			if err != nil {
+				return err
+			}
+			note := ""
+			if r.GetAdded() < copper {
+				note = fmt.Sprintf("; the purse is full, only %d of the %d copper fitted", r.GetAdded(), copper)
+			}
+			fmt.Fprintf(out, "%s: +%d copper, the purse holds %d (was %d)%s\n", r.GetCharacter(), r.GetAdded(), r.GetBalance(), r.GetPrevious(), note)
+			return nil
+		}, nil
+	case "give-item":
+		if len(pos) < 2 || len(pos) > 3 {
+			return nil, usageError("needs a character and an item: worldctl give-item <character> <item name or Guid> [<count>]")
+		}
+		count := int64(1)
+		if len(pos) == 3 {
+			n, err := strconv.ParseInt(strings.TrimSpace(pos[2]), 10, 32)
+			if err != nil || n < 1 || n > 100000 {
+				return nil, usageError(fmt.Sprintf("the count %q is not a whole number from 1 to 100000", pos[2]))
+			}
+			count = n
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.GiveItem(ctx, &worldadminv1.GiveItemRequest{Character: pos[0], Item: pos[1], Count: int32(count)})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s: %d x %s (%d) given, into %s\n", r.GetCharacter(), r.GetCount(), r.GetItem(), r.GetItemGuid(), r.GetContainer())
 			return nil
 		}, nil
 	}

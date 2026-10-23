@@ -28,4 +28,8 @@ namespace aoc::worldd::vendor {
 /// The answer to ServerGetNodeTaxTable(node): every tax 0%.
 protocol::repl::NodeTaxDetails untaxed_table(int64_t node);
 
+/// The table of a node nobody has changed (the vendors milestone, step 0): the 78 rows with the rates of the default tax details, 50 percent of the price with the owning node
+/// keeping all of it.  A shop that has a tax tag charges the rate of the first row, from its tag up the tag tree, with both flags set (vendor/town_shops.h).
+protocol::repl::NodeTaxDetails default_table(int64_t node);
+
 }  // namespace aoc::worldd::vendor

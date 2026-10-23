@@ -231,6 +231,11 @@ func (s *Store) Inventory(ctx context.Context, characterID string) ([]Item, erro
 // (not in part 1 of the complete character), so an empty save is a bug in the caller, and it would erase the character's
 // kit.
 func (s *Store) SaveInventory(ctx context.Context, characterID string, items []Item) error {
+	return s.saveInventory(ctx, characterID, items, nil)
+}
+
+// saveInventory is SaveInventory and, when wallet is not nil, the wallet's entries stored in the same transaction (SaveInventoryAndWallet).
+func (s *Store) saveInventory(ctx context.Context, characterID string, items []Item, wallet []WalletEntry) error {
 	if !idPattern.MatchString(characterID) {
 		return ErrNotFound
 	}
@@ -258,6 +263,9 @@ func (s *Store) SaveInventory(ctx context.Context, characterID string, items []I
 	}
 	if err := insertItems(ctx, tx, characterID, items); err != nil {
 		return itemsError(err)
+	}
+	if err := upsertWallet(ctx, tx, characterID, wallet); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }

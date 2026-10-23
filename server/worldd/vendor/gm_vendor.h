@@ -19,7 +19,7 @@
 //  kind ("GM Gear 0-9", "GM Materials"...), grouped by kind in two arcs in front of the login spot:
 //
 //    stock     the listings of the def's inventories that are not hidden: the item records the player may buy there, nothing else
-//    price     none: the PTR defs list no offer, and the server takes no currency (worldd has none yet); a price the client's window
+//    price     none: the PTR defs list no offer, and the server takes no currency for these defs (the purse is for the towns' shops); a price the client's window
 //              would show is its own
 //    purchase  a cart of items of the open def, a quantity each; each becomes stacks of the record's MaxStackSize (the use of an item
 //              grants in the same way: session/item_use.h) in the lowest free bag slots, an Add event each; a bag with too few free

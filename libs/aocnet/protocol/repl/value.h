@@ -492,9 +492,8 @@ struct HitConfirmations {
     bool operator==(const HitConfirmations&) const = default;
 };
 
-/// One element of FVendorPurchaseCart::ItemCart (plan E1): an item record and a quantity, and two TOptional<int64> (read by the exe's
-/// a 32-bit "set" flag, then the 64-bit value when set) whose meaning is not known: both are unset in 1,034 of the 1,035
-/// elements of the retail captures and the one set holds an item record id.
+/// One element of FVendorPurchaseCart::ItemCart: an item record and a quantity, and two TOptional<int64> (each a 32-bit "set" flag, then the 64-bit value when set):
+/// optional_a is the listing's item variation and optional_b the offer the buyer picked; a listing that has neither leaves both unset.
 struct VendorCartItem {
     int64_t                item_record = 0;
     int32_t                quantity = 0;

@@ -472,6 +472,21 @@ DELETE FROM schema_migrations WHERE version = 11;
 COMMIT;
 ```
 
+**Rolling back migration 0012.** Migration 0012 (the vendors milestone, step 0) adds ONE table, `character_wallet` (the money a character carries, one row per currency in the currency's base unit:
+copper for money); it writes nowhere else, backfills nothing and touches no existing table. The character service gives a character with no wallet row its start purse ONCE, the
+first time its wallet is read: an empty one, or 210,000 copper (21 gold) on a server set up for testing and development (AOC_GM_STARTER_SET=1); worldd saves the wallet with the items. The rollback
+drops the table with whatever it holds: every character's money is gone, and the next start of the services gives each character its start purse again. The characters and their items are untouched. Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0012 (vendors, step 0: the wallet)
+BEGIN;
+DROP TABLE character_wallet;
+DELETE FROM schema_migrations WHERE version = 12;
+COMMIT;
+```
+
+**Content (vendors, step 0).** contentc version 18 adds `npc_vendor_link` (which shop a shopkeeper's use opens), `vendor_def_data`, `vendor_def_modifier`, `vendor_def_sell_filter`, `vendor_modifier`, `vendor_sell_filter`, `base_item_value`, `item_base_value`, `vendor_offer`, `vendor_availability` and `vendor_price` (`internal/content/vendors.go` says what each holds; `cmd/contentc/vendors.go` writes them), and the `OpenWindow` actions of the dialogue tables carry the shop they open (`vd`). `vendor_price` holds, for every listing of every shop, its price per unit before the town's tax: the listing's value (the offer's, when it has one) rounded up, through the shop's buy modifiers, rounded up, evaluated with `aocexpr` (`Env.IntDivide` makes a division of two whole numbers truncate, as the formulas expect); a listing that needs more than the item gets no row. Rebuild `content.db` (the extractor's `database` step) after pulling it. The character service's `GetCharacter` (with items) also returns the wallet and gives a character with none its start purse once (empty, or 210,000 copper with AOC_GM_STARTER_SET=1, for testing); `SaveInventory` stores the wallet in the same transaction when `replace_wallet` is set.
+
 **Content.** contentc version 5 adds `item_use`, `item_action`, `action_response`, `action_reward`, `reward_table`, `reward_item`, `reward_xp`, `leveling_type`,
 `leveling_curve`, `skill_auto_grant` and `skill_rank_stat_mod` (`internal/content/schema.go` says what each holds; `cmd/contentc/progression.go` writes them).
 Version 5 is the oldest file this checkout reads (`RequireVersion`, and worldd's `ContentDb::open`): after pulling D1 rebuild `content.db` and restart both services.

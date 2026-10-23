@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace aoc { namespace worldd {
 
@@ -150,6 +151,93 @@ GmSpeedResult GmTravel::set_speed(const std::string& character, double multiplie
     out.character = handle.player->name();
     out.previous = change.previous;
     out.multiplier = change.now;
+    return out;
+}
+
+GmMoneyGrant GmTravel::give_money(const std::string& character, int64_t copper, const std::string& by) {
+    GmMoneyGrant out;
+    if (copper < 1) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "the amount must be at least 1 copper (100 copper = 1 silver, 100 silver = 1 gold)";
+        return out;
+    }
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    const PlayerSession::GmMoneyResult r = handle.player->gm_give_money(*handle.connection, copper, now_(), by);
+    out.character = handle.player->name();
+    out.previous = r.previous;
+    out.balance = r.balance;
+    out.added = r.added;
+    if (!r.ok) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = r.refusal;
+    }
+    return out;
+}
+
+GmItemGrant GmTravel::give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by) {
+    GmItemGrant out;
+    if (item.empty()) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "no item is named";
+        return out;
+    }
+    if (count < 1 || count > 100000) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "the count must be 1 to 100,000";
+        return out;
+    }
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    const content::ContentDb* db = world_.content();
+    if (!db) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "worldd has no content.db to look the item up in";
+        return out;
+    }
+    // an item is named by its record name (case does not count) or by its Guid
+    int64_t guid = 0;
+    const bool digits = std::all_of(item.begin(), item.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (digits && item.size() <= 19) {
+        guid = std::strtoll(item.c_str(), nullptr, 10);
+    } else {
+        std::string error;
+        const std::vector<int64_t> found = db->items_named(item, error);
+        if (!error.empty()) {
+            out.status = GmStatus::FailedPrecondition;
+            out.message = error;
+            return out;
+        }
+        if (found.empty()) {
+            out.status = GmStatus::NotFound;
+            out.message = "no item is named \"" + item + "\" (the name is the record's, such as Consumable_Food_Regen_Rations_T1, or its Guid)";
+            return out;
+        }
+        if (found.size() > 1) {
+            out.status = GmStatus::InvalidArgument;
+            out.message = "\"" + item + "\" names " + std::to_string(found.size()) + " items: give the Guid of one of them (first: " + std::to_string(found.front()) + ")";
+            return out;
+        }
+        guid = found.front();
+    }
+    const PlayerSession::GmItemResult r = handle.player->gm_give_item(*handle.connection, guid, count, now_(), by);
+    out.character = handle.player->name();
+    out.item = r.item_name;
+    out.item_guid = guid;
+    out.count = r.count;
+    out.container = r.container;
+    if (!r.ok) {
+        out.status = r.item_name.empty() ? GmStatus::NotFound : GmStatus::FailedPrecondition;
+        out.message = r.refusal;
+    }
     return out;
 }
 

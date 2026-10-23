@@ -11,7 +11,8 @@
 // With AOC_GM_STARTER_SET=1 (plan D1; off by default) the same file gives a new character the GM starter set (the level
 // scrolls, the class scrolls and a gear scroll: internal/kit's StarterMaker) in its bag with the kit, and, at a start of the
 // service, gives it once to every character that has not had it (characters.gm_starter_set_granted_at), logged per
-// character; what does not fit a full bag is left out and logged.
+// character; what does not fit a full bag is left out and logged. It also gives a character with no wallet yet a start
+// purse of 21 gold, once, for testing and development; without it a wallet starts empty.
 //
 // The content.db that contentc builds (AOC_CONTENT_DB, or --content-db) is what
 // a new character's race, gender, class and customization are checked against
@@ -90,6 +91,9 @@ func run(contentDB string, backfill bool, starterSet bool) error {
 	check, kits, starter, closeContent := loadContent(contentDB, starterSet)
 	defer closeContent()
 	store := character.NewStore(pool)
+	if starterSet {
+		store.SetStartPurse(character.StartPurseCopper) // testing and development only: 21 gold to try the shops with
+	}
 	if backfill {
 		backfillKits(ctx, store, kits)
 	}

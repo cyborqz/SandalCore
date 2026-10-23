@@ -773,6 +773,262 @@ func (x *SetMoveSpeedResponse) GetMultiplier() float64 {
 	return 0
 }
 
+type GiveMoneyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
+	Copper        int64                  `protobuf:"varint,2,opt,name=copper,proto3" json:"copper,omitempty"` // 1 or more (100 copper = 1 silver, 100 silver = 1 gold)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GiveMoneyRequest) Reset() {
+	*x = GiveMoneyRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GiveMoneyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GiveMoneyRequest) ProtoMessage() {}
+
+func (x *GiveMoneyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GiveMoneyRequest.ProtoReflect.Descriptor instead.
+func (*GiveMoneyRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GiveMoneyRequest) GetCharacter() string {
+	if x != nil {
+		return x.Character
+	}
+	return ""
+}
+
+func (x *GiveMoneyRequest) GetCopper() int64 {
+	if x != nil {
+		return x.Copper
+	}
+	return 0
+}
+
+type GiveMoneyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
+	Previous      int64                  `protobuf:"varint,2,opt,name=previous,proto3" json:"previous,omitempty"` // the purse before, in copper
+	Balance       int64                  `protobuf:"varint,3,opt,name=balance,proto3" json:"balance,omitempty"`   // and after
+	Added         int64                  `protobuf:"varint,4,opt,name=added,proto3" json:"added,omitempty"`       // less than asked when the cap was reached
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GiveMoneyResponse) Reset() {
+	*x = GiveMoneyResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GiveMoneyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GiveMoneyResponse) ProtoMessage() {}
+
+func (x *GiveMoneyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GiveMoneyResponse.ProtoReflect.Descriptor instead.
+func (*GiveMoneyResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GiveMoneyResponse) GetCharacter() string {
+	if x != nil {
+		return x.Character
+	}
+	return ""
+}
+
+func (x *GiveMoneyResponse) GetPrevious() int64 {
+	if x != nil {
+		return x.Previous
+	}
+	return 0
+}
+
+func (x *GiveMoneyResponse) GetBalance() int64 {
+	if x != nil {
+		return x.Balance
+	}
+	return 0
+}
+
+func (x *GiveMoneyResponse) GetAdded() int64 {
+	if x != nil {
+		return x.Added
+	}
+	return 0
+}
+
+type GiveItemRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
+	Item          string                 `protobuf:"bytes,2,opt,name=item,proto3" json:"item,omitempty"`    // the item record's name, or its Guid in digits
+	Count         int32                  `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"` // 1 to 100000
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GiveItemRequest) Reset() {
+	*x = GiveItemRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GiveItemRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GiveItemRequest) ProtoMessage() {}
+
+func (x *GiveItemRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GiveItemRequest.ProtoReflect.Descriptor instead.
+func (*GiveItemRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GiveItemRequest) GetCharacter() string {
+	if x != nil {
+		return x.Character
+	}
+	return ""
+}
+
+func (x *GiveItemRequest) GetItem() string {
+	if x != nil {
+		return x.Item
+	}
+	return ""
+}
+
+func (x *GiveItemRequest) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type GiveItemResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
+	Item          string                 `protobuf:"bytes,2,opt,name=item,proto3" json:"item,omitempty"` // the record's name
+	ItemGuid      int64                  `protobuf:"varint,3,opt,name=item_guid,json=itemGuid,proto3" json:"item_guid,omitempty"`
+	Count         int32                  `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`
+	Container     string                 `protobuf:"bytes,5,opt,name=container,proto3" json:"container,omitempty"` // where the first stack went: Backpack or a resource container
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GiveItemResponse) Reset() {
+	*x = GiveItemResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GiveItemResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GiveItemResponse) ProtoMessage() {}
+
+func (x *GiveItemResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GiveItemResponse.ProtoReflect.Descriptor instead.
+func (*GiveItemResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GiveItemResponse) GetCharacter() string {
+	if x != nil {
+		return x.Character
+	}
+	return ""
+}
+
+func (x *GiveItemResponse) GetItem() string {
+	if x != nil {
+		return x.Item
+	}
+	return ""
+}
+
+func (x *GiveItemResponse) GetItemGuid() int64 {
+	if x != nil {
+		return x.ItemGuid
+	}
+	return 0
+}
+
+func (x *GiveItemResponse) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *GiveItemResponse) GetContainer() string {
+	if x != nil {
+		return x.Container
+	}
+	return ""
+}
+
 var File_aoc_worldadmin_v1_worldadmin_proto protoreflect.FileDescriptor
 
 const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
@@ -831,13 +1087,33 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\bprevious\x18\x02 \x01(\x01R\bprevious\x12\x1e\n" +
 	"\n" +
 	"multiplier\x18\x03 \x01(\x01R\n" +
-	"multiplier2\x82\x03\n" +
+	"multiplier\"H\n" +
+	"\x10GiveMoneyRequest\x12\x1c\n" +
+	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x16\n" +
+	"\x06copper\x18\x02 \x01(\x03R\x06copper\"}\n" +
+	"\x11GiveMoneyResponse\x12\x1c\n" +
+	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x1a\n" +
+	"\bprevious\x18\x02 \x01(\x03R\bprevious\x12\x18\n" +
+	"\abalance\x18\x03 \x01(\x03R\abalance\x12\x14\n" +
+	"\x05added\x18\x04 \x01(\x03R\x05added\"Y\n" +
+	"\x0fGiveItemRequest\x12\x1c\n" +
+	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x12\n" +
+	"\x04item\x18\x02 \x01(\tR\x04item\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x05R\x05count\"\x95\x01\n" +
+	"\x10GiveItemResponse\x12\x1c\n" +
+	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x12\n" +
+	"\x04item\x18\x02 \x01(\tR\x04item\x12\x1b\n" +
+	"\titem_guid\x18\x03 \x01(\x03R\bitemGuid\x12\x14\n" +
+	"\x05count\x18\x04 \x01(\x05R\x05count\x12\x1c\n" +
+	"\tcontainer\x18\x05 \x01(\tR\tcontainer2\xaf\x04\n" +
 	"\x11WorldAdminService\x12\\\n" +
 	"\vListPlayers\x12%.aoc.worldadmin.v1.ListPlayersRequest\x1a&.aoc.worldadmin.v1.ListPlayersResponse\x12Y\n" +
 	"\n" +
 	"ListPlaces\x12$.aoc.worldadmin.v1.ListPlacesRequest\x1a%.aoc.worldadmin.v1.ListPlacesResponse\x12S\n" +
 	"\bTeleport\x12\".aoc.worldadmin.v1.TeleportRequest\x1a#.aoc.worldadmin.v1.TeleportResponse\x12_\n" +
-	"\fSetMoveSpeed\x12&.aoc.worldadmin.v1.SetMoveSpeedRequest\x1a'.aoc.worldadmin.v1.SetMoveSpeedResponseB4Z2aocrop/services/gen/aoc/worldadmin/v1;worldadminv1b\x06proto3"
+	"\fSetMoveSpeed\x12&.aoc.worldadmin.v1.SetMoveSpeedRequest\x1a'.aoc.worldadmin.v1.SetMoveSpeedResponse\x12V\n" +
+	"\tGiveMoney\x12#.aoc.worldadmin.v1.GiveMoneyRequest\x1a$.aoc.worldadmin.v1.GiveMoneyResponse\x12S\n" +
+	"\bGiveItem\x12\".aoc.worldadmin.v1.GiveItemRequest\x1a#.aoc.worldadmin.v1.GiveItemResponseB4Z2aocrop/services/gen/aoc/worldadmin/v1;worldadminv1b\x06proto3"
 
 var (
 	file_aoc_worldadmin_v1_worldadmin_proto_rawDescOnce sync.Once
@@ -853,7 +1129,7 @@ func file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP() []byte {
 	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescData
 }
 
-var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_aoc_worldadmin_v1_worldadmin_proto_goTypes = []any{
 	(*Position)(nil),             // 0: aoc.worldadmin.v1.Position
 	(*Player)(nil),               // 1: aoc.worldadmin.v1.Player
@@ -867,6 +1143,10 @@ var file_aoc_worldadmin_v1_worldadmin_proto_goTypes = []any{
 	(*TeleportResponse)(nil),     // 9: aoc.worldadmin.v1.TeleportResponse
 	(*SetMoveSpeedRequest)(nil),  // 10: aoc.worldadmin.v1.SetMoveSpeedRequest
 	(*SetMoveSpeedResponse)(nil), // 11: aoc.worldadmin.v1.SetMoveSpeedResponse
+	(*GiveMoneyRequest)(nil),     // 12: aoc.worldadmin.v1.GiveMoneyRequest
+	(*GiveMoneyResponse)(nil),    // 13: aoc.worldadmin.v1.GiveMoneyResponse
+	(*GiveItemRequest)(nil),      // 14: aoc.worldadmin.v1.GiveItemRequest
+	(*GiveItemResponse)(nil),     // 15: aoc.worldadmin.v1.GiveItemResponse
 }
 var file_aoc_worldadmin_v1_worldadmin_proto_depIdxs = []int32{
 	0,  // 0: aoc.worldadmin.v1.Player.position:type_name -> aoc.worldadmin.v1.Position
@@ -880,12 +1160,16 @@ var file_aoc_worldadmin_v1_worldadmin_proto_depIdxs = []int32{
 	5,  // 8: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
 	8,  // 9: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
 	10, // 10: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
-	3,  // 11: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
-	6,  // 12: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
-	9,  // 13: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
-	11, // 14: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
+	12, // 11: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
+	14, // 12: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
+	3,  // 13: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
+	6,  // 14: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
+	9,  // 15: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
+	11, // 16: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
+	13, // 17: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
+	15, // 18: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
+	13, // [13:19] is the sub-list for method output_type
+	7,  // [7:13] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
 	7,  // [7:7] is the sub-list for extension extendee
 	0,  // [0:7] is the sub-list for field type_name
@@ -906,7 +1190,7 @@ func file_aoc_worldadmin_v1_worldadmin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc), len(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -7,6 +7,7 @@
 #include "session/player_world.h"
 
 #include "combat/npc_replicator.h"
+#include "world/interaction_state.h"
 
 #include <spdlog/spdlog.h>
 
@@ -251,6 +252,15 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             spdlog::info("[world] conversations: {} nodes of {} roots, {} quests named by conditions", dialogue_->nodes(), dialogue_->roots(), dialogue_->quests());
         } else {
             spdlog::warn("[world] the NPC conversations do not load, so the NPCs that have one answer as before: {}", de);
+        }
+    }
+    {   // vendors, step 0: the towns' shops; a content.db of an older version has none and the NPCs keep their answer
+        std::string ve;
+        if (auto data = content_->vendor_data(ve)) {
+            shops_.emplace(std::move(*data));
+            spdlog::info("[world] shops: {} vendor defs, {} NPC links, {} priced listings; open: {}", shops_->defs(), shops_->links(), shops_->priced_rows(), shops_->open_shops().size());
+        } else {
+            spdlog::warn("[world] the town shops do not load, so the shopkeepers answer as before: {}", ve);
         }
     }
     // Gathering stage 3, "Hunting": the creatures whose asset names a Hunting_<kind> interaction get the hunting interactable (spawns/generic_npc.h); an older content.db has none
@@ -790,6 +800,19 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
                 } else {
                     spdlog::warn("[people] {} ({}): its stats do not run, it keeps its template's: {}", id, spawns::blueprint_leaf(person->npc.archetype), why);
                 }
+            }
+        }
+        // vendors, step 0: a shopkeeper can be used and its window names the town it stands in (the node its plot component holds is the one the client asks the taxes of and whose
+        // name the window shows); a template recorded in another town names that one
+        if (shops_ && node.guid != 0) {
+            const world::WorldActor* keeper = registry_.find(id);
+            if (keeper && keeper->kind == world::ActorKind::Npc && shops_->shop_of(keeper->npc.instance_guid, keeper->npc.asset_guid) != 0) {
+                registry_.modify(id, world::Change::State, [&](world::WorldActor& w) {
+                    world::allow_inputs(w.actor);   // the shopkeeper's four inputs may be activated, as the GM vendors' are
+                    for (protocol::repl::Subobject& s : w.actor.subobjects) {
+                        if (s.obj.schema && std::string(s.obj.schema->name) == "UAoCNodePlotComponent") s.obj.state.set(*s.obj.schema, "NodeRecordGuid", protocol::repl::Value::i64(node.guid));
+                    }
+                });
             }
         }
         if (!npcs_) return;   // no ground: the NPC stands where the data put it

@@ -71,6 +71,14 @@ struct InventoryItem {
     }
 };
 
+/// The vendors milestone, step 0: one currency of a character's wallet (aoc.character.v1.WalletEntry): the BASE currency def's Guid (Copper, Node currency) and the balance in that
+/// unit (copper for money).
+struct WalletEntry {
+    int64_t currency_guid = 0;
+    int64_t amount = 0;
+    bool operator==(const WalletEntry&) const = default;
+};
+
 /// Plan D1: the XP a character has in one leveling type (aoc.character.v1.Experience): the design database's LevelingTypeDef
 /// Guid (Adventuring 108651085518458), the total as the client's XPTracker shows it and the experience debt.
 struct Experience {
@@ -153,6 +161,9 @@ struct Character {
     /// Gathering stage 2: the character's 22 professions in guid order (with the items): a profession the service has no row for is Novice, level 1, no XP,
     /// so a service of this version always sends 22; an older fake may send none, which worldd reads the same way.
     std::vector<ProfessionState> professions;
+    /// The vendors milestone, step 0: the character's money (with the items). The service gives a character with no wallet the start purse when it reads it, so a service of this
+    /// version always sends a Copper entry; an older fake sends none, which worldd reads as an empty purse.
+    std::vector<WalletEntry> wallet;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -216,6 +227,12 @@ public:
         (void)id;
         (void)items;
         return CallStatus::Failed;
+    }
+    /// The vendors milestone, step 0: SaveInventory that also stores the wallet, in the same transaction (each currency named is set, the others are left). A fake that does not care
+    /// saves the items alone.
+    virtual CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet) {
+        (void)wallet;
+        return save_inventory(id, items);
     }
     /// Plan D1: SaveProgress: the level, the class and the XP rows, in one transaction (the latest save wins). Refused: a level
     /// outside 1-25, a class outside 1-8, a leveling type of 0, a negative XP or debt; NotFound: no such character.

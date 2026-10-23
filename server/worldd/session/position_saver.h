@@ -54,6 +54,11 @@ public:
         (void)character_id;
         (void)items;
     }
+    /// The vendors milestone, step 0: the inventory with the character's wallet (stored in the same call). A sink that does not keep wallets saves the items alone.
+    virtual void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet) {
+        (void)wallet;
+        save_inventory(character_id, std::move(items));
+    }
     /// Plan D1: queues the character's progress (SaveProgress: level, class, XP rows). Never blocks on the network.
     virtual void save_progress(const std::string& character_id, svc::Progress progress) {
         (void)character_id;
@@ -77,6 +82,7 @@ public:
 
     void save(const std::string& character_id, const svc::Position& position) override;
     void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items) override;
+    void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet) override;
     void save_progress(const std::string& character_id, svc::Progress progress) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
@@ -98,6 +104,7 @@ private:
     struct Entry {
         std::optional<svc::Position>                   position;
         std::optional<std::vector<svc::InventoryItem>> inventory;
+        std::optional<std::vector<svc::WalletEntry>>   wallet;      // the vendors milestone, step 0: saved in the inventory's call when set
         std::optional<svc::Progress>                   progress;   // plan D1: saved between the position and the inventory
         int                                            position_attempts = 0;
         int                                            inventory_attempts = 0;
@@ -105,6 +112,7 @@ private:
     };
 
     void run();
+    void save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet);
 
     svc::CharacterApi&   api_;
     const Config         config_;

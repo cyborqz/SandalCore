@@ -44,6 +44,15 @@ type Store interface {
 
 var _ Store = (*character.Store)(nil)
 
+// WalletStore is the part of character.Store that keeps a character's money (the vendors milestone, step 0). A store without it keeps no wallet: GetCharacter sends none
+// and a save that replaces the wallet is refused.
+type WalletStore interface {
+	Wallet(ctx context.Context, id string) ([]character.WalletEntry, error)
+	SaveInventoryAndWallet(ctx context.Context, id string, items []character.Item, wallet []character.WalletEntry) error
+}
+
+var _ WalletStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -209,6 +218,13 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			return nil, toStatus(ctx, err)
 		}
 		out.Professions = toProtoProfessions(profs)
+		if ws, ok := s.store.(WalletStore); ok {
+			wallet, err := ws.Wallet(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.Wallet = toProtoWallet(wallet)
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -293,6 +309,14 @@ func toProtoProfessions(ps []character.Profession) []*characterv1.ProfessionStat
 	return out
 }
 
+func toProtoWallet(w []character.WalletEntry) []*characterv1.WalletEntry {
+	out := make([]*characterv1.WalletEntry, 0, len(w))
+	for _, e := range w {
+		out = append(out, &characterv1.WalletEntry{CurrencyGuid: e.CurrencyGuid, Amount: e.Amount})
+	}
+	return out
+}
+
 func toProtoExperience(xp []character.Experience) []*characterv1.Experience {
 	if len(xp) == 0 {
 		return nil
@@ -315,6 +339,20 @@ func (s *Server) SaveInventory(ctx context.Context, r *characterv1.SaveInventory
 			return nil, status.Errorf(codes.InvalidArgument, "item %d: %s", i, err)
 		}
 		items = append(items, item)
+	}
+	if r.GetReplaceWallet() {
+		ws, ok := s.store.(WalletStore)
+		if !ok {
+			return nil, status.Error(codes.Unimplemented, "this character store keeps no wallet")
+		}
+		wallet := make([]character.WalletEntry, 0, len(r.GetWallet()))
+		for _, e := range r.GetWallet() {
+			wallet = append(wallet, character.WalletEntry{CurrencyGuid: e.GetCurrencyGuid(), Amount: e.GetAmount()})
+		}
+		if err := ws.SaveInventoryAndWallet(ctx, r.GetId(), items, wallet); err != nil {
+			return nil, toStatus(ctx, err)
+		}
+		return &characterv1.SaveInventoryResponse{Saved: int32(len(items))}, nil
 	}
 	if err := s.store.SaveInventory(ctx, r.GetId(), items); err != nil {
 		return nil, toStatus(ctx, err)

@@ -28,4 +28,22 @@ protocol::repl::NodeTaxDetails untaxed_table(int64_t node) {
     return d;
 }
 
+protocol::repl::NodeTaxDetails default_table(int64_t node) {
+    protocol::repl::NodeTaxDetails d;
+    d.node = node;
+    d.entries.reserve(tax_table::kRowCount);
+    for (const tax_table::Row& row : tax_table::kRows) {
+        protocol::repl::NodeTaxEntry e;
+        e.tag = row.tag;
+        e.details = row.details;
+        e.flat_tax = row.flat_tax;
+        e.tax_percent = row.tax_percent;
+        e.owning_node_percent = row.owning_node_percent;
+        e.flag_a = row.flag_a;
+        e.flag_b = row.flag_b;
+        d.entries.push_back(std::move(e));
+    }
+    return d;
+}
+
 }  // namespace aoc::worldd::vendor

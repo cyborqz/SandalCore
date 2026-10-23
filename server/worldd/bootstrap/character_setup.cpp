@@ -8,6 +8,7 @@
 
 #include "bootstrap/captured_abilities.h"
 #include "bootstrap/captured_setup.h"
+#include "items/wallet.h"
 #include "protocol/repl/codecs.h"
 
 #include <nlohmann/json.hpp>
@@ -920,6 +921,8 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
         s.held_items.items = held_items_for(*inventory);
     }
     s.appearance_ids = items::appearance_ids(*inventory);
+    // the vendors milestone, step 0: the purse is part of the first OwnerInfo (Copper, then Node currency, then any other the character holds)
+    for (const svc::WalletEntry& e : items::Wallet(ch.wallet).entries()) s.currencies.push_back({e.currency_guid, e.amount});
     // a note says what the character plays with (a character with no items has nothing to say: the session warns about it)
     if (inventory->size() > 0) {
         out.notes.push_back("items: " + std::to_string(inventory->count(svc::ItemContainer::Backpack)) + " in the bag, " +

@@ -27,6 +27,8 @@ const (
 	WorldAdminService_ListPlaces_FullMethodName   = "/aoc.worldadmin.v1.WorldAdminService/ListPlaces"
 	WorldAdminService_Teleport_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/Teleport"
 	WorldAdminService_SetMoveSpeed_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/SetMoveSpeed"
+	WorldAdminService_GiveMoney_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/GiveMoney"
+	WorldAdminService_GiveItem_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
 )
 
 // WorldAdminServiceClient is the client API for WorldAdminService service.
@@ -57,6 +59,13 @@ type WorldAdminServiceClient interface {
 	// GM run speed: a multiplier of the character's MoveSpeedMult (and of the mount it rides), 0.5 to 10; 1 resets. It lasts until
 	// the character logs out or it is set to 1.
 	SetMoveSpeed(ctx context.Context, in *SetMoveSpeedRequest, opts ...grpc.CallOption) (*SetMoveSpeedResponse, error)
+	// Test commands (the vendors milestone, step 0). Adds copper to a player's purse, never past the cap of 10,000,000 copper (1,000 gold); what does not fit is not added and the answer says
+	// how much was. InvalidArgument for an amount below 1; FailedPrecondition for a full purse.
+	GiveMoney(ctx context.Context, in *GiveMoneyRequest, opts ...grpc.CallOption) (*GiveMoneyResponse, error)
+	// Gives a player an item by its record name (case does not count) or its Guid, in stacks of the item's stack size, routed by the bag rule: materials to the resource bags, everything
+	// else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
+	// the whole grant (nothing is given, the answer says why).
+	GiveItem(ctx context.Context, in *GiveItemRequest, opts ...grpc.CallOption) (*GiveItemResponse, error)
 }
 
 // -- CoA & C | Y | B --
@@ -109,6 +118,26 @@ func (c *worldAdminServiceClient) SetMoveSpeed(ctx context.Context, in *SetMoveS
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) GiveMoney(ctx context.Context, in *GiveMoneyRequest, opts ...grpc.CallOption) (*GiveMoneyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GiveMoneyResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_GiveMoney_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) GiveItem(ctx context.Context, in *GiveItemRequest, opts ...grpc.CallOption) (*GiveItemResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GiveItemResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_GiveItem_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldAdminServiceServer is the server API for WorldAdminService service.
 // All implementations must embed UnimplementedWorldAdminServiceServer
 // for forward compatibility.
@@ -137,6 +166,13 @@ type WorldAdminServiceServer interface {
 	// GM run speed: a multiplier of the character's MoveSpeedMult (and of the mount it rides), 0.5 to 10; 1 resets. It lasts until
 	// the character logs out or it is set to 1.
 	SetMoveSpeed(context.Context, *SetMoveSpeedRequest) (*SetMoveSpeedResponse, error)
+	// Test commands (the vendors milestone, step 0). Adds copper to a player's purse, never past the cap of 10,000,000 copper (1,000 gold); what does not fit is not added and the answer says
+	// how much was. InvalidArgument for an amount below 1; FailedPrecondition for a full purse.
+	GiveMoney(context.Context, *GiveMoneyRequest) (*GiveMoneyResponse, error)
+	// Gives a player an item by its record name (case does not count) or its Guid, in stacks of the item's stack size, routed by the bag rule: materials to the resource bags, everything
+	// else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
+	// the whole grant (nothing is given, the answer says why).
+	GiveItem(context.Context, *GiveItemRequest) (*GiveItemResponse, error)
 	mustEmbedUnimplementedWorldAdminServiceServer()
 }
 
@@ -158,6 +194,12 @@ func (UnimplementedWorldAdminServiceServer) Teleport(context.Context, *TeleportR
 }
 func (UnimplementedWorldAdminServiceServer) SetMoveSpeed(context.Context, *SetMoveSpeedRequest) (*SetMoveSpeedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetMoveSpeed not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) GiveMoney(context.Context, *GiveMoneyRequest) (*GiveMoneyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GiveMoney not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) GiveItem(context.Context, *GiveItemRequest) (*GiveItemResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GiveItem not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) mustEmbedUnimplementedWorldAdminServiceServer() {}
 func (UnimplementedWorldAdminServiceServer) testEmbeddedByValue()                           {}
@@ -254,6 +296,42 @@ func _WorldAdminService_SetMoveSpeed_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_GiveMoney_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GiveMoneyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).GiveMoney(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_GiveMoney_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).GiveMoney(ctx, req.(*GiveMoneyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_GiveItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GiveItemRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).GiveItem(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_GiveItem_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).GiveItem(ctx, req.(*GiveItemRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldAdminService_ServiceDesc is the grpc.ServiceDesc for WorldAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -276,6 +354,14 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetMoveSpeed",
 			Handler:    _WorldAdminService_SetMoveSpeed_Handler,
+		},
+		{
+			MethodName: "GiveMoney",
+			Handler:    _WorldAdminService_GiveMoney_Handler,
+		},
+		{
+			MethodName: "GiveItem",
+			Handler:    _WorldAdminService_GiveItem_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

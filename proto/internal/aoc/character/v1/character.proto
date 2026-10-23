@@ -90,6 +90,16 @@ message Character {
   // Gathering stage 2: the character's 22 professions (certification tier, level and XP of each, in profession-guid order), with the items
   // (include_items) and in the reply of SaveProgress: a profession with no stored row is Novice, level 1, no XP, so there are always 22.
   repeated ProfessionState professions = 19;
+  // The vendors milestone, step 0: the character's money, one entry per currency it holds, with the items (include_items). A character that has no wallet yet is given the
+  // start purse the first time it is read, so a character read this way always has an entry for Copper.
+  repeated WalletEntry wallet = 20;
+}
+
+// One currency of a character's wallet (the vendors milestone, step 0, migration 0012): currency_guid is the BASE currency def's Guid (Copper 6064629132706054144, Node
+// currency 6064629879350493185) and amount the balance in that unit (copper for money: 100 copper = 1 silver, 100 silver = 1 gold).
+message WalletEntry {
+  int64 currency_guid = 1; // 1 or more
+  int64 amount = 2; // 0 to 10^13
 }
 
 // One of the 22 CharacterProfessions of a character (Gathering stage 2, migration 0010): profession_guid is the design database's
@@ -228,6 +238,11 @@ message DeleteCharacterResponse {}
 message SaveInventoryRequest {
   string id = 1;
   repeated Item items = 2; // the character's whole inventory
+  // The vendors milestone, step 0: with replace_wallet the entries of `wallet` are stored in the same transaction as the items (each currency named is set to its amount,
+  // a currency not named is left as it is); without it the wallet is left alone. InvalidArgument, with nothing changed, for a currency of 0 or less, an amount outside
+  // 0 to 10^13 or a currency named twice.
+  bool replace_wallet = 3;
+  repeated WalletEntry wallet = 4;
 }
 
 message SaveInventoryResponse {

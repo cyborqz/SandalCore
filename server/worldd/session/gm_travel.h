@@ -98,6 +98,24 @@ struct GmSpeedResult {
     double      previous = 1.0, multiplier = 1.0;
 };
 
+/// The vendors milestone, step 0: the test commands that give money and items.
+struct GmMoneyGrant {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    int64_t     previous = 0, balance = 0, added = 0;
+};
+
+struct GmItemGrant {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    std::string item;        // the record's name
+    int64_t     item_guid = 0;
+    int32_t     count = 0;
+    std::string container;   // where the first stack went
+};
+
 /// The GM travel tools on the network thread.  `directory` lists the players of the world (Endpoint::players), `now` is the Endpoint's clock.
 class GmTravel : public GmPort {
 public:
@@ -114,6 +132,10 @@ public:
     /// `by` names who asked, for the log ("worldctl", "ServerTeleportXYZ").
     GmTeleportResult teleport(const GmTeleportRequest& request, const std::string& by);
     GmSpeedResult    set_speed(const std::string& character, double multiplier, const std::string& by);
+    /// Adds copper to a player's purse (the cap is 10,000,000 copper) and shows it; the amount is 1 or more.
+    GmMoneyGrant     give_money(const std::string& character, int64_t copper, const std::string& by);
+    /// Gives a player `count` of an item named by its record name or its Guid (digits), routed by the bag rule.
+    GmItemGrant      give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by);
 
     size_t teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) override;
 

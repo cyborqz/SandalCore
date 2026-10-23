@@ -808,6 +808,37 @@ struct DialogueData {
     std::map<int64_t, int64_t>         asset_roots;     // PopulationAsset guid -> root
 };
 
+// ---- vendors, step 0 (contentc version 18): which NPC opens which shop and what its listings cost (npc_vendor_link, vendor_def_data, vendor_price, vendor_availability) ----------
+
+/// One priced listing: the tab (inventory) and the listing's index in it, what it sells (item, the variation and the offer the cart names; 0: none) and the price in one
+/// currency tier, per unit, before the node tax.
+struct VendorPriceRow {
+    int64_t inventory = 0;
+    int     ord = 0;
+    int64_t item = 0, variation = 0, offer = 0, currency = 0;
+    int64_t price = 0;
+};
+
+/// A predicate of a tab (listing -1) or a listing: an expression that must hold for the player, and the text the window shows when it does not.
+struct VendorPredicateRow {
+    std::string expression, failure;
+    bool        hidden = false;
+};
+
+struct VendorData {
+    struct Def {
+        std::string name;
+        int64_t     operations = 0;   // the bit mask of what the shop does: 1 buy, 2 sell, 4 repair
+        std::string tax_tag;          // "" for none
+        bool        blacklisted = false;
+    };
+    std::map<int64_t, Def>     defs;             // VendorDef guid -> the def
+    std::map<int64_t, int64_t> instance_links;   // PopulationInstance guid -> the VendorDef its use opens
+    std::map<int64_t, int64_t> asset_links;      // PopulationAsset guid -> the same
+    std::map<int64_t, std::map<int64_t, std::vector<VendorPriceRow>>> prices;   // VendorDef -> item -> its priced listings (a row per listing, offer and currency)
+    std::map<std::pair<int64_t, int>, std::vector<VendorPredicateRow>> predicates;   // (tab, listing; -1 for the tab's own) -> its predicates
+};
+
 struct PopulationData {
     std::map<int64_t, NpcAssetRow>                         assets;
     std::map<int64_t, std::vector<std::pair<int64_t, double>>> asset_sets;   // set guid -> (asset guid, weight) in order
@@ -968,6 +999,8 @@ public:
     /// Plan B2: the item with the record Guid. nullopt with `error` empty when there is no such item (an instance of a record the
     /// file does not know); nullopt with `error` set when the query failed or the row holds an EEquipSlot that does not fit a byte.
     std::optional<ItemRecord> item(int64_t guid, std::string& error) const;
+    /// The item records with this name (exact, case does not count), at most 8: how a GM tool finds an item it was given by name.  `error` is set when the query fails.
+    std::vector<int64_t> items_named(const std::string& name, std::string& error) const;
 
     /// Gathering stage 3 (contentc version 14): the grid of a resource bag item.  nullopt with `error` empty for an item that is no resource bag; with `error` set when a query
     /// failed or the rows are not what contentc writes (a dimension below 1 or above the 255 cells a container holds, a cell outside the grid).
@@ -1034,6 +1067,8 @@ public:
     /// Quests, slice 0 (contentc version 17): the NPC conversations (dialogue_root, dialogue_node, dialogue_choice, dialogue_quest, npc_dialogue), read whole.
     /// nullopt with `error` set when a table is missing (a file of an older version) or a row does not read.
     std::optional<DialogueData> dialogue_data(std::string& error) const;
+    /// Vendors, step 0 (contentc version 18): the shops' links, tax tags, prices and predicates, read whole.  nullopt, with `error` set, for a file of an older version.
+    std::optional<VendorData> vendor_data(std::string& error) const;
     /// Plan E1: a vendor (vendor_def with its inventories and their listings) by its VendorDef guid; nullopt with `error` empty when there is none.
     std::optional<VendorDefRow> vendor_def(int64_t guid, std::string& error) const;
     /// Plan E1: a vendor by name ("PTR_ONLY_Vendor_Gear_0-9"); nullopt with `error` empty when there is none.

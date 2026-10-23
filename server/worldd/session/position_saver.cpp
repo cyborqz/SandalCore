@@ -58,6 +58,14 @@ void CharacterSaver::save(const std::string& character_id, const svc::Position& 
 }
 
 void CharacterSaver::save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items) {
+    save_inventory_entry(character_id, std::move(items), std::nullopt);
+}
+
+void CharacterSaver::save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet) {
+    save_inventory_entry(character_id, std::move(items), std::move(wallet));
+}
+
+void CharacterSaver::save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (stop_) return;
@@ -65,6 +73,7 @@ void CharacterSaver::save_inventory(const std::string& character_id, std::vector
         if (it != entries_.end()) {
             if (it->second.inventory) ++replaced_;
             it->second.inventory = std::move(items);
+            it->second.wallet = std::move(wallet);
             it->second.inventory_attempts = 0;
         } else {
             if (entries_.size() >= config_.max_queued) {
@@ -77,6 +86,7 @@ void CharacterSaver::save_inventory(const std::string& character_id, std::vector
             order_.push_back(character_id);
             Entry e;
             e.inventory = std::move(items);
+            e.wallet = std::move(wallet);
             entries_.emplace(character_id, std::move(e));
         }
     }
@@ -155,7 +165,7 @@ void CharacterSaver::run() {
         if (entry.inventory) {
             inventory_status = svc::CallStatus::Failed;
             try {
-                inventory_status = api_.save_inventory(id, *entry.inventory);
+                inventory_status = entry.wallet ? api_.save_inventory(id, *entry.inventory, *entry.wallet) : api_.save_inventory(id, *entry.inventory);
             } catch (const std::exception& e) {
                 spdlog::error("[saver] saving the inventory of {} threw {}", id, e.what());
             }
@@ -240,6 +250,7 @@ void CharacterSaver::run() {
                 }
                 if (retry_inventory) {
                     again.inventory = std::move(entry.inventory);
+                    again.wallet = std::move(entry.wallet);
                     again.inventory_attempts = entry.inventory_attempts;
                 }
                 if (retry_progress) {
@@ -257,6 +268,7 @@ void CharacterSaver::run() {
                     }
                     if (!newer->second.inventory && again.inventory) {
                         newer->second.inventory = std::move(again.inventory);
+                        newer->second.wallet = std::move(again.wallet);
                         newer->second.inventory_attempts = again.inventory_attempts;
                     }
                     if (!newer->second.progress && again.progress) {

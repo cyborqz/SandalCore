@@ -22,7 +22,7 @@ type Config struct {
 	TokenTTL          time.Duration // AOC_TOKEN_TTL, e.g. "24h"
 	ServiceTokenFile  string        // AOC_SERVICE_TOKEN_FILE: the internal services' shared token (internal/svcauth)
 	ContentDB         string        // AOC_CONTENT_DB: the content.db contentc builds; the character service checks new characters against it
-	GMStarterSet      bool          // AOC_GM_STARTER_SET=1: new characters get the GM starter set, existing ones once at a start (plan D1)
+	GMStarterSet      bool          // AOC_GM_STARTER_SET=1: new characters get the GM starter set, existing ones once at a start (plan D1), and a wallet starts with 21 gold (testing only)
 
 	MeshGRPCAddr     string        // AOC_MESH_GRPC_ADDR
 	MeshStaticWorld  string        // AOC_MESH_STATIC_WORLD: a world server that never registers; "" for none

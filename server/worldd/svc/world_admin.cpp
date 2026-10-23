@@ -242,6 +242,33 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         resp->set_multiplier(out.multiplier);
         return grpc::Status::OK;
     }
+
+    grpc::Status GiveMoney(grpc::ServerContext* ctx, const adminv1::GiveMoneyRequest* req, adminv1::GiveMoneyResponse* resp) override {
+        if (auto s = authorize(ctx, "GiveMoney"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmMoneyGrant out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.give_money(req->character(), req->copper(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_previous(out.previous);
+        resp->set_balance(out.balance);
+        resp->set_added(out.added);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status GiveItem(grpc::ServerContext* ctx, const adminv1::GiveItemRequest* req, adminv1::GiveItemResponse* resp) override {
+        if (auto s = authorize(ctx, "GiveItem"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmItemGrant out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.give_item(req->character(), req->item(), req->count() == 0 ? 1 : req->count(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_item(out.item);
+        resp->set_item_guid(out.item_guid);
+        resp->set_count(out.count);
+        resp->set_container(out.container);
+        return grpc::Status::OK;
+    }
 };
 
 WorldAdminServer::WorldAdminServer(GmTravel& travel, AdminQueue& queue, Options options)

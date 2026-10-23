@@ -140,6 +140,12 @@ struct AccountCharacterNode {
     int64_t     citizen_node = 0;
 };
 
+/// One currency the character holds, as OwnerInfo.Currencies lists it: the BASE currency def's Guid and the balance in that unit (copper for money).
+struct CurrencyBalance {
+    int64_t currency = 0;
+    int64_t amount = 0;
+};
+
 // ---- the login ----------------------------------------------------------------------------------------------------
 
 /// What the PlayerState carries (transcript section 4.5): the connection's login, not the character.
@@ -266,6 +272,8 @@ struct PlayerSetup {
     std::vector<AccountCharacterNode>  account_characters;
     /// OwnerInfo.CitizenNodeGuid (the account's node; 0 until the citizenship milestone).
     int64_t                            citizen_node = 0;
+    /// OwnerInfo.Currencies at the join (the vendors milestone, step 0): Copper first, then Node currency, then any other the character holds.  Empty: the field is not sent.
+    std::vector<CurrencyBalance>       currencies;
 
     // ---- the login [sess] ----------------------------------------------------------------------------------------
     LoginIdentity login;

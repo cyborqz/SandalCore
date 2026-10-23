@@ -111,7 +111,11 @@ func ValidateName(name string) error {
 	return nil
 }
 
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool *pgxpool.Pool
+	// startPurse is the copper a character with no wallet yet is given once (SetStartPurse; 0 unless the server is set up for testing).
+	startPurse int64
+}
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 

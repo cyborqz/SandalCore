@@ -31,6 +31,13 @@ service WorldAdminService {
   // GM run speed: a multiplier of the character's MoveSpeedMult (and of the mount it rides), 0.5 to 10; 1 resets. It lasts until
   // the character logs out or it is set to 1.
   rpc SetMoveSpeed(SetMoveSpeedRequest) returns (SetMoveSpeedResponse);
+  // Test commands (the vendors milestone, step 0). Adds copper to a player's purse, never past the cap of 10,000,000 copper (1,000 gold); what does not fit is not added and the answer says
+  // how much was. InvalidArgument for an amount below 1; FailedPrecondition for a full purse.
+  rpc GiveMoney(GiveMoneyRequest) returns (GiveMoneyResponse);
+  // Gives a player an item by its record name (case does not count) or its Guid, in stacks of the item's stack size, routed by the bag rule: materials to the resource bags, everything
+  // else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
+  // the whole grant (nothing is given, the answer says why).
+  rpc GiveItem(GiveItemRequest) returns (GiveItemResponse);
 }
 
 message Position {
@@ -102,4 +109,30 @@ message SetMoveSpeedResponse {
   string character = 1;
   double previous = 2;
   double multiplier = 3;
+}
+
+message GiveMoneyRequest {
+  string character = 1;
+  int64 copper = 2; // 1 or more (100 copper = 1 silver, 100 silver = 1 gold)
+}
+
+message GiveMoneyResponse {
+  string character = 1;
+  int64 previous = 2; // the purse before, in copper
+  int64 balance = 3;  // and after
+  int64 added = 4;    // less than asked when the cap was reached
+}
+
+message GiveItemRequest {
+  string character = 1;
+  string item = 2; // the item record's name, or its Guid in digits
+  int32 count = 3; // 1 to 100000
+}
+
+message GiveItemResponse {
+  string character = 1;
+  string item = 2;        // the record's name
+  int64 item_guid = 3;
+  int32 count = 4;
+  string container = 5;   // where the first stack went: Backpack or a resource container
 }

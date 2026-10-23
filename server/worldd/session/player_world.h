@@ -64,6 +64,7 @@
 #include "spawns/node_populations.h"
 #include "stats/stat_program.h"
 #include "vendor/gm_vendor.h"
+#include "vendor/town_shops.h"
 #include "world/actor_registry.h"
 #include "world/city_nodes.h"
 #include "world/node_control.h"
@@ -196,6 +197,10 @@ public:
     const dialogue::Book*         dialogue() const { return dialogue_ ? &*dialogue_ : nullptr; }
     /// A test's conversations (load_area reads the real ones).
     void                          set_dialogue(dialogue::Book book) { dialogue_ = std::move(book); }
+    /// Vendors, step 0: the towns' shops (vendor/town_shops.h), read with the area; null for a content.db older than contentc version 18 (the NPCs answer as before).
+    const vendor::TownShops*      town_shops() const { return shops_ ? &*shops_ : nullptr; }
+    /// A test's shops (load_area reads the real ones).
+    void                          set_town_shops(vendor::TownShops shops) { shops_ = std::move(shops); }
     /// G1 stage 1: the GM garden (spawns/gm_garden.h), off by default.  `set_gm_garden(true)` before load_area; the garden is placed once the ground is known
     /// (load_ground), or by place_gm_garden() when there is no ground file.  Once.
     void                          set_gm_garden(bool on) { gm_garden_ = on; }
@@ -508,6 +513,7 @@ private:
     const world::NodeWire*               node_wire_ = nullptr;
     world::NodeControl*                  node_control_ = nullptr;
     std::optional<dialogue::Book>        dialogue_;
+    std::optional<vendor::TownShops>     shops_;
     const world::NodeLayoutData*         node_layout_data_ = nullptr;
     std::unique_ptr<world::NodeScenery>  scenery_;
     const spawns::NodePopulationData*    node_pop_data_ = nullptr;

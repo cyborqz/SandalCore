@@ -2775,6 +2775,96 @@ std::optional<DialogueData> ContentDb::dialogue_data(std::string& error) const {
     return out;
 }
 
+std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string& error) const {
+    std::vector<int64_t> out;
+    Stmt q(db_, "SELECT guid FROM item WHERE name = ?1 COLLATE NOCASE ORDER BY guid LIMIT 8");
+    if (!q.ok()) {
+        error = "content.db item query failed: " + db_message(db_);
+        return out;
+    }
+    sqlite3_bind_text(q.get(), 1, name.c_str(), static_cast<int>(name.size()), SQLITE_TRANSIENT);
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.push_back(sqlite3_column_int64(q.get(), 0));
+    if (step != SQLITE_DONE) error = "content.db item query failed: " + db_message(db_);
+    return out;
+}
+
+std::optional<VendorData> ContentDb::vendor_data(std::string& error) const {
+    VendorData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the vendor tables are contentc version 18's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    const auto unread = [&](const char* table) {
+        error = std::string("content.db ") + table + " has a column of the wrong storage class";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT d.guid, d.name, d.operations, COALESCE(x.tax_tag, ''), COALESCE(x.blacklisted, 0) FROM vendor_def d LEFT JOIN vendor_def_data x ON x.vendor_guid = d.guid");
+        if (!q.ok()) return failed("vendor_def");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2)) return unread("vendor_def");
+            VendorData::Def d;
+            d.name = column_text(s, 1);
+            d.operations = sqlite3_column_int64(s, 2);
+            d.tax_tag = column_text(s, 3);
+            d.blacklisted = sqlite3_column_int64(s, 4) != 0;
+            out.defs[sqlite3_column_int64(s, 0)] = std::move(d);
+        }
+        if (step != SQLITE_DONE) return failed("vendor_def");
+    }
+    {
+        Stmt q(db_, "SELECT source_kind, source_guid, vendor_guid FROM npc_vendor_link");
+        if (!q.ok()) return failed("npc_vendor_link");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 1) || !column_is_int(s, 2)) return unread("npc_vendor_link");
+            (column_text(s, 0) == "instance" ? out.instance_links : out.asset_links)[sqlite3_column_int64(s, 1)] = sqlite3_column_int64(s, 2);
+        }
+        if (step != SQLITE_DONE) return failed("npc_vendor_link");
+    }
+    {
+        Stmt q(db_, "SELECT vendor_guid, inventory_guid, ord, item_guid, variation_guid, offer_guid, currency_guid, price FROM vendor_price ORDER BY vendor_guid, inventory_guid, ord, offer_guid, currency_guid");
+        if (!q.ok()) return failed("vendor_price");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (int c = 0; c < 8; ++c) {
+                if (!column_is_int(s, c)) return unread("vendor_price");
+            }
+            VendorPriceRow r;
+            r.inventory = sqlite3_column_int64(s, 1);
+            r.ord = static_cast<int>(sqlite3_column_int64(s, 2));
+            r.item = sqlite3_column_int64(s, 3);
+            r.variation = sqlite3_column_int64(s, 4);
+            r.offer = sqlite3_column_int64(s, 5);
+            r.currency = sqlite3_column_int64(s, 6);
+            r.price = sqlite3_column_int64(s, 7);
+            out.prices[sqlite3_column_int64(s, 0)][r.item].push_back(r);
+        }
+        if (step != SQLITE_DONE) return failed("vendor_price");
+    }
+    {
+        Stmt q(db_, "SELECT inventory_guid, listing_ord, expression, failure, hidden FROM vendor_availability ORDER BY inventory_guid, listing_ord, ord");
+        if (!q.ok()) return failed("vendor_availability");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("vendor_availability");
+            VendorPredicateRow p;
+            p.expression = column_text(s, 2);
+            p.failure = column_text(s, 3);
+            p.hidden = sqlite3_column_int64(s, 4) != 0;
+            out.predicates[{sqlite3_column_int64(s, 0), static_cast<int>(sqlite3_column_int64(s, 1))}].push_back(std::move(p));
+        }
+        if (step != SQLITE_DONE) return failed("vendor_availability");
+    }
+    return out;
+}
+
 std::optional<MountData> ContentDb::mount_data(std::string& error) const {
     MountData out;
     const std::string rebuild = " (the mount tables are contentc version 11's: rebuild the file with this checkout's contentc)";

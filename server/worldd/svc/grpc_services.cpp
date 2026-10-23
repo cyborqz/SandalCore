@@ -138,6 +138,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         it.lock_expiration = item.lock_expiration();
         r.character.items.push_back(std::move(it));
     }
+    for (const auto& w : c.wallet()) r.character.wallet.push_back({w.currency_guid(), w.amount()});
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -250,11 +251,25 @@ CallStatus GrpcServices::save_position(const std::string& id, const Position& po
     return map_grpc_status(stubs_->character->SaveCharacterState(&ctx, req, &resp));
 }
 
-CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items) {
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items) { return save_inventory(id, items, {}, /*with_wallet=*/false); }
+
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet) {
+    return save_inventory(id, items, wallet, /*with_wallet=*/true);
+}
+
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet) {
     grpc::ClientContext ctx;
     prepare(ctx, save_timeout_);
     characterv1::SaveInventoryRequest req;
     req.set_id(id);
+    if (with_wallet) {
+        req.set_replace_wallet(true);
+        for (const WalletEntry& w : wallet) {
+            auto* e = req.add_wallet();
+            e->set_currency_guid(w.currency_guid);
+            e->set_amount(w.amount);
+        }
+    }
     for (const InventoryItem& it : items) {
         auto* p = req.add_items();
         switch (it.container) {

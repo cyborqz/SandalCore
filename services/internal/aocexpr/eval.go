@@ -312,11 +312,15 @@ func (ev *evaluator) binary(e binary, sc *scope) (Value, error) {
 	case "*":
 		return ev.num(a * b), nil
 	case "/":
-		if !ev.isFloat(e.l, sc) && !ev.isFloat(e.r, sc) {
+		whole := !ev.isFloat(e.l, sc) && !ev.isFloat(e.r, sc)
+		if whole && !ev.env.IntDivide {
 			return nil, unsupported(e.pos, "division where no operand is proven to be a float (integer division is not modelled; write 2.0 or Float(x))")
 		}
 		if b == 0 {
 			return nil, syntax(e.pos, "division by zero")
+		}
+		if whole {
+			return ev.num(math.Trunc(a / b)), nil
 		}
 		return ev.num(a / b), nil
 	case "%":

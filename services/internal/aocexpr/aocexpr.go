@@ -196,4 +196,7 @@ type Env struct {
 	LooseBool bool
 	// SameActor says whether two objects of different roles are one actor (GetTarget() != GetInstigator()). Nil: they are (one character).
 	SameActor func(a, b int) bool
+	// IntDivide evaluates a division where no operand is proven to be a float as C++'s integer division does, truncating toward zero (the vendor price formulas
+	// end in `ItemBaseValue / 2` over an integer variable). Without it such a division is an unsupported construct.
+	IntDivide bool
 }

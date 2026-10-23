@@ -240,6 +240,19 @@ bool PlayerBootstrap::build_actors() {
         // and the warehouse tabs are the defaults until the milestones that give them values (nothing is sent for a default).
         {
             repl::Subobject owner = make_component(g.owner_info, "OwnerInfo", kChecksumOwnerInfo);
+            if (!s.currencies.empty()) {   // the vendors milestone, step 0: the purse, as a fast map of currency -> balance (the first OwnerInfo of a played character carries it)
+                repl::FastArrayState* wallet = owner.obj.arrays.get(*owner.obj.schema, "Currencies");
+                if (!wallet) {
+                    all(fail("OwnerInfo has no Currencies"));
+                } else {
+                    for (const CurrencyBalance& c : s.currencies) {
+                        repl::ElementState e;
+                        e.values[1] = Value::u64(static_cast<uint64_t>(c.amount));
+                        e.values[2] = Value::i64(c.currency);
+                        if (!wallet->add(std::move(e))) all(fail("OwnerInfo.Currencies: an entry does not fit"));
+                    }
+                }
+            }
             if (mode_ == GameStateMode::Tier3) {
                 if (s.citizen_node != 0) all(set(owner.obj, "CitizenNodeGuid", Value::i64(s.citizen_node)));
                 if (!s.account_characters.empty()) {
@@ -1078,13 +1091,14 @@ std::optional<Send> PlayerBootstrap::storage_payload(StorageKind kind, Role targ
 
 // ---- plan B2: the items' events and the pawn's visible gear --------------------------------------------------------------------
 
-std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent> events) {
+std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first) {
     if (!ok_ || events.empty() || events.size() > kMaxEventsPerChain) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveStorageEvent");
     if (!rpc) return std::nullopt;
     const repl::GuidValue character{setup_.character_guid[0], setup_.character_guid[1], setup_.character_guid[2], setup_.character_guid[3]};
     std::vector<repl::RpcRequest> calls;
-    calls.reserve(events.size());
+    calls.reserve(events.size() + 1);
+    if (first) calls.push_back(*first);
     for (const ItemEvent& e : events) {
         if (e.type != repl::StorageEventType::Add && e.type != repl::StorageEventType::Remove) return std::nullopt;
         if (!e.item.has_item || e.slot < 0) return std::nullopt;
@@ -1104,7 +1118,7 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         call.params = std::move(*params);
         calls.push_back(std::move(call));
     }
-    return rpcs(Role::PlayerController, "ClientReceiveStorageEvent", calls);
+    return rpcs(Role::PlayerController, first ? "purchase answer" : "ClientReceiveStorageEvent", calls);
 }
 // ~ CoA & C Y B ~
 
@@ -1355,6 +1369,67 @@ std::optional<Send> PlayerBootstrap::item_events(std::span<const ItemEvent> even
     return send;
 }
 // -- CoA . C_Y_B --
+
+namespace {
+
+/// ClientShowCurrencyCallout(CurrencyTierDefGuid, Delta) as a call; nullopt when the RPC does not build.
+std::optional<repl::RpcRequest> currency_callout_call(const schema::ClassSchema& pc, int64_t tier, int64_t delta) {
+    const schema::RpcSchema* rpc = pc.rpc("ClientShowCurrencyCallout");
+    if (!rpc) return std::nullopt;
+    repl::RpcParams params;
+    if (!repl::set_rpc_param(*rpc, params, "CurrencyTierDefGuid", Value::i64(tier)) || !repl::set_rpc_param(*rpc, params, "Delta", Value::i64(delta))) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientShowCurrencyCallout";
+    call.params = std::move(params);
+    return call;
+}
+
+}  // namespace
+
+std::optional<Send> PlayerBootstrap::purchase_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> events) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
+    if (!callout) return std::nullopt;
+    auto send = build_item_events(events, &*callout);
+    if (!send) return std::nullopt;
+    for (const ItemEvent& e : events) {
+        const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
+        if (e.type == repl::StorageEventType::Add) items_[key] = e.item;
+        else items_.erase(key);
+    }
+    return send;
+}
+
+std::optional<Send> PlayerBootstrap::currency_callout(int64_t currency_tier, int64_t delta) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
+    if (!callout) return std::nullopt;
+    return rpcs(Role::PlayerController, "ClientShowCurrencyCallout", std::span<const repl::RpcRequest>(&*callout, 1));
+}
+
+bool PlayerBootstrap::set_currency(int64_t currency, int64_t amount) {
+    if (!ok_ || amount < 0) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    repl::FastArrayState* wallet = owner->obj.arrays.get(*owner->obj.schema, "Currencies");
+    if (!wallet) return false;
+    repl::ElementState values;
+    values.values[1] = Value::u64(static_cast<uint64_t>(amount));
+    values.values[2] = Value::i64(currency);
+    for (const repl::FastArrayItem& it : wallet->items()) {
+        const auto key = it.values.values.find(2);
+        if (key == it.values.values.end() || !(key->second == Value::i64(currency))) continue;
+        const auto now = it.values.values.find(1);
+        if (now != it.values.values.end() && now->second == Value::u64(static_cast<uint64_t>(amount))) return true;   // already so: nothing to send
+        return wallet->change(it.id, std::move(values));
+    }
+    return wallet->add(std::move(values)).has_value();
+}
+
+std::optional<Send> PlayerBootstrap::currencies_update() {
+    if (!ok_ || !second_state_sent_) return std::nullopt;
+    return update(Role::Pawn, "Currencies", pawn_, pawn_shadow_);
+}
 
 std::optional<Send> PlayerBootstrap::item_durability(ItemStorage storage, int32_t slot, float durability) {
     if (!ok_ || !second_state_added_) return std::nullopt;

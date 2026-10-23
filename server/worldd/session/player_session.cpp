@@ -285,6 +285,8 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         if (refusal) *refusal = built.refusal;
         return nullptr;
     }
+    // the vendors milestone, step 0: the purse (the first OwnerInfo already carries it: build_player_setup)
+    const items::Wallet purse(character.wallet);
     // Gathering stage 3: a resource container of a second or third bag needs a guid of its own (minted here, after everything else, so that the one bag every class starts with
     // changes no id)
     for (size_t i = 1; i < built.setup->resource_bags.size(); ++i) {
@@ -328,6 +330,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         new PlayerSession(std::move(*built.setup), world.gamestate_mode(), character.id, world.movement(), world.position_sink(),
                           world.ability_rules(), std::move(*built.inventory), world.item_catalog(), std::move(built.character_stats), &world,
                           character.class_id, built.progress));
+    p->wallet_ = purse;
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
         p->inventory_dirty_ = true;
@@ -830,7 +833,7 @@ void PlayerSession::hand_over_inventory(const char* why, bool periodic) {
     if (!sink_) return;
     std::vector<svc::InventoryItem> items = inventory_.items();
     const size_t n = items.size();
-    sink_->save_inventory(character_id_, std::move(items));
+    sink_->save_inventory(character_id_, std::move(items), wallet_.entries());
     ++inventories_handed_over_;
     spdlog::log(periodic ? level_for(item_periodic_logged_) : spdlog::level::info, "[session] {}: saving the inventory ({} items) ({})", name(), n, why);
 }
@@ -2982,10 +2985,20 @@ const world::WorldActor* PlayerSession::open_vendor(std::string& why) {
     }
     const world::WorldActor* a = registry_ ? registry_->find(vendor_actor_) : nullptr;
     const GoodPosition at = checker_.good();
+    const vendor::TownShops* shops = world_ ? world_->town_shops() : nullptr;
+    const bool town = a && !a->npc.is_gm_vendor && shops && shops->is_open(vendor_def_) && town_shop_of(*a) == vendor_def_;
     if (!a) {
         why = "the vendor is gone";
-    } else if (!a->npc.is_gm_vendor) {
-        why = "the NPC is no GM vendor";
+    } else if (!a->npc.is_gm_vendor && !town) {
+        why = "the NPC is no GM vendor and opens no shop";
+    } else if (town) {
+        // a town shop: the shopkeeper must be less than 12 m away in three dimensions (the shop re-checks on every request)
+        const double dx = a->x - at.x, dy = a->y - at.y, dz = a->z - at.z;
+        if (dx * dx + dy * dy + dz * dz >= vendor::kShopRangeCm * vendor::kShopRangeCm) {
+            why = "the shopkeeper is " + std::to_string(static_cast<int>(std::sqrt(dx * dx + dy * dy + dz * dz) / 100.0)) + " m away";
+        } else {
+            return a;
+        }
     } else if (std::hypot(a->x - at.x, a->y - at.y) > kInteractRangeCm) {
         why = "the vendor is " + std::to_string(static_cast<int>(std::hypot(a->x - at.x, a->y - at.y) / 100.0)) + " m away";
     } else {
@@ -3033,6 +3046,24 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (a->kind == world::ActorKind::Npc && a->npc.dialogue_root != 0 && open_dialogue(conn, *a, now)) return;
     const vendor::GmVendors* gm = world_ ? world_->gm_vendors() : nullptr;
     const vendor::GmVendor* def = (gm && a->npc.is_gm_vendor) ? gm->find(a->npc.vendor_guid) : nullptr;
+    // vendors, step 0: a shopkeeper of a town whose data links it to a switched-on shop opens that shop's window
+    if (!def && a->kind == world::ActorKind::Npc) {
+        if (const int64_t shop = town_shop_of(*a)) {
+            const double dx = a->x - at.x, dy = a->y - at.y, dz = a->z - at.z;
+            if (dx * dx + dy * dy + dz * dz >= vendor::kShopRangeCm * vendor::kShopRangeCm) {
+                return ignore("the shopkeeper is " + std::to_string(static_cast<int>(std::sqrt(dx * dx + dy * dy + dz * dz) / 100.0)) + " m away (a shop opens within 12 m)");
+            }
+            if (!room_for(1)) return;
+            const vendor::TownShops* shops = world_->town_shops();
+            vendor_actor_ = a->id;
+            vendor_def_ = shop;
+            ++vendor_opens_;
+            const FIntrepidNetworkGUID npc = a->actor.guid;
+            spdlog::log(level_for(vendor_logged_), "[session] {}: opens the shop {} of {}", name(), shops->def(shop) ? shops->def(shop)->name : std::to_string(shop), a->npc.name);
+            queue("ClientOpenVendor", [shop, npc](bootstrap::PlayerBootstrap& pb) { return pb.open_vendor(shop, npc); }, conn, /*must_build=*/true);
+            return;
+        }
+    }
     if (!def) return ignore("the actor " + a->npc.name + " has nothing to offer yet");
     if (!room_for(1)) return;
     vendor_actor_ = a->id;
@@ -3272,10 +3303,23 @@ void PlayerSession::on_node_tax_request(Connection& conn, const repl::ClientRpc&
         spdlog::log(level_for(tax_logged_), "[session] {}: the client asks for the taxes of node {} but has no vendor window open ({}): ignored", name(), *node, why);
         return;
     }
+    const int64_t asked = *node;
+    if (!a->npc.is_gm_vendor) {
+        // a town shop: the table of a node nobody has changed, for a node the world knows; nothing for any other (the client's window then stays empty, and a made-up node id gets no answer)
+        const world::CityNodes* nodes = world_ ? world_->city_nodes() : nullptr;
+        if (nodes && !nodes->by_guid(asked)) {
+            spdlog::log(level_for(tax_logged_), "[session] {}: the window of {} asks for the taxes of node {}, which the world does not know: no answer", name(), a->npc.name, asked);
+            return;
+        }
+        ++tax_tables_sent_;
+        spdlog::log(level_for(tax_logged_), "[session] {}: the window of {} asks for the taxes of node {}: sending the default table ({} tags)", name(), a->npc.name, asked,
+                    vendor::default_table(asked).entries.size());
+        queue("ClientSetNodeTaxTable", [asked](bootstrap::PlayerBootstrap& pb) { return pb.node_tax_table(vendor::default_table(asked)); }, conn, /*must_build=*/true);
+        return;
+    }
     ++tax_tables_sent_;
     spdlog::log(level_for(tax_logged_), "[session] {}: the window of {} asks for the taxes of node {}: sending the untaxed table ({} tags)", name(), a->npc.name, *node,
                 vendor::untaxed_table(*node).entries.size());
-    const int64_t asked = *node;
     queue("ClientSetNodeTaxTable", [asked](bootstrap::PlayerBootstrap& pb) { return pb.node_tax_table(vendor::untaxed_table(asked)); }, conn, /*must_build=*/true);
 }
 
@@ -3296,11 +3340,13 @@ void PlayerSession::on_vendor_purchase(Connection& conn, const repl::ClientRpc& 
     };
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     const vendor::GmVendors* gm = world_ ? world_->gm_vendors() : nullptr;
-    if (!db || !gm) return refuse("worldd has no GM vendors");
     if (dead_) return refuse("the character is dead: the vendor window closed with the death");
     std::string why;
     const world::WorldActor* a = open_vendor(why);
     if (!a) return refuse(why);
+    // vendors, step 0: a town shop is paid for from the purse
+    if (!a->npc.is_gm_vendor) return buy_from_town_shop(conn, *cart, now);
+    if (!db || !gm) return refuse("worldd has no GM vendors");
     const vendor::GmVendor* def = gm->find(vendor_def_);
     if (!def) return refuse("the open window's vendor def is unknown");
     const size_t free = static_cast<size_t>(items::kBackpackSlots) - inventory_.count(svc::ItemContainer::Backpack);
@@ -3338,6 +3384,189 @@ void PlayerSession::on_vendor_purchase(Connection& conn, const repl::ClientRpc& 
     spdlog::log(level_for(vendor_logged_), "[session] {}: bought {} (free): {} storage event(s)", name(), plan.summary, outcome.events.size());
 }
 // ~ Cyb - C-O-A ~
+
+// ============================================================================================================================
+//  the vendors milestone, step 0: the purse and the general merchant
+// ============================================================================================================================
+
+namespace {
+
+/// The stacks of `count` of an item: the record's stack size each, its default quality and full durability, as the GM vendors' goods are made.
+void stacks_of(int64_t record, int32_t count, const content::ItemRecord& rec, std::vector<svc::InventoryItem>& out, int64_t created_ms) {
+    const int32_t stack = rec.max_stack_size > 0 ? rec.max_stack_size : 1;
+    for (int32_t left = count; left > 0;) {
+        svc::InventoryItem it;
+        it.container = svc::ItemContainer::Backpack;   // Inventory::grant routes it
+        it.item_record_id = record;
+        it.quantity = std::min(left, stack);
+        it.quality = rec.default_quality;
+        it.durability = static_cast<float>(std::floor(rec.max_durability + 0.5));
+        it.created_at_ms = created_ms;
+        left -= it.quantity;
+        out.push_back(std::move(it));
+    }
+}
+
+}  // namespace
+
+int64_t PlayerSession::town_shop_of(const world::WorldActor& npc) const {
+    const vendor::TownShops* shops = world_ ? world_->town_shops() : nullptr;
+    if (!shops || npc.kind != world::ActorKind::Npc || npc.npc.is_gm_vendor) return 0;
+    return shops->shop_of(npc.npc.instance_guid, npc.npc.asset_guid);
+}
+
+void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurchaseCart& cart, Clock::time_point now) {
+    const char* what = "ServerHandleVendorPurchase";
+    const auto refuse = [&](const std::string& why) {
+        ++vendor_refused_;
+        refuse_item_request(conn, what, why, now);
+    };
+    const vendor::TownShops* shops = world_ ? world_->town_shops() : nullptr;
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!shops || !db) return refuse("worldd has no town shops");
+    // the player's side of the shop's predicates: the node the player stands in
+    vendor::ShopFacts facts;
+    facts.nodes = world_->city_nodes();
+    const GoodPosition at = checker_.good();
+    facts.player_x = at.x;
+    facts.player_y = at.y;
+    bool unreadable = false;
+    const vendor::TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
+        const auto v = dialogue::evaluate_expression(p.expression, facts);
+        if (!v) unreadable = true;
+        return v && v->i != 0;
+    };
+    const vendor::TownShops::Quote quote = shops->quote(vendor_def_, cart, shops->default_rate(vendor_def_), holds);
+    if (!quote.ok) {
+        if (unreadable) spdlog::warn("[session] {}: a shop predicate does not evaluate: the listing is not sold", name());
+        return refuse(quote.refusal);
+    }
+    if (!wallet_.can_pay(quote.total)) {
+        return refuse("the purse holds " + std::to_string(wallet_.copper()) + " copper and the cart costs " + std::to_string(quote.total) + " (not enough money)");
+    }
+    // the goods, as stacks, routed by the bag rule; a cart that does not fit whole is refused whole
+    std::vector<svc::InventoryItem> fresh;
+    const int64_t created = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000;
+    for (const vendor::TownShops::Line& line : quote.lines) {
+        std::string error;
+        const auto rec = db->item(line.item, error);
+        if (!rec) return refuse(error.empty() ? "content.db has no item record " + std::to_string(line.item) : "content.db failed: " + error);
+        stacks_of(line.item, line.quantity, *rec, fresh, created);
+    }
+    for (svc::InventoryItem& it : fresh) {
+        it.instance_guid = fresh_guid();
+        // an instance guid must be new within this batch too (fresh_guid only looks at the inventory)
+        for (const svc::InventoryItem& other : fresh) {
+            if (&other != &it && other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();
+        }
+    }
+    const items::Outcome outcome = inventory_.grant(std::move(fresh), item_catalog());
+    if (!outcome.ok) return refuse(outcome.refusal);
+    const int64_t before = wallet_.copper();
+    wallet_.pay(quote.total);   // checked above: it cannot be short
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    ++items_applied_;
+    ++vendor_purchases_;
+    // the answer: the callout first, then the Add events (in one chain), then the new balance in the pawn's Currencies
+    const std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
+    const int64_t delta = -quote.total;
+    for (size_t at_event = 0; at_event < events.size(); at_event += bootstrap::kMaxEventsPerChain) {
+        const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at_event),
+                                                     events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at_event + bootstrap::kMaxEventsPerChain)));
+        if (at_event == 0) {
+            queue("purchase answer", [part, delta](bootstrap::PlayerBootstrap& pb) { return pb.purchase_answer(items::kMoneyTier, delta, part); }, conn, /*must_build=*/true);
+        } else {
+            queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
+        }
+    }
+    pb_.set_currency(items::kCopperCurrency, wallet_.copper());
+    queue("Currencies", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
+    spdlog::log(level_for(vendor_logged_), "[session] {}: bought {} line(s) at the shop for {} copper ({} -> {}): {} storage event(s)", name(), quote.lines.size(), quote.total, before,
+                wallet_.copper(), outcome.events.size());
+}
+
+PlayerSession::GmMoneyResult PlayerSession::gm_give_money(Connection& conn, int64_t copper, Clock::time_point now, const std::string& by) {
+    (void)now;
+    GmMoneyResult r;
+    r.previous = wallet_.copper();
+    r.balance = r.previous;
+    if (copper < 1) {
+        r.refusal = "the amount must be at least 1 copper";
+        return r;
+    }
+    if (wallet_.room() == 0) {
+        r.refusal = name() + "'s purse is full (" + std::to_string(items::kMoneyCap) + " copper, 1,000 gold)";
+        return r;
+    }
+    if (!room_for(3)) {
+        r.refusal = name() + "'s connection is busy: try again in a moment";
+        return r;
+    }
+    r.added = wallet_.give(copper);
+    r.balance = wallet_.copper();
+    r.ok = true;
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    pb_.set_currency(items::kCopperCurrency, wallet_.copper());
+    const int64_t shown = r.added;
+    queue("ClientShowCurrencyCallout", [shown](bootstrap::PlayerBootstrap& pb) { return pb.currency_callout(items::kMoneyTier, shown); }, conn, /*must_build=*/true);
+    queue("Currencies", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
+    spdlog::info("[gm] {}: {} copper added by {} ({} -> {}{})", name(), r.added, by, r.previous, r.balance, r.added < copper ? "; the purse is full, the rest is not added" : "");
+    return r;
+}
+
+PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by) {
+    (void)now;
+    GmItemResult r;
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!db) {
+        r.refusal = "worldd has no content.db to read the item from";
+        return r;
+    }
+    if (count < 1 || count > 100000) {
+        r.refusal = "the count must be 1 to 100,000";
+        return r;
+    }
+    std::string error;
+    const auto rec = db->item(item_record, error);
+    if (!rec) {
+        r.refusal = error.empty() ? "the data holds no item record " + std::to_string(item_record) : "content.db failed: " + error;
+        return r;
+    }
+    r.item_name = rec->name;
+    if (!room_for(2 + static_cast<size_t>(count / std::max(1, rec->max_stack_size)) / bootstrap::kMaxEventsPerChain)) {
+        r.refusal = name() + "'s connection is busy: try again in a moment";
+        return r;
+    }
+    std::vector<svc::InventoryItem> fresh;
+    stacks_of(item_record, count, *rec, fresh, std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000);
+    for (svc::InventoryItem& it : fresh) {
+        it.instance_guid = fresh_guid();
+        for (const svc::InventoryItem& other : fresh) {
+            if (&other != &it && other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();
+        }
+    }
+    const items::Outcome outcome = inventory_.grant(std::move(fresh), item_catalog());
+    if (!outcome.ok) {
+        r.refusal = "no room: " + outcome.refusal;
+        return r;
+    }
+    r.ok = true;
+    r.count = count;
+    r.container = outcome.events.empty() ? "" : items::container_name(outcome.events.front().container);
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    ++items_applied_;
+    const std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
+    for (size_t at_event = 0; at_event < events.size(); at_event += bootstrap::kMaxEventsPerChain) {
+        const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at_event),
+                                                     events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at_event + bootstrap::kMaxEventsPerChain)));
+        queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
+    }
+    spdlog::info("[gm] {}: {} x {} given by {} ({} storage event(s), first into {})", name(), count, r.item_name, by, outcome.events.size(), r.container);
+    return r;
+}
 
 // ============================================================================================================================
 //  plan E1, stage 3, part 2: kills and loot

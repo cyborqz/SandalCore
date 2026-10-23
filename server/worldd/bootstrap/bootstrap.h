@@ -260,6 +260,15 @@ public:
     std::optional<Send> open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor);
     /// ClientSetNodeTaxTable: the answer to the vendor window's ServerGetNodeTaxTable (fix 4; vendor/node_tax.h).
     std::optional<Send> node_tax_table(const repl::NodeTaxDetails& details);
+    /// The vendors milestone, step 0: a purchase's answer in one chain: ClientShowCurrencyCallout(currency tier, signed delta) first, then the ClientReceiveStorageEvent calls of `events`
+    /// (at most kMaxEventsPerChain), in that order.  What the storages hold follows the events, as item_events does.
+    std::optional<Send> purchase_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> events);
+    /// ClientShowCurrencyCallout alone (a grant of money to show).
+    std::optional<Send> currency_callout(int64_t currency_tier, int64_t delta);
+    /// OwnerInfo.Currencies: sets the balance of a currency (the entry is added when the field has none), sent with the next currencies_update().  False when the value does not fit.
+    bool set_currency(int64_t currency, int64_t amount);
+    /// The pawn's update that carries the changed balances (nullopt before the pawn's second state).
+    std::optional<Send> currencies_update();
 
     /// Quests, slice 0: what the PlayerController's CurrentDialogueInstance holds for the talking window.  Every field is set, and the update carries only what differs from
     /// what the connection has (the greeting: the lines, the NPC, the shown node and the greeting flag; a step: where it came from and went to; the clear: all of them back to nothing).
@@ -608,7 +617,7 @@ private:
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;
     const emit::FIntrepidNetworkGUID& item_storage_guid(ItemStorage storage) const;
-    std::optional<Send> build_item_events(std::span<const ItemEvent> events);
+    std::optional<Send> build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first = nullptr);
 };
 
 }  // namespace aoc::worldd::bootstrap

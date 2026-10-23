@@ -250,6 +250,7 @@
 #include "dialogue/talk.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
+#include "items/wallet.h"
 #include "net/connection.h"
 #include "net/control_channel.h"
 #include "protocol/repl/item_rpc.h"
@@ -693,6 +694,29 @@ public:
     size_t        gm_rpcs_answered() const { return gm_rpcs_answered_; }
     size_t        gm_teleports() const { return gm_teleports_; }
 
+    // ---- the vendors milestone, step 0: the purse and the test commands (session/gm_travel.h, the admin API) -----------------------------------
+    const items::Wallet& wallet() const { return wallet_; }
+    /// What a GM grant of money did: the balance before and after, and what was added (less than asked when the cap was reached).
+    struct GmMoneyResult {
+        bool    ok = false;
+        std::string refusal;
+        int64_t previous = 0, balance = 0, added = 0;
+    };
+    /// Adds `copper` to the purse (never past the cap), shows the +amount and the new balance, and saves with the next inventory hand-over.  Refused for an amount below 1, a full purse, or
+    /// a reply queue that has no room.
+    GmMoneyResult gm_give_money(Connection& conn, int64_t copper, Clock::time_point now, const std::string& by);
+    /// What a GM grant of an item did.
+    struct GmItemResult {
+        bool        ok = false;
+        std::string refusal;
+        std::string item_name;
+        int32_t     count = 0;
+        std::string container;   // where the first stack went: Backpack or a resource container
+    };
+    /// Gives `count` of the item record: stacks of its stack size, routed by the bag rule (materials to the resource bags, everything else to the item bag).  Refused, changing nothing, for
+    /// an item the data does not hold, a count outside 1 to 100,000, or bags without room for the whole grant.
+    GmItemResult gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by);
+
     // ---- Nodes 1, stage 2: the world knows its nodes ----------------------------------------------------------------------------------
     /// The client asks for the summary and the siege summary of every node at login (49 + 49 in the possession bunch) and again from the node window.  Each request is
     /// queued by node (a node already waiting is not queued twice) and answered in retail's order: every siege summary, then every node summary, each in the order
@@ -1031,6 +1055,10 @@ private:
     /// The vendor NPC the window is open on, when it is still held, a GM vendor, and within range of the last good position; else nullptr (the
     /// window is forgotten and `why` says what was wrong).
     const world::WorldActor* open_vendor(std::string& why);
+    /// Vendors, step 0: the shop (a VendorDef guid) an NPC's use opens in a town; 0 when it opens none or the shop is not switched on.
+    int64_t town_shop_of(const world::WorldActor& npc) const;
+    /// ... and the purchase from the shop that is open (priced from vendor_price and the node tax, paid from the wallet, goods through Inventory::grant).
+    void buy_from_town_shop(Connection& conn, const protocol::repl::VendorPurchaseCart& cart, Clock::time_point now);
     const protocol::schema::ClassSchema* class_of(bootstrap::Role role) const;
     bool role_of_channel(uint32_t channel, bootstrap::Role* role) const;
     void fail(std::string why);
@@ -1045,6 +1073,7 @@ private:
     std::chrono::seconds save_interval_;
     const content::AbilityRules* ability_rules_;   // plan A7: PlayerWorld's, null in a test that wants no abilities
     items::Inventory inventory_;                   // plan B2
+    items::Wallet    wallet_;                      // the vendors milestone, step 0: the purse (saved with the inventory, shown through OwnerInfo.Currencies)
     const items::ItemCatalog* catalog_;
     /// The catalog the grants route by (Gathering stage 3); a session without one knows no record, so everything goes to the Backpack.
     const items::ItemCatalog& item_catalog() const;

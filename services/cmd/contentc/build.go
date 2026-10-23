@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "17"
+const Version = "18"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -225,6 +225,11 @@ var keep = map[string]bool{
 	// quests, slice 0 (version 17): the NPC conversations (dialogue.go; PopulationInstanceRecordBase, PopulationAssetRecordBase and NarrativeQuestV2 are kept above)
 	"DialogueRoot": true,
 	"DialogueNode": true,
+	// vendors, step 0 (version 18): the shops' links, prices and rules (vendors.go; the vendor, item, interaction and population records are kept above)
+	"VendorOfferRecordBase":          true,
+	"VendorSellFilterRecordBase":     true,
+	"FVendorPriceModifierRecordBase": true,
+	"BaseItemValueRecordBase":        true,
 }
 
 // -- C Y B x C.O.A --
@@ -414,6 +419,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildDialogue(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildVendors(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
 

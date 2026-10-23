@@ -44,10 +44,11 @@ type reqJSON struct {
 	Q   []critJSON `json:"q"`
 }
 
-// actionJSON is a dialogue action, only its kind and the window it opens.
+// actionJSON is a dialogue action, only its kind, the window it opens and, for a shop window, the VendorDef it opens (vendors milestone, version 18).
 type actionJSON struct {
 	Action string `json:"a"`
 	Window string `json:"w,omitempty"`
+	Vendor int64  `json:"vd,omitempty"`
 }
 
 // intOf reads a number a decoded struct holds as an int64 (ints, floats and enums stored as numbers).
@@ -178,6 +179,9 @@ func readActions(v designdb.Value) (string, error) {
 			x := actionJSON{Action: enumValue(strOf(a["ActionType"]))}
 			if x.Action == "OpenWindow" {
 				x.Window = enumValue(strOf(a["WindowType"]))
+				if x.Window == "Vendor" {
+					x.Vendor = idGuid(a["VendorDefId"])
+				}
 			}
 			out = append(out, x)
 		}
