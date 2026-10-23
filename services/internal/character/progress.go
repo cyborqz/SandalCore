@@ -315,9 +315,9 @@ func (s *Store) GrantMissingStarterSets(ctx context.Context, sets StarterSetMake
 }
 
 // grantBag places `set` in the character's bag and marks the character (`mark` is the SET clause), under its row lock; placed is -1
-// when the character's `guard` column was set meanwhile (or the character is gone) and nothing was written.  With onlyMissing the guard
-// is not asked and an item of the set whose record the character already holds anywhere (bag, worn, quest storage) is left out of it;
-// nothing is written (nor marked) when nothing is missing.
+// when the character's `guard` column was set meanwhile (or the character is gone) and nothing was written.  With onlyMissing an item of
+// the set whose record the character already holds anywhere (bag, worn, quest storage) is left out of it; when nothing is missing the
+// character is only marked (a grant that is given once is spent whether or not anything had to be placed).  An empty guard asks nothing.
 func (s *Store) grantBag(ctx context.Context, characterID string, set []Item, guard, mark string, onlyMissing bool) (placed, noRoom int, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -337,7 +337,7 @@ func (s *Store) grantBag(ctx context.Context, characterID string, set []Item, gu
 		}
 		return 0, 0, err
 	}
-	if !onlyMissing {
+	if guard != "" {
 		var granted *time.Time
 		if err := tx.QueryRow(ctx, `SELECT `+guard+` FROM characters WHERE id = $1`, characterID).Scan(&granted); err != nil {
 			return 0, 0, err
@@ -376,7 +376,11 @@ func (s *Store) grantBag(ctx context.Context, characterID string, set []Item, gu
 			}
 		}
 		if len(missing) == 0 {
-			return 0, 0, nil // nothing to give: no write, no mark
+			// nothing to give: the character holds them all; it is marked all the same, so a mount it throws away later is not given again
+			if _, err := tx.Exec(ctx, `UPDATE characters SET `+mark+`, updated_at = now() WHERE id = $1`, characterID); err != nil {
+				return 0, 0, err
+			}
+			return 0, 0, tx.Commit(ctx)
 		}
 		set = missing
 	}
@@ -397,24 +401,23 @@ func (s *Store) grantBag(ctx context.Context, characterID string, set []Item, gu
 
 // StarterMountsResult says what GrantMissingStarterMounts did.
 type StarterMountsResult struct {
-	Waiting int // characters that have the set (each is looked at)
+	Waiting int // characters that had the set and were never given the test mounts (each is looked at once)
 	Granted int // given a mount (items placed)
 	Items   int // items placed in all
-	NoRoom  int // items that did not fit a full bag (they are asked for again at the next start)
+	NoRoom  int // items that did not fit a full bag (left out: the character is marked all the same)
 }
 
 // (C | O | A : Cyb)
 
-// GrantMissingStarterMounts keeps the test mounts of the GM starter set (the mounts milestone, stage 3) stocked: every character
-// that has the set (gm_starter_set_granted_at) is given each mount of the maker that it holds nowhere (bag, worn, quest storage).
-// A character that has not had the set gets the mounts with it (GrantMissingStarterSets); one that holds them all is not written to.
-// It is a top-up, not a once-only grant (fix 2 of stage 3: the set changed, the six flyers only a node's mayor can use were
-// replaced by the two a client lets anyone summon, and the characters that had the old set must get them), so a test mount that was
-// thrown away comes back at the next start.  Each grant is its own transaction under the row lock, as the set's is; what does not
-// fit the bag is logged and left out.
+// GrantMissingStarterMounts gives the test mounts of the GM starter set (the mounts milestone, stage 3) ONCE to every character that
+// had the set before it held mounts: gm_starter_set_granted_at is set and gm_starter_mounts_granted_at is not.  The character is given
+// each mount of the maker that it holds nowhere (bag, worn, quest storage) and is marked in the same transaction, also when it held them
+// all, so a test mount it throws away later stays gone and nothing it keeps is ever taken or given again.  A character created with the
+// set, or given it by GrantMissingStarterSets, is marked at once and is not looked at.  Each grant is its own transaction under the row
+// lock, as the set's is; what does not fit the bag is logged and left out (the character is marked all the same: it is given once).
 func (s *Store) GrantMissingStarterMounts(ctx context.Context, maker MountSetMaker) (StarterMountsResult, error) {
 	var res StarterMountsResult
-	rows, err := s.pool.Query(ctx, `SELECT id, name FROM characters WHERE gm_starter_set_granted_at IS NOT NULL ORDER BY created_at, id`)
+	rows, err := s.pool.Query(ctx, `SELECT id, name FROM characters WHERE gm_starter_set_granted_at IS NOT NULL AND gm_starter_mounts_granted_at IS NULL ORDER BY created_at, id`)
 	if err != nil {
 		return res, err
 	}
@@ -439,7 +442,7 @@ func (s *Store) GrantMissingStarterMounts(ctx context.Context, maker MountSetMak
 			slog.Warn("character: no test mounts granted (backfill)", "character_id", t.id, "name", t.name, "why", err.Error())
 			continue
 		}
-		placed, noRoom, err := s.grantBag(ctx, t.id, mounts, "", "gm_starter_mounts_granted_at = COALESCE(gm_starter_mounts_granted_at, now())", true)
+		placed, noRoom, err := s.grantBag(ctx, t.id, mounts, "gm_starter_mounts_granted_at", "gm_starter_mounts_granted_at = now()", true)
 		if errors.Is(err, errKitLockTimeout) {
 			slog.Warn("character: no test mounts granted (backfill): its row stayed locked; the next start grants them", "character_id", t.id, "name", t.name)
 			continue
@@ -455,10 +458,10 @@ func (s *Store) GrantMissingStarterMounts(ctx context.Context, maker MountSetMak
 			res.Granted++
 			res.Items += placed
 		}
-		slog.Info("character: GM starter set test mounts granted (top-up)", "character_id", t.id, "name", t.name, "items", placed, "no_room", noRoom)
+		slog.Info("character: GM starter set test mounts given once (backfill)", "character_id", t.id, "name", t.name, "items", placed, "no_room", noRoom)
 	}
 	if res.Granted > 0 || res.NoRoom > 0 {
-		slog.Info("character: GM starter set test mounts top-up", "characters_with_the_set", res.Waiting, "granted", res.Granted, "items", res.Items, "no_room", res.NoRoom)
+		slog.Info("character: GM starter set test mounts given once", "characters_waiting", res.Waiting, "granted", res.Granted, "items", res.Items, "no_room", res.NoRoom)
 	}
 	return res, nil
 }

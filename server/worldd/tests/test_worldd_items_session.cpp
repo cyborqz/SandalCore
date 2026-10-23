@@ -1249,13 +1249,16 @@ static BunchWriter flipped_bits(const BunchWriter& src, const std::vector<size_t
 }
 // built with C.Y.B and C O A
 
-static bool inventory_is_sane(const items::Inventory& inv, const std::set<std::string>& guids) {
+/// The inventory reads back the same, holds only items it started with, each in one slot, and has lost no more of them than it destroyed (a dragged-out item is destroyed since
+/// vendors step 1, so the set may shrink by a destroy, never grow and never shrink otherwise).
+static bool inventory_is_sane(const items::Inventory& inv, const std::set<std::string>& guids, size_t destroyed) {
     std::string error;
     const auto again = items::Inventory::from_items(inv.items(), error);
     if (!again || !(*again == inv)) return false;
     std::set<std::string> now;
     for (const auto& it : inv.items()) now.insert(it.instance_guid);
-    return now == guids && inv.size() == guids.size();
+    if (inv.size() != now.size() || !std::includes(guids.begin(), guids.end(), now.begin(), now.end())) return false;
+    return guids.size() - now.size() <= destroyed;
 }
 
 static void test_hostile() {
@@ -1349,14 +1352,15 @@ static void test_hostile() {
         }
         if (i % 50 == 49) {
             h.settle();
-            sane = sane && inventory_is_sane(h.s->inventory(), guids) && !h.s->failed();
+            sane = sane && inventory_is_sane(h.s->inventory(), guids, h.s->items_destroyed()) && !h.s->failed();
         }
     }
     h.settle();
-    sane = sane && inventory_is_sane(h.s->inventory(), guids);
-    std::printf("    %zu requests: %zu applied (%zu ServerItemUsed, %zu storage events), %zu refused, %zu dropped for the budget\n", kRequests, h.s->item_requests_applied(),
-                applied_by_use, applied_by_move, h.s->item_requests_refused(), h.s->requests_dropped());
-    CHECK(!h.s->failed() && sane, "2500 requests, valid, wrong and damaged: the session is up and the inventory is still a valid one with the same 17 items, each in one slot");
+    sane = sane && inventory_is_sane(h.s->inventory(), guids, h.s->items_destroyed());
+    std::printf("    %zu requests: %zu applied (%zu ServerItemUsed, %zu storage events, %zu destroys), %zu refused, %zu dropped for the budget\n", kRequests, h.s->item_requests_applied(),
+                applied_by_use, applied_by_move, h.s->items_destroyed(), h.s->item_requests_refused(), h.s->requests_dropped());
+    CHECK(!h.s->failed() && sane,
+          "2500 requests, valid, wrong and damaged: the session is up and the inventory is still a valid one, only items it started with, each in one slot, none lost but by a destroy");
     CHECK(h.s->item_requests_applied() > 50 && applied_by_use > 10 && applied_by_move > 10, "(the run did apply requests of both kinds)");
     CHECK(h.mirror.unreadable == 0, "everything the server sent reads");
     // the client was told of every change by events: no resend of the storages is needed to agree (a resync may have come, which agrees too)
@@ -4411,7 +4415,7 @@ static void test_resource_requests() {
     CHECK(expect_refused(fill, "fill"), "a Fill is refused");
     MoveSpec destroy = onto;
     destroy.type = static_cast<uint8_t>(repl::StorageEventType::Remove);
-    CHECK(expect_refused(destroy, "destroy"), "a Remove (destroying the stack by dragging it out) is refused");
+    CHECK(expect_refused(destroy, "destroy"), "a Remove whose slot does not hold the event's item (a destroy of the wrong stack) is refused");
     MoveSpec to_bag = m;   // the coal into the Backpack
     to_bag.from_slot = 2;
     to_bag.from_count = 20;

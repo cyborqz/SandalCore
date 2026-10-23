@@ -142,6 +142,8 @@ public:
         return n;
     }
     const std::vector<int64_t>& open_shops() const { return open_; }
+    /// The data the shops are made of (the modifiers and filters of a sale or a repair are read from it: vendor/sell_rules.h).
+    const content::VendorData& data() const { return d_; }
 
     const content::VendorData::Def* def(int64_t shop) const {
         const auto it = d_.defs.find(shop);

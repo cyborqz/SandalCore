@@ -218,20 +218,27 @@ func (f *fakeMounts) StarterMounts() ([]Item, error) {
 
 // (CoA + C_Y_B)
 
-// The test mounts are kept stocked (fix 2 of stage 3: the set's flyers changed): every character with the set is given the ones it
-// holds nowhere; one that holds them all is not written to; one without the set gets them with it.
-func TestGrantMissingStarterMountsTopsUpACharacterWithTheSet(t *testing.T) {
+// The test mounts are given ONCE (the owner: a mount he throws away stays gone): a character that had the set before it held mounts gets
+// the ones it holds nowhere and is marked; one that holds them all is marked and not written to; one without the set gets them with it.
+func TestGrantMissingStarterMountsGivesThemOnce(t *testing.T) {
 	s, acc := setup(t)
 	ctx := context.Background()
 	a, _ := s.Create(ctx, New{AccountID: acc, Name: "Alpha", ClassID: 2, Items: smallKit()})
-	// Bravo has the set but none of the mounts: it was created before they existed
+	// Bravo has the set but none of the mounts: it was created before they existed (Create marks both columns, so the mount mark is cleared)
 	b, _ := s.Create(ctx, New{AccountID: acc, Name: "Bravo", ClassID: 7, Items: smallKit(), GMStarterSetGranted: true})
 	// Charlie has the set and one of the two mounts (an older set, or one it threw away)
 	c, _ := s.Create(ctx, New{AccountID: acc, Name: "Charlie", ClassID: 3, Items: append(smallKit(), item(Backpack, 40, 9501, guid(900))), GMStarterSetGranted: true})
+	// Delta has the set and both mounts, and was never marked for them
+	d, _ := s.Create(ctx, New{AccountID: acc, Name: "Delta", ClassID: 4, Items: append(smallKit(), item(Backpack, 41, 9501, guid(901)), item(Backpack, 42, 9502, guid(902))), GMStarterSetGranted: true})
+	for _, id := range []string{b.ID, c.ID, d.ID} {
+		if _, err := s.pool.Exec(ctx, `UPDATE characters SET gm_starter_mounts_granted_at = NULL WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	m := &fakeMounts{}
 	res, err := s.GrantMissingStarterMounts(ctx, m)
-	if err != nil || res.Waiting != 2 || res.Granted != 2 || res.Items != 3 {
-		t.Fatalf("result = %+v, %v; want Bravo's 2 and Charlie's 1", res, err)
+	if err != nil || res.Waiting != 3 || res.Granted != 2 || res.Items != 3 {
+		t.Fatalf("result = %+v, %v; want 3 waiting, Bravo's 2 and Charlie's 1", res, err)
 	}
 	if got, _ := s.Inventory(ctx, b.ID); len(got) != len(smallKit())+2 {
 		t.Errorf("Bravo holds %d items, want the kit and the 2 mounts", len(got))
@@ -244,28 +251,37 @@ func TestGrantMissingStarterMountsTopsUpACharacterWithTheSet(t *testing.T) {
 	if len(got) != len(smallKit())+2 || records[9501] != 1 || records[9502] != 1 {
 		t.Errorf("Charlie holds %d items (%v), want the kit, its mount 9501 once and the missing 9502", len(got), records)
 	}
+	if got, _ := s.Inventory(ctx, d.ID); len(got) != len(smallKit())+2 {
+		t.Errorf("Delta holds %d items, want what it had: the kit and its 2 mounts", len(got))
+	}
 	if got, _ := s.Inventory(ctx, a.ID); len(got) != len(smallKit()) {
 		t.Errorf("Alpha, without the set, got mounts here: %d items", len(got))
 	}
-	// a second pass finds them all held
-	if again, err := s.GrantMissingStarterMounts(ctx, m); err != nil || again.Granted != 0 || again.Items != 0 {
+	for _, who := range []Character{b, c, d} {
+		var unmarked bool
+		if err := s.pool.QueryRow(ctx, `SELECT gm_starter_mounts_granted_at IS NULL FROM characters WHERE id = $1`, who.ID).Scan(&unmarked); err != nil || unmarked {
+			t.Errorf("%s is still unmarked (%v): each is marked, also the one that held both mounts", who.Name, err)
+		}
+	}
+	// a second pass finds nobody waiting
+	if again, err := s.GrantMissingStarterMounts(ctx, m); err != nil || again.Waiting != 0 || again.Granted != 0 || again.Items != 0 {
 		t.Errorf("second pass = %+v, %v", again, err)
 	}
-	// a mount thrown away comes back
+	// a mount thrown away stays gone
 	if _, err := s.pool.Exec(ctx, `DELETE FROM character_items WHERE character_id = $1 AND item_record_id = 9502`, c.ID); err != nil {
 		t.Fatal(err)
 	}
-	if again, err := s.GrantMissingStarterMounts(ctx, m); err != nil || again.Granted != 1 || again.Items != 1 {
-		t.Errorf("after a mount was thrown away = %+v, %v", again, err)
+	if again, err := s.GrantMissingStarterMounts(ctx, m); err != nil || again.Waiting != 0 || again.Granted != 0 || again.Items != 0 {
+		t.Errorf("after a mount was thrown away = %+v, %v; it must not come back", again, err)
 	}
-	// Alpha's set (with the mounts in it) marks both columns; the top-up then finds her mounts, if the maker's set holds them, or gives them
+	if got, _ := s.Inventory(ctx, c.ID); len(got) != len(smallKit())+1 {
+		t.Errorf("Charlie holds %d items after throwing 9502 away, want the kit and 9501", len(got))
+	}
+	// Alpha's set (with the mounts in it) marks both columns; the pass then has nobody waiting
 	if _, err := s.GrantMissingStarterSets(ctx, m); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GrantMissingStarterMounts(ctx, m); err != nil {
-		t.Fatal(err)
-	}
-	if again, err := s.GrantMissingStarterMounts(ctx, m); err != nil || again.Items != 0 {
+	if again, err := s.GrantMissingStarterMounts(ctx, m); err != nil || again.Waiting != 0 || again.Items != 0 {
 		t.Errorf("after the set's backfill = %+v, %v", again, err)
 	}
 }

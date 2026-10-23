@@ -51,6 +51,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -825,18 +826,80 @@ struct VendorPredicateRow {
     bool        hidden = false;
 };
 
+/// A gameplay tag query as the data holds it (vendor_modifier.filter, vendor_sell_filter.filter): the token stream and the tag dictionary (lower case); `present` is false for none.
+struct TagQuery {
+    bool                     present = false;
+    std::vector<int64_t>     tok;
+    std::vector<std::string> tags;
+};
+
+/// One price modifier (vendor_modifier): the operations it applies to (contexts: a bit mask, 1 buy, 2 sell, 4 repair), how it changes a price (operation Add / Multiply / Set),
+/// where its value comes from (source Expression: `expression`; Curve: `curve` read at `factor`; PriceModifierSet: its `children`), the items it touches (`filter`) and the currency
+/// tiers it touches.
+struct VendorModifier {
+    struct Key {
+        double      time = 0, value = 0;
+        std::string interp;   // Linear, Constant or Cubic
+    };
+    int64_t              guid = 0;
+    std::string          name;
+    int64_t              contexts = 0;
+    std::string          operation, source, factor, expression;
+    std::vector<Key>     curve;
+    TagQuery             filter;
+    std::vector<int64_t> currencies, children;
+};
+
+/// One sell filter of a def (vendor_sell_filter): a whitelist of items and a tag query.
+struct VendorSellFilter {
+    TagQuery          filter;
+    std::set<int64_t> whitelist;
+};
+
 struct VendorData {
     struct Def {
         std::string name;
         int64_t     operations = 0;   // the bit mask of what the shop does: 1 buy, 2 sell, 4 repair
         std::string tax_tag;          // "" for none
         bool        blacklisted = false;
+        std::vector<int64_t> modifiers;     // the def's price modifiers, in order (vendors, the selling step: contentc version 19 reads them for sales and repairs)
+        std::vector<int64_t> sell_filters;  // the def's sell filters, in order
     };
+    std::map<int64_t, VendorModifier>   modifiers;      // vendor_modifier by guid
+    std::map<int64_t, VendorSellFilter> sell_filters;   // vendor_sell_filter by guid
     std::map<int64_t, Def>     defs;             // VendorDef guid -> the def
     std::map<int64_t, int64_t> instance_links;   // PopulationInstance guid -> the VendorDef its use opens
     std::map<int64_t, int64_t> asset_links;      // PopulationAsset guid -> the same
     std::map<int64_t, std::map<int64_t, std::vector<VendorPriceRow>>> prices;   // VendorDef -> item -> its priced listings (a row per listing, offer and currency)
     std::map<std::pair<int64_t, int>, std::vector<VendorPredicateRow>> predicates;   // (tab, listing; -1 for the tab's own) -> its predicates
+};
+
+/// What a sale or a repair needs of an item (contentc version 19: item_vendor, item_sell_value, item_tag, quality_curve), read for one item by ContentDb::item_sale.
+struct ItemSaleFacts {
+    bool                  known = false;          // item_vendor has a row for the item
+    bool                  vendorable = false;     // a shop may buy it at all
+    bool                  blacklisted = false;
+    int                   rarity_min = 0;         // the rarity ordinals the item's rarity is held inside (Common 0 ... Artifact 6)
+    int                   rarity_max = 6;
+    int                   level = 0;
+    std::vector<std::pair<double, double>> bands; // the item's quality curve: the Quality range (x, y) of each rarity, in order (empty: the item has none)
+    std::set<std::string> tags;                   // lower case, each tag with its parents
+    std::map<std::pair<int, int64_t>, int64_t> values;   // (rarity, currency tier) -> the base value of a sale, per unit, rounded up
+
+    /// The rarity of a quality: the band of the quality curve, held inside rarity_min..rarity_max; Common without a curve.
+    int rarity_of(int64_t quality) const {
+        int band = 0;
+        if (bands.size() == 7) {
+            for (size_t i = 0; i < bands.size(); ++i) {
+                const double q = static_cast<double>(quality);
+                if (q >= bands[i].first) band = static_cast<int>(i);
+                if (q >= bands[i].first && q <= bands[i].second) break;
+            }
+        }
+        if (band < rarity_min) band = rarity_min;
+        if (band > rarity_max) band = rarity_max;
+        return band;
+    }
 };
 
 struct PopulationData {
@@ -1069,6 +1132,9 @@ public:
     std::optional<DialogueData> dialogue_data(std::string& error) const;
     /// Vendors, step 0 (contentc version 18): the shops' links, tax tags, prices and predicates, read whole.  nullopt, with `error` set, for a file of an older version.
     std::optional<VendorData> vendor_data(std::string& error) const;
+    /// Vendors, the selling step (contentc version 19): what a sale or a repair needs of one item.  `known` is false for an item with no item_vendor row; nullopt, with `error` set,
+    /// for a file of an older version or a damaged read.
+    std::optional<ItemSaleFacts> item_sale(int64_t item, std::string& error) const;
     /// Plan E1: a vendor (vendor_def with its inventories and their listings) by its VendorDef guid; nullopt with `error` empty when there is none.
     std::optional<VendorDefRow> vendor_def(int64_t guid, std::string& error) const;
     /// Plan E1: a vendor by name ("PTR_ONLY_Vendor_Gear_0-9"); nullopt with `error` empty when there is none.

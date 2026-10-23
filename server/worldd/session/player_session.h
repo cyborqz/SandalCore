@@ -210,7 +210,9 @@
 //                                                             (a GM vendor within range), ClientSetNodeTaxTable(the node asked for, vendor/node_tax.h's
 //                                                             untaxed table of 78 tags) is sent, at most kTaxBurst at once and one more every
 //                                                             kTaxInterval; with none, ignored.  Every request is logged (the first ones at info).
-//                  ServerHandleVendorTransaction              a sale or a buy-back: GM vendors buy nothing; ignored and logged once.
+//                  ServerHandleVendorTransaction              a sale (2) or a repair (4) at a town shop (vendor/sell_rules.h): the answer is the items' storage events and the
+//                                                             money callout, or the durability update and the money callout, then the new balance; GM vendors buy nothing:
+//                                                             ignored and logged once.
 //  Both take tokens of the item budget (kVendorBurst, kVendorInterval).
 //
 //  Riding (the mounts milestone, stage 3; session/riding.h has the rules and what is modelled).  The session controls ONE actor at a time: the player's pawn or
@@ -653,6 +655,9 @@ public:
     int64_t  vendor_def() const { return vendor_def_; }
     size_t   vendor_opens() const { return vendor_opens_; }
     size_t   vendor_purchases() const { return vendor_purchases_; }
+    size_t   vendor_sales() const { return vendor_sales_; }
+    size_t   vendor_repairs() const { return vendor_repairs_; }
+    size_t   items_destroyed() const { return items_destroyed_; }
     size_t   vendor_refused() const { return vendor_refused_; }
     size_t   interactions_ignored() const { return interact_ignored_; }
     /// Quests, slice 0: the talking window.  The NPC the player talks to (0: nobody), the conversation, and how many were opened, lines chosen, closed and refused.
@@ -918,6 +923,7 @@ private:
     // ---- plan E1 ----
     void on_interact(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_vendor_purchase(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    void on_vendor_transaction(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_node_tax_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     // ---- Nodes 1, stage 2 ----
     void on_node_summary_request(const protocol::repl::ClientRpc& rpc);
@@ -1059,6 +1065,13 @@ private:
     int64_t town_shop_of(const world::WorldActor& npc) const;
     /// ... and the purchase from the shop that is open (priced from vendor_price and the node tax, paid from the wallet, goods through Inventory::grant).
     void buy_from_town_shop(Connection& conn, const protocol::repl::VendorPurchaseCart& cart, Clock::time_point now);
+    /// Vendors, step 1: the sale of items from the bags to the shop that is open (the whole stack of each, paid in copper by vendor/sell_rules.h's chain), and the repair of worn
+    /// items (the wear mended to full, paid with the node tax); each is all or nothing.
+    void sell_to_town_shop(Connection& conn, const protocol::repl::VendorTransactionCart& cart, Clock::time_point now);
+    void repair_at_town_shop(Connection& conn, const protocol::repl::VendorTransactionCart& cart, Clock::time_point now);
+    /// The toasts the item feed shows for storage events: the Add of an item that arrives ("Acquired ...", the quantity added when it tops up a stack) and, with `removals`, the
+    /// Remove of an item that leaves for good ("Removed ...").  The name is the item's own as the player reads it.
+    void add_item_toasts(std::vector<bootstrap::ItemEvent>& events, bool removals) const;
     const protocol::schema::ClassSchema* class_of(bootstrap::Role role) const;
     bool role_of_channel(uint32_t channel, bootstrap::Role* role) const;
     void fail(std::string why);
@@ -1275,6 +1288,7 @@ private:
     RequestBudget                  tax_budget_{kTaxBurst, kTaxInterval};
     size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;
     size_t vendor_opens_ = 0, vendor_purchases_ = 0, vendor_refused_ = 0, interact_ignored_ = 0, vendor_logged_ = 0, interact_logged_ = 0;
+    size_t vendor_sales_ = 0, vendor_repairs_ = 0, items_destroyed_ = 0;
     bool   vendor_unreadable_logged_ = false, vendor_sale_logged_ = false;
     // quests, slice 0: the talking window
     dialogue::Talk talk_;

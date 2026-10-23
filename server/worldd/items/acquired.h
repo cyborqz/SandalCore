@@ -18,14 +18,20 @@
 //      emblems, ids 0, location 0.
 //  What is inferred: the style names of the bands above Heroic (Item_Epic, Item_Legendary, Item_Artifact); that a top-up of an existing stack is told the quantity that was added
 //  (no capture shows one: the events are all new stacks); that the metadata after the quality is zero for an item that has an enchantment, a tempering or sockets (resources have none).
+//
+//  The vendors milestone, step 1: the same callout rides the other storage events the item feed shows.  A purchase's Add event carries the type 6 "Acquired" form, as a harvest's does;
+//  the Remove event of an item sold to a shop or destroyed by dragging it out carries the type 16 "Removed" form, with the item's durability in its link (metaDurability="14").
+//  Without it the item arrives in or leaves the bag and no toast appears.  Nothing else differs from the harvest's callout.
 // ============================================================================
 #pragma once
 
 #include "protocol/repl/value.h"
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace aoc::worldd::items {
 
@@ -45,15 +51,31 @@ inline std::string_view rarity_band_name(uint32_t quality) {
     return "Common";
 }
 
-/// The popup's rich text for `item` (its record, quality and quantity) named `name`.
-inline std::string acquired_text(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name) {
-    std::string s = "Acquired <a id=\"Item\" style=\"Item_";
+/// The item link's durability as the text shows it: a whole number without decimals ("14"), else up to two ("13.5").
+inline std::string durability_text(float durability) {
+    if (!(durability > 0.0f)) return "0";
+    const long long whole = static_cast<long long>(durability);
+    if (static_cast<float>(whole) == durability) return std::to_string(whole);
+    std::string s = std::to_string(std::lround(durability * 100.0f));   // hundredths
+    while (s.size() < 3) s.insert(s.begin(), '0');
+    s.insert(s.size() - 2, ".");
+    while (s.back() == '0') s.pop_back();
+    return s;
+}
+
+/// The rich text of a toast about `item` named `name`, led by `word` ("Acquired", "Removed"): the item link with its record, quality and durability, and "x<quantity>" after it
+/// for a stack of more than one.
+inline std::string item_toast_text(std::string_view word, const ::aoc::protocol::repl::ItemInstance& item, std::string_view name) {
+    std::string s(word);
+    s += " <a id=\"Item\" style=\"Item_";
     s += rarity_band_name(item.quality);
     s += "\" metaType=\"ItemLink\" metaGUID=\"";
     s += std::to_string(item.record_id);
     s += "\" metaItemQuality=\"";
     s += std::to_string(item.quality);
-    s += "\" metaEnchantLevel=\"0\" metaTemperingPercent=\"0\" metaDurability=\"0\" metaSockets=\"\"> [";
+    s += "\" metaEnchantLevel=\"0\" metaTemperingPercent=\"0\" metaDurability=\"";
+    s += durability_text(item.durability);
+    s += "\" metaSockets=\"\"> [";
     s += name;
     if (item.quantity > 1) {
         s += "] </>x";
@@ -63,19 +85,35 @@ inline std::string acquired_text(const ::aoc::protocol::repl::ItemInstance& item
     }
     return s;
 }
+
+/// The popup's rich text for `item` (its record, quality and quantity) named `name`.
+inline std::string acquired_text(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name) { return item_toast_text("Acquired", item, name); }
 // C.Y.B / CoA
 
-/// The FCalloutQueueInfo of a harvest's storage event for `item` as it is stored (its quantity is what was acquired), made at `creation_ticks` (FDateTime ticks).
-inline ::aoc::protocol::repl::CalloutQueueInfo acquired_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, int64_t creation_ticks) {
+/// The FCalloutQueueInfo of a storage event for `item` as it is stored, toasting `text`, made at `creation_ticks` (FDateTime ticks).
+inline ::aoc::protocol::repl::CalloutQueueInfo item_callout(std::string text, uint8_t type, const ::aoc::protocol::repl::ItemInstance& item, int64_t creation_ticks) {
     ::aoc::protocol::repl::CalloutQueueInfo c;
-    c.message = acquired_text(item, name);
+    c.message = std::move(text);
     c.formatted_on_screen = c.message;
-    c.callout_type = kAcquiredCalloutType;
+    c.callout_type = type;
     c.point_size = kAcquiredPointSize;
     c.chat_category = kAcquiredChatCategory;
     c.item = item;
     c.creation_time.ticks = creation_ticks;
     return c;
+}
+
+/// The FCalloutQueueInfo of a harvest's storage event for `item` as it is stored (its quantity is what was acquired), made at `creation_ticks` (FDateTime ticks).
+inline ::aoc::protocol::repl::CalloutQueueInfo acquired_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, int64_t creation_ticks) {
+    return item_callout(acquired_text(item, name), kAcquiredCalloutType, item, creation_ticks);
+}
+
+/// The callout type of the toast of an item that leaves a bag: sold to a shop, or destroyed.
+inline constexpr uint8_t kRemovedCalloutType = 16;
+
+/// The FCalloutQueueInfo of the Remove event of an item that was sold or destroyed ("Removed <link> [Name]"): the same struct as the pick-up toast, type 16.
+inline ::aoc::protocol::repl::CalloutQueueInfo removed_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, int64_t creation_ticks) {
+    return item_callout(item_toast_text("Removed", item, name), kRemovedCalloutType, item, creation_ticks);
 }
 
 }  // namespace aoc::worldd::items

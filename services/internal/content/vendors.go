@@ -25,6 +25,9 @@ import (
 //	vendor_availability    the predicates of a tab (listing_ord -1) or a listing: an expression, the failure text and whether the entry hides when it fails
 //	vendor_price           the price of every buyable listing, per currency, per UNIT, before the node tax: the listing's expression (the offer's when it has one), rounded up,
 //	                       through the def's buy modifiers, rounded up
+//	item_vendor            (contentc version 19, the selling step) per item: whether a shop may buy it (Vendorable, Blacklisted) and the range its rarity is held inside
+//	item_sell_value        (version 19) per item with a base value (vendorable or not), rarity and currency: the item's base value for a sale or a repair, per unit, rounded up
+//	                       (the record's own sale expressions when it overrides them, else its buy expressions); the def's modifiers are applied by the reader
 //
 // A tag query (filter) is {"tok": [..], "tags": [..]}: the query's token stream (version, a non-empty flag, then the expression tree: an expression type, and for a tag
 // set the number of tags and their indexes into tags, for an expression set the number of sub-expressions) and the tag dictionary.
@@ -111,11 +114,25 @@ CREATE TABLE vendor_price (
     PRIMARY KEY (vendor_guid, inventory_guid, ord, offer_guid, currency_guid)
 ) WITHOUT ROWID;
 CREATE INDEX vendor_price_by_item ON vendor_price (vendor_guid, item_guid);
+CREATE TABLE item_vendor (
+    item_guid   INTEGER PRIMARY KEY,
+    vendorable  INTEGER NOT NULL,      -- Vendorable: a shop may buy the item at all
+    blacklisted INTEGER NOT NULL,      -- Blacklisted
+    rarity_min  INTEGER NOT NULL,      -- RarityMin as the rarity ordinal (Common 0 ... Artifact 6): the item's rarity is held inside this range
+    rarity_max  INTEGER NOT NULL       -- RarityMax
+) WITHOUT ROWID;
+CREATE TABLE item_sell_value (
+    item_guid     INTEGER NOT NULL,
+    rarity        INTEGER NOT NULL,    -- the item's rarity ordinal
+    currency_guid INTEGER NOT NULL,    -- the currency tier
+    price         INTEGER NOT NULL,    -- the item's base value for a sale or a repair at that rarity, per unit, rounded up, before the def's modifiers
+    PRIMARY KEY (item_guid, rarity, currency_guid)
+) WITHOUT ROWID;
 `
 
 // VendorTables are the tables VendorsDDL creates, in the DDL's order.
 var VendorTables = []string{"npc_vendor_link", "vendor_def_data", "vendor_def_modifier", "vendor_def_sell_filter", "vendor_modifier", "vendor_sell_filter",
-	"base_item_value", "item_base_value", "vendor_offer", "vendor_availability", "vendor_price"}
+	"base_item_value", "item_base_value", "vendor_offer", "vendor_availability", "vendor_price", "item_vendor", "item_sell_value"}
 
 func createVendors(db *sql.DB) error {
 	if _, err := db.Exec(VendorsDDL); err != nil {

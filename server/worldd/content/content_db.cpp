@@ -2425,6 +2425,35 @@ std::string str_of(const nlohmann::json& j, const char* key) {
     return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
 }
 
+std::string lower_case(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+/// A tag query of vendor_modifier.filter or vendor_sell_filter.filter ({"tok": [..], "tags": [..]}); `present` stays false for '' and for text that is no query.
+TagQuery parse_tag_query(const std::string& text) {
+    TagQuery q;
+    if (text.empty()) return q;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return q;
+    q.tok = int_list(j, "tok");
+    const auto it = j.find("tags");
+    if (it != j.end() && it->is_array()) {
+        for (const auto& v : *it) q.tags.push_back(v.is_string() ? lower_case(v.get<std::string>()) : std::string());
+    }
+    q.present = q.tok.size() >= 2 && q.tok[1] != 0;
+    return q;
+}
+
+/// A JSON array of integers (the text of a column); empty for anything else.
+std::vector<int64_t> int_array(const std::string& text) {
+    std::vector<int64_t> out;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_array()) return out;
+    for (const auto& v : j) out.push_back(v.is_number() ? v.get<int64_t>() : 0);
+    return out;
+}
+
 }  // namespace
 
 std::optional<std::map<int64_t, LootTable>> ContentDb::loot_tables(const std::vector<int64_t>& roots, std::string& error) const {
@@ -2861,6 +2890,160 @@ std::optional<VendorData> ContentDb::vendor_data(std::string& error) const {
             out.predicates[{sqlite3_column_int64(s, 0), static_cast<int>(sqlite3_column_int64(s, 1))}].push_back(std::move(p));
         }
         if (step != SQLITE_DONE) return failed("vendor_availability");
+    }
+    {   // the selling step: the price modifiers and the sell filters, and the chain each def holds
+        Stmt q(db_, "SELECT guid, name, contexts, operation, source, factor, expression, curve, filter, currencies, children FROM vendor_modifier");
+        if (!q.ok()) return failed("vendor_modifier");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2)) return unread("vendor_modifier");
+            VendorModifier m;
+            m.guid = sqlite3_column_int64(s, 0);
+            m.name = column_text(s, 1);
+            m.contexts = sqlite3_column_int64(s, 2);
+            m.operation = column_text(s, 3);
+            m.source = column_text(s, 4);
+            m.factor = column_text(s, 5);
+            m.expression = column_text(s, 6);
+            const nlohmann::json curve = nlohmann::json::parse(column_text(s, 7), nullptr, false);
+            if (curve.is_array()) {
+                for (const auto& k : curve) {
+                    if (!k.is_array() || k.size() < 3 || !k[0].is_number() || !k[1].is_number() || !k[2].is_string()) continue;
+                    m.curve.push_back({k[0].get<double>(), k[1].get<double>(), k[2].get<std::string>()});
+                }
+            }
+            m.filter = parse_tag_query(column_text(s, 8));
+            m.currencies = int_array(column_text(s, 9));
+            m.children = int_array(column_text(s, 10));
+            const int64_t guid = m.guid;
+            out.modifiers[guid] = std::move(m);
+        }
+        if (step != SQLITE_DONE) return failed("vendor_modifier");
+    }
+    {
+        Stmt q(db_, "SELECT guid, filter, whitelist FROM vendor_sell_filter");
+        if (!q.ok()) return failed("vendor_sell_filter");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0)) return unread("vendor_sell_filter");
+            VendorSellFilter f;
+            f.filter = parse_tag_query(column_text(s, 1));
+            for (const int64_t item : int_array(column_text(s, 2))) f.whitelist.insert(item);
+            out.sell_filters[sqlite3_column_int64(s, 0)] = std::move(f);
+        }
+        if (step != SQLITE_DONE) return failed("vendor_sell_filter");
+    }
+    struct Chain {
+        const char* table;
+        const char* sql;
+        bool        modifiers;
+    };
+    for (const Chain& chain : {Chain{"vendor_def_modifier", "SELECT vendor_guid, modifier_guid FROM vendor_def_modifier ORDER BY vendor_guid, ord", true},
+                               Chain{"vendor_def_sell_filter", "SELECT vendor_guid, filter_guid FROM vendor_def_sell_filter ORDER BY vendor_guid, ord", false}}) {
+        Stmt q(db_, chain.sql);
+        if (!q.ok()) return failed(chain.table);
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread(chain.table);
+            const auto def = out.defs.find(sqlite3_column_int64(s, 0));
+            if (def == out.defs.end()) continue;
+            (chain.modifiers ? def->second.modifiers : def->second.sell_filters).push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed(chain.table);
+    }
+    return out;
+}
+
+std::optional<ItemSaleFacts> ContentDb::item_sale(int64_t item, std::string& error) const {
+    error.clear();
+    ItemSaleFacts out;
+    const std::string rebuild = " (the sale tables are contentc version 19's: rebuild the file with this checkout's contentc)";
+    int64_t curve = 0;
+    {
+        Stmt q(db_, "SELECT v.vendorable, v.blacklisted, v.rarity_min, v.rarity_max, i.level, i.quality_curve_guid FROM item_vendor v JOIN item i ON i.guid = v.item_guid WHERE v.item_guid = ?1");
+        if (!q.ok()) {
+            error = "content.db item_vendor query failed: " + db_message(db_) + rebuild;
+            return std::nullopt;
+        }
+        sqlite3_bind_int64(q.get(), 1, item);
+        const int step = sqlite3_step(q.get());
+        if (step == SQLITE_DONE) return out;   // no such item: known stays false
+        if (step != SQLITE_ROW) {
+            error = "content.db item_vendor query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        for (int c = 0; c < 6; ++c) {
+            if (!column_is_int(q.get(), c)) {
+                error = "content.db item_vendor of item " + std::to_string(item) + " has a column of the wrong storage class";
+                return std::nullopt;
+            }
+        }
+        out.known = true;
+        out.vendorable = sqlite3_column_int64(q.get(), 0) != 0;
+        out.blacklisted = sqlite3_column_int64(q.get(), 1) != 0;
+        out.rarity_min = static_cast<int>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 2), 0, 6));
+        out.rarity_max = static_cast<int>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 3), 0, 6));
+        out.level = static_cast<int>(sqlite3_column_int64(q.get(), 4));
+        curve = sqlite3_column_int64(q.get(), 5);
+    }
+    {   // the tags, each with its parents ("item.consumable.food" holds "item.consumable" and "item")
+        Stmt q(db_, "SELECT tag FROM item_tag WHERE item_guid = ?1");
+        if (!q.ok()) {
+            error = "content.db item_tag query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        sqlite3_bind_int64(q.get(), 1, item);
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            std::string tag = lower_case(column_text(q.get(), 0));
+            while (!tag.empty()) {
+                out.tags.insert(tag);
+                const size_t dot = tag.rfind('.');
+                if (dot == std::string::npos) break;
+                tag.resize(dot);
+            }
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db item_tag query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    if (curve != 0) {
+        Stmt q(db_, "SELECT x, y FROM quality_curve WHERE guid = ?1 ORDER BY ord");
+        if (!q.ok()) {
+            error = "content.db quality_curve query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        sqlite3_bind_int64(q.get(), 1, curve);
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.bands.push_back({sqlite3_column_double(q.get(), 0), sqlite3_column_double(q.get(), 1)});
+        if (step != SQLITE_DONE) {
+            error = "content.db quality_curve query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    {
+        Stmt q(db_, "SELECT rarity, currency_guid, price FROM item_sell_value WHERE item_guid = ?1");
+        if (!q.ok()) {
+            error = "content.db item_sell_value query failed: " + db_message(db_) + rebuild;
+            return std::nullopt;
+        }
+        sqlite3_bind_int64(q.get(), 1, item);
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            if (!column_is_int(q.get(), 0) || !column_is_int(q.get(), 1) || !column_is_int(q.get(), 2)) {
+                error = "content.db item_sell_value of item " + std::to_string(item) + " has a column of the wrong storage class";
+                return std::nullopt;
+            }
+            out.values[{static_cast<int>(sqlite3_column_int64(q.get(), 0)), sqlite3_column_int64(q.get(), 1)}] = sqlite3_column_int64(q.get(), 2);
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db item_sell_value query failed: " + db_message(db_);
+            return std::nullopt;
+        }
     }
     return out;
 }

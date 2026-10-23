@@ -146,6 +146,8 @@ type vitem struct {
 	rarityMin   int
 	rarityMax   int
 	baseValue   int64
+	vendorable  bool            // Vendorable: a shop may buy it
+	blacklisted bool            // Blacklisted
 	tags        map[string]bool // lower case, each tag with its parents
 }
 
@@ -491,6 +493,12 @@ func buildVendors(w *writer, src *source, opt *Options, meta map[string]string) 
 		}
 		if _, has := f.get("BaseVendorValueId"); has {
 			it.baseValue, _ = f.id("BaseVendorValueId")
+		}
+		if v, has := f.get("Vendorable"); has {
+			it.vendorable, _ = v.(bool)
+		}
+		if v, has := f.get("Blacklisted"); has {
+			it.blacklisted, _ = v.(bool)
 		}
 		if _, has := f.get("GameplayTags"); has {
 			it.tags = tagSet(f.tags("GameplayTags"))
@@ -912,5 +920,104 @@ func buildVendors(w *writer, src *source, opt *Options, meta map[string]string) 
 	meta["typed.vendor_price"] = strconv.Itoa(rows)
 	meta["typed.vendor_modifier"] = strconv.Itoa(len(modIDs))
 	meta["typed.vendor_listings_unpriced"] = strconv.Itoa(skippedTotal)
+
+	// --- what a sale needs of an item (contentc version 19, the selling step) ------------------------------------------------------------------
+	soldRows, sellable, unpriced := writeSaleFacts(w, g)
+	reasons = reasons[:0]
+	for k := range unpriced {
+		reasons = append(reasons, k)
+	}
+	sort.Strings(reasons)
+	unpricedTotal := 0
+	for _, k := range reasons {
+		unpricedTotal += unpriced[k].count
+		opt.logf("item_sell_value: %d item(s) without a sale value: %s (e.g. %s)", unpriced[k].count, k, unpriced[k].example)
+	}
+	if soldRows.err != nil {
+		return soldRows.err
+	}
+	opt.logf("item_vendor: %d items, %d of them with a base value (not blacklisted) into %d item_sell_value rows (%d without a value)", len(g.items), sellable, soldRows.rows, unpricedTotal)
+	meta["typed.item_vendor"] = strconv.Itoa(len(g.items))
+	meta["typed.item_sell_value"] = strconv.Itoa(soldRows.rows)
 	return nil
+}
+
+// sold is the outcome of writeSaleFacts.
+type sold struct {
+	rows int
+	err  error
+}
+
+type reasonCount struct {
+	count   int
+	example string
+}
+
+// writeSaleFacts writes item_vendor (one row per item) and item_sell_value: for every item with a base value record that is not blacklisted, and every rarity the item can have, its
+// base value for a sale in each currency of the record's sale expressions (the record's own when it overrides them, else its buy expressions), rounded up.  Whether a shop may buy
+// the item is item_vendor's business (Vendorable); the value is also what a repair is priced from.  An item whose expression this builder cannot run, or that gives no price, gets
+// no value (it can be neither sold nor repaired); the reasons come back counted.
+func writeSaleFacts(w *writer, g *priceGen) (sold, int, map[string]*reasonCount) {
+	ids := make([]int64, 0, len(g.items))
+	for id := range g.items {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	unpriced := map[string]*reasonCount{}
+	note := func(reason, where string) {
+		if rc := unpriced[reason]; rc != nil {
+			rc.count++
+			return
+		}
+		unpriced[reason] = &reasonCount{count: 1, example: where}
+	}
+	var out sold
+	sellable := 0
+	for _, id := range ids {
+		it := g.items[id]
+		if err := w.exec(`INSERT INTO item_vendor (item_guid, vendorable, blacklisted, rarity_min, rarity_max) VALUES (?, ?, ?, ?, ?)`,
+			it.guid, b2i(it.vendorable), b2i(it.blacklisted), it.rarityMin, it.rarityMax); err != nil {
+			out.err = err
+			return out, sellable, unpriced
+		}
+		// every item with a base value gets its values, vendorable or not: a shop buys only what is vendorable (item_vendor), but a worn item is mended by its value whether or
+		// not a shop would buy it (the starter tools are not vendorable)
+		if it.blacklisted || it.baseValue == 0 {
+			continue
+		}
+		b := g.bases[it.baseValue]
+		if b == nil {
+			note("the item has no base value record", it.name)
+			continue
+		}
+		sellable++
+		exprs := b.buy
+		if b.override {
+			exprs = b.sell
+		}
+		if len(exprs) == 0 {
+			note("the base value record overrides the sale values and lists none", it.name)
+			continue
+		}
+		for rarity := it.rarityMin; rarity <= it.rarityMax; rarity++ {
+			c := &evalCtx{item: it, quality: it.quality, rarity: rarity}
+			for _, ce := range exprs {
+				e, err := g.eval(ce.expr, c)
+				if err != nil {
+					note(reasonOf(err), fmt.Sprintf("%s at rarity %d", it.name, rarity))
+					continue
+				}
+				if e < 0 || e > 1e15 {
+					note("the expression gives no price (negative or out of range)", fmt.Sprintf("%s at rarity %d", it.name, rarity))
+					continue
+				}
+				if err := w.exec(`INSERT OR IGNORE INTO item_sell_value (item_guid, rarity, currency_guid, price) VALUES (?, ?, ?, ?)`, it.guid, rarity, ce.currency, int64(math.Ceil(e))); err != nil {
+					out.err = err
+					return out, sellable, unpriced
+				}
+				out.rows++
+			}
+		}
+	}
+	return out, sellable, unpriced
 }

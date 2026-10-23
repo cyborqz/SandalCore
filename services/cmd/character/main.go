@@ -157,10 +157,10 @@ func backfillStarterSets(ctx context.Context, store *character.Store, sets chara
 	if _, err := store.GrantMissingStarterSets(ctx, sets); err != nil {
 		slog.Error("character: the GM starter set backfill stopped on an error (characters already given the set keep it; it runs again at the next start)", "err", err)
 	}
-	// the mounts milestone, stage 3: a character that had the set before it held the test mounts gets them (a top-up at every start: a test mount it holds nowhere is given again; review B M8)
+	// the mounts milestone, stage 3: a character that had the set before it held the test mounts gets them once (it is marked then, so a test mount it throws away stays gone)
 	if mk, ok := sets.(character.MountSetMaker); ok {
 		if _, err := store.GrantMissingStarterMounts(ctx, mk); err != nil {
-			slog.Error("character: the test mounts backfill stopped on an error (it runs again at the next start)", "err", err)
+			slog.Error("character: the test mounts backfill stopped on an error (the characters not yet given them are looked at again at the next start)", "err", err)
 		}
 	}
 }

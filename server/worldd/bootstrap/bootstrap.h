@@ -263,6 +263,12 @@ public:
     /// The vendors milestone, step 0: a purchase's answer in one chain: ClientShowCurrencyCallout(currency tier, signed delta) first, then the ClientReceiveStorageEvent calls of `events`
     /// (at most kMaxEventsPerChain), in that order.  What the storages hold follows the events, as item_events does.
     std::optional<Send> purchase_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> events);
+    /// The vendors milestone, step 1: a sale's answer in one chain, in the retail order: the ClientReceiveStorageEvent calls of `events` first, then
+    /// ClientShowCurrencyCallout(currency tier, signed delta).  What the storages hold follows the events.
+    std::optional<Send> sale_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> events);
+    /// A repair's answer in one chain, in the retail order: ClientUpdateItemDurability for the item in `storage` slot `slot` (its new durability), then
+    /// ClientShowCurrencyCallout(currency tier, signed delta).  nullopt for a slot that holds no item.
+    std::optional<Send> repair_answer(ItemStorage storage, int32_t slot, float durability, int64_t currency_tier, int64_t delta);
     /// ClientShowCurrencyCallout alone (a grant of money to show).
     std::optional<Send> currency_callout(int64_t currency_tier, int64_t delta);
     /// OwnerInfo.Currencies: sets the balance of a currency (the entry is added when the field has none), sent with the next currencies_update().  False when the value does not fit.
@@ -617,7 +623,7 @@ private:
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;
     const emit::FIntrepidNetworkGUID& item_storage_guid(ItemStorage storage) const;
-    std::optional<Send> build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first = nullptr);
+    std::optional<Send> build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first = nullptr, const repl::RpcRequest* last = nullptr);
 };
 
 }  // namespace aoc::worldd::bootstrap

@@ -1091,7 +1091,7 @@ std::optional<Send> PlayerBootstrap::storage_payload(StorageKind kind, Role targ
 
 // ---- plan B2: the items' events and the pawn's visible gear --------------------------------------------------------------------
 
-std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first) {
+std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first, const repl::RpcRequest* last) {
     if (!ok_ || events.empty() || events.size() > kMaxEventsPerChain) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveStorageEvent");
     if (!rpc) return std::nullopt;
@@ -1118,7 +1118,8 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         call.params = std::move(*params);
         calls.push_back(std::move(call));
     }
-    return rpcs(Role::PlayerController, first ? "purchase answer" : "ClientReceiveStorageEvent", calls);
+    if (last) calls.push_back(*last);
+    return rpcs(Role::PlayerController, first ? "purchase answer" : last ? "sale answer" : "ClientReceiveStorageEvent", calls);
 }
 // ~ CoA & C Y B ~
 
@@ -1397,6 +1398,44 @@ std::optional<Send> PlayerBootstrap::purchase_answer(int64_t currency_tier, int6
         if (e.type == repl::StorageEventType::Add) items_[key] = e.item;
         else items_.erase(key);
     }
+    return send;
+}
+
+std::optional<Send> PlayerBootstrap::sale_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> events) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
+    if (!callout) return std::nullopt;
+    auto send = build_item_events(events, nullptr, &*callout);
+    if (!send) return std::nullopt;
+    for (const ItemEvent& e : events) {
+        const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
+        if (e.type == repl::StorageEventType::Add) items_[key] = e.item;
+        else items_.erase(key);
+    }
+    return send;
+}
+
+std::optional<Send> PlayerBootstrap::repair_answer(ItemStorage storage, int32_t slot, float durability, int64_t currency_tier, int64_t delta) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(storage), slot};
+    const auto it = items_.find(key);
+    if (it == items_.end() || !it->second.has_item) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientUpdateItemDurability");
+    if (!rpc) return std::nullopt;
+    const auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
+    if (!callout) return std::nullopt;
+    repl::ItemDurabilityUpdate update;
+    update.container = item_storage_guid(storage);
+    update.items.push_back({it->second.guid, slot, durability});
+    auto params = repl::item_durability_params(*rpc, update);
+    if (!params) return std::nullopt;
+    std::vector<repl::RpcRequest> calls(2);
+    calls[0].rpc = "ClientUpdateItemDurability";
+    calls[0].params = std::move(*params);
+    calls[1] = *callout;
+    auto send = rpcs(Role::PlayerController, "repair answer", calls);
+    if (!send) return std::nullopt;
+    it->second.durability = durability;   // what the client was told is what the payloads show from now on
     return send;
 }
 

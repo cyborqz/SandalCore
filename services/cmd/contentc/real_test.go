@@ -161,9 +161,10 @@ func TestRealBuild(t *testing.T) {
 	}
 	t.Logf("content.db: %d MB", st.Size()>>20)
 	// 270 MB with every table decoded (the first slice's 301 tables took 165 MB;
-	// the spec allowed for 250).
-	if st.Size() > 300<<20 {
-		t.Errorf("content.db is %d MB, over 300 MB", st.Size()>>20)
+	// the spec allowed for 250); about 300 MB since the vendors' item sale values
+	// (version 19).
+	if st.Size() > 330<<20 {
+		t.Errorf("content.db is %d MB, over 330 MB", st.Size()>>20)
 	}
 	patchStatus, patchesApplied := expectedPatches(generatedUsmap(t, usmapPath))
 	statusJSON, _ := json.Marshal(patchStatus)
