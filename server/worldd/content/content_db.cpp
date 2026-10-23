@@ -11,6 +11,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
@@ -2593,6 +2594,23 @@ const MountEffectRow* MountData::dash() const {
     return nullptr;
 }
 
+namespace {
+
+// The item names of the mounts the game retired carry a marker ("RETIRED_Deer", "RETIRED_CorralesFox"): the nameplate shows the name without it, with a space between the words
+// of a name written in one piece ("Corrales Fox").  Every other name is kept as the data gives it.
+std::string shown_mount_name(const std::string& name) {
+    static const std::string kRetired = "RETIRED_";
+    if (name.size() <= kRetired.size() || name.compare(0, kRetired.size(), kRetired) != 0) return name;
+    std::string shown;
+    for (const char c : name.substr(kRetired.size())) {
+        if (!shown.empty() && std::isupper(static_cast<unsigned char>(c)) && std::islower(static_cast<unsigned char>(shown.back()))) shown += ' ';
+        shown += c;
+    }
+    return shown;
+}
+
+}  // namespace
+
 std::optional<MountData> ContentDb::mount_data(std::string& error) const {
     MountData out;
     const std::string rebuild = " (the mount tables are contentc version 11's: rebuild the file with this checkout's contentc)";
@@ -2632,6 +2650,16 @@ std::optional<MountData> ContentDb::mount_data(std::string& error) const {
         if (step != SQLITE_DONE) {
             error = "content.db mount query failed: " + db_message(db_);
             return std::nullopt;
+        }
+    }
+    {   // each mount's name for its nameplate: its item's display name (contentc version 16); a file without the column leaves it empty
+        Stmt q(db_, kItemNameSql);
+        if (q.ok()) {
+            for (MountRow& r : out.mounts) {
+                sqlite3_reset(q.get());
+                sqlite3_bind_int64(q.get(), 1, r.item);
+                if (sqlite3_step(q.get()) == SQLITE_ROW) r.display_name = shown_mount_name(column_text(q.get(), 0));
+            }
         }
     }
     {

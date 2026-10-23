@@ -361,7 +361,8 @@ static void test_living_open(World& w) {
         CHECK(ability && l.ability.bits == 0 && rep_block_of(ability->obj).size() == 0, (label + "'s AbilityComponent is the capture's: nothing (it fights nothing)").c_str());
     }
     // the names of the kinds the captures name (the four living opens: Raven, Spider, Tidesnapper and the Bear of 1458's packet 316)
-    const std::pair<const char*, const char*> known[] = {{"Hunting_Raven", "Raven"}, {"Hunting_Spider", "Spider"}, {"Hunting_Tidesnapper", "Tidesnapper"}, {"Hunting_Bear", "Bear"}, {"Hunting_PallasCat", "Pallas Cat"}};
+    const std::pair<const char*, const char*> known[] = {{"Hunting_Raven", "Raven"}, {"Hunting_Spider", "Spider"}, {"Hunting_Tidesnapper", "Tidesnapper"}, {"Hunting_Bear", "Bear"}, {"Hunting_PallasCat", "Pallas Cat"},
+                                                                  {"Hunting_Rabid", "Grem"}};   // the Rabid def is the Grem (its carcass item): the name is ours, not a capture's
     for (const auto& [kind, want] : known) {
         std::string got;
         for (const auto& [def, k] : w.g->hunting()) {

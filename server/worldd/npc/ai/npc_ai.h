@@ -39,6 +39,7 @@ struct Params {
     double leash_radius_cm = 3000.0;      // from home
     double sense_interval = 0.25;         // how often an idle NPC looks for a target
     double attack_hysteresis = 1.15;      // an attack goes on to this multiple of its range
+    double chase_stop_fraction = 0.8;     // a chase ends when the target is within this share of the attack's range
     double repath_interval = 0.5;         // seconds between two orders to walk to a moving target
     double repath_distance_cm = 150.0;    // ... unless the target moved less than this
     double reset_arrive_cm = 150.0;       // within this of home it is home

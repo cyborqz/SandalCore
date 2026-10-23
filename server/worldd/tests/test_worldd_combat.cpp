@@ -15,8 +15,13 @@
 #include "combat_rig.h"
 #include "combat/combat_data.h"
 #include "combat/hit_resolver.h"
+#include "combat/npc_ability_data.h"
+#include "combat/npc_ability_replicator.h"
 #include "combat/npc_stats.h"
 #include "npc/motion_table.h"
+#include "protocol/repl/block_reader.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/replicator.h"
 #include "spawns/captured_spawns.h"
 #include "spawns/generic_npc.h"
 
@@ -281,7 +286,22 @@ int main() {
     test_hostile(f);
     test_player_cast(f);
     test_npc_hits_player(f);
+    test_npc_damage_mult(f);
+    test_fallback_attack(f);
     test_combat_flag(f);
+    test_grem_fight(f);
+    test_creature_movement_reaches_client(f);
+    test_creature_parameter_and_health_gates(f);
+    test_creature_roll_gate(f);
+    test_hit_area_rules();
+    test_bite_lands_wherever_the_player_stands(f);
+    test_fury_lands_only_inside_its_cone(f);
+    test_lunge_pauses_at_the_player(f);
+    test_swing_is_not_cut_by_walk_orders(f);
+    test_timid_raven_swings_back(f);
+    test_chase_of_a_player_who_walks_away(f);
+    test_swing_faces_its_target(f);
+    test_turn_to_a_player_behind(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

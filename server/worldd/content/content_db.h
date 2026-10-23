@@ -809,6 +809,7 @@ struct MountRow {
     int         crate_capacity = 0;
     bool        tradeable = false;
     std::string description;
+    std::string display_name;            // the item's name as the player reads it ("Dawnbreaker"; item.display_name, contentc version 16; empty in an older file; a retired mount's without its "RETIRED_" marker): the nameplate of the summoned mount
 // [C O A x C | Y | B]
 
     double health_factor() const { return health_pct / 100.0; }

@@ -14,6 +14,9 @@
     dist\content\artisan_curves.tsv,           profession curves, mount speeds and riders        (mapc, from the game's containers)
       mount_speeds.tsv, mount_riders.tsv
     dist\content\npc_motion.tsv, region_foliage.tsv, roads_raw.tsv, roads.tsv, roads_levels.tsv
+    dist\content\npc_abilities.tsv,          what the creatures that attack with their own animation do: their Blueprints' ability tasks with the conditions they are
+      npc_montages.tsv, npc_targeting.tsv      used under, the animation montages' lengths, hit notifies and root motion, and where each ability's hit lands
+                                               (tools\npcabilities, from the game's containers and content.db)
     dist\content\town_platforms.bin            the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
     dist\content\town_layout_items.tsv,        the buildings, walls and terraces of the five towns' layouts at the level each town starts at (deploy\citynode_seed.json):
                                                what stands where (a python list from content.db),
@@ -36,7 +39,7 @@
 .PARAMETER GameRoot
   The game's "Game" folder (the one that holds AOCClient.exe and AOC\). Default: GAME_ROOT, config\paths.json, Steam's libraries, the usual folders.
 .PARAMETER Only
-  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, navmesh.
+  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, npcabilities, navmesh.
 .PARAMETER Skip
   Leave these steps out (for example -Skip fixtures when you do not build the tests).
 .PARAMETER Force
@@ -69,11 +72,16 @@ $stampDir  = Join-Path $outDir '.extract'
 $toolsDir  = Join-Path $distDir 'tools'
 $usmapSrc  = Join-Path $repoRoot 'layouts\aoc.usmap'
 $mapcDll   = Join-Path $repoRoot 'tools\mapc\bin\Release\net8.0\mapc.dll'
+$npcAbilitiesDll = Join-Path $repoRoot 'tools\npcabilities\bin\Release\net8.0\npcabilities.dll'
 $contentc  = Join-Path $toolsDir 'contentc.exe'
 $statprog  = Join-Path $toolsDir 'statprog.exe'
 $navbuild  = Join-Path $distDir 'Release\aoc_navbuild.exe'
 $logFile   = Join-Path $stampDir 'current.log'
 $lastLog   = Join-Path $stampDir 'last_run.log'
+# The creature kinds that attack with their own animation: one container folder of the game's files per kind (its Blueprints and the animation montages beside them).
+# worldd animates exactly the Blueprints this reads; a kind that is not listed keeps its single swing.
+$NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Content/DesignAssets/Population/NPC/Beast/Canine', 'AOC/Content/DesignAssets/Population/NPC/Beast/Bear',
+               'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin')
 
 # The client build this code was made for (the player's own files are only compared by size).
 $Supported = @{ ExeBytes = 235606624; DbcBytes = 144085052; Date = '2026-01-29' }
@@ -365,6 +373,7 @@ Say ("Tools       : Python {0}, .NET SDK, Go; {1} jobs for C++, {2} threads for 
 # ---------------------------------------------------------------------------------------------------------------------
 function Get-CodeMapc     { Get-CodeHash @('tools\mapc') }
 function Get-CodeContentc { Get-CodeHash @('services\cmd\contentc', 'services\internal\content', 'services\internal\designdb', 'services\internal\usmap', 'services\internal\aocexpr', 'services\internal\chardef', 'services\internal\statprog', 'services\go.mod', 'services\go.sum') }
+function Get-CodeNpcAbilities { Get-CodeHash @('tools\npcabilities') }
 function Get-CodeGens     { Get-CodeHash @('tools\capture\gen_zoi_surface.py', 'tools\capture\gen_region_rects.py', 'tools\capture\gen_region.py', 'tools\capture\gen_node_constants.py', 'tools\capture\gen_gm_garden.py', 'tools\capture\gen_tooltips.py', 'tools\worldd\gen_gear_fixture.py', 'tools\worldd\gen_talent_fixture.py') }
 function Get-CodeNav      { Get-CodeHash @('server\worldd\nav', 'third_party\recastnavigation', 'CMakeLists.txt', 'server\worldd\CMakeLists.txt', 'vcpkg.json') }
 # The level each node starts at in the server's seed file (deploy\citynode_seed.json): the towns' buildings are listed at those levels (tools\capture\gen_town_layouts.py), so a change of a
@@ -395,6 +404,7 @@ function Get-Id([string]$step) {
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
         'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-CodeLayouts) + (Get-Id 'database')) }
+        'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + (Get-Id 'database')) }
         'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-Id 'townlayouts') + (Get-Id 'database')) }
     }
     $ids[$step] = $v
@@ -430,6 +440,8 @@ $steps = @(
         $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'; $env:DOTNET_NOLOGO = '1'
         Invoke-Checked $dotnet @('build', '-c', 'Release', (Join-Path $repoRoot 'tools\mapc'), '-v', 'q', '-nologo', '-nodeReuse:false', '-p:UseSharedCompilation=false') 'dotnet_build'
         Assert-Files @('tools\mapc\bin\Release\net8.0\mapc.dll') 'the mapc build did not produce it'
+        Invoke-Checked $dotnet @('build', '-c', 'Release', (Join-Path $repoRoot 'tools\npcabilities'), '-v', 'q', '-nologo', '-nodeReuse:false', '-p:UseSharedCompilation=false') 'dotnet_build_npcabilities'
+        Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll') 'the npcabilities build did not produce it'
         New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
         $svc = Join-Path $repoRoot 'services'
         Invoke-Checked $go @('build', '-trimpath', '-buildvcs=false', '-o', $contentc, './cmd/contentc') 'go_build_contentc' $svc
@@ -499,6 +511,14 @@ $steps = @(
         Assert-Files @('dist\content\content.db', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools and database steps first'
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\capture\gen_town_layouts.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out', (Join-Path $outDir 'town_layout_items.tsv'))) 'gen_town_layouts'
         Invoke-Checked $dotnet @($mapcDll, 'town-layouts', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir, '--min-free-gb', '8') 'mapc_town_layouts'
+    } },
+    @{ Name = 'npcabilities'; Title = 'Read the creature Blueprints and animation montages that give the creatures their attacks (tools/npcabilities; a few seconds)'; Outputs = @('dist\content\npc_abilities.tsv', 'dist\content\npc_montages.tsv', 'dist\content\npc_targeting.tsv'); Run = {
+        Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll', 'dist\content\content.db') 'run the tools and database steps first'
+        $npcArgs = @($npcAbilitiesDll, 'read', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir)
+        foreach ($f in $NpcFolders) { $npcArgs += @('--dir', $f) }
+        Invoke-Checked $dotnet $npcArgs 'npcabilities_read'
+        Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\npcabilities\targeting.py'), '--content-db', (Join-Path $outDir 'content.db'),
+            '--abilities', (Join-Path $outDir 'npc_abilities.tsv'), '--out', (Join-Path $outDir 'npc_targeting.tsv'))) 'npcabilities_targeting'
     } },
     @{ Name = 'navmesh'; Title = 'Read the map and build the navigation mesh, the NPC motion table and the foliage (mapc; the longest step)'; Outputs = @('dist\content\npc_motion.tsv', 'dist\content\region_foliage.tsv', 'dist\content\area_geom.bin', 'dist\content\area_nav.bin'); Run = {
         Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll', 'dist\content\town_platforms.bin', 'dist\content\town_layouts.bin', 'dist\content\content.db') 'run the earlier steps first'

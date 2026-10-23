@@ -425,6 +425,20 @@ bool PlayerWorld::load_blueprints(const std::string& motion_path, std::string& e
     return true;
 }
 
+bool PlayerWorld::load_npc_abilities(const std::string& abilities_path, const std::string& montages_path, const std::string& targeting_path, std::string& error) {
+    if (combat_) {
+        error = "the fights have started";
+        return false;
+    }
+    combat::NpcAbilityData data;
+    if (!data.load(abilities_path, montages_path, targeting_path, error)) return false;
+    npc_abilities_ = std::move(data);
+    spdlog::info("[combat] creature attack animations: {} Blueprints, {} montages", npc_abilities_.kinds(), npc_abilities_.montages());
+    // what the tables let each Blueprint's fight use, and what they leave out and why
+    for (const std::string& line : npc_abilities_.coverage_lines()) spdlog::info("[combat]   {}", line);
+    return true;
+}
+
 bool PlayerWorld::load_ground(const std::string& nav_path, const std::string& motion_path, std::string& error) {
     if (!area_report_) {
         error = "the area is not loaded";
@@ -654,10 +668,12 @@ void PlayerWorld::start_combat() {
     }
     if (!npc_book_) npc_book_.emplace(*bundle_, *gear_);
     combat_ = std::make_unique<combat::CombatWorld>(registry_, npcs_.get(), nav_.get(), *combat_data_, *ability_catalog(), *npc_book_, motion_, combat_config_);
+    combat_->set_ability_data(&npc_abilities_);
+    if (!npc_abilities_.empty()) spdlog::info("[combat] {}", combat_->gate_census().text());
     start_aftermath();
-    spdlog::info("[combat] on: {} abilities in the tables, damage profile of {} elements, in combat for {} s, NPCs fight within their aggro radius (default {} cm) and leash at {} cm",
+    spdlog::info("[combat] on: {} abilities in the tables, damage profile of {} elements, in combat for {} s, NPCs fight within their aggro radius (default {} cm) and leash at {} cm, and their hits do {} x the data's damage to a player",
                  ability_catalog()->abilities(), combat_data_->profile().elements.size(), combat_data_->in_combat_timer(), combat_config_.default_aggro_cm,
-                 combat_config_.default_leash_cm);
+                 combat_config_.default_leash_cm, combat_config_.npc_damage_mult);
 }
 // ~ C | O | A - C | Y | B ~
 

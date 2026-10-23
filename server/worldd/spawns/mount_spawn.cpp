@@ -425,6 +425,8 @@ std::optional<MountMade> MountBook::make(const content::MountRow& row, const Mou
             if (!set_path(info->obj, words[i], word_value(now[i]), e)) { error = e; return std::nullopt; }
         }
         if (!set_path(info->obj, "CreatureOwnerName", repl::Value::str(p.owner_name), e)) { error = e; return std::nullopt; }
+        // the nameplate shows the mount's own name, not its owner's: the item's name ("Dawnbreaker"); an item with none keeps the donor's UNPCInfo as it was
+        if (!row.display_name.empty() && !set_path(info->obj, "CharacterName", repl::Value::str(row.display_name), e)) { error = e; return std::nullopt; }
         if (info->obj.state.get(*info->obj.schema, "ServerId") && !set_path(info->obj, "ServerId", repl::Value::i64(static_cast<int32_t>(p.server_id)), e)) { error = e; return std::nullopt; }
         w.npc.name = p.owner_name;
         if (const repl::Value* lv = info->obj.state.get(*info->obj.schema, "Level")) w.npc.level = static_cast<int>(util::int_of(lv));

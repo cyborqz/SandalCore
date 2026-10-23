@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    npcabilities: reads what each creature Blueprint says about its abilities (the ability records of its ability component and, per ability, the
+    animation montages' lengths, play rates and hit notifies) out of the game's containers (see README.md).  It reads the same containers as tools/mapc
+    and builds on its Game class; it is a project of its own so that a change here does not restamp the steps that mapc's code feeds.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>NpcAbilities</RootNamespace>
+    <AssemblyName>npcabilities</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8619;CS8620;CS8625;CS8765;CS8767;CS0108;CS0114;CS0168;CS0169;CS0219;CS0649;CS0414;CS0659;CS0661;CS8981;CS1591;CS0618;SYSLIB0011;CS8632;CS0067;CS8509;CS8524;CS8073;CA2022;IDE0059</NoWarn>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <ProjectReference Include="..\mapc\mapc.csproj" />
+  </ItemGroup>
+</Project>

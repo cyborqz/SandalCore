@@ -727,6 +727,27 @@ static void test_rarity(World& w) {
 }
 // ~ Cyb & C-O-A ~
 
+static void test_fresh_seed() {
+    std::printf("the seed of the harvest rolls: a new number on every start of the server\n");
+    std::set<uint64_t> seen;
+    bool never_zero = true;
+    for (int i = 0; i < 64; ++i) {
+        const uint64_t s = gather::fresh_seed();
+        never_zero = never_zero && s != 0;
+        seen.insert(s);
+    }
+    CHECK(never_zero, "a fresh seed is never 0 (0 is how --gather-seed asks for a new one)");
+    CHECK(seen.size() == 64, "64 fresh seeds in a row are all different");
+    CHECK(gather::Config{}.seed == 0x6A7E5EEDull, "a Config made by hand keeps the fixed seed, so the tests' rolls repeat");
+    // a server that starts from one fixed number rolls the same rarities in the same order on every start; two fresh seeds start two different streams
+    stats::SplitMix a, b;
+    a.state = gather::fresh_seed();
+    b.state = gather::fresh_seed();
+    bool differ = false;
+    for (int i = 0; i < 8 && !differ; ++i) differ = a.rand_double() != b.rand_double();
+    CHECK(differ, "two fresh seeds start two different streams of rolls");
+}
+
 static void test_rules_of_rolls(World& w) {
     std::printf("what a harvest gives: the quantity, the experience, the wear\n");
     w.g->set_ratings({});
@@ -922,6 +943,7 @@ int main() {
     test_bonus_1470(w);
     test_durations(w);
     test_rarity(w);
+    test_fresh_seed();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

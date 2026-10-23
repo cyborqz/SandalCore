@@ -187,6 +187,17 @@ std::optional<MontageRef> montage_for(std::string_view path, uint64_t net_guid) 
     return m;
 }
 
+std::optional<MontageRef> montage_for(std::string_view path, uint64_t net_guid, uint64_t package_guid) {
+    if (net_guid == 0 || package_guid == 0 || package_guid == net_guid) return std::nullopt;
+    const size_t dot = path.rfind('.');
+    if (dot == std::string_view::npos || dot == 0 || dot + 1 >= path.size()) return std::nullopt;
+    const std::string package(path.substr(0, dot)), name(path.substr(dot + 1));
+    MontageRef m;
+    m.guid.ObjectId = net_guid;
+    m.chain = asset(net_guid, name.c_str(), 0, package_guid, package.c_str());
+    return m;
+}
+
 std::optional<DodgeMontage> dodge_montage_for(int32_t animation_index) {
     for (const DodgeIndex& d : kDodgeIndexes) {
         if (d.index == animation_index) return DodgeMontage{d.path, d.axis_degrees, d.fixed_yaw};

@@ -23,6 +23,7 @@
 #include "combat/combat_data.h"
 #include "combat/fighter.h"
 #include "combat/hit_resolver.h"
+#include "combat/npc_ability_data.h"
 #include "combat/npc_stats.h"
 #include "nav/area_nav.h"
 #include "npc/ai/npc_ai.h"
@@ -136,8 +137,11 @@ struct CombatWorldConfig {
     double player_reach_cm = 4500.0;        // a player's ability reaches this far past the surface of its target (OutOfRangeDistance + the activation leeway)
     double melee_reach_cm = 1500.0;         // ... a weapon combo's hit (ThirdPartyHitDistance)
     uint64_t seed = 1;
-    /// The ability a creature with no kit attacks with.
-    std::string fallback_ability = "NPC_Bandit_Melee_Slash_ABL_1";
+    /// Multiplies the Health an NPC's hit takes from a player (1: the data's own; worldd's --npc-damage-mult sets it, 1 by default).  Misses, heals and every other stat are untouched.
+    double npc_damage_mult = 1.0;
+    /// The ability a creature with no kit attacks with: a plain basic attack that does 1.0 x the shared damage equation, so its damage follows the creature's level and stats, the player's
+    /// mitigation and the level difference.  (The data's NPC_Bandit_Melee_Slash_ABL_1 takes a flat 50 Health whatever the creature, the player and their levels are.)
+    std::string fallback_ability = "Ramkin_Hunter_SpearStrike";
 };
 
 class CombatWorld {
@@ -157,6 +161,20 @@ public:
     HitResolver& resolver() { return resolver_; }
 
     void set_death_hook(DeathHook hook) { death_hook_ = std::move(hook); }
+
+    /// The creatures that attack with their own animation (combat/npc_ability_data.h): a creature whose Blueprint the tables list starts each attack with the ability's montage, lands
+    /// each hit when the montage's notify says and starts its next attack when the montage is over; every other creature swings as it always did.  Null (the default) for none.
+    /// The tables outlive the world.
+    void set_ability_data(const NpcAbilityData* data) { anim_ = data; }
+    /// How many of the creature attacks the tables list and the world can animate land by each kind of rule (see combat/bite_area.h), and how many keep the single swing because a volume of theirs
+    /// cannot be placed.  An attack none of whose hits is a hit of its montage (a thrown rock, a bolt) has no area to decide by: `unplayed` counts those.  One attack counts once, whichever
+    /// Blueprints use it.
+    struct GateCensus {
+        size_t any = 0, validity = 0, volumes = 0, kept_swing = 0, unplayed = 0;
+        std::vector<std::string> any_names, validity_names, volume_names, kept_names, unplayed_names;   // the attacks' names, by kind
+        std::string text() const;
+    };
+    GateCensus gate_census() const;
 
     /// Gathering stage 3, "Hunting" (retest 3): which creatures are huntable.  A huntable is no combatant (it fights nothing and its CombatInfo is the living huntable's, not a fighter's) but its
     /// stats are filled as a combatant's are, the first time a player is near: retail's living huntable opens with the full list (914 packet 1561 and a hostile Raven's both carry 1563 bits of
@@ -221,20 +239,67 @@ private:
         const abilities::AbilityDef* ability = nullptr;
         int    windup_ms = 500;
         int    range_cm = 220;
+        const CreatureAbility* task = nullptr;   // the Blueprint's task that picked it (a creature with its own animation)
     };
     struct Pending {
         double   due = 0;
         uint64_t npc = 0, target = 0;
         const abilities::AbilityDef* ability = nullptr;
         std::vector<int64_t> hits;
+        // an attack with its own animation: every hit at the time of its notify, then the end of the montage
+        bool     animated = false;
+        std::vector<std::pair<double, int64_t>> timed_hits;   // (when, hit record), in time order
+        size_t   next_hit = 0;
+        double   end_at = 0;
+        bool     logged = false;    // the log has the line of its beginning, so it gets the line of its end
+        std::vector<BiteArea> timed_areas;   // where each of those hits lands (the targeting record of the hit's key): a hit that reaches nobody sends nothing
+    };
+    /// Why the tree allowed none of a creature's attacks from where it stands: its target is farther than the attacks reach, or the right distance but not within the angle of its facing.
+    struct TreeWhy {
+        bool too_far = false, off_angle = false;
+    };
+    /// How an attack with its own animation plays: the montage, how long it runs and the hits it lands (seconds after it starts, hit record).
+    struct PlannedHit {
+        double  delay = 0;   // seconds after the attack begins
+        int64_t hit = 0;     // the hit record
+        int     key = 0;     // the key of the ability's hit, which finds its targeting record
+    };
+    struct CastPlan {
+        const MontageData* montage = nullptr;
+        double             seconds = 0;
+        std::vector<PlannedHit> hits;
     };
     class Npc;
     Npc*  combatant(uint64_t actor_id);
     Npc*  make_combatant(const world::WorldActor& a);
     Attack choose_attack(Npc& n);
+    Attack choose_animated(Npc& n, const Fighter* target, TreeWhy* why = nullptr);
+    /// Whether a hit of `area` lands on `body` now (the creature as it stands and faces): see combat/bite_area.h.  `is_target`: the body is the one the record's target part finds.
+    bool  hit_reaches(const Npc& n, const Fighter& body, const BiteArea& area, bool is_target) const;
+    /// The player the target part of `area` finds for a hit of an attack aimed at `cast_target`: the creature's own target and the one the cast was aimed at, in the order the record says (0: none).
+    uint64_t aimed_at(const Npc& n, const BiteArea& area, uint64_t cast_target);
+    /// Whether the creature has a line of sight between the two places (the walking map's: off the map the ground says nothing and it sees).
+    bool  line_clear(const Vec3& from, const Vec3& to) const;
+    /// Whether every hit of the ability that hurts an enemy has a targeting record the world can decide by; an ability with one it cannot decide by is not animated.
+    bool  areas_usable(const abilities::AbilityDef& def) const;
+    /// Whether the ability's montages are read, with their hit notifies and a root motion the tables could read (what any creature needs to play it).
+    bool  montages_readable(const abilities::AbilityDef& def) const;
     void  think(Npc& n, double now);
-    void  start_attack(Npc& n, uint64_t target, double now);
+    /// Sends the creature after its target (the NPC world re-plans the walk to the target's place at every step, so it never runs to where the target was and waits there).
+    void  pursue(Npc& n, uint64_t target, double speed_cm_s, double stop_distance_cm);
+    /// Whether the creature faces `at` to within `tolerance_degrees`.
+    bool  faces(const Npc& n, const Vec3& at, double tolerance_degrees) const;
+    /// `picked` is the attack the tree allowed a moment ago (its conditions, a roll among them, are not asked twice); null: the tree is asked here.
+    void  start_attack(Npc& n, uint64_t target, double now, const Attack* picked = nullptr);
+    /// Ends the animation of an attack under way: the montage that carries the creature stops carrying it, and the cast's element says the montage is over.
+    void  stop_cast(Npc& n);
     void  resolve_pending(double now);
+    bool  animates(const Npc& n, const abilities::AbilityDef& def) const;
+    /// Whether any task of the creature's tree that a fight can use is an attack it can play (its ability is in the data, its open lists it, its montage is read): a creature with none keeps the
+    /// single swing every creature had before the trees.
+    bool  can_animate(const Npc& n) const;
+    bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
+    void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now);
     void  kill(Npc& n, uint64_t killer, double now);
     void  begin_reset(Npc& n, double now);
     void  set_flags(Npc& n, bool in_combat, uint64_t target_actor);
@@ -256,6 +321,7 @@ private:
     std::vector<PlayerPort*> players_;
     std::map<uint64_t, double> player_combat_until_;   // actor id -> when its combat flag ends
     std::vector<Pending>   pending_;
+    const NpcAbilityData*  anim_ = nullptr;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
     HuntablePredicate      huntable_;
     std::set<uint64_t>     huntable_stats_;   // the huntables whose stats were filled
@@ -263,6 +329,10 @@ private:
     double                 now_ = 0;
     Stats                  stats_;
     stats::SplitMix        rng_;
+    size_t                 npc_hits_logged_ = 0;                 // the NPC hits on players written to the log so far (the first kLoggedNpcHits)
+    static constexpr size_t kLoggedNpcHits = 400;
+    size_t                 npc_casts_logged_ = 0;                // the attacks with their own animation written to the log so far (the first kLoggedNpcCasts)
+    static constexpr size_t kLoggedNpcCasts = 200;
 };
 
 }  // namespace aoc::worldd::combat

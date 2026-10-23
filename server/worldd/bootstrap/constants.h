@@ -103,6 +103,10 @@ std::optional<MontageRef> montage_for(std::string_view path);
 /// nullopt for a path that is no "<package>.<name>" or an id of 0.
 std::optional<MontageRef> montage_for(std::string_view path, uint64_t net_guid);
 
+/// A montage whose object id and package id are both known (the creature montages' tables carry them: the ids are the network layer's static ids, computed from the
+/// asset path): the export is exactly the one the client expects.  nullopt for a path that is no "<package>.<name>" or an id of 0.
+std::optional<MontageRef> montage_for(std::string_view path, uint64_t net_guid, uint64_t package_guid);
+
 /// The Dodge montage the retail server named for a ServerTriggerAbility's AnimationIndex (a Dodge reply's item carries the
 /// montage of the index the client chose, whatever the class): 5 forward, 7 right, 8 back, 9 no input, and 2, the Rogue's
 /// dash to the right (31 Dodges in 16 captures; the indexes 5, 7, 8, 9 and 2 are all the captures show, so any other index

@@ -144,6 +144,9 @@ struct WorldActor {
     /// Exports that go with the actor block of its open (an object its values name by path that the client has no other way to find: a lingering
     /// zone's AttachComponent, the pawn's CharacterMesh0).
     std::vector<repl::ExportChain> open_exports;
+    /// Exports that go with the AbilityComponent's block of an update or an open while a creature's attack names a montage (its path: the client has no other way to find the
+    /// asset): set when the attack starts, cleared when it ends.  Each connection is sent a chain until it has acknowledged it.
+    std::vector<repl::ExportChain> ability_exports;
     uint32_t   version = 1;               // every change of the replicated state
     uint32_t   reliable_version = 1;      // the changes that must not be lost
     NpcInfo    npc;

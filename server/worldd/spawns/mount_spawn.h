@@ -23,7 +23,7 @@
 //  their retail export; the others, the GM Eagle Gryphon (Mount_Flying_Gryphon_5_Armored) among them, are made.
 //
 //  What is the instance's own: where it stands and its yaw; the owner (its CharacterGuid in the alignments, the creature-owner guid and the interaction
-//  state; its name; its pawn as the Instigator); the mount's own CharacterGuid; the item's guid; Health, MaxHealth (Mount_Base_HP at the owner's level times the
+//  state; its name; its pawn as the Instigator); the mount's own CharacterGuid and its own name (UNPCInfo.CharacterName: the item's name, which the nameplate shows); the item's guid; Health, MaxHealth (Mount_Base_HP at the owner's level times the
 //  item's factor: x5 for a flyer) and the StealthLevel (the owner's level); no road effect (roads are stage 3's); bIsSummoning 1 and a DissolveTimer.
 //  Also the instance's own (stage 3 fix 2): the alignments (the mount INHERITS its owner's: a donor's belong to the player who was captured, 898's was a Combatant, the
 //  PvP flag) and the rider's AnimBP (the interaction data names it and the open exports the class: without it the rider stands on the mount).

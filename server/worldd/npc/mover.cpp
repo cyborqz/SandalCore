@@ -43,6 +43,28 @@ void Mover::init(const nav::AreaNav* nav, double foot_offset_cm, double yaw_rate
 }
 // Cyb and C.O.A
 
+void Mover::face(double yaw_degrees) {
+    if (std::isfinite(yaw_degrees)) yaw_ = wrap180(yaw_degrees);
+}
+
+bool Mover::turn_toward(double yaw_degrees, double dt, double rate) {
+    if (!std::isfinite(yaw_degrees) || !(dt > 0) || !std::isfinite(dt)) return false;
+    const double per_second = rate > 0 && std::isfinite(rate) ? rate : yaw_rate_;
+    const double diff = wrap180(yaw_degrees - yaw_), most = per_second * dt;
+    if (std::fabs(diff) <= most) {
+        yaw_ = wrap180(yaw_degrees);
+        return true;
+    }
+    yaw_ = wrap180(yaw_ + (diff > 0 ? most : -most));
+    return false;
+}
+
+void Mover::shift(double x, double y, double ground_z) {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(ground_z)) return;
+    ground_ = {x, y, ground_z};
+    velocity_ = {};
+}
+
 void Mover::place(double x, double y, double ground_z, double yaw_degrees) {
     ground_ = {x, y, ground_z};
     yaw_ = std::isfinite(yaw_degrees) ? wrap180(yaw_degrees) : 0.0;
@@ -93,6 +115,13 @@ bool Mover::follow(const std::vector<Vec3>& path, double speed_cm_s) {
     // a path that starts where it stands: the first point is the start
     if (dist2d(path_[0], ground_) < 1.0) next_ = 1;
     if (next_ >= path_.size()) finish(Status::Arrived);
+    return true;
+}
+
+bool Mover::set_end(double x, double y) {
+    if (status_ != Status::Moving || path_.empty() || !std::isfinite(x) || !std::isfinite(y)) return false;
+    path_.back().x = x;
+    path_.back().y = y;
     return true;
 }
 

@@ -10,8 +10,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <random>
 #include <set>
 
 namespace aoc::worldd::gather {
@@ -106,9 +108,20 @@ std::map<int64_t, std::string> hunting_names(const content::FoliageData& data) {
             if (i > 0 && std::isupper(static_cast<unsigned char>(c)) && std::islower(static_cast<unsigned char>(name[i - 1])) && !shown.empty() && shown.back() != ' ') shown += ' ';
             shown += c;
         }
+        if (name == "Rabid") shown = "Grem";   // the Rabid hunting def is the Grem: its carcass item is a Grem and the Riverlands call the creature one
         if (!shown.empty()) out.emplace(def, std::move(shown));
     }
     return out;
+}
+
+uint64_t fresh_seed() {
+    std::random_device random;
+    const uint64_t drawn = (static_cast<uint64_t>(random()) << 32) ^ static_cast<uint64_t>(random());
+    const uint64_t clock = static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    stats::SplitMix mix;
+    mix.state = drawn ^ (clock * 0x9E3779B97F4A7C15ull);
+    const uint64_t seed = mix.next();
+    return seed != 0 ? seed : 1;
 }
 
 std::unique_ptr<Gathering> Gathering::make(const content::ContentDb& db, world::ActorRegistry& registry, const abilities::Catalog& catalog, Config config, std::string& error) {

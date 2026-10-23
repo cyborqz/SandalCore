@@ -41,12 +41,20 @@ public:
     void init(const nav::AreaNav* nav, double foot_offset_cm, double yaw_rate_degrees_per_second);
     /// Puts the NPC on the ground at (x, y) with its feet at `ground_z`.
     void place(double x, double y, double ground_z, double yaw_degrees);
+    /// Turns the NPC where it stands to face `yaw_degrees` at once (a creature that turns to its target before it attacks).
+    void face(double yaw_degrees);
+    /// Turns the NPC towards `yaw_degrees` by what `dt` seconds allow at `rate` degrees a second (<= 0: the Blueprint's rotation rate) and no more; true when it faces that way.
+    bool turn_toward(double yaw_degrees, double dt, double rate = 0);
+    /// Moves the NPC to (x, y) with its feet at `ground_z` without touching its walk or its facing (an animation carried it): a walk goes on from the new place.
+    void shift(double x, double y, double ground_z);
 
     /// Orders a walk to `dest` at `speed_cm_s`, ending `stop_distance` cm short of it.  The path is found now (Detour's A*): false and Blocked when
     /// there is none, when it only gets part of the way (`allow_partial` false) or when it is longer than `max_length` (cm, 0: any).
     bool move_to(const Vec3& dest, double speed_cm_s, double stop_distance = 0, double max_length = 0, bool allow_partial = false);
     /// Orders a walk along points already found (ground positions; the first may be where it stands).
     bool follow(const std::vector<Vec3>& path, double speed_cm_s);
+    /// Moves the end of the walk it is on to (x, y), keeping the way there (a walk after a target that has stepped a little way: the way is the same, its end is not).  False when it is not walking.
+    bool set_end(double x, double y);
     void stop();
 
     /// Moves `dt` seconds along the path.  Returns the status after the step.

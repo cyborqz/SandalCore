@@ -137,7 +137,7 @@ Orders NpcAi::think(const Sense& s) {
         last_order_dest_ = t->pos;
         o.move = Orders::Move::ChaseTo;
         o.dest = t->pos;
-        o.stop_distance_cm = std::max(0.0, std::min(range * 0.8, s.attack_range_cm) + s.self_radius_cm + t->radius_cm);
+        o.stop_distance_cm = std::max(0.0, std::min(range * params_.chase_stop_fraction, s.attack_range_cm) + s.self_radius_cm + t->radius_cm);
         o.speed_cm_s = params_.chase_speed_cm_s;
     }
     return o;

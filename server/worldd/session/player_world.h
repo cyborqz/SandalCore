@@ -179,6 +179,9 @@ public:
     /// `error`, when it is missing or broken: then only the Blueprints a capture opened spawn, and the report says how many points that loses) and the
     /// generic NPCs' switches (the kill switch by name, or all of them off).
     bool load_blueprints(const std::string& motion_path, std::string& error);
+    /// The creature attack animations (tools/npcabilities: the ability tasks of the creature Blueprints and the animation montages): a creature whose Blueprint the tables list attacks with
+    /// its own animation.  Before the fights start (load_ground); false, with `error`, for a table that cannot be read.
+    bool load_npc_abilities(const std::string& abilities_path, const std::string& montages_path, const std::string& targeting_path, std::string& error);
     void set_generic_npcs(spawns::GenericConfig config) { generic_config_ = std::move(config); }
     /// Plan E1, stage 3: what this world is for the conditions a spawn names (spawns/spawn_filter.h); before load_area.  `enabled = false` is the kill switch.
     void set_spawn_context(spawns::SpawnContext context) { spawn_context_ = std::move(context); }
@@ -489,6 +492,7 @@ private:
     std::unique_ptr<npc::NpcWorld>       npcs_;
     std::optional<npc::GroundReport>     ground_report_;
     combat::CombatWorldConfig            combat_config_;
+    combat::NpcAbilityData               npc_abilities_;   // before combat_: it holds a pointer to it
     std::optional<combat::NpcStatBook>   npc_book_;
     std::optional<combat::CombatData>    combat_data_;
     std::unique_ptr<combat::CombatWorld> combat_;     // after npcs_ and the ground: it is destroyed first

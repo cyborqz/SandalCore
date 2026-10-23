@@ -26,6 +26,38 @@ using world::Ring;
 namespace {
 /// The update chains whose events the view waits for, over all actors, before it sweeps the routes of ones it no longer holds.
 constexpr size_t kMaxRoutes = 4096;
+
+/// A creature's attack names its montage by an id the client knows only from the montage's export: the export goes with the AbilityComponent's block, and with the actor's own
+/// (the creature's RepRootMotion names the montage too, and an update may carry that block alone; a chain the connection acknowledged is left out, one named twice is written once).
+void add_ability_exports(std::vector<repl::ContentBlock>& blocks, const std::vector<repl::ExportChain>& exports) {
+    for (repl::ContentBlock& b : blocks) {
+        if (b.sub && (!b.sub->obj.schema || std::string(b.sub->obj.schema->name) != "UAoCAbilityComponent")) continue;
+        for (const repl::ExportChain& x : exports) b.exports.push_back(x);
+    }
+}
+
+/// repl::update_actor with the exports of a creature's attack added to the AbilityComponent's block.
+std::optional<repl::Emission> update_with_ability_exports(const repl::Actor& actor, repl::ActorShadow& shadow, const repl::ExportAcks& acks,
+                                                          const std::vector<repl::ExportChain>& exports, bool* failed, repl::SentRecord* record) {
+    if (exports.empty()) return repl::update_actor(actor, shadow, acks, failed, record);
+    if (failed) *failed = false;
+    repl::ShadowUndo undo;
+    std::vector<repl::ContentBlock> blocks;
+    if (!repl::collect_update_blocks(actor, shadow, blocks, &undo)) {
+        if (failed) *failed = true;
+        return std::nullopt;
+    }
+    if (blocks.empty()) return std::nullopt;
+    add_ability_exports(blocks, exports);
+    auto e = repl::assemble_blocks(actor, blocks, acks);
+    if (!e) {
+        undo.rollback(shadow);
+        if (failed) *failed = true;
+    } else if (record) {
+        *record = repl::sent_record(undo, shadow);
+    }
+    return e;
+}
 }  // namespace
 
 ActorView::ActorView(world::ActorRegistry& registry, Config config, std::function<bool(uint32_t)> reserved)
@@ -144,16 +176,17 @@ std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, 
         shown = &scratch;
     }
     const repl::Actor& actor = *shown;
-    if (a.open_exports.empty()) return repl::open_actor(actor, work, acks_, &failed);
-    // the blocks by hand: the actor's block carries the exports its values name by path
+    if (a.open_exports.empty() && a.ability_exports.empty()) return repl::open_actor(actor, work, acks_, &failed);
+    // the blocks by hand: the actor's block carries the exports its values name by path, the AbilityComponent's those of the attack it shows
     std::vector<repl::ContentBlock> blocks;
     repl::ShadowUndo undo;
     work.forget_sent();
-    if (!repl::collect_open_blocks(actor, work, blocks, &undo) || blocks.empty() || blocks[0].sub) {
+    if (!repl::collect_open_blocks(actor, work, blocks, &undo) || blocks.empty() || (!a.open_exports.empty() && blocks[0].sub)) {
         undo.rollback(work);
         return std::nullopt;
     }
     for (const repl::ExportChain& x : a.open_exports) blocks[0].exports.push_back(x);
+    add_ability_exports(blocks, a.ability_exports);
     auto em = repl::assemble_open(actor, blocks, acks_);
     if (!em) undo.rollback(work);
     return em;
@@ -229,7 +262,7 @@ bool ActorView::send_update(Connection& conn, world::WorldActor& a, Entry& e) {
     bool failed = false;
     repl::SentRecord record;
     repl::Actor scratch;
-    auto em = repl::update_actor(view_of(a, scratch), work, acks_, &failed, &record);
+    auto em = update_with_ability_exports(view_of(a, scratch), work, acks_, a.ability_exports, &failed, &record);
     if (failed) {
         e.broken = true;
         ++stats_.broken;

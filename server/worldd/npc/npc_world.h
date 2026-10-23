@@ -30,6 +30,18 @@
 //  The seams of stage 3.  `order_move` / `release` / `order_return_home` hand an NPC's feet to the caller (the AI chases, keeps a range, goes
 //  home); `mover()` is the service itself.  The state machine here runs only while nothing has ordered the NPC.
 //
+//  Root motion.  A creature's attack animation can carry the creature with it (a lunge: the montage's root bone travels 1.5 to 2.5 m).  The client plays the montage and
+//  moves the creature along it by itself, so the server has to move its own copy the same way, at the same 15 Hz, and say where it is: `begin_root_motion` takes the NPC's
+//  feet for the montage; each step puts the creature where the montage's root is, as far along the way there as the creature can go (it stops where it touches a capsule the
+//  caller names, and at the edge of the walkable ground, and stays there while the root's place is beyond: the recorded creatures stop at the player and do not step back when the
+//  animation does); it writes ReplicatedMovement as for any walk and RepRootMotion (the montage, its position, the creature's place and facing: what the client puts the creature
+//  back to), and `end_root_motion` (or the montage's end) gives the feet back with the montage marked over.  An ability whose lunge pauses on contact is held where it is while a body is in the
+//  box ahead of it (the montage goes on playing, the creature's velocity is zero) and `bRootMotionObstructed` goes out with those updates, which is what makes the client hold its own copy
+//  too; when the box is clear the creature goes on by what the montage still travels (the travel it skipped is lost, as on the client).  The client's copy was moved by the montage on its own and is put back where the
+//  server has it only while its montage plays; when its montage lets go the ordinary placement is back, and it must be given the place once more: the retail server sends ReplicatedMovement
+//  (the place, the facing, no velocity) at every update after the end of a Snap or a Fury, the first 0.03 to 0.2 s after it, and so does this one, for `settle_seconds` or until the creature walks or
+//  a montage takes it again.
+//
 //  Without a navmesh (the file is missing or broken) there is no NpcWorld to build: NPCs keep standing where the loader put them, and worldd's log
 //  says so once.
 // ============================================================================
@@ -40,7 +52,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -91,6 +105,11 @@ struct NpcWorldConfig {
     /// Within the agent's radius (35 cm) of a wall the walking map has no polygon at a place, and a posted person stands that close to a stall or a house: where there is none at its exact place, the
     /// floor of the nearest polygon within this radius (cm), in the same window, is its ground.
     double data_ground_near_cm = 100.0;
+    /// After a montage lets go of a creature its place goes out again at every step (ReplicatedMovement with the creature's place and facing and no velocity, even though nothing about it changed) for this many
+    /// seconds, unless it walks or a montage takes it first: the client's copy, moved by the montage's root motion and no longer held to the server's by its montage, is put back by it.  The recorded retail
+    /// creatures do it at every update from the first one after the end (0.03 to 0.2 s) until the next cast or a walk (1 to 7 updates in the 6 recorded Snap and Fury ends); the longest the client's catch-up
+    /// waits for its montage (the age of a move it still uses) is 0.5 s, so a client whose montage ends late is still given the place after it.
+    double settle_seconds = 0.5;
 };
 
 class NpcWorld {
@@ -155,6 +174,62 @@ public:
     bool release(uint64_t actor_id);
     /// Stops the NPC where it stands and writes that it is still (a zero velocity); the NPC then stands for good (stage 3: it died).
     bool halt(uint64_t actor_id);
+    /// Turns a standing NPC to face the point (x, y) at once and publishes it (the facing a creature attacks with; it keeps it while it stands).  False for an NPC the world does not hold,
+    /// and for one a montage is carrying (it keeps the facing it began with).
+    bool face_toward(uint64_t actor_id, double x, double y);
+    /// Turns a standing NPC towards the point (x, y) at its rotation rate (or `rate` degrees a second), one step at a time: unlike `face_toward` its facing never jumps.  An NPC that walks turns
+    /// with its walk; an order that takes its feet (a walk, a halt) ends the turn.  False for an NPC the world does not hold.
+    bool turn_toward(uint64_t actor_id, double x, double y, double rate = 0);
+    /// Where a target is now; false when it is gone.
+    using Where = std::function<bool(nav::Vec3&)>;
+    /// The NPC keeps turning towards the place `where` names, at `rate` degrees a second (<= 0: its rotation rate), until the world clock reaches `until` (<= 0: until `stop_tracking`): while it stands,
+    /// and while a montage carries it, when the rest of the montage's travel goes the way it faces then.
+    bool track_target(uint64_t actor_id, Where where, double rate, double until);
+    void stop_tracking(uint64_t actor_id);
+    /// Orders a walk after a target that moves: at every step the walk is re-planned to the target's place when it has moved off the walk's end (or the NPC has stopped short of it), so the NPC
+    /// never runs to where the target was and waits there.  It ends `stop_distance` cm short of the target (centres) and sets off again at once when the target steps away; any other order ends the pursuit.
+    bool order_pursue(uint64_t actor_id, Where where, double speed_cm_s, double stop_distance);
+
+    // ---- root motion: a montage that carries its creature -----------------------------------------------------------------
+    /// How far a montage carries the creature that plays it: its root bone's place, `x` cm ahead and `y` cm to the right of where the creature faces, from where it stood when the
+    /// montage began, `time` seconds into the montage at a play rate of 1.
+    struct RootMotionStep {
+        double time = 0, x = 0, y = 0;
+    };
+    /// A place the carried creature's centre may not come nearer to than `radius` (another body's capsule plus its own).  `body` is the other body's own radius and `target` says it is the one
+    /// the montage's ability is aimed at (the freeze box below looks at it).
+    struct RootMotionBlock {
+        double x = 0, y = 0, radius = 0;
+        double body = 0;
+        bool   target = false;
+    };
+    struct RootMotionPlay {
+        uint64_t                    montage = 0;     // the montage object's id (what RepRootMotion names)
+        std::vector<RootMotionStep> steps;           // from time 0, in time order
+        double                      length = 0;      // seconds the montage plays at a play rate of 1
+        double                      rate = 1;        // montage seconds per second (its rate scale times the play rate)
+        double                      blend_out = 0.25;   // montage seconds at its end in which it no longer carries the creature (the engine's default blend out)
+        /// Asked at every step: appends the places to keep out of.
+        std::function<void(std::vector<RootMotionBlock>&)> blockers;
+        /// The ability record's RootMotionFreeze (StopOnContact): the lunge ends for good, for the rest of the montage, once a body is in the box ahead of the creature, which reaches
+        /// `freeze_distance` past the creature's own radius times `freeze_scale` and is as wide as that, each plus the body's own radius; a lunge that begins with a body in it does not begin.
+        /// Only the ability's target counts when `ignore_non_target`.
+        bool   freeze_stop = false;
+        /// ... and PauseOnContact: the creature is held where it is for as long as a body is in that box (the step that would take it into the box takes it as far as the box's edge, and it is held
+        /// there), and goes on by what the montage travels from then on once the box is clear.  `bRootMotionObstructed` is written 1 in every update of the pause (and of a stop), 0 otherwise.
+        bool   freeze_pause = false;
+        double freeze_distance = 0, freeze_scale = 1, own_radius = 0;
+        bool   ignore_non_target = true;
+    };
+    /// Whether a body whose centre is at (bx, by) and whose own radius is `body` is in the freeze box of a creature whose centre is at (cx, cy), facing `yaw_degrees`: the box reaches `distance` ahead
+    /// of the creature's own radius `wide` (the radius times the record's scale), is `wide` to either side of its facing, and counts the body's own radius on every side.
+    static bool in_freeze_box(double cx, double cy, double yaw_degrees, double distance, double wide, double bx, double by, double body);
+    /// A montage begins on the NPC: from now it, not the NPC's own walking, moves it.  The montage's first state is written at once (the attack that names it goes out with it).  False
+    /// for an NPC the world does not hold, one still waiting for its ground, or a play with no steps or no length.
+    bool begin_root_motion(uint64_t actor_id, RootMotionPlay play);
+    /// The montage is over (or the NPC died or was sent home): writes the creature's place with the montage marked inactive, and gives its feet back.  False when none was playing.
+    bool end_root_motion(uint64_t actor_id);
+    bool root_motion_active(uint64_t actor_id) const;
     /// Orders a walk home at the NPC's run speed; its behaviour takes over on arrival.  False when no path.
     bool order_return_home(uint64_t actor_id);
     const Mover* mover(uint64_t actor_id) const;
@@ -188,6 +263,17 @@ public:
 
 private:
     enum class Mode : uint8_t { Stand, Idle, Wander, Patrol, PatrolPause, Return, Ordered };
+    struct RootMotion {
+        RootMotionPlay play;
+        double         start = 0;                 // the world clock when the montage began
+        double         yaw = 0;                   // degrees: the facing it is carried in, kept to the end
+        double         ox = 0, oy = 0;            // where the creature stood when the montage began (the montage's root travels from here)
+        double         position = 0;              // montage seconds at the last step
+        bool           frozen = false;            // the freeze box has stopped the lunge
+        double         skip_x = 0, skip_y = 0;    // the part of the montage's travel (ahead, to the right) the creature did not take while a pause held it: the montage's root minus this is where it goes
+        double         last_tx = 0, last_ty = 0;  // where the last step put the creature in the montage's frame (the root minus the skipped part): a turn of the facing carries the rest of the travel on from here
+        std::optional<uint64_t> saved_mode;       // the creature's ReplicatedMovementMode before the montage took it (it walks while the montage carries it)
+    };
     struct Npc {
         uint64_t     id = 0;
         NpcMotionSetup setup;
@@ -209,6 +295,18 @@ private:
         bool         grounded = false;        // the last grounding found a surface for it
         double       data_feet = 0;           // where the data put its feet at that grounding (the height the surface was searched around)
         double       ground_dz = 0;           // how far the surface it was stood on is from that (cm, over is positive)
+        std::optional<RootMotion> rm;         // the montage that carries it now
+        bool         turning = false;         // it turns on the spot to `turn_yaw` (degrees) at `turn_rate` degrees a second (0: its own rate)
+        double       turn_yaw = 0, turn_rate = 0;
+        Where        track;                   // it keeps turning to this place ...
+        double       track_rate = 0, track_until = 0;   // ... at this rate, until this time
+        Where        pursue;                  // it walks after this place (the AI's chase) ...
+        double       pursue_speed = 0, pursue_stop = 0;   // ... at this speed, ending this far from it
+        double       pursue_x = 0, pursue_y = 0;          // ... the place the walk ends at now ...
+        double       pursue_plan_x = 0, pursue_plan_y = 0;   // ... and the place it was last planned to (path-finding)
+        double       settle_began = 0;        // after a montage: when it let go (its place goes out again at every step after that one) ...
+        double       settle_until = 0;        // ... until then (NpcWorldConfig::settle_seconds) ...
+        int          settle_sent = 0;         // ... and how many times it has
     };
 
     double next_unit(Npc& n);
@@ -219,6 +317,15 @@ private:
     void   start_patrol_leg(Npc& n);
     void   go_idle(Npc& n);
     void   commit(Npc& n, double t, bool force);
+    void   advance_root_motion(Npc& n, double t);
+    /// One step of the NPC's turning on the spot or tracking its target, and of its pursuit: before it walks.
+    void   steer(Npc& n, double t);
+    void   pursue_step(Npc& n, double t);
+    void   finish_root_motion(Npc& n, double t);
+    /// A montage has let go of the creature: its place will go out again at the following steps.
+    void   begin_settle(Npc& n, double t);
+    /// One step of that: the creature's place, facing and no velocity are written again (or the settling is over).
+    void   settle(Npc& n, double t);
     void   refresh_active(double t);
     /// Stands the NPC on the ground nearest the height it has and gives it its behaviour; true when a ground was found.
     bool   ground_npc(Npc& n, world::WorldActor& a);
@@ -234,6 +341,8 @@ private:
     struct PlayerNote { double x, y, at; };
     std::map<uint64_t, PlayerNote> players_;
     std::vector<uint64_t>         active_;        // the NPCs that moved last step (sorted: a deterministic order)
+    std::vector<uint64_t>         rooted_;        // the NPCs a montage is carrying
+    std::vector<uint64_t>         settling_;      // the NPCs a montage let go of lately: their place goes out again at each step (NpcWorldConfig::settle_seconds)
     std::map<nav::ChunkKey, std::vector<uint64_t>> pending_by_chunk_;   // NPCs waiting for a chunk of the ground's window
     size_t                        pending_count_ = 0;
     uint32_t                      remove_listener_ = 0;

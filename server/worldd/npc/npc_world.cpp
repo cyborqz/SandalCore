@@ -3,7 +3,9 @@
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 #include "npc/npc_world.h"
 
+#include "protocol/emit/intrepid_netguid.h"
 #include "protocol/repl/codecs.h"
+#include "protocol/repl/move_packed.h"
 #include "protocol/repl/value.h"
 
 #include <algorithm>
@@ -13,6 +15,7 @@
 namespace aoc::worldd::npc {
 
 namespace repl = ::aoc::protocol::repl;
+namespace emit = ::aoc::protocol::emit;
 
 namespace {
 
@@ -55,18 +58,24 @@ bool finite_setup(const NpcMotionSetup& s) {
 /// Writes what the retail server writes for a walking NPC into the actor's replicated state: ReplicatedMovement (location 0.01 cm, velocity in whole cm/s,
 /// yaw as one byte), its timestamp and CurrentMovementInput.  The open's own location and rotation follow: a re-open (a dormant actor coming back) starts
 /// where the NPC is.
-void write_replicated(world::WorldActor& a, double x, double y, double z, double yaw, const nav::Vec3& vel, bool moving, double stamp) {
+/// The client applies none of it while the actor's bReplicateMovement is off, and the opens the NPCs are made from do not all have it on, so every place the world writes
+/// turns it on: the creature is where the server has it from its first step, its first turn and its first montage on.
+/// `again` (1, 2, 3 ...) is the number of the time this same place is sent once more, as the retail server does after a montage (its floats move below what the wire shows, so it sends the place at every
+/// update): the replicator sends a value only when it differs from the one it sent, so the copy differs from the last in the angular velocity, which the wire carries for a physics body only and so never
+/// for a creature: the bits that go out are the same ones.
+void write_replicated(world::WorldActor& a, double x, double y, double z, double yaw, const nav::Vec3& vel, bool moving, double stamp, int again = 0) {
     repl::ObjectState& obj = a.actor.obj;
     if (!obj.schema) return;
     repl::RepMovement m;
     if (const repl::Value* v = obj.state.get(7)) {
         if (const auto* old = v->get_if<repl::RepMovement>()) m = *old;
     }
+    if (obj.schema->command("bReplicateMovement")) obj.state.set(*obj.schema, "bReplicateMovement", repl::Value::boolean(true));
     m.simulated_physic_sleep = false;
     m.rep_physics = false;
     m.location = repl::quantize_location(obj.opts, x, y, z);
     m.linear_velocity = repl::quantize_velocity(obj.opts, vel.x, vel.y, vel.z);
-    m.angular_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
+    m.angular_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, again, 0, 0};
     m.acceleration.reset();
     m.rotation = repl::Rot{0, obj.opts.rep_movement_short_rotation ? angle16(yaw) : angle8(yaw), 0};
     if (obj.schema->command("ReplicatedMovement")) obj.state.set(*obj.schema, "ReplicatedMovement", repl::Value(m));
@@ -77,6 +86,61 @@ void write_replicated(world::WorldActor& a, double x, double y, double z, double
     a.actor.open.spawn.location = repl::quantize_vector(10, x, y, z);
     a.actor.open.spawn.rotation = repl::Rot{0, angle16(yaw), 0};
     a.actor.open.spawn.velocity.reset();
+}
+
+/// Writes what the retail server writes while a montage with root motion plays (ACharacter::RepRootMotion): the montage, whether it still carries the creature, how far it has played, and
+/// the creature's own place and facing at that position, which the client sets its copy back to as it plays the same motion.  The montage is cleared when it no longer carries the creature.
+/// `obstructed` is bRootMotionObstructed: the creature is held where it is because a body is in the ability's freeze box (the client zeroes its copy's root-motion velocity while it is set; the
+/// montage's clock goes on).
+void write_root_motion(world::WorldActor& a, bool active, uint64_t montage, double position, double x, double y, double z, double yaw, const nav::Vec3& vel, bool obstructed = false) {
+    repl::ObjectState& obj = a.actor.obj;
+    if (!obj.schema) return;
+    const auto set = [&](const char* name, repl::Value v) {
+        if (obj.schema->command(name)) obj.state.set(*obj.schema, name, std::move(v));
+    };
+    set("bRootMotionObstructed", repl::Value::boolean(obstructed));
+    // the client puts its copy where these say (and where ReplicatedMovement says) only while the actor replicates its movement (every place the world writes turns that on)
+    set("bReplicateMovement", repl::Value::boolean(true));
+    set("RepRootMotion.Animation", repl::Value(emit::FIntrepidNetworkGUID::from_u64(active ? montage : 0)));
+    set("RepRootMotion.bIsActive", repl::Value::boolean(active));
+    set("RepRootMotion.Position", repl::Value::f32(static_cast<float>(position)));
+    set("RepRootMotion.Location", repl::Value(repl::quantize_vector(100, x, y, z)));
+    set("RepRootMotion.Rotation", repl::Value(repl::Rot{0, angle16(yaw), 0}));
+    set("RepRootMotion.LinearVelocity", repl::Value(repl::quantize_vector(10, vel.x, vel.y, vel.z)));   // (the creature's velocity: the retail server's carries it in every update of a lunge)
+}
+
+/// Sets the creature's ReplicatedMovementMode and returns the mode it had (none when it carries none).  The retail server puts a creature in the walking mode while a montage carries it and back
+/// when the montage lets go; the client moves its copy by the montage's root motion in that mode.
+std::optional<uint64_t> swap_movement_mode(world::WorldActor& a, uint64_t mode) {
+    std::optional<uint64_t> old;
+    repl::ObjectState& obj = a.actor.obj;
+    if (!obj.schema || !obj.schema->command("ReplicatedMovementMode")) return old;
+    if (const repl::Value* v = obj.state.get(*obj.schema, "ReplicatedMovementMode")) {
+        if (const uint64_t* p = v->get_if<uint64_t>()) old = *p;
+    }
+    obj.state.set(*obj.schema, "ReplicatedMovementMode", repl::Value::u64(mode));
+    return old;
+}
+
+/// Where a montage's root is `at` seconds into it (a play rate of 1): linear between the steps, the last one after the end.
+void root_at(const std::vector<NpcWorld::RootMotionStep>& steps, double at, double* x, double* y) {
+    *x = *y = 0;
+    if (steps.empty()) return;
+    if (at <= steps.front().time) {
+        *x = steps.front().x;
+        *y = steps.front().y;
+        return;
+    }
+    for (size_t i = 1; i < steps.size(); ++i) {
+        if (at > steps[i].time) continue;
+        const double span = steps[i].time - steps[i - 1].time;
+        const double f = span > 0 ? (at - steps[i - 1].time) / span : 1.0;
+        *x = steps[i - 1].x + (steps[i].x - steps[i - 1].x) * f;
+        *y = steps[i - 1].y + (steps[i].y - steps[i - 1].y) * f;
+        return;
+    }
+    *x = steps.back().x;
+    *y = steps.back().y;
 }
 
 }  // namespace
@@ -95,6 +159,8 @@ bool NpcWorld::remove(uint64_t actor_id) {
     if (it->second.pending_ground && pending_count_ > 0) --pending_count_;
     npcs_.erase(it);
     active_.erase(std::remove(active_.begin(), active_.end(), actor_id), active_.end());
+    rooted_.erase(std::remove(rooted_.begin(), rooted_.end(), actor_id), rooted_.end());
+    settling_.erase(std::remove(settling_.begin(), settling_.end(), actor_id), settling_.end());
     return true;
 }
 
@@ -318,7 +384,8 @@ void NpcWorld::refresh_active(double t) {
         registry_.query(p.x, p.y, cfg_.awake_cm + cfg_.awake_margin_cm + 6000.0, near);   // (a large creature's awake radius may be more than the default)
         for (const uint64_t id : near) {
             const auto it = npcs_.find(id);
-            if (it == npcs_.end() || it->second.mode == Mode::Stand || it->second.pending_ground) continue;
+            // (an NPC that stands, and has no turning to do, is not stepped)
+            if (it == npcs_.end() || (it->second.mode == Mode::Stand && !it->second.turning && !it->second.track) || it->second.pending_ground) continue;
             const world::WorldActor* a = registry_.find(id);
             // (an NPC whose chunk of the ground has gone out of the window sleeps where it stands: nothing is there to walk on)
             if (a && awake_for_someone(*a) && nav_->ready_at(a->x, a->y)) next.push_back(id);
@@ -370,7 +437,20 @@ void NpcWorld::step(double t) {
     // say) can keep the rest from ever being asked
     const size_t count = active_.size();
     const size_t first = count ? static_cast<size_t>(stats_.steps % count) : 0;
-    for (size_t i = 0; i < count; ++i) advance_npc(npcs_.find(active_[(first + i) % count])->second, t);
+    for (size_t i = 0; i < count; ++i) {
+        Npc& n = npcs_.find(active_[(first + i) % count])->second;
+        if (!n.rm) advance_npc(n, t);   // (a creature a montage carries is moved by the montage)
+    }
+    const std::vector<uint64_t> carried = rooted_;   // (finishing a montage takes the NPC out of the list)
+    for (const uint64_t id : carried) {
+        const auto it = npcs_.find(id);
+        if (it != npcs_.end() && it->second.rm) advance_root_motion(it->second, t);
+    }
+    const std::vector<uint64_t> settling = settling_;   // (a settle ends by taking the NPC out of the list)
+    for (const uint64_t id : settling) {
+        const auto it = npcs_.find(id);
+        if (it != npcs_.end()) settle(it->second, t);
+    }
     stats_.max_step_ms = std::max(stats_.max_step_ms, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - step_start).count());
     stats_.max_active = std::max(stats_.max_active, count);
     stats_.max_pathfinds_in_step = std::max(stats_.max_pathfinds_in_step, pathfinds_this_step_);
@@ -513,9 +593,58 @@ void NpcWorld::commit(Npc& n, double t, bool force) {
     ++stats_.writes;
 }
 
+void NpcWorld::steer(Npc& n, double t) {
+    const double dt = cfg_.step_seconds;
+    bool turned = false;
+    if (n.track) {
+        nav::Vec3 at;
+        if (n.track_until > 0 && t >= n.track_until) {
+            n.track = nullptr;
+        } else if (n.track(at)) {
+            const nav::Vec3 g = n.mover.ground();
+            if (std::hypot(at.x - g.x, at.y - g.y) > 1.0) {
+                n.mover.turn_toward(std::atan2(at.y - g.y, at.x - g.x) * 180.0 / 3.14159265358979323846, dt, n.track_rate);
+                turned = true;
+            }
+        }
+    } else if (n.turning && !n.mover.moving()) {
+        if (n.mover.turn_toward(n.turn_yaw, dt, n.turn_rate)) n.turning = false;
+        turned = true;
+    }
+    if (turned) commit(n, t, false);
+}
+
+void NpcWorld::pursue_step(Npc& n, double) {
+    if (!n.pursue) return;
+    nav::Vec3 at;
+    if (n.mode != Mode::Ordered || !n.pursue(at)) {   // another order took over, or the target is gone: the AI decides what next
+        n.pursue = nullptr;
+        return;
+    }
+    const nav::Vec3 g = n.mover.ground();
+    if (std::hypot(at.x - g.x, at.y - g.y) <= n.pursue_stop) return;   // where it wants to be: the AI judges its range
+    // on its way, and the target has not gone far from where the way was found to lead: the way is kept and its end follows the target
+    if (n.mover.moving() && std::hypot(at.x - n.pursue_plan_x, at.y - n.pursue_plan_y) < 200.0 && n.mover.set_end(at.x, at.y)) {
+        n.pursue_x = at.x;
+        n.pursue_y = at.y;
+        return;
+    }
+    if (pathfinds_this_step_ >= cfg_.max_pathfinds_per_step || iterations_this_step_ >= cfg_.max_search_iterations_per_step) return;   // the next step
+    ++pathfinds_this_step_;
+    const bool found = n.mover.move_to(at, n.pursue_speed, n.pursue_stop, 0);
+    iterations_this_step_ += n.mover.last_search_iterations();
+    n.pursue_x = n.pursue_plan_x = at.x;
+    n.pursue_y = n.pursue_plan_y = at.y;
+    if (!found) n.pursue = nullptr;   // no way to the target: the AI's next order tries again (a search that fails is not repeated at every step)
+}
+
 void NpcWorld::advance_npc(Npc& n, double t) {
     const double dt = cfg_.step_seconds;
-    if (n.mode == Mode::Stand) return;
+    pursue_step(n, t);
+    if (n.mode == Mode::Stand) {
+        steer(n, t);
+        return;
+    }
     if (n.mode == Mode::Idle || n.mode == Mode::PatrolPause) {
         n.timer -= dt;
         if (n.timer <= 0) decide(n, t);
@@ -526,6 +655,7 @@ void NpcWorld::advance_npc(Npc& n, double t) {
         // a walk began: its first step is this step's
     }
     const Mover::Status st = n.mover.advance(dt);
+    steer(n, t);
     commit(n, t, false);
     if (st == Mover::Status::Arrived) {
         if (n.mode == Mode::Ordered) {   // the AI's order is done: it stands until it is given another or released
@@ -550,6 +680,9 @@ bool NpcWorld::order_move(uint64_t id, const nav::Vec3& dest, double speed_cm_s,
     const auto it = npcs_.find(id);
     if (it == npcs_.end()) return false;
     Npc& n = it->second;
+    if (n.rm) finish_root_motion(n, now_);   // (an order takes the feet back from the montage)
+    n.turning = false;
+    n.pursue = nullptr;
     if (!n.mover.move_to(dest, speed_cm_s, stop_distance, 0)) return false;
     n.mode = Mode::Ordered;
     ++stats_.moves_started;
@@ -559,6 +692,7 @@ bool NpcWorld::order_move(uint64_t id, const nav::Vec3& dest, double speed_cm_s,
 bool NpcWorld::release(uint64_t id) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end() || it->second.mode != Mode::Ordered) return false;
+    it->second.pursue = nullptr;
     go_idle(it->second);
     return true;
 }
@@ -567,6 +701,10 @@ bool NpcWorld::halt(uint64_t id) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end()) return false;
     Npc& n = it->second;
+    if (n.rm) finish_root_motion(n, now_);
+    n.turning = false;
+    n.pursue = nullptr;
+    n.track = nullptr;
     n.mover.stop();
     n.mode = Mode::Stand;
     n.ordered_return = false;
@@ -574,15 +712,314 @@ bool NpcWorld::halt(uint64_t id) {
     return true;
 }
 
+bool NpcWorld::face_toward(uint64_t id, double x, double y) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    const world::WorldActor* a = registry_.find(id);
+    if (!a) return false;
+    const double dx = x - a->x, dy = y - a->y;
+    if (std::fabs(dx) < 1e-6 && std::fabs(dy) < 1e-6) return true;
+    Npc& n = it->second;
+    if (n.rm) return false;   // a montage carries it in the facing it began with
+    n.mover.face(std::atan2(dy, dx) * 180.0 / 3.14159265358979323846);
+    commit(n, now_, true);
+    return true;
+}
+
+bool NpcWorld::turn_toward(uint64_t id, double x, double y, double rate) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || !std::isfinite(x) || !std::isfinite(y)) return false;
+    const world::WorldActor* a = registry_.find(id);
+    if (!a) return false;
+    const double dx = x - a->x, dy = y - a->y;
+    if (std::fabs(dx) < 1e-6 && std::fabs(dy) < 1e-6) return true;
+    Npc& n = it->second;
+    if (n.rm) return false;   // a montage carries it in the facing it has
+    n.turning = true;
+    n.turn_yaw = std::atan2(dy, dx) * 180.0 / 3.14159265358979323846;
+    n.turn_rate = std::isfinite(rate) && rate > 0 ? rate : 0.0;
+    return true;
+}
+
+bool NpcWorld::track_target(uint64_t id, Where where, double rate, double until) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || !where) return false;
+    Npc& n = it->second;
+    n.track = std::move(where);
+    n.track_rate = std::isfinite(rate) && rate > 0 ? rate : 0.0;
+    n.track_until = std::isfinite(until) ? until : 0.0;
+    return true;
+}
+
+void NpcWorld::stop_tracking(uint64_t id) {
+    const auto it = npcs_.find(id);
+    if (it != npcs_.end()) it->second.track = nullptr;
+}
+
+bool NpcWorld::order_pursue(uint64_t id, Where where, double speed_cm_s, double stop_distance) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || !where) return false;
+    Npc& n = it->second;
+    nav::Vec3 at;
+    if (!where(at)) return false;
+    if (!order_move(id, at, speed_cm_s, stop_distance)) return false;
+    n.pursue = std::move(where);
+    n.pursue_speed = speed_cm_s;
+    n.pursue_stop = std::max(0.0, stop_distance);
+    n.pursue_x = n.pursue_plan_x = at.x;
+    n.pursue_y = n.pursue_plan_y = at.y;
+    return true;
+}
+
 bool NpcWorld::order_return_home(uint64_t id) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end()) return false;
     Npc& n = it->second;
+    if (n.rm) finish_root_motion(n, now_);
+    n.turning = false;
+    n.pursue = nullptr;
+    n.track = nullptr;
     if (!n.mover.move_to(n.home, n.setup.run_speed, 0, 0)) return false;
     n.mode = Mode::Return;
     n.ordered_return = true;
     ++stats_.returns_home;
     return true;
+}
+
+bool NpcWorld::in_freeze_box(double cx, double cy, double yaw_degrees, double distance, double wide, double bx, double by, double body) {
+    if (!std::isfinite(cx) || !std::isfinite(cy) || !std::isfinite(bx) || !std::isfinite(by)) return false;
+    constexpr double kPi = 3.14159265358979323846;
+    const double fx = std::cos(yaw_degrees * kPi / 180.0), fy = std::sin(yaw_degrees * kPi / 180.0);
+    const double ex = bx - cx, ey = by - cy;
+    const double ahead = ex * fx + ey * fy, aside = -ex * fy + ey * fx;
+    return ahead >= -body && ahead <= distance + wide + body && std::fabs(aside) <= wide + body;
+}
+
+bool NpcWorld::begin_root_motion(uint64_t id, RootMotionPlay play) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || it->second.pending_ground || play.steps.empty() || !(play.length > 0) || !std::isfinite(play.length) || !std::isfinite(play.rate) || !std::isfinite(play.blend_out)) return false;
+    for (const RootMotionStep& s : play.steps) {
+        if (!std::isfinite(s.time) || !std::isfinite(s.x) || !std::isfinite(s.y)) return false;
+    }
+    Npc& n = it->second;
+    if (!registry_.find(id)) return false;
+    if (n.rm) finish_root_motion(n, now_);   // (one montage at a time: the one before is over)
+    n.turning = false;
+    n.pursue = nullptr;
+    RootMotion r;
+    r.play = std::move(play);
+    r.start = now_;
+    r.yaw = n.mover.yaw_degrees();
+    const nav::Vec3 g = n.mover.ground();
+    r.ox = g.x;
+    r.oy = g.y;
+    n.rm = std::move(r);
+    rooted_.push_back(id);
+    // the montage is on its first frame: the actor says so in the update that carries the attack naming it
+    const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
+    const uint64_t montage = n.rm->play.montage;
+    std::optional<uint64_t> saved;
+    registry_.modify(id, world::Change::Movement, [&](world::WorldActor& a) {
+        saved = swap_movement_mode(a, repl::kMoveWalking);
+        write_root_motion(a, true, montage, 0.0, g.x, g.y, z, yaw, {});
+    });
+    n.rm->saved_mode = saved;
+    return true;
+}
+
+bool NpcWorld::end_root_motion(uint64_t id) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || !it->second.rm) return false;
+    finish_root_motion(it->second, now_);
+    return true;
+}
+
+bool NpcWorld::root_motion_active(uint64_t id) const {
+    const auto it = npcs_.find(id);
+    return it != npcs_.end() && it->second.rm.has_value();
+}
+
+void NpcWorld::advance_root_motion(Npc& n, double t) {
+    RootMotion& r = *n.rm;
+    const RootMotionPlay& p = r.play;
+    world::WorldActor* a = registry_.find(n.id);
+    if (!a) {
+        n.rm.reset();
+        rooted_.erase(std::remove(rooted_.begin(), rooted_.end(), n.id), rooted_.end());
+        return;
+    }
+    const double dt = cfg_.step_seconds;
+    const double rate = p.rate > 0 ? p.rate : 1.0;
+    const double carry_end = std::max(0.0, p.length - std::max(0.0, p.blend_out));   // the montage carries the creature until it starts to blend out
+    const double reached = std::max(0.0, t - r.start) * rate;
+    const bool last = reached >= carry_end;
+    const double at = last ? carry_end : reached;
+    constexpr double kPi = 3.14159265358979323846;
+    const nav::Vec3 g = n.mover.ground();
+    // A creature that tracks its target turns while the montage carries it (its rate, no jumps), and the rest of the montage's travel goes the way it faces then: the travel so far stays
+    // where it is, and the travel still to come is turned about the creature's place.
+    if (n.track && n.track_until > 0 && t >= n.track_until) n.track = nullptr;
+    if (n.track) {
+        nav::Vec3 at_target;
+        if (n.track(at_target) && std::hypot(at_target.x - g.x, at_target.y - g.y) > 1.0) {
+            n.mover.turn_toward(std::atan2(at_target.y - g.y, at_target.x - g.x) * 180.0 / kPi, dt, n.track_rate);
+        }
+    }
+    if (std::fabs(n.mover.yaw_degrees() - r.yaw) > 1e-9) {
+        r.yaw = n.mover.yaw_degrees();
+        r.ox = g.x - (std::cos(r.yaw * kPi / 180.0) * r.last_tx - std::sin(r.yaw * kPi / 180.0) * r.last_ty);
+        r.oy = g.y - (std::sin(r.yaw * kPi / 180.0) * r.last_tx + std::cos(r.yaw * kPi / 180.0) * r.last_ty);
+    }
+    // where the montage's root is now (ahead of the creature and to its right, from where it stood), and so where the creature would be with nothing in its way: the root's travel less the part
+    // a pause made it skip (the client's copy takes the montage's travel tick by tick, so what it did not take while it was held it does not take later)
+    double rx = 0, ry = 0;
+    root_at(p.steps, at, &rx, &ry);
+    r.position = at;
+    const double fx = std::cos(r.yaw * kPi / 180.0), fy = std::sin(r.yaw * kPi / 180.0);
+    const double tx = rx - r.skip_x, ty = ry - r.skip_y;
+    double nx = r.ox + fx * tx - fy * ty, ny = r.oy + fy * tx + fx * ty;
+    std::vector<RootMotionBlock> blocks;
+    if (p.blockers) p.blockers(blocks);
+    // the freeze box (the ability record's RootMotionFreeze): a body in the box ahead of the creature ends the lunge for good (StopOnContact; a lunge that begins with one in it does not begin) or
+    // holds the creature where it is for as long as the body stays in it (PauseOnContact)
+    const double wide = p.freeze_scale * p.own_radius;
+    const auto in_box = [&](double cx, double cy) {
+        if (!p.freeze_stop && !p.freeze_pause) return false;
+        for (const RootMotionBlock& b : blocks) {
+            if (p.ignore_non_target && !b.target) continue;
+            if (in_freeze_box(cx, cy, r.yaw, p.freeze_distance, wide, b.x, b.y, b.body)) return true;
+        }
+        return false;
+    };
+    bool obstructed = false;   // bRootMotionObstructed: the creature is held by the box in this update
+    if (p.freeze_stop && !r.frozen && in_box(g.x, g.y)) r.frozen = true;
+    if (r.frozen) {
+        nx = g.x;
+        ny = g.y;
+        obstructed = true;
+    } else if (p.freeze_pause) {
+        // How far along this step the creature is in the box: 0 where it is already, a fraction where the step brings it to the box's edge (the first point of the way, by sixteenths and then
+        // by halving, that is inside), and none (2) where the step ends outside it.
+        double entry = 2.0;
+        if (in_box(g.x, g.y)) {
+            entry = 0.0;
+        } else {
+            constexpr int kSub = 16;
+            for (int i = 1; i <= kSub && entry > 1.0; ++i) {
+                const double hi_f = static_cast<double>(i) / kSub;
+                if (!in_box(g.x + (nx - g.x) * hi_f, g.y + (ny - g.y) * hi_f)) continue;
+                double lo = static_cast<double>(i - 1) / kSub, hi = hi_f;
+                for (int k = 0; k < 14; ++k) {
+                    const double mid = 0.5 * (lo + hi);
+                    (in_box(g.x + (nx - g.x) * mid, g.y + (ny - g.y) * mid) ? hi : lo) = mid;
+                }
+                entry = hi;
+            }
+        }
+        if (entry <= 1.0) {
+            // held: the creature goes no farther than the box's edge (its velocity is zero from the next step on), and the montage's travel from there to where the root is now is the part it skips
+            nx = g.x + (nx - g.x) * entry;
+            ny = g.y + (ny - g.y) * entry;
+            obstructed = true;
+            const double ex = nx - r.ox, ey = ny - r.oy;
+            r.skip_x = rx - (ex * fx + ey * fy);
+            r.skip_y = ry - (-ex * fy + ey * fx);
+        }
+    }
+    r.last_tx = rx - r.skip_x;
+    r.last_ty = ry - r.skip_y;
+    // it goes from where it is towards that place, and not into the bodies it is told to keep out of: a body in the way stops the step where they touch (the recorded creatures stop at the
+    // player's capsule and stay there, they do not slide round it and do not step back when the animation does); one it already overlaps is not pushed out of, it only does not get deeper
+    for (const RootMotionBlock& b : blocks) {
+        if (!std::isfinite(b.x) || !std::isfinite(b.y) || !(b.radius > 0)) continue;
+        // the way from where it is to where the montage wants it, up to the first point at which the creature's centre comes to `keep` cm of the body's (a body it overlaps keeps the
+        // distance it has: it is on that circle already)
+        const double sx = g.x - b.x, sy = g.y - b.y, dx = nx - g.x, dy = ny - g.y;
+        const double a2 = dx * dx + dy * dy, was2 = sx * sx + sy * sy;
+        if (a2 < 1e-12) continue;
+        const double keep = std::min(b.radius, std::sqrt(was2));
+        const double bq = sx * dx + sy * dy, cq = was2 - keep * keep, disc = bq * bq - a2 * cq;
+        if (bq >= 0 || disc < 0) continue;   // the way leads away from the body, or passes it
+        const double f = std::max(0.0, (-bq - std::sqrt(disc)) / a2);   // (a creature on the circle already meets it at 0, whatever the rounding says)
+        if (f >= 1) continue;   // the way stops short of the body
+        nx = g.x + dx * f;
+        ny = g.y + dy * f;
+    }
+    // ... nor off the ground it can walk on
+    nav::Vec3 to{nx, ny, g.z};
+    if (nav_->on_navmesh(g)) {
+        nav::Vec3 edge;
+        if (!nav_->raycast(g, to, &edge)) {
+            to.x = edge.x;
+            to.y = edge.y;
+        }
+    }
+    double gz = g.z;
+    const double window = 80.0 + 2.0 * std::hypot(to.x - g.x, to.y - g.y);
+    if (nav_->ground_height(to.x, to.y, g.z, &gz, window, window)) {
+        to.z = gz;
+    } else {
+        to = g;   // no ground there: it stays
+    }
+    if (p.freeze_stop && !r.frozen && in_box(to.x, to.y)) r.frozen = true;
+    n.mover.shift(to.x, to.y, to.z);
+    const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
+    registry_.move(n.id, to.x, to.y, z, yaw);
+    const nav::Vec3 vel = last ? nav::Vec3{} : nav::Vec3{(to.x - g.x) / dt, (to.y - g.y) / dt, (to.z - g.z) / dt};
+    write_replicated(*a, to.x, to.y, z, yaw, vel, false, t);
+    write_root_motion(*a, !last, p.montage, at, to.x, to.y, z, yaw, vel, obstructed && !last);
+    n.reported_moving = false;
+    ++stats_.writes;
+    if (last) {
+        if (r.saved_mode) swap_movement_mode(*a, *r.saved_mode);
+        registry_.touch(*a, world::Change::State);   // the end, with the place the creature stopped at, must not be lost: it goes on a reliable chain
+        n.rm.reset();
+        rooted_.erase(std::remove(rooted_.begin(), rooted_.end(), n.id), rooted_.end());
+        begin_settle(n, t);
+    }
+}
+
+void NpcWorld::finish_root_motion(Npc& n, double t) {
+    if (!n.rm) return;
+    const double position = n.rm->position;
+    const std::optional<uint64_t> saved_mode = n.rm->saved_mode;
+    n.rm.reset();
+    rooted_.erase(std::remove(rooted_.begin(), rooted_.end(), n.id), rooted_.end());
+    world::WorldActor* a = registry_.find(n.id);
+    if (!a) return;
+    if (saved_mode) swap_movement_mode(*a, *saved_mode);
+    const nav::Vec3 g = n.mover.ground();
+    const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
+    registry_.move(n.id, g.x, g.y, z, yaw);
+    write_replicated(*a, g.x, g.y, z, yaw, {}, false, t);
+    write_root_motion(*a, false, 0, position, g.x, g.y, z, yaw, {});
+    registry_.touch(*a, world::Change::State);   // (reliable, as the montage's own end)
+    n.reported_moving = false;
+    ++stats_.writes;
+    begin_settle(n, t);
+}
+
+void NpcWorld::begin_settle(Npc& n, double t) {
+    if (!(cfg_.settle_seconds > 0)) return;
+    n.settle_began = t;
+    n.settle_until = t + cfg_.settle_seconds;
+    n.settle_sent = 0;
+    if (std::find(settling_.begin(), settling_.end(), n.id) == settling_.end()) settling_.push_back(n.id);
+}
+
+void NpcWorld::settle(Npc& n, double t) {
+    if (t <= n.settle_began + 1e-9) return;   // (the step the montage let go in has the end written already: the first re-send is the next step's)
+    world::WorldActor* a = registry_.find(n.id);
+    // over: the actor is gone, a montage has taken the creature again, it walks (its walking says where it is), or the time is up
+    if (!a || n.rm || n.reported_moving || t > n.settle_until + 1e-9) {
+        settling_.erase(std::remove(settling_.begin(), settling_.end(), n.id), settling_.end());
+        return;
+    }
+    const nav::Vec3 g = n.mover.ground();
+    const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
+    registry_.move(n.id, g.x, g.y, z, yaw);
+    write_replicated(*a, g.x, g.y, z, yaw, {}, false, t, ++n.settle_sent);
+    ++stats_.writes;
 }
 
 const Mover* NpcWorld::mover(uint64_t id) const {

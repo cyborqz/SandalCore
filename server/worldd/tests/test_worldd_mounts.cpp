@@ -314,6 +314,7 @@ static void test_open_golden(const spawns::MountBook& book) {
         {"ANPCCharacter", {"ReplicatedBasedMovement.BaseID", "ReplicatedBasedMovement.MovementBase"}},
         {"UAlignmentComponent", {"InheritedAlignments", "Alignments"}},   // (the owner's, not the capturing player's: a node, a guild, 898's Combatant)
         {"UInteractableComponent", {"InteractionInputData"}},              // (the rider's AnimBP: the open exports a class of ours)
+        {"UNPCInfo", {"CharacterName"}},                                   // (the mount's own name for its nameplate: the item's; the capture sent none)
         {"UAoCStatsComponent", {"[StatRepInt32EveryoneProxy]", "[CurrentEffects]"}},
     };
     for (const Case& c : cases) {
@@ -372,6 +373,13 @@ static void test_open_golden(const spawns::MountBook& book) {
         // the donor that never sent the timestamp in its open (898 sent it 49 ms later): we always set it
         if (!donor->actor_block().state.state.get(*donor->actor_block().state.schema, "ReplicatedServerLastTransformUpdateTimeStamp")) {
             found["ANPCCharacter"].erase("ReplicatedServerLastTransformUpdateTimeStamp");
+        }
+        // the nameplate shows the mount's own name (the item's), not the owner's
+        for (size_t i = 0; same_blocks && i < a.subobjects.size(); ++i) {
+            if (donor->blocks[i + 1].cls != "UNPCInfo") continue;
+            const repl::Value* shown = a.subobjects[i].obj.state.get(*a.subobjects[i].obj.schema, "CharacterName");
+            const std::string* name = shown ? shown->get_if<std::string>() : nullptr;
+            CHECK(!row->display_name.empty() && name && *name == row->display_name, (title + ": the nameplate shows the mount's own name \"" + row->display_name + "\"").c_str());
         }
         bool exact = true;
         std::string report;

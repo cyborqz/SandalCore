@@ -53,14 +53,18 @@ namespace aoc::worldd::gather {
 std::set<int64_t> hunting_defs(const content::FoliageData& data);
 /// The name a huntable creature's nameplate shows, by its PlayerInteractionDef: the def's name without "Hunting_" and with a space before each capital ("Hunting_Raven" -> "Raven", "Hunting_PallasCat" ->
 /// "Pallas Cat").  Retail's four living opens carry it as UNPCInfo.CharacterName ("Raven", "Spider", "Tidesnapper", "Bear": the retail captures); the Blueprints of these creatures name nothing.
-/// The multi-word names are inferred from that rule.
+/// The multi-word names are inferred from that rule.  The Rabid hunting def is the Grem (its carcass item is a Grem), so it shows as "Grem".
 std::map<int64_t, std::string> hunting_names(const content::FoliageData& data);
 // -- CoA & C_Y_B --
+
+/// A seed for the harvest rolls that differs on every call: the system's random source mixed with the clock.  A server that starts its rolls from one fixed number replays the same
+/// rolls on every start, so every run's first harvests come out the same (all Common).
+uint64_t fresh_seed();
 
 struct Config {
     NodeBoard::Config board;
     bool              quality_literal = false;
-    uint64_t          seed = 0x6A7E5EEDull;
+    uint64_t          seed = 0x6A7E5EEDull;   // the default repeats the same rolls on every start (the tests rely on it); worldd passes fresh_seed() unless --gather-seed is given
 };
 
 /// What a harvest gave.

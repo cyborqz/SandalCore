@@ -181,6 +181,19 @@ int main(int argc, char** argv) {
     app.add_option("--npc-motion", npc_motion_path, "the NPC archetypes' capsules and speeds tools/mapc reads from the game (a missing file: the Blueprint defaults)")
         ->envname("AOC_NPC_MOTION")
         ->capture_default_str();
+    // the creature attack animations (tools/npcabilities): the ability tasks of the creature Blueprints and the animation montages beside them
+    std::string npc_abilities_path = "dist/content/npc_abilities.tsv";
+    app.add_option("--npc-abilities", npc_abilities_path, "the creature Blueprints' ability tasks tools/npcabilities reads from the game (a missing file: every creature swings without an animation)")
+        ->envname("AOC_NPC_ABILITIES")
+        ->capture_default_str();
+    std::string npc_targeting_path = "dist/content/npc_targeting.tsv";
+    app.add_option("--npc-targeting", npc_targeting_path, "where each creature ability's hit lands, tools/npcabilities (a missing file: every creature swings without an animation)")
+        ->envname("AOC_NPC_TARGETING")
+        ->capture_default_str();
+    std::string npc_montages_path = "dist/content/npc_montages.tsv";
+    app.add_option("--npc-montages", npc_montages_path, "the creature animation montages tools/npcabilities reads from the game: their lengths and hit notifies (a missing file: every creature swings without an animation)")
+        ->envname("AOC_NPC_MONTAGES")
+        ->capture_default_str();
     // the mounts milestone: the speeds of the mount Blueprints (tools/mapc mount-speeds), what a desummoned mount runs at
     std::string mount_speeds_path = "dist/content/mount_speeds.tsv";
     app.add_option("--mount-speeds", mount_speeds_path, "the mount Blueprints' speeds tools/mapc reads from the game (a missing file: 600 cm/s times the item's ground percentage)")
@@ -227,10 +240,13 @@ int main(int argc, char** argv) {
         ->capture_default_str();
     // plan E1, stage 3: the fights (combat/combat_world.h)
     bool no_combat = false;
-    double npc_aggro_cm = 800.0, npc_leash_cm = 3000.0;
+    double npc_aggro_cm = 800.0, npc_leash_cm = 3000.0, npc_damage_mult = 1.0;
     app.add_flag("--no-combat", no_combat, "the kill switch for the fights: the NPCs do not aggro, attack or take hits (stage 2's world)")->envname("AOC_NO_COMBAT");
     app.add_option("--npc-aggro-cm", npc_aggro_cm, "how far (cm) an NPC whose data gives no aggro radius notices a player")->envname("AOC_NPC_AGGRO_CM")->capture_default_str();
     app.add_option("--npc-leash-cm", npc_leash_cm, "how far (cm) from home an NPC chases before it gives up and resets")->envname("AOC_NPC_LEASH_CM")->capture_default_str();
+    app.add_option("--npc-damage-mult", npc_damage_mult,
+                   "multiplies the Health damage every NPC's hit does to a player: 1 (the default) is the data's own damage, 0.2 takes 80 % off")
+        ->envname("AOC_NPC_DAMAGE_MULT")->check(CLI::Range(0.0, 100.0))->capture_default_str();
     // plan E1, stage 3, part 2: what follows a death (combat/aftermath.h)
     bool no_loot = false, no_respawn = false, no_death_loss = false;
     double corpse_seconds = 15.0, loot_corpse_seconds = 120.0, loot_chance_mult = 1.0;
@@ -251,6 +267,10 @@ int main(int argc, char** argv) {
     app.add_flag("--gather-quality-literal", gather_quality_literal,
                  "GetRolledItemQuality() in the Quantity equation answers the literal quality (1, 6, 16 ...) instead of the index of its rarity band (0 to 6): the equation compares it with 0 to 6")
         ->envname("AOC_GATHER_QUALITY_LITERAL");
+    uint64_t gather_seed = 0;
+    app.add_option("--gather-seed", gather_seed,
+                   "the number the harvest rolls start from: 0 (the default) takes a new one on every start, so each run rolls different rarities; any other number repeats the same rolls on every start")
+        ->envname("AOC_GATHER_SEED")->capture_default_str();
     // Gathering stage 3, "Foliage gathering": the painted trees, plants and stones (foliage/foliage.h); --no-gathering switches them off with the nodes
     double foliage_regrow_mult = 1.0;
     std::string foliage_map_path = "dist/content/region_foliage.tsv";
@@ -467,6 +487,7 @@ int main(int argc, char** argv) {
             combat_config.enabled = !no_combat;
             combat_config.default_aggro_cm = npc_aggro_cm;
             combat_config.default_leash_cm = npc_leash_cm;
+            combat_config.npc_damage_mult = npc_damage_mult;
             players.set_combat_config(std::move(combat_config));
             combat::AftermathConfig aftermath;
             aftermath.enabled = !no_loot;
@@ -479,6 +500,12 @@ int main(int argc, char** argv) {
             std::string table_error;
             if (!players.load_blueprints(npc_motion_path, table_error)) {
                 spdlog::warn("[area] no Blueprint table ({}): the NPCs no retail capture opened cannot be made (run tools/mapc: mapc build)", table_error);
+            }
+        }
+        {
+            std::string animation_error;
+            if (!players.load_npc_abilities(npc_abilities_path, npc_montages_path, npc_targeting_path, animation_error)) {
+                spdlog::warn("[combat] no creature attack animations ({}): the creatures swing without an animation (run scripts/extract_game_data.ps1)", animation_error);
             }
         }
         {
@@ -554,6 +581,8 @@ int main(int argc, char** argv) {
             gather::Config gathering;
             gathering.board.respawn_mult = gather_respawn_mult;
             gathering.quality_literal = gather_quality_literal;
+            gathering.seed = gather_seed != 0 ? gather_seed : gather::fresh_seed();
+            spdlog::info("[gather] the harvest rolls start from seed {}{}", gathering.seed, gather_seed != 0 ? " (--gather-seed: the same rolls on every start)" : " (new on every start)");
             std::string gather_error;
             if (!players.start_gathering(gathering, gather_error)) {
                 spdlog::warn("[gather] harvesting is off: {} (the resource nodes are seen and not harvested)", gather_error);
