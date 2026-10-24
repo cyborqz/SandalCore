@@ -160,16 +160,20 @@ size_t NodePopulations::apply(const world::CityNodeInfo& info, int level, double
     e.desired = st.live.size();
     e.by_source[0] = e.by_source[1] = 0;
     e.npcs = 0;
+    e.stations = 0;
     for (const auto& [ident, l] : st.live) {
         ++e.by_source[l.spawn.source == PopSource::Layout ? 0 : 1];
-        if (l.actor != 0) ++e.npcs;
+        if (l.actor == 0) continue;
+        const world::WorldActor* made = registry_.find(l.actor);
+        if (made && made->kind == world::ActorKind::Station) ++e.stations;
+        else ++e.npcs;
     }
     if (first) {
-        spdlog::info("[people] {} ({}, {}): {} NPCs ({} from {} layout sets, {} from {} building sets); the rest dropped by {}", info.display_name, node_level_name(level),
-                     node_type_name(info.type), e.npcs, stats.spawned[0], stats.sets[0], stats.spawned[1], stats.sets[1], reasons_of(stats));
+        spdlog::info("[people] {} ({}, {}): {} NPCs and {} crafting stations ({} from {} layout sets, {} from {} building sets); the rest dropped by {}", info.display_name, node_level_name(level),
+                     node_type_name(info.type), e.npcs, e.stations, stats.spawned[0], stats.sets[0], stats.spawned[1], stats.sets[1], reasons_of(stats));
     } else {
-        spdlog::info("[people] {} -> {}: {} NPCs now ({} stay, {} leave, {} arrive; {} from the layout's {} sets, {} from {} building sets); the rest dropped by {}", info.display_name,
-                     node_level_name(level), e.npcs, kept, removed, added, stats.spawned[0], stats.sets[0], stats.spawned[1], stats.sets[1], reasons_of(stats));
+        spdlog::info("[people] {} -> {}: {} NPCs and {} crafting stations now ({} stay, {} leave, {} arrive; {} from the layout's {} sets, {} from {} building sets); the rest dropped by {}", info.display_name,
+                     node_level_name(level), e.npcs, e.stations, kept, removed, added, stats.spawned[0], stats.sets[0], stats.spawned[1], stats.sets[1], reasons_of(stats));
     }
     return added;
 }
@@ -227,7 +231,7 @@ uint64_t NodePopulations::respawn(uint32_t ref, double now) {
     if (id != 0) {
         ++respawned_;
         const auto e = entries_.find(slot.node);
-        if (e != entries_.end()) e->second.npcs = actors_of(slot.node).size();
+        if (e != entries_.end()) e->second.npcs = actors_of(slot.node).size() - std::min(actors_of(slot.node).size(), e->second.stations);
     }
     return id;
 }

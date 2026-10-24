@@ -48,6 +48,7 @@ enum class ActorKind : uint8_t {
     Mount,       // a summoned mount (the mounts milestone, stage 2): an ANPCCharacter-layout actor with an owner, never dormant
     NodeLayout,  // a town's ANodeLayoutReplicator (Nodes 1, stage 3a): the scenery of a city node, awake within 1.45 km, never dormant
     Foliage,     // a foliage cell's AIntrepidStateIFA (Gathering stage 3, "Foliage gathering"): which instances of the cell are cut or growing; opened as a snapshot, never awake
+    Station,     // a crafting or processing station (crafting, step 0): an ACraftingStationBase actor of a node's building, opened like any other actor, used for its window
 };
 // [C | Y | B ~ C-O-A]
 
@@ -115,6 +116,20 @@ struct SceneryInfo {
     size_t      payload_bits = 0;    // the field payload as an open sends it
 };
 
+/// What a station (ActorKind::Station) is to the server: which def it shows the window of, which node, plot and building it belongs to (spawns/station_data.h).
+struct StationInfo {
+    std::string name;             // the station Blueprint's leaf ("CraftingStation_Carpentry_T2")
+    bool        processing = false;   // a processing station (jobs over time) or a fast-craft one
+    int         tier = 0;         // 1 Novice ... 5; 0 for a crate table
+    int64_t     def = 0;          // the CraftingStationDef its window lists the recipes of (0: the data names none)
+    int64_t     asset = 0;        // the PopulationAsset it was made from
+    int64_t     node = 0;         // the city node it stands in
+    int64_t     plot = 0;         // the service plot it stands on (0: the layout's, not a plot's)
+    int64_t     building = 0;     // the building of that plot
+    bool        placed = false;   // put there by a game master (worldctl place-station), not by the node's people
+    std::string tax_tag;          // the def's TaxTag ("" for none): which row of the node's tax table the window shows
+};
+
 /// Gathering stage 2, "Harvesting": what the harvesting player's own connection sees of a resource node that the shared state cannot say (an object reference to a pawn that only that
 /// player's client has).  The node's InteractableComponent holds InteractingPlayer as none; the actor view of the player `player_id` shows `pawn` in it while `show` is set
 /// (gather/node_wire.h).  Every other connection sees none, as the retail captures' second observer does.
@@ -151,6 +166,7 @@ struct WorldActor {
     uint32_t   version = 1;               // every change of the replicated state
     uint32_t   reliable_version = 1;      // the changes that must not be lost
     NpcInfo    npc;
+    StationInfo station;                  // ActorKind::Station only
     SceneryInfo scenery;                  // ActorKind::NodeLayout only
     GatherSeen gather;                    // ActorKind::Gatherable only (gather/node_wire.h)
 };

@@ -160,6 +160,12 @@ class Data:
         self.captured_npc = set(re.findall(r'\{"npc", "ANPCCharacter", "([^"]+)"', src))
 
 
+def is_station(path):
+    """A crafting or processing station Blueprint (under /Artisanship/): worldd makes its open from a station a capture opened (its own or its family's), so it always has a template."""
+    leaf = path.rsplit('.', 1)[-1]
+    return '/Artisanship/' in path and (leaf.startswith('Default__CraftingStation_') or leaf.startswith('Default__ProcessingStation_'))
+
+
 class Context:
     def __init__(self, hour=11.0):
         self.map = 'Verra_World_Master'
@@ -369,7 +375,7 @@ def select(d, contains, zoi_at, ctx):
                     if w != 'Spawns':
                         allc.append((a, wgt if wgt > 0 else 1.0, False, w))
                         continue
-                    ok = bool(a['path']) and (a['path'] in d.captured_npc or a['path'] in d.motion)
+                    ok = bool(a['path']) and (a['path'] in d.captured_npc or a['path'] in d.motion or is_station(a['path']))
                     allc.append((a, wgt if wgt > 0 else 1.0, ok, 'Spawns'))
                     if ok:
                         shown.append((a, wgt if wgt > 0 else 1.0))

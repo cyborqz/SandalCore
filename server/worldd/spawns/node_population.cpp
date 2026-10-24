@@ -8,6 +8,8 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace aoc::worldd::spawns {
@@ -235,6 +237,112 @@ std::vector<NodeSpawn> select_node_spawns(const content::PopulationData& populat
             ++stats.spawned[src];
         }
     }
+    return out;
+}
+
+namespace {
+
+/// An asset's names a game master may call a station by, lower case: the asset's name without its spawn suffix, and the Blueprint's leaf.
+std::vector<std::string> station_names_of(const content::NpcAssetRow& asset) {
+    const auto lowered = [](std::string s) {
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    std::string name = asset.name;
+    const std::string tail = "_SpawnAsset";
+    if (name.size() > tail.size() && name.compare(name.size() - tail.size(), tail.size(), tail) == 0) name.resize(name.size() - tail.size());
+    std::vector<std::string> out{lowered(name)};
+    const size_t dot = asset.archetype_path.rfind('.');
+    std::string leaf = asset.archetype_path.substr(dot == std::string::npos ? 0 : dot + 1);
+    if (leaf.rfind("Default__", 0) == 0) leaf = leaf.substr(9);
+    if (leaf.size() > 2 && leaf.compare(leaf.size() - 2, 2, "_C") == 0) leaf.resize(leaf.size() - 2);
+    if (!leaf.empty()) out.push_back(lowered(leaf));
+    return out;
+}
+
+bool is_station_asset(const content::NpcAssetRow& asset) {
+    return asset.archetype_path.find("/Artisanship/") != std::string::npos &&
+           (asset.archetype_path.find("CraftingStation_") != std::string::npos || asset.archetype_path.find("ProcessingStation_") != std::string::npos);
+}
+
+}  // namespace
+
+std::optional<NodeSpawn> select_station_on_plot(const content::PopulationData& population, const TemplateSource& templates, const NodePopulationData& data, const NodeSite& site,
+                                                const world::PlotRow& plot, const std::vector<int64_t>& buildings, const std::string& station, int64_t& building, std::string& why) {
+    std::string want;
+    for (const char c : station) want.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    const double yaw = site.yaw * kPi / 180.0;
+    const double c = std::cos(yaw), s = std::sin(yaw);
+    const double x = site.x + plot.tx * c - plot.ty * s;
+    const double y = site.y + plot.tx * s + plot.ty * c;
+    const double plot_yaw = site.yaw + quaternion_yaw(plot.qx, plot.qy, plot.qz, plot.qw);
+    const int64_t placement = static_cast<int64_t>(static_cast<uint64_t>(site.guid) ^ (static_cast<uint64_t>(plot.plot) * kGolden));
+    bool any_station = false;
+    for (const int64_t b : buildings) {
+        const int64_t spawn = data.spawn_for(b, site.level);
+        if (spawn == 0) continue;
+        for (const int64_t set_guid : data.spawn_sets(spawn, 2)) {
+            const auto set_it = population.sets.find(set_guid);
+            if (set_it == population.sets.end() || set_it->second.area != 0) continue;
+            content::NpcPlacement at;
+            at.spawn = placement;
+            at.set = set_guid;
+            at.x = x;
+            at.y = y;
+            at.z = site.z + plot.tz;
+            at.yaw = plot_yaw;
+            for (const Point& pt : placement_points(at, set_it->second)) {
+                const auto inst_it = population.instances.find(pt.instance);
+                if (inst_it == population.instances.end()) continue;
+                PopulationStats stats;
+                DataSpawn spawn_out;
+                if (!spawn_point(population, templates, nullptr, nullptr, set_it->second, inst_it->second, pt, placement, 0, 0, 0, false, stats, spawn_out) || !spawn_out.asset) continue;
+                if (!is_station_asset(*spawn_out.asset)) continue;
+                any_station = true;
+                for (const std::string& name : station_names_of(*spawn_out.asset)) {
+                    if (name != want) continue;
+                    NodeSpawn out;
+                    out.spawn = spawn_out;
+                    out.source = PopSource::Building;
+                    out.plot = plot.plot;
+                    out.ident = point_hash(0, set_guid, placement, pt.key);
+                    building = b;
+                    return out;
+                }
+            }
+        }
+    }
+    why = any_station ? "no building that can stand on this plot has a station named " + station : "no building that can stand on this plot has a station at the node's level";
+    return std::nullopt;
+}
+
+std::vector<std::string> stations_on_plot(const content::PopulationData& population, const NodePopulationData& data, const NodeSite& site, const std::vector<int64_t>& buildings) {
+    std::vector<std::string> out;
+    for (const int64_t b : buildings) {
+        const int64_t spawn = data.spawn_for(b, site.level);
+        if (spawn == 0) continue;
+        for (const int64_t set_guid : data.spawn_sets(spawn, 2)) {
+            const auto set_it = population.sets.find(set_guid);
+            if (set_it == population.sets.end() || set_it->second.area != 0) continue;
+            for (const content::NpcSetMember& m : set_it->second.members) {
+                const auto inst_it = population.instances.find(m.instance);
+                if (inst_it == population.instances.end()) continue;
+                for (const int64_t as : inst_it->second.asset_sets) {
+                    const auto set_assets = population.asset_sets.find(as);
+                    if (set_assets == population.asset_sets.end()) continue;
+                    for (const auto& [asset_guid, weight] : set_assets->second) {
+                        const auto a = population.assets.find(asset_guid);
+                        if (a == population.assets.end() || !is_station_asset(a->second)) continue;
+                        std::string name = a->second.name;
+                        const std::string tail = "_SpawnAsset";
+                        if (name.size() > tail.size() && name.compare(name.size() - tail.size(), tail.size(), tail) == 0) name.resize(name.size() - tail.size());
+                        if (std::find(out.begin(), out.end(), name) == out.end()) out.push_back(name);
+                    }
+                }
+            }
+        }
+    }
+    std::sort(out.begin(), out.end());
     return out;
 }
 

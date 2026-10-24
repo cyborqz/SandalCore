@@ -63,6 +63,7 @@ struct GroundReport {
     };
     std::map<std::string, TypeCount> by_type;
     size_t fly = 0;
+    size_t stations = 0;             // crafting, step 0: stations the area's data places (a workshop outside the nodes), put on the ground; not counted among the NPCs
     std::string describe() const;
     /// The per-type counts as log lines (`per_line` types a line), most numerous first.
     std::vector<std::string> describe_types(size_t per_line = 12) const;

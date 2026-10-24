@@ -415,7 +415,13 @@ static void test_population(const content::ContentDb& db, const spawns::Captured
     spawns::GenericNpcs no_table(captured, nullptr, spawns::GenericConfig{});
     spawns::PopulationStats ns;
     const auto bare = spawns::select_data_spawns(*data, spawns::TemplateSource{&captured, &no_table}, area, ns);
-    CHECK(bare.size() == spawns_a.size() && ns.lost_by_verdict[spawns::Verdict::NoTable] > 0, "without npc_motion.tsv no generic NPC is made and the loader says so");
+    // (a crafting station is no pawn and needs no table: the stations the data places are made either way, so the creatures are what is compared)
+    const auto creatures = [](const std::vector<spawns::DataSpawn>& list) {
+        size_t n = 0;
+        for (const spawns::DataSpawn& s : list) n += s.open && s.open->category == "station" ? 0 : 1;
+        return n;
+    };
+    CHECK(creatures(bare) == creatures(spawns_a) && ns.lost_by_verdict[spawns::Verdict::NoTable] > 0, "without npc_motion.tsv no generic NPC is made and the loader says so");
 }
 // CoA.C | Y | B
 

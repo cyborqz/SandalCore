@@ -269,6 +269,35 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         resp->set_container(out.container);
         return grpc::Status::OK;
     }
+
+    grpc::Status PlaceStation(grpc::ServerContext* ctx, const adminv1::PlaceStationRequest* req, adminv1::PlaceStationResponse* resp) override {
+        if (auto s = authorize(ctx, "PlaceStation"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmStationResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.place_station(req->node(), req->plot(), req->station(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_node(out.node);
+        resp->set_plot(out.plot);
+        resp->set_station(out.station);
+        resp->set_actor(out.actor);
+        resp->set_building(out.building);
+        resp->mutable_position()->set_x(out.position.x);
+        resp->mutable_position()->set_y(out.position.y);
+        resp->mutable_position()->set_z(out.position.z);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status RemoveStation(grpc::ServerContext* ctx, const adminv1::RemoveStationRequest* req, adminv1::RemoveStationResponse* resp) override {
+        if (auto s = authorize(ctx, "RemoveStation"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmStationResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.remove_station(req->node(), req->plot(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_node(out.node);
+        resp->set_plot(out.plot);
+        resp->set_station(out.station);
+        return grpc::Status::OK;
+    }
 };
 
 WorldAdminServer::WorldAdminServer(GmTravel& travel, AdminQueue& queue, Options options)

@@ -893,6 +893,262 @@ func (x *GiveMoneyResponse) GetAdded() int64 {
 	return 0
 }
 
+type PlaceStationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`       // a city node: its record name, the same without Verra_, or its display name
+	Plot          string                 `protobuf:"bytes,2,opt,name=plot,proto3" json:"plot,omitempty"`       // a free service plot of the node at its level ("Plot_17_Service"; case does not count)
+	Station       string                 `protobuf:"bytes,3,opt,name=station,proto3" json:"station,omitempty"` // an artisan building's station: its asset or definition name ("CraftingStation_Weaponsmithing_T3"; case does not count)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlaceStationRequest) Reset() {
+	*x = PlaceStationRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlaceStationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlaceStationRequest) ProtoMessage() {}
+
+func (x *PlaceStationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlaceStationRequest.ProtoReflect.Descriptor instead.
+func (*PlaceStationRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *PlaceStationRequest) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *PlaceStationRequest) GetPlot() string {
+	if x != nil {
+		return x.Plot
+	}
+	return ""
+}
+
+func (x *PlaceStationRequest) GetStation() string {
+	if x != nil {
+		return x.Station
+	}
+	return ""
+}
+
+type PlaceStationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`         // the node's display name
+	Plot          string                 `protobuf:"bytes,2,opt,name=plot,proto3" json:"plot,omitempty"`         // the plot's record name
+	Station       string                 `protobuf:"bytes,3,opt,name=station,proto3" json:"station,omitempty"`   // the station's Blueprint
+	Actor         uint64                 `protobuf:"varint,4,opt,name=actor,proto3" json:"actor,omitempty"`      // the station's actor id
+	Building      string                 `protobuf:"bytes,5,opt,name=building,proto3" json:"building,omitempty"` // the artisan building whose station it is ("Construction_Active_Smithy_Building")
+	Position      *Position              `protobuf:"bytes,6,opt,name=position,proto3" json:"position,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlaceStationResponse) Reset() {
+	*x = PlaceStationResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlaceStationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlaceStationResponse) ProtoMessage() {}
+
+func (x *PlaceStationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlaceStationResponse.ProtoReflect.Descriptor instead.
+func (*PlaceStationResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PlaceStationResponse) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *PlaceStationResponse) GetPlot() string {
+	if x != nil {
+		return x.Plot
+	}
+	return ""
+}
+
+func (x *PlaceStationResponse) GetStation() string {
+	if x != nil {
+		return x.Station
+	}
+	return ""
+}
+
+func (x *PlaceStationResponse) GetActor() uint64 {
+	if x != nil {
+		return x.Actor
+	}
+	return 0
+}
+
+func (x *PlaceStationResponse) GetBuilding() string {
+	if x != nil {
+		return x.Building
+	}
+	return ""
+}
+
+func (x *PlaceStationResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+type RemoveStationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	Plot          string                 `protobuf:"bytes,2,opt,name=plot,proto3" json:"plot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveStationRequest) Reset() {
+	*x = RemoveStationRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveStationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveStationRequest) ProtoMessage() {}
+
+func (x *RemoveStationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveStationRequest.ProtoReflect.Descriptor instead.
+func (*RemoveStationRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RemoveStationRequest) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *RemoveStationRequest) GetPlot() string {
+	if x != nil {
+		return x.Plot
+	}
+	return ""
+}
+
+type RemoveStationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	Plot          string                 `protobuf:"bytes,2,opt,name=plot,proto3" json:"plot,omitempty"`
+	Station       string                 `protobuf:"bytes,3,opt,name=station,proto3" json:"station,omitempty"` // the Blueprint that stood there
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveStationResponse) Reset() {
+	*x = RemoveStationResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveStationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveStationResponse) ProtoMessage() {}
+
+func (x *RemoveStationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveStationResponse.ProtoReflect.Descriptor instead.
+func (*RemoveStationResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RemoveStationResponse) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *RemoveStationResponse) GetPlot() string {
+	if x != nil {
+		return x.Plot
+	}
+	return ""
+}
+
+func (x *RemoveStationResponse) GetStation() string {
+	if x != nil {
+		return x.Station
+	}
+	return ""
+}
+
 type GiveItemRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
@@ -904,7 +1160,7 @@ type GiveItemRequest struct {
 
 func (x *GiveItemRequest) Reset() {
 	*x = GiveItemRequest{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[14]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -916,7 +1172,7 @@ func (x *GiveItemRequest) String() string {
 func (*GiveItemRequest) ProtoMessage() {}
 
 func (x *GiveItemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[14]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -929,7 +1185,7 @@ func (x *GiveItemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GiveItemRequest.ProtoReflect.Descriptor instead.
 func (*GiveItemRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{14}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GiveItemRequest) GetCharacter() string {
@@ -966,7 +1222,7 @@ type GiveItemResponse struct {
 
 func (x *GiveItemResponse) Reset() {
 	*x = GiveItemResponse{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[15]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -978,7 +1234,7 @@ func (x *GiveItemResponse) String() string {
 func (*GiveItemResponse) ProtoMessage() {}
 
 func (x *GiveItemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[15]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -991,7 +1247,7 @@ func (x *GiveItemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GiveItemResponse.ProtoReflect.Descriptor instead.
 func (*GiveItemResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{15}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GiveItemResponse) GetCharacter() string {
@@ -1095,7 +1351,25 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x1a\n" +
 	"\bprevious\x18\x02 \x01(\x03R\bprevious\x12\x18\n" +
 	"\abalance\x18\x03 \x01(\x03R\abalance\x12\x14\n" +
-	"\x05added\x18\x04 \x01(\x03R\x05added\"Y\n" +
+	"\x05added\x18\x04 \x01(\x03R\x05added\"W\n" +
+	"\x13PlaceStationRequest\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x12\x12\n" +
+	"\x04plot\x18\x02 \x01(\tR\x04plot\x12\x18\n" +
+	"\astation\x18\x03 \x01(\tR\astation\"\xc3\x01\n" +
+	"\x14PlaceStationResponse\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x12\x12\n" +
+	"\x04plot\x18\x02 \x01(\tR\x04plot\x12\x18\n" +
+	"\astation\x18\x03 \x01(\tR\astation\x12\x14\n" +
+	"\x05actor\x18\x04 \x01(\x04R\x05actor\x12\x1a\n" +
+	"\bbuilding\x18\x05 \x01(\tR\bbuilding\x127\n" +
+	"\bposition\x18\x06 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\">\n" +
+	"\x14RemoveStationRequest\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x12\x12\n" +
+	"\x04plot\x18\x02 \x01(\tR\x04plot\"Y\n" +
+	"\x15RemoveStationResponse\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\x12\x12\n" +
+	"\x04plot\x18\x02 \x01(\tR\x04plot\x12\x18\n" +
+	"\astation\x18\x03 \x01(\tR\astation\"Y\n" +
 	"\x0fGiveItemRequest\x12\x1c\n" +
 	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x12\n" +
 	"\x04item\x18\x02 \x01(\tR\x04item\x12\x14\n" +
@@ -1105,7 +1379,7 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\x04item\x18\x02 \x01(\tR\x04item\x12\x1b\n" +
 	"\titem_guid\x18\x03 \x01(\x03R\bitemGuid\x12\x14\n" +
 	"\x05count\x18\x04 \x01(\x05R\x05count\x12\x1c\n" +
-	"\tcontainer\x18\x05 \x01(\tR\tcontainer2\xaf\x04\n" +
+	"\tcontainer\x18\x05 \x01(\tR\tcontainer2\xf4\x05\n" +
 	"\x11WorldAdminService\x12\\\n" +
 	"\vListPlayers\x12%.aoc.worldadmin.v1.ListPlayersRequest\x1a&.aoc.worldadmin.v1.ListPlayersResponse\x12Y\n" +
 	"\n" +
@@ -1113,7 +1387,9 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\bTeleport\x12\".aoc.worldadmin.v1.TeleportRequest\x1a#.aoc.worldadmin.v1.TeleportResponse\x12_\n" +
 	"\fSetMoveSpeed\x12&.aoc.worldadmin.v1.SetMoveSpeedRequest\x1a'.aoc.worldadmin.v1.SetMoveSpeedResponse\x12V\n" +
 	"\tGiveMoney\x12#.aoc.worldadmin.v1.GiveMoneyRequest\x1a$.aoc.worldadmin.v1.GiveMoneyResponse\x12S\n" +
-	"\bGiveItem\x12\".aoc.worldadmin.v1.GiveItemRequest\x1a#.aoc.worldadmin.v1.GiveItemResponseB4Z2aocrop/services/gen/aoc/worldadmin/v1;worldadminv1b\x06proto3"
+	"\bGiveItem\x12\".aoc.worldadmin.v1.GiveItemRequest\x1a#.aoc.worldadmin.v1.GiveItemResponse\x12_\n" +
+	"\fPlaceStation\x12&.aoc.worldadmin.v1.PlaceStationRequest\x1a'.aoc.worldadmin.v1.PlaceStationResponse\x12b\n" +
+	"\rRemoveStation\x12'.aoc.worldadmin.v1.RemoveStationRequest\x1a(.aoc.worldadmin.v1.RemoveStationResponseB4Z2aocrop/services/gen/aoc/worldadmin/v1;worldadminv1b\x06proto3"
 
 var (
 	file_aoc_worldadmin_v1_worldadmin_proto_rawDescOnce sync.Once
@@ -1129,24 +1405,28 @@ func file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP() []byte {
 	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescData
 }
 
-var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_aoc_worldadmin_v1_worldadmin_proto_goTypes = []any{
-	(*Position)(nil),             // 0: aoc.worldadmin.v1.Position
-	(*Player)(nil),               // 1: aoc.worldadmin.v1.Player
-	(*ListPlayersRequest)(nil),   // 2: aoc.worldadmin.v1.ListPlayersRequest
-	(*ListPlayersResponse)(nil),  // 3: aoc.worldadmin.v1.ListPlayersResponse
-	(*Place)(nil),                // 4: aoc.worldadmin.v1.Place
-	(*ListPlacesRequest)(nil),    // 5: aoc.worldadmin.v1.ListPlacesRequest
-	(*ListPlacesResponse)(nil),   // 6: aoc.worldadmin.v1.ListPlacesResponse
-	(*Point)(nil),                // 7: aoc.worldadmin.v1.Point
-	(*TeleportRequest)(nil),      // 8: aoc.worldadmin.v1.TeleportRequest
-	(*TeleportResponse)(nil),     // 9: aoc.worldadmin.v1.TeleportResponse
-	(*SetMoveSpeedRequest)(nil),  // 10: aoc.worldadmin.v1.SetMoveSpeedRequest
-	(*SetMoveSpeedResponse)(nil), // 11: aoc.worldadmin.v1.SetMoveSpeedResponse
-	(*GiveMoneyRequest)(nil),     // 12: aoc.worldadmin.v1.GiveMoneyRequest
-	(*GiveMoneyResponse)(nil),    // 13: aoc.worldadmin.v1.GiveMoneyResponse
-	(*GiveItemRequest)(nil),      // 14: aoc.worldadmin.v1.GiveItemRequest
-	(*GiveItemResponse)(nil),     // 15: aoc.worldadmin.v1.GiveItemResponse
+	(*Position)(nil),              // 0: aoc.worldadmin.v1.Position
+	(*Player)(nil),                // 1: aoc.worldadmin.v1.Player
+	(*ListPlayersRequest)(nil),    // 2: aoc.worldadmin.v1.ListPlayersRequest
+	(*ListPlayersResponse)(nil),   // 3: aoc.worldadmin.v1.ListPlayersResponse
+	(*Place)(nil),                 // 4: aoc.worldadmin.v1.Place
+	(*ListPlacesRequest)(nil),     // 5: aoc.worldadmin.v1.ListPlacesRequest
+	(*ListPlacesResponse)(nil),    // 6: aoc.worldadmin.v1.ListPlacesResponse
+	(*Point)(nil),                 // 7: aoc.worldadmin.v1.Point
+	(*TeleportRequest)(nil),       // 8: aoc.worldadmin.v1.TeleportRequest
+	(*TeleportResponse)(nil),      // 9: aoc.worldadmin.v1.TeleportResponse
+	(*SetMoveSpeedRequest)(nil),   // 10: aoc.worldadmin.v1.SetMoveSpeedRequest
+	(*SetMoveSpeedResponse)(nil),  // 11: aoc.worldadmin.v1.SetMoveSpeedResponse
+	(*GiveMoneyRequest)(nil),      // 12: aoc.worldadmin.v1.GiveMoneyRequest
+	(*GiveMoneyResponse)(nil),     // 13: aoc.worldadmin.v1.GiveMoneyResponse
+	(*PlaceStationRequest)(nil),   // 14: aoc.worldadmin.v1.PlaceStationRequest
+	(*PlaceStationResponse)(nil),  // 15: aoc.worldadmin.v1.PlaceStationResponse
+	(*RemoveStationRequest)(nil),  // 16: aoc.worldadmin.v1.RemoveStationRequest
+	(*RemoveStationResponse)(nil), // 17: aoc.worldadmin.v1.RemoveStationResponse
+	(*GiveItemRequest)(nil),       // 18: aoc.worldadmin.v1.GiveItemRequest
+	(*GiveItemResponse)(nil),      // 19: aoc.worldadmin.v1.GiveItemResponse
 }
 var file_aoc_worldadmin_v1_worldadmin_proto_depIdxs = []int32{
 	0,  // 0: aoc.worldadmin.v1.Player.position:type_name -> aoc.worldadmin.v1.Position
@@ -1156,23 +1436,28 @@ var file_aoc_worldadmin_v1_worldadmin_proto_depIdxs = []int32{
 	7,  // 4: aoc.worldadmin.v1.TeleportRequest.point:type_name -> aoc.worldadmin.v1.Point
 	0,  // 5: aoc.worldadmin.v1.TeleportResponse.from:type_name -> aoc.worldadmin.v1.Position
 	0,  // 6: aoc.worldadmin.v1.TeleportResponse.to:type_name -> aoc.worldadmin.v1.Position
-	2,  // 7: aoc.worldadmin.v1.WorldAdminService.ListPlayers:input_type -> aoc.worldadmin.v1.ListPlayersRequest
-	5,  // 8: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
-	8,  // 9: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
-	10, // 10: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
-	12, // 11: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
-	14, // 12: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
-	3,  // 13: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
-	6,  // 14: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
-	9,  // 15: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
-	11, // 16: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
-	13, // 17: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
-	15, // 18: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
-	13, // [13:19] is the sub-list for method output_type
-	7,  // [7:13] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	0,  // 7: aoc.worldadmin.v1.PlaceStationResponse.position:type_name -> aoc.worldadmin.v1.Position
+	2,  // 8: aoc.worldadmin.v1.WorldAdminService.ListPlayers:input_type -> aoc.worldadmin.v1.ListPlayersRequest
+	5,  // 9: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
+	8,  // 10: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
+	10, // 11: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
+	12, // 12: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
+	18, // 13: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
+	14, // 14: aoc.worldadmin.v1.WorldAdminService.PlaceStation:input_type -> aoc.worldadmin.v1.PlaceStationRequest
+	16, // 15: aoc.worldadmin.v1.WorldAdminService.RemoveStation:input_type -> aoc.worldadmin.v1.RemoveStationRequest
+	3,  // 16: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
+	6,  // 17: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
+	9,  // 18: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
+	11, // 19: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
+	13, // 20: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
+	19, // 21: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
+	15, // 22: aoc.worldadmin.v1.WorldAdminService.PlaceStation:output_type -> aoc.worldadmin.v1.PlaceStationResponse
+	17, // 23: aoc.worldadmin.v1.WorldAdminService.RemoveStation:output_type -> aoc.worldadmin.v1.RemoveStationResponse
+	16, // [16:24] is the sub-list for method output_type
+	8,  // [8:16] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_aoc_worldadmin_v1_worldadmin_proto_init() }
@@ -1190,7 +1475,7 @@ func file_aoc_worldadmin_v1_worldadmin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc), len(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

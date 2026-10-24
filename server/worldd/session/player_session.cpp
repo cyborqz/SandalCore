@@ -10,6 +10,7 @@
 
 #include "bootstrap/character_setup.h"
 #include "combat/combat_world.h"
+#include "crafting/station.h"
 #include "content/content_db.h"
 #include "dialogue/talk.h"
 #include "protocol/repl/ability_rpc.h"
@@ -3094,6 +3095,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (!a) return ignore("it is no component of an actor of this world");
     if (a->kind == world::ActorKind::Mount) return on_mount_interact(conn, *a, now);   // getting on
     if (a->kind == world::ActorKind::Gatherable) return on_gather_interact(conn, *a, now);   // Gathering stage 2: a resource node
+    if (a->kind == world::ActorKind::Station) return on_station_interact(conn, *a, now);     // crafting, step 0: a crafting or processing station
     if (view_->state_of(a->id) != world::ClientState::Awake) return ignore("the client does not have that actor open");
     const GoodPosition at = checker_.good();
     const double distance = std::hypot(a->x - at.x, a->y - at.y);
@@ -3138,6 +3140,37 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     const FIntrepidNetworkGUID npc = a->actor.guid;
     spdlog::log(level_for(vendor_logged_), "[session] {}: opens the window of {} ({}, {} listing(s) in {} tab(s))", name(), def->label, def->name, def->listings, def->tabs);
     queue("ClientOpenVendor", [merch, npc](bootstrap::PlayerBootstrap& pb) { return pb.open_vendor(merch, npc); }, conn, /*must_build=*/true);
+}
+
+// -- crafting, step 0: the stations --------------------------------------------------------------------------------------------------------------------------
+
+void PlayerSession::on_station_interact(Connection& conn, const world::WorldActor& a, Clock::time_point /*now*/) {
+    constexpr size_t kStationLogged = 30;   // a player tries a handful of stations: each click is a line in the log, up to this many of each kind
+    const auto ignore = [&](const std::string& why) {
+        ++interact_ignored_;
+        spdlog::log(level_for(station_ignored_logged_, kStationLogged), "[session] {}: a click on the station {} is ignored: {}", name(), a.station.name, why);
+    };
+    if (view_->state_of(a.id) != world::ClientState::Awake) return ignore("the client does not have that station open");
+    const GoodPosition at = checker_.good();
+    const double dx = a.x - at.x, dy = a.y - at.y, dz = a.z - at.z;
+    const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (distance >= crafting::kStationRangeCm) {
+        return ignore("the station is " + std::to_string(static_cast<int>(distance / 100.0)) + " m away (a window opens within " + std::to_string(static_cast<int>(crafting::kStationRangeCm / 100.0)) + " m)");
+    }
+    if (!room_for(1)) return;
+    const protocol::repl::StationTax tax = crafting::station_tax(a.station.tax_tag);
+    const FIntrepidNetworkGUID guid = a.actor.guid;
+    ++station_opens_;
+    // what this step cannot put in the window is said once per kind: the recipes, prices and certification are the client's own; the player's known recipes (OwnerInfo) and jobs are not sent yet
+    if (station_told_.insert("known recipes").second) {
+        spdlog::info("[session] {}: a station window opens with the client's own recipe lists: the server sends no known recipes and no jobs yet (told once)", name());
+    }
+    if (a.station.def == 0 && station_told_.insert("no def " + a.station.name).second) {
+        spdlog::info("[session] {}: the station {} has no definition in the data: its window opens with the client's own recipes and the default tax", name(), a.station.name);
+    }
+    spdlog::log(level_for(station_logged_, kStationLogged), "[session] {}: opens the window of {} in node {} ({} m away, tax {:.2f} of the price, the owning node keeps {:.2f}; no jobs yet)", name(), a.station.name,
+                a.station.node, static_cast<int>(distance / 100.0), tax.percent, tax.owning_share);
+    queue("ClientOpenCraftingStationUI", [guid, tax](bootstrap::PlayerBootstrap& pb) { return pb.open_station(guid, tax); }, conn, /*must_build=*/true);
 }
 
 // -- quests, slice 0: the talking window --------------------------------------------------------------------------------------------------------------------

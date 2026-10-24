@@ -654,6 +654,7 @@ public:
     uint64_t vendor_actor() const { return vendor_actor_; }
     int64_t  vendor_def() const { return vendor_def_; }
     size_t   vendor_opens() const { return vendor_opens_; }
+    size_t   station_opens() const { return station_opens_; }
     size_t   vendor_purchases() const { return vendor_purchases_; }
     size_t   vendor_sales() const { return vendor_sales_; }
     size_t   vendor_repairs() const { return vendor_repairs_; }
@@ -924,6 +925,9 @@ private:
     void on_client_load(Connection& conn, Clock::time_point now);
     // ---- plan E1 ----
     void on_interact(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Crafting, step 0: a click on a station's interactable opens its window (ClientOpenCraftingStationUI, the service tax, none of the player's jobs yet) when the station is open for this
+    /// client and within kStationRangeCm of the player.
+    void on_station_interact(Connection& conn, const world::WorldActor& station, Clock::time_point now);
     void on_vendor_purchase(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Vendors, step 2: the client opens the shop a line of its conversation names (ServerOpenVendor): the NPC it talks to, a shop of that conversation.
     void on_open_vendor(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
@@ -1297,6 +1301,8 @@ private:
     RequestBudget                  tax_budget_{kTaxBurst, kTaxInterval};
     size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;
     size_t vendor_opens_ = 0, vendor_purchases_ = 0, vendor_refused_ = 0, interact_ignored_ = 0, vendor_logged_ = 0, interact_logged_ = 0;
+    size_t station_opens_ = 0, station_logged_ = 0, station_ignored_logged_ = 0;   // crafting, step 0: windows opened, log lines said
+    std::set<std::string> station_told_;              // what was said once about a station kind
     size_t vendor_sales_ = 0, vendor_repairs_ = 0, items_destroyed_ = 0;
     bool   vendor_unreadable_logged_ = false, vendor_sale_logged_ = false;
     // quests, slice 0: the talking window

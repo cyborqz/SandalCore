@@ -23,12 +23,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorldAdminService_ListPlayers_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/ListPlayers"
-	WorldAdminService_ListPlaces_FullMethodName   = "/aoc.worldadmin.v1.WorldAdminService/ListPlaces"
-	WorldAdminService_Teleport_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/Teleport"
-	WorldAdminService_SetMoveSpeed_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/SetMoveSpeed"
-	WorldAdminService_GiveMoney_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/GiveMoney"
-	WorldAdminService_GiveItem_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
+	WorldAdminService_ListPlayers_FullMethodName   = "/aoc.worldadmin.v1.WorldAdminService/ListPlayers"
+	WorldAdminService_ListPlaces_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/ListPlaces"
+	WorldAdminService_Teleport_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/Teleport"
+	WorldAdminService_SetMoveSpeed_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/SetMoveSpeed"
+	WorldAdminService_GiveMoney_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/GiveMoney"
+	WorldAdminService_GiveItem_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
+	WorldAdminService_PlaceStation_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/PlaceStation"
+	WorldAdminService_RemoveStation_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/RemoveStation"
 )
 
 // WorldAdminServiceClient is the client API for WorldAdminService service.
@@ -66,6 +68,12 @@ type WorldAdminServiceClient interface {
 	// else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
 	// the whole grant (nothing is given, the answer says why).
 	GiveItem(ctx context.Context, in *GiveItemRequest, opts ...grpc.CallOption) (*GiveItemResponse, error)
+	// Crafting, step 0. Puts the station of an artisan building on a free service plot of a Village or a Town (the mayor's buildings do not exist yet): the station's actor stands where the
+	// building would have put it, and stays until RemoveStation, until the node drops below a Village, or until worldd restarts (placed stations are not saved). NotFound for a node,
+	// plot or station the world does not know; FailedPrecondition for a node below Village, a plot that is not free or already holds a station.
+	PlaceStation(ctx context.Context, in *PlaceStationRequest, opts ...grpc.CallOption) (*PlaceStationResponse, error)
+	// Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
+	RemoveStation(ctx context.Context, in *RemoveStationRequest, opts ...grpc.CallOption) (*RemoveStationResponse, error)
 }
 
 // -- CoA & C | Y | B --
@@ -138,6 +146,26 @@ func (c *worldAdminServiceClient) GiveItem(ctx context.Context, in *GiveItemRequ
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) PlaceStation(ctx context.Context, in *PlaceStationRequest, opts ...grpc.CallOption) (*PlaceStationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlaceStationResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_PlaceStation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) RemoveStation(ctx context.Context, in *RemoveStationRequest, opts ...grpc.CallOption) (*RemoveStationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveStationResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_RemoveStation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldAdminServiceServer is the server API for WorldAdminService service.
 // All implementations must embed UnimplementedWorldAdminServiceServer
 // for forward compatibility.
@@ -173,6 +201,12 @@ type WorldAdminServiceServer interface {
 	// else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
 	// the whole grant (nothing is given, the answer says why).
 	GiveItem(context.Context, *GiveItemRequest) (*GiveItemResponse, error)
+	// Crafting, step 0. Puts the station of an artisan building on a free service plot of a Village or a Town (the mayor's buildings do not exist yet): the station's actor stands where the
+	// building would have put it, and stays until RemoveStation, until the node drops below a Village, or until worldd restarts (placed stations are not saved). NotFound for a node,
+	// plot or station the world does not know; FailedPrecondition for a node below Village, a plot that is not free or already holds a station.
+	PlaceStation(context.Context, *PlaceStationRequest) (*PlaceStationResponse, error)
+	// Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
+	RemoveStation(context.Context, *RemoveStationRequest) (*RemoveStationResponse, error)
 	mustEmbedUnimplementedWorldAdminServiceServer()
 }
 
@@ -200,6 +234,12 @@ func (UnimplementedWorldAdminServiceServer) GiveMoney(context.Context, *GiveMone
 }
 func (UnimplementedWorldAdminServiceServer) GiveItem(context.Context, *GiveItemRequest) (*GiveItemResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GiveItem not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) PlaceStation(context.Context, *PlaceStationRequest) (*PlaceStationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PlaceStation not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) RemoveStation(context.Context, *RemoveStationRequest) (*RemoveStationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveStation not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) mustEmbedUnimplementedWorldAdminServiceServer() {}
 func (UnimplementedWorldAdminServiceServer) testEmbeddedByValue()                           {}
@@ -332,6 +372,42 @@ func _WorldAdminService_GiveItem_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_PlaceStation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlaceStationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).PlaceStation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_PlaceStation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).PlaceStation(ctx, req.(*PlaceStationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_RemoveStation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveStationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).RemoveStation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_RemoveStation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).RemoveStation(ctx, req.(*RemoveStationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldAdminService_ServiceDesc is the grpc.ServiceDesc for WorldAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -362,6 +438,14 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GiveItem",
 			Handler:    _WorldAdminService_GiveItem_Handler,
+		},
+		{
+			MethodName: "PlaceStation",
+			Handler:    _WorldAdminService_PlaceStation_Handler,
+		},
+		{
+			MethodName: "RemoveStation",
+			Handler:    _WorldAdminService_RemoveStation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

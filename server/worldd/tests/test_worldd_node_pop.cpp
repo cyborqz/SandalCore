@@ -163,6 +163,9 @@ static std::unique_ptr<world::CityNodes> fresh_nodes(bool with_plots = false) {
     return nodes;
 }
 
+/// What the nodes' people hold in a registry: their NPCs and (crafting, step 0) their crafting stations, which the same selection places.
+static size_t people_of(const world::ActorRegistry& registry) { return registry.count(world::ActorKind::Npc) + registry.count(world::ActorKind::Station); }
+
 static void set_level(world::CityNodes& nodes, int64_t guid, int level) {
     world::LiveNode ln;
     ln.guid = guid;
@@ -635,7 +638,7 @@ static void test_walkers() {
     }
     const Count& joeva = by_node[kJoeva];
     const Count& halcyon = by_node[kHalcyon];
-    CHECK(joeva.total == 603 && halcyon.total == 350, "Joeva (Town) has 603 NPCs and Halcyon (Village) 350 with the workshops");
+    CHECK(joeva.total == 624 && halcyon.total == 371, "Joeva (Town) has 603 NPCs and 21 crafting stations and Halcyon (Village) 350 and 21 with the workshops");
     CHECK(joeva.patrol > 0 && joeva.guards_patrol > 0 && joeva.wander > 0 && joeva.stand > 0, "Joeva has people that walk a route, guards among them, people that wander and people that stand");
     CHECK(joeva.workers_walk == 16 && joeva.farmers_stand == 2 && halcyon.workers_walk == 4, "the workshops' people: 16 workers walk and 2 farmers stand at Joeva, 4 workers walk at Halcyon");
     CHECK(joeva.carriers_walk == 0 && joeva.guards_patrol == 1 && halcyon.carriers_walk == 2 && halcyon.guards_patrol == 2, "Joeva's carriers stand (its guard walks); Halcyon's 2 carriers and 2 guards walk their routes");
@@ -657,14 +660,14 @@ static void test_manager() {
     for (const world::CityNodeInfo& n : nodes->nodes()) {
         if (const tests::NodePopCase* c = golden_of(n.name, nodes->level_of(n.guid))) want += c->spawned_layout + c->spawned_building;
     }
-    CHECK(made == want && rig.pops->made() == want && rig.registry.count(world::ActorKind::Npc) == want && rig.spawned.size() == want, "start: every node inside the area has the oracle's number of NPCs at its seed level");
+    CHECK(made == want && rig.pops->made() == want && people_of(rig.registry) == want && rig.spawned.size() == want, "start: every node inside the area has the oracle's number of NPCs at its seed level");
     CHECK(rig.pops->nodes() == 10 && rig.pops->start(0.0) == 0, "10 nodes inside the Riverlands; started once");
     CHECK(rig.npcs_of(kJoeva) == golden_npcs("Verra_RVR_Joeva", 4) && rig.npcs_of(kHalcyon) == golden_npcs("Verra_RVR_Halcyon", 3) && rig.npcs_of(kWinstead) == golden_npcs("Verra_RVR_Winstead", 0),
           "Joeva (Town), Halcyon (Village) and Winstead (Wilderness) have their level's people");
     bool tagged = true, in_range = true, grounding = true;
     size_t by_data = 0, by_terrain = 0;
     rig.registry.for_each([&](const world::WorldActor& a) {
-        tagged = tagged && a.npc.spawn_ref >= spawns::kNodeRefBase && a.npc.source == world::Source::Data && a.kind == world::ActorKind::Npc;
+        tagged = tagged && a.npc.spawn_ref >= spawns::kNodeRefBase && a.npc.source == world::Source::Data && (a.kind == world::ActorKind::Npc || a.kind == world::ActorKind::Station);
         in_range = in_range && a.npc.home_x == a.x && a.npc.home_y == a.y;
         grounding = grounding && a.npc.ground_by_data != a.npc.ground_by_terrain;   // (one or the other)
         by_data += a.npc.ground_by_data ? 1 : 0;
@@ -702,7 +705,7 @@ static void test_manager() {
     for (size_t i = despawned_before; i < rig.despawned.size(); ++i) hook_ids = hook_ids && b.count(rig.despawned[i]) && !a.count(rig.despawned[i]);
     CHECK(leavers_gone && stayers_there && hook_ids, "the NPCs that left are out of the registry; the ones that stay keep their actors and their references");
     CHECK(as_set(rig.pops->actors_of(kHalcyon)) == as_set(halcyon_before), "Halcyon's people were not touched");
-    CHECK(rig.registry.count(world::ActorKind::Npc) == want - golden_npcs("Verra_RVR_Joeva", 4) + golden_npcs("Verra_RVR_Joeva", 3), "the registry holds exactly the nodes' people (nothing leaked, nothing doubled)");
+    CHECK(people_of(rig.registry) == want - golden_npcs("Verra_RVR_Joeva", 4) + golden_npcs("Verra_RVR_Joeva", 3), "the registry holds exactly the nodes' people (nothing leaked, nothing doubled)");
 
     // a respawn: the point that stays comes back, the one the level took away does not
     uint64_t gone_id = 0, stay_id = 0;
@@ -714,13 +717,13 @@ static void test_manager() {
     CHECK(rig.pops->respawn(0x80000000u + 4000000u, 3.0) == 0 && rig.pops->respawn(5, 3.0) == 0, "a reference that is no slot, or not a node's, is nothing");
     const world::WorldActor stayer = *rig.registry.find(stay_id);
     rig.registry.remove(stay_id);   // (it died and its corpse went)
-    const size_t npcs_without = rig.registry.count(world::ActorKind::Npc);
+    const size_t npcs_without = people_of(rig.registry);
     const uint64_t back = rig.pops->respawn(ref_of[stay_id], 4.0);
     const world::WorldActor* b2 = rig.registry.find(back);
-    CHECK(back != 0 && b2 && rig.registry.count(world::ActorKind::Npc) == npcs_without + 1 && b2->npc.asset_guid == stayer.npc.asset_guid && b2->npc.instance_guid == stayer.npc.instance_guid &&
+    CHECK(back != 0 && b2 && people_of(rig.registry) == npcs_without + 1 && b2->npc.asset_guid == stayer.npc.asset_guid && b2->npc.instance_guid == stayer.npc.instance_guid &&
               b2->npc.spawn_ref == ref_of[stay_id] && b2->x == stayer.x && b2->y == stayer.y && b2->npc.level == stayer.npc.level,
           "the NPC of a point that stays comes back from the node's selection: the same Blueprint, place, level and reference");
-    CHECK(rig.pops->respawned() == 1 && rig.pops->entry_of(kJoeva)->npcs == after.size(), "(counted; the node's count is whole again)");
+    CHECK(rig.pops->respawned() == 1 && rig.pops->entry_of(kJoeva)->npcs + rig.pops->entry_of(kJoeva)->stations == after.size(), "(counted; the node's count is whole again)");
 
     // Joeva down to Wilderness, then back up
     CHECK(rig.pops->tick(5.0) == 0, "(nothing to follow)");
@@ -880,7 +883,7 @@ static HeightKept height_kept(const world::ActorRegistry& reg, const std::map<ui
     HeightKept h;
     reg.for_each([&](const world::WorldActor& a) {
         const auto it = data_z.find(a.id);
-        if (a.kind != world::ActorKind::Npc || it == data_z.end()) return;
+        if ((a.kind != world::ActorKind::Npc && a.kind != world::ActorKind::Station) || it == data_z.end()) return;   // (the stations stand on the ground like the people)
         ++h.npcs;
         const double d = std::fabs(a.z - it->second);
         h.worst = std::max(h.worst, d);
@@ -933,7 +936,7 @@ static void test_pending() {
     const size_t made = rig.pops->start(0.0);
     const auto waiting_now = [&] {
         size_t w = 0;
-        reg->for_each([&](const world::WorldActor& a) { w += a.kind == world::ActorKind::Npc && !nav->ready_at(a.x, a.y) ? 1 : 0; });
+        reg->for_each([&](const world::WorldActor& a) { w += (a.kind == world::ActorKind::Npc || a.kind == world::ActorKind::Station) && !nav->ready_at(a.x, a.y) ? 1 : 0; });
         return w;
     };
     const size_t waiting = waiting_now();
@@ -1180,9 +1183,9 @@ static void test_world() {
         spawns::NodePopStats st;
         return select(*nodes, *g_env.wire, *joeva, level, st, circle).size();
     };
-    const size_t before_npcs = world.registry().count(world::ActorKind::Npc);
+    const size_t before_npcs = people_of(world.registry());
     const size_t made = world.start_node_people(cfg);
-    CHECK(made == circle_npcs(4) && made > 400 && world.node_people() && world.registry().count(world::ActorKind::Npc) == before_npcs + made,
+    CHECK(made == circle_npcs(4) && made > 400 && world.node_people() && people_of(world.registry()) == before_npcs + made,
           "start_node_people: the circle holds Joeva only (a Town): the oracle's number of NPCs, added to the area's");
     CHECK(world.start_node_people(cfg) == 0, "once");
     size_t vendors = 0, with_ref = 0;
@@ -1223,7 +1226,7 @@ static void test_world() {
     set_level(*nodes, kJoeva, 3);
     world.tick_world(10.0);
     const spawns::NodePopulations::Entry* e = world.node_people()->entry_of(kJoeva);
-    CHECK(e && e->level == 3 && e->npcs == circle_npcs(3) && world.registry().count(world::ActorKind::Npc) == before_npcs + e->npcs,
+    CHECK(e && e->level == 3 && e->npcs + e->stations == circle_npcs(3) && people_of(world.registry()) == before_npcs + e->npcs + e->stations,
           "tick_world follows Joeva's level change: Village's people, the registry holds the area's NPCs and these");
     if (have_roads) {
         const auto [bad, joeva_roads] = tier_expectations(3);
@@ -1518,7 +1521,7 @@ static void test_bowl_world() {
     std::vector<double> overs;
     std::vector<std::array<double, 3>> people;   // x, y, over
     world.registry().for_each([&](const world::WorldActor& a) {
-        if (a.npc.spawn_ref < spawns::kNodeRefBase) return;
+        if (a.kind != world::ActorKind::Npc || a.npc.spawn_ref < spawns::kNodeRefBase) return;   // (the floor is worked out from the people; the stations stand on it)
         double t = 0;
         if (!world.nav()->terrain_height(a.npc.home_x, a.npc.home_y, &t)) return;   // (a person outside the extracted terrain is no part of the floor)
         const double over = a.npc.home_z - t;

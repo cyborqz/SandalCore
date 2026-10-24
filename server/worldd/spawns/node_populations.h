@@ -82,6 +82,7 @@ public:
         int64_t  node = 0;
         int      level = -1;           // the level the people show (-1: never built)
         size_t   npcs = 0;             // NPCs that exist now (alive or a corpse that is lying there)
+        size_t   stations = 0;         // crafting stations that exist now (crafting, step 0)
         size_t   desired = 0;          // the points the selection has
         size_t   by_source[2] = {0, 0};   // desired, layout and building
     };

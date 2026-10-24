@@ -12,6 +12,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -261,6 +262,15 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             spdlog::info("[world] shops: {} vendor defs, {} NPC links, {} priced listings; open: {}", shops_->defs(), shops_->links(), shops_->priced_rows(), shops_->open_shops().size());
         } else {
             spdlog::warn("[world] the town shops do not load, so the shopkeepers answer as before: {}", ve);
+        }
+    }
+    {   // crafting, step 0: the station definitions; a content.db of an older version has none and the stations stand with the default tax
+        std::string se;
+        if (auto data = content_->craft_station_data(se)) {
+            stations_.emplace(std::move(*data));
+            spdlog::info("[world] stations: {} definitions, {} assets that are a station", stations_->defs.size(), stations_->asset_defs.size());
+        } else {
+            spdlog::warn("[world] the station definitions do not load, so the stations open with the default tax: {}", se);
         }
     }
     // Gathering stage 3, "Hunting": the creatures whose asset names a Hunting_<kind> interaction get the hunting interactable (spawns/generic_npc.h); an older content.db has none
@@ -637,12 +647,217 @@ void PlayerWorld::log_window(double now_seconds, const nav::WindowStats& w) {
                  ns.moving_now, w.chunk_loads, w.chunk_unloads, w.load_failures, w.retries, w.deferred_by_cap, w.evicted_for_room, w.plans, w.plans_skipped);
 }
 
+void PlayerWorld::finish_station(uint64_t id, const world::CityNodeInfo& node, int64_t plot, int64_t building) {
+    describe_station(id, node, plot, building);
+    if (!npcs_) return;   // no ground: the station stands where the data put it
+    if (const world::WorldActor* placed = registry_.find(id)) {
+        npc::NpcMotionSetup post;
+        post.ambient = npc::Ambient::Stationary;
+        post.foot_offset = 0.0;
+        post.home_yaw = placed->yaw_degrees;
+        npcs_->add(id, post);
+    }
+}
+
+void PlayerWorld::describe_station(uint64_t id, const world::CityNodeInfo& node, int64_t plot, int64_t building) {
+    registry_.modify(id, world::Change::State, [&](world::WorldActor& w) {
+        w.station.node = node.guid;
+        w.station.plot = plot;
+        w.station.asset = w.npc.asset_guid;
+        w.station.building = building;
+        if (building == 0 && plot != 0 && node_wire_ && city_nodes_) {
+            for (const world::PlotRow& row : node_wire_->plot_rows_of(node.guid, city_nodes_->level_of(node.guid))) {
+                if (row.plot == plot) {
+                    w.station.building = row.building;
+                    break;
+                }
+            }
+        }
+        if (stations_) {
+            if (const content::CraftStationDef* d = stations_->def_of_asset(w.npc.asset_guid)) {
+                w.station.def = d->guid;
+                w.station.tax_tag = d->tax_tag;
+                w.station.processing = d->processing;
+                w.station.tier = d->max_tier >= 0 ? d->max_tier + 1 : 0;
+            }
+        }
+        for (protocol::repl::Subobject& s : w.actor.subobjects) {
+            if (!s.obj.schema || std::string(s.obj.schema->name) != "UAoCNodePlotComponent") continue;
+            s.obj.state.set(*s.obj.schema, "NodeRecordGuid", protocol::repl::Value::i64(node.guid));
+            s.obj.state.set(*s.obj.schema, "PlotRecordGuid", protocol::repl::Value::i64(plot));
+            s.obj.state.set(*s.obj.schema, "BuildingRecordGuid", protocol::repl::Value::i64(w.station.building));
+        }
+    });
+}
+
+namespace {
+
+bool same_text(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    }
+    return true;
+}
+
+/// The plots of a node that are free (no building stands on them, none is being built).
+std::vector<const world::PlotRow*> free_plots(const std::vector<world::PlotRow>& rows) {
+    std::vector<const world::PlotRow*> out;
+    for (const world::PlotRow& r : rows) {
+        if (r.state == 0 && !r.pre_construct) out.push_back(&r);
+    }
+    return out;
+}
+
+std::string joined(const std::vector<std::string>& names, size_t limit) {
+    std::string out;
+    for (size_t i = 0; i < names.size() && i < limit; ++i) out += (out.empty() ? "" : ", ") + names[i];
+    if (names.size() > limit) out += ", ...";
+    return out;
+}
+
+}  // namespace
+
+PlayerWorld::StationResult PlayerWorld::place_station(const std::string& node_name, const std::string& plot_name, const std::string& station_name, const std::string& by) {
+    StationResult r;
+    const auto fail = [&](StationStatus s, std::string m) {
+        r.status = s;
+        r.message = std::move(m);
+        spdlog::info("[stations] {}: place {} {} {}: refused: {}", by, node_name, plot_name, station_name, r.message);
+        return r;
+    };
+    if (!city_nodes_ || !node_wire_ || !node_pop_data_ || !area_report_ || !area_report_->data || !captured_ || !generic_ || !node_pops_) {
+        return fail(StationStatus::Refused, "the towns' people are not running (worldd needs the area, the nodes and their people)");
+    }
+    if (node_name.empty() || plot_name.empty() || station_name.empty()) return fail(StationStatus::Invalid, "a node, a plot and a station are needed");
+    const world::CityNodeInfo* node = city_nodes_->by_name(node_name);
+    if (!node) return fail(StationStatus::NotFound, "no city node is named \"" + node_name + "\" (worldctl places lists them)");
+    const int level = city_nodes_->level_of(node->guid);
+    if (level < 3) return fail(StationStatus::Refused, node->display_name + " is a " + std::string(spawns::node_level_name(level)) + ": only a Village or a Town has free service plots");
+    const std::vector<world::PlotRow> rows = node_wire_->plot_rows_of(node->guid, level);
+    const world::PlotRow* plot = nullptr;
+    for (const world::PlotRow& row : rows) {
+        if (same_text(row.name, plot_name)) {
+            plot = &row;
+            break;
+        }
+    }
+    if (!plot) {
+        std::vector<std::string> names;
+        for (const world::PlotRow* p : free_plots(rows)) names.push_back(p->name);
+        return fail(StationStatus::NotFound, node->display_name + " has no plot named \"" + plot_name + "\" (its free plots: " + joined(names, 20) + ")");
+    }
+    if (plot->state != 0 || plot->pre_construct) return fail(StationStatus::Refused, plot->name + " of " + node->display_name + " is not free (a building stands on it)");
+    if (placed_stations_.count({node->guid, plot->plot})) return fail(StationStatus::Refused, plot->name + " of " + node->display_name + " holds a placed station already (worldctl remove-station takes it off)");
+    const spawns::NodeSite site = spawns::node_site_of(*city_nodes_, *node_wire_, *node, level);
+    const std::vector<int64_t> buildings = node_wire_->plot_buildings(plot->plot);
+    const spawns::TemplateSource templates{&*captured_, &*generic_};
+    int64_t building = 0;
+    std::string why;
+    const auto spawn = spawns::select_station_on_plot(*area_report_->data, templates, *node_pop_data_, site, *plot, buildings, station_name, building, why);
+    if (!spawn) {
+        return fail(StationStatus::NotFound, why + " (the stations the plot's buildings have: " + joined(spawns::stations_on_plot(*area_report_->data, *node_pop_data_, site, buildings), 40) + ")");
+    }
+    std::string error;
+    auto w = spawns::make_data_actor(spawn->spawn, [this] { return guids_.next(); }, server_id_, world_clock_, nullptr, error);
+    if (!w) return fail(StationStatus::Refused, "the station could not be made: " + error);
+    w->station.placed = true;
+    w->npc.spawn_ref = 0;
+    w->npc.ground_by_data = true;
+    const uint64_t id = w->id;
+    const std::string blueprint = w->station.name;
+    if (!registry_.add(std::move(*w))) return fail(StationStatus::Refused, "the registry refused the station's actor");
+    finish_station(id, *node, plot->plot, building);
+    placed_stations_[{node->guid, plot->plot}] = id;
+    placed_seen_version_ = city_nodes_->version();
+    const world::WorldActor* made = registry_.find(id);
+    r.actor = id;
+    r.node = node->display_name;
+    r.plot = plot->name;
+    r.station = blueprint;
+    r.building = node_wire_->building_name(plot->plot, building);
+    if (made) {
+        r.x = made->x;
+        r.y = made->y;
+        r.z = made->z;
+    }
+    spdlog::info("[stations] {}: placed {} (actor {}) on {} of {} at ({:.0f}, {:.0f}, {:.0f}), a station of {}; it stays until removed, until the node drops below a Village, or until worldd stops", by, blueprint, id,
+                 plot->name, node->display_name, r.x, r.y, r.z, r.building);
+    return r;
+}
+
+PlayerWorld::StationResult PlayerWorld::remove_station(const std::string& node_name, const std::string& plot_name, const std::string& by) {
+    StationResult r;
+    const auto fail = [&](StationStatus s, std::string m) {
+        r.status = s;
+        r.message = std::move(m);
+        spdlog::info("[stations] {}: remove {} {}: refused: {}", by, node_name, plot_name, r.message);
+        return r;
+    };
+    if (!city_nodes_) return fail(StationStatus::Refused, "worldd has no city nodes");
+    const world::CityNodeInfo* node = city_nodes_->by_name(node_name);
+    if (!node) return fail(StationStatus::NotFound, "no city node is named \"" + node_name + "\"");
+    for (auto it = placed_stations_.begin(); it != placed_stations_.end(); ++it) {
+        if (it->first.first != node->guid) continue;
+        const world::WorldActor* a = registry_.find(it->second);
+        std::string plot_record;
+        for (const world::PlotRow& row : node_wire_ ? node_wire_->plot_rows_of(node->guid, city_nodes_->level_of(node->guid)) : std::vector<world::PlotRow>{}) {
+            if (row.plot == it->first.second) plot_record = row.name;
+        }
+        if (!same_text(plot_record, plot_name)) continue;
+        r.node = node->display_name;
+        r.plot = plot_record;
+        r.station = a ? a->station.name : std::string();
+        r.actor = it->second;
+        if (a) {
+            r.x = a->x;
+            r.y = a->y;
+            r.z = a->z;
+            r.building = node_wire_ ? node_wire_->building_name(it->first.second, a->station.building) : std::string();
+        }
+        registry_.remove(it->second);
+        placed_stations_.erase(it);
+        spdlog::info("[stations] {}: removed {} from {} of {}", by, r.station, plot_record, node->display_name);
+        return r;
+    }
+    return fail(StationStatus::NotFound, "no station was placed on " + plot_name + " of " + node->display_name);
+}
+
+void PlayerWorld::reap_placed_stations() {
+    placed_seen_version_ = city_nodes_ ? city_nodes_->version() : 0;
+    for (auto it = placed_stations_.begin(); it != placed_stations_.end();) {
+        const int64_t node = it->first.first, plot = it->first.second;
+        const int level = city_nodes_->level_of(node);
+        bool keep = level >= 3 && node_wire_;
+        if (keep) {
+            keep = false;
+            for (const world::PlotRow& row : node_wire_->plot_rows_of(node, level)) {
+                if (row.plot == plot && row.state == 0 && !row.pre_construct) keep = true;
+            }
+        }
+        if (keep && registry_.find(it->second)) {
+            ++it;
+            continue;
+        }
+        const world::WorldActor* a = registry_.find(it->second);
+        spdlog::info("[stations] the placed station {} of node {} leaves: the node is a {} now{}", a ? a->station.name : std::string("?"), node, spawns::node_level_name(level),
+                     level >= 3 ? " and the plot is not free any more" : "");
+        registry_.remove(it->second);
+        it = placed_stations_.erase(it);
+    }
+}
+
 void PlayerWorld::check_towns(double now_seconds) {
     if (!node_pops_ || !npcs_ || !nav_ || now_seconds - last_town_check_ < kTownCheckSeconds) return;
     last_town_check_ = now_seconds;
     for (const auto& [node, entry] : node_pops_->entries()) {
         if (entry.npcs == 0) continue;
-        const npc::NpcWorld::StandReport r = npcs_->stand_report(node_pops_->actors_of(node));
+        std::vector<uint64_t> people = node_pops_->actors_of(node);
+        people.erase(std::remove_if(people.begin(), people.end(), [&](uint64_t id) {
+            const world::WorldActor* a = registry_.find(id);
+            return a && a->kind == world::ActorKind::Station;   // (the stations are counted apart)
+        }), people.end());
+        const npc::NpcWorld::StandReport r = npcs_->stand_report(people);
         const size_t ready = r.people - r.waiting;
         TownCheck& c = town_checks_[node];
         if (c.level != entry.level || c.people != r.people || c.ready != ready) {
@@ -709,6 +924,7 @@ void PlayerWorld::tick_world(double now_seconds) {
     // before the NPC world's step: an NPC made now goes into the NPC world at once (grounded if its chunk is resident, else waiting for it, pending, as the area's NPCs do), and an NPC
     // removed now is gone from the step that follows.  The world is one thread: the citynode feed only bumps CityNodes::version().
     if (node_pops_) node_pops_->tick(now_seconds);
+    if (!placed_stations_.empty() && city_nodes_ && placed_seen_version_ != city_nodes_->version()) reap_placed_stations();
     if (city_nodes_ && roads_.level_roads() != 0 && roads_seen_version_ != city_nodes_->version()) apply_road_levels();
     window_cost_.max_people_ms = std::max(window_cost_.max_people_ms, ms(t));
     t = std::chrono::steady_clock::now();
@@ -821,6 +1037,11 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
                     }
                 });
             }
+        }
+        // crafting, step 0: a station of the node's buildings names its town, plot and building, and stands on the ground like the people
+        if (const world::WorldActor* st = registry_.find(id); st && st->kind == world::ActorKind::Station) {
+            finish_station(id, node, plot);
+            return;
         }
         if (!npcs_) return;   // no ground: the NPC stands where the data put it
         const world::WorldActor* a = registry_.find(id);

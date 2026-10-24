@@ -140,4 +140,14 @@ std::vector<PlacedSet> placed_sets(const NodePopulationData& data, const world::
 std::vector<NodeSpawn> select_node_spawns(const content::PopulationData& population, const TemplateSource& templates, const NodePopulationData& data, const world::NodeWire& wire,
                                           const NodeSite& site, const AreaConfig& area, const SpawnFilter& filter, NodePopStats& stats);
 
+/// Crafting, step 0 (the GM station): the spawn of ONE station on a service plot, as a building of that plot would put it there.  Each building the plot may take (`buildings`) is looked at
+/// as built (Operational) at the node's level: its spawn sets are placed at the plot's transform in the node's frame, the way placed_sets places a building's, and the point whose
+/// asset is `station` (an asset's name, its definition's name or its Blueprint's, case ignored) is the answer.  The spawn filter is not asked: a game master puts it there.  nullopt, with
+/// `why`, when no building of the plot has such a station; `building` is the building that has it.
+std::optional<NodeSpawn> select_station_on_plot(const content::PopulationData& population, const TemplateSource& templates, const NodePopulationData& data, const NodeSite& site,
+                                                const world::PlotRow& plot, const std::vector<int64_t>& buildings, const std::string& station, int64_t& building, std::string& why);
+
+/// The stations the buildings of a plot can have at the node's level, by their asset names, for a message ("CraftingStation_Weaponsmithing_T3, ...").
+std::vector<std::string> stations_on_plot(const content::PopulationData& population, const NodePopulationData& data, const NodeSite& site, const std::vector<int64_t>& buildings);
+
 }  // namespace aoc::worldd::spawns

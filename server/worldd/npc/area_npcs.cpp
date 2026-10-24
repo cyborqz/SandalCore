@@ -226,6 +226,21 @@ GroundReport populate(world::ActorRegistry& registry, NpcWorld& world, const Mot
             if (dz > 100.0) ++rep.moved_by_more_than_1m;
         }
     }
+    // crafting, step 0: a station the area's data places stands where the data puts it, on the ground, and never moves
+    std::vector<uint64_t> stations;
+    registry.for_each([&](const world::WorldActor& a) {
+        if (a.kind == world::ActorKind::Station) stations.push_back(a.id);
+    });
+    std::sort(stations.begin(), stations.end());
+    for (const uint64_t id : stations) {
+        const world::WorldActor* a = registry.find(id);
+        if (!a) continue;
+        NpcMotionSetup setup;
+        setup.ambient = Ambient::Stationary;
+        setup.foot_offset = 0.0;
+        setup.home_yaw = a->yaw_degrees;
+        if (world.add(id, setup)) ++rep.stations;
+    }
     return rep;
 }
 

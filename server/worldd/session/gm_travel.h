@@ -116,6 +116,15 @@ struct GmItemGrant {
     std::string container;   // where the first stack went
 };
 
+/// Crafting, step 0: the test commands that put an artisan building's station on a free plot, and take it off.
+struct GmStationResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    uint64_t    actor = 0;
+    std::string node, plot, station, building;
+    GmPosition  position;
+};
+
 /// The GM travel tools on the network thread.  `directory` lists the players of the world (Endpoint::players), `now` is the Endpoint's clock.
 class GmTravel : public GmPort {
 public:
@@ -136,6 +145,9 @@ public:
     GmMoneyGrant     give_money(const std::string& character, int64_t copper, const std::string& by);
     /// Gives a player `count` of an item named by its record name or its Guid (digits), routed by the bag rule.
     GmItemGrant      give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by);
+    /// Puts the station `station` of an artisan building on the free plot `plot` of the node `node` (a Village or a Town), and takes it off again.
+    GmStationResult  place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by);
+    GmStationResult  remove_station(const std::string& node, const std::string& plot, const std::string& by);
 
     size_t teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) override;
 

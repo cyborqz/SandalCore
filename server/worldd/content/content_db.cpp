@@ -2819,6 +2819,55 @@ std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string
     return out;
 }
 
+std::optional<CraftStationData> ContentDb::craft_station_data(std::string& error) const {
+    CraftStationData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the crafting tables are contentc version 20's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT guid, name, display_name, kind, max_tier, queue_size, simultaneous, individual, tax_tag, recipe_set_guid FROM craft_station_def");
+        if (!q.ok()) return failed("craft_station_def");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 4) || !column_is_int(s, 5) || !column_is_int(s, 6) || !column_is_int(s, 9)) {
+                error = "content.db craft_station_def has a column of the wrong storage class";
+                return std::nullopt;
+            }
+            CraftStationDef d;
+            d.guid = sqlite3_column_int64(s, 0);
+            d.name = column_text(s, 1);
+            d.display_name = column_text(s, 2);
+            d.processing = column_text(s, 3) == "Processing";
+            d.max_tier = static_cast<int>(sqlite3_column_int64(s, 4));
+            d.queue_size = static_cast<int>(sqlite3_column_int64(s, 5));
+            d.simultaneous = static_cast<int>(sqlite3_column_int64(s, 6));
+            d.individual = sqlite3_column_int64(s, 7) != 0;
+            d.tax_tag = column_text(s, 8);
+            d.recipe_set = sqlite3_column_int64(s, 9);
+            out.by_name[d.name] = d.guid;
+            out.defs[d.guid] = std::move(d);
+        }
+        if (step != SQLITE_DONE) return failed("craft_station_def");
+    }
+    {
+        Stmt q(db_, "SELECT asset_guid, def_guid FROM craft_station_asset");
+        if (!q.ok()) return failed("craft_station_asset");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) {
+                error = "content.db craft_station_asset has a column of the wrong storage class";
+                return std::nullopt;
+            }
+            out.asset_defs[sqlite3_column_int64(s, 0)] = sqlite3_column_int64(s, 1);
+        }
+        if (step != SQLITE_DONE) return failed("craft_station_asset");
+    }
+    return out;
+}
+
 std::optional<VendorData> ContentDb::vendor_data(std::string& error) const {
     VendorData out;
     const auto failed = [&](const char* table) {

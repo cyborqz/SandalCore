@@ -1262,6 +1262,18 @@ std::optional<Send> PlayerBootstrap::open_vendor(int64_t merch_set, const emit::
     return rpcs(Role::PlayerController, "ClientOpenVendor", std::span<const repl::RpcRequest>(&call, 1));
 }
 
+std::optional<Send> PlayerBootstrap::open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientOpenCraftingStationUI");
+    if (!rpc) return std::nullopt;
+    auto params = repl::open_station_params(*rpc, station, tax);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientOpenCraftingStationUI";
+    call.params = std::move(*params);
+    return rpcs(Role::PlayerController, "ClientOpenCraftingStationUI", std::span<const repl::RpcRequest>(&call, 1));
+}
+
 std::optional<Send> PlayerBootstrap::dialogue_update(const DialogueView& view) {
     if (!ok_ || !second_state_added_) return std::nullopt;
     const schema::ClassSchema& cls = *pc_.obj.schema;

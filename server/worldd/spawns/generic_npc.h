@@ -50,6 +50,12 @@
 //
 //  A Blueprint that is not a pawn (npc_motion.tsv has no line for it: a banner, a tent, a quest sparkle), an excluded one, and every Blueprint when
 //  the table is not loaded or the switch is off, get no template, and the loader counts them by name.
+//
+//  Stations (crafting, step 0).  A crafting or processing station is no pawn (it has no line in npc_motion.tsv) and is made the same way from a captured station of the same
+//  native class: the Apprentice station of a processing (or a fast-craft) family is the donor, the Blueprint's path comes from the data, the checksum is 0 and the NetGUIDs are
+//  worldd's own.  What a station's open holds (the actor, its InteractableComponent, NodePlotComponent and MapRegistrationComponentBP) is the same for every Blueprint of the
+//  family; what is the Blueprint's own (its meshes, its window's recipes) is in the client's copy of the Blueprint, named by the path.  The Novice stations of a Camp are made so:
+//  no capture opened them (the one recorded open of a Novice station has the same four blocks as the Apprentice ones).
 // ============================================================================
 #pragma once
 // ~ C.Y.B & CoA ~
@@ -106,11 +112,15 @@ public:
     /// The open of an NPC of `asset`'s Blueprint (a captured template is the caller's first choice); nullptr with `why` when there is none.  A huntable creature's has the eighth
     /// block (above).  The pointer is valid as long as this object.
     const OpenTemplate* template_for(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
+    /// The open of a station (see above): nullptr with `why` when the captures hold no station of the asset's family.
+    const OpenTemplate* station_template(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
 
     /// What the donor is (its archetype path), "" when the captures have none.
     const std::string& donor() const { return donor_path_; }
     const GenericConfig& config() const { return config_; }
-    size_t made() const { return made_.size() - hunting_made_; }   // the Blueprints' plain templates
+    size_t made() const { return made_.size() - hunting_made_ - stations_made_; }   // the Blueprints' plain templates
+    /// How many of the templates made are a station's (crafting, step 0).
+    size_t stations_made() const { return stations_made_; }
     /// How many of the templates made are a huntable creature's (eight blocks).
     size_t hunting_made() const { return hunting_made_; }
     /// Whether the captures hold the living huntable the eighth block is made from (the Hunting_Raven's open).
@@ -129,6 +139,7 @@ private:
     const ParsedBlock*       hunt_block_ = nullptr;   // the living Hunting_Raven's UInteractableComponent
     const OpenTemplate*      living_ = nullptr;       // ... and its whole open (its CombatInfo and AbilityComponent are every huntable's)
     mutable size_t           hunting_made_ = 0;
+    mutable size_t           stations_made_ = 0;
     mutable std::map<std::string, OpenTemplate> made_;     // by archetype path (stable addresses)
     mutable std::set<uint64_t>                  minted_;   // the static NetGUIDs handed out
 };

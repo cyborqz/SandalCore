@@ -770,5 +770,8 @@ func Create(db *sql.DB) error {
 	if err := createDialogue(db); err != nil {
 		return err
 	}
-	return createVendors(db)
+	if err := createVendors(db); err != nil {
+		return err
+	}
+	return createCrafting(db)
 }

@@ -12,6 +12,9 @@
 //	worldctl speed <character> <multiplier>           the character's run speed, 0.5 to 10 (1 resets); until relog
 //	worldctl give-money <character> <copper>          adds copper to the character's purse (100 copper = 1 silver, 100 silver = 1 gold; the purse holds 10,000,000 at most)
 //	worldctl give-item <character> <item> [<count>]   gives an item by its record name or Guid (count 1 by default), into the bag its kind belongs to
+//	worldctl place-station <node> <plot> <station>    puts an artisan building's station on a free service plot of a Village or a Town (it stays until removed, until the node drops below
+//	                                                  a Village, or until worldd restarts)
+//	worldctl remove-station <node> <plot>             takes a placed station off its plot
 //
 // A mounted player is dismounted first. A <place> is matched as nodectl matches a node: the record name (Verra_RVR_Joeva), the same
 // without Verra_, or the display name (Joeva); case, spaces and punctuation do not count.
@@ -61,6 +64,8 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   speed <character> <multiplier>    run speed, 0.5 to 10; 1 resets (until relog)
   give-money <character> <copper>   add copper to the purse (a test command)
   give-item <character> <item> [n]  give an item by record name or Guid, into the right bag (a test command)
+  place-station <node> <plot> <st>  put an artisan building's station on a free plot of a Village or a Town
+  remove-station <node> <plot>      take a placed station off its plot
 every command takes --addr and --token-file`
 
 type usageError string
@@ -75,7 +80,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed", "give-money", "give-item":
+	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station":
 	case "help", "-h", "--help":
 		fmt.Fprintln(out, usage)
 		return 0
@@ -231,6 +236,31 @@ func parse(cmd string, pos []string) (call, error) {
 				return err
 			}
 			fmt.Fprintf(out, "%s: %d x %s (%d) given, into %s\n", r.GetCharacter(), r.GetCount(), r.GetItem(), r.GetItemGuid(), r.GetContainer())
+			return nil
+		}, nil
+	case "place-station":
+		if len(pos) != 3 {
+			return nil, usageError("needs a node, a plot and a station: worldctl place-station <node> <plot> <station>, such as: worldctl place-station Joeva Plot_17_Service CraftingStation_Weaponsmithing_T3")
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.PlaceStation(ctx, &worldadminv1.PlaceStationRequest{Node: pos[0], Plot: pos[1], Station: pos[2]})
+			if err != nil {
+				return err
+			}
+			at := r.GetPosition()
+			fmt.Fprintf(out, "%s %s: %s of %s placed (actor %d) at %.0f %.0f %.0f\n", r.GetNode(), r.GetPlot(), r.GetStation(), r.GetBuilding(), r.GetActor(), at.GetX(), at.GetY(), at.GetZ())
+			return nil
+		}, nil
+	case "remove-station":
+		if len(pos) != 2 {
+			return nil, usageError("needs a node and a plot: worldctl remove-station <node> <plot>")
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.RemoveStation(ctx, &worldadminv1.RemoveStationRequest{Node: pos[0], Plot: pos[1]})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s %s: %s removed\n", r.GetNode(), r.GetPlot(), r.GetStation())
 			return nil
 		}, nil
 	}

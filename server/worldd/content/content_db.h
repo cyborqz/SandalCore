@@ -802,6 +802,31 @@ struct DialogueQuestRow {
     DialogueRequirement activation;
 };
 
+/// Crafting, step 0 (contentc version 20): the station definitions (craft_station_def) and which population asset is the station of which (craft_station_asset).
+struct CraftStationDef {
+    int64_t     guid = 0;
+    std::string name;            // "ProcessingStation_Lumbermilling_T2"
+    std::string display_name;    // the window's title ("Lumber Milling - Apprentice")
+    bool        processing = false;   // Type Processing (a job runs for a time and is collected); else FastCraft
+    int         max_tier = -1;   // the certification tier a recipe may need here (Novice 0 ... Grand Master 4); -1 for none
+    int         queue_size = 1;
+    int         simultaneous = 1;
+    bool        individual = true;    // a queue for each player
+    std::string tax_tag;         // "" for none
+    int64_t     recipe_set = 0;
+};
+struct CraftStationData {
+    std::map<int64_t, CraftStationDef> defs;            // CraftingStationDef guid -> the def
+    std::map<int64_t, int64_t>         asset_defs;      // PopulationAsset guid -> the def it is the station of
+    std::map<std::string, int64_t>     by_name;         // def name -> guid
+    const CraftStationDef* def_of_asset(int64_t asset) const {
+        const auto a = asset_defs.find(asset);
+        if (a == asset_defs.end()) return nullptr;
+        const auto d = defs.find(a->second);
+        return d == defs.end() ? nullptr : &d->second;
+    }
+};
+
 struct DialogueData {
     std::map<int64_t, int64_t>         roots;           // root guid -> the node it starts at (0: none)
     std::map<int64_t, DialogueNodeRow> nodes;
@@ -1132,6 +1157,8 @@ public:
     /// Quests, slice 0 (contentc version 17): the NPC conversations (dialogue_root, dialogue_node, dialogue_choice, dialogue_quest, npc_dialogue), read whole.
     /// nullopt with `error` set when a table is missing (a file of an older version) or a row does not read.
     std::optional<DialogueData> dialogue_data(std::string& error) const;
+    /// Crafting, step 0 (contentc version 20): the station definitions and the assets that are their stations, read whole. nullopt, with `error` set, for a file of an older version.
+    std::optional<CraftStationData> craft_station_data(std::string& error) const;
     /// Vendors, step 0 (contentc version 18): the shops' links, tax tags, prices and predicates, read whole.  nullopt, with `error` set, for a file of an older version.
     std::optional<VendorData> vendor_data(std::string& error) const;
     /// Vendors, the selling step (contentc version 19): what a sale or a repair needs of one item.  `known` is false for an item with no item_vendor row; nullopt, with `error` set,

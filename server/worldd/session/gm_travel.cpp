@@ -179,6 +179,41 @@ GmMoneyGrant GmTravel::give_money(const std::string& character, int64_t copper, 
     return out;
 }
 
+namespace {
+
+GmStatus gm_status_of(PlayerWorld::StationStatus s) {
+    switch (s) {
+        case PlayerWorld::StationStatus::Ok: return GmStatus::Ok;
+        case PlayerWorld::StationStatus::NotFound: return GmStatus::NotFound;
+        case PlayerWorld::StationStatus::Invalid: return GmStatus::InvalidArgument;
+        case PlayerWorld::StationStatus::Refused: return GmStatus::FailedPrecondition;
+    }
+    return GmStatus::FailedPrecondition;
+}
+
+GmStationResult station_result_of(const PlayerWorld::StationResult& r) {
+    GmStationResult out;
+    out.status = gm_status_of(r.status);
+    out.message = r.message;
+    out.actor = r.actor;
+    out.node = r.node;
+    out.plot = r.plot;
+    out.station = r.station;
+    out.building = r.building;
+    out.position = {r.x, r.y, r.z};
+    return out;
+}
+
+}  // namespace
+
+GmStationResult GmTravel::place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by) {
+    return station_result_of(world_.place_station(log_text(node), log_text(plot), log_text(station), by));
+}
+
+GmStationResult GmTravel::remove_station(const std::string& node, const std::string& plot, const std::string& by) {
+    return station_result_of(world_.remove_station(log_text(node), log_text(plot), by));
+}
+
 GmItemGrant GmTravel::give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by) {
     GmItemGrant out;
     if (item.empty()) {

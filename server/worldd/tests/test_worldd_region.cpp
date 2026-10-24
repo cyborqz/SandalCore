@@ -244,8 +244,8 @@ static void test_golden(const content::ContentDb& db, const spawns::CapturedData
     const auto list_plain = spawns::select_data_spawns(w.data, templates, plain, st_plain, &filter);
     std::printf("    selected in %s: %zu NPCs\n", ms_since(t0).c_str(), list_plain.size());
     compare_golden("zones off (the research's pop.py: E1's rule over the whole footprint)", tests::kGoldenPlain, list_plain, st_plain);
-    CHECK(st_plain.spawned == 10554 && st_plain.points_in_area + st_plain.area_points == 22122,
-          "10,554 NPCs from 22,122 points (the research's ~10,850 NPCs and 22,421 points were the 55 km2 upper bound of the chunks)");
+    CHECK(st_plain.spawned == 10556 && st_plain.points_in_area + st_plain.area_points == 22122,
+          "10,556 NPCs and stations from 22,122 points (the research's ~10,850 NPCs and 22,421 points were the 55 km2 upper bound of the chunks)");
 
     const spawns::AreaConfig zoned = spawns::AreaConfig::riverlands();
     spawns::PopulationStats st_zoi;
@@ -274,10 +274,10 @@ static void test_golden(const content::ContentDb& db, const spawns::CapturedData
                 huntable += hunting ? 1 : 0;
                 eight += hunting && s.open && s.open->blocks.size() == 8 && s.open->find("UInteractableComponent") == 7 ? 1 : 0;
                 if (hunting) ++kinds[s.asset->name];
-                others_with_interactable += !hunting && s.open && s.open->find("UInteractableComponent") > 0 && s.generic ? 1 : 0;
+                others_with_interactable += !hunting && s.open && s.open->category != "station" && s.open->find("UInteractableComponent") > 0 && s.generic ? 1 : 0;
             }
             std::printf("    %zu huntable creatures of %zu NPCs in %zu kinds\n", huntable, list_hunt.size(), kinds.size());
-            CHECK(list_hunt.size() == 10554, "the same 10,554 NPCs");
+            CHECK(list_hunt.size() == 10556, "the same 10,556 NPCs and stations");
             CHECK(huntable == 759 && eight == huntable, "759 of them are huntable (7.2 %), each with its eighth block, a UInteractableComponent");
             CHECK(kinds.size() == 17 && others_with_interactable == 0, "17 kinds, and no other generic creature has an interactable block");
         }

@@ -78,6 +78,10 @@ public:
     /// The plots of the node `node_guid` at `level`: plot_rows() of its layout, with the workshops the seed starts the node with (CityNodes::plot_choices) built on the
     /// service plots it names (Operational, the building of that kind among the plot's own).  The summary, the scenery and the people all read this.
     std::vector<PlotRow> plot_rows_of(int64_t node_guid, int level) const;
+    /// The buildings that may be built on a service plot (service_plot_building), in the data's order; empty for a plot that has none.
+    std::vector<int64_t> plot_buildings(int64_t plot) const;
+    /// The record name of such a building ("Construction_Active_Smithy_Building"); "" when the plot has no such building.
+    std::string building_name(int64_t plot, int64_t building) const;
     /// What the node's level grants: the highest defined level at or below `level` (nothing before the first).
     LevelGrants grants(int64_t node_guid, int level) const;
     /// The layout record of a node (0: none) and whether the record is a real node of a map (the dungeons and the jungle are not).

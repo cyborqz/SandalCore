@@ -41,6 +41,13 @@ uint64_t mix(uint64_t z) {
     return z ^ (z >> 31);
 }
 
+/// A station Blueprint: under /Artisanship/, a CraftingStation_* or ProcessingStation_* class.
+bool is_station_path(const std::string& path) {
+    if (path.find("/Artisanship/") == std::string::npos) return false;
+    const std::string leaf = blueprint_leaf(path);
+    return leaf.rfind("CraftingStation_", 0) == 0 || leaf.rfind("ProcessingStation_", 0) == 0;
+}
+
 /// The block classes of a plain creature's open, in the order retail sends them.
 const char* const kPlain[] = {"ANPCCharacter", "UAlignmentComponent", "UNPCSecondaryInfo", "UNPCInfo", "UNPCCombatInfo", "UAoCAbilityComponent", "UAoCStatsComponent"};
 
@@ -119,6 +126,10 @@ const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset,
     const std::string& path = asset.archetype_path;
     if (path.empty()) return fail(Verdict::NoPath);
     if (!config_.enabled) return fail(Verdict::Disabled);
+    if (is_station_path(path)) {
+        if (!excluded_.empty() && (excluded_.count(lower(blueprint_leaf(path))) || excluded_.count(lower(path)))) return fail(Verdict::Excluded);
+        return station_template(asset, why);
+    }
     if (!blueprints_ || blueprints_->empty()) return fail(Verdict::NoTable);
     if (!excluded_.empty() && (excluded_.count(lower(blueprint_leaf(path))) || excluded_.count(lower(path)))) return fail(Verdict::Excluded);
     const OpenTemplate* plain = nullptr;
@@ -154,6 +165,50 @@ const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset,
         return &made_.emplace(key, std::move(t)).first->second;
     }
     return plain;
+}
+
+const OpenTemplate* GenericNpcs::station_template(const content::NpcAssetRow& asset, Verdict* why) const {
+    const auto fail = [&](Verdict v) -> const OpenTemplate* {
+        if (why) *why = v;
+        return nullptr;
+    };
+    if (why) *why = Verdict::Generic;
+    const std::string& path = asset.archetype_path;
+    if (!is_station_path(path)) return fail(Verdict::NotPawn);
+    if (const auto it = made_.find(path); it != made_.end()) return &it->second;
+    // the donor: a captured Apprentice station of the same family (processing or fast-craft), the first in the tables' order
+    const bool processing = blueprint_leaf(path).rfind("ProcessingStation_", 0) == 0;
+    const OpenTemplate* donor = nullptr;
+    for (const OpenTemplate& t : captured_->opens()) {
+        if (t.category != "station" || t.blocks.size() != 4) continue;
+        const std::string leaf = blueprint_leaf(t.archetype_path);
+        if ((leaf.rfind("ProcessingStation_", 0) == 0) != processing) continue;
+        if (leaf.size() < 3 || leaf.compare(leaf.size() - 3, 3, "_T2") != 0) continue;
+        donor = &t;
+        break;
+    }
+    if (!donor) return fail(Verdict::NoDonor);
+    OpenTemplate t = *donor;
+    t.archetype_path = path;
+    t.capture = t.channel = t.packet = 0;   // made here: no capture opened it
+    const size_t dot = path.rfind('.');
+    if (dot == std::string::npos) return fail(Verdict::NoPath);
+    const std::string package = path.substr(0, dot), object = path.substr(dot + 1);
+    const auto taken = [&](uint64_t id) { return captured_->static_id_in_use(id) || minted_.count(id) != 0; };
+    repl::ExportLink obj, pkg;
+    obj.guid = FIntrepidNetworkGUID::from_u64(static_object_id(path, taken));
+    minted_.insert(obj.guid.ObjectId);
+    obj.name = object;
+    obj.has_checksum = true;
+    obj.checksum = config_.export_checksum;
+    pkg.guid = FIntrepidNetworkGUID::from_u64(static_object_id(package + "#package", taken));
+    minted_.insert(pkg.guid.ObjectId);
+    pkg.name = package;
+    pkg.has_checksum = true;
+    pkg.checksum = 0;
+    t.archetype = {obj, pkg};
+    ++stations_made_;
+    return &made_.emplace(path, std::move(t)).first->second;
 }
 
 const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, Verdict* why) const {

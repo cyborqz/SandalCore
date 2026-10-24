@@ -165,7 +165,7 @@ def select_node(d, nd, node, level, base_ctx, contains, shown_extra=()):
                     if w != 'Spawns':
                         allc.append((a, wgt if wgt > 0 else 1.0, False, w))
                         continue
-                    ok = bool(a['path']) and (a['path'] in d.captured_npc or a['path'] in d.motion)
+                    ok = bool(a['path']) and (a['path'] in d.captured_npc or a['path'] in d.motion or P.is_station(a['path']))
                     allc.append((a, wgt if wgt > 0 else 1.0, ok, 'Spawns'))
                     if ok:
                         shown.append((a, wgt if wgt > 0 else 1.0))

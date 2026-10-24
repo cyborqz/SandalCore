@@ -201,6 +201,26 @@ public:
     const vendor::TownShops*      town_shops() const { return shops_ ? &*shops_ : nullptr; }
     /// A test's shops (load_area reads the real ones).
     void                          set_town_shops(vendor::TownShops shops) { shops_ = std::move(shops); }
+    /// Crafting, step 0: the station definitions (content.db, contentc version 20), read with the area; null for an older file (the stations still stand and open, with the default tax).
+    const content::CraftStationData* station_data() const { return stations_ ? &*stations_ : nullptr; }
+
+    /// Crafting, step 0 (the GM command): a station of an artisan building on a free service plot of a Village or a Town.
+    enum class StationStatus : uint8_t { Ok, NotFound, Invalid, Refused };
+    struct StationResult {
+        StationStatus status = StationStatus::Ok;
+        std::string   message;     // why it was refused
+        uint64_t      actor = 0;
+        std::string   node;        // the node's display name
+        std::string   plot;        // the plot's record name
+        std::string   station;     // the station's Blueprint (placed) or the one that stood there (removed)
+        std::string   building;    // the artisan building whose station it is
+        double        x = 0, y = 0, z = 0;
+    };
+    /// Puts the station `station` (an asset's or a definition's name) on the free plot `plot` of the node `node`.  The actor stands until remove_station, until the node drops below a Village
+    /// or loses the plot, or until worldd stops; nothing is saved.
+    StationResult place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by);
+    StationResult remove_station(const std::string& node, const std::string& plot, const std::string& by);
+    size_t        placed_station_count() const { return placed_stations_.size(); }
     /// G1 stage 1: the GM garden (spawns/gm_garden.h), off by default.  `set_gm_garden(true)` before load_area; the garden is placed once the ground is known
     /// (load_ground), or by place_gm_garden() when there is no ground file.  Once.
     void                          set_gm_garden(bool on) { gm_garden_ = on; }
@@ -424,6 +444,13 @@ private:
     /// on a floor within 30 cm of where the data puts them, how many on a floor farther away, how many have none, how many of those have no walkable ground near either (in a wall, a stall, under a floor or in the air) and how many would walk if they had ground.  It runs again for a node
     /// whose level or people changed (a level change brings other people, and its line comes as soon as they are on the ground), at most once a minute for the same level.
     void check_towns(double now_seconds);
+    /// Crafting, step 0: what a station of a node's people knows of itself: the node, plot and building its plot component names (the window's town), its definition and tax tag.
+    /// `building` (when not 0) is the building the plot component names instead of the plot's own (a station a game master put on a free plot).
+    void describe_station(uint64_t id, const world::CityNodeInfo& node, int64_t plot, int64_t building = 0);
+    /// ... and puts it on the ground like the town's people (a post that never moves).
+    void finish_station(uint64_t id, const world::CityNodeInfo& node, int64_t plot, int64_t building = 0);
+    /// The placed stations of nodes that dropped below a Village, or whose plot is gone, leave (checked when the nodes' levels move).
+    void reap_placed_stations();
     struct TownCheck {
         int    level = -1;
         size_t people = 0, ready = 0;       // what the check saw last: the NPCs the NPC world holds and how many of them have their ground
@@ -514,6 +541,9 @@ private:
     world::NodeControl*                  node_control_ = nullptr;
     std::optional<dialogue::Book>        dialogue_;
     std::optional<vendor::TownShops>     shops_;
+    std::optional<content::CraftStationData> stations_;   // crafting, step 0: the station definitions and which asset is whose station
+    std::map<std::pair<int64_t, int64_t>, uint64_t> placed_stations_;   // (node, plot) -> the actor of a station a game master placed
+    uint64_t                             placed_seen_version_ = 0;
     const world::NodeLayoutData*         node_layout_data_ = nullptr;
     std::unique_ptr<world::NodeScenery>  scenery_;
     const spawns::NodePopulationData*    node_pop_data_ = nullptr;

@@ -38,6 +38,12 @@ service WorldAdminService {
   // else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
   // the whole grant (nothing is given, the answer says why).
   rpc GiveItem(GiveItemRequest) returns (GiveItemResponse);
+  // Crafting, step 0. Puts the station of an artisan building on a free service plot of a Village or a Town (the mayor's buildings do not exist yet): the station's actor stands where the
+  // building would have put it, and stays until RemoveStation, until the node drops below a Village, or until worldd restarts (placed stations are not saved). NotFound for a node,
+  // plot or station the world does not know; FailedPrecondition for a node below Village, a plot that is not free or already holds a station.
+  rpc PlaceStation(PlaceStationRequest) returns (PlaceStationResponse);
+  // Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
+  rpc RemoveStation(RemoveStationRequest) returns (RemoveStationResponse);
 }
 
 message Position {
@@ -121,6 +127,32 @@ message GiveMoneyResponse {
   int64 previous = 2; // the purse before, in copper
   int64 balance = 3;  // and after
   int64 added = 4;    // less than asked when the cap was reached
+}
+
+message PlaceStationRequest {
+  string node = 1;    // a city node: its record name, the same without Verra_, or its display name
+  string plot = 2;    // a free service plot of the node at its level ("Plot_17_Service"; case does not count)
+  string station = 3; // an artisan building's station: its asset or definition name ("CraftingStation_Weaponsmithing_T3"; case does not count)
+}
+
+message PlaceStationResponse {
+  string node = 1;    // the node's display name
+  string plot = 2;    // the plot's record name
+  string station = 3; // the station's Blueprint
+  uint64 actor = 4;   // the station's actor id
+  string building = 5; // the artisan building whose station it is ("Construction_Active_Smithy_Building")
+  Position position = 6;
+}
+
+message RemoveStationRequest {
+  string node = 1;
+  string plot = 2;
+}
+
+message RemoveStationResponse {
+  string node = 1;
+  string plot = 2;
+  string station = 3; // the Blueprint that stood there
 }
 
 message GiveItemRequest {

@@ -85,6 +85,7 @@ func TestCreateMakesTheDocumentedTables(t *testing.T) {
 	want = append(want, PopulationTables...) // plan E1 (contentc version 7): the NPC population chain and the vendors
 	want = append(want, DialogueTables...)   // quests, slice 0 (contentc version 17): the NPC conversations
 	want = append(want, VendorTables...)     // vendors, step 0 (contentc version 18): the shops' links and prices
+	want = append(want, CraftingTables...)   // crafting, step 0 (contentc version 20): the stations, recipes and rewards
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("tables = %v\nwant     %v", got, want)

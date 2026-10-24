@@ -27,6 +27,8 @@
 #include "protocol/schema/generated/ABaseCharacter.h"
 #include "protocol/schema/generated/ACharacter.h"
 #include "protocol/schema/generated/AController.h"
+#include "protocol/schema/generated/ACraftingStationBase.h"
+#include "protocol/schema/generated/AFastCraftingActor.h"
 #include "protocol/schema/generated/AGameStateBase.h"
 #include "protocol/schema/generated/AGatherableActor.h"
 #include "protocol/schema/generated/AInfo.h"
@@ -39,6 +41,7 @@
 #include "protocol/schema/generated/APlayerController.h"
 #include "protocol/schema/generated/APlayerLootPile.h"
 #include "protocol/schema/generated/APlayerState.h"
+#include "protocol/schema/generated/AProcessingStationActor.h"
 #include "protocol/schema/generated/AoCGameStateBP_C.h"
 #include "protocol/schema/generated/AoCPlayerControllerBP_C.h"
 #include "protocol/schema/generated/AoCPlayerStateBP_C.h"
@@ -59,6 +62,7 @@
 #include "protocol/schema/generated/UItemStorageComponent.h"
 #include "protocol/schema/generated/ULevelingComponent.h"
 #include "protocol/schema/generated/ULootComponent.h"
+#include "protocol/schema/generated/UMapRegistrationComponent.h"
 #include "protocol/schema/generated/UMountComponent.h"
 #include "protocol/schema/generated/UNPCAppearanceComponent.h"
 #include "protocol/schema/generated/UNPCCombatInfo.h"
@@ -91,6 +95,8 @@ constexpr Entry kByName[] = {
     {"ABaseCharacter", &kABaseCharacter},
     {"ACharacter", &kACharacter},
     {"AController", &kAController},
+    {"ACraftingStationBase", &kACraftingStationBase},
+    {"AFastCraftingActor", &kAFastCraftingActor},
     {"AGameStateBase", &kAGameStateBase},
     {"AGatherableActor", &kAGatherableActor},
     {"AInfo", &kAInfo},
@@ -103,6 +109,7 @@ constexpr Entry kByName[] = {
     {"APlayerController", &kAPlayerController},
     {"APlayerLootPile", &kAPlayerLootPile},
     {"APlayerState", &kAPlayerState},
+    {"AProcessingStationActor", &kAProcessingStationActor},
     {"AoCGameStateBP_C", &kAoCGameStateBP_C},
     {"AoCPlayerControllerBP_C", &kAoCPlayerControllerBP_C},
     {"AoCPlayerStateBP_C", &kAoCPlayerStateBP_C},
@@ -124,6 +131,7 @@ constexpr Entry kByName[] = {
     {"UItemStorageComponent", &kUItemStorageComponent},
     {"ULevelingComponent", &kULevelingComponent},
     {"ULootComponent", &kULootComponent},
+    {"UMapRegistrationComponent", &kUMapRegistrationComponent},
     {"UMountComponent", &kUMountComponent},
     {"UNPCAppearanceComponent", &kUNPCAppearanceComponent},
     {"UNPCCombatInfo", &kUNPCCombatInfo},
@@ -171,6 +179,8 @@ constexpr const ClassSchema* kAll[] = {
     &kABaseCharacter,
     &kACharacter,
     &kAController,
+    &kACraftingStationBase,
+    &kAFastCraftingActor,
     &kAGameStateBase,
     &kAGatherableActor,
     &kAInfo,
@@ -183,6 +193,7 @@ constexpr const ClassSchema* kAll[] = {
     &kAPlayerController,
     &kAPlayerLootPile,
     &kAPlayerState,
+    &kAProcessingStationActor,
     &kAoCGameStateBP_C,
     &kAoCPlayerControllerBP_C,
     &kAoCPlayerStateBP_C,
@@ -203,6 +214,7 @@ constexpr const ClassSchema* kAll[] = {
     &kUItemStorageComponent,
     &kULevelingComponent,
     &kULootComponent,
+    &kUMapRegistrationComponent,
     &kUMountComponent,
     &kUNPCAppearanceComponent,
     &kUNPCCombatInfo,

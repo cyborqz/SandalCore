@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
-// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
 //  server/worldd/tests/pop_golden_region.h
 //
@@ -28,7 +25,6 @@ struct PopGolden {
     const GoldenCount* zones;       size_t zone_count;         // NPCs by zone of influence name (zone mode only)
     uint64_t           digest;                                 // the multiset of (round(x), round(y), level, Blueprint), FNV-1a each, summed
 };
-// ~ C:Y:B - C.O.A ~
 
 inline constexpr GoldenCount kPlainStage[] = {
     {"placements", 15179},
@@ -36,8 +32,8 @@ inline constexpr GoldenCount kPlainStage[] = {
     {"area_points", 4002},
     {"area_sets", 412},
     {"no_asset", 0},
-    {"no_template", 1044},
-    {"spawned", 10554},
+    {"no_template", 1042},
+    {"spawned", 10556},
     {"area_spawned", 3219},
 };
 inline constexpr GoldenCount kPlainFiltered[] = {
@@ -90,6 +86,7 @@ inline constexpr GoldenCount kPlainBlueprints[] = {
     {"Chicken_Base", 14},
     {"Cow_StateTree", 5},
     {"Crab_Giant", 1},
+    {"CraftingStation_BefallenForge", 1},
     {"Crushed_Curator", 1},
     {"CrystalGolem", 10},
     {"CrystalGolem_Corrupted", 32},
@@ -219,6 +216,7 @@ inline constexpr GoldenCount kPlainBlueprints[] = {
     {"PlantMonster_Poison1", 2},
     {"PlantMonster_RareSpawn_OleBloodmother", 1},
     {"Prisma", 1},
+    {"ProcessingStation_BefallenForge", 1},
     {"RVR_SPH_AnimatedArmor_Knight", 40},
     {"RVR_SPH_Animated_Armor_Caster", 12},
     {"RVR_SPH_Bat", 5},
@@ -301,8 +299,7 @@ inline constexpr GoldenCount kPlainBlueprints[] = {
 inline constexpr GoldenCount kPlainZones[] = {
     {"", 0},
 };
-inline constexpr PopGolden kGoldenPlain = {kPlainStage, sizeof(kPlainStage) / sizeof(GoldenCount), kPlainFiltered, sizeof(kPlainFiltered) / sizeof(GoldenCount), kPlainBlueprints, sizeof(kPlainBlueprints) / sizeof(GoldenCount), kPlainZones, 0, 16298908314572436993ull};
-// -- C Y B . C-O-A --
+inline constexpr PopGolden kGoldenPlain = {kPlainStage, sizeof(kPlainStage) / sizeof(GoldenCount), kPlainFiltered, sizeof(kPlainFiltered) / sizeof(GoldenCount), kPlainBlueprints, sizeof(kPlainBlueprints) / sizeof(GoldenCount), kPlainZones, 0, 3293526207069979091ull};
 
 inline constexpr GoldenCount kZoiStage[] = {
     {"placements", 15179},
@@ -310,8 +307,8 @@ inline constexpr GoldenCount kZoiStage[] = {
     {"area_points", 4002},
     {"area_sets", 412},
     {"no_asset", 0},
-    {"no_template", 1083},
-    {"spawned", 10554},
+    {"no_template", 1081},
+    {"spawned", 10556},
     {"area_spawned", 3219},
 };
 inline constexpr GoldenCount kZoiFiltered[] = {
@@ -364,6 +361,7 @@ inline constexpr GoldenCount kZoiBlueprints[] = {
     {"Chicken_Base", 14},
     {"Cow_StateTree", 5},
     {"Crab_Giant", 1},
+    {"CraftingStation_BefallenForge", 1},
     {"Crushed_Curator", 1},
     {"CrystalGolem", 10},
     {"CrystalGolem_Corrupted", 32},
@@ -493,6 +491,7 @@ inline constexpr GoldenCount kZoiBlueprints[] = {
     {"PlantMonster_Poison1", 2},
     {"PlantMonster_RareSpawn_OleBloodmother", 1},
     {"Prisma", 1},
+    {"ProcessingStation_BefallenForge", 1},
     {"RVR_SPH_AnimatedArmor_Knight", 40},
     {"RVR_SPH_Animated_Armor_Caster", 12},
     {"RVR_SPH_Bat", 5},
@@ -580,12 +579,12 @@ inline constexpr GoldenCount kZoiZones[] = {
     {"Verra_RVR_Node_Halcyon", 962},
     {"Verra_RVR_StartingArea_Samia", 747},
     {"Verra_RVR_StartingArea_RuinsOfAela", 636},
-    {"Verra_RVR_Dungeon_BefallenForge", 136},
+    {"Verra_RVR_Dungeon_BefallenForge", 138},
     {"Verra_RVR_Dungeon_Harth", 0},
     {"Verra_RVR_StartingArea_Samia_ArtisanPOI", 102},
     {"Verra_RVR_StartingArea_RuinsOfAela_ArtisanPOI", 41},
     {"Verra_RVR_HARBOR_BreezewaterBay", 8},
 };
-inline constexpr PopGolden kGoldenZoi = {kZoiStage, sizeof(kZoiStage) / sizeof(GoldenCount), kZoiFiltered, sizeof(kZoiFiltered) / sizeof(GoldenCount), kZoiBlueprints, sizeof(kZoiBlueprints) / sizeof(GoldenCount), kZoiZones, sizeof(kZoiZones) / sizeof(GoldenCount), 16298908314572436993ull};
+inline constexpr PopGolden kGoldenZoi = {kZoiStage, sizeof(kZoiStage) / sizeof(GoldenCount), kZoiFiltered, sizeof(kZoiFiltered) / sizeof(GoldenCount), kZoiBlueprints, sizeof(kZoiBlueprints) / sizeof(GoldenCount), kZoiZones, sizeof(kZoiZones) / sizeof(GoldenCount), 3293526207069979091ull};
 
 }  // namespace aoc::worldd::tests

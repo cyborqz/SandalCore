@@ -200,6 +200,23 @@ std::vector<PlotRow> NodeWire::plot_rows_of(int64_t node_guid, int level) const 
     return rows;
 }
 
+std::vector<int64_t> NodeWire::plot_buildings(int64_t plot) const {
+    std::vector<int64_t> out;
+    const auto it = candidates_.find(plot);
+    if (it == candidates_.end()) return out;
+    for (const Candidate& c : it->second) out.push_back(c.building);
+    return out;
+}
+
+std::string NodeWire::building_name(int64_t plot, int64_t building) const {
+    const auto it = candidates_.find(plot);
+    if (it == candidates_.end()) return std::string();
+    for (const Candidate& c : it->second) {
+        if (c.building == building) return c.name;
+    }
+    return std::string();
+}
+
 LevelGrants NodeWire::grants(int64_t node_guid, int level) const {
     LevelGrants best;
     best.level = -1;

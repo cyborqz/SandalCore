@@ -173,7 +173,7 @@ bool NpcWorld::add(uint64_t actor_id, const NpcMotionSetup& setup, bool* ground_
     if (pending) *pending = false;
     if (!nav_ || npcs_.count(actor_id) || !finite_setup(setup)) return false;
     world::WorldActor* a = registry_.find(actor_id);
-    if (!a || a->kind != world::ActorKind::Npc) return false;
+    if (!a || (a->kind != world::ActorKind::Npc && a->kind != world::ActorKind::Station)) return false;   // (crafting, step 0: a station is grounded like a town's people and never moves)
     Npc n;
     n.id = actor_id;
     n.setup = setup;

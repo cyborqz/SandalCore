@@ -63,6 +63,7 @@
 #include "protocol/repl/replicator.h"
 #include "protocol/repl/skill_rpc.h"
 #include "protocol/repl/storage_rpc.h"
+#include "protocol/repl/craft_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
 
 #include <array>
@@ -259,6 +260,9 @@ public:
     /// stock and prices are the client's own tables'), `vendor` the NPC's actor. nullopt before the pawn's second state or when the RPC does
     /// not build.
     std::optional<Send> open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor, const repl::UnavailableList& unavailable = {});
+    /// Crafting, step 0: ClientOpenCraftingStationUI on the PlayerController (reliable): the client opens the window of the station actor `station` (the recipes are the client's own
+    /// tables') with the service tax `tax` and none of the player's jobs. nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax);
     /// ClientSetNodeTaxTable: the answer to the vendor window's ServerGetNodeTaxTable (fix 4; vendor/node_tax.h).
     std::optional<Send> node_tax_table(const repl::NodeTaxDetails& details);
     /// The vendors milestone, step 0: a purchase's answer in one chain: ClientShowCurrencyCallout(currency tier, signed delta) first, then the ClientReceiveStorageEvent calls of `events`
