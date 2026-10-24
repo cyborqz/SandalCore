@@ -93,6 +93,35 @@ message Character {
   // The vendors milestone, step 0: the character's money, one entry per currency it holds, with the items (include_items). A character that has no wallet yet is given the
   // start purse the first time it is read, so a character read this way always has an entry for Copper.
   repeated WalletEntry wallet = 20;
+  // Crafting, step 1: the character's processing jobs (migration 0013), with the items (include_items), in the order they were queued. A character that never started one has none.
+  repeated ProcessingJob processing_jobs = 21;
+}
+
+// One processing job of a character (crafting, step 1, migration 0013): a batch of a recipe started at a station. Times are Unix milliseconds on the server's wall clock, so a job runs
+// on while its player is away: it started at started_at_ms (the end of the job before it when it waited) and is done at started_at_ms + duration_ms.
+message ProcessingJob {
+  string job_guid = 1; // 32 lowercase hex digits, not all zero
+  string station_key = 2; // 16 lowercase hex digits: which station the job is at (the same on every start of the server)
+  int64 recipe_guid = 3; // the design database's CraftingRecipeDef Guid
+  int64 sub_recipe_guid = 4; // 0 for none
+  int32 quantity = 5; // 1 to 250
+  int64 queued_at_ms = 6; // when the player started it
+  int64 started_at_ms = 7; // when it began to run: queued_at_ms, or the end of the job before it
+  int64 duration_ms = 8; // how long it runs: 1 or more
+  string client_txn = 9; // 32 lowercase hex digits: the client's id of the request that started it, which the window shows the job back with
+  repeated JobResource resources = 10; // what was paid, by record and rarity band
+}
+
+// One resource of a job (a record) with the rarities and counts that were paid.
+message JobResource {
+  int64 record_id = 1;
+  repeated JobRarity rarities = 2;
+}
+
+message JobRarity {
+  int32 rarity = 1; // 0 Common ... 6 Artifact
+  int32 count = 2; // 1 or more
+  bool from_warehouse = 3;
 }
 
 // One currency of a character's wallet (the vendors milestone, step 0, migration 0012): currency_guid is the BASE currency def's Guid (Copper 6064629132706054144, Node
@@ -243,6 +272,10 @@ message SaveInventoryRequest {
   // 0 to 10^13 or a currency named twice.
   bool replace_wallet = 3;
   repeated WalletEntry wallet = 4;
+  // Crafting, step 1: with replace_processing_jobs the character's jobs become exactly `processing_jobs`, in the same transaction as the items (a job started and the items it took are
+  // stored together or not at all); without it they are left alone. InvalidArgument, with nothing changed, for a job that breaks the rules (processing_jobs.go says which).
+  bool replace_processing_jobs = 5;
+  repeated ProcessingJob processing_jobs = 6;
 }
 
 message SaveInventoryResponse {

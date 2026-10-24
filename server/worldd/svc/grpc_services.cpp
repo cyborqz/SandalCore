@@ -139,6 +139,25 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         r.character.items.push_back(std::move(it));
     }
     for (const auto& w : c.wallet()) r.character.wallet.push_back({w.currency_guid(), w.amount()});
+    for (const auto& j : c.processing_jobs()) {
+        ProcessingJob job;
+        job.job_guid = j.job_guid();
+        job.station_key = j.station_key();
+        job.recipe_guid = j.recipe_guid();
+        job.sub_recipe_guid = j.sub_recipe_guid();
+        job.quantity = j.quantity();
+        job.queued_at_ms = j.queued_at_ms();
+        job.started_at_ms = j.started_at_ms();
+        job.duration_ms = j.duration_ms();
+        job.client_txn = j.client_txn();
+        for (const auto& res : j.resources()) {
+            JobResource jr;
+            jr.record_id = res.record_id();
+            for (const auto& ra : res.rarities()) jr.rarities.push_back({ra.rarity(), ra.count(), ra.from_warehouse()});
+            job.resources.push_back(std::move(jr));
+        }
+        r.character.processing_jobs.push_back(std::move(job));
+    }
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -257,11 +276,40 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
     return save_inventory(id, items, wallet, /*with_wallet=*/true);
 }
 
-CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet) {
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs) {
+    return save_inventory(id, items, wallet, /*with_wallet=*/true, &jobs);
+}
+
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs) {
     grpc::ClientContext ctx;
     prepare(ctx, save_timeout_);
     characterv1::SaveInventoryRequest req;
     req.set_id(id);
+    if (jobs) {
+        req.set_replace_processing_jobs(true);
+        for (const ProcessingJob& job : *jobs) {
+            auto* j = req.add_processing_jobs();
+            j->set_job_guid(job.job_guid);
+            j->set_station_key(job.station_key);
+            j->set_recipe_guid(job.recipe_guid);
+            j->set_sub_recipe_guid(job.sub_recipe_guid);
+            j->set_quantity(job.quantity);
+            j->set_queued_at_ms(job.queued_at_ms);
+            j->set_started_at_ms(job.started_at_ms);
+            j->set_duration_ms(job.duration_ms);
+            j->set_client_txn(job.client_txn);
+            for (const JobResource& res : job.resources) {
+                auto* r = j->add_resources();
+                r->set_record_id(res.record_id);
+                for (const JobRarity& ra : res.rarities) {
+                    auto* rr = r->add_rarities();
+                    rr->set_rarity(ra.rarity);
+                    rr->set_count(ra.count);
+                    rr->set_from_warehouse(ra.from_warehouse);
+                }
+            }
+        }
+    }
     if (with_wallet) {
         req.set_replace_wallet(true);
         for (const WalletEntry& w : wallet) {

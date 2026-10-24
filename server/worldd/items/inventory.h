@@ -260,6 +260,12 @@ public:
     /// that names the stack as it was and how many leave (the stack keeps the rest in its slot; a stack that is emptied is gone).  Refused, changing nothing, when fewer are held.
     Outcome take(int64_t record, int64_t count);
 
+    /// Crafting, step 1: how many items of `record` whose quality is `quality_lo` to `quality_hi` the material bags (the resource containers) hold.
+    int64_t count_materials(int64_t record, int quality_lo, int quality_hi) const;
+    /// Takes `count` items of `record` of that quality band from the stacks of the material bags (never the item bag), in the order of their container and slot, or the lowest quality first with
+    /// `lowest_first`.  Each stack that gives something is ONE Remove event that names the stack as it was and how many leave, as take() does.  Refused, changing nothing, when fewer are held.
+    Outcome take_materials(int64_t record, int quality_lo, int quality_hi, int64_t count, bool lowest_first = false);
+
     /// Plan D1: items granted (a GiveItem reward, a purchase, a use): THE routing of Gathering stage 3 -- each item goes where its kind says (see the top of this file): a resource item
     /// tops up the stacks of its record and quality in the resource containers and starts new ones at the first free rectangle of the first container with room, any other item takes
     /// the lowest free bag slot.  An Add event each (the character as the instigator, as the join's Adds; a top-up is a Remove and an Add of the same instance), in the order given;

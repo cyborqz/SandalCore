@@ -637,6 +637,43 @@ struct CharacterCustomization {
     bool operator==(const CharacterCustomization&) const = default;
 };
 
+/// One rarity of a resource a craft takes: how many items of that rarity band (0 Common ... 6 Artifact) and whether they are taken from the warehouse.
+struct CraftRarityCount {
+    uint8_t rarity = 0;
+    int32_t count = 0;
+    bool    from_warehouse = false;
+    bool operator==(const CraftRarityCount&) const = default;
+};
+
+/// One resource of a craft (a record) with the rarities and counts paid.
+struct CraftResource {
+    int64_t                      record = 0;
+    std::vector<CraftRarityCount> rarities;
+    bool operator==(const CraftResource&) const = default;
+};
+
+/// FCraftItemState (ClientOpenCraftingStationUI's CraftItemStates, ClientUpdateCraftingStationUI's CraftStates): one crafting or processing job as the window shows it; NetSerialize,
+/// craft_codec.h has the layout.  `start_time` is whole seconds on the synchronized clock, `status` the job's state (Pending 1, InProgress 2, Complete 3, Claimed 4).  The members that
+/// only a finished job carries (its products and experience rows), the tag resources and the item list are not held: the codec reads and writes them empty.
+struct CraftItemState {
+    int64_t                    recipe = 0;
+    int64_t                    sub_recipe = 0;
+    double                     start_time = 0;
+    float                      duration = 0;       // seconds
+    int32_t                    quantity = 0;
+    std::vector<CraftResource> general;
+    std::vector<CraftResource> flexible;
+    GuidValue                  transaction;        // the ClientTransactionId of the request that started it
+    GuidValue                  job;                // the job's own guid
+    uint8_t                    status = 0;
+    bool                       flag = true;        // the member after the lists: always 1
+    uint8_t                    extra = 0;          // ... and the byte after it: always 0
+    bool operator==(const CraftItemState& o) const {
+        return recipe == o.recipe && sub_recipe == o.sub_recipe && same_bits(start_time, o.start_time) && same_bits(duration, o.duration) && quantity == o.quantity && general == o.general &&
+               flexible == o.flexible && transaction == o.transaction && job == o.job && status == o.status && flag == o.flag && extra == o.extra;
+    }
+};
+
 // ---- Value -----------------------------------------------------------------
 
 struct ElementState;
@@ -659,7 +696,7 @@ public:
         Vec3d, Vec2d, Rot, QuantVec, Normal16, RepMovement, LoadTracker, UniqueNetId, Ticks,
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
-        EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData>;
+        EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

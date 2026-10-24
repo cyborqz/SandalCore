@@ -128,6 +128,7 @@ struct StationInfo {
     int64_t     building = 0;     // the building of that plot
     bool        placed = false;   // put there by a game master (worldctl place-station), not by the node's people
     std::string tax_tag;          // the def's TaxTag ("" for none): which row of the node's tax table the window shows
+    uint64_t    seed = 0;         // the spawn point's seed (the data's: the same on every start; 0 when the point had none): the station's key and its StationGuid are made from it
 };
 
 /// Gathering stage 2, "Harvesting": what the harvesting player's own connection sees of a resource node that the shared state cannot say (an object reference to a pawn that only that

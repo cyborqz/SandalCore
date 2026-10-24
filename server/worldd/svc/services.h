@@ -79,6 +79,36 @@ struct WalletEntry {
     bool operator==(const WalletEntry&) const = default;
 };
 
+/// Crafting, step 1: one rarity of a resource a processing job was paid with (aoc.character.v1.JobRarity).
+struct JobRarity {
+    int32_t rarity = 0;   // 0 Common ... 6 Artifact
+    int32_t count = 0;
+    bool    from_warehouse = false;
+    bool operator==(const JobRarity&) const = default;
+};
+struct JobResource {
+    int64_t                record_id = 0;
+    std::vector<JobRarity> rarities;
+    bool operator==(const JobResource&) const = default;
+};
+
+/// Crafting, step 1: a processing job of a character (aoc.character.v1.ProcessingJob). The times are Unix milliseconds on the wall clock: the job started at `started_at_ms` (the end of the
+/// job before it when it waited) and is done `duration_ms` later, whether its player is logged in or not.
+struct ProcessingJob {
+    std::string              job_guid;        // 32 lowercase hex digits
+    std::string              station_key;     // 16 lowercase hex digits
+    int64_t                  recipe_guid = 0;
+    int64_t                  sub_recipe_guid = 0;
+    int32_t                  quantity = 0;
+    int64_t                  queued_at_ms = 0;
+    int64_t                  started_at_ms = 0;
+    int64_t                  duration_ms = 0;
+    std::string              client_txn;      // 32 lowercase hex digits
+    std::vector<JobResource> resources;
+    int64_t end_ms() const { return started_at_ms + duration_ms; }
+    bool operator==(const ProcessingJob&) const = default;
+};
+
 /// Plan D1: the XP a character has in one leveling type (aoc.character.v1.Experience): the design database's LevelingTypeDef
 /// Guid (Adventuring 108651085518458), the total as the client's XPTracker shows it and the experience debt.
 struct Experience {
@@ -164,6 +194,8 @@ struct Character {
     /// The vendors milestone, step 0: the character's money (with the items). The service gives a character with no wallet the start purse when it reads it, so a service of this
     /// version always sends a Copper entry; an older fake sends none, which worldd reads as an empty purse.
     std::vector<WalletEntry> wallet;
+    /// Crafting, step 1: the character's processing jobs, in the order they were queued (with the items). A service of an older version sends none.
+    std::vector<ProcessingJob> processing_jobs;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -233,6 +265,12 @@ public:
     virtual CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet) {
         (void)wallet;
         return save_inventory(id, items);
+    }
+    /// Crafting, step 1: SaveInventory that also stores the wallet and the character's processing jobs, in the same transaction (the jobs become exactly `jobs`). A fake that does not care saves
+    /// the items and the wallet.
+    virtual CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs) {
+        (void)jobs;
+        return save_inventory(id, items, wallet);
     }
     /// Plan D1: SaveProgress: the level, the class and the XP rows, in one transaction (the latest save wins). Refused: a level
     /// outside 1-25, a class outside 1-8, a leveling type of 0, a negative XP or debt; NotFound: no such character.

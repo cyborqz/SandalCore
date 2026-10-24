@@ -45,6 +45,7 @@ public:
     CallStatus save_position(const std::string& id, const Position& position) override;
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items) override;
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet) override;
+    CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs) override;
     CallStatus save_progress(const std::string& id, const Progress& progress) override;
     RegisterResult register_server(const std::string& address,
                                    const std::vector<std::string>& regions) override;
@@ -52,7 +53,7 @@ public:
 
 private:
     struct Stubs;
-    CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet);
+    CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs = nullptr);
     void prepare(grpc::ClientContext& ctx, std::chrono::milliseconds timeout) const;
     void prepare(grpc::ClientContext& ctx) const { prepare(ctx, timeout_); }
 

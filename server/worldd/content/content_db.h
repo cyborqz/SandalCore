@@ -827,6 +827,73 @@ struct CraftStationData {
     }
 };
 
+/// Crafting, step 1 (contentc version 20): the recipes (craft_recipe with its inputs, predicates and cost records) and which recipes each station's recipe set lists.
+struct CraftInput {
+    int64_t     item = 0;        // the resource record (0 when the input is named by a filter or by tags)
+    int64_t     filter = 0;      // CostGatherItemFilter
+    std::string tags;            // MaterialTags, comma separated
+    int         quantity = 0;    // for one unit
+    int         min_rarity = 0;  // Common 0 ... Artifact 6
+    bool        consume = true;
+    bool        primary = false; // the reagent (PrimaryResourceCosts): the server takes it, the request does not name it
+};
+/// A predicate of a recipe or a list (craft_pred): the recipe is available only where it holds.
+struct CraftPred {
+    std::string type;            // "Biome", "NodeLevel", "Node" or "BuildingModification"
+    int         node_level = -1; // the least node level (Wilderness 0 ... Metropolis 6), for NodeLevel
+    std::string biomes, modifications, nodes;   // comma separated
+    bool        hidden = false;
+};
+struct CraftRecipe {
+    int64_t     guid = 0;
+    std::string name;
+    int64_t     profession = 0;
+    int         tier = -1;       // the certification tier it needs (Novice 0 ... Grand Master 4)
+    double      base_duration = 0;   // seconds for one unit
+    std::string std_cost;        // StandardCurrencyCost, a number in text ("" for none)
+    int64_t     cost_guid = 0;   // CraftingCurrencyCostId (CraftCost), 0 for none
+    int64_t     reward = 0;
+    bool        learnable = false;   // the crafter must learn it
+    bool        inventory_destination = true;
+    int         fuel = 0;
+    bool        blacklisted = false;
+    std::vector<CraftInput> inputs;   // the general resources in order, then the reagents
+    std::vector<CraftPred>  preds;
+};
+struct CraftCost {
+    int64_t tier = 0;            // the currency tier the amount is in
+    int64_t value = 0;
+};
+struct CraftRecipeData {
+    std::unordered_map<int64_t, CraftRecipe>           recipes;
+    std::map<int64_t, CraftCost>                       costs;
+    std::map<int64_t, std::vector<int64_t>>            set_lists;     // recipe set -> its lists, in order
+    std::map<int64_t, std::vector<int64_t>>            list_recipes;  // list -> its recipes, in order
+    std::map<int64_t, std::vector<CraftPred>>          list_preds;
+    const CraftRecipe* recipe(int64_t guid) const {
+        const auto it = recipes.find(guid);
+        return it == recipes.end() ? nullptr : &it->second;
+    }
+    /// Whether `recipe` is in a list of `set`; `lists_out` (optional) gets the lists of the set that hold it.
+    bool set_holds(int64_t set, int64_t recipe, std::vector<int64_t>* lists_out = nullptr) const {
+        bool found = false;
+        const auto s = set_lists.find(set);
+        if (s == set_lists.end()) return false;
+        for (const int64_t list : s->second) {
+            const auto l = list_recipes.find(list);
+            if (l == list_recipes.end()) continue;
+            for (const int64_t r : l->second) {
+                if (r == recipe) {
+                    found = true;
+                    if (lists_out) lists_out->push_back(list);
+                    break;
+                }
+            }
+        }
+        return found;
+    }
+};
+
 struct DialogueData {
     std::map<int64_t, int64_t>         roots;           // root guid -> the node it starts at (0: none)
     std::map<int64_t, DialogueNodeRow> nodes;
@@ -1159,6 +1226,8 @@ public:
     std::optional<DialogueData> dialogue_data(std::string& error) const;
     /// Crafting, step 0 (contentc version 20): the station definitions and the assets that are their stations, read whole. nullopt, with `error` set, for a file of an older version.
     std::optional<CraftStationData> craft_station_data(std::string& error) const;
+    /// Crafting, step 1 (contentc version 20): the recipes, their inputs, predicates and cost records, and the recipe sets' lists, read whole. nullopt, with `error` set, for a file of an older version.
+    std::optional<CraftRecipeData> craft_recipe_data(std::string& error) const;
     /// Vendors, step 0 (contentc version 18): the shops' links, tax tags, prices and predicates, read whole.  nullopt, with `error` set, for a file of an older version.
     std::optional<VendorData> vendor_data(std::string& error) const;
     /// Vendors, the selling step (contentc version 19): what a sale or a repair needs of one item.  `known` is false for an item with no item_vendor row; nullopt, with `error` set,

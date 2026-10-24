@@ -1262,16 +1262,29 @@ std::optional<Send> PlayerBootstrap::open_vendor(int64_t merch_set, const emit::
     return rpcs(Role::PlayerController, "ClientOpenVendor", std::span<const repl::RpcRequest>(&call, 1));
 }
 
-std::optional<Send> PlayerBootstrap::open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax) {
+std::optional<Send> PlayerBootstrap::open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax, const std::vector<repl::CraftItemState>& jobs) {
     if (!ok_ || !second_state_added_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientOpenCraftingStationUI");
     if (!rpc) return std::nullopt;
-    auto params = repl::open_station_params(*rpc, station, tax);
+    auto params = repl::open_station_params(*rpc, station, tax, jobs);
     if (!params) return std::nullopt;
     repl::RpcRequest call;
     call.rpc = "ClientOpenCraftingStationUI";
     call.params = std::move(*params);
     return rpcs(Role::PlayerController, "ClientOpenCraftingStationUI", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+bool PlayerBootstrap::set_active_stations(const std::vector<std::array<int32_t, 4>>& stations) {
+    if (!ok_) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    repl::ArrayValue list;
+    for (const std::array<int32_t, 4>& g : stations) {
+        repl::ElementState e;
+        for (size_t i = 0; i < 4; ++i) e.values[static_cast<uint16_t>(i + 1)] = Value::i64(g[i]);   // ActiveProcessingStations.A to .D
+        list.elements.push_back(std::move(e));
+    }
+    return owner->obj.state.set(*owner->obj.schema, "ActiveProcessingStations", Value(std::move(list)));
 }
 
 std::optional<Send> PlayerBootstrap::dialogue_update(const DialogueView& view) {
@@ -1482,6 +1495,20 @@ std::optional<Send> PlayerBootstrap::currency_callout(int64_t currency_tier, int
     const auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
     if (!callout) return std::nullopt;
     return rpcs(Role::PlayerController, "ClientShowCurrencyCallout", std::span<const repl::RpcRequest>(&*callout, 1));
+}
+
+std::optional<Send> PlayerBootstrap::craft_started_answer(const emit::FIntrepidNetworkGUID& station, int64_t currency_tier, int64_t delta, const repl::CraftItemState& state) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
+    const schema::RpcSchema* update = pc_.obj.schema->rpc("ClientUpdateCraftingStationUI");
+    if (!callout || !update) return std::nullopt;
+    auto params = repl::update_station_params(*update, station, {state});
+    if (!params) return std::nullopt;
+    std::vector<repl::RpcRequest> calls(2);
+    calls[0] = std::move(*callout);
+    calls[1].rpc = "ClientUpdateCraftingStationUI";
+    calls[1].params = std::move(*params);
+    return rpcs(Role::PlayerController, "craft started", calls);
 }
 
 bool PlayerBootstrap::set_currency(int64_t currency, int64_t amount) {

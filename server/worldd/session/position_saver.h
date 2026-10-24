@@ -59,6 +59,11 @@ public:
         (void)wallet;
         save_inventory(character_id, std::move(items));
     }
+    /// Crafting, step 1: the inventory with the wallet and the character's processing jobs (stored in the same call). A sink that does not keep jobs saves the items and the wallet.
+    virtual void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs) {
+        (void)jobs;
+        save_inventory(character_id, std::move(items), std::move(wallet));
+    }
     /// Plan D1: queues the character's progress (SaveProgress: level, class, XP rows). Never blocks on the network.
     virtual void save_progress(const std::string& character_id, svc::Progress progress) {
         (void)character_id;
@@ -83,6 +88,7 @@ public:
     void save(const std::string& character_id, const svc::Position& position) override;
     void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items) override;
     void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet) override;
+    void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs) override;
     void save_progress(const std::string& character_id, svc::Progress progress) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
@@ -105,6 +111,7 @@ private:
         std::optional<svc::Position>                   position;
         std::optional<std::vector<svc::InventoryItem>> inventory;
         std::optional<std::vector<svc::WalletEntry>>   wallet;      // the vendors milestone, step 0: saved in the inventory's call when set
+        std::optional<std::vector<svc::ProcessingJob>> jobs;        // crafting, step 1: saved in the inventory's call when set
         std::optional<svc::Progress>                   progress;   // plan D1: saved between the position and the inventory
         int                                            position_attempts = 0;
         int                                            inventory_attempts = 0;
@@ -112,7 +119,8 @@ private:
     };
 
     void run();
-    void save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet);
+    void save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet,
+                              std::optional<std::vector<svc::ProcessingJob>> jobs = std::nullopt);
 
     svc::CharacterApi&   api_;
     const Config         config_;

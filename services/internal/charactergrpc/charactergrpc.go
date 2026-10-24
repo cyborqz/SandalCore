@@ -53,6 +53,15 @@ type WalletStore interface {
 
 var _ WalletStore = (*character.Store)(nil)
 
+// JobStore is the part of character.Store that keeps a character's processing jobs (the crafting milestone, step 1). A store without it keeps none: GetCharacter sends none and a
+// save that replaces the jobs is refused.
+type JobStore interface {
+	ProcessingJobs(ctx context.Context, id string) ([]character.ProcessingJob, error)
+	SaveInventoryAll(ctx context.Context, id string, items []character.Item, wallet []character.WalletEntry, replaceWallet bool, jobs []character.ProcessingJob, replaceJobs bool) error
+}
+
+var _ JobStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -225,6 +234,13 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			}
 			out.Wallet = toProtoWallet(wallet)
 		}
+		if js, ok := s.store.(JobStore); ok {
+			jobs, err := js.ProcessingJobs(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.ProcessingJobs = toProtoJobs(jobs)
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -317,6 +333,43 @@ func toProtoWallet(w []character.WalletEntry) []*characterv1.WalletEntry {
 	return out
 }
 
+func toProtoJobs(jobs []character.ProcessingJob) []*characterv1.ProcessingJob {
+	if len(jobs) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.ProcessingJob, 0, len(jobs))
+	for _, j := range jobs {
+		p := &characterv1.ProcessingJob{JobGuid: j.JobGUID, StationKey: j.StationKey, RecipeGuid: j.RecipeGUID, SubRecipeGuid: j.SubRecipeGUID, Quantity: j.Quantity,
+			QueuedAtMs: j.QueuedAt.UnixMilli(), StartedAtMs: j.StartedAt.UnixMilli(), DurationMs: j.DurationMs, ClientTxn: j.ClientTxn}
+		for _, r := range j.Resources {
+			res := &characterv1.JobResource{RecordId: r.RecordID}
+			for _, ra := range r.Rarities {
+				res.Rarities = append(res.Rarities, &characterv1.JobRarity{Rarity: ra.Rarity, Count: ra.Count, FromWarehouse: ra.FromWarehouse})
+			}
+			p.Resources = append(p.Resources, res)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func fromProtoJobs(jobs []*characterv1.ProcessingJob) []character.ProcessingJob {
+	out := make([]character.ProcessingJob, 0, len(jobs))
+	for _, p := range jobs {
+		j := character.ProcessingJob{JobGUID: p.GetJobGuid(), StationKey: p.GetStationKey(), RecipeGUID: p.GetRecipeGuid(), SubRecipeGUID: p.GetSubRecipeGuid(), Quantity: p.GetQuantity(),
+			QueuedAt: time.UnixMilli(p.GetQueuedAtMs()).UTC(), StartedAt: time.UnixMilli(p.GetStartedAtMs()).UTC(), DurationMs: p.GetDurationMs(), ClientTxn: p.GetClientTxn()}
+		for _, r := range p.GetResources() {
+			res := character.JobResource{RecordID: r.GetRecordId()}
+			for _, ra := range r.GetRarities() {
+				res.Rarities = append(res.Rarities, character.JobRarity{Rarity: ra.GetRarity(), Count: ra.GetCount(), FromWarehouse: ra.GetFromWarehouse()})
+			}
+			j.Resources = append(j.Resources, res)
+		}
+		out = append(out, j)
+	}
+	return out
+}
+
 func toProtoExperience(xp []character.Experience) []*characterv1.Experience {
 	if len(xp) == 0 {
 		return nil
@@ -339,6 +392,20 @@ func (s *Server) SaveInventory(ctx context.Context, r *characterv1.SaveInventory
 			return nil, status.Errorf(codes.InvalidArgument, "item %d: %s", i, err)
 		}
 		items = append(items, item)
+	}
+	if r.GetReplaceProcessingJobs() {
+		js, ok := s.store.(JobStore)
+		if !ok {
+			return nil, status.Error(codes.Unimplemented, "this character store keeps no processing jobs")
+		}
+		wallet := make([]character.WalletEntry, 0, len(r.GetWallet()))
+		for _, e := range r.GetWallet() {
+			wallet = append(wallet, character.WalletEntry{CurrencyGuid: e.GetCurrencyGuid(), Amount: e.GetAmount()})
+		}
+		if err := js.SaveInventoryAll(ctx, r.GetId(), items, wallet, r.GetReplaceWallet(), fromProtoJobs(r.GetProcessingJobs()), true); err != nil {
+			return nil, toStatus(ctx, err)
+		}
+		return &characterv1.SaveInventoryResponse{Saved: int32(len(items))}, nil
 	}
 	if r.GetReplaceWallet() {
 		ws, ok := s.store.(WalletStore)

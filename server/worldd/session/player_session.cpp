@@ -10,6 +10,8 @@
 
 #include "bootstrap/character_setup.h"
 #include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rules.h"
 #include "crafting/station.h"
 #include "content/content_db.h"
 #include "dialogue/talk.h"
@@ -339,6 +341,8 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
                           world.ability_rules(), std::move(*built.inventory), world.item_catalog(), std::move(built.character_stats), &world,
                           character.class_id, built.progress));
     p->wallet_ = purse;
+    p->jobs_ = character.processing_jobs;   // crafting, step 1: the jobs run on the wall clock, whether the character was logged in or not
+    p->sync_active_stations(wall_ms());
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
         p->inventory_dirty_ = true;
@@ -841,7 +845,7 @@ void PlayerSession::hand_over_inventory(const char* why, bool periodic) {
     if (!sink_) return;
     std::vector<svc::InventoryItem> items = inventory_.items();
     const size_t n = items.size();
-    sink_->save_inventory(character_id_, std::move(items), wallet_.entries());
+    sink_->save_inventory(character_id_, std::move(items), wallet_.entries(), jobs_);
     ++inventories_handed_over_;
     spdlog::log(periodic ? level_for(item_periodic_logged_) : spdlog::level::info, "[session] {}: saving the inventory ({} items) ({})", name(), n, why);
 }
@@ -1070,6 +1074,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerSetActionbarSlotUseData") return on_set_slot(conn, rpc, now);
         if (name_of_rpc == "ServerSelectDialogueChoice") return on_dialogue_choice(conn, rpc, now);
         if (name_of_rpc == "ServerHandleVendorPurchase") return on_vendor_purchase(conn, rpc, now);
+        if (name_of_rpc == "ServerStartCraft") return on_start_craft(conn, rpc, now);
         if (name_of_rpc == "ServerOpenVendor") return on_open_vendor(conn, rpc, now);
         if (name_of_rpc == "ServerRequestLootStorageEvents") return on_loot_request(conn, rpc, now);
         if (name_of_rpc == "ServerGetNodeTaxTable") return on_node_tax_request(conn, rpc, now);
@@ -3144,7 +3149,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
 
 // -- crafting, step 0: the stations --------------------------------------------------------------------------------------------------------------------------
 
-void PlayerSession::on_station_interact(Connection& conn, const world::WorldActor& a, Clock::time_point /*now*/) {
+void PlayerSession::on_station_interact(Connection& conn, const world::WorldActor& a, Clock::time_point now) {
     constexpr size_t kStationLogged = 30;   // a player tries a handful of stations: each click is a line in the log, up to this many of each kind
     const auto ignore = [&](const std::string& why) {
         ++interact_ignored_;
@@ -3163,14 +3168,134 @@ void PlayerSession::on_station_interact(Connection& conn, const world::WorldActo
     ++station_opens_;
     // what this step cannot put in the window is said once per kind: the recipes, prices and certification are the client's own; the player's known recipes (OwnerInfo) and jobs are not sent yet
     if (station_told_.insert("known recipes").second) {
-        spdlog::info("[session] {}: a station window opens with the client's own recipe lists: the server sends no known recipes and no jobs yet (told once)", name());
+        spdlog::info("[session] {}: a station window opens with the client's own recipe lists: the server sends no known recipes (told once)", name());
     }
     if (a.station.def == 0 && station_told_.insert("no def " + a.station.name).second) {
         spdlog::info("[session] {}: the station {} has no definition in the data: its window opens with the client's own recipes and the default tax", name(), a.station.name);
     }
-    spdlog::log(level_for(station_logged_, kStationLogged), "[session] {}: opens the window of {} in node {} ({} m away, tax {:.2f} of the price, the owning node keeps {:.2f}; no jobs yet)", name(), a.station.name,
-                a.station.node, static_cast<int>(distance / 100.0), tax.percent, tax.owning_share);
-    queue("ClientOpenCraftingStationUI", [guid, tax](bootstrap::PlayerBootstrap& pb) { return pb.open_station(guid, tax); }, conn, /*must_build=*/true);
+    // crafting, step 1: the player's own jobs at this station, in the order they were queued
+    const int64_t now_ms = wall_ms();
+    std::vector<repl::CraftItemState> states;
+    if (const std::string key = crafting::station_key(a.station.seed); !key.empty()) states = crafting::states_at(jobs_, key, now_ms, sync_now(now));
+    spdlog::log(level_for(station_logged_, kStationLogged), "[session] {}: opens the window of {} in node {} ({} m away, tax {:.2f} of the price, the owning node keeps {:.2f}; {} job(s) of the player's here)", name(),
+                a.station.name, a.station.node, static_cast<int>(distance / 100.0), tax.percent, tax.owning_share, states.size());
+    queue("ClientOpenCraftingStationUI", [guid, tax, states](bootstrap::PlayerBootstrap& pb) { return pb.open_station(guid, tax, states); }, conn, /*must_build=*/true);
+}
+
+// -- crafting, step 1: starting a processing job -------------------------------------------------------------------------------------------------------------
+
+int64_t PlayerSession::wall_ms() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); }
+
+double PlayerSession::sync_now(Clock::time_point now) { return bootstrap::effect_clock(pb_.setup().world_time + session_seconds(now)); }
+
+void PlayerSession::sync_active_stations(int64_t now_ms) {
+    const std::vector<std::array<int32_t, 4>> stations = crafting::active_station_words(jobs_, now_ms);
+    if (stations.empty() && active_stations_ == 0) return;   // nothing was ever told and nothing is: the property stays out of the state
+    if (pb_.set_active_stations(stations)) active_stations_ = stations.size();
+}
+
+void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    constexpr size_t kCraftLogged = 30;   // a player starts a few jobs: each is a line in the log, up to this many
+    if (dead_) return;
+    const auto req = repl::parse_start_craft(rpc.call);
+    if (!req) {
+        if (!vendor_unreadable_logged_) {
+            vendor_unreadable_logged_ = true;
+            spdlog::warn("[session] {}: a ServerStartCraft does not read ({} parameter bits): ignored (further ones are not logged)", name(), rpc.call.param_bits);
+        }
+        return;
+    }
+    if (!within_budget(vendor_budget_, "ServerStartCraft", now) || !room_for(8)) return;
+    const auto refuse = [&](const std::string& why) {
+        ++crafts_refused_;
+        spdlog::log(level_for(craft_refused_logged_, kCraftLogged), "[session] {}: a start at a station is refused (nothing is taken, nothing is sent): {}", name(), why);
+    };
+    if (!registry_ || !view_ || !world_) return refuse("the world has no actors");
+    const world::WorldActor* a = registry_->find(req->station.ObjectId);
+    if (!a || a->kind != world::ActorKind::Station) return refuse("the object named is no station of this world");
+    if (view_->state_of(a->id) != world::ClientState::Awake) return refuse("the client does not have that station open");
+    const GoodPosition at = checker_.good();
+    const double dx = a->x - at.x, dy = a->y - at.y, dz = a->z - at.z;
+    const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (distance >= crafting::kStationRangeCm) return refuse("the station " + a->station.name + " is " + std::to_string(static_cast<int>(distance / 100.0)) + " m away");
+    if (!a->station.processing) return refuse(a->station.name + " is a station that crafts at once: its start is the next step's");
+    const std::string key = crafting::station_key(a->station.seed);
+    if (key.empty()) return refuse(a->station.name + " has no key that survives a restart: no job can be saved there");
+    const content::CraftStationData* defs = world_->station_data();
+    const content::CraftRecipeData* recipes = world_->craft_recipes();
+    if (!defs || !recipes) return refuse("worldd has no station definitions or recipes (an older content.db)");
+    const auto def = defs->defs.find(a->station.def);
+    if (a->station.def == 0 || def == defs->defs.end()) return refuse("the data holds no definition for " + a->station.name);
+    const int64_t now_ms = wall_ms();
+    crafting::StartFacts facts;
+    facts.recipes = recipes;
+    facts.station = &def->second;
+    facts.tax = crafting::station_tax(a->station.tax_tag);
+    facts.node.guid = a->station.node;
+    if (world_->city_nodes() && world_->node_wire()) {
+        if (const world::CityNodeInfo* node = world_->city_nodes()->by_guid(a->station.node)) {
+            facts.node.level = world_->city_nodes()->level_of(node->guid);
+            facts.node.biome = spawns::node_site_of(*world_->city_nodes(), *world_->node_wire(), *node, facts.node.level).biome;
+        }
+    }
+    facts.tier_of = [this](int64_t profession) { return professions_.valid() ? professions_.tier(profession) : 0; };
+    facts.inventory = &inventory_;
+    facts.copper = wallet_.copper();
+    facts.unfinished_here = crafting::unfinished_at(jobs_, key, now_ms);
+    facts.held_here = crafting::held_at(jobs_, key);
+    if (jobs_.size() >= crafting::kMaxJobsHeld) return refuse("the character holds " + std::to_string(jobs_.size()) + " jobs already");
+    const crafting::Plan plan = crafting::plan_start(*req, facts);
+    if (!plan.ok) return refuse(plan.refusal);
+    // the stacks leave the material bags: the reagent first, then what the player named (the retail order); any failure puts the bags back as they were
+    const items::Inventory kept = inventory_;
+    items::Outcome taken;
+    taken.ok = true;
+    for (const crafting::Take& t : plan.takes) {
+        items::Outcome o = inventory_.take_materials(t.record, t.quality_lo, t.quality_hi, t.count, t.lowest_first);
+        if (!o.ok) {
+            inventory_ = kept;
+            return refuse(o.refusal);
+        }
+        taken.events.insert(taken.events.end(), std::make_move_iterator(o.events.begin()), std::make_move_iterator(o.events.end()));
+    }
+    if (taken.events.size() > 8 * bootstrap::kMaxEventsPerChain) {
+        inventory_ = kept;
+        return refuse("the job takes from " + std::to_string(taken.events.size()) + " stacks: more events than one answer holds");
+    }
+    svc::ProcessingJob job = crafting::make_job(jobs_, key, plan.recipe->guid, req->quantity, plan.duration_ms, req->transaction, crafting::job_resources_of(plan.paid), now_ms);
+    const auto state = crafting::to_state(job, now_ms, sync_now(now));
+    if (!state) {   // (the guids were made here: cannot happen)
+        inventory_ = kept;
+        return refuse("the job's guids do not read");
+    }
+    const int64_t before = wallet_.copper();
+    if (plan.cost > 0) wallet_.pay(plan.cost);   // checked by the plan: it cannot be short
+    jobs_.push_back(std::move(job));
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    ++items_applied_;
+    ++crafts_started_;
+    // the answer in the retail order: the Remove events (each with its "Removed" callout), then one tick with the active stations and the new balance, the money callout and the new job's state
+    std::vector<bootstrap::ItemEvent> events = item_events_for(taken);
+    add_item_toasts(events, /*removals=*/true);
+    const FIntrepidNetworkGUID station_guid = a->actor.guid;
+    const int64_t delta = -plan.cost;
+    const repl::CraftItemState shown = *state;
+    constexpr auto kTickAfterRemoves = std::chrono::milliseconds(40);   // retail: the Removes at +79 ms, the tick at +121 ms
+    for (size_t at_event = 0; at_event < events.size(); at_event += bootstrap::kMaxEventsPerChain) {
+        const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at_event),
+                                                     events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at_event + bootstrap::kMaxEventsPerChain)));
+        queue_later("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, now, /*must_build=*/true);
+    }
+    pb_.set_currency(items::kCopperCurrency, wallet_.copper());
+    sync_active_stations(now_ms);
+    queue_later("OwnerInfo", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, now + kTickAfterRemoves, /*must_build=*/true);
+    queue_later("craft started", [station_guid, delta, shown](bootstrap::PlayerBootstrap& pb) { return pb.craft_started_answer(station_guid, items::kMoneyTier, delta, shown); }, conn,
+                now + kTickAfterRemoves, /*must_build=*/true);
+    spdlog::log(level_for(craft_logged_, kCraftLogged),
+                "[session] {}: started {} x{} at {} ({}): {} copper ({} each with the tax of {:.2f}, {} before it) leaves the purse ({} -> {}), {} stack(s) leave the material bags, the job runs {:.0f} s {}", name(),
+                plan.recipe->name, req->quantity, a->station.name, key, plan.cost, plan.unit_taxed, facts.tax.percent, plan.unit_cost, before, wallet_.copper(), taken.events.size(),
+                plan.duration_ms / 1000.0, state->status == crafting::kPending ? "after the one before it" : "from now");
 }
 
 // -- quests, slice 0: the talking window --------------------------------------------------------------------------------------------------------------------

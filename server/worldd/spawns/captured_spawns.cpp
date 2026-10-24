@@ -10,12 +10,14 @@
 
 #include "bootstrap/constants.h"
 #include "content/content_db.h"
+#include "crafting/station.h"
 #include "protocol/repl/block_reader.h"
 #include "protocol/schema/generated/index.h"
 #include "spawns/area_spawns.h"
 #include "spawns/mount_donors.h"
 #include "spawns/spawn_util.h"
 
+#include <array>
 #include <cmath>
 #include <iterator>
 
@@ -427,10 +429,13 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
         w.y = p.y;
         w.z = p.z;
         w.yaw_degrees = p.yaw_degrees;
-        // who it is: its own StationGuid (the key of its jobs later), not the recorded station's
-        uint64_t seed = p.seed ? p.seed : w.id;
-        for (const char* path : {"StationGuid.A", "StationGuid.B", "StationGuid.C", "StationGuid.D"}) {
-            if (!set_path(actor, path, repl::Value::i64(static_cast<int32_t>(splitmix(seed) >> 16)), e)) { error = e; return std::nullopt; }
+        // who it is: its own StationGuid, not the recorded station's.  The words come from the point's seed (the data's, the same on every start: the key its jobs are saved under); a point with
+        // no seed falls back to the actor's id, which changes from start to start, and its station has no key (w.station.seed stays 0)
+        w.station.seed = p.seed;
+        const std::array<int32_t, 4> words = crafting::station_guid_words(p.seed ? p.seed : w.id);
+        const char* const word_paths[4] = {"StationGuid.A", "StationGuid.B", "StationGuid.C", "StationGuid.D"};
+        for (size_t i = 0; i < 4; ++i) {
+            if (!set_path(actor, word_paths[i], repl::Value::i64(words[i]), e)) { error = e; return std::nullopt; }
         }
         const size_t dot = open.archetype_path.rfind('.');
         std::string leaf = open.archetype_path.substr(dot == std::string::npos ? 0 : dot + 1);

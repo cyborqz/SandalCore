@@ -36,10 +36,10 @@ func schemaWithout(t *testing.T, pool *pgxpool.Pool, skip string) []string {
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name NOT IN ($1, 'character_wallet') ORDER BY 1`,
+			WHERE table_schema = current_schema() AND table_name NOT IN ($1, 'character_wallet', 'character_processing_jobs') ORDER BY 1`,
 		`SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
-			WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text NOT IN ($1, 'character_wallet') ORDER BY 1`,
-		`SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT IN ($1, 'character_wallet') ORDER BY 1`,
+			WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text NOT IN ($1, 'character_wallet', 'character_processing_jobs') ORDER BY 1`,
+		`SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT IN ($1, 'character_wallet', 'character_processing_jobs') ORDER BY 1`,
 	} {
 		r, err := pool.Query(ctx, q, skip)
 		if err != nil {

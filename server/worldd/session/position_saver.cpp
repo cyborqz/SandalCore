@@ -65,7 +65,12 @@ void CharacterSaver::save_inventory(const std::string& character_id, std::vector
     save_inventory_entry(character_id, std::move(items), std::move(wallet));
 }
 
-void CharacterSaver::save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet) {
+void CharacterSaver::save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs) {
+    save_inventory_entry(character_id, std::move(items), std::move(wallet), std::move(jobs));
+}
+
+void CharacterSaver::save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet,
+                                          std::optional<std::vector<svc::ProcessingJob>> jobs) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (stop_) return;
@@ -74,6 +79,7 @@ void CharacterSaver::save_inventory_entry(const std::string& character_id, std::
             if (it->second.inventory) ++replaced_;
             it->second.inventory = std::move(items);
             it->second.wallet = std::move(wallet);
+            it->second.jobs = std::move(jobs);
             it->second.inventory_attempts = 0;
         } else {
             if (entries_.size() >= config_.max_queued) {
@@ -87,6 +93,7 @@ void CharacterSaver::save_inventory_entry(const std::string& character_id, std::
             Entry e;
             e.inventory = std::move(items);
             e.wallet = std::move(wallet);
+            e.jobs = std::move(jobs);
             entries_.emplace(character_id, std::move(e));
         }
     }
@@ -165,7 +172,9 @@ void CharacterSaver::run() {
         if (entry.inventory) {
             inventory_status = svc::CallStatus::Failed;
             try {
-                inventory_status = entry.wallet ? api_.save_inventory(id, *entry.inventory, *entry.wallet) : api_.save_inventory(id, *entry.inventory);
+                inventory_status = entry.wallet && entry.jobs ? api_.save_inventory(id, *entry.inventory, *entry.wallet, *entry.jobs)
+                                   : entry.wallet              ? api_.save_inventory(id, *entry.inventory, *entry.wallet)
+                                                               : api_.save_inventory(id, *entry.inventory);
             } catch (const std::exception& e) {
                 spdlog::error("[saver] saving the inventory of {} threw {}", id, e.what());
             }

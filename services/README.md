@@ -485,9 +485,25 @@ DELETE FROM schema_migrations WHERE version = 12;
 COMMIT;
 ```
 
+**Rolling back migration 0013.** Migration 0013 (the crafting milestone, step 1) adds ONE table, `character_processing_jobs` (the processing jobs a character started at the crafting stations, one
+row each, in the order they were queued, with the wall-clock time each began and how long it runs); it writes nowhere else, backfills nothing and touches no existing table. worldd keeps a
+character's jobs while it plays and saves them with the items and the wallet in the same call (`SaveInventory` with `replace_processing_jobs`). The rollback drops the table with whatever it
+holds: every job that is running or waiting is gone, and the materials and the coin they took do not come back. The characters, their items and their money are untouched. Stop the character
+service and worldd first.
+
+```sql
+-- rollback of migration 0013 (crafting, step 1: the processing jobs)
+BEGIN;
+DROP TABLE character_processing_jobs;
+DELETE FROM schema_migrations WHERE version = 13;
+COMMIT;
+```
+
 **Content (vendors, step 0).** contentc version 18 adds `npc_vendor_link` (which shop a shopkeeper's use opens), `vendor_def_data`, `vendor_def_modifier`, `vendor_def_sell_filter`, `vendor_modifier`, `vendor_sell_filter`, `base_item_value`, `item_base_value`, `vendor_offer`, `vendor_availability` and `vendor_price` (`internal/content/vendors.go` says what each holds; `cmd/contentc/vendors.go` writes them), and the `OpenWindow` actions of the dialogue tables carry the shop they open (`vd`). `vendor_price` holds, for every listing of every shop, its price per unit before the town's tax: the listing's value (the offer's, when it has one) rounded up, through the shop's buy modifiers, rounded up, evaluated with `aocexpr` (`Env.IntDivide` makes a division of two whole numbers truncate, as the formulas expect); a listing that needs more than the item gets no row. Rebuild `content.db` (the extractor's `database` step) after pulling it. The character service's `GetCharacter` (with items) also returns the wallet and gives a character with none its start purse once (empty, or 210,000 copper with AOC_GM_STARTER_SET=1, for testing); `SaveInventory` stores the wallet in the same transaction when `replace_wallet` is set.
 
 **Content (crafting, step 0).** contentc version 20 adds the crafting tables (`internal/content/crafting.go`): `craft_station_def` (the 130 station definitions: kind, title, certification tier, queue, tax tag, recipe set), `craft_station_asset` (which population asset is whose station, by name), `craft_recipe_set` with `craft_recipe_set_list`, `craft_recipe_list` with `craft_recipe_list_member`, `craft_pred` (the biome, node level, node and building-modification predicates of lists and recipes), `craft_recipe` (4,274 recipes: profession, tier, durations and formulas, cost, flags) with `craft_recipe_input` (what it takes), `craft_cost` and `craft_reward` (the reward tables the recipes name and the sub-tables they reach, as JSON). worldd reads the definitions and the asset link; the steps that start and collect a job read the rest.
+
+**Processing jobs (crafting, step 1).** Migration 0013 adds `character_processing_jobs`: the batches a player started at the processing stations, in the order they were queued, each with the station it is at (`station_key`, 16 hex digits made from the station's place in the world's data, the same on every start of the server), the recipe and quantity, what was paid (`resources`, JSON), when it was queued and began (`started_at`: queued, or the end of the job before it) and how long it runs. A job runs on the wall clock, so it goes on while its player is logged out. worldd reads the jobs with `GetCharacter` (with items) and saves them with the items and the wallet in the same transaction (`SaveInventory` with `replace_processing_jobs`): a job and the materials and coin it took are stored together or not at all. worldd prices and times a job from the recipes in `content.db`: one unit costs the recipe's copper plus the station's service tax, rounded half up, and takes the recipe's base duration.
 
 **Content (vendors, step 1).** contentc version 19 adds `item_vendor` (per item: Vendorable, Blacklisted and the range its rarity is held inside) and `item_sell_value` (per item with a base value, vendorable or not, rarity and currency: the item's base value for a sale or a repair, per unit, rounded up; the record's own sale expressions when it overrides them, else its buy expressions), evaluated with `aocexpr` like `vendor_price`; the shops' sell modifiers and filters are read from the step 0 tables. Rebuild `content.db` (the extractor does it) after pulling. **The test mounts of the GM starter set are given once:** the character service gives them to a character that had the set before the mounts existed (`gm_starter_set_granted_at` set, `gm_starter_mounts_granted_at` not), the ones it holds nowhere, and marks it in the same transaction, also when it held them all; a mount thrown away later stays gone (a character created with the set is marked at once).
 

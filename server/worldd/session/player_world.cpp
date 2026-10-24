@@ -264,15 +264,7 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             spdlog::warn("[world] the town shops do not load, so the shopkeepers answer as before: {}", ve);
         }
     }
-    {   // crafting, step 0: the station definitions; a content.db of an older version has none and the stations stand with the default tax
-        std::string se;
-        if (auto data = content_->craft_station_data(se)) {
-            stations_.emplace(std::move(*data));
-            spdlog::info("[world] stations: {} definitions, {} assets that are a station", stations_->defs.size(), stations_->asset_defs.size());
-        } else {
-            spdlog::warn("[world] the station definitions do not load, so the stations open with the default tax: {}", se);
-        }
-    }
+    load_crafting_data();   // crafting, steps 0 and 1: the station definitions and the recipes
     // Gathering stage 3, "Hunting": the creatures whose asset names a Hunting_<kind> interaction get the hunting interactable (spawns/generic_npc.h); an older content.db has none
     if (generic_config_.hunting && generic_config_.hunting_defs.empty()) {
         std::string fe;
@@ -645,6 +637,26 @@ void PlayerWorld::log_window(double now_seconds, const nav::WindowStats& w) {
                  "{} deferred for room, {} dropped for a nearer one; planned {} times, {} skipped",
                  w.resident_chunks, w.resident_tiles, nav_->file().settings.max_tiles, w.committed_tiles, players, players ? " in chunks " : "", where, npcs_->pending_ground(), ns.npcs, ns.active_now,
                  ns.moving_now, w.chunk_loads, w.chunk_unloads, w.load_failures, w.retries, w.deferred_by_cap, w.evicted_for_room, w.plans, w.plans_skipped);
+}
+
+void PlayerWorld::load_crafting_data() {
+    if (!content_ || stations_) return;
+    // crafting, step 0: the station definitions; a content.db of an older version has none and the stations stand with the default tax
+    std::string se;
+    if (auto data = content_->craft_station_data(se)) {
+        stations_.emplace(std::move(*data));
+        spdlog::info("[world] stations: {} definitions, {} assets that are a station", stations_->defs.size(), stations_->asset_defs.size());
+    } else {
+        spdlog::warn("[world] the station definitions do not load, so the stations open with the default tax: {}", se);
+    }
+    // crafting, step 1: the recipes
+    std::string re;
+    if (auto data = content_->craft_recipe_data(re)) {
+        recipes_.emplace(std::move(*data));
+        spdlog::info("[world] recipes: {} recipes, {} cost records, {} recipe sets", recipes_->recipes.size(), recipes_->costs.size(), recipes_->set_lists.size());
+    } else {
+        spdlog::warn("[world] the recipes do not load, so no job can be started at a station: {}", re);
+    }
 }
 
 void PlayerWorld::finish_station(uint64_t id, const world::CityNodeInfo& node, int64_t plot, int64_t building) {

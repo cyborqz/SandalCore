@@ -655,6 +655,9 @@ public:
     int64_t  vendor_def() const { return vendor_def_; }
     size_t   vendor_opens() const { return vendor_opens_; }
     size_t   station_opens() const { return station_opens_; }
+    size_t   crafts_started() const { return crafts_started_; }
+    size_t   crafts_refused() const { return crafts_refused_; }
+    const std::vector<svc::ProcessingJob>& processing_jobs() const { return jobs_; }
     size_t   vendor_purchases() const { return vendor_purchases_; }
     size_t   vendor_sales() const { return vendor_sales_; }
     size_t   vendor_repairs() const { return vendor_repairs_; }
@@ -928,6 +931,14 @@ private:
     /// Crafting, step 0: a click on a station's interactable opens its window (ClientOpenCraftingStationUI, the service tax, none of the player's jobs yet) when the station is open for this
     /// client and within kStationRangeCm of the player.
     void on_station_interact(Connection& conn, const world::WorldActor& station, Clock::time_point now);
+    /// Crafting, step 1: the player pressed Start at a processing station (ServerStartCraft).  The checks of crafting/rules.h run first and a start that fails one is refused whole, with a line in
+    /// the log and nothing sent; a start that passes takes the stacks from the material bags and the price from the purse, makes the job and answers in the retail order.
+    void on_start_craft(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// The wall clock in Unix milliseconds, and the client's synchronized clock now (the one ClientSetTime sets, in seconds).
+    static int64_t wall_ms();
+    double         sync_now(Clock::time_point now);
+    /// OwnerInfo.ActiveProcessingStations from the jobs that are not over.
+    void sync_active_stations(int64_t now_ms);
     void on_vendor_purchase(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Vendors, step 2: the client opens the shop a line of its conversation names (ServerOpenVendor): the NPC it talks to, a shop of that conversation.
     void on_open_vendor(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
@@ -1302,6 +1313,9 @@ private:
     size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;
     size_t vendor_opens_ = 0, vendor_purchases_ = 0, vendor_refused_ = 0, interact_ignored_ = 0, vendor_logged_ = 0, interact_logged_ = 0;
     size_t station_opens_ = 0, station_logged_ = 0, station_ignored_logged_ = 0;   // crafting, step 0: windows opened, log lines said
+    std::vector<svc::ProcessingJob> jobs_;            // crafting, step 1: the character's processing jobs, in the order they were queued (saved with the inventory)
+    size_t crafts_started_ = 0, crafts_refused_ = 0, craft_logged_ = 0, craft_refused_logged_ = 0;
+    size_t active_stations_ = 0;                      // how many stations OwnerInfo.ActiveProcessingStations lists
     std::set<std::string> station_told_;              // what was said once about a station kind
     size_t vendor_sales_ = 0, vendor_repairs_ = 0, items_destroyed_ = 0;
     bool   vendor_unreadable_logged_ = false, vendor_sale_logged_ = false;

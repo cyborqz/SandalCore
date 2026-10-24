@@ -564,6 +564,58 @@ Outcome Inventory::take(int64_t record, int64_t count) {
     return out;
 }
 
+int64_t Inventory::count_materials(int64_t record, int quality_lo, int quality_hi) const {
+    int64_t held = 0;
+    for (const auto& [key, it] : slots_) {
+        if (it.item_record_id == record && is_resource(static_cast<svc::ItemContainer>(key.first)) && it.quality >= quality_lo && it.quality <= quality_hi) held += it.quantity;
+    }
+    return held;
+}
+
+Outcome Inventory::take_materials(int64_t record, int quality_lo, int quality_hi, int64_t count, bool lowest_first) {
+    Outcome out;
+    if (count < 1) {
+        out.refusal = "nothing to take: the count is " + std::to_string(count);
+        return out;
+    }
+    const int64_t held = count_materials(record, quality_lo, quality_hi);
+    if (held < count) {
+        out.refusal = "the material bags hold " + std::to_string(held) + " of item " + std::to_string(record) + " of quality " + std::to_string(quality_lo) + " to " + std::to_string(quality_hi) +
+                      ", not " + std::to_string(count);
+        return out;
+    }
+    std::vector<Key> order;   // the stacks of that item and band
+    for (const auto& [key, it] : slots_) {
+        if (it.item_record_id == record && is_resource(static_cast<svc::ItemContainer>(key.first)) && it.quality >= quality_lo && it.quality <= quality_hi) order.push_back(key);
+    }
+    if (lowest_first) {
+        std::stable_sort(order.begin(), order.end(), [&](const Key& a, const Key& b) { return slots_.at(a).quality < slots_.at(b).quality; });
+    }
+    std::vector<std::pair<Key, int32_t>> plan;   // the stacks that give, with how many
+    int64_t left = count;
+    for (const Key& key : order) {
+        const int32_t give = static_cast<int32_t>(std::min<int64_t>(left, slots_.at(key).quantity));
+        plan.push_back({key, give});
+        left -= give;
+        if (left == 0) break;
+    }
+    for (const auto& [key, give] : plan) {
+        const svc::InventoryItem before = slots_.at(key);
+        Event e;
+        e.type = repl::StorageEventType::Remove;
+        e.container = static_cast<svc::ItemContainer>(key.first);
+        e.slot = key.second;
+        e.item = before;
+        e.count = give < before.quantity ? give : 0;
+        e.instigated = false;   // the retail Remove of a payment names nobody
+        if (give < before.quantity) slots_[key].quantity = before.quantity - give;
+        else slots_.erase(key);
+        out.events.push_back(std::move(e));
+    }
+    out.ok = true;
+    return out;
+}
+
 Outcome Inventory::consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count) {
     Outcome out;
     const auto refuse = [&](std::string why) {

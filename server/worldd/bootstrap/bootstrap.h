@@ -261,8 +261,14 @@ public:
     /// not build.
     std::optional<Send> open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor, const repl::UnavailableList& unavailable = {});
     /// Crafting, step 0: ClientOpenCraftingStationUI on the PlayerController (reliable): the client opens the window of the station actor `station` (the recipes are the client's own
-    /// tables') with the service tax `tax` and none of the player's jobs. nullopt before the pawn's second state or when the RPC does not build.
-    std::optional<Send> open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax);
+    /// tables') with the service tax `tax` and the player's jobs at the station (step 1; none: the list is not sent). nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> open_station(const emit::FIntrepidNetworkGUID& station, const repl::StationTax& tax, const std::vector<repl::CraftItemState>& jobs = {});
+    /// Crafting, step 1: a processing job started, in one chain on the PlayerController: ClientShowCurrencyCallout(currency tier, signed delta) then ClientUpdateCraftingStationUI(station,
+    /// the new job's state), the retail order.  nullopt before the pawn's second state or when an RPC does not build.
+    std::optional<Send> craft_started_answer(const emit::FIntrepidNetworkGUID& station, int64_t currency_tier, int64_t delta, const repl::CraftItemState& state);
+    /// OwnerInfo.ActiveProcessingStations: the stations where the player has a job running or waiting, each as the four words of its StationGuid.  Sent with the next currencies_update() (the
+    /// pawn's update that carries the OwnerInfo changes).  False when the pawn has no OwnerInfo.
+    bool set_active_stations(const std::vector<std::array<int32_t, 4>>& stations);
     /// ClientSetNodeTaxTable: the answer to the vendor window's ServerGetNodeTaxTable (fix 4; vendor/node_tax.h).
     std::optional<Send> node_tax_table(const repl::NodeTaxDetails& details);
     /// The vendors milestone, step 0: a purchase's answer in one chain: ClientShowCurrencyCallout(currency tier, signed delta) first, then the ClientReceiveStorageEvent calls of `events`

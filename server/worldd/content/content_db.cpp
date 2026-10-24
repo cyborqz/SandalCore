@@ -2868,6 +2868,126 @@ std::optional<CraftStationData> ContentDb::craft_station_data(std::string& error
     return out;
 }
 
+std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) const {
+    CraftRecipeData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the crafting tables are contentc version 20's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    const auto unread = [&](const char* table) {
+        error = std::string("content.db ") + table + " has a column of the wrong storage class";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT guid, name, profession_guid, tier, base_duration, std_cost, cost_guid, reward_guid, learnable, destination, fuel, blacklisted FROM craft_recipe");
+        if (!q.ok()) return failed("craft_recipe");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3) || !column_is_int(s, 6) || !column_is_int(s, 7) || !column_is_int(s, 8) || !column_is_int(s, 10) ||
+                !column_is_int(s, 11) || !(column_is_real(s, 4) || column_is_int(s, 4))) {
+                return unread("craft_recipe");
+            }
+            CraftRecipe r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.profession = sqlite3_column_int64(s, 2);
+            r.tier = static_cast<int>(sqlite3_column_int64(s, 3));
+            r.base_duration = sqlite3_column_double(s, 4);
+            r.std_cost = column_text(s, 5);
+            r.cost_guid = sqlite3_column_int64(s, 6);
+            r.reward = sqlite3_column_int64(s, 7);
+            r.learnable = sqlite3_column_int64(s, 8) != 0;
+            r.inventory_destination = column_text(s, 9) == "Inventory";
+            r.fuel = static_cast<int>(sqlite3_column_int64(s, 10));
+            r.blacklisted = sqlite3_column_int64(s, 11) != 0;
+            out.recipes[r.guid] = std::move(r);
+        }
+        if (step != SQLITE_DONE) return failed("craft_recipe");
+    }
+    {
+        Stmt q(db_, "SELECT recipe_guid, kind, item_guid, filter_guid, tags, quantity, min_rarity, consume FROM craft_recipe_input ORDER BY recipe_guid, kind DESC, ord");
+        if (!q.ok()) return failed("craft_recipe_input");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3) || !column_is_int(s, 5) || !column_is_int(s, 6) || !column_is_int(s, 7)) return unread("craft_recipe_input");
+            const auto r = out.recipes.find(sqlite3_column_int64(s, 0));
+            if (r == out.recipes.end()) continue;
+            CraftInput in;
+            in.primary = column_text(s, 1) == "primary";
+            in.item = sqlite3_column_int64(s, 2);
+            in.filter = sqlite3_column_int64(s, 3);
+            in.tags = column_text(s, 4);
+            in.quantity = static_cast<int>(sqlite3_column_int64(s, 5));
+            in.min_rarity = static_cast<int>(sqlite3_column_int64(s, 6));
+            in.consume = sqlite3_column_int64(s, 7) != 0;
+            r->second.inputs.push_back(std::move(in));
+        }
+        if (step != SQLITE_DONE) return failed("craft_recipe_input");
+    }
+    {
+        Stmt q(db_, "SELECT owner_kind, owner_guid, type, node_level_n, biomes, modifications, nodes, hidden FROM craft_pred ORDER BY owner_kind, owner_guid, ord");
+        if (!q.ok()) return failed("craft_pred");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 1) || !column_is_int(s, 3) || !column_is_int(s, 7)) return unread("craft_pred");
+            CraftPred p;
+            p.type = column_text(s, 2);
+            p.node_level = static_cast<int>(sqlite3_column_int64(s, 3));
+            p.biomes = column_text(s, 4);
+            p.modifications = column_text(s, 5);
+            p.nodes = column_text(s, 6);
+            p.hidden = sqlite3_column_int64(s, 7) != 0;
+            const int64_t owner = sqlite3_column_int64(s, 1);
+            if (column_text(s, 0) == "list") {
+                out.list_preds[owner].push_back(std::move(p));
+            } else if (const auto r = out.recipes.find(owner); r != out.recipes.end()) {
+                r->second.preds.push_back(std::move(p));
+            }
+        }
+        if (step != SQLITE_DONE) return failed("craft_pred");
+    }
+    {
+        Stmt q(db_, "SELECT guid, tier_guid, value FROM craft_cost");
+        if (!q.ok()) return failed("craft_cost");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("craft_cost");
+            CraftCost c;
+            c.tier = sqlite3_column_int64(s, 1);
+            c.value = static_cast<int64_t>(std::atoll(column_text(s, 2).c_str()));
+            out.costs[sqlite3_column_int64(s, 0)] = c;
+        }
+        if (step != SQLITE_DONE) return failed("craft_cost");
+    }
+    {
+        Stmt q(db_, "SELECT set_guid, list_guid FROM craft_recipe_set_list ORDER BY set_guid, ord");
+        if (!q.ok()) return failed("craft_recipe_set_list");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("craft_recipe_set_list");
+            out.set_lists[sqlite3_column_int64(s, 0)].push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed("craft_recipe_set_list");
+    }
+    {
+        Stmt q(db_, "SELECT list_guid, recipe_guid FROM craft_recipe_list_member ORDER BY list_guid, ord");
+        if (!q.ok()) return failed("craft_recipe_list_member");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("craft_recipe_list_member");
+            out.list_recipes[sqlite3_column_int64(s, 0)].push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed("craft_recipe_list_member");
+    }
+    return out;
+}
+
 std::optional<VendorData> ContentDb::vendor_data(std::string& error) const {
     VendorData out;
     const auto failed = [&](const char* table) {

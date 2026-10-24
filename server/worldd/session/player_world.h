@@ -203,6 +203,10 @@ public:
     void                          set_town_shops(vendor::TownShops shops) { shops_ = std::move(shops); }
     /// Crafting, step 0: the station definitions (content.db, contentc version 20), read with the area; null for an older file (the stations still stand and open, with the default tax).
     const content::CraftStationData* station_data() const { return stations_ ? &*stations_ : nullptr; }
+    /// Crafting, step 1: the recipes, their inputs and costs (null with an older content.db).
+    const content::CraftRecipeData* craft_recipes() const { return recipes_ ? &*recipes_ : nullptr; }
+    /// Reads the station definitions and the recipes from content.db (load_area does it; once).
+    void load_crafting_data();
 
     /// Crafting, step 0 (the GM command): a station of an artisan building on a free service plot of a Village or a Town.
     enum class StationStatus : uint8_t { Ok, NotFound, Invalid, Refused };
@@ -542,6 +546,7 @@ private:
     std::optional<dialogue::Book>        dialogue_;
     std::optional<vendor::TownShops>     shops_;
     std::optional<content::CraftStationData> stations_;   // crafting, step 0: the station definitions and which asset is whose station
+    std::optional<content::CraftRecipeData>  recipes_;    // crafting, step 1: the recipes
     std::map<std::pair<int64_t, int64_t>, uint64_t> placed_stations_;   // (node, plot) -> the actor of a station a game master placed
     uint64_t                             placed_seen_version_ = 0;
     const world::NodeLayoutData*         node_layout_data_ = nullptr;
