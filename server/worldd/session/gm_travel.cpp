@@ -214,6 +214,23 @@ GmStationResult GmTravel::remove_station(const std::string& node, const std::str
     return station_result_of(world_.remove_station(log_text(node), log_text(plot), by));
 }
 
+GmFinishResult GmTravel::finish_jobs(const std::string& character, const std::string& station, const std::string& by) {
+    GmFinishResult out;
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = handle.player->name();
+    out.finished = static_cast<uint32_t>(handle.player->gm_finish_jobs(*handle.connection, now_(), log_text(station), by));
+    if (out.finished == 0) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = out.character + " has no job that is not over" + (station.empty() ? std::string() : " at " + log_text(station));
+    }
+    return out;
+}
+
 GmItemGrant GmTravel::give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by) {
     GmItemGrant out;
     if (item.empty()) {

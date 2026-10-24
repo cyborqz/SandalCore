@@ -44,6 +44,10 @@ service WorldAdminService {
   rpc PlaceStation(PlaceStationRequest) returns (PlaceStationResponse);
   // Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
   rpc RemoveStation(RemoveStationRequest) returns (RemoveStationResponse);
+  // Crafting, step 2. Finishes a player's processing jobs that are not over (the one running and the ones waiting) at once: each is over now and ready to collect, and the player's window is
+  // told. With a station (its Blueprint's or its definition's name) only the jobs there. NotFound for a character that is not in the world; FailedPrecondition when the character has no job
+  // that is not over (at that station).
+  rpc FinishJobs(FinishJobsRequest) returns (FinishJobsResponse);
 
   // ---- NPC actions: a game master's tools on one creature. Each takes the creature's actor id, as the world stream and Inspect give it, and is applied on the network thread like the
   // calls above. NotFound for an id that is not in the world; InvalidArgument for an actor that is not a creature (a player, a resource node, a mount, a station) and for a point
@@ -175,6 +179,16 @@ message RemoveStationResponse {
   string node = 1;
   string plot = 2;
   string station = 3; // the Blueprint that stood there
+}
+
+message FinishJobsRequest {
+  string character = 1;
+  string station = 2; // a station's Blueprint or definition name ("ProcessingStation_Lumbermilling_T2"; case does not count); empty: every station
+}
+
+message FinishJobsResponse {
+  string character = 1; // the name worldd has it under
+  int32 finished = 2;   // the jobs finished
 }
 
 message GiveItemRequest {

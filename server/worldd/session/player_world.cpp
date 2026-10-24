@@ -649,11 +649,17 @@ void PlayerWorld::load_crafting_data() {
     } else {
         spdlog::warn("[world] the station definitions do not load, so the stations open with the default tax: {}", se);
     }
-    // crafting, step 1: the recipes
+    // crafting, steps 1 and 2: the recipes, and what each makes when it is done
     std::string re;
     if (auto data = content_->craft_recipe_data(re)) {
         recipes_.emplace(std::move(*data));
-        spdlog::info("[world] recipes: {} recipes, {} cost records, {} recipe sets", recipes_->recipes.size(), recipes_->costs.size(), recipes_->set_lists.size());
+        size_t unread = 0, unknown_xp = 0;
+        for (const auto& [guid, reward] : recipes_->rewards) {
+            unread += reward.unread != 0 ? 1 : 0;
+            unknown_xp += reward.unknown_formula.empty() ? 0 : 1;
+        }
+        spdlog::info("[world] recipes: {} recipes, {} cost records, {} recipe sets, {} reward tables ({} with a part left out, {} with an experience formula not worked out), experience curves {}", recipes_->recipes.size(),
+                     recipes_->costs.size(), recipes_->set_lists.size(), recipes_->rewards.size(), unread, unknown_xp, recipes_->xp_curves.ok() ? "read" : "MISSING: no Adventuring experience for a job");
     } else {
         spdlog::warn("[world] the recipes do not load, so no job can be started at a station: {}", re);
     }

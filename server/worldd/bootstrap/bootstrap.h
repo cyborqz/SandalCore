@@ -266,6 +266,13 @@ public:
     /// Crafting, step 1: a processing job started, in one chain on the PlayerController: ClientShowCurrencyCallout(currency tier, signed delta) then ClientUpdateCraftingStationUI(station,
     /// the new job's state), the retail order.  nullopt before the pawn's second state or when an RPC does not build.
     std::optional<Send> craft_started_answer(const emit::FIntrepidNetworkGUID& station, int64_t currency_tier, int64_t delta, const repl::CraftItemState& state);
+    /// Crafting, step 2: the states of jobs that changed (one ended, the next began), one ClientUpdateCraftingStationUI call for each, in order, in one chain on the PlayerController.
+    std::optional<Send> craft_states_update(const emit::FIntrepidNetworkGUID& station, const std::vector<repl::CraftItemState>& states);
+    /// Crafting, step 2: a collected job's answer in one chain, the retail order: ClientUpdateCraftingStationUI(station, the job at Claimed), then ClientRecieveBatchedStorageEvents with the Add
+    /// events of `events` (the stacks of the first product; none: the update alone).  What the storages hold follows the events.
+    std::optional<Send> craft_claimed_answer(const emit::FIntrepidNetworkGUID& station, const repl::CraftItemState& claimed, std::span<const ItemEvent> events);
+    /// Crafting, step 2: the stacks of one more product of a collected job, one ClientRecieveBatchedStorageEvents call (at most 256 events).  What the storages hold follows the events.
+    std::optional<Send> craft_batched_events(std::span<const ItemEvent> events);
     /// OwnerInfo.ActiveProcessingStations: the stations where the player has a job running or waiting, each as the four words of its StationGuid.  Sent with the next currencies_update() (the
     /// pawn's update that carries the OwnerInfo changes).  False when the pawn has no OwnerInfo.
     bool set_active_stations(const std::vector<std::array<int32_t, 4>>& stations);
@@ -650,6 +657,8 @@ private:
     /// `middle` (when given) is the call placed before the event number `middle_at`.
     std::optional<Send> build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first = nullptr, const repl::RpcRequest* last = nullptr, const repl::RpcRequest* middle = nullptr,
                                           size_t middle_at = 0);
+    /// The ClientRecieveBatchedStorageEvents call of `events` (crafting, step 2); nullopt when an event does not build.
+    std::optional<repl::RpcRequest> batched_events_call(std::span<const ItemEvent> events);
     /// What the client was told is what the payloads show from now on: the events applied to items_ (a Remove of part of a stack leaves the rest).
     void remember(std::span<const ItemEvent> events);
 };

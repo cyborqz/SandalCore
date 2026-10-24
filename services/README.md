@@ -689,6 +689,7 @@ dist\services\worldctl.exe tp cyb -777664 616578 16000   # a point with z
 dist\services\worldctl.exe speed cyb 5                   # run speed x5 until relog; "speed cyb 1" resets
 dist\services\worldctl.exe place-station joeva Plot_17_Service CraftingStation_Weaponsmithing_T3   # an artisan building's station on a free plot of a Village or a Town
 dist\services\worldctl.exe remove-station joeva Plot_17_Service                                    # ... and off again (placed stations are not saved)
+dist\services\worldctl.exe craft finish cyb                # the character's processing jobs that are not over (the one running and the ones waiting) are over now, ready to collect; a station's name after the character limits it to that station
 dist\services\worldctl.exe npc kill 16795192             # a creature by its actor id (the world stream and Inspect give it): a corpse with its loot, open to every player in the world, no experience
 dist\services\worldctl.exe npc respawn 16795192          # a dead creature is made again at its spawn point now; a living one is replaced by a fresh one (the answer gives the new id)
 dist\services\worldctl.exe npc reset 16795192            # back to its spawn point at a run, healed, its threat cleared, its leash centred there again

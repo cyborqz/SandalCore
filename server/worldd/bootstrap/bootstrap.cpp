@@ -1511,6 +1511,78 @@ std::optional<Send> PlayerBootstrap::craft_started_answer(const emit::FIntrepidN
     return rpcs(Role::PlayerController, "craft started", calls);
 }
 
+std::optional<Send> PlayerBootstrap::craft_states_update(const emit::FIntrepidNetworkGUID& station, const std::vector<repl::CraftItemState>& states) {
+    if (!ok_ || !second_state_added_ || states.empty() || states.size() > kMaxEventsPerChain) return std::nullopt;
+    const schema::RpcSchema* update = pc_.obj.schema->rpc("ClientUpdateCraftingStationUI");
+    if (!update) return std::nullopt;
+    std::vector<repl::RpcRequest> calls(states.size());
+    for (size_t i = 0; i < states.size(); ++i) {   // (the retail server sends one state in each call)
+        auto params = repl::update_station_params(*update, station, {states[i]});
+        if (!params) return std::nullopt;
+        calls[i].rpc = "ClientUpdateCraftingStationUI";
+        calls[i].params = std::move(*params);
+    }
+    return rpcs(Role::PlayerController, "craft update", calls);
+}
+
+std::optional<repl::RpcRequest> PlayerBootstrap::batched_events_call(std::span<const ItemEvent> events) {
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientRecieveBatchedStorageEvents");
+    if (!rpc || events.empty() || events.size() > 256) return std::nullopt;
+    const repl::GuidValue character{setup_.character_guid[0], setup_.character_guid[1], setup_.character_guid[2], setup_.character_guid[3]};
+    std::vector<repl::ItemStorageEvent> list;
+    list.reserve(events.size());
+    for (const ItemEvent& e : events) {
+        // (an Add of a new stack; a stack that is topped up arrives as the Remove of the old one and the Add of the new total)
+        if ((e.type != repl::StorageEventType::Add && e.type != repl::StorageEventType::Remove) || !e.item.has_item || e.slot < 0) return std::nullopt;
+        repl::ItemStorageEvent ev;
+        ev.type = static_cast<uint8_t>(e.type);
+        ev.item = e.item;
+        if (e.instigated) ev.instigator = character;
+        ev.callout = e.callout;
+        repl::StorageEventContainer target;
+        target.object = item_storage_guid(e.storage);
+        target.slots.push_back({e.slot, e.count > 0 ? e.count : static_cast<int32_t>(e.item.quantity), e.item.guid});
+        ev.targets.push_back(std::move(target));
+        list.push_back(std::move(ev));
+    }
+    auto params = repl::batched_events_params(*rpc, list);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientRecieveBatchedStorageEvents";
+    call.params = std::move(*params);
+    return call;
+}
+
+std::optional<Send> PlayerBootstrap::craft_claimed_answer(const emit::FIntrepidNetworkGUID& station, const repl::CraftItemState& claimed, std::span<const ItemEvent> events) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* update = pc_.obj.schema->rpc("ClientUpdateCraftingStationUI");
+    if (!update) return std::nullopt;
+    auto params = repl::update_station_params(*update, station, {claimed});
+    if (!params) return std::nullopt;
+    std::vector<repl::RpcRequest> calls(1);
+    calls[0].rpc = "ClientUpdateCraftingStationUI";
+    calls[0].params = std::move(*params);
+    if (!events.empty()) {
+        auto batch = batched_events_call(events);
+        if (!batch) return std::nullopt;
+        calls.push_back(std::move(*batch));
+    }
+    auto send = rpcs(Role::PlayerController, "craft claimed", calls);
+    if (!send) return std::nullopt;
+    remember(events);
+    return send;
+}
+
+std::optional<Send> PlayerBootstrap::craft_batched_events(std::span<const ItemEvent> events) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    auto batch = batched_events_call(events);
+    if (!batch) return std::nullopt;
+    auto send = rpcs(Role::PlayerController, "craft items", std::span<const repl::RpcRequest>(&*batch, 1));
+    if (!send) return std::nullopt;
+    remember(events);
+    return send;
+}
+
 bool PlayerBootstrap::set_currency(int64_t currency, int64_t amount) {
     if (!ok_ || amount < 0) return false;
     repl::Subobject* owner = component(setup_.guids.owner_info);

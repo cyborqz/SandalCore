@@ -652,9 +652,17 @@ struct CraftResource {
     bool operator==(const CraftResource&) const = default;
 };
 
+/// One experience row of a finished job: who gets it (a profession's record, or the Adventuring leveling type), the kind of record that is (its TypeId) and how much.
+struct CraftExperience {
+    int64_t guid = 0;
+    int64_t type = 0;
+    int64_t amount = 0;
+    bool operator==(const CraftExperience&) const = default;
+};
+
 /// FCraftItemState (ClientOpenCraftingStationUI's CraftItemStates, ClientUpdateCraftingStationUI's CraftStates): one crafting or processing job as the window shows it; NetSerialize,
-/// craft_codec.h has the layout.  `start_time` is whole seconds on the synchronized clock, `status` the job's state (Pending 1, InProgress 2, Complete 3, Claimed 4).  The members that
-/// only a finished job carries (its products and experience rows), the tag resources and the item list are not held: the codec reads and writes them empty.
+/// craft_codec.h has the layout.  `start_time` is whole seconds on the synchronized clock, `status` the job's state (Pending 1, InProgress 2, Complete 3, Claimed 4).  Only a finished job
+/// (status 3) carries `experience`, `products` and `level`; the tag resources and the item list are not held: the codec reads and writes them empty.
 struct CraftItemState {
     int64_t                    recipe = 0;
     int64_t                    sub_recipe = 0;
@@ -666,11 +674,16 @@ struct CraftItemState {
     GuidValue                  transaction;        // the ClientTransactionId of the request that started it
     GuidValue                  job;                // the job's own guid
     uint8_t                    status = 0;
+    std::vector<CraftExperience> experience;       // a finished job: the experience it pays (the profession's, then Adventuring's)
+    std::vector<ItemInstance>    products;         // ... the items it makes
+    int32_t                    unknown_a = 0, unknown_b = 0;   // ... two members before the level: 0 in every recording
+    int32_t                    level = 0;          // ... the crafter's level the experience was worked out at
     bool                       flag = true;        // the member after the lists: always 1
     uint8_t                    extra = 0;          // ... and the byte after it: always 0
     bool operator==(const CraftItemState& o) const {
         return recipe == o.recipe && sub_recipe == o.sub_recipe && same_bits(start_time, o.start_time) && same_bits(duration, o.duration) && quantity == o.quantity && general == o.general &&
-               flexible == o.flexible && transaction == o.transaction && job == o.job && status == o.status && flag == o.flag && extra == o.extra;
+               flexible == o.flexible && transaction == o.transaction && job == o.job && status == o.status && experience == o.experience && products == o.products && unknown_a == o.unknown_a &&
+               unknown_b == o.unknown_b && level == o.level && flag == o.flag && extra == o.extra;
     }
 };
 

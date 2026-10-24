@@ -14,6 +14,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <string>
 #include <system_error>
@@ -2868,6 +2869,125 @@ std::optional<CraftStationData> ContentDb::craft_station_data(std::string& error
     return out;
 }
 
+namespace {
+
+/// The formula guids an experience reward's text names: every `$#<type>:<guid>$` of "EvalFormula($#4547065559311335368:6064632384103186687$) * EvalFormula(...)", in order.
+std::vector<int64_t> formula_guids_of(const std::string& text) {
+    std::vector<int64_t> out;
+    for (size_t at = text.find("$#"); at != std::string::npos; at = text.find("$#", at + 2)) {
+        const size_t colon = text.find(':', at);
+        const size_t end = text.find('$', at + 2);
+        if (colon == std::string::npos || end == std::string::npos || colon > end) continue;
+        out.push_back(std::atoll(text.substr(colon + 1, end - colon - 1).c_str()));
+    }
+    return out;
+}
+
+/// What the reader knows of an experience formula by its name.
+XpRule profession_rule_named(const std::string& name) {
+    if (name == "Artisanship_Processing_BaseXP") return XpRule::Processing;
+    if (name == "Artisanship_Processing_BaseXP_AnimalHusbandry") return XpRule::AnimalHusbandry;
+    return XpRule::Unknown;
+}
+XpRule adventuring_rule_named(const std::string& name) {
+    if (name == "Adventuring_Processing_BaseXP") return XpRule::Processing;
+    if (name == "Adventuring_Crafting_BaseXP") return XpRule::Crafting;
+    return XpRule::Unknown;
+}
+
+bool all_digits(const std::string& s) { return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c) != 0; }); }
+
+/// Reads the reward table `guid` and the sub-tables it reaches into `out` (depth bounded, a table once).
+void read_craft_reward(const std::map<int64_t, std::string>& bodies, int64_t guid, CraftReward& out, std::vector<int64_t>& seen, const std::function<std::string(int64_t)>& formula_name) {
+    if (seen.size() >= 16 || std::find(seen.begin(), seen.end(), guid) != seen.end()) return;
+    seen.push_back(guid);
+    const auto body = bodies.find(guid);
+    if (body == bodies.end()) return;
+    const nlohmann::json j = nlohmann::json::parse(body->second, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+        ++out.unread;
+        return;
+    }
+    const auto containers = j.find("RewardDefContainers");
+    if (containers != j.end() && containers->is_array()) {
+        for (const nlohmann::json& c : *containers) {
+            if (!c.is_object()) continue;
+            if (str_of(c, "GrantMethod") != "ERewardGrantMethod::Always") {
+                ++out.unread;
+                continue;
+            }
+            CraftRewardContainer box;
+            const std::string algorithm = str_of(c, "SelectionAlgorithm");
+            if (algorithm == "ERewardSelectionAlgorithm::PureRandom") box.pick = CraftRewardContainer::Pick::PureRandom;
+            else if (algorithm == "ERewardSelectionAlgorithm::PerElementWeightedRandom") box.pick = CraftRewardContainer::Pick::WeightedRandom;
+            else if (algorithm != "ERewardSelectionAlgorithm::All") {
+                ++out.unread;
+                continue;
+            }
+            box.number = static_cast<int>(int_of(c, "NumberToSelect"));
+            box.weights = number_list(c, "WeightsPerReward");
+            const auto rewards = c.find("Rewards");
+            if (rewards == c.end() || !rewards->is_array()) continue;
+            for (const nlohmann::json& r : *rewards) {
+                if (!r.is_object()) continue;
+                std::vector<CraftRewardItem> items;
+                const auto currency = r.find("Currency");
+                if (currency != r.end() && currency->is_array() && !currency->empty()) ++out.unread;
+                const auto item_rewards = r.find("ItemRewards");
+                if (item_rewards != r.end() && item_rewards->is_array()) {
+                    for (const nlohmann::json& it : *item_rewards) {
+                        const auto item = it.find("Item");
+                        if (item == it.end() || !item->is_object()) continue;
+                        const std::string quantity = str_of(it, "Quantity");
+                        if (quantity.empty()) continue;   // an empty quantity gives nothing
+                        if (int_of(*item, "VariationId") != 0 || !all_digits(quantity)) {
+                            ++out.unread;
+                            continue;
+                        }
+                        CraftRewardItem x;
+                        x.item = int_of(*item, "ItemId");
+                        x.quantity = std::atoll(quantity.c_str());
+                        if (x.item != 0 && x.quantity > 0) items.push_back(x);
+                    }
+                }
+                const auto experience = r.find("ExperienceRewards");
+                if (experience != r.end() && experience->is_array()) {
+                    for (const nlohmann::json& x : *experience) {
+                        const std::string type = str_of(x, "ExperienceType");
+                        const std::vector<int64_t> formulas = formula_guids_of(str_of(x, "ExperienceValue"));
+                        const std::string base = formulas.empty() ? std::string() : formula_name(formulas.front());
+                        if (type == "EExperienceContextType::Profession") {
+                            out.profession = int_of(x, "ProfessionsId");
+                            out.profession_rule = profession_rule_named(base);
+                            if (out.profession_rule == XpRule::Unknown && out.unknown_formula.empty()) out.unknown_formula = base.empty() ? std::string("(none)") : base;
+                        } else if (type == "EExperienceContextType::Adventuring") {
+                            out.adventuring_rule = adventuring_rule_named(base);
+                            if (out.adventuring_rule == XpRule::Unknown && out.unknown_formula.empty()) out.unknown_formula = base.empty() ? std::string("(none)") : base;
+                        } else {
+                            ++out.unread;
+                        }
+                    }
+                }
+                if (!items.empty()) box.rewards.push_back(std::move(items));
+            }
+            if (!box.rewards.empty()) out.containers.push_back(std::move(box));
+        }
+    }
+    for (const int64_t sub : int_list(j, "SubTablesIds")) read_craft_reward(bodies, sub, out, seen, formula_name);
+}
+
+/// The points of the curve `guid` (stat_curve), in order.
+std::vector<std::pair<double, double>> stat_curve_points(sqlite3* db, int64_t guid) {
+    std::vector<std::pair<double, double>> out;
+    Stmt q(db, "SELECT level, value FROM stat_curve WHERE guid = ?1 ORDER BY ord");
+    if (!q.ok()) return out;
+    sqlite3_bind_int64(q.get(), 1, guid);
+    while (sqlite3_step(q.get()) == SQLITE_ROW) out.emplace_back(sqlite3_column_double(q.get(), 0), sqlite3_column_double(q.get(), 1));
+    return out;
+}
+
+}  // namespace
+
 std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) const {
     CraftRecipeData out;
     const auto failed = [&](const char* table) {
@@ -2984,6 +3104,44 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
             out.list_recipes[sqlite3_column_int64(s, 0)].push_back(sqlite3_column_int64(s, 1));
         }
         if (step != SQLITE_DONE) return failed("craft_recipe_list_member");
+    }
+    {   // crafting, step 2: what each recipe yields when it is done (the reward table, its sub-tables and the names of the experience formulas)
+        std::map<int64_t, std::string> bodies;
+        {
+            Stmt q(db_, "SELECT guid, body FROM craft_reward");
+            if (!q.ok()) return failed("craft_reward");
+            int step;
+            while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+                sqlite3_stmt* s = q.get();
+                if (!column_is_int(s, 0)) return unread("craft_reward");
+                bodies[sqlite3_column_int64(s, 0)] = column_text(s, 1);
+            }
+            if (step != SQLITE_DONE) return failed("craft_reward");
+        }
+        std::map<int64_t, std::string> names;
+        const auto formula_name = [&](int64_t guid) -> std::string {
+            const auto known = names.find(guid);
+            if (known != names.end()) return known->second;
+            std::string name;
+            Stmt q(db_, "SELECT name FROM record WHERE guid = ?1 AND schema = 'StatFormulaTypeRecordBase'");
+            if (q.ok()) {
+                sqlite3_bind_int64(q.get(), 1, guid);
+                if (sqlite3_step(q.get()) == SQLITE_ROW) name = column_text(q.get(), 0);
+            }
+            names[guid] = name;
+            return name;
+        };
+        for (const auto& [guid, recipe] : out.recipes) {
+            if (recipe.reward == 0 || out.rewards.count(recipe.reward) != 0) continue;
+            CraftReward reward;
+            std::vector<int64_t> seen;
+            read_craft_reward(bodies, recipe.reward, reward, seen, formula_name);
+            out.rewards.emplace(recipe.reward, std::move(reward));
+        }
+        out.xp_curves.kill = stat_curve_points(db_, kCurveBaseKillXp);
+        out.xp_curves.tier[0] = stat_curve_points(db_, kCurveTierModNovice);
+        out.xp_curves.tier[1] = stat_curve_points(db_, kCurveTierModApprentice);
+        out.xp_curves.tier[2] = stat_curve_points(db_, kCurveTierModJourneyman);
     }
     return out;
 }

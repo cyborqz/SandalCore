@@ -1304,6 +1304,15 @@ recipes' reward tables (`craft_*`; `internal/content/crafting.go` says what each
 Agricultural Supply) on a free service plot of a Village or a Town: the actor stands where the building would put it (the plot's transform in the node's frame and the set member's offset). `worldctl remove-station <node> <plot>`
 takes it off. A placed station stays until it is removed, until its node drops below a Village or the plot is not free any more, or until worldd stops: placed stations are not saved.
 
+**Jobs, and collecting them (steps 1 and 2).** A start at a processing station (`ServerStartCraft`, checked by `crafting/rules.h`) takes the reagent, the stacks the player chose and the price, and makes a job
+(`crafting/job.h`): it runs on the wall clock, in a queue of the player's own at each station, and is saved with the items (`character_processing_jobs`). A job whose time is over is Complete. The window is sent its
+state with what it made (`crafting/rewards.h`: the recipe's reward table times the quantity, all at the quality of what was paid; the profession's experience and Adventuring's) at the moment it ends, together with
+the next job now running, and in every open of the window after (a job that ended while the player was away is worked out from the clock at the login). The Claim button is the client's answer to a Complete state, whatever
+its clock says. `ServerSendProcessingStationRequest` (Claim) finds the job by its guid and ignores the products and experience the client sends back; it needs the job over and room in the bags for everything it made
+(with none the player is told "Not enough inventory space." and the job stays Complete); then it hands over the items (materials to the material bags, anything else to the item bag; one `ClientRecieveBatchedStorageEvents`
+call for each product, the last product first, one event for each stack), pays the experience (the level-up effects as a harvest's), deletes the job and saves the items and the jobs together. A Cancel is refused and logged.
+`worldctl craft finish <character> [<station>]` (`WorldAdmin.FinishJobs`) finishes a player's running and waiting jobs at once: each one's start moves back so that it ends now, and the window is told as for any job that ended.
+
 ### The world stream: a read-only view of the world for admin tools
 
 worldd serves `WorldStreamService` (`proto/internal/aoc/worldadmin/v1/worldadmin.proto`, beside `WorldAdminService`) on `--world-stream` / `AOC_WORLD_STREAM_ADDR` (default `127.0.0.1:50057`; `--no-world-stream` turns it off)

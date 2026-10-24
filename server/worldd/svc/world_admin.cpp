@@ -271,6 +271,17 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         return grpc::Status::OK;
     }
 
+    grpc::Status FinishJobs(grpc::ServerContext* ctx, const adminv1::FinishJobsRequest* req, adminv1::FinishJobsResponse* resp) override {
+        if (auto s = authorize(ctx, "FinishJobs"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmFinishResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.finish_jobs(req->character(), req->station(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_finished(static_cast<int32_t>(out.finished));
+        return grpc::Status::OK;
+    }
+
     grpc::Status PlaceStation(grpc::ServerContext* ctx, const adminv1::PlaceStationRequest* req, adminv1::PlaceStationResponse* resp) override {
         if (auto s = authorize(ctx, "PlaceStation"); !s.ok()) return s;
         const std::string by = "the admin API (" + ctx->peer() + ")";

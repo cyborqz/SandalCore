@@ -19,6 +19,8 @@
 //                       AutoSelectInventoryBehavior, bUseExactItems)
 //          the player pressed Start: the station ACTOR, a guid that comes back in the job's state, the recipe and how many units, and the stacks the player chose to pay with (by record and
 //          rarity band; the reagent is not named: the server takes it)
+//      ServerSendProcessingStationRequest(ProcessingStation, CraftItemState, RequestType, bWarehouse)
+//          the player pressed Claim (RequestType 4) or Cancel (5) on a job: the station ACTOR, the job's state as the window holds it, and whether the products were asked to go to the warehouse
 //
 //  TaxDetails (FRuntimeTaxDetails) is the tax record the numbers come from, a flat amount, the node's percent, the owning node's share of it, and two flags the window
 //  reads as "the tax is set" and "use these numbers".
@@ -169,6 +171,50 @@ inline std::optional<UpdateStation> parse_update_station(const RpcCall& call) {
     if (!states) return std::nullopt;
     u.states = std::move(*states);
     return u;
+}
+
+/// ServerSendProcessingStationRequest: the player pressed Claim (type 4) or Cancel (type 5) on a job of a processing station.  `state` is the job's state as the window holds it; a
+/// server finds the job by its guid and does not trust the rest.  `type` is an EProcessingJobState value; `warehouse` says the products were asked to go to the warehouse.
+struct ProcessingRequest {
+    emit::FIntrepidNetworkGUID station;
+    CraftItemState             state;
+    uint8_t                    type = 0;
+    bool                       warehouse = false;
+    bool operator==(const ProcessingRequest&) const = default;
+};
+
+/// ServerSendProcessingStationRequest from a decoded call; nullopt for another RPC, an undecoded call or a parameter of another kind.
+inline std::optional<ProcessingRequest> parse_processing_request(const RpcCall& call) {
+    if (!call.rpc || !call.decoded || !call.rpc->name || std::string_view(call.rpc->name) != "ServerSendProcessingStationRequest") return std::nullopt;
+    const schema::RpcSchema& rpc = *call.rpc;
+    ProcessingRequest p;
+    if (const Value* v = rpcf::value_of(rpc, call.params, "ProcessingStation")) {
+        const auto* g = rpcf::as<emit::FIntrepidNetworkGUID>(v);
+        if (!g) return std::nullopt;
+        p.station = *g;
+    }
+    if (const Value* v = rpcf::value_of(rpc, call.params, "CraftItemState")) {
+        const auto* s = rpcf::as<CraftItemState>(v);
+        if (!s) return std::nullopt;
+        p.state = *s;
+    }
+    const auto type = rpcf::uint_or(rpcf::value_of(rpc, call.params, "RequestType"), 0);
+    const auto warehouse = rpcf::bool_or(rpcf::value_of(rpc, call.params, "bWarehouse"), false);
+    if (!type || !warehouse || *type > 7) return std::nullopt;
+    p.type = static_cast<uint8_t>(*type);
+    p.warehouse = *warehouse;
+    return p;
+}
+
+/// ServerSendProcessingStationRequest's parameters, the form the client sends.  nullopt when `rpc` is not that RPC or a value is refused.
+inline std::optional<RpcParams> processing_request_params(const schema::RpcSchema& rpc, const ProcessingRequest& p) {
+    if (!rpc.name || std::string_view(rpc.name) != "ServerSendProcessingStationRequest") return std::nullopt;
+    RpcParams params;
+    if (!set_rpc_param(rpc, params, "ProcessingStation", Value(p.station)) || !set_rpc_param(rpc, params, "CraftItemState", Value(p.state)) ||
+        !set_rpc_param(rpc, params, "RequestType", Value::u64(p.type)) || !set_rpc_param(rpc, params, "bWarehouse", Value::boolean(p.warehouse))) {
+        return std::nullopt;
+    }
+    return params;
 }
 
 /// ServerStartCraft's parameters. The stacks the player chose to pay with are `general` (and `flexible`, which a processing station's window leaves empty); `has_tags` and `has_fuel` say a

@@ -125,6 +125,14 @@ struct GmStationResult {
     GmPosition  position;
 };
 
+/// Crafting, step 2: the test command that finishes a player's processing jobs at once.
+struct GmFinishResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    uint32_t    finished = 0;   // the jobs finished (running and waiting ones)
+};
+
 /// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
 struct GmNpcResult {
     GmStatus    status = GmStatus::Ok;
@@ -160,6 +168,9 @@ public:
     /// Puts the station `station` of an artisan building on the free plot `plot` of the node `node` (a Village or a Town), and takes it off again.
     GmStationResult  place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by);
     GmStationResult  remove_station(const std::string& node, const std::string& plot, const std::string& by);
+    /// Finishes the processing jobs of a player that are not over (running and waiting ones), all of them or only those at the station named by `station` (its Blueprint's or its definition's
+    /// name; empty for all): each is over now and ready to collect.
+    GmFinishResult   finish_jobs(const std::string& character, const std::string& station, const std::string& by);
 
     // ---- the NPC actions (a creature is named by its actor id, as the world stream and Inspect give it)
     /// Kills it as a blow would: the same death and corpse, the loot a kill gives (rolled as for a player of the creature's own level, open to every player in the world, no experience), and its

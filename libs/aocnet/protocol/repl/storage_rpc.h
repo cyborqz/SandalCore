@@ -48,6 +48,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -144,6 +145,12 @@ std::optional<LootPayload> parse_loot_payload(const RpcCall& call);
 /// The events of a decoded ServerRequestLootStorageEvents call (none when the array is empty); nullopt for another RPC, an undecoded call or an array of
 /// more than 256 events.
 std::optional<std::vector<ItemStorageEvent>> parse_loot_events(const RpcCall& call);
+
+/// Crafting, step 2: the parameters of a ClientRecieveBatchedStorageEvents call (the game's spelling), the call that hands a collected job's items to the bags: ItemEvents, an array of
+/// FItemStorageEvent in the order given (1 to 256).  nullopt for another RPC or an event that does not fit.
+std::optional<RpcParams> batched_events_params(const schema::RpcSchema& rpc, std::span<const ItemStorageEvent> events);
+/// The events of a decoded ClientRecieveBatchedStorageEvents call (none when the array is empty); nullopt for another RPC or an undecoded call.
+std::optional<std::vector<ItemStorageEvent>> parse_batched_events(const RpcCall& call);
 
 /// The parameters of ClientRemoveListenerFromStorage(LootActor); nullopt for another RPC.
 std::optional<RpcParams> remove_listener_params(const schema::RpcSchema& rpc, const emit::FIntrepidNetworkGUID& actor);

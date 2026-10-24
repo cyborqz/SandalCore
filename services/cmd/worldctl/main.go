@@ -15,6 +15,8 @@
 //	worldctl place-station <node> <plot> <station>    puts an artisan building's station on a free service plot of a Village or a Town (it stays until removed, until the node drops below
 //	                                                  a Village, or until worldd restarts)
 //	worldctl remove-station <node> <plot>             takes a placed station off its plot
+//	worldctl craft finish <character> [<station>]     finishes the character's processing jobs that are not over (the one running and the ones waiting), all of them or only those at one
+//	                                                  station: each is over now and ready to collect
 //	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one creature, named by its actor id (npc.go says what each does)
 //	worldctl npc move <id> <x> <y> [<z>]              stands a creature at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
 //	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
@@ -71,6 +73,7 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   give-item <character> <item> [n]  give an item by record name or Guid, into the right bag (a test command)
   place-station <node> <plot> <st>  put an artisan building's station on a free plot of a Village or a Town
   remove-station <node> <plot>      take a placed station off its plot
+  craft finish <character> [<st>]   finish the character's processing jobs at once, ready to collect (a test command)
   npc kill|respawn|reset|heal|despawn <id>   a game master's action on one creature, by its actor id
   npc move <id> <x> <y> [<z>]       stand a creature at a point (cm); its leash is centred there, its spawn point stays
   watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
@@ -88,7 +91,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "npc":
+	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "npc":
 	case "watch":
 		return runWatch(ctx, rest, out, errw)
 	case "help", "-h", "--help":
@@ -187,6 +190,26 @@ func parse(cmd string, pos []string) (call, error) {
 		return parseTeleport(pos)
 	case "npc":
 		return parseNpc(pos)
+	case "craft":
+		if len(pos) < 2 || len(pos) > 3 || pos[0] != "finish" {
+			return nil, usageError("needs finish and a character: worldctl craft finish <character> [<station>], such as: worldctl craft finish cyb ProcessingStation_Lumbermilling_T2")
+		}
+		station := ""
+		if len(pos) == 3 {
+			station = pos[2]
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.FinishJobs(ctx, &worldadminv1.FinishJobsRequest{Character: pos[1], Station: station})
+			if err != nil {
+				return err
+			}
+			where := ""
+			if station != "" {
+				where = " at " + station
+			}
+			fmt.Fprintf(out, "%s: %d job(s) finished%s; they are ready to collect\n", r.GetCharacter(), r.GetFinished(), where)
+			return nil
+		}, nil
 	case "speed":
 		if len(pos) != 2 {
 			return nil, usageError("needs a character and a multiplier: worldctl speed <character> <multiplier>")

@@ -249,6 +249,7 @@
 // [Cyb :: C | O | A]
 
 #include "bootstrap/bootstrap.h"
+#include "crafting/job.h"
 #include "dialogue/talk.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
@@ -282,6 +283,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -657,7 +659,12 @@ public:
     size_t   station_opens() const { return station_opens_; }
     size_t   crafts_started() const { return crafts_started_; }
     size_t   crafts_refused() const { return crafts_refused_; }
+    size_t   crafts_claimed() const { return crafts_claimed_; }
+    size_t   claims_refused() const { return claims_refused_; }
     const std::vector<svc::ProcessingJob>& processing_jobs() const { return jobs_; }
+    /// Crafting, step 2, a game master's tool: finishes the character's jobs that are not over (all of them, or those at one station when `station_name` is not empty: its Blueprint's name or
+    /// its definition's), at once and ready to collect.  The number of jobs finished (0 when there were none, or none at that station).
+    size_t   gm_finish_jobs(Connection& conn, Clock::time_point now, const std::string& station_name, const std::string& by);
     size_t   vendor_purchases() const { return vendor_purchases_; }
     size_t   vendor_sales() const { return vendor_sales_; }
     size_t   vendor_repairs() const { return vendor_repairs_; }
@@ -934,11 +941,23 @@ private:
     /// Crafting, step 1: the player pressed Start at a processing station (ServerStartCraft).  The checks of crafting/rules.h run first and a start that fails one is refused whole, with a line in
     /// the log and nothing sent; a start that passes takes the stacks from the material bags and the price from the purse, makes the job and answers in the retail order.
     void on_start_craft(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Crafting, step 2: the player pressed Claim or Cancel on a job (ServerSendProcessingStationRequest).  A claim finds the job by its guid, needs it over, needs room for everything it
+    /// made (all or nothing: with none the player is told so and the job stays), hands over the products and the experience, deletes the job and answers in the retail order.  A cancel is
+    /// refused and logged.
+    void on_processing_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Crafting, step 2: sends the window the states of the jobs that changed since it was last told (a job ended, the next began) and updates the active stations; called every tick.
+    void run_crafting(Connection& conn, Clock::time_point now);
+    /// The earliest moment any job of the character changes status again (wall milliseconds; INT64_MAX when none will).
+    int64_t next_job_event(int64_t now_ms) const;
+    /// What a finished job made and pays for this character (crafting/rewards.h), at the character's level now.
+    std::optional<crafting::JobRewards> job_rewards(const svc::ProcessingJob& job) const;
+    /// The station actor whose key is `key` (nullptr when the world has none).
+    const world::WorldActor* station_by_key(const std::string& key) const;
     /// The wall clock in Unix milliseconds, and the client's synchronized clock now (the one ClientSetTime sets, in seconds).
     static int64_t wall_ms();
     double         sync_now(Clock::time_point now);
-    /// OwnerInfo.ActiveProcessingStations from the jobs that are not over.
-    void sync_active_stations(int64_t now_ms);
+    /// OwnerInfo.ActiveProcessingStations from the jobs that are not over; true when the list changed (the caller sends the property).
+    bool sync_active_stations(int64_t now_ms);
     void on_vendor_purchase(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Vendors, step 2: the client opens the shop a line of its conversation names (ServerOpenVendor): the NPC it talks to, a shop of that conversation.
     void on_open_vendor(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
@@ -1315,7 +1334,12 @@ private:
     size_t station_opens_ = 0, station_logged_ = 0, station_ignored_logged_ = 0;   // crafting, step 0: windows opened, log lines said
     std::vector<svc::ProcessingJob> jobs_;            // crafting, step 1: the character's processing jobs, in the order they were queued (saved with the inventory)
     size_t crafts_started_ = 0, crafts_refused_ = 0, craft_logged_ = 0, craft_refused_logged_ = 0;
-    size_t active_stations_ = 0;                      // how many stations OwnerInfo.ActiveProcessingStations lists
+    size_t crafts_claimed_ = 0, claims_refused_ = 0, claim_logged_ = 0, claim_refused_logged_ = 0, crafts_finished_ = 0, craft_update_logged_ = 0;   // crafting, step 2
+    bool   claim_unreadable_logged_ = false;
+    std::vector<std::array<int32_t, 4>> active_words_;   // the stations OwnerInfo.ActiveProcessingStations lists
+    bool   active_told_ = false;                      // the list was set on the pawn at least once (before that an empty list stays out of the state)
+    std::map<std::string, uint8_t> job_seen_;         // job guid -> the status the window was last told of (or an open shows): a change is sent
+    int64_t next_job_event_ms_ = 0;                   // the earliest wall-clock moment a job changes status (0: look at once)
     std::set<std::string> station_told_;              // what was said once about a station kind
     size_t vendor_sales_ = 0, vendor_repairs_ = 0, items_destroyed_ = 0;
     bool   vendor_unreadable_logged_ = false, vendor_sale_logged_ = false;

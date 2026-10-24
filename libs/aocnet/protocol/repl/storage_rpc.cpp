@@ -378,6 +378,39 @@ std::optional<std::vector<ItemStorageEvent>> parse_loot_events(const RpcCall& ca
     return out;
 }
 
+std::optional<RpcParams> batched_events_params(const RpcSchema& rpc, std::span<const ItemStorageEvent> events) {
+    if (!rpc.name || std::string_view("ClientRecieveBatchedStorageEvents") != rpc.name || events.empty() || events.size() > 256) return std::nullopt;
+    const RepCommand* c = rpc_command(rpc, "ItemEvents");
+    if (!c || c->type != PropType::DynamicArray || elements_of(rpc, *c).size() != 1) return std::nullopt;
+    ArrayValue array;
+    array.elements.reserve(events.size());
+    for (const ItemStorageEvent& e : events) {
+        ElementState element;
+        element.values[1] = Value(e);
+        array.elements.push_back(std::move(element));
+    }
+    RpcParams params;
+    if (!set_rpc_param(rpc, params, "ItemEvents", Value(std::move(array)))) return std::nullopt;
+    return params;
+}
+
+std::optional<std::vector<ItemStorageEvent>> parse_batched_events(const RpcCall& call) {
+    if (!call.rpc || !call.decoded || !call.rpc->name || std::string_view("ClientRecieveBatchedStorageEvents") != call.rpc->name) return std::nullopt;
+    const RepCommand* c = rpc_command(*call.rpc, "ItemEvents");
+    if (!c || c->type != PropType::DynamicArray) return std::nullopt;
+    const auto it = call.params.values.find(c->handle);
+    std::vector<ItemStorageEvent> out;
+    if (it == call.params.values.end()) return out;
+    const auto* array = it->second.get_if<ArrayValue>();
+    if (!array || array->elements.size() > 256 || elements_of(*call.rpc, *c).size() != 1) return std::nullopt;
+    for (const ElementState& e : array->elements) {
+        const auto* ev = get_as<ItemStorageEvent>(element_value(e, 1));
+        if (!ev) return std::nullopt;
+        out.push_back(*ev);
+    }
+    return out;
+}
+
 std::optional<RpcParams> remove_listener_params(const RpcSchema& rpc, const emit::FIntrepidNetworkGUID& actor) {
     if (!rpc.name || std::string_view("ClientRemoveListenerFromStorage") != rpc.name || !rpc_command(rpc, "LootActor")) return std::nullopt;
     RpcParams params;

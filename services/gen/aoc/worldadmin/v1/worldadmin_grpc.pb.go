@@ -31,6 +31,7 @@ const (
 	WorldAdminService_GiveItem_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
 	WorldAdminService_PlaceStation_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/PlaceStation"
 	WorldAdminService_RemoveStation_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/RemoveStation"
+	WorldAdminService_FinishJobs_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/FinishJobs"
 	WorldAdminService_KillNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
 	WorldAdminService_RespawnNpc_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
 	WorldAdminService_ResetNpc_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
@@ -80,6 +81,10 @@ type WorldAdminServiceClient interface {
 	PlaceStation(ctx context.Context, in *PlaceStationRequest, opts ...grpc.CallOption) (*PlaceStationResponse, error)
 	// Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
 	RemoveStation(ctx context.Context, in *RemoveStationRequest, opts ...grpc.CallOption) (*RemoveStationResponse, error)
+	// Crafting, step 2. Finishes a player's processing jobs that are not over (the one running and the ones waiting) at once: each is over now and ready to collect, and the player's window is
+	// told. With a station (its Blueprint's or its definition's name) only the jobs there. NotFound for a character that is not in the world; FailedPrecondition when the character has no job
+	// that is not over (at that station).
+	FinishJobs(ctx context.Context, in *FinishJobsRequest, opts ...grpc.CallOption) (*FinishJobsResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -97,8 +102,6 @@ type WorldAdminServiceClient interface {
 	// to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
 	MoveNpc(ctx context.Context, in *MoveNpcRequest, opts ...grpc.CallOption) (*MoveNpcResponse, error)
 }
-
-// -- CoA & C | Y | B --
 
 type worldAdminServiceClient struct {
 	cc grpc.ClientConnInterface
@@ -182,6 +185,16 @@ func (c *worldAdminServiceClient) RemoveStation(ctx context.Context, in *RemoveS
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RemoveStationResponse)
 	err := c.cc.Invoke(ctx, WorldAdminService_RemoveStation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) FinishJobs(ctx context.Context, in *FinishJobsRequest, opts ...grpc.CallOption) (*FinishJobsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FinishJobsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_FinishJobs_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +302,10 @@ type WorldAdminServiceServer interface {
 	PlaceStation(context.Context, *PlaceStationRequest) (*PlaceStationResponse, error)
 	// Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
 	RemoveStation(context.Context, *RemoveStationRequest) (*RemoveStationResponse, error)
+	// Crafting, step 2. Finishes a player's processing jobs that are not over (the one running and the ones waiting) at once: each is over now and ready to collect, and the player's window is
+	// told. With a station (its Blueprint's or its definition's name) only the jobs there. NotFound for a character that is not in the world; FailedPrecondition when the character has no job
+	// that is not over (at that station).
+	FinishJobs(context.Context, *FinishJobsRequest) (*FinishJobsResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -339,6 +356,9 @@ func (UnimplementedWorldAdminServiceServer) PlaceStation(context.Context, *Place
 func (UnimplementedWorldAdminServiceServer) RemoveStation(context.Context, *RemoveStationRequest) (*RemoveStationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveStation not implemented")
 }
+func (UnimplementedWorldAdminServiceServer) FinishJobs(context.Context, *FinishJobsRequest) (*FinishJobsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FinishJobs not implemented")
+}
 func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
 }
@@ -359,8 +379,6 @@ func (UnimplementedWorldAdminServiceServer) MoveNpc(context.Context, *MoveNpcReq
 }
 func (UnimplementedWorldAdminServiceServer) mustEmbedUnimplementedWorldAdminServiceServer() {}
 func (UnimplementedWorldAdminServiceServer) testEmbeddedByValue()                           {}
-
-// C_Y_B - CoA
 
 // UnsafeWorldAdminServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to WorldAdminServiceServer will
@@ -524,6 +542,24 @@ func _WorldAdminService_RemoveStation_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_FinishJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FinishJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).FinishJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_FinishJobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).FinishJobs(ctx, req.(*FinishJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillNpcRequest)
 	if err := dec(in); err != nil {
@@ -670,6 +706,10 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveStation",
 			Handler:    _WorldAdminService_RemoveStation_Handler,
+		},
+		{
+			MethodName: "FinishJobs",
+			Handler:    _WorldAdminService_FinishJobs_Handler,
 		},
 		{
 			MethodName: "KillNpc",

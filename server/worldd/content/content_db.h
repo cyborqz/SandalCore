@@ -864,8 +864,43 @@ struct CraftCost {
     int64_t tier = 0;            // the currency tier the amount is in
     int64_t value = 0;
 };
+/// Crafting, step 2 (the same contentc version 20): what a finished recipe yields, from craft_reward (the table the recipe names and the sub-tables it reaches).
+struct CraftRewardItem {
+    int64_t item = 0;
+    int64_t quantity = 0;        // for one unit made
+};
+struct CraftRewardContainer {
+    enum class Pick : uint8_t { All, PureRandom, WeightedRandom };
+    Pick                                       pick = Pick::All;
+    int                                        number = 0;     // NumberToSelect (a random pick takes at least one)
+    std::vector<std::vector<CraftRewardItem>>  rewards;        // the items of each reward of the container
+    std::vector<double>                        weights;        // WeightsPerReward (a weighted pick)
+};
+/// The experience formulas the data names for a recipe: what the reader knows of each.
+enum class XpRule : uint8_t { None, Processing, AnimalHusbandry, Crafting, Unknown };
+struct CraftReward {
+    std::vector<CraftRewardContainer> containers;   // the table's own and then its sub-tables', in order
+    XpRule                            profession_rule = XpRule::None;    // Artisanship_Processing_BaseXP (Processing) or its Animal Husbandry form
+    XpRule                            adventuring_rule = XpRule::None;   // Adventuring_Processing_BaseXP (Processing) or Adventuring_Crafting_BaseXP (Crafting)
+    int64_t                           profession = 0;                    // the profession the experience goes to
+    std::string                       unknown_formula;                   // the first formula of the experience this reader does not know
+    int                               unread = 0;                        // rewards left out: a currency, an item with a variation, a quantity that is no number
+};
+/// The curves the Adventuring experience of a job reads, by the character's level: the kill experience (Base_Kill_XP) and the modifier of each recipe tier (Novice, Apprentice,
+/// Journeyman and above).  Linear between keys, flat past the ends.
+struct CraftXpCurves {
+    std::vector<std::pair<double, double>> kill;
+    std::vector<std::pair<double, double>> tier[3];
+    bool ok() const { return !kill.empty() && !tier[0].empty() && !tier[1].empty() && !tier[2].empty(); }
+};
+inline constexpr int64_t kCurveBaseKillXp = 6064630639394422811ll;
+inline constexpr int64_t kCurveTierModNovice = 6064633469604267308ll, kCurveTierModApprentice = 6064633469606364461ll, kCurveTierModJourneyman = 6064633469607937326ll;
+/// The TypeId of a CharacterProfessions record, as the experience rows of a finished job name it.
+inline constexpr int64_t kTypeCharacterProfession = 5612931243805009072ll;
 struct CraftRecipeData {
     std::unordered_map<int64_t, CraftRecipe>           recipes;
+    std::unordered_map<int64_t, CraftReward>           rewards;       // by reward table guid (CraftRecipe::reward)
+    CraftXpCurves                                      xp_curves;
     std::map<int64_t, CraftCost>                       costs;
     std::map<int64_t, std::vector<int64_t>>            set_lists;     // recipe set -> its lists, in order
     std::map<int64_t, std::vector<int64_t>>            list_recipes;  // list -> its recipes, in order
@@ -873,6 +908,10 @@ struct CraftRecipeData {
     const CraftRecipe* recipe(int64_t guid) const {
         const auto it = recipes.find(guid);
         return it == recipes.end() ? nullptr : &it->second;
+    }
+    const CraftReward* reward_of(const CraftRecipe& r) const {
+        const auto it = rewards.find(r.reward);
+        return it == rewards.end() ? nullptr : &it->second;
     }
     /// Whether `recipe` is in a list of `set`; `lists_out` (optional) gets the lists of the set that hold it.
     bool set_holds(int64_t set, int64_t recipe, std::vector<int64_t>* lists_out = nullptr) const {

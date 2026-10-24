@@ -1134,7 +1134,7 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
         }
         case S::CraftState: {
             const auto* s = v.get_if<CraftItemState>();
-            return s && craft_state_fits(*s) && s->status != 3;
+            return s && craft_state_fits(*s);
         }
         case S::ChannelingData: {
             const auto* d = v.get_if<ChannelingData>();
