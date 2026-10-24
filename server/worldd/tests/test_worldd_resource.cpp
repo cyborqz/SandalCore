@@ -389,18 +389,40 @@ static void test_move() {
 // [C.Y.B ~ CoA]
 
 static void test_bags_stay() {
-    std::printf("bags: a bag whose container is open stays\n");
+    std::printf("bags: a bag is worn, replaced and taken off during the session unless its container holds items\n");
     auto inv = build(with(worn_kit(), {make_item(Bag, 0, fr::kBagMining, 1), make_item(R0, 0, fr::kOak, 2, 4)}));
     const auto before = inv->items();
     auto o = inv->use(Worn, 23, guid_n(900), 0xFFFFFFFFu, *g_catalog);
-    CHECK(!o.ok && o.refusal.find("container open") != std::string::npos && inv->items() == before, "taking off the Sanctus bag is refused while its container is open (even an empty one)");
+    CHECK(!o.ok && o.holds_items && o.bags.empty() && inv->items() == before && inv->grid(R0).cells() == 24, "taking off the Sanctus bag is refused while its container holds the oak");
     o = inv->use(Bag, 0, guid_n(1), 23, *g_catalog);
-    CHECK(!o.ok && o.refusal.find("container open") != std::string::npos && inv->items() == before, "wearing the Mining bag over it is refused");
-    // the server picks the first free bag slot: 24, whose container does not exist this session
+    CHECK(!o.ok && o.holds_items && o.bags.empty() && inv->items() == before && inv->grid(R0).cells() == 24, "wearing the Mining bag over it is refused too");
+    // the server picks the first free bag slot: 24; its container opens at once with the bag's grid
     o = inv->use(Bag, 0, guid_n(1), 0xFFFFFFFFu, *g_catalog);
-    CHECK(o.ok && inv->at(Worn, 24) && inv->grid(R1).empty() && inv->grid(R0).cells() == 24, "wearing it in the free slot 24 works; its container opens at the next login (no grid this session)");
+    CHECK(o.ok && inv->at(Worn, 24) && inv->grid(R1).cells() == 40 && inv->grid(R0).cells() == 24, "wearing it in the free slot 24 works and opens its 8 x 5 container now");
+    CHECK(o.bags.size() == 1 && o.bags[0].index == 1 && o.bags[0].open, "...and the outcome says container 1 opened");
     auto relog = build(inv->items());
-    CHECK(relog && relog->grid(R1).cells() == 40, "...and the next login builds it");
+    CHECK(relog && relog->grid(R1).cells() == 40, "...and the next login builds the same");
+    // a coal fits the new container at once
+    const auto coal = inv->grant({make_item(Bag, 0, fr::kCoal, 77, 3)}, *g_catalog);
+    CHECK(coal.ok && inv->count(R1) + inv->count(R0) == 2, "a granted item finds room in a container (the first with room)");
+    // taking it off: its container is empty, so the bag goes to the Backpack and the container closes
+    auto fresh = build(with(worn_kit(true), {make_item(R0, 0, fr::kOak, 2, 4)}));
+    o = fresh->use(Worn, 24, guid_n(901), 0xFFFFFFFFu, *g_catalog);
+    CHECK(o.ok && !fresh->at(Worn, 24) && fresh->grid(R1).empty() && fresh->grid(R0).cells() == 24 && o.events.size() == 2, "the empty Mining bag is taken off: the container closes");
+    CHECK(o.bags.size() == 1 && o.bags[0].index == 1 && !o.bags[0].open, "...and the outcome says container 1 closed");
+    // replacing it with another bag: the empty container takes the new bag's grid (and the old bag goes to the Backpack)
+    auto swap = build(with(worn_kit(true), {make_item(Bag, 0, fr::kBagLumber, 3)}));
+    o = swap->use(Bag, 0, guid_n(3), 24, *g_catalog);
+    CHECK(o.ok && swap->at(Worn, 24) && swap->at(Worn, 24)->item_record_id == fr::kBagLumber && swap->grid(R1).cells() == 30 && o.bags.size() == 1 && o.bags[0].index == 1 && o.bags[0].open &&
+              swap->at(Bag, 0) && swap->at(Bag, 0)->item_record_id == fr::kBagMining,
+          "the Lumberjacking bag replaces the empty Mining bag: the container is 6 x 5 now and the Mining bag is in the Backpack");
+    // ...but not while the bag it replaces holds a stack
+    auto full = build(with(worn_kit(true), {make_item(Bag, 0, fr::kBagLumber, 3), make_item(R1, 0, fr::kCoal, 5, 2)}));
+    const auto full_before = full->items();
+    o = full->use(Bag, 0, guid_n(3), 24, *g_catalog);
+    CHECK(!o.ok && o.holds_items && o.bags.empty() && full->items() == full_before && full->grid(R1).cells() == 40, "the Lumberjacking bag does not replace a Mining bag that holds coal");
+    o = full->use(Worn, 24, guid_n(901), 0xFFFFFFFFu, *g_catalog);
+    CHECK(!o.ok && o.holds_items && full->items() == full_before, "...and the Mining bag that holds coal is not taken off");
     // the stack in a container is not used
     o = inv->use(R0, 0, guid_n(2), 0xFFFFFFFFu, *g_catalog);
     CHECK(!o.ok && o.refusal.find("Resource0") != std::string::npos, "a stack in a resource container is not used");

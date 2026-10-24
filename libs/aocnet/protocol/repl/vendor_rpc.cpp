@@ -80,10 +80,95 @@ std::optional<RpcParams> vendor_transaction_params(const schema::RpcSchema& rpc,
     return params;
 }
 
-std::optional<RpcParams> open_vendor_params(const schema::RpcSchema& rpc, int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor) {
+namespace {
+
+/// The element commands of an array command of `rpc` (empty when its range is bad), and the local handle (1-based position) of the one named `path`, 0 when there is none.
+std::span<const schema::RepCommand> elements_of(const schema::RpcSchema& rpc, const schema::RepCommand& array) {
+    if (array.type != schema::PropType::DynamicArray || array.elem_end < array.elem_begin || array.elem_end > rpc.element_commands.size()) return {};
+    return rpc.element_commands.subspan(array.elem_begin, array.elem_end - array.elem_begin);
+}
+uint16_t local_handle(std::span<const schema::RepCommand> elems, std::string_view path) {
+    for (size_t i = 0; i < elems.size(); ++i) {
+        if (path == elems[i].path) return static_cast<uint16_t>(i + 1);
+    }
+    return 0;
+}
+
+/// An array of uint8 (the positions of the failed predicates).
+Value bytes_value(const std::vector<uint8_t>& bytes) {
+    ArrayValue a;
+    for (const uint8_t b : bytes) {
+        ElementState e;
+        e.values[1] = Value::u64(b);
+        a.elements.push_back(std::move(e));
+    }
+    return Value(std::move(a));
+}
+
+}  // namespace
+
+std::optional<RpcParams> open_vendor_params(const schema::RpcSchema& rpc, int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor, const UnavailableList& unavailable) {
     if (!is_rpc(rpc, "ClientOpenVendor")) return std::nullopt;
     RpcParams params;
     if (!set_rpc_param(rpc, params, "MerchSetId", Value::i64(merch_set)) || !set_rpc_param(rpc, params, "Vendor", Value(vendor))) return std::nullopt;
+    if (unavailable.empty()) return params;
+    // VendorInventoryUnavailableList: per tab { UnavailableListings: [{ Index, PredicateFailures, bHidden }], UnavailableInventory: { Index, PredicateFailures, bHidden } }
+    const schema::RepCommand* list = rpc_command(rpc, "VendorInventoryUnavailableList");
+    if (!list || unavailable.size() > 0xFFFF) return std::nullopt;
+    const auto tab_elems = elements_of(rpc, *list);
+    const uint16_t h_listings = local_handle(tab_elems, "VendorInventoryUnavailableList.UnavailableListings"), h_index = local_handle(tab_elems, "VendorInventoryUnavailableList.UnavailableInventory.Index"),
+                   h_failures = local_handle(tab_elems, "VendorInventoryUnavailableList.UnavailableInventory.PredicateFailures"),
+                   h_hidden = local_handle(tab_elems, "VendorInventoryUnavailableList.UnavailableInventory.bHidden");
+    if (!h_listings || !h_index || !h_failures || !h_hidden) return std::nullopt;
+    const auto listing_elems = elements_of(rpc, tab_elems[h_listings - 1]);
+    const uint16_t l_index = local_handle(listing_elems, "UnavailableListings.Index"), l_failures = local_handle(listing_elems, "UnavailableListings.PredicateFailures"),
+                   l_hidden = local_handle(listing_elems, "UnavailableListings.bHidden");
+    if (!l_index || !l_failures || !l_hidden) return std::nullopt;
+    ArrayValue tabs;
+    for (const UnavailableTab& t : unavailable) {
+        if (t.listings.size() > 0xFFFF || t.inventory.failures.size() > 0xFFFF) return std::nullopt;
+        ArrayValue listings;
+        for (const UnavailableEntry& l : t.listings) {
+            if (l.failures.size() > 0xFFFF) return std::nullopt;
+            ElementState e;
+            e.values[l_index] = Value::i64(l.index);
+            e.values[l_failures] = bytes_value(l.failures);
+            e.values[l_hidden] = Value::boolean(l.hidden);
+            listings.elements.push_back(std::move(e));
+        }
+        ElementState tab;
+        tab.values[h_listings] = Value(std::move(listings));
+        tab.values[h_index] = Value::i64(t.inventory.index);
+        tab.values[h_failures] = bytes_value(t.inventory.failures);
+        tab.values[h_hidden] = Value::boolean(t.inventory.hidden);
+        tabs.elements.push_back(std::move(tab));
+    }
+    if (!set_rpc_param(rpc, params, "VendorInventoryUnavailableList", Value(std::move(tabs)))) return std::nullopt;
+    return params;
+}
+
+std::optional<OpenVendorRequest> parse_server_open_vendor(const RpcCall& call) {
+    if (!decoded_as(call, "ServerOpenVendor")) return std::nullopt;
+    const schema::RpcSchema& rpc = *call.rpc;
+    // a parameter left at its default is not on the wire: the zero FGuid reads as zero words
+    const auto word = [&](std::string_view path) -> std::optional<int64_t> { return rpcf::int_or(rpcf::value_of(rpc, call.params, path), 0); };
+    const auto a = word("VendorNPCGuid.A"), b = word("VendorNPCGuid.B"), c = word("VendorNPCGuid.C"), d = word("VendorNPCGuid.D");
+    const auto def = rpcf::int_or(rpcf::value_of(rpc, call.params, "VendorDefRecordGuid"), 0);
+    if (!a || !b || !c || !d || !def) return std::nullopt;
+    OpenVendorRequest r;
+    r.npc = GuidValue{static_cast<uint32_t>(*a), static_cast<uint32_t>(*b), static_cast<uint32_t>(*c), static_cast<uint32_t>(*d)};
+    r.vendor = *def;
+    return r;
+}
+
+std::optional<RpcParams> server_open_vendor_params(const schema::RpcSchema& rpc, const OpenVendorRequest& request) {
+    if (!is_rpc(rpc, "ServerOpenVendor")) return std::nullopt;
+    RpcParams params;
+    if (!set_rpc_param(rpc, params, "VendorNPCGuid.A", Value::i64(static_cast<int32_t>(request.npc.a))) || !set_rpc_param(rpc, params, "VendorNPCGuid.B", Value::i64(static_cast<int32_t>(request.npc.b))) ||
+        !set_rpc_param(rpc, params, "VendorNPCGuid.C", Value::i64(static_cast<int32_t>(request.npc.c))) || !set_rpc_param(rpc, params, "VendorNPCGuid.D", Value::i64(static_cast<int32_t>(request.npc.d))) ||
+        !set_rpc_param(rpc, params, "VendorDefRecordGuid", Value::i64(request.vendor))) {
+        return std::nullopt;
+    }
     return params;
 }
 

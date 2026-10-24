@@ -137,6 +137,7 @@ struct ItemEvent {
     int32_t                slot = 0;
     repl::ItemInstance     item;
     bool                   instigated = true;   // the character's guid is the event's instigator, else the zero guid
+    int32_t                count = 0;           // a Remove of part of a stack: how many leave, `item` being the stack as it was (0: all of item.quantity)
     /// Gathering stage 3, "the pick-up popup": the FCalloutQueueInfo the retail server sends with the Add of a harvested item (items/acquired.h); the client shows the popup with the
     /// item's icon from it.  Unset for every other event.
     std::optional<repl::CalloutQueueInfo> callout;
@@ -257,7 +258,7 @@ public:
     /// Plan E1: ClientOpenVendor on the PlayerController (reliable): the client opens its window for the VendorDef `merch_set` (the vendor's
     /// stock and prices are the client's own tables'), `vendor` the NPC's actor. nullopt before the pawn's second state or when the RPC does
     /// not build.
-    std::optional<Send> open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor);
+    std::optional<Send> open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor, const repl::UnavailableList& unavailable = {});
     /// ClientSetNodeTaxTable: the answer to the vendor window's ServerGetNodeTaxTable (fix 4; vendor/node_tax.h).
     std::optional<Send> node_tax_table(const repl::NodeTaxDetails& details);
     /// The vendors milestone, step 0: a purchase's answer in one chain: ClientShowCurrencyCallout(currency tier, signed delta) first, then the ClientReceiveStorageEvent calls of `events`
@@ -266,6 +267,9 @@ public:
     /// The vendors milestone, step 1: a sale's answer in one chain, in the retail order: the ClientReceiveStorageEvent calls of `events` first, then
     /// ClientShowCurrencyCallout(currency tier, signed delta).  What the storages hold follows the events.
     std::optional<Send> sale_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> events);
+    /// A purchase paid in items (Glint) in one chain, in the retail order: the Remove events of `paid` (the stacks the payment took from), ClientShowCurrencyCallout(currency tier, signed
+    /// delta), then the Add events of `bought`.  No Currencies change goes with it.  What the storages hold follows the events.
+    std::optional<Send> item_payment_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> paid, std::span<const ItemEvent> bought);
     /// A repair's answer in one chain, in the retail order: ClientUpdateItemDurability for the item in `storage` slot `slot` (its new durability), then
     /// ClientShowCurrencyCallout(currency tier, signed delta).  nullopt for a slot that holds no item.
     std::optional<Send> repair_answer(ItemStorage storage, int32_t slot, float durability, int64_t currency_tier, int64_t delta);
@@ -310,6 +314,16 @@ public:
     /// What changed on the pawn since the last update (HeldItems, AppearanceIDs, whatever else is dirty), as one chain, reliable; nullopt when
     /// nothing did. Take a checkpoint() first, as for every send.
     std::optional<Send> equipment_update();
+
+    /// A resource bag was worn or taken off during the session: container `index` (0 to 2) opens with `bag` (present, its grid) or closes (not present).  An opening container
+    /// gets a new component on the pawn, named by `guid` (a new one for every opening: the one it replaces stays with the client, unlisted), and is listed in OwnerInfo.ResourceContainers;
+    /// a closing one is taken off the list (its component and guid are kept for the storage events that name them).  Idempotent for the same arguments (a chain that is built again).  Nothing goes out until resource_containers_update().  False when the pawn's second state is
+    /// not built yet or a value does not fit.
+    bool set_resource_container(int index, const ResourceBagSetup& bag, const emit::FIntrepidNetworkGUID& guid);
+
+    /// What set_resource_container changed, as one chain: the new component with its export (a subobject the client has not seen is sent in full) and the changed list.  nullopt when
+    /// nothing changed.  Take a checkpoint() first, as for every send.
+    std::optional<Send> resource_containers_update();
 // (C.O.A) (C-Y-B)
 
     /// How many items the bootstrap holds in a storage (its copy), and the item in a slot (nullptr when empty).
@@ -623,7 +637,11 @@ private:
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;
     const emit::FIntrepidNetworkGUID& item_storage_guid(ItemStorage storage) const;
-    std::optional<Send> build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first = nullptr, const repl::RpcRequest* last = nullptr);
+    /// `middle` (when given) is the call placed before the event number `middle_at`.
+    std::optional<Send> build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first = nullptr, const repl::RpcRequest* last = nullptr, const repl::RpcRequest* middle = nullptr,
+                                          size_t middle_at = 0);
+    /// What the client was told is what the payloads show from now on: the events applied to items_ (a Remove of part of a stack leaves the rest).
+    void remember(std::span<const ItemEvent> events);
 };
 
 }  // namespace aoc::worldd::bootstrap

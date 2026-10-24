@@ -20,6 +20,9 @@
 //  tab or own predicates do not hold for the player is not sold); every price is in money; the whole cart costs no more than a purse can hold.  Anything else is refused whole.
 //
 //  Only the shops in kOpenShops are switched on: the Barracks, the citizen outfitter and the mayor's shop keep answering "nothing to offer yet" until their systems exist.
+//
+//  The shops of shopkeepers who talk (the Black Market, the caravan salesman, the sheriff's tax vouchers) have no use link: a line of their conversation opens them.  A window can
+//  hide a whole tab, or hide or grey out a listing, for a player the tab's or the listing's predicates do not hold for (unavailable()); a price in Glint is paid with Glint T1 items.
 // ============================================================================
 #pragma once
 
@@ -27,6 +30,7 @@
 #include "dialogue/expression.h"
 #include "items/wallet.h"
 #include "protocol/repl/value.h"
+#include "protocol/repl/vendor_rpc.h"
 #include "vendor/node_tax_table.h"
 #include "world/city_nodes.h"
 
@@ -43,7 +47,7 @@
 namespace aoc::worldd::vendor {
 
 /// The shops this step switches on, by their def's name.
-inline constexpr const char* kOpenShops[] = {"Marketplace_Vendor"};
+inline constexpr const char* kOpenShops[] = {"Marketplace_Vendor", "Node_Vendor_BlackMarket", "Caravansary_VendorDef", "ServiceBuilding_TownHallAdmin_Vendor"};
 
 /// How far the shopkeeper may be from the player, in cm, in three dimensions, for the shop to open and for a purchase to go through (12 m).
 inline constexpr double kShopRangeCm = 1200.0;
@@ -81,16 +85,28 @@ inline int64_t taxed_unit(int64_t price, const TaxRate& rate) {
     return price + static_cast<int64_t>(std::ceil(tax));
 }
 
-/// What a shop's predicates are asked against: the node the player stands in.  GetPlayer, GetCurrentNode and Node_InLevelRangeInclusive are the functions the shops' own
-/// predicates use; any other function ends the evaluation with no value, and the predicate does not hold.
+/// What a shop's predicates are asked against: the node the player stands in and, for a shop a shopkeeper opens, the node the shopkeeper stands in.  GetPlayer, GetInteractionTarget,
+/// GetCurrentNode, Node_GetActorCityNode and Node_InLevelRangeInclusive are the functions the shops' own predicates use; any other function ends the evaluation with no value, and the
+/// predicate does not hold.
 class ShopFacts final : public dialogue::ExprHost {
 public:
     const world::CityNodes* nodes = nullptr;
     double                  player_x = 0, player_y = 0;
+    bool                    has_npc = false;
+    double                  npc_x = 0, npc_y = 0;
 
     std::optional<dialogue::ExprValue> call(const std::string& name, const std::vector<dialogue::ExprValue>& args) const override {
         using dialogue::ExprValue;
-        if (name == "GetPlayer") return ExprValue::of(1);
+        constexpr int64_t kPlayer = 1, kNpc = 2;   // the objects an expression passes around
+        if (name == "GetPlayer") return ExprValue::of(kPlayer);
+        if (name == "GetInteractionTarget") return ExprValue::of(has_npc ? kNpc : 0);
+        if (name == "Node_GetActorCityNode") {
+            if (args.size() != 1 || !nodes) return std::nullopt;
+            const bool of_npc = args[0].i == kNpc && has_npc;
+            const world::NodeSite site = nodes->node_at(of_npc ? npc_x : player_x, of_npc ? npc_y : player_y);
+            const world::CityNodeInfo* n = nodes->by_rank(site.node_rank);
+            return ExprValue::of(n ? n->guid : 0);
+        }
         if (name == "GetCurrentNode") {
             if (args.size() != 1 || !nodes) return std::nullopt;
             const world::NodeSite site = nodes->node_at(player_x, player_y);
@@ -182,7 +198,8 @@ public:
         bool              ok = false;
         std::string       refusal;
         std::vector<Line> lines;
-        int64_t           total = 0;   // copper
+        int64_t           total = 0;                    // in `currency`'s units: copper, or Glint T1 for the Glint tier
+        int64_t           currency = items::kMoneyTier; // the tier the whole cart is paid in
     };
     /// Whether a predicate holds for the player now.
     using Holds = std::function<bool(const content::VendorPredicateRow&)>;
@@ -239,18 +256,62 @@ public:
                 }
             }
             if (!chosen) return refuse("item " + std::to_string(line.item_record) + " is not for sale to this player here: " + why);
-            int64_t unit = 0;
+            int64_t unit = 0, currency = 0;
             for (const content::VendorPriceRow* r : *chosen) {
-                if (r->currency != items::kMoneyTier) return refuse("item " + std::to_string(line.item_record) + " is paid in a currency this shop cannot take yet");
+                if (currency != 0 && r->currency != currency) return refuse("item " + std::to_string(line.item_record) + " is paid in more than one currency");
+                currency = r->currency;
                 unit += taxed_unit(r->price, rate);
             }
-            if (unit > items::kMoneyCap) return refuse("item " + std::to_string(line.item_record) + " costs more than a purse can hold");
+            // money comes from the purse, Glint from the Glint T1 items of the bags; every other currency waits for its system
+            if (currency != items::kMoneyTier && currency != items::kGlintTier) return refuse("item " + std::to_string(line.item_record) + " is paid in a currency this shop cannot take yet");
+            if (q.lines.empty()) q.currency = currency;
+            else if (q.currency != currency) return refuse("a cart is paid in one currency, and this one mixes two");
+            const int64_t cap = currency == items::kGlintTier ? items::kGlintCap : items::kMoneyCap;
+            if (unit > cap) return refuse("item " + std::to_string(line.item_record) + " costs more than can be held");
             q.total += unit * line.quantity;
-            if (q.total > items::kMoneyCap) return refuse("the cart costs more than a purse can hold");
+            if (q.total > cap) return refuse("the cart costs more than can be held");
             q.lines.push_back({line.item_record, line.quantity, unit});
         }
         q.ok = true;
         return q;
+    }
+
+    /// What the window of `shop` hides or greys out for the player `holds` is asked for: one entry for each tab (counted in the def's order) with a predicate that fails, naming the tab
+    /// (hidden when a failed predicate of its own is a hiding one) and, unless the whole tab is hidden, its listings that fail.  A failed predicate that is not a hiding one and has a
+    /// reason to show is named by its position.
+    protocol::repl::UnavailableList unavailable(int64_t shop, const Holds& holds) const {
+        using protocol::repl::UnavailableEntry;
+        using protocol::repl::UnavailableTab;
+        protocol::repl::UnavailableList out;
+        const content::VendorData::Def* d = def(shop);
+        if (!d) return out;
+        // true (and the entry's hidden/failures set) when a predicate of the list fails
+        const auto evaluate = [&](const std::vector<content::VendorPredicateRow>& preds, UnavailableEntry& e) {
+            bool failed = false;
+            for (size_t k = 0; k < preds.size() && k <= 0xFF; ++k) {
+                if (holds(preds[k])) continue;
+                failed = true;
+                if (preds[k].hidden) e.hidden = true;
+                else if (!preds[k].failure.empty()) e.failures.push_back(static_cast<uint8_t>(k));
+            }
+            return failed;
+        };
+        for (size_t t = 0; t < d->inventories.size(); ++t) {
+            const int64_t tab = d->inventories[t];
+            UnavailableTab entry;
+            entry.inventory.index = static_cast<int32_t>(t);
+            bool any = false;
+            if (const auto own = d_.predicates.find({tab, -1}); own != d_.predicates.end()) any = evaluate(own->second, entry.inventory);
+            if (!entry.inventory.hidden) {
+                for (auto it = d_.predicates.lower_bound({tab, 0}); it != d_.predicates.end() && it->first.first == tab; ++it) {
+                    UnavailableEntry listing;
+                    listing.index = it->first.second;
+                    if (evaluate(it->second, listing)) entry.listings.push_back(std::move(listing));
+                }
+            }
+            if (any || !entry.listings.empty()) out.push_back(std::move(entry));
+        }
+        return out;
     }
 
 private:

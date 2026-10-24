@@ -412,12 +412,13 @@ Outcome Inventory::equip(int bag_slot, const ItemCatalog& catalog, uint32_t requ
             }
         }
     }
-    // a resource bag whose container is open this session (its grid was built from it) is not replaced: the items in the container, and the client's layout, belong to it
+    // a resource bag whose container holds items is not replaced: the items belong to it (an empty one is, and its container takes the new bag's grid below)
     for (const int d : displaced) {
         const int bag = bag_container_of(d);
-        if (bag >= 0 && !grid(resource_container(bag)).empty()) {
-            return refuse(std::string("the resource bag in Equipment slot ") + std::to_string(d) + " has its container open (" + container_name(resource_container(bag)) +
-                          "): bags are changed at the next login");
+        if (bag >= 0 && count(resource_container(bag)) > 0) {
+            out.holds_items = true;
+            return refuse(std::string("the resource bag in Equipment slot ") + std::to_string(d) + " holds " + std::to_string(count(resource_container(bag))) + " item stack(s) in " +
+                          container_name(resource_container(bag)) + ": it is emptied before it is replaced");
         }
     }
     const size_t free_after = static_cast<size_t>(kBackpackSlots) - count(svc::ItemContainer::Backpack) + 1;   // the item leaves its slot
@@ -454,6 +455,19 @@ Outcome Inventory::equip(int bag_slot, const ItemCatalog& catalog, uint32_t requ
         remove(svc::ItemContainer::Equipment, d);
     }
     add(svc::ItemContainer::Equipment, target, item);
+    // the resource containers follow the bags: a bag worn in Equipment slot 23 to 25 gives that container its grid (a displaced, empty bag's grid goes with it)
+    for (const int d : displaced) {
+        if (const int bag = bag_container_of(d); bag >= 0) grids_[static_cast<size_t>(bag)] = ResourceGrid{};
+    }
+    if (const int bag = bag_container_of(target); bag >= 0) {
+        const bool opens = info->bag.has_value();
+        grids_[static_cast<size_t>(bag)] = opens ? *info->bag : ResourceGrid{};
+        out.bags.push_back({bag, opens});
+    }
+    for (const int d : displaced) {
+        const int bag = bag_container_of(d);
+        if (bag >= 0 && bag != bag_container_of(target)) out.bags.push_back({bag, false});
+    }
     out.ok = true;
     out.equipment_changed = true;
     return out;
@@ -462,8 +476,11 @@ Outcome Inventory::equip(int bag_slot, const ItemCatalog& catalog, uint32_t requ
 Outcome Inventory::unequip(int equip_slot) {
     Outcome out;
     const svc::InventoryItem item = *find(svc::ItemContainer::Equipment, equip_slot);
-    if (const int bag = bag_container_of(equip_slot); bag >= 0 && !grid(resource_container(bag)).empty()) {
-        out.refusal = std::string("the resource bag has its container open (") + container_name(resource_container(bag)) + "): bags are changed at the next login";
+    const int worn_bag = bag_container_of(equip_slot);   // the container this slot's bag gives, -1 for any other slot
+    if (worn_bag >= 0 && count(resource_container(worn_bag)) > 0) {
+        out.holds_items = true;
+        out.refusal = std::string("the resource bag in Equipment slot ") + std::to_string(equip_slot) + " holds " + std::to_string(count(resource_container(worn_bag))) +
+                      " item stack(s) in " + container_name(resource_container(worn_bag)) + ": it is emptied before it is taken off";
         return out;
     }
     const int bag = first_free(svc::ItemContainer::Backpack);
@@ -488,6 +505,10 @@ Outcome Inventory::unequip(int equip_slot) {
     slots_.erase({static_cast<uint8_t>(svc::ItemContainer::Equipment), equip_slot});
     slots_[{static_cast<uint8_t>(svc::ItemContainer::Backpack), bag}] = moved;
     out.events = {std::move(add), std::move(remove)};
+    if (worn_bag >= 0) {
+        grids_[static_cast<size_t>(worn_bag)] = ResourceGrid{};   // the empty bag leaves: its container closes
+        out.bags.push_back({worn_bag, false});
+    }
     out.ok = true;
     out.equipment_changed = true;
     return out;
@@ -495,6 +516,53 @@ Outcome Inventory::unequip(int equip_slot) {
 // -- C Y B x C.O.A --
 
 // ---- plan D1: consuming and granting ---------------------------------------------------------------------------------------
+
+int64_t Inventory::count_of(int64_t record) const {
+    int64_t n = 0;
+    for (const auto& [key, it] : slots_) {
+        const svc::ItemContainer c = static_cast<svc::ItemContainer>(key.first);
+        if (it.item_record_id == record && (c == svc::ItemContainer::Backpack || is_resource(c))) n += it.quantity;
+    }
+    return n;
+}
+
+Outcome Inventory::take(int64_t record, int64_t count) {
+    Outcome out;
+    if (count < 1) {
+        out.refusal = "nothing to take: the count is " + std::to_string(count);
+        return out;
+    }
+    const int64_t held = count_of(record);
+    if (held < count) {
+        out.refusal = "the character holds " + std::to_string(held) + " of item " + std::to_string(record) + ", not " + std::to_string(count);
+        return out;
+    }
+    std::vector<std::pair<Key, int32_t>> plan;   // the stacks that give, with how many
+    int64_t left = count;
+    for (const auto& [key, it] : slots_) {
+        const svc::ItemContainer c = static_cast<svc::ItemContainer>(key.first);
+        if (it.item_record_id != record || (c != svc::ItemContainer::Backpack && !is_resource(c))) continue;
+        const int32_t give = static_cast<int32_t>(std::min<int64_t>(left, it.quantity));
+        plan.push_back({key, give});
+        left -= give;
+        if (left == 0) break;
+    }
+    for (const auto& [key, give] : plan) {
+        const svc::InventoryItem before = slots_.at(key);
+        Event e;
+        e.type = repl::StorageEventType::Remove;
+        e.container = static_cast<svc::ItemContainer>(key.first);
+        e.slot = key.second;
+        e.item = before;
+        e.count = give < before.quantity ? give : 0;
+        e.instigated = false;   // the retail Remove of a payment names nobody
+        if (give < before.quantity) slots_[key].quantity = before.quantity - give;
+        else slots_.erase(key);
+        out.events.push_back(std::move(e));
+    }
+    out.ok = true;
+    return out;
+}
 
 Outcome Inventory::consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count) {
     Outcome out;

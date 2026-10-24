@@ -41,7 +41,8 @@ enum class Outcome { Changed, Nothing, Refused };
 struct Result {
     Outcome                  outcome = Outcome::Nothing;
     std::string              why;       // for the log: why nothing changed, or what was skipped
-    std::vector<std::string> skipped;   // actions of a line or node that were not done ("OpenWindow/Vendor")
+    std::vector<std::string> skipped;   // actions of a line or node that were not done ("GiveItems")
+    int64_t                  open_vendor = 0;   // the line opens this shop (a VendorDef): the caller opens its window; the conversation itself is left as it is
 };
 
 class Talk {
@@ -111,9 +112,19 @@ public:
         const content::DialogueNodeRow* from = book.node(state_.shown_node);
         if (!from || response.choice_index < 0 || static_cast<size_t>(response.choice_index) >= from->choices.size()) { r.why = "the node has no such line"; return r; }
         const content::DialogueChoiceRow& line = from->choices[static_cast<size_t>(response.choice_index)];
-        for (const auto& a : line.actions) r.skipped.push_back(a.window.empty() ? a.action : a.action + "/" + a.window);
+        size_t others = 0;   // the actions that are not a shop's window
+        for (const auto& a : line.actions) {
+            if (a.action == "OpenWindow" && a.window == "Vendor" && a.vendor != 0) {
+                if (r.open_vendor == 0) r.open_vendor = a.vendor;
+                continue;
+            }
+            ++others;
+            r.skipped.push_back(a.window.empty() ? a.action : a.action + "/" + a.window);
+        }
         if (line.next == 0) {
-            if (!line.actions.empty()) { r.outcome = Outcome::Nothing; r.why = "the line's actions are not done yet"; return r; }
+            // a line that ends the conversation and opens a shop leaves the conversation as it is: the client closes its own window as the shop's opens
+            if (r.open_vendor != 0) { r.outcome = Outcome::Nothing; r.why = "the line opens a shop"; return r; }
+            if (!line.actions.empty() && others > 0) { r.outcome = Outcome::Nothing; r.why = "the line's actions are not done yet"; return r; }
             state_ = State{};
             r.outcome = Outcome::Changed;
             return r;

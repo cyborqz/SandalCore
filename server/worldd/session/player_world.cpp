@@ -803,10 +803,17 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
             }
         }
         // vendors, step 0: a shopkeeper can be used and its window names the town it stands in (the node its plot component holds is the one the client asks the taxes of and whose
-        // name the window shows); a template recorded in another town names that one
+        // name the window shows); a template recorded in another town names that one.  Step 2: so does a shopkeeper whose conversation opens a switched-on shop.
         if (shops_ && node.guid != 0) {
             const world::WorldActor* keeper = registry_.find(id);
-            if (keeper && keeper->kind == world::ActorKind::Npc && shops_->shop_of(keeper->npc.instance_guid, keeper->npc.asset_guid) != 0) {
+            const auto opens_by_talk = [&](const world::WorldActor& npc) {
+                if (!dialogue_ || npc.npc.dialogue_root == 0) return false;
+                for (const int64_t def : dialogue_->vendor_defs(npc.npc.dialogue_root)) {
+                    if (shops_->is_open(def)) return true;
+                }
+                return false;
+            };
+            if (keeper && keeper->kind == world::ActorKind::Npc && (shops_->shop_of(keeper->npc.instance_guid, keeper->npc.asset_guid) != 0 || opens_by_talk(*keeper))) {
                 registry_.modify(id, world::Change::State, [&](world::WorldActor& w) {
                     world::allow_inputs(w.actor);   // the shopkeeper's four inputs may be activated, as the GM vendors' are
                     for (protocol::repl::Subobject& s : w.actor.subobjects) {

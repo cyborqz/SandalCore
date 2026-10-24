@@ -2698,7 +2698,7 @@ bool parse_dialogue_requirement(const std::string& text, DialogueRequirement& ou
     return true;
 }
 
-/// A list of actions ([{"a": "OpenWindow", "w": "Vendor"}]); false when the text does not read.
+/// A list of actions ([{"a": "OpenWindow", "w": "Vendor", "vd": <the shop's def>}]); false when the text does not read.
 bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionRow>& out) {
     out.clear();
     if (text.empty()) return true;
@@ -2709,6 +2709,7 @@ bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionR
         DialogueActionRow r;
         if (const auto it = a.find("a"); it != a.end() && it->is_string()) r.action = it->get<std::string>();
         if (const auto it = a.find("w"); it != a.end() && it->is_string()) r.window = it->get<std::string>();
+        if (const auto it = a.find("vd"); it != a.end() && it->is_number_integer()) r.vendor = it->get<int64_t>();
         out.push_back(std::move(r));
     }
     return true;
@@ -2875,6 +2876,18 @@ std::optional<VendorData> ContentDb::vendor_data(std::string& error) const {
             out.prices[sqlite3_column_int64(s, 0)][r.item].push_back(r);
         }
         if (step != SQLITE_DONE) return failed("vendor_price");
+    }
+    {   // the tabs of each def, in order (the window's list of what is unavailable counts them)
+        Stmt q(db_, "SELECT vendor_guid, inventory_guid FROM vendor_def_inventory ORDER BY vendor_guid, ord");
+        if (!q.ok()) return failed("vendor_def_inventory");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("vendor_def_inventory");
+            const auto def = out.defs.find(sqlite3_column_int64(s, 0));
+            if (def != out.defs.end()) def->second.inventories.push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed("vendor_def_inventory");
     }
     {
         Stmt q(db_, "SELECT inventory_guid, listing_ord, expression, failure, hidden FROM vendor_availability ORDER BY inventory_guid, listing_ord, ord");

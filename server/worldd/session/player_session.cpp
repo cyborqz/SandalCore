@@ -1069,6 +1069,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerSetActionbarSlotUseData") return on_set_slot(conn, rpc, now);
         if (name_of_rpc == "ServerSelectDialogueChoice") return on_dialogue_choice(conn, rpc, now);
         if (name_of_rpc == "ServerHandleVendorPurchase") return on_vendor_purchase(conn, rpc, now);
+        if (name_of_rpc == "ServerOpenVendor") return on_open_vendor(conn, rpc, now);
         if (name_of_rpc == "ServerRequestLootStorageEvents") return on_loot_request(conn, rpc, now);
         if (name_of_rpc == "ServerGetNodeTaxTable") return on_node_tax_request(conn, rpc, now);
         // Nodes 1, stage 2: the node window and the login's 49 + 49 requests, and the client's node GM console
@@ -1764,6 +1765,7 @@ std::vector<bootstrap::ItemEvent> item_events_for(const items::Outcome& outcome)
         ev.slot = e.slot;
         ev.item = items::to_instance(e.item);
         ev.instigated = e.instigated;
+        ev.count = e.count;
         out.push_back(std::move(ev));
     }
     return out;
@@ -2824,11 +2826,34 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     }
     spdlog::log(level_for(item_applied_logged_), "[session] {}: {}: {} storage event(s){}", name(), what, outcome.events.size(),
                 outcome.equipment_changed ? ", the visible gear is updated" : "");
-    for (const items::Event& e : outcome.events) {
-        if (e.type == repl::StorageEventType::Add && e.container == svc::ItemContainer::Equipment && e.slot >= items::equip::ResourceBag0 && e.slot <= items::equip::ResourceBag2) {
-            // Gathering stage 3: the container of a bag worn now is not open this session (the client lays its containers out at the login)
-            spdlog::info("[session] {}: a resource bag is worn in Equipment slot {}: its container opens at the next login", name(), e.slot);
-        }
+    // a resource bag worn, replaced or taken off: its container opens or closes on the client now, after the events that moved the bag
+    for (const items::BagChange& c : outcome.bags) update_resource_container(conn, c);
+}
+
+void PlayerSession::update_resource_container(Connection& conn, const items::BagChange& change) {
+    if (change.index < 0 || change.index >= items::kResourceContainers) return;
+    const size_t i = static_cast<size_t>(change.index);
+    const items::ResourceGrid& grid = inventory_.grid(items::resource_container(change.index));
+    bootstrap::ResourceBagSetup bag;
+    FIntrepidNetworkGUID guid = pb_.setup().guids.resource_storage[i];
+    if (change.open && !grid.empty()) {
+        bag.present = true;
+        bag.columns = grid.columns();
+        bag.rows = grid.rows();
+        bag.override_matrix = grid.override_matrix();
+        if (world_) guid = world_->mint_guid();   // a container that opens is a new component with a guid of its own
+    }
+    spdlog::info("[session] {}: the resource bag in Equipment slot {} {}: container Resource{} {}", name(), items::equip::ResourceBag0 + change.index,
+                 bag.present ? "is worn" : "is taken off", change.index, bag.present ? std::to_string(bag.columns) + " x " + std::to_string(bag.rows) + " opens now" : std::string("closes now"));
+    const int index = change.index;
+    queue("the resource containers", [index, bag, guid](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+        if (!pb.set_resource_container(index, bag, guid)) return std::nullopt;
+        return pb.resource_containers_update();
+    }, conn, /*must_build=*/true);
+    if (bag.present) {
+        // the server hands the grid to the client with the container (the client asks for it too, as a client does for any container it learns of: the answer is the same)
+        const bootstrap::StorageKind kind = bootstrap::resource_kind(index);
+        queue("ClientReceiveStoragePayload", [kind](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(kind, Role::Pawn); }, conn);
     }
 }
 // (C Y B | CoA)
@@ -2856,7 +2881,7 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
         }
         return;
     }
-    if (!within_budget(item_budget_, "ServerItemUsed", now) || !room_for(4)) return;
+    if (!within_budget(item_budget_, "ServerItemUsed", now) || !room_for(8)) return;
     if (!catalog_) return refuse_item_request(conn, "ServerItemUsed", "worldd has no item catalog", now);
     const auto storage = container_of_location(use->storage);
     if (!storage) return refuse_item_request(conn, "ServerItemUsed", "items of storage " + std::to_string(use->storage) + " are not used", now);
@@ -2880,7 +2905,11 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
         }
     }
     const items::Outcome outcome = inventory_.use(*storage, use->slot, items::guid_hex(use->expected_item), use->requested_equip_slot, *catalog_);
-    if (!outcome.ok) return refuse_item_request(conn, "ServerItemUsed", outcome.refusal, now);
+    if (!outcome.ok) {
+        // a resource bag that still holds items stays where it is; the player is told why nothing happened
+        if (outcome.holds_items) send_economy_callout(conn, "CantUnequipResourceBag", now);
+        return refuse_item_request(conn, "ServerItemUsed", outcome.refusal, now);
+    }
     apply_outcome(conn, outcome, *storage == svc::ItemContainer::Backpack ? "an item is worn" : "an item is taken off");
 }
 
@@ -3019,7 +3048,7 @@ const world::WorldActor* PlayerSession::open_vendor(std::string& why) {
     const world::WorldActor* a = registry_ ? registry_->find(vendor_actor_) : nullptr;
     const GoodPosition at = checker_.good();
     const vendor::TownShops* shops = world_ ? world_->town_shops() : nullptr;
-    const bool town = a && !a->npc.is_gm_vendor && shops && shops->is_open(vendor_def_) && town_shop_of(*a) == vendor_def_;
+    const bool town = a && !a->npc.is_gm_vendor && shops && shops->is_open(vendor_def_) && (vendor_by_talk_ || town_shop_of(*a) == vendor_def_);
     if (!a) {
         why = "the vendor is gone";
     } else if (!a->npc.is_gm_vendor && !town) {
@@ -3039,6 +3068,7 @@ const world::WorldActor* PlayerSession::open_vendor(std::string& why) {
     }
     vendor_actor_ = 0;
     vendor_def_ = 0;
+    vendor_by_talk_ = false;
     return nullptr;
 }
 // -- C.O.A x C-Y-B --
@@ -3090,6 +3120,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
             const vendor::TownShops* shops = world_->town_shops();
             vendor_actor_ = a->id;
             vendor_def_ = shop;
+            vendor_by_talk_ = false;
             ++vendor_opens_;
             const FIntrepidNetworkGUID npc = a->actor.guid;
             spdlog::log(level_for(vendor_logged_), "[session] {}: opens the shop {} of {}", name(), shops->def(shop) ? shops->def(shop)->name : std::to_string(shop), a->npc.name);
@@ -3101,6 +3132,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (!room_for(1)) return;
     vendor_actor_ = a->id;
     vendor_def_ = def->guid;
+    vendor_by_talk_ = false;
     ++vendor_opens_;
     const int64_t merch = def->guid;
     const FIntrepidNetworkGUID npc = a->actor.guid;
@@ -3289,6 +3321,11 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
     for (const std::string& s : r.skipped) {
         if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
     }
+    // vendors, step 2: a line that opens a shop opens its window; the conversation is left as it is (the client closes its own window as the shop's opens)
+    if (r.open_vendor != 0) {
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the shop {}", name(), response->choice_index, response->node, r.open_vendor);
+        open_talk_shop(conn, *npc, r.open_vendor, now);
+    }
     switch (r.outcome) {
         case dialogue::Outcome::Changed:
             ++dialogue_steps_;
@@ -3298,7 +3335,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
             send_dialogue(conn, "a line was chosen");
             break;
         case dialogue::Outcome::Nothing:
-            spdlog::log(level_for(dialogue_logged_), "[session] {}: line {} of node {} changes nothing: {}", name(), response->choice_index, response->node, r.why);
+            if (r.open_vendor == 0) spdlog::log(level_for(dialogue_logged_), "[session] {}: line {} of node {} changes nothing: {}", name(), response->choice_index, response->node, r.why);
             break;
         case dialogue::Outcome::Refused:
             ++dialogue_refused_;
@@ -3315,6 +3352,95 @@ void PlayerSession::run_dialogue(Connection& conn, Clock::time_point /*now*/) {
     if (std::hypot(npc->x - at.x, npc->y - at.y) > kDialogueRangeCm) end_dialogue(conn, "the player walked away");
 }
 
+
+// -- vendors, step 2: the shopkeepers who talk ----------------------------------------------------------------------------------------------------------
+
+namespace {
+
+/// What a shop's predicates are asked: the node the player stands in and the node the shopkeeper stands in.
+vendor::ShopFacts shop_facts_for(const world::CityNodes* nodes, const GoodPosition& player, const world::WorldActor* npc) {
+    vendor::ShopFacts facts;
+    facts.nodes = nodes;
+    facts.player_x = player.x;
+    facts.player_y = player.y;
+    if (npc) {
+        facts.has_npc = true;
+        facts.npc_x = npc->x;
+        facts.npc_y = npc->y;
+    }
+    return facts;
+}
+
+}  // namespace
+
+bool PlayerSession::open_talk_shop(Connection& conn, const world::WorldActor& npc, int64_t def, Clock::time_point /*now*/) {
+    const vendor::TownShops* shops = world_ ? world_->town_shops() : nullptr;
+    const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
+    const auto refuse = [&](const std::string& why) {
+        ++vendor_refused_;
+        spdlog::log(level_for(vendor_logged_), "[session] {}: {}'s shop {} does not open: {}", name(), npc.npc.name, def, why);
+        return false;
+    };
+    if (!shops || !shops->def(def) || !shops->is_open(def)) return refuse("worldd opens no such shop yet");
+    // only a shop of the shopkeeper's own conversation
+    if (!book || book->vendor_defs(npc.npc.dialogue_root).count(def) == 0) return refuse("the conversation of " + npc.npc.name + " opens no such shop");
+    const GoodPosition at = checker_.good();
+    const double dx = npc.x - at.x, dy = npc.y - at.y, dz = npc.z - at.z;
+    if (dx * dx + dy * dy + dz * dz >= vendor::kShopRangeCm * vendor::kShopRangeCm) {
+        return refuse("the shopkeeper is " + std::to_string(static_cast<int>(std::sqrt(dx * dx + dy * dy + dz * dz) / 100.0)) + " m away (a shop opens within 12 m)");
+    }
+    // the window answers once: the line the server ran and the request the client may send for the same shop are one opening
+    if (vendor_actor_ == npc.id && vendor_def_ == def && vendor_by_talk_) {
+        spdlog::log(level_for(vendor_logged_), "[session] {}: the shop {} of {} is open already: not answered again", name(), def, npc.npc.name);
+        return true;
+    }
+    if (!room_for(2)) return false;
+    vendor_actor_ = npc.id;
+    vendor_def_ = def;
+    vendor_by_talk_ = true;
+    ++vendor_opens_;
+    // what the window hides or greys out for this player and this shopkeeper
+    const vendor::ShopFacts facts = shop_facts_for(world_->city_nodes(), at, &npc);
+    bool unreadable = false;
+    const vendor::TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
+        const auto v = dialogue::evaluate_expression(p.expression, facts);
+        if (!v) unreadable = true;
+        return v && v->i != 0;
+    };
+    repl::UnavailableList unavailable = shops->unavailable(def, holds);
+    size_t hidden_tabs = 0, listings = 0;
+    for (const repl::UnavailableTab& t : unavailable) {
+        hidden_tabs += t.inventory.hidden ? 1 : 0;
+        listings += t.listings.size();
+    }
+    spdlog::log(level_for(vendor_logged_), "[session] {}: opens the shop {} of {} from the conversation: {} tab(s) listed as unavailable ({} hidden), {} listing(s){}", name(), shops->def(def)->name,
+                npc.npc.name, unavailable.size(), hidden_tabs, listings, unreadable ? "; a predicate does not evaluate and does not hold" : "");
+    const FIntrepidNetworkGUID guid = npc.actor.guid;
+    queue("ClientOpenVendor", [def, guid, unavailable = std::move(unavailable)](bootstrap::PlayerBootstrap& pb) { return pb.open_vendor(def, guid, unavailable); }, conn, /*must_build=*/true);
+    return true;
+}
+
+void PlayerSession::on_open_vendor(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    const auto request = repl::parse_server_open_vendor(rpc.call);
+    if (!request) {
+        if (!vendor_unreadable_logged_) {
+            vendor_unreadable_logged_ = true;
+            spdlog::warn("[session] {}: a ServerOpenVendor does not read ({} parameter bits): ignored (further ones are not logged)", name(), rpc.call.param_bits);
+        }
+        return;
+    }
+    if (!within_budget(vendor_budget_, "ServerOpenVendor", now) || !room_for(2)) return;
+    const auto refuse = [&](const std::string& why) {
+        ++vendor_refused_;
+        spdlog::log(level_for(vendor_logged_), "[session] {}: the client's ServerOpenVendor for shop {} is refused: {}", name(), request->vendor, why);
+    };
+    if (dead_) return refuse("the character is dead");
+    // the NPC the client may name is the one it talks to; the shopkeeper's own guid in the request is not what decides
+    if (!talk_.open()) return refuse("no conversation is open");
+    const world::WorldActor* npc = registry_ ? registry_->find(talk_.state().source) : nullptr;
+    if (!npc) return refuse("the NPC the player talks to is gone");
+    open_talk_shop(conn, *npc, request->vendor, now);
+}
 
 // The vendor window waits for this answer (vendor/node_tax.h): the exe's UVendorMenu::InitializeVendor sent the request, and only the table's
 // arrival makes the window fill its listings, taxes and funds.  Retail answers the next packet with the node's table.
@@ -3457,12 +3583,10 @@ void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurch
     const vendor::TownShops* shops = world_ ? world_->town_shops() : nullptr;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     if (!shops || !db) return refuse("worldd has no town shops");
-    // the player's side of the shop's predicates: the node the player stands in
-    vendor::ShopFacts facts;
-    facts.nodes = world_->city_nodes();
+    // the shop's predicates: the node the player stands in, and the node the shopkeeper stands in
     const GoodPosition at = checker_.good();
-    facts.player_x = at.x;
-    facts.player_y = at.y;
+    const world::WorldActor* keeper = registry_ ? registry_->find(vendor_actor_) : nullptr;
+    const vendor::ShopFacts facts = shop_facts_for(world_->city_nodes(), at, keeper);
     bool unreadable = false;
     const vendor::TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
         const auto v = dialogue::evaluate_expression(p.expression, facts);
@@ -3474,8 +3598,13 @@ void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurch
         if (unreadable) spdlog::warn("[session] {}: a shop predicate does not evaluate: the listing is not sold", name());
         return refuse(quote.refusal);
     }
-    if (!wallet_.can_pay(quote.total)) {
+    // a price in Glint is paid with Glint T1 items of the bags (the material bags hold them); a price in money, from the purse
+    const bool in_glint = quote.currency == items::kGlintTier;
+    if (!in_glint && !wallet_.can_pay(quote.total)) {
         return refuse("the purse holds " + std::to_string(wallet_.copper()) + " copper and the cart costs " + std::to_string(quote.total) + " (not enough money)");
+    }
+    if (in_glint && inventory_.count_of(items::kGlintT1Item) < quote.total) {
+        return refuse("the bags hold " + std::to_string(inventory_.count_of(items::kGlintT1Item)) + " Glint T1 and the cart costs " + std::to_string(quote.total) + " (not enough Glint)");
     }
     // the goods, as stacks, routed by the bag rule; a cart that does not fit whole is refused whole
     std::vector<svc::InventoryItem> fresh;
@@ -3493,14 +3622,35 @@ void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurch
             if (&other != &it && other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();
         }
     }
+    // paying in Glint: the stacks give first, and the goods must fit behind that; any failure puts the bags back as they were
+    const items::Inventory kept = inventory_;
+    items::Outcome paid;
+    if (in_glint) {
+        paid = inventory_.take(items::kGlintT1Item, quote.total);
+        if (!paid.ok) return refuse(paid.refusal);
+    }
     const items::Outcome outcome = inventory_.grant(std::move(fresh), item_catalog());
-    if (!outcome.ok) return refuse(outcome.refusal);
+    if (!outcome.ok || (in_glint && paid.events.size() + outcome.events.size() > bootstrap::kMaxEventsPerChain)) {
+        inventory_ = kept;
+        return refuse(outcome.ok ? "the payment and the goods are more events than one answer holds" : outcome.refusal);
+    }
     const int64_t before = wallet_.copper();
-    wallet_.pay(quote.total);   // checked above: it cannot be short
+    if (!in_glint) wallet_.pay(quote.total);   // checked above: it cannot be short
     inventory_dirty_ = true;
     inventory_changed_ = true;
     ++items_applied_;
     ++vendor_purchases_;
+    if (in_glint) {
+        // the retail answer to a purchase paid in items: the Remove of the Glint stack(s) (no toast), the callout in the Glint tier (no Currencies change), then the Add of the goods
+        std::vector<bootstrap::ItemEvent> paid_events = item_events_for(paid);
+        std::vector<bootstrap::ItemEvent> bought = item_events_for(outcome);
+        add_item_toasts(bought, /*removals=*/false);
+        const int64_t glint_delta = -quote.total;
+        queue("purchase answer", [paid_events, bought, glint_delta](bootstrap::PlayerBootstrap& pb) { return pb.item_payment_answer(items::kGlintTier, glint_delta, paid_events, bought); }, conn, /*must_build=*/true);
+        spdlog::log(level_for(vendor_logged_), "[session] {}: bought {} line(s) at the shop for {} Glint T1: {} + {} storage event(s)", name(), quote.lines.size(), quote.total, paid.events.size(),
+                    outcome.events.size());
+        return;
+    }
     // the answer: the callout first, then the Add events (in one chain), then the new balance in the pawn's Currencies; each Add carries the "Acquired" toast of the item feed
     std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
     add_item_toasts(events, /*removals=*/false);
@@ -3880,6 +4030,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     death_z_ = at.z;
     loot_actor_ = 0;
     vendor_actor_ = 0;   // the windows close with the death: a purchase or a loot take from a dead character is refused (E1 review A4)
+    vendor_by_talk_ = false;
     end_dialogue(conn, "the player died");
     // the frame of the retail captures: where it fell, the restart of the pawn, the pawn dead with no Health and no Mana
     set_current_value(content::kGuidMana, 0.0f);

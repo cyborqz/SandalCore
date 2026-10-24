@@ -29,6 +29,10 @@ inline constexpr int64_t kMoneyTier = 6064629127873626112ll;
 inline constexpr int64_t kNodeCurrency = 6064629879350493185ll;
 /// The most copper a character can hold (1,000 gold).
 inline constexpr int64_t kMoneyCap = 10'000'000;
+/// Glint is held as items, not in the purse: the tier a price and a callout name, the item that is one unit of it (Glint T1), and the most a price may come to.
+inline constexpr int64_t kGlintTier = 6064629147812364289ll;
+inline constexpr int64_t kGlintT1Item = 6064628753953390592ll;
+inline constexpr int64_t kGlintCap = 3'368'420;
 
 class Wallet {
 public:

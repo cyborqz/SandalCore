@@ -76,6 +76,32 @@ public:
         const auto it = d_.quests.find(guid);
         return it == d_.quests.end() ? nullptr : &it->second;
     }
+    /// The shops (VendorDefs) that a line of the conversation of `root` opens, wherever in the conversation the line is: what a client that opens a shop from the window may name.
+    std::set<int64_t> vendor_defs(int64_t root) const {
+        std::set<int64_t> shops;
+        std::set<int64_t> seen;
+        std::vector<int64_t> todo;
+        if (const int64_t top = top_node(root)) todo.push_back(top);
+        while (!todo.empty()) {
+            const int64_t guid = todo.back();
+            todo.pop_back();
+            if (!seen.insert(guid).second) continue;
+            const content::DialogueNodeRow* n = node(guid);
+            if (!n) continue;
+            const auto take = [&](const std::vector<content::DialogueActionRow>& actions) {
+                for (const content::DialogueActionRow& a : actions) {
+                    if (a.action == "OpenWindow" && a.window == "Vendor" && a.vendor != 0) shops.insert(a.vendor);
+                }
+            };
+            take(n->on_enter);
+            take(n->on_exit);
+            for (const content::DialogueChoiceRow& c : n->choices) {
+                take(c.actions);
+                if (c.next != 0) todo.push_back(c.next);
+            }
+        }
+        return shops;
+    }
     size_t nodes() const { return d_.nodes.size(); }
     size_t roots() const { return d_.roots.size(); }
     size_t quests() const { return d_.quests.size(); }

@@ -75,11 +75,16 @@ void PlayerSession::send_foliage_data(Connection& conn, const bootstrap::PlayerB
 // == C-O-A | Cyb ==
 
 void PlayerSession::send_interrupt_callout(Connection& conn, Interrupt key, Clock::time_point now) {
-    if (key == Interrupt::None || !room_for(2)) return;
+    if (key == Interrupt::None) return;
+    send_economy_callout(conn, interrupt_key(key), now);
+}
+
+void PlayerSession::send_economy_callout(Connection& conn, const std::string& message_key, Clock::time_point now) {
+    if (!room_for(2)) return;
     const int64_t unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     const int64_t ticks = items::ticks_of_ms(unix_ms);
     const uint64_t callout_key = (static_cast<uint64_t>(pb_.setup().player_id) << 32) | (0x40000000u + gather_callout_seq_++);
-    const std::string text = interrupt_key(key);
+    const std::string text = message_key;
     queue("a callout", [ticks, callout_key, text](bootstrap::PlayerBootstrap& pb) { return pb.callout_add("", kInterruptCalloutType, kCalloutPointSize, ticks, callout_key, "Economy", text, kInterruptChatCategory); }, conn);
     gather_callouts_.push_back({now + kCalloutLife, callout_key});
 }

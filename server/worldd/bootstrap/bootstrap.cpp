@@ -28,6 +28,7 @@
 #include "protocol/repl/hit_rpc.h"
 #include "protocol/schema/generated/index.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -91,6 +92,16 @@ repl::Subobject make_component(const FIntrepidNetworkGUID& guid, const char* nam
     s.checksum = checksum;
     s.obj.schema = gen::find_component_schema(name);
     return s;
+}
+
+/// One dynamic UResourceStorageComponent of the pawn, for the resource container `index` (EItemLocation Resource0 to Resource2 = 11 to 13); the client spawns it from its class.
+/// False when the class has no schema.
+bool make_resource_component(const FIntrepidNetworkGUID& guid, size_t index, repl::Subobject& out) {
+    out = repl::Subobject{};
+    out.guid = guid;
+    out.dynamic_class = resource_storage_class_export();
+    out.obj.schema = gen::find_class_schema("UResourceStorageComponent");
+    return out.obj.schema && out.obj.state.set(*out.obj.schema, "ItemLocationType", Value::u64(11 + index));
 }
 
 }  // namespace
@@ -439,11 +450,7 @@ void PlayerBootstrap::add_second_state_components() {
     for (size_t i = 0; i < s.resource_bags.size(); ++i) {
         if (!s.resource_bags[i].present) continue;
         repl::Subobject resource;   // not stably named: the client spawns it from its class
-        resource.guid = g.resource_storage[i];
-        resource.dynamic_class = resource_storage_class_export();
-        resource.obj.schema = gen::find_class_schema("UResourceStorageComponent");
-        if (resource.obj.schema) set(resource.obj, "ItemLocationType", Value::u64(11 + i));
-        else fail("no schema for UResourceStorageComponent");
+        if (!make_resource_component(g.resource_storage[i], i, resource)) fail("no schema for UResourceStorageComponent");
         resources.push_back(std::move(resource));
     }
 
@@ -1091,7 +1098,8 @@ std::optional<Send> PlayerBootstrap::storage_payload(StorageKind kind, Role targ
 
 // ---- plan B2: the items' events and the pawn's visible gear --------------------------------------------------------------------
 
-std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first, const repl::RpcRequest* last) {
+std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent> events, const repl::RpcRequest* first, const repl::RpcRequest* last, const repl::RpcRequest* middle,
+                                                       size_t middle_at) {
     if (!ok_ || events.empty() || events.size() > kMaxEventsPerChain) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveStorageEvent");
     if (!rpc) return std::nullopt;
@@ -1099,7 +1107,9 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
     std::vector<repl::RpcRequest> calls;
     calls.reserve(events.size() + 1);
     if (first) calls.push_back(*first);
+    size_t number = 0;
     for (const ItemEvent& e : events) {
+        if (middle && number++ == middle_at) calls.push_back(*middle);
         if (e.type != repl::StorageEventType::Add && e.type != repl::StorageEventType::Remove) return std::nullopt;
         if (!e.item.has_item || e.slot < 0) return std::nullopt;
         repl::ItemStorageEvent ev;
@@ -1109,7 +1119,7 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         ev.callout = e.callout;
         repl::StorageEventContainer target;
         target.object = item_storage_guid(e.storage);
-        target.slots.push_back({e.slot, static_cast<int32_t>(e.item.quantity), e.item.guid});
+        target.slots.push_back({e.slot, e.count > 0 ? e.count : static_cast<int32_t>(e.item.quantity), e.item.guid});
         ev.targets.push_back(std::move(target));
         auto params = repl::storage_event_params(*rpc, ev);
         if (!params) return std::nullopt;
@@ -1118,8 +1128,9 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         call.params = std::move(*params);
         calls.push_back(std::move(call));
     }
+    if (middle && middle_at >= events.size()) calls.push_back(*middle);
     if (last) calls.push_back(*last);
-    return rpcs(Role::PlayerController, first ? "purchase answer" : last ? "sale answer" : "ClientReceiveStorageEvent", calls);
+    return rpcs(Role::PlayerController, (first || middle) ? "purchase answer" : last ? "sale answer" : "ClientReceiveStorageEvent", calls);
 }
 // ~ CoA & C Y B ~
 
@@ -1239,11 +1250,11 @@ std::optional<Send> PlayerBootstrap::loot_listener_removed(const emit::FIntrepid
     return rpcs(Role::PlayerController, "ClientRemoveListenerFromStorage", std::span<const repl::RpcRequest>(&call, 1));
 }
 
-std::optional<Send> PlayerBootstrap::open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor) {
+std::optional<Send> PlayerBootstrap::open_vendor(int64_t merch_set, const emit::FIntrepidNetworkGUID& vendor, const repl::UnavailableList& unavailable) {
     if (!ok_ || !second_state_added_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientOpenVendor");
     if (!rpc) return std::nullopt;
-    auto params = repl::open_vendor_params(*rpc, merch_set, vendor);
+    auto params = repl::open_vendor_params(*rpc, merch_set, vendor, unavailable);
     if (!params) return std::nullopt;
     repl::RpcRequest call;
     call.rpc = "ClientOpenVendor";
@@ -1362,12 +1373,23 @@ std::optional<Send> PlayerBootstrap::item_events(std::span<const ItemEvent> even
     auto send = build_item_events(events);
     if (!send) return std::nullopt;
     // what the client was told is what the payloads show from now on (idempotent: a chain built again changes nothing)
+    remember(events);
+    return send;
+}
+
+void PlayerBootstrap::remember(std::span<const ItemEvent> events) {
     for (const ItemEvent& e : events) {
         const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
-        if (e.type == repl::StorageEventType::Add) items_[key] = e.item;
-        else items_.erase(key);
+        if (e.type == repl::StorageEventType::Add) {
+            items_[key] = e.item;
+        } else if (e.count > 0 && e.count < static_cast<int32_t>(e.item.quantity)) {
+            repl::ItemInstance rest = e.item;   // the stack as it was, less what left
+            rest.quantity = e.item.quantity - static_cast<decltype(rest.quantity)>(e.count);
+            items_[key] = std::move(rest);
+        } else {
+            items_.erase(key);
+        }
     }
-    return send;
 }
 // -- CoA . C_Y_B --
 
@@ -1393,11 +1415,7 @@ std::optional<Send> PlayerBootstrap::purchase_answer(int64_t currency_tier, int6
     if (!callout) return std::nullopt;
     auto send = build_item_events(events, &*callout);
     if (!send) return std::nullopt;
-    for (const ItemEvent& e : events) {
-        const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
-        if (e.type == repl::StorageEventType::Add) items_[key] = e.item;
-        else items_.erase(key);
-    }
+    remember(events);
     return send;
 }
 
@@ -1407,11 +1425,19 @@ std::optional<Send> PlayerBootstrap::sale_answer(int64_t currency_tier, int64_t 
     if (!callout) return std::nullopt;
     auto send = build_item_events(events, nullptr, &*callout);
     if (!send) return std::nullopt;
-    for (const ItemEvent& e : events) {
-        const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
-        if (e.type == repl::StorageEventType::Add) items_[key] = e.item;
-        else items_.erase(key);
-    }
+    remember(events);
+    return send;
+}
+
+std::optional<Send> PlayerBootstrap::item_payment_answer(int64_t currency_tier, int64_t delta, std::span<const ItemEvent> paid, std::span<const ItemEvent> bought) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const auto callout = currency_callout_call(*pc_.obj.schema, currency_tier, delta);
+    if (!callout) return std::nullopt;
+    std::vector<ItemEvent> all(paid.begin(), paid.end());
+    all.insert(all.end(), bought.begin(), bought.end());
+    auto send = build_item_events(all, nullptr, nullptr, &*callout, paid.size());
+    if (!send) return std::nullopt;
+    remember(all);
     return send;
 }
 
@@ -1565,6 +1591,46 @@ bool PlayerBootstrap::apply_equipment(std::span<const HeldItem> held, std::span<
 std::optional<Send> PlayerBootstrap::equipment_update() {
     if (!ok_ || !second_state_sent_) return std::nullopt;
     return update(Role::Pawn, "equipment", pawn_, pawn_shadow_);
+}
+
+bool PlayerBootstrap::set_resource_container(int index, const ResourceBagSetup& bag, const emit::FIntrepidNetworkGUID& guid) {
+    if (!ok_ || !second_state_added_ || index < 0 || index >= static_cast<int>(setup_.resource_bags.size())) return false;
+    const size_t i = static_cast<size_t>(index);
+    if (bag.present) {
+        if (guid.ObjectId == 0) return fail("a resource container needs a guid");
+        // every container that opens is a new component with a guid of its own, as a new bag gets a new container: the list names another object, which is what makes the client lay
+        // the container out again (and ask for its data).  The component it replaces (a bag taken off before, or swapped) is left to the client, unlisted and empty: the replicator has no
+        // message that takes a dynamic subobject away.
+        if (!(setup_.guids.resource_storage[i] == guid)) {
+            const emit::FIntrepidNetworkGUID old = setup_.guids.resource_storage[i];
+            if (old.ObjectId != 0) {
+                auto& subs = pawn_.subobjects;
+                subs.erase(std::remove_if(subs.begin(), subs.end(), [&](const repl::Subobject& s) { return s.guid == old; }), subs.end());
+            }
+            setup_.guids.resource_storage[i] = guid;
+        }
+        if (!component(guid)) {
+            repl::Subobject resource;
+            if (!make_resource_component(guid, i, resource)) return fail("no schema for UResourceStorageComponent");
+            pawn_.subobjects.push_back(std::move(resource));
+        }
+    }
+    setup_.resource_bags[i] = bag.present ? bag : ResourceBagSetup{};
+    repl::Subobject* owner = component(setup_.guids.owner_info);   // (after the push_back above: it may move the subobjects)
+    if (!owner) return fail("OwnerInfo is not on the pawn");
+    // OwnerInfo.ResourceContainers has three slots: the containers of the bags worn, a null for the others
+    repl::ArrayValue containers;
+    containers.elements.resize(3);
+    for (size_t j = 0; j < setup_.resource_bags.size(); ++j) {
+        if (setup_.resource_bags[j].present) containers.elements[j].values[1] = object(setup_.guids.resource_storage[j]);
+    }
+    if (!owner->obj.state.set(*owner->obj.schema, "ResourceContainers", Value(std::move(containers)))) return fail("OwnerInfo.ResourceContainers refused");
+    return true;
+}
+
+std::optional<Send> PlayerBootstrap::resource_containers_update() {
+    if (!ok_ || !second_state_sent_) return std::nullopt;
+    return update(Role::Pawn, "resource containers", pawn_, pawn_shadow_);
 }
 
 std::optional<Send> PlayerBootstrap::verbatim_block(Role role, const char* what, const char* hex, size_t bits) {

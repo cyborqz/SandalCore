@@ -47,8 +47,9 @@
 //  first free rectangle (rows, then columns).  grant() is THE routing: a caller never picks a container.  A grant tops up the stacks of the same record and quality (up to the
 //  record's MaxStackSize, the bag's stat modifiers are not replicated) before it starts a new one, in the first container with room, in index order [R: the retail capture's
 //  Resource containers hold one stack of 15 Weeping Willow and one of 10 Halcyonite that harvests of 5 grew; the retail event of a top-up is not captured, the Remove and Add of
-//  the same instance that consume() sends is modelled].  The grids are the ones of the bags worn when the inventory was built: a container opens at the next login for a bag worn
-//  later, and a bag whose container is open cannot be taken off or replaced during the session.
+//  the same instance that consume() sends is modelled].  The grids follow the bags worn: a bag worn during the session opens its container at once (Outcome::bags says which), a bag
+//  whose container holds nothing may be taken off (the container closes) or replaced (the container takes the new bag's grid), and a bag whose container holds items may be neither
+//  (the items belong to it: Outcome::holds_items).
 // ============================================================================
 #pragma once
 
@@ -167,17 +168,27 @@ struct Event {
     svc::ItemContainer     container = svc::ItemContainer::Backpack;
     int                    slot = 0;
     svc::InventoryItem     item;                                  // the instance added to / removed from the slot
+    /// A Remove of part of a stack: how many leave, `item` being the stack as it was (0: the whole of `item.quantity`).
+    int32_t                count = 0;
     /// Whether the event carries the character's guid as its instigator.  The retail server's do for an equip's Add and for
     /// both events of a move or swap, and not for an equip's Remove or an unequip's Remove (the zero guid; research A1).
     bool                   instigated = true;
 };
 
+/// A resource container that a request opened, gave another bag's grid, or closed: `open` false means its bag was taken off.
+struct BagChange {
+    int  index = 0;       // 0 to 2: Resource0 to Resource2
+    bool open = false;
+};
+
 /// The result of a request: whether it was applied, why not, and what the client is told.
 struct Outcome {
-    bool               ok = false;
-    std::string        refusal;           // why not (for the log); empty when ok
-    std::vector<Event> events;            // empty when refused
-    bool               equipment_changed = false;   // the Equipment storage changed: the visible gear may have
+    bool                   ok = false;
+    std::string            refusal;           // why not (for the log); empty when ok
+    std::vector<Event>     events;            // empty when refused
+    bool                   equipment_changed = false;   // the Equipment storage changed: the visible gear may have
+    std::vector<BagChange> bags;              // the resource containers this request opened, re-gridded or closed (the Inventory's grid() already shows the new state)
+    bool                   holds_items = false;   // refused because a resource bag still holds items (the player is told)
 };
 
 /// What grant_what_fits did: the events of what it placed, and what it could not (the quantity left of an item that topped up a stack or filled a container in part comes back
@@ -204,7 +215,8 @@ public:
     /// no blocked cell and on no other item (an error says which); without one a resource item is only checked for its slot number (the grids stay empty).
     static std::optional<Inventory> from_items(const std::vector<svc::InventoryItem>& items, std::string& error, const ItemCatalog* catalog = nullptr);
 
-    /// The grid of a resource container (Resource0 to Resource2; an empty grid for any other storage and for a container whose bag is not worn).
+    /// The grid of a resource container (Resource0 to Resource2; an empty grid for any other storage and for a container whose bag is not worn; a bag worn or taken off during the session
+    /// changes it at once).
     const ResourceGrid& grid(svc::ItemContainer container) const;
     /// The slot of the first free `w` x `h` rectangle of a resource container, -1 when there is none (or the storage is no resource container).
     int place(svc::ItemContainer container, int w, int h, const ItemCatalog& catalog) const;
@@ -241,6 +253,12 @@ public:
     /// nothing, when the slot does not hold that instance or holds fewer than `count`. Modelled: no retail capture shows a stack
     /// losing one (the consumables retail used were single items, removed with one Remove event).
     Outcome consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count);
+
+    /// How many items of `record` the character holds in the item bag and the resource containers (what an item currency, Glint, is counted from).
+    int64_t count_of(int64_t record) const;
+    /// Takes `count` items of `record` from the stacks in the item bag and the resource containers, in the order of their storage and slot.  Each stack that gives something is ONE Remove event
+    /// that names the stack as it was and how many leave (the stack keeps the rest in its slot; a stack that is emptied is gone).  Refused, changing nothing, when fewer are held.
+    Outcome take(int64_t record, int64_t count);
 
     /// Plan D1: items granted (a GiveItem reward, a purchase, a use): THE routing of Gathering stage 3 -- each item goes where its kind says (see the top of this file): a resource item
     /// tops up the stacks of its record and quality in the resource containers and starts new ones at the first free rectangle of the first container with room, any other item takes
@@ -285,7 +303,7 @@ private:
     bool covered(int slot, const ItemCatalog& catalog) const;
 
     std::map<Key, svc::InventoryItem> slots_;   // (container, slot) -> the item
-    std::array<ResourceGrid, kResourceContainers> grids_;   // the grids of the resource bags worn when the inventory was built
+    std::array<ResourceGrid, kResourceContainers> grids_;   // the grids of the resource bags worn (built with the inventory, changed by wearing and taking off a bag)
 };
 
 // ---- the visible gear ----------------------------------------------------------------------------------------------------

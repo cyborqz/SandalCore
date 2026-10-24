@@ -915,6 +915,8 @@ private:
     std::string fresh_guid();
     /// Tells the client what an applied request did (the events, then the visible gear) and marks the inventory dirty.
     void apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what);
+    /// A resource bag was worn, replaced or taken off: its container opens (with the bag's grid) or closes on the client at once, and an opening one is sent its payload.
+    void update_resource_container(Connection& conn, const items::BagChange& change);
     /// A refused request: the reason is logged, the inventory is as it was, and the client's storages are sent again (budget permitting).
     void refuse_item_request(Connection& conn, const char* what, const std::string& why, Clock::time_point now);
     /// Hands the whole inventory to the sink (saved on a worker thread); `why` is for the log.
@@ -923,6 +925,10 @@ private:
     // ---- plan E1 ----
     void on_interact(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_vendor_purchase(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Vendors, step 2: the client opens the shop a line of its conversation names (ServerOpenVendor): the NPC it talks to, a shop of that conversation.
+    void on_open_vendor(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Opens the window of `def` for the shopkeeper `npc` the player talks to: the same answer for a line the server runs and a request of the client.  False when it does not open.
+    bool open_talk_shop(Connection& conn, const world::WorldActor& npc, int64_t def, Clock::time_point now);
     void on_vendor_transaction(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_node_tax_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     // ---- Nodes 1, stage 2 ----
@@ -1023,6 +1029,8 @@ private:
     void send_foliage_data(Connection& conn, const bootstrap::PlayerBootstrap::FoliageChannel& data);
     /// The callout of an interruption (Economy / GatheringInterruption_<key>) the movement refusal and every interruption of worldd's own show.
     void send_interrupt_callout(Connection& conn, Interrupt key, Clock::time_point now);
+    /// A callout whose text the client takes from its own table "Economy" by `message_key` (the same shape as the interruptions').
+    void send_economy_callout(Connection& conn, const std::string& message_key, Clock::time_point now);
     /// Gathering stage 3: what a finished harvest of any kind (a resource node, a tree or plant of the foliage, a hunting corpse) hands to the common part, `deliver_harvest`.  The
     /// frames' ORDER differs between the kinds (the node clears the pawn's ChannelingData between the items and the XPTracker, the foliage confirms right after the items [R: 1463
     /// packet 833] and clears its FoliageData last), which the two hooks carry; both run at the point of the frame where they are called, `conn` captured by the caller.
@@ -1284,6 +1292,7 @@ private:
     size_t                         time_syncs_sent_ = 0;
     uint64_t                       vendor_actor_ = 0;
     int64_t                        vendor_def_ = 0;
+    bool                           vendor_by_talk_ = false;   // the open window was opened by a line of the shopkeeper's conversation, not by a use of it
     RequestBudget                  vendor_budget_{kVendorBurst, kVendorInterval};
     RequestBudget                  tax_budget_{kTaxBurst, kTaxInterval};
     size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;

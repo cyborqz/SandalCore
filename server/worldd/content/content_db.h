@@ -777,6 +777,7 @@ struct DialogueRequirement {
 struct DialogueActionRow {
     std::string action;   // OpenWindow, ActionResponse, GiveItems, IncrementDialogueObjective, ...
     std::string window;   // for OpenWindow: Vendor
+    int64_t     vendor = 0;   // for OpenWindow/Vendor: the VendorDef the window opens (0: none named)
 };
 
 struct DialogueChoiceRow {
@@ -864,6 +865,7 @@ struct VendorData {
         bool        blacklisted = false;
         std::vector<int64_t> modifiers;     // the def's price modifiers, in order (vendors, the selling step: contentc version 19 reads them for sales and repairs)
         std::vector<int64_t> sell_filters;  // the def's sell filters, in order
+        std::vector<int64_t> inventories;   // the def's tabs (VendorInventory guids) in the order the window counts them
     };
     std::map<int64_t, VendorModifier>   modifiers;      // vendor_modifier by guid
     std::map<int64_t, VendorSellFilter> sell_filters;   // vendor_sell_filter by guid
