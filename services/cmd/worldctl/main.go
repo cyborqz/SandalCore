@@ -15,6 +15,11 @@
 //	worldctl place-station <node> <plot> <station>    puts an artisan building's station on a free service plot of a Village or a Town (it stays until removed, until the node drops below
 //	                                                  a Village, or until worldd restarts)
 //	worldctl remove-station <node> <plot>             takes a placed station off its plot
+//	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one creature, named by its actor id (npc.go says what each does)
+//	worldctl npc move <id> <x> <y> [<z>]              stands a creature at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
+//	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
+//	                                                  watches worldd's world stream (WorldStreamService, AOC_WORLD_STREAM_ADDR, default 127.0.0.1:50057): one line a second with the
+//	                                                  frames that came, the entities held and the cost of a publish (watch.go)
 //
 // A mounted player is dismounted first. A <place> is matched as nodectl matches a node: the record name (Verra_RVR_Joeva), the same
 // without Verra_, or the display name (Joeva); case, spaces and punctuation do not count.
@@ -66,6 +71,9 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   give-item <character> <item> [n]  give an item by record name or Guid, into the right bag (a test command)
   place-station <node> <plot> <st>  put an artisan building's station on a free plot of a Village or a Town
   remove-station <node> <plot>      take a placed station off its plot
+  npc kill|respawn|reset|heal|despawn <id>   a game master's action on one creature, by its actor id
+  npc move <id> <x> <y> [<z>]       stand a creature at a point (cm); its leash is centred there, its spawn point stays
+  watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
 every command takes --addr and --token-file`
 
 type usageError string
@@ -80,7 +88,9 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station":
+	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "npc":
+	case "watch":
+		return runWatch(ctx, rest, out, errw)
 	case "help", "-h", "--help":
 		fmt.Fprintln(out, usage)
 		return 0
@@ -175,6 +185,8 @@ func parse(cmd string, pos []string) (call, error) {
 		return doPlaces, nil
 	case "tp":
 		return parseTeleport(pos)
+	case "npc":
+		return parseNpc(pos)
 	case "speed":
 		if len(pos) != 2 {
 			return nil, usageError("needs a character and a multiplier: worldctl speed <character> <multiplier>")

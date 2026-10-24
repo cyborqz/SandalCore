@@ -25,6 +25,228 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type EntityKind int32
+
+const (
+	EntityKind_ENTITY_KIND_UNSPECIFIED   EntityKind = 0
+	EntityKind_ENTITY_KIND_PLAYER        EntityKind = 1
+	EntityKind_ENTITY_KIND_NPC           EntityKind = 2 // a dead NPC stays an NPC with ENTITY_STATE_DEAD until its body goes
+	EntityKind_ENTITY_KIND_RESOURCE_NODE EntityKind = 3 // a gatherable resource node (the painted trees, plants and stones are not actors)
+	EntityKind_ENTITY_KIND_MOUNT         EntityKind = 4
+	EntityKind_ENTITY_KIND_LOOT_PILE     EntityKind = 5
+)
+
+// Enum value maps for EntityKind.
+var (
+	EntityKind_name = map[int32]string{
+		0: "ENTITY_KIND_UNSPECIFIED",
+		1: "ENTITY_KIND_PLAYER",
+		2: "ENTITY_KIND_NPC",
+		3: "ENTITY_KIND_RESOURCE_NODE",
+		4: "ENTITY_KIND_MOUNT",
+		5: "ENTITY_KIND_LOOT_PILE",
+	}
+	EntityKind_value = map[string]int32{
+		"ENTITY_KIND_UNSPECIFIED":   0,
+		"ENTITY_KIND_PLAYER":        1,
+		"ENTITY_KIND_NPC":           2,
+		"ENTITY_KIND_RESOURCE_NODE": 3,
+		"ENTITY_KIND_MOUNT":         4,
+		"ENTITY_KIND_LOOT_PILE":     5,
+	}
+)
+
+func (x EntityKind) Enum() *EntityKind {
+	p := new(EntityKind)
+	*p = x
+	return p
+}
+
+func (x EntityKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EntityKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[0].Descriptor()
+}
+
+func (EntityKind) Type() protoreflect.EnumType {
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[0]
+}
+
+func (x EntityKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EntityKind.Descriptor instead.
+func (EntityKind) EnumDescriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{0}
+}
+
+// Bits of Entity.state.
+type EntityState int32
+
+const (
+	EntityState_ENTITY_STATE_UNSPECIFIED EntityState = 0
+	EntityState_ENTITY_STATE_IN_COMBAT   EntityState = 1
+	EntityState_ENTITY_STATE_DEAD        EntityState = 2
+	EntityState_ENTITY_STATE_MOUNTED     EntityState = 4 // a player on a mount
+)
+
+// Enum value maps for EntityState.
+var (
+	EntityState_name = map[int32]string{
+		0: "ENTITY_STATE_UNSPECIFIED",
+		1: "ENTITY_STATE_IN_COMBAT",
+		2: "ENTITY_STATE_DEAD",
+		4: "ENTITY_STATE_MOUNTED",
+	}
+	EntityState_value = map[string]int32{
+		"ENTITY_STATE_UNSPECIFIED": 0,
+		"ENTITY_STATE_IN_COMBAT":   1,
+		"ENTITY_STATE_DEAD":        2,
+		"ENTITY_STATE_MOUNTED":     4,
+	}
+)
+
+func (x EntityState) Enum() *EntityState {
+	p := new(EntityState)
+	*p = x
+	return p
+}
+
+func (x EntityState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (EntityState) Descriptor() protoreflect.EnumDescriptor {
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[1].Descriptor()
+}
+
+func (EntityState) Type() protoreflect.EnumType {
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[1]
+}
+
+func (x EntityState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use EntityState.Descriptor instead.
+func (EntityState) EnumDescriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{1}
+}
+
+type StreamDetail int32
+
+const (
+	StreamDetail_STREAM_DETAIL_UNSPECIFIED StreamDetail = 0
+	StreamDetail_STREAM_DETAIL_ENTITIES    StreamDetail = 1 // single entities: an EntitySnapshot, then EntityDeltas
+	StreamDetail_STREAM_DETAIL_DENSITY     StreamDetail = 2 // counts per cell: a DensityGrid in every frame sent (a wide, coarse view)
+)
+
+// Enum value maps for StreamDetail.
+var (
+	StreamDetail_name = map[int32]string{
+		0: "STREAM_DETAIL_UNSPECIFIED",
+		1: "STREAM_DETAIL_ENTITIES",
+		2: "STREAM_DETAIL_DENSITY",
+	}
+	StreamDetail_value = map[string]int32{
+		"STREAM_DETAIL_UNSPECIFIED": 0,
+		"STREAM_DETAIL_ENTITIES":    1,
+		"STREAM_DETAIL_DENSITY":     2,
+	}
+)
+
+func (x StreamDetail) Enum() *StreamDetail {
+	p := new(StreamDetail)
+	*p = x
+	return p
+}
+
+func (x StreamDetail) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StreamDetail) Descriptor() protoreflect.EnumDescriptor {
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[2].Descriptor()
+}
+
+func (StreamDetail) Type() protoreflect.EnumType {
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[2]
+}
+
+func (x StreamDetail) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StreamDetail.Descriptor instead.
+func (StreamDetail) EnumDescriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{2}
+}
+
+// Bits of SubscribeRequest.layers: which kinds a stream carries.
+type StreamLayer int32
+
+const (
+	StreamLayer_STREAM_LAYER_UNSPECIFIED    StreamLayer = 0
+	StreamLayer_STREAM_LAYER_PLAYERS        StreamLayer = 1
+	StreamLayer_STREAM_LAYER_NPCS           StreamLayer = 2
+	StreamLayer_STREAM_LAYER_RESOURCE_NODES StreamLayer = 4
+	StreamLayer_STREAM_LAYER_MOUNTS         StreamLayer = 8
+	StreamLayer_STREAM_LAYER_LOOT_PILES     StreamLayer = 16
+	StreamLayer_STREAM_LAYER_ALL            StreamLayer = 31
+)
+
+// Enum value maps for StreamLayer.
+var (
+	StreamLayer_name = map[int32]string{
+		0:  "STREAM_LAYER_UNSPECIFIED",
+		1:  "STREAM_LAYER_PLAYERS",
+		2:  "STREAM_LAYER_NPCS",
+		4:  "STREAM_LAYER_RESOURCE_NODES",
+		8:  "STREAM_LAYER_MOUNTS",
+		16: "STREAM_LAYER_LOOT_PILES",
+		31: "STREAM_LAYER_ALL",
+	}
+	StreamLayer_value = map[string]int32{
+		"STREAM_LAYER_UNSPECIFIED":    0,
+		"STREAM_LAYER_PLAYERS":        1,
+		"STREAM_LAYER_NPCS":           2,
+		"STREAM_LAYER_RESOURCE_NODES": 4,
+		"STREAM_LAYER_MOUNTS":         8,
+		"STREAM_LAYER_LOOT_PILES":     16,
+		"STREAM_LAYER_ALL":            31,
+	}
+)
+
+func (x StreamLayer) Enum() *StreamLayer {
+	p := new(StreamLayer)
+	*p = x
+	return p
+}
+
+func (x StreamLayer) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StreamLayer) Descriptor() protoreflect.EnumDescriptor {
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[3].Descriptor()
+}
+
+func (StreamLayer) Type() protoreflect.EnumType {
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[3]
+}
+
+func (x StreamLayer) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StreamLayer.Descriptor instead.
+func (StreamLayer) EnumDescriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{3}
+}
+
 type Position struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	X             float64                `protobuf:"fixed64,1,opt,name=x,proto3" json:"x,omitempty"` // cm
@@ -1285,6 +1507,2178 @@ func (x *GiveItemResponse) GetContainer() string {
 	return ""
 }
 
+// The NPC actions' requests name a creature by its actor id; every answer carries the creature's id, its nameplate, where it stands (or stood) and one plain sentence of what was done.
+type KillNpcRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"` // the creature's actor id
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillNpcRequest) Reset() {
+	*x = KillNpcRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillNpcRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillNpcRequest) ProtoMessage() {}
+
+func (x *KillNpcRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillNpcRequest.ProtoReflect.Descriptor instead.
+func (*KillNpcRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *KillNpcRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type KillNpcResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Position         *Position              `protobuf:"bytes,3,opt,name=position,proto3" json:"position,omitempty"`
+	Result           string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	LootStacks       uint32                 `protobuf:"varint,5,opt,name=loot_stacks,json=lootStacks,proto3" json:"loot_stacks,omitempty"`                      // the stacks on its corpse
+	RespawnInSeconds float64                `protobuf:"fixed64,6,opt,name=respawn_in_seconds,json=respawnInSeconds,proto3" json:"respawn_in_seconds,omitempty"` // until its spawn point makes it again (0: it does not)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *KillNpcResponse) Reset() {
+	*x = KillNpcResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillNpcResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillNpcResponse) ProtoMessage() {}
+
+func (x *KillNpcResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillNpcResponse.ProtoReflect.Descriptor instead.
+func (*KillNpcResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *KillNpcResponse) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *KillNpcResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *KillNpcResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *KillNpcResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+func (x *KillNpcResponse) GetLootStacks() uint32 {
+	if x != nil {
+		return x.LootStacks
+	}
+	return 0
+}
+
+func (x *KillNpcResponse) GetRespawnInSeconds() float64 {
+	if x != nil {
+		return x.RespawnInSeconds
+	}
+	return 0
+}
+
+type RespawnNpcRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RespawnNpcRequest) Reset() {
+	*x = RespawnNpcRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespawnNpcRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespawnNpcRequest) ProtoMessage() {}
+
+func (x *RespawnNpcRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespawnNpcRequest.ProtoReflect.Descriptor instead.
+func (*RespawnNpcRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *RespawnNpcRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type RespawnNpcResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"` // the actor id of the creature that was made: a new one for a dead creature and for a living one it replaced
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Position      *Position              `protobuf:"bytes,3,opt,name=position,proto3" json:"position,omitempty"` // its spawn point
+	Result        string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RespawnNpcResponse) Reset() {
+	*x = RespawnNpcResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RespawnNpcResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RespawnNpcResponse) ProtoMessage() {}
+
+func (x *RespawnNpcResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RespawnNpcResponse.ProtoReflect.Descriptor instead.
+func (*RespawnNpcResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *RespawnNpcResponse) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *RespawnNpcResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RespawnNpcResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *RespawnNpcResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+type ResetNpcRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetNpcRequest) Reset() {
+	*x = ResetNpcRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetNpcRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetNpcRequest) ProtoMessage() {}
+
+func (x *ResetNpcRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetNpcRequest.ProtoReflect.Descriptor instead.
+func (*ResetNpcRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ResetNpcRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type ResetNpcResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Position      *Position              `protobuf:"bytes,3,opt,name=position,proto3" json:"position,omitempty"` // where it stands as the call returns, on its way home
+	Result        string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetNpcResponse) Reset() {
+	*x = ResetNpcResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetNpcResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetNpcResponse) ProtoMessage() {}
+
+func (x *ResetNpcResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetNpcResponse.ProtoReflect.Descriptor instead.
+func (*ResetNpcResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ResetNpcResponse) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ResetNpcResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ResetNpcResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *ResetNpcResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+type HealNpcRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealNpcRequest) Reset() {
+	*x = HealNpcRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealNpcRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealNpcRequest) ProtoMessage() {}
+
+func (x *HealNpcRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealNpcRequest.ProtoReflect.Descriptor instead.
+func (*HealNpcRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *HealNpcRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type HealNpcResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Position      *Position              `protobuf:"bytes,3,opt,name=position,proto3" json:"position,omitempty"`
+	Result        string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealNpcResponse) Reset() {
+	*x = HealNpcResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealNpcResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealNpcResponse) ProtoMessage() {}
+
+func (x *HealNpcResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealNpcResponse.ProtoReflect.Descriptor instead.
+func (*HealNpcResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *HealNpcResponse) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *HealNpcResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *HealNpcResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *HealNpcResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+type DespawnNpcRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DespawnNpcRequest) Reset() {
+	*x = DespawnNpcRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DespawnNpcRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DespawnNpcRequest) ProtoMessage() {}
+
+func (x *DespawnNpcRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DespawnNpcRequest.ProtoReflect.Descriptor instead.
+func (*DespawnNpcRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *DespawnNpcRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type DespawnNpcResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Position         *Position              `protobuf:"bytes,3,opt,name=position,proto3" json:"position,omitempty"` // where it stood
+	Result           string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	RespawnInSeconds float64                `protobuf:"fixed64,5,opt,name=respawn_in_seconds,json=respawnInSeconds,proto3" json:"respawn_in_seconds,omitempty"` // until its spawn point makes it again (0: it does not)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DespawnNpcResponse) Reset() {
+	*x = DespawnNpcResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DespawnNpcResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DespawnNpcResponse) ProtoMessage() {}
+
+func (x *DespawnNpcResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DespawnNpcResponse.ProtoReflect.Descriptor instead.
+func (*DespawnNpcResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *DespawnNpcResponse) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *DespawnNpcResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DespawnNpcResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *DespawnNpcResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+func (x *DespawnNpcResponse) GetRespawnInSeconds() float64 {
+	if x != nil {
+		return x.RespawnInSeconds
+	}
+	return 0
+}
+
+type MoveNpcRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Point         *Point                 `protobuf:"bytes,2,opt,name=point,proto3" json:"point,omitempty"` // x, y and z in cm; has_z false: the ground under (x, y)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MoveNpcRequest) Reset() {
+	*x = MoveNpcRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MoveNpcRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MoveNpcRequest) ProtoMessage() {}
+
+func (x *MoveNpcRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MoveNpcRequest.ProtoReflect.Descriptor instead.
+func (*MoveNpcRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *MoveNpcRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *MoveNpcRequest) GetPoint() *Point {
+	if x != nil {
+		return x.Point
+	}
+	return nil
+}
+
+type MoveNpcResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Position      *Position              `protobuf:"bytes,3,opt,name=position,proto3" json:"position,omitempty"` // where it stands now
+	Result        string                 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	From          *Position              `protobuf:"bytes,5,opt,name=from,proto3" json:"from,omitempty"` // where it stood
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MoveNpcResponse) Reset() {
+	*x = MoveNpcResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MoveNpcResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MoveNpcResponse) ProtoMessage() {}
+
+func (x *MoveNpcResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MoveNpcResponse.ProtoReflect.Descriptor instead.
+func (*MoveNpcResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *MoveNpcResponse) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *MoveNpcResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *MoveNpcResponse) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *MoveNpcResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+func (x *MoveNpcResponse) GetFrom() *Position {
+	if x != nil {
+		return x.From
+	}
+	return nil
+}
+
+// A box in world centimetres: min inclusive, max exclusive.
+type AreaBox struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MinXCm        int32                  `protobuf:"zigzag32,1,opt,name=min_x_cm,json=minXCm,proto3" json:"min_x_cm,omitempty"`
+	MinYCm        int32                  `protobuf:"zigzag32,2,opt,name=min_y_cm,json=minYCm,proto3" json:"min_y_cm,omitempty"`
+	MaxXCm        int32                  `protobuf:"zigzag32,3,opt,name=max_x_cm,json=maxXCm,proto3" json:"max_x_cm,omitempty"`
+	MaxYCm        int32                  `protobuf:"zigzag32,4,opt,name=max_y_cm,json=maxYCm,proto3" json:"max_y_cm,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AreaBox) Reset() {
+	*x = AreaBox{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AreaBox) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AreaBox) ProtoMessage() {}
+
+func (x *AreaBox) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AreaBox.ProtoReflect.Descriptor instead.
+func (*AreaBox) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *AreaBox) GetMinXCm() int32 {
+	if x != nil {
+		return x.MinXCm
+	}
+	return 0
+}
+
+func (x *AreaBox) GetMinYCm() int32 {
+	if x != nil {
+		return x.MinYCm
+	}
+	return 0
+}
+
+func (x *AreaBox) GetMaxXCm() int32 {
+	if x != nil {
+		return x.MaxXCm
+	}
+	return 0
+}
+
+func (x *AreaBox) GetMaxYCm() int32 {
+	if x != nil {
+		return x.MaxYCm
+	}
+	return 0
+}
+
+type SubscribeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Area          *AreaBox               `protobuf:"bytes,1,opt,name=area,proto3" json:"area,omitempty"`                                           // at most 100 km on a side
+	Detail        StreamDetail           `protobuf:"varint,2,opt,name=detail,proto3,enum=aoc.worldadmin.v1.StreamDetail" json:"detail,omitempty"`  // 0 means STREAM_DETAIL_ENTITIES
+	DensityCellCm uint32                 `protobuf:"varint,3,opt,name=density_cell_cm,json=densityCellCm,proto3" json:"density_cell_cm,omitempty"` // STREAM_DETAIL_DENSITY only: 20000, 50000 or 100000 (0 means 50000); the grid may have at most 65,536 cells
+	Layers        uint32                 `protobuf:"varint,4,opt,name=layers,proto3" json:"layers,omitempty"`                                      // StreamLayer bits; 0 means STREAM_LAYER_ALL
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeRequest) Reset() {
+	*x = SubscribeRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeRequest) ProtoMessage() {}
+
+func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *SubscribeRequest) GetArea() *AreaBox {
+	if x != nil {
+		return x.Area
+	}
+	return nil
+}
+
+func (x *SubscribeRequest) GetDetail() StreamDetail {
+	if x != nil {
+		return x.Detail
+	}
+	return StreamDetail_STREAM_DETAIL_UNSPECIFIED
+}
+
+func (x *SubscribeRequest) GetDensityCellCm() uint32 {
+	if x != nil {
+		return x.DensityCellCm
+	}
+	return 0
+}
+
+func (x *SubscribeRequest) GetLayers() uint32 {
+	if x != nil {
+		return x.Layers
+	}
+	return 0
+}
+
+type Entity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Kind          EntityKind             `protobuf:"varint,2,opt,name=kind,proto3,enum=aoc.worldadmin.v1.EntityKind" json:"kind,omitempty"`
+	XCm           int32                  `protobuf:"zigzag32,3,opt,name=x_cm,json=xCm,proto3" json:"x_cm,omitempty"`
+	YCm           int32                  `protobuf:"zigzag32,4,opt,name=y_cm,json=yCm,proto3" json:"y_cm,omitempty"`
+	ZCm           int32                  `protobuf:"zigzag32,5,opt,name=z_cm,json=zCm,proto3" json:"z_cm,omitempty"`
+	Yaw           uint32                 `protobuf:"varint,6,opt,name=yaw,proto3" json:"yaw,omitempty"`                              // 8 bits: 0..255 is 0..360 degrees
+	State         uint32                 `protobuf:"varint,7,opt,name=state,proto3" json:"state,omitempty"`                          // EntityState bits
+	HealthPct     uint32                 `protobuf:"varint,8,opt,name=health_pct,json=healthPct,proto3" json:"health_pct,omitempty"` // 0..100; 255 for an entity whose health is not tracked (a player's, a resource node's)
+	Level         uint32                 `protobuf:"varint,9,opt,name=level,proto3" json:"level,omitempty"`
+	Name          string                 `protobuf:"bytes,10,opt,name=name,proto3" json:"name,omitempty"` // players only, and only in the frame in which the entity first appears for this subscriber (empty in an update: unchanged)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Entity) Reset() {
+	*x = Entity{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Entity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Entity) ProtoMessage() {}
+
+func (x *Entity) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Entity.ProtoReflect.Descriptor instead.
+func (*Entity) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *Entity) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *Entity) GetKind() EntityKind {
+	if x != nil {
+		return x.Kind
+	}
+	return EntityKind_ENTITY_KIND_UNSPECIFIED
+}
+
+func (x *Entity) GetXCm() int32 {
+	if x != nil {
+		return x.XCm
+	}
+	return 0
+}
+
+func (x *Entity) GetYCm() int32 {
+	if x != nil {
+		return x.YCm
+	}
+	return 0
+}
+
+func (x *Entity) GetZCm() int32 {
+	if x != nil {
+		return x.ZCm
+	}
+	return 0
+}
+
+func (x *Entity) GetYaw() uint32 {
+	if x != nil {
+		return x.Yaw
+	}
+	return 0
+}
+
+func (x *Entity) GetState() uint32 {
+	if x != nil {
+		return x.State
+	}
+	return 0
+}
+
+func (x *Entity) GetHealthPct() uint32 {
+	if x != nil {
+		return x.HealthPct
+	}
+	return 0
+}
+
+func (x *Entity) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *Entity) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type EntitySnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entities      []*Entity              `protobuf:"bytes,1,rep,name=entities,proto3" json:"entities,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntitySnapshot) Reset() {
+	*x = EntitySnapshot{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntitySnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntitySnapshot) ProtoMessage() {}
+
+func (x *EntitySnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntitySnapshot.ProtoReflect.Descriptor instead.
+func (*EntitySnapshot) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *EntitySnapshot) GetEntities() []*Entity {
+	if x != nil {
+		return x.Entities
+	}
+	return nil
+}
+
+// What changed since the stream's last frame: the entities that are new or differ (whole records) and the ids that left the area or the world.
+type EntityDelta struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Changed       []*Entity              `protobuf:"bytes,1,rep,name=changed,proto3" json:"changed,omitempty"`
+	Removed       []uint64               `protobuf:"varint,2,rep,packed,name=removed,proto3" json:"removed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntityDelta) Reset() {
+	*x = EntityDelta{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntityDelta) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntityDelta) ProtoMessage() {}
+
+func (x *EntityDelta) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntityDelta.ProtoReflect.Descriptor instead.
+func (*EntityDelta) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *EntityDelta) GetChanged() []*Entity {
+	if x != nil {
+		return x.Changed
+	}
+	return nil
+}
+
+func (x *EntityDelta) GetRemoved() []uint64 {
+	if x != nil {
+		return x.Removed
+	}
+	return nil
+}
+
+// Counts per cell, row-major (index = row * cols + col; a row is a step in y). Cell (col, row) covers [origin + col * cell, origin + (col + 1) * cell) in x and the same in y. The
+// origin is the area's minimum floored to a multiple of cell_cm. Each list has cols * rows counts.
+type DensityGrid struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CellCm        uint32                 `protobuf:"varint,1,opt,name=cell_cm,json=cellCm,proto3" json:"cell_cm,omitempty"`
+	OriginXCm     int32                  `protobuf:"zigzag32,2,opt,name=origin_x_cm,json=originXCm,proto3" json:"origin_x_cm,omitempty"`
+	OriginYCm     int32                  `protobuf:"zigzag32,3,opt,name=origin_y_cm,json=originYCm,proto3" json:"origin_y_cm,omitempty"`
+	Cols          uint32                 `protobuf:"varint,4,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,5,opt,name=rows,proto3" json:"rows,omitempty"`
+	Players       []uint32               `protobuf:"varint,6,rep,packed,name=players,proto3" json:"players,omitempty"`
+	Npcs          []uint32               `protobuf:"varint,7,rep,packed,name=npcs,proto3" json:"npcs,omitempty"` // NPCs that are not dead
+	ResourceNodes []uint32               `protobuf:"varint,8,rep,packed,name=resource_nodes,json=resourceNodes,proto3" json:"resource_nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DensityGrid) Reset() {
+	*x = DensityGrid{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DensityGrid) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DensityGrid) ProtoMessage() {}
+
+func (x *DensityGrid) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DensityGrid.ProtoReflect.Descriptor instead.
+func (*DensityGrid) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *DensityGrid) GetCellCm() uint32 {
+	if x != nil {
+		return x.CellCm
+	}
+	return 0
+}
+
+func (x *DensityGrid) GetOriginXCm() int32 {
+	if x != nil {
+		return x.OriginXCm
+	}
+	return 0
+}
+
+func (x *DensityGrid) GetOriginYCm() int32 {
+	if x != nil {
+		return x.OriginYCm
+	}
+	return 0
+}
+
+func (x *DensityGrid) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *DensityGrid) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+func (x *DensityGrid) GetPlayers() []uint32 {
+	if x != nil {
+		return x.Players
+	}
+	return nil
+}
+
+func (x *DensityGrid) GetNpcs() []uint32 {
+	if x != nil {
+		return x.Npcs
+	}
+	return nil
+}
+
+func (x *DensityGrid) GetResourceNodes() []uint32 {
+	if x != nil {
+		return x.ResourceNodes
+	}
+	return nil
+}
+
+// worldd's numbers.
+type StreamStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TickMs        float32                `protobuf:"fixed32,1,opt,name=tick_ms,json=tickMs,proto3" json:"tick_ms,omitempty"`                     // the network thread's work in one pass of its loop (datagrams, the world's tick, admin calls, the publish), smoothed
+	PublishMs     float32                `protobuf:"fixed32,2,opt,name=publish_ms,json=publishMs,proto3" json:"publish_ms,omitempty"`            // the network thread's cost of one publish, smoothed (the budget is 0.5)
+	PublishMaxMs  float32                `protobuf:"fixed32,3,opt,name=publish_max_ms,json=publishMaxMs,proto3" json:"publish_max_ms,omitempty"` // ... and the worst of the last minute or two
+	Players       uint32                 `protobuf:"varint,4,opt,name=players,proto3" json:"players,omitempty"`
+	Npcs          uint32                 `protobuf:"varint,5,opt,name=npcs,proto3" json:"npcs,omitempty"` // NPCs in the world now (a dead one counts until its body goes)
+	ResourceNodes uint32                 `protobuf:"varint,6,opt,name=resource_nodes,json=resourceNodes,proto3" json:"resource_nodes,omitempty"`
+	Mounts        uint32                 `protobuf:"varint,7,opt,name=mounts,proto3" json:"mounts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamStats) Reset() {
+	*x = StreamStats{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamStats) ProtoMessage() {}
+
+func (x *StreamStats) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamStats.ProtoReflect.Descriptor instead.
+func (*StreamStats) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *StreamStats) GetTickMs() float32 {
+	if x != nil {
+		return x.TickMs
+	}
+	return 0
+}
+
+func (x *StreamStats) GetPublishMs() float32 {
+	if x != nil {
+		return x.PublishMs
+	}
+	return 0
+}
+
+func (x *StreamStats) GetPublishMaxMs() float32 {
+	if x != nil {
+		return x.PublishMaxMs
+	}
+	return 0
+}
+
+func (x *StreamStats) GetPlayers() uint32 {
+	if x != nil {
+		return x.Players
+	}
+	return 0
+}
+
+func (x *StreamStats) GetNpcs() uint32 {
+	if x != nil {
+		return x.Npcs
+	}
+	return 0
+}
+
+func (x *StreamStats) GetResourceNodes() uint32 {
+	if x != nil {
+		return x.ResourceNodes
+	}
+	return 0
+}
+
+func (x *StreamStats) GetMounts() uint32 {
+	if x != nil {
+		return x.Mounts
+	}
+	return 0
+}
+
+// One frame of a Subscribe stream.
+type SubscribeResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Seq       uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
+	Tick      uint64                 `protobuf:"varint,2,opt,name=tick,proto3" json:"tick,omitempty"`
+	WorldTime float64                `protobuf:"fixed64,3,opt,name=world_time,json=worldTime,proto3" json:"world_time,omitempty"` // worldd's world clock, seconds
+	// Types that are valid to be assigned to Body:
+	//
+	//	*SubscribeResponse_Snapshot
+	//	*SubscribeResponse_Delta
+	//	*SubscribeResponse_Density
+	Body          isSubscribeResponse_Body `protobuf_oneof:"body"`
+	Stats         *StreamStats             `protobuf:"bytes,7,opt,name=stats,proto3" json:"stats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeResponse) Reset() {
+	*x = SubscribeResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeResponse) ProtoMessage() {}
+
+func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *SubscribeResponse) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *SubscribeResponse) GetTick() uint64 {
+	if x != nil {
+		return x.Tick
+	}
+	return 0
+}
+
+func (x *SubscribeResponse) GetWorldTime() float64 {
+	if x != nil {
+		return x.WorldTime
+	}
+	return 0
+}
+
+func (x *SubscribeResponse) GetBody() isSubscribeResponse_Body {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *SubscribeResponse) GetSnapshot() *EntitySnapshot {
+	if x != nil {
+		if x, ok := x.Body.(*SubscribeResponse_Snapshot); ok {
+			return x.Snapshot
+		}
+	}
+	return nil
+}
+
+func (x *SubscribeResponse) GetDelta() *EntityDelta {
+	if x != nil {
+		if x, ok := x.Body.(*SubscribeResponse_Delta); ok {
+			return x.Delta
+		}
+	}
+	return nil
+}
+
+func (x *SubscribeResponse) GetDensity() *DensityGrid {
+	if x != nil {
+		if x, ok := x.Body.(*SubscribeResponse_Density); ok {
+			return x.Density
+		}
+	}
+	return nil
+}
+
+func (x *SubscribeResponse) GetStats() *StreamStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
+type isSubscribeResponse_Body interface {
+	isSubscribeResponse_Body()
+}
+
+type SubscribeResponse_Snapshot struct {
+	Snapshot *EntitySnapshot `protobuf:"bytes,4,opt,name=snapshot,proto3,oneof"`
+}
+
+type SubscribeResponse_Delta struct {
+	Delta *EntityDelta `protobuf:"bytes,5,opt,name=delta,proto3,oneof"`
+}
+
+type SubscribeResponse_Density struct {
+	Density *DensityGrid `protobuf:"bytes,6,opt,name=density,proto3,oneof"`
+}
+
+func (*SubscribeResponse_Snapshot) isSubscribeResponse_Body() {}
+
+func (*SubscribeResponse_Delta) isSubscribeResponse_Body() {}
+
+func (*SubscribeResponse_Density) isSubscribeResponse_Body() {}
+
+type InspectRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectRequest) Reset() {
+	*x = InspectRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectRequest) ProtoMessage() {}
+
+func (x *InspectRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectRequest.ProtoReflect.Descriptor instead.
+func (*InspectRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *InspectRequest) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+type ThreatEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Threat        float64                `protobuf:"fixed64,2,opt,name=threat,proto3" json:"threat,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThreatEntry) Reset() {
+	*x = ThreatEntry{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThreatEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThreatEntry) ProtoMessage() {}
+
+func (x *ThreatEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThreatEntry.ProtoReflect.Descriptor instead.
+func (*ThreatEntry) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ThreatEntry) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *ThreatEntry) GetThreat() float64 {
+	if x != nil {
+		return x.Threat
+	}
+	return 0
+}
+
+// An NPC, resource node, mount or loot pile.
+type ActorDetail struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Name                  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Archetype             string                 `protobuf:"bytes,2,opt,name=archetype,proto3" json:"archetype,omitempty"`
+	Source                string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // where it came from: "data" (the design data), "captured" or "runtime" (made by the server)
+	Level                 uint32                 `protobuf:"varint,4,opt,name=level,proto3" json:"level,omitempty"`
+	Health                float64                `protobuf:"fixed64,5,opt,name=health,proto3" json:"health,omitempty"` // 0 for an NPC that has not been in a fight (its health is full)
+	MaxHealth             float64                `protobuf:"fixed64,6,opt,name=max_health,json=maxHealth,proto3" json:"max_health,omitempty"`
+	AiState               string                 `protobuf:"bytes,7,opt,name=ai_state,json=aiState,proto3" json:"ai_state,omitempty"`       // idle, chase, attack, reset, dead; "none" for an actor that has not been in a fight
+	Target                uint64                 `protobuf:"varint,8,opt,name=target,proto3" json:"target,omitempty"`                       // the entity it fights now (0: nobody)
+	Threat                []*ThreatEntry         `protobuf:"bytes,9,rep,name=threat,proto3" json:"threat,omitempty"`                        // its threat table, most first
+	HomeXCm               int32                  `protobuf:"zigzag32,10,opt,name=home_x_cm,json=homeXCm,proto3" json:"home_x_cm,omitempty"` // its leash centre, and where it walks back to: where it spawned, until a game master moves it (MoveNpc)
+	HomeYCm               int32                  `protobuf:"zigzag32,11,opt,name=home_y_cm,json=homeYCm,proto3" json:"home_y_cm,omitempty"`
+	HomeZCm               int32                  `protobuf:"zigzag32,12,opt,name=home_z_cm,json=homeZCm,proto3" json:"home_z_cm,omitempty"`
+	DistanceFromHomeCm    float64                `protobuf:"fixed64,13,opt,name=distance_from_home_cm,json=distanceFromHomeCm,proto3" json:"distance_from_home_cm,omitempty"`
+	AggroRadiusCm         float64                `protobuf:"fixed64,14,opt,name=aggro_radius_cm,json=aggroRadiusCm,proto3" json:"aggro_radius_cm,omitempty"` // 0: the creature kind's own
+	LeashRadiusCm         float64                `protobuf:"fixed64,15,opt,name=leash_radius_cm,json=leashRadiusCm,proto3" json:"leash_radius_cm,omitempty"` // how far from its home it chases: its own once it has fought, else the data's (0: the default)
+	RespawnSeconds        float64                `protobuf:"fixed64,16,opt,name=respawn_seconds,json=respawnSeconds,proto3" json:"respawn_seconds,omitempty"`
+	RespawnRule           string                 `protobuf:"bytes,17,opt,name=respawn_rule,json=respawnRule,proto3" json:"respawn_rule,omitempty"` // Refill, AllDead, NoRespawn
+	LootTables            []int64                `protobuf:"varint,18,rep,packed,name=loot_tables,json=lootTables,proto3" json:"loot_tables,omitempty"`
+	Combatant             bool                   `protobuf:"varint,19,opt,name=combatant,proto3" json:"combatant,omitempty"`                   // it has been in a fight, so its health and AI state are live
+	Standing              bool                   `protobuf:"varint,20,opt,name=standing,proto3" json:"standing,omitempty"`                     // it has no life of its own: it stands where it is
+	SpawnXCm              int32                  `protobuf:"zigzag32,21,opt,name=spawn_x_cm,json=spawnXCm,proto3" json:"spawn_x_cm,omitempty"` // its spawn point: where it is made again after a death (the same as its home until a game master moves it)
+	SpawnYCm              int32                  `protobuf:"zigzag32,22,opt,name=spawn_y_cm,json=spawnYCm,proto3" json:"spawn_y_cm,omitempty"`
+	SpawnZCm              int32                  `protobuf:"zigzag32,23,opt,name=spawn_z_cm,json=spawnZCm,proto3" json:"spawn_z_cm,omitempty"`
+	Corpse                bool                   `protobuf:"varint,24,opt,name=corpse,proto3" json:"corpse,omitempty"`                                                                 // it is dead and its corpse still stands
+	CorpseLootStacks      uint32                 `protobuf:"varint,25,opt,name=corpse_loot_stacks,json=corpseLootStacks,proto3" json:"corpse_loot_stacks,omitempty"`                   // the stacks left on its corpse
+	CorpseClosesInSeconds float64                `protobuf:"fixed64,26,opt,name=corpse_closes_in_seconds,json=corpseClosesInSeconds,proto3" json:"corpse_closes_in_seconds,omitempty"` // until the corpse is taken off the world
+	RespawnInSeconds      float64                `protobuf:"fixed64,27,opt,name=respawn_in_seconds,json=respawnInSeconds,proto3" json:"respawn_in_seconds,omitempty"`                  // a dead creature: until its spawn point makes it again (0: not scheduled)
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *ActorDetail) Reset() {
+	*x = ActorDetail{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActorDetail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActorDetail) ProtoMessage() {}
+
+func (x *ActorDetail) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActorDetail.ProtoReflect.Descriptor instead.
+func (*ActorDetail) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *ActorDetail) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ActorDetail) GetArchetype() string {
+	if x != nil {
+		return x.Archetype
+	}
+	return ""
+}
+
+func (x *ActorDetail) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *ActorDetail) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetHealth() float64 {
+	if x != nil {
+		return x.Health
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetMaxHealth() float64 {
+	if x != nil {
+		return x.MaxHealth
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetAiState() string {
+	if x != nil {
+		return x.AiState
+	}
+	return ""
+}
+
+func (x *ActorDetail) GetTarget() uint64 {
+	if x != nil {
+		return x.Target
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetThreat() []*ThreatEntry {
+	if x != nil {
+		return x.Threat
+	}
+	return nil
+}
+
+func (x *ActorDetail) GetHomeXCm() int32 {
+	if x != nil {
+		return x.HomeXCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetHomeYCm() int32 {
+	if x != nil {
+		return x.HomeYCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetHomeZCm() int32 {
+	if x != nil {
+		return x.HomeZCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetDistanceFromHomeCm() float64 {
+	if x != nil {
+		return x.DistanceFromHomeCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetAggroRadiusCm() float64 {
+	if x != nil {
+		return x.AggroRadiusCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetLeashRadiusCm() float64 {
+	if x != nil {
+		return x.LeashRadiusCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetRespawnSeconds() float64 {
+	if x != nil {
+		return x.RespawnSeconds
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetRespawnRule() string {
+	if x != nil {
+		return x.RespawnRule
+	}
+	return ""
+}
+
+func (x *ActorDetail) GetLootTables() []int64 {
+	if x != nil {
+		return x.LootTables
+	}
+	return nil
+}
+
+func (x *ActorDetail) GetCombatant() bool {
+	if x != nil {
+		return x.Combatant
+	}
+	return false
+}
+
+func (x *ActorDetail) GetStanding() bool {
+	if x != nil {
+		return x.Standing
+	}
+	return false
+}
+
+func (x *ActorDetail) GetSpawnXCm() int32 {
+	if x != nil {
+		return x.SpawnXCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetSpawnYCm() int32 {
+	if x != nil {
+		return x.SpawnYCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetSpawnZCm() int32 {
+	if x != nil {
+		return x.SpawnZCm
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetCorpse() bool {
+	if x != nil {
+		return x.Corpse
+	}
+	return false
+}
+
+func (x *ActorDetail) GetCorpseLootStacks() uint32 {
+	if x != nil {
+		return x.CorpseLootStacks
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetCorpseClosesInSeconds() float64 {
+	if x != nil {
+		return x.CorpseClosesInSeconds
+	}
+	return 0
+}
+
+func (x *ActorDetail) GetRespawnInSeconds() float64 {
+	if x != nil {
+		return x.RespawnInSeconds
+	}
+	return 0
+}
+
+type PlayerDetail struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Name                string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	CharacterId         string                 `protobuf:"bytes,2,opt,name=character_id,json=characterId,proto3" json:"character_id,omitempty"` // the character's guid (32 hex digits)
+	Level               uint32                 `protobuf:"varint,3,opt,name=level,proto3" json:"level,omitempty"`
+	Mounted             bool                   `protobuf:"varint,4,opt,name=mounted,proto3" json:"mounted,omitempty"`
+	Dead                bool                   `protobuf:"varint,5,opt,name=dead,proto3" json:"dead,omitempty"`
+	MoveSpeedMultiplier float64                `protobuf:"fixed64,6,opt,name=move_speed_multiplier,json=moveSpeedMultiplier,proto3" json:"move_speed_multiplier,omitempty"` // the GM run speed; 1 for none
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *PlayerDetail) Reset() {
+	*x = PlayerDetail{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlayerDetail) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlayerDetail) ProtoMessage() {}
+
+func (x *PlayerDetail) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlayerDetail.ProtoReflect.Descriptor instead.
+func (*PlayerDetail) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *PlayerDetail) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PlayerDetail) GetCharacterId() string {
+	if x != nil {
+		return x.CharacterId
+	}
+	return ""
+}
+
+func (x *PlayerDetail) GetLevel() uint32 {
+	if x != nil {
+		return x.Level
+	}
+	return 0
+}
+
+func (x *PlayerDetail) GetMounted() bool {
+	if x != nil {
+		return x.Mounted
+	}
+	return false
+}
+
+func (x *PlayerDetail) GetDead() bool {
+	if x != nil {
+		return x.Dead
+	}
+	return false
+}
+
+func (x *PlayerDetail) GetMoveSpeedMultiplier() float64 {
+	if x != nil {
+		return x.MoveSpeedMultiplier
+	}
+	return 0
+}
+
+type InspectResponse struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Entity *Entity                `protobuf:"bytes,1,opt,name=entity,proto3" json:"entity,omitempty"`
+	// Types that are valid to be assigned to Detail:
+	//
+	//	*InspectResponse_Actor
+	//	*InspectResponse_Player
+	Detail        isInspectResponse_Detail `protobuf_oneof:"detail"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectResponse) Reset() {
+	*x = InspectResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectResponse) ProtoMessage() {}
+
+func (x *InspectResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectResponse.ProtoReflect.Descriptor instead.
+func (*InspectResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *InspectResponse) GetEntity() *Entity {
+	if x != nil {
+		return x.Entity
+	}
+	return nil
+}
+
+func (x *InspectResponse) GetDetail() isInspectResponse_Detail {
+	if x != nil {
+		return x.Detail
+	}
+	return nil
+}
+
+func (x *InspectResponse) GetActor() *ActorDetail {
+	if x != nil {
+		if x, ok := x.Detail.(*InspectResponse_Actor); ok {
+			return x.Actor
+		}
+	}
+	return nil
+}
+
+func (x *InspectResponse) GetPlayer() *PlayerDetail {
+	if x != nil {
+		if x, ok := x.Detail.(*InspectResponse_Player); ok {
+			return x.Player
+		}
+	}
+	return nil
+}
+
+type isInspectResponse_Detail interface {
+	isInspectResponse_Detail()
+}
+
+type InspectResponse_Actor struct {
+	Actor *ActorDetail `protobuf:"bytes,2,opt,name=actor,proto3,oneof"`
+}
+
+type InspectResponse_Player struct {
+	Player *PlayerDetail `protobuf:"bytes,3,opt,name=player,proto3,oneof"`
+}
+
+func (*InspectResponse_Actor) isInspectResponse_Detail() {}
+
+func (*InspectResponse_Player) isInspectResponse_Detail() {}
+
+type SearchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`  // at least 2 characters
+	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"` // 1..50 (0 means 20)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchRequest) Reset() {
+	*x = SearchRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchRequest) ProtoMessage() {}
+
+func (x *SearchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
+func (*SearchRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *SearchRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *SearchRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type SearchResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entity        *Entity                `protobuf:"bytes,1,opt,name=entity,proto3" json:"entity,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"` // the entity's name (an NPC's too)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchResult) Reset() {
+	*x = SearchResult{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchResult) ProtoMessage() {}
+
+func (x *SearchResult) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchResult.ProtoReflect.Descriptor instead.
+func (*SearchResult) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *SearchResult) GetEntity() *Entity {
+	if x != nil {
+		return x.Entity
+	}
+	return nil
+}
+
+func (x *SearchResult) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type SearchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Results       []*SearchResult        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"` // players first, then by name
+	Truncated     bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchResponse) Reset() {
+	*x = SearchResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchResponse) ProtoMessage() {}
+
+func (x *SearchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
+func (*SearchResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *SearchResponse) GetResults() []*SearchResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
+func (x *SearchResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+type GetStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetStatusRequest) Reset() {
+	*x = GetStatusRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStatusRequest) ProtoMessage() {}
+
+func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetStatusRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{48}
+}
+
+type GetStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Stats         *StreamStats           `protobuf:"bytes,1,opt,name=stats,proto3" json:"stats,omitempty"`
+	WorldTime     float64                `protobuf:"fixed64,2,opt,name=world_time,json=worldTime,proto3" json:"world_time,omitempty"`
+	Tick          uint64                 `protobuf:"varint,3,opt,name=tick,proto3" json:"tick,omitempty"`               // publishes since worldd started
+	Subscribers   uint32                 `protobuf:"varint,4,opt,name=subscribers,proto3" json:"subscribers,omitempty"` // Subscribe streams open now
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetStatusResponse) Reset() {
+	*x = GetStatusResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStatusResponse) ProtoMessage() {}
+
+func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetStatusResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *GetStatusResponse) GetStats() *StreamStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
+func (x *GetStatusResponse) GetWorldTime() float64 {
+	if x != nil {
+		return x.WorldTime
+	}
+	return 0
+}
+
+func (x *GetStatusResponse) GetTick() uint64 {
+	if x != nil {
+		return x.Tick
+	}
+	return 0
+}
+
+func (x *GetStatusResponse) GetSubscribers() uint32 {
+	if x != nil {
+		return x.Subscribers
+	}
+	return 0
+}
+
 var File_aoc_worldadmin_v1_worldadmin_proto protoreflect.FileDescriptor
 
 const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
@@ -1379,7 +3773,203 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\x04item\x18\x02 \x01(\tR\x04item\x12\x1b\n" +
 	"\titem_guid\x18\x03 \x01(\x03R\bitemGuid\x12\x14\n" +
 	"\x05count\x18\x04 \x01(\x05R\x05count\x12\x1c\n" +
-	"\tcontainer\x18\x05 \x01(\tR\tcontainer2\xf4\x05\n" +
+	"\tcontainer\x18\x05 \x01(\tR\tcontainer\" \n" +
+	"\x0eKillNpcRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\xd5\x01\n" +
+	"\x0fKillNpcResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\x12\x1f\n" +
+	"\vloot_stacks\x18\x05 \x01(\rR\n" +
+	"lootStacks\x12,\n" +
+	"\x12respawn_in_seconds\x18\x06 \x01(\x01R\x10respawnInSeconds\"#\n" +
+	"\x11RespawnNpcRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\x89\x01\n" +
+	"\x12RespawnNpcResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\"!\n" +
+	"\x0fResetNpcRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\x87\x01\n" +
+	"\x10ResetNpcResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\" \n" +
+	"\x0eHealNpcRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\x86\x01\n" +
+	"\x0fHealNpcResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\"#\n" +
+	"\x11DespawnNpcRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"\xb7\x01\n" +
+	"\x12DespawnNpcResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\x12,\n" +
+	"\x12respawn_in_seconds\x18\x05 \x01(\x01R\x10respawnInSeconds\"P\n" +
+	"\x0eMoveNpcRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12.\n" +
+	"\x05point\x18\x02 \x01(\v2\x18.aoc.worldadmin.v1.PointR\x05point\"\xb7\x01\n" +
+	"\x0fMoveNpcResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
+	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
+	"\x06result\x18\x04 \x01(\tR\x06result\x12/\n" +
+	"\x04from\x18\x05 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\x04from\"q\n" +
+	"\aAreaBox\x12\x18\n" +
+	"\bmin_x_cm\x18\x01 \x01(\x11R\x06minXCm\x12\x18\n" +
+	"\bmin_y_cm\x18\x02 \x01(\x11R\x06minYCm\x12\x18\n" +
+	"\bmax_x_cm\x18\x03 \x01(\x11R\x06maxXCm\x12\x18\n" +
+	"\bmax_y_cm\x18\x04 \x01(\x11R\x06maxYCm\"\xbb\x01\n" +
+	"\x10SubscribeRequest\x12.\n" +
+	"\x04area\x18\x01 \x01(\v2\x1a.aoc.worldadmin.v1.AreaBoxR\x04area\x127\n" +
+	"\x06detail\x18\x02 \x01(\x0e2\x1f.aoc.worldadmin.v1.StreamDetailR\x06detail\x12&\n" +
+	"\x0fdensity_cell_cm\x18\x03 \x01(\rR\rdensityCellCm\x12\x16\n" +
+	"\x06layers\x18\x04 \x01(\rR\x06layers\"\xf5\x01\n" +
+	"\x06Entity\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x121\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x1d.aoc.worldadmin.v1.EntityKindR\x04kind\x12\x11\n" +
+	"\x04x_cm\x18\x03 \x01(\x11R\x03xCm\x12\x11\n" +
+	"\x04y_cm\x18\x04 \x01(\x11R\x03yCm\x12\x11\n" +
+	"\x04z_cm\x18\x05 \x01(\x11R\x03zCm\x12\x10\n" +
+	"\x03yaw\x18\x06 \x01(\rR\x03yaw\x12\x14\n" +
+	"\x05state\x18\a \x01(\rR\x05state\x12\x1d\n" +
+	"\n" +
+	"health_pct\x18\b \x01(\rR\thealthPct\x12\x14\n" +
+	"\x05level\x18\t \x01(\rR\x05level\x12\x12\n" +
+	"\x04name\x18\n" +
+	" \x01(\tR\x04name\"G\n" +
+	"\x0eEntitySnapshot\x125\n" +
+	"\bentities\x18\x01 \x03(\v2\x19.aoc.worldadmin.v1.EntityR\bentities\"\\\n" +
+	"\vEntityDelta\x123\n" +
+	"\achanged\x18\x01 \x03(\v2\x19.aoc.worldadmin.v1.EntityR\achanged\x12\x18\n" +
+	"\aremoved\x18\x02 \x03(\x04R\aremoved\"\xe3\x01\n" +
+	"\vDensityGrid\x12\x17\n" +
+	"\acell_cm\x18\x01 \x01(\rR\x06cellCm\x12\x1e\n" +
+	"\vorigin_x_cm\x18\x02 \x01(\x11R\toriginXCm\x12\x1e\n" +
+	"\vorigin_y_cm\x18\x03 \x01(\x11R\toriginYCm\x12\x12\n" +
+	"\x04cols\x18\x04 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x05 \x01(\rR\x04rows\x12\x18\n" +
+	"\aplayers\x18\x06 \x03(\rR\aplayers\x12\x12\n" +
+	"\x04npcs\x18\a \x03(\rR\x04npcs\x12%\n" +
+	"\x0eresource_nodes\x18\b \x03(\rR\rresourceNodes\"\xd8\x01\n" +
+	"\vStreamStats\x12\x17\n" +
+	"\atick_ms\x18\x01 \x01(\x02R\x06tickMs\x12\x1d\n" +
+	"\n" +
+	"publish_ms\x18\x02 \x01(\x02R\tpublishMs\x12$\n" +
+	"\x0epublish_max_ms\x18\x03 \x01(\x02R\fpublishMaxMs\x12\x18\n" +
+	"\aplayers\x18\x04 \x01(\rR\aplayers\x12\x12\n" +
+	"\x04npcs\x18\x05 \x01(\rR\x04npcs\x12%\n" +
+	"\x0eresource_nodes\x18\x06 \x01(\rR\rresourceNodes\x12\x16\n" +
+	"\x06mounts\x18\a \x01(\rR\x06mounts\"\xcb\x02\n" +
+	"\x11SubscribeResponse\x12\x10\n" +
+	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12\x12\n" +
+	"\x04tick\x18\x02 \x01(\x04R\x04tick\x12\x1d\n" +
+	"\n" +
+	"world_time\x18\x03 \x01(\x01R\tworldTime\x12?\n" +
+	"\bsnapshot\x18\x04 \x01(\v2!.aoc.worldadmin.v1.EntitySnapshotH\x00R\bsnapshot\x126\n" +
+	"\x05delta\x18\x05 \x01(\v2\x1e.aoc.worldadmin.v1.EntityDeltaH\x00R\x05delta\x12:\n" +
+	"\adensity\x18\x06 \x01(\v2\x1e.aoc.worldadmin.v1.DensityGridH\x00R\adensity\x124\n" +
+	"\x05stats\x18\a \x01(\v2\x1e.aoc.worldadmin.v1.StreamStatsR\x05statsB\x06\n" +
+	"\x04body\" \n" +
+	"\x0eInspectRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\"5\n" +
+	"\vThreatEntry\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x16\n" +
+	"\x06threat\x18\x02 \x01(\x01R\x06threat\"\x94\a\n" +
+	"\vActorDetail\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tarchetype\x18\x02 \x01(\tR\tarchetype\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x14\n" +
+	"\x05level\x18\x04 \x01(\rR\x05level\x12\x16\n" +
+	"\x06health\x18\x05 \x01(\x01R\x06health\x12\x1d\n" +
+	"\n" +
+	"max_health\x18\x06 \x01(\x01R\tmaxHealth\x12\x19\n" +
+	"\bai_state\x18\a \x01(\tR\aaiState\x12\x16\n" +
+	"\x06target\x18\b \x01(\x04R\x06target\x126\n" +
+	"\x06threat\x18\t \x03(\v2\x1e.aoc.worldadmin.v1.ThreatEntryR\x06threat\x12\x1a\n" +
+	"\thome_x_cm\x18\n" +
+	" \x01(\x11R\ahomeXCm\x12\x1a\n" +
+	"\thome_y_cm\x18\v \x01(\x11R\ahomeYCm\x12\x1a\n" +
+	"\thome_z_cm\x18\f \x01(\x11R\ahomeZCm\x121\n" +
+	"\x15distance_from_home_cm\x18\r \x01(\x01R\x12distanceFromHomeCm\x12&\n" +
+	"\x0faggro_radius_cm\x18\x0e \x01(\x01R\raggroRadiusCm\x12&\n" +
+	"\x0fleash_radius_cm\x18\x0f \x01(\x01R\rleashRadiusCm\x12'\n" +
+	"\x0frespawn_seconds\x18\x10 \x01(\x01R\x0erespawnSeconds\x12!\n" +
+	"\frespawn_rule\x18\x11 \x01(\tR\vrespawnRule\x12\x1f\n" +
+	"\vloot_tables\x18\x12 \x03(\x03R\n" +
+	"lootTables\x12\x1c\n" +
+	"\tcombatant\x18\x13 \x01(\bR\tcombatant\x12\x1a\n" +
+	"\bstanding\x18\x14 \x01(\bR\bstanding\x12\x1c\n" +
+	"\n" +
+	"spawn_x_cm\x18\x15 \x01(\x11R\bspawnXCm\x12\x1c\n" +
+	"\n" +
+	"spawn_y_cm\x18\x16 \x01(\x11R\bspawnYCm\x12\x1c\n" +
+	"\n" +
+	"spawn_z_cm\x18\x17 \x01(\x11R\bspawnZCm\x12\x16\n" +
+	"\x06corpse\x18\x18 \x01(\bR\x06corpse\x12,\n" +
+	"\x12corpse_loot_stacks\x18\x19 \x01(\rR\x10corpseLootStacks\x127\n" +
+	"\x18corpse_closes_in_seconds\x18\x1a \x01(\x01R\x15corpseClosesInSeconds\x12,\n" +
+	"\x12respawn_in_seconds\x18\x1b \x01(\x01R\x10respawnInSeconds\"\xbd\x01\n" +
+	"\fPlayerDetail\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12!\n" +
+	"\fcharacter_id\x18\x02 \x01(\tR\vcharacterId\x12\x14\n" +
+	"\x05level\x18\x03 \x01(\rR\x05level\x12\x18\n" +
+	"\amounted\x18\x04 \x01(\bR\amounted\x12\x12\n" +
+	"\x04dead\x18\x05 \x01(\bR\x04dead\x122\n" +
+	"\x15move_speed_multiplier\x18\x06 \x01(\x01R\x13moveSpeedMultiplier\"\xc1\x01\n" +
+	"\x0fInspectResponse\x121\n" +
+	"\x06entity\x18\x01 \x01(\v2\x19.aoc.worldadmin.v1.EntityR\x06entity\x126\n" +
+	"\x05actor\x18\x02 \x01(\v2\x1e.aoc.worldadmin.v1.ActorDetailH\x00R\x05actor\x129\n" +
+	"\x06player\x18\x03 \x01(\v2\x1f.aoc.worldadmin.v1.PlayerDetailH\x00R\x06playerB\b\n" +
+	"\x06detail\";\n" +
+	"\rSearchRequest\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\"U\n" +
+	"\fSearchResult\x121\n" +
+	"\x06entity\x18\x01 \x01(\v2\x19.aoc.worldadmin.v1.EntityR\x06entity\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"i\n" +
+	"\x0eSearchResponse\x129\n" +
+	"\aresults\x18\x01 \x03(\v2\x1f.aoc.worldadmin.v1.SearchResultR\aresults\x12\x1c\n" +
+	"\ttruncated\x18\x02 \x01(\bR\ttruncated\"\x12\n" +
+	"\x10GetStatusRequest\"\x9e\x01\n" +
+	"\x11GetStatusResponse\x124\n" +
+	"\x05stats\x18\x01 \x01(\v2\x1e.aoc.worldadmin.v1.StreamStatsR\x05stats\x12\x1d\n" +
+	"\n" +
+	"world_time\x18\x02 \x01(\x01R\tworldTime\x12\x12\n" +
+	"\x04tick\x18\x03 \x01(\x04R\x04tick\x12 \n" +
+	"\vsubscribers\x18\x04 \x01(\rR\vsubscribers*\xa7\x01\n" +
+	"\n" +
+	"EntityKind\x12\x1b\n" +
+	"\x17ENTITY_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12ENTITY_KIND_PLAYER\x10\x01\x12\x13\n" +
+	"\x0fENTITY_KIND_NPC\x10\x02\x12\x1d\n" +
+	"\x19ENTITY_KIND_RESOURCE_NODE\x10\x03\x12\x15\n" +
+	"\x11ENTITY_KIND_MOUNT\x10\x04\x12\x19\n" +
+	"\x15ENTITY_KIND_LOOT_PILE\x10\x05*x\n" +
+	"\vEntityState\x12\x1c\n" +
+	"\x18ENTITY_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16ENTITY_STATE_IN_COMBAT\x10\x01\x12\x15\n" +
+	"\x11ENTITY_STATE_DEAD\x10\x02\x12\x18\n" +
+	"\x14ENTITY_STATE_MOUNTED\x10\x04*d\n" +
+	"\fStreamDetail\x12\x1d\n" +
+	"\x19STREAM_DETAIL_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16STREAM_DETAIL_ENTITIES\x10\x01\x12\x19\n" +
+	"\x15STREAM_DETAIL_DENSITY\x10\x02*\xc9\x01\n" +
+	"\vStreamLayer\x12\x1c\n" +
+	"\x18STREAM_LAYER_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14STREAM_LAYER_PLAYERS\x10\x01\x12\x15\n" +
+	"\x11STREAM_LAYER_NPCS\x10\x02\x12\x1f\n" +
+	"\x1bSTREAM_LAYER_RESOURCE_NODES\x10\x04\x12\x17\n" +
+	"\x13STREAM_LAYER_MOUNTS\x10\b\x12\x1b\n" +
+	"\x17STREAM_LAYER_LOOT_PILES\x10\x10\x12\x14\n" +
+	"\x10STREAM_LAYER_ALL\x10\x1f2\xf5\t\n" +
 	"\x11WorldAdminService\x12\\\n" +
 	"\vListPlayers\x12%.aoc.worldadmin.v1.ListPlayersRequest\x1a&.aoc.worldadmin.v1.ListPlayersResponse\x12Y\n" +
 	"\n" +
@@ -1389,7 +3979,20 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\tGiveMoney\x12#.aoc.worldadmin.v1.GiveMoneyRequest\x1a$.aoc.worldadmin.v1.GiveMoneyResponse\x12S\n" +
 	"\bGiveItem\x12\".aoc.worldadmin.v1.GiveItemRequest\x1a#.aoc.worldadmin.v1.GiveItemResponse\x12_\n" +
 	"\fPlaceStation\x12&.aoc.worldadmin.v1.PlaceStationRequest\x1a'.aoc.worldadmin.v1.PlaceStationResponse\x12b\n" +
-	"\rRemoveStation\x12'.aoc.worldadmin.v1.RemoveStationRequest\x1a(.aoc.worldadmin.v1.RemoveStationResponseB4Z2aocrop/services/gen/aoc/worldadmin/v1;worldadminv1b\x06proto3"
+	"\rRemoveStation\x12'.aoc.worldadmin.v1.RemoveStationRequest\x1a(.aoc.worldadmin.v1.RemoveStationResponse\x12P\n" +
+	"\aKillNpc\x12!.aoc.worldadmin.v1.KillNpcRequest\x1a\".aoc.worldadmin.v1.KillNpcResponse\x12Y\n" +
+	"\n" +
+	"RespawnNpc\x12$.aoc.worldadmin.v1.RespawnNpcRequest\x1a%.aoc.worldadmin.v1.RespawnNpcResponse\x12S\n" +
+	"\bResetNpc\x12\".aoc.worldadmin.v1.ResetNpcRequest\x1a#.aoc.worldadmin.v1.ResetNpcResponse\x12P\n" +
+	"\aHealNpc\x12!.aoc.worldadmin.v1.HealNpcRequest\x1a\".aoc.worldadmin.v1.HealNpcResponse\x12Y\n" +
+	"\n" +
+	"DespawnNpc\x12$.aoc.worldadmin.v1.DespawnNpcRequest\x1a%.aoc.worldadmin.v1.DespawnNpcResponse\x12P\n" +
+	"\aMoveNpc\x12!.aoc.worldadmin.v1.MoveNpcRequest\x1a\".aoc.worldadmin.v1.MoveNpcResponse2\xe7\x02\n" +
+	"\x12WorldStreamService\x12X\n" +
+	"\tSubscribe\x12#.aoc.worldadmin.v1.SubscribeRequest\x1a$.aoc.worldadmin.v1.SubscribeResponse0\x01\x12P\n" +
+	"\aInspect\x12!.aoc.worldadmin.v1.InspectRequest\x1a\".aoc.worldadmin.v1.InspectResponse\x12M\n" +
+	"\x06Search\x12 .aoc.worldadmin.v1.SearchRequest\x1a!.aoc.worldadmin.v1.SearchResponse\x12V\n" +
+	"\tGetStatus\x12#.aoc.worldadmin.v1.GetStatusRequest\x1a$.aoc.worldadmin.v1.GetStatusResponseB4Z2aocrop/services/gen/aoc/worldadmin/v1;worldadminv1b\x06proto3"
 
 var (
 	file_aoc_worldadmin_v1_worldadmin_proto_rawDescOnce sync.Once
@@ -1405,59 +4008,138 @@ func file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP() []byte {
 	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescData
 }
 
-var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_aoc_worldadmin_v1_worldadmin_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_aoc_worldadmin_v1_worldadmin_proto_goTypes = []any{
-	(*Position)(nil),              // 0: aoc.worldadmin.v1.Position
-	(*Player)(nil),                // 1: aoc.worldadmin.v1.Player
-	(*ListPlayersRequest)(nil),    // 2: aoc.worldadmin.v1.ListPlayersRequest
-	(*ListPlayersResponse)(nil),   // 3: aoc.worldadmin.v1.ListPlayersResponse
-	(*Place)(nil),                 // 4: aoc.worldadmin.v1.Place
-	(*ListPlacesRequest)(nil),     // 5: aoc.worldadmin.v1.ListPlacesRequest
-	(*ListPlacesResponse)(nil),    // 6: aoc.worldadmin.v1.ListPlacesResponse
-	(*Point)(nil),                 // 7: aoc.worldadmin.v1.Point
-	(*TeleportRequest)(nil),       // 8: aoc.worldadmin.v1.TeleportRequest
-	(*TeleportResponse)(nil),      // 9: aoc.worldadmin.v1.TeleportResponse
-	(*SetMoveSpeedRequest)(nil),   // 10: aoc.worldadmin.v1.SetMoveSpeedRequest
-	(*SetMoveSpeedResponse)(nil),  // 11: aoc.worldadmin.v1.SetMoveSpeedResponse
-	(*GiveMoneyRequest)(nil),      // 12: aoc.worldadmin.v1.GiveMoneyRequest
-	(*GiveMoneyResponse)(nil),     // 13: aoc.worldadmin.v1.GiveMoneyResponse
-	(*PlaceStationRequest)(nil),   // 14: aoc.worldadmin.v1.PlaceStationRequest
-	(*PlaceStationResponse)(nil),  // 15: aoc.worldadmin.v1.PlaceStationResponse
-	(*RemoveStationRequest)(nil),  // 16: aoc.worldadmin.v1.RemoveStationRequest
-	(*RemoveStationResponse)(nil), // 17: aoc.worldadmin.v1.RemoveStationResponse
-	(*GiveItemRequest)(nil),       // 18: aoc.worldadmin.v1.GiveItemRequest
-	(*GiveItemResponse)(nil),      // 19: aoc.worldadmin.v1.GiveItemResponse
+	(EntityKind)(0),               // 0: aoc.worldadmin.v1.EntityKind
+	(EntityState)(0),              // 1: aoc.worldadmin.v1.EntityState
+	(StreamDetail)(0),             // 2: aoc.worldadmin.v1.StreamDetail
+	(StreamLayer)(0),              // 3: aoc.worldadmin.v1.StreamLayer
+	(*Position)(nil),              // 4: aoc.worldadmin.v1.Position
+	(*Player)(nil),                // 5: aoc.worldadmin.v1.Player
+	(*ListPlayersRequest)(nil),    // 6: aoc.worldadmin.v1.ListPlayersRequest
+	(*ListPlayersResponse)(nil),   // 7: aoc.worldadmin.v1.ListPlayersResponse
+	(*Place)(nil),                 // 8: aoc.worldadmin.v1.Place
+	(*ListPlacesRequest)(nil),     // 9: aoc.worldadmin.v1.ListPlacesRequest
+	(*ListPlacesResponse)(nil),    // 10: aoc.worldadmin.v1.ListPlacesResponse
+	(*Point)(nil),                 // 11: aoc.worldadmin.v1.Point
+	(*TeleportRequest)(nil),       // 12: aoc.worldadmin.v1.TeleportRequest
+	(*TeleportResponse)(nil),      // 13: aoc.worldadmin.v1.TeleportResponse
+	(*SetMoveSpeedRequest)(nil),   // 14: aoc.worldadmin.v1.SetMoveSpeedRequest
+	(*SetMoveSpeedResponse)(nil),  // 15: aoc.worldadmin.v1.SetMoveSpeedResponse
+	(*GiveMoneyRequest)(nil),      // 16: aoc.worldadmin.v1.GiveMoneyRequest
+	(*GiveMoneyResponse)(nil),     // 17: aoc.worldadmin.v1.GiveMoneyResponse
+	(*PlaceStationRequest)(nil),   // 18: aoc.worldadmin.v1.PlaceStationRequest
+	(*PlaceStationResponse)(nil),  // 19: aoc.worldadmin.v1.PlaceStationResponse
+	(*RemoveStationRequest)(nil),  // 20: aoc.worldadmin.v1.RemoveStationRequest
+	(*RemoveStationResponse)(nil), // 21: aoc.worldadmin.v1.RemoveStationResponse
+	(*GiveItemRequest)(nil),       // 22: aoc.worldadmin.v1.GiveItemRequest
+	(*GiveItemResponse)(nil),      // 23: aoc.worldadmin.v1.GiveItemResponse
+	(*KillNpcRequest)(nil),        // 24: aoc.worldadmin.v1.KillNpcRequest
+	(*KillNpcResponse)(nil),       // 25: aoc.worldadmin.v1.KillNpcResponse
+	(*RespawnNpcRequest)(nil),     // 26: aoc.worldadmin.v1.RespawnNpcRequest
+	(*RespawnNpcResponse)(nil),    // 27: aoc.worldadmin.v1.RespawnNpcResponse
+	(*ResetNpcRequest)(nil),       // 28: aoc.worldadmin.v1.ResetNpcRequest
+	(*ResetNpcResponse)(nil),      // 29: aoc.worldadmin.v1.ResetNpcResponse
+	(*HealNpcRequest)(nil),        // 30: aoc.worldadmin.v1.HealNpcRequest
+	(*HealNpcResponse)(nil),       // 31: aoc.worldadmin.v1.HealNpcResponse
+	(*DespawnNpcRequest)(nil),     // 32: aoc.worldadmin.v1.DespawnNpcRequest
+	(*DespawnNpcResponse)(nil),    // 33: aoc.worldadmin.v1.DespawnNpcResponse
+	(*MoveNpcRequest)(nil),        // 34: aoc.worldadmin.v1.MoveNpcRequest
+	(*MoveNpcResponse)(nil),       // 35: aoc.worldadmin.v1.MoveNpcResponse
+	(*AreaBox)(nil),               // 36: aoc.worldadmin.v1.AreaBox
+	(*SubscribeRequest)(nil),      // 37: aoc.worldadmin.v1.SubscribeRequest
+	(*Entity)(nil),                // 38: aoc.worldadmin.v1.Entity
+	(*EntitySnapshot)(nil),        // 39: aoc.worldadmin.v1.EntitySnapshot
+	(*EntityDelta)(nil),           // 40: aoc.worldadmin.v1.EntityDelta
+	(*DensityGrid)(nil),           // 41: aoc.worldadmin.v1.DensityGrid
+	(*StreamStats)(nil),           // 42: aoc.worldadmin.v1.StreamStats
+	(*SubscribeResponse)(nil),     // 43: aoc.worldadmin.v1.SubscribeResponse
+	(*InspectRequest)(nil),        // 44: aoc.worldadmin.v1.InspectRequest
+	(*ThreatEntry)(nil),           // 45: aoc.worldadmin.v1.ThreatEntry
+	(*ActorDetail)(nil),           // 46: aoc.worldadmin.v1.ActorDetail
+	(*PlayerDetail)(nil),          // 47: aoc.worldadmin.v1.PlayerDetail
+	(*InspectResponse)(nil),       // 48: aoc.worldadmin.v1.InspectResponse
+	(*SearchRequest)(nil),         // 49: aoc.worldadmin.v1.SearchRequest
+	(*SearchResult)(nil),          // 50: aoc.worldadmin.v1.SearchResult
+	(*SearchResponse)(nil),        // 51: aoc.worldadmin.v1.SearchResponse
+	(*GetStatusRequest)(nil),      // 52: aoc.worldadmin.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),     // 53: aoc.worldadmin.v1.GetStatusResponse
 }
 var file_aoc_worldadmin_v1_worldadmin_proto_depIdxs = []int32{
-	0,  // 0: aoc.worldadmin.v1.Player.position:type_name -> aoc.worldadmin.v1.Position
-	1,  // 1: aoc.worldadmin.v1.ListPlayersResponse.players:type_name -> aoc.worldadmin.v1.Player
-	0,  // 2: aoc.worldadmin.v1.Place.position:type_name -> aoc.worldadmin.v1.Position
-	4,  // 3: aoc.worldadmin.v1.ListPlacesResponse.places:type_name -> aoc.worldadmin.v1.Place
-	7,  // 4: aoc.worldadmin.v1.TeleportRequest.point:type_name -> aoc.worldadmin.v1.Point
-	0,  // 5: aoc.worldadmin.v1.TeleportResponse.from:type_name -> aoc.worldadmin.v1.Position
-	0,  // 6: aoc.worldadmin.v1.TeleportResponse.to:type_name -> aoc.worldadmin.v1.Position
-	0,  // 7: aoc.worldadmin.v1.PlaceStationResponse.position:type_name -> aoc.worldadmin.v1.Position
-	2,  // 8: aoc.worldadmin.v1.WorldAdminService.ListPlayers:input_type -> aoc.worldadmin.v1.ListPlayersRequest
-	5,  // 9: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
-	8,  // 10: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
-	10, // 11: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
-	12, // 12: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
-	18, // 13: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
-	14, // 14: aoc.worldadmin.v1.WorldAdminService.PlaceStation:input_type -> aoc.worldadmin.v1.PlaceStationRequest
-	16, // 15: aoc.worldadmin.v1.WorldAdminService.RemoveStation:input_type -> aoc.worldadmin.v1.RemoveStationRequest
-	3,  // 16: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
-	6,  // 17: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
-	9,  // 18: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
-	11, // 19: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
-	13, // 20: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
-	19, // 21: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
-	15, // 22: aoc.worldadmin.v1.WorldAdminService.PlaceStation:output_type -> aoc.worldadmin.v1.PlaceStationResponse
-	17, // 23: aoc.worldadmin.v1.WorldAdminService.RemoveStation:output_type -> aoc.worldadmin.v1.RemoveStationResponse
-	16, // [16:24] is the sub-list for method output_type
-	8,  // [8:16] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	4,  // 0: aoc.worldadmin.v1.Player.position:type_name -> aoc.worldadmin.v1.Position
+	5,  // 1: aoc.worldadmin.v1.ListPlayersResponse.players:type_name -> aoc.worldadmin.v1.Player
+	4,  // 2: aoc.worldadmin.v1.Place.position:type_name -> aoc.worldadmin.v1.Position
+	8,  // 3: aoc.worldadmin.v1.ListPlacesResponse.places:type_name -> aoc.worldadmin.v1.Place
+	11, // 4: aoc.worldadmin.v1.TeleportRequest.point:type_name -> aoc.worldadmin.v1.Point
+	4,  // 5: aoc.worldadmin.v1.TeleportResponse.from:type_name -> aoc.worldadmin.v1.Position
+	4,  // 6: aoc.worldadmin.v1.TeleportResponse.to:type_name -> aoc.worldadmin.v1.Position
+	4,  // 7: aoc.worldadmin.v1.PlaceStationResponse.position:type_name -> aoc.worldadmin.v1.Position
+	4,  // 8: aoc.worldadmin.v1.KillNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	4,  // 9: aoc.worldadmin.v1.RespawnNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	4,  // 10: aoc.worldadmin.v1.ResetNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	4,  // 11: aoc.worldadmin.v1.HealNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	4,  // 12: aoc.worldadmin.v1.DespawnNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	11, // 13: aoc.worldadmin.v1.MoveNpcRequest.point:type_name -> aoc.worldadmin.v1.Point
+	4,  // 14: aoc.worldadmin.v1.MoveNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	4,  // 15: aoc.worldadmin.v1.MoveNpcResponse.from:type_name -> aoc.worldadmin.v1.Position
+	36, // 16: aoc.worldadmin.v1.SubscribeRequest.area:type_name -> aoc.worldadmin.v1.AreaBox
+	2,  // 17: aoc.worldadmin.v1.SubscribeRequest.detail:type_name -> aoc.worldadmin.v1.StreamDetail
+	0,  // 18: aoc.worldadmin.v1.Entity.kind:type_name -> aoc.worldadmin.v1.EntityKind
+	38, // 19: aoc.worldadmin.v1.EntitySnapshot.entities:type_name -> aoc.worldadmin.v1.Entity
+	38, // 20: aoc.worldadmin.v1.EntityDelta.changed:type_name -> aoc.worldadmin.v1.Entity
+	39, // 21: aoc.worldadmin.v1.SubscribeResponse.snapshot:type_name -> aoc.worldadmin.v1.EntitySnapshot
+	40, // 22: aoc.worldadmin.v1.SubscribeResponse.delta:type_name -> aoc.worldadmin.v1.EntityDelta
+	41, // 23: aoc.worldadmin.v1.SubscribeResponse.density:type_name -> aoc.worldadmin.v1.DensityGrid
+	42, // 24: aoc.worldadmin.v1.SubscribeResponse.stats:type_name -> aoc.worldadmin.v1.StreamStats
+	45, // 25: aoc.worldadmin.v1.ActorDetail.threat:type_name -> aoc.worldadmin.v1.ThreatEntry
+	38, // 26: aoc.worldadmin.v1.InspectResponse.entity:type_name -> aoc.worldadmin.v1.Entity
+	46, // 27: aoc.worldadmin.v1.InspectResponse.actor:type_name -> aoc.worldadmin.v1.ActorDetail
+	47, // 28: aoc.worldadmin.v1.InspectResponse.player:type_name -> aoc.worldadmin.v1.PlayerDetail
+	38, // 29: aoc.worldadmin.v1.SearchResult.entity:type_name -> aoc.worldadmin.v1.Entity
+	50, // 30: aoc.worldadmin.v1.SearchResponse.results:type_name -> aoc.worldadmin.v1.SearchResult
+	42, // 31: aoc.worldadmin.v1.GetStatusResponse.stats:type_name -> aoc.worldadmin.v1.StreamStats
+	6,  // 32: aoc.worldadmin.v1.WorldAdminService.ListPlayers:input_type -> aoc.worldadmin.v1.ListPlayersRequest
+	9,  // 33: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
+	12, // 34: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
+	14, // 35: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
+	16, // 36: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
+	22, // 37: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
+	18, // 38: aoc.worldadmin.v1.WorldAdminService.PlaceStation:input_type -> aoc.worldadmin.v1.PlaceStationRequest
+	20, // 39: aoc.worldadmin.v1.WorldAdminService.RemoveStation:input_type -> aoc.worldadmin.v1.RemoveStationRequest
+	24, // 40: aoc.worldadmin.v1.WorldAdminService.KillNpc:input_type -> aoc.worldadmin.v1.KillNpcRequest
+	26, // 41: aoc.worldadmin.v1.WorldAdminService.RespawnNpc:input_type -> aoc.worldadmin.v1.RespawnNpcRequest
+	28, // 42: aoc.worldadmin.v1.WorldAdminService.ResetNpc:input_type -> aoc.worldadmin.v1.ResetNpcRequest
+	30, // 43: aoc.worldadmin.v1.WorldAdminService.HealNpc:input_type -> aoc.worldadmin.v1.HealNpcRequest
+	32, // 44: aoc.worldadmin.v1.WorldAdminService.DespawnNpc:input_type -> aoc.worldadmin.v1.DespawnNpcRequest
+	34, // 45: aoc.worldadmin.v1.WorldAdminService.MoveNpc:input_type -> aoc.worldadmin.v1.MoveNpcRequest
+	37, // 46: aoc.worldadmin.v1.WorldStreamService.Subscribe:input_type -> aoc.worldadmin.v1.SubscribeRequest
+	44, // 47: aoc.worldadmin.v1.WorldStreamService.Inspect:input_type -> aoc.worldadmin.v1.InspectRequest
+	49, // 48: aoc.worldadmin.v1.WorldStreamService.Search:input_type -> aoc.worldadmin.v1.SearchRequest
+	52, // 49: aoc.worldadmin.v1.WorldStreamService.GetStatus:input_type -> aoc.worldadmin.v1.GetStatusRequest
+	7,  // 50: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
+	10, // 51: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
+	13, // 52: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
+	15, // 53: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
+	17, // 54: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
+	23, // 55: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
+	19, // 56: aoc.worldadmin.v1.WorldAdminService.PlaceStation:output_type -> aoc.worldadmin.v1.PlaceStationResponse
+	21, // 57: aoc.worldadmin.v1.WorldAdminService.RemoveStation:output_type -> aoc.worldadmin.v1.RemoveStationResponse
+	25, // 58: aoc.worldadmin.v1.WorldAdminService.KillNpc:output_type -> aoc.worldadmin.v1.KillNpcResponse
+	27, // 59: aoc.worldadmin.v1.WorldAdminService.RespawnNpc:output_type -> aoc.worldadmin.v1.RespawnNpcResponse
+	29, // 60: aoc.worldadmin.v1.WorldAdminService.ResetNpc:output_type -> aoc.worldadmin.v1.ResetNpcResponse
+	31, // 61: aoc.worldadmin.v1.WorldAdminService.HealNpc:output_type -> aoc.worldadmin.v1.HealNpcResponse
+	33, // 62: aoc.worldadmin.v1.WorldAdminService.DespawnNpc:output_type -> aoc.worldadmin.v1.DespawnNpcResponse
+	35, // 63: aoc.worldadmin.v1.WorldAdminService.MoveNpc:output_type -> aoc.worldadmin.v1.MoveNpcResponse
+	43, // 64: aoc.worldadmin.v1.WorldStreamService.Subscribe:output_type -> aoc.worldadmin.v1.SubscribeResponse
+	48, // 65: aoc.worldadmin.v1.WorldStreamService.Inspect:output_type -> aoc.worldadmin.v1.InspectResponse
+	51, // 66: aoc.worldadmin.v1.WorldStreamService.Search:output_type -> aoc.worldadmin.v1.SearchResponse
+	53, // 67: aoc.worldadmin.v1.WorldStreamService.GetStatus:output_type -> aoc.worldadmin.v1.GetStatusResponse
+	50, // [50:68] is the sub-list for method output_type
+	32, // [32:50] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_aoc_worldadmin_v1_worldadmin_proto_init() }
@@ -1469,18 +4151,28 @@ func file_aoc_worldadmin_v1_worldadmin_proto_init() {
 		(*TeleportRequest_Place)(nil),
 		(*TeleportRequest_Point)(nil),
 	}
+	file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[39].OneofWrappers = []any{
+		(*SubscribeResponse_Snapshot)(nil),
+		(*SubscribeResponse_Delta)(nil),
+		(*SubscribeResponse_Density)(nil),
+	}
+	file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[44].OneofWrappers = []any{
+		(*InspectResponse_Actor)(nil),
+		(*InspectResponse_Player)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc), len(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   20,
+			NumEnums:      4,
+			NumMessages:   50,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_aoc_worldadmin_v1_worldadmin_proto_goTypes,
 		DependencyIndexes: file_aoc_worldadmin_v1_worldadmin_proto_depIdxs,
+		EnumInfos:         file_aoc_worldadmin_v1_worldadmin_proto_enumTypes,
 		MessageInfos:      file_aoc_worldadmin_v1_worldadmin_proto_msgTypes,
 	}.Build()
 	File_aoc_worldadmin_v1_worldadmin_proto = out.File

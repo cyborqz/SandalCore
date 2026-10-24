@@ -268,6 +268,22 @@ bool CombatWorld::dead(uint64_t actor_id) const {
     return it != npcs_.end() && it->second->dead;
 }
 
+void CombatWorld::summaries(std::vector<Summary>& out) const {
+    out.reserve(out.size() + npcs_.size());
+    for (const auto& entry : npcs_) {
+        const Npc& n = *entry.second;
+        Summary s;
+        s.id = entry.first;
+        const double max = n.max_health(), now = n.health();
+        const double pct = max > 0 ? std::clamp(now / max * 100.0, 0.0, 100.0) : 100.0;
+        s.health_pct = static_cast<uint8_t>(std::lround(pct));
+        if (!n.dead && now > 0 && s.health_pct == 0) s.health_pct = 1;   // alive is never shown as empty
+        s.in_combat = n.flags_in_combat;
+        s.dead = n.dead;
+        out.push_back(s);
+    }
+}
+
 std::string CombatWorld::next_attack_name(uint64_t actor_id) const {
     const auto it = npcs_.find(actor_id);
     if (it == npcs_.end() || !it->second->next.ability) return {};
@@ -927,7 +943,7 @@ Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, co
     return d;
 }
 
-void CombatWorld::kill(Npc& n, uint64_t killer, double now) {
+void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
     if (n.dead) return;
     n.dead = true;
     n.killer = killer;
@@ -955,8 +971,53 @@ void CombatWorld::kill(Npc& n, uint64_t killer, double now) {
         e.info = a ? &a->npc : nullptr;
         e.motion = &n.bp;
         e.attackers = n.attackers;
+        e.gm = gm;
         death_hook_(e);
     }
+}
+
+// ---- a game master's hands on an NPC ------------------------------------------------------------------------------------------------
+
+bool CombatWorld::gm_kill(uint64_t actor_id, double now, std::string& why) {
+    Npc* n = combatant(actor_id);
+    if (!n) {
+        why = "worldd has no combat stats for this creature";
+        return false;
+    }
+    if (n->dead) {
+        why = "it is dead already";
+        return false;
+    }
+    kill(*n, 0, now, true);
+    return true;
+}
+
+bool CombatWorld::gm_heal(uint64_t actor_id) {
+    const auto it = npcs_.find(actor_id);
+    if (it == npcs_.end()) return true;   // it has never been in a fight: its health is full
+    Npc& n = *it->second;
+    if (n.dead) return false;
+    if (const stats::StatValue* max = n.cs->find(data_.ids().max_health)) {
+        n.cs->set_current(content::kGuidHealth, max->value);
+        write_stat(registry_, actor_id, content::kGuidHealth, max->value);
+    }
+    return true;
+}
+
+CombatWorld::GmReset CombatWorld::gm_reset(uint64_t actor_id, double now) {
+    const auto it = npcs_.find(actor_id);
+    if (it == npcs_.end()) return GmReset::Standing;   // it has never been in a fight: no threat to clear, health full
+    Npc& n = *it->second;
+    if (n.dead) return GmReset::Dead;
+    n.ai.reset_now();
+    begin_reset(n, now);   // healed, its flags down, an attack under way stopped, and sent home
+    const npc::Mover* m = npcs_world_ ? npcs_world_->mover(actor_id) : nullptr;
+    if (m && m->moving()) return GmReset::Walking;
+    // no way home on foot (or none to walk): it is home as far as the fight goes; the caller stands it at its spawn point
+    n.ai.revive();
+    n.returning = false;
+    if (npcs_world_) npcs_world_->release(actor_id);
+    return GmReset::Standing;
 }
 
 // ---- thinking -------------------------------------------------------------------------------------------------------------------

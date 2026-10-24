@@ -673,6 +673,12 @@ dist\services\worldctl.exe tp cyb -777664 616578 16000   # a point with z
 dist\services\worldctl.exe speed cyb 5                   # run speed x5 until relog; "speed cyb 1" resets
 dist\services\worldctl.exe place-station joeva Plot_17_Service CraftingStation_Weaponsmithing_T3   # an artisan building's station on a free plot of a Village or a Town
 dist\services\worldctl.exe remove-station joeva Plot_17_Service                                    # ... and off again (placed stations are not saved)
+dist\services\worldctl.exe npc kill 16795192             # a creature by its actor id (the world stream and Inspect give it): a corpse with its loot, open to every player in the world, no experience
+dist\services\worldctl.exe npc respawn 16795192          # a dead creature is made again at its spawn point now; a living one is replaced by a fresh one (the answer gives the new id)
+dist\services\worldctl.exe npc reset 16795192            # back to its spawn point at a run, healed, its threat cleared, its leash centred there again
+dist\services\worldctl.exe npc heal 16795192             # full health
+dist\services\worldctl.exe npc despawn 16795192          # out of the world now; its spawn point makes it again on its usual timer
+dist\services\worldctl.exe npc move 16795192 -777664 616578   # stood at a point (z: the ground; or give it as a fourth number); its leash is centred there, its spawn point stays
 ```
 
 Exit status: 0 done, 1 worldd refused it or could not be reached, 2 the command line is wrong.
@@ -683,6 +689,37 @@ or `AOC_GM_COMMANDS=1` (off by default; `launch_nodes1.bat` turns it on). `Serve
 `ServerTeleportPlayer` names characters separated by commas, semicolons or spaces. **Whether the shipping client's console can send them at all is not known**: worldd logs
 every one it receives, with its parameters, switch or no switch (`[gm] cyb: the client sent ServerTeleportXYZ (X=... Y=... Z=...): answering` or `refused: GM commands are off`),
 so a test settles it. The admin API does not depend on the switch.
+
+## The world stream (a read-only view of the world for admin tools)
+
+worldd also serves a stream of the world for tools that watch it, `WorldStreamService` (`proto/internal/aoc/worldadmin/v1/worldadmin.proto`, generated Go in `gen/aoc/worldadmin/v1`). It is a gRPC server of its own on
+`127.0.0.1:50057` (`AOC_WORLD_STREAM_ADDR`, or `worldd --world-stream <addr>`; `--no-world-stream` turns it off; a non-loopback address is logged as a warning), so streams that hold threads cannot starve the admin API.
+Calls carry the service token exactly as the admin API's do (without it, or with another, the call is refused with `Unauthenticated`, counted and logged at most once a second). Nothing in it changes the world.
+
+- `Subscribe(area, detail, density_cell_cm, layers)`: a stream of frames, five a second at most. The area is a box in cm (min inclusive, max exclusive, at most 100 km on a side), the layers choose players, NPCs, resource nodes,
+  mounts and loot piles (0: all). With `detail` entities the first frame is a full snapshot of the area (each entity: id, kind, x y z in cm, facing in 8 bits, state bits for in combat, dead and mounted, health in percent, level;
+  a player's name once), and each later frame is a delta against what the subscriber was last sent: the entities that are new or differ and the ids that left the area or the world. A frame goes out when something changed and at
+  least every 2 s (an empty delta). Frames are numbered from 1, and a reader that sees another seq than the one it expects subscribes again. With `detail` density the frames are counts per cell (players, NPCs that are not dead,
+  resource nodes) for cells of 200, 500 or 1,000 m, whole, when the counts changed. Every frame carries worldd's numbers (`StreamStats`).
+- `Inspect(id)`: one entity as worldd knows it now. An NPC, node, mount or pile: name, Blueprint, level, health, AI state, target and threat table, home (the leash centre) and spawn point, aggro and leash radius, respawn time and rule, loot tables, and for a dead creature its corpse and its respawn timer. A player:
+  name, character guid, level, mounted, dead and run speed. `NotFound` for an id that is not in the world.
+- `Search(query, limit)`: players, NPCs, nodes, mounts and piles by a case-insensitive part of the name (2 characters at least, at most 50 results, players first, then by name; `truncated` says there were more).
+- `GetStatus`: the counts (players, NPCs, resource nodes, mounts), the cost of a publish on worldd's network thread (smoothed, and the worst of the last minute or two), the loop's work, the publish count and the streams open.
+
+A bad request is `InvalidArgument` with its reason (an empty or oversized area, a density cell that is not 20000, 50000 or 100000 cm, a grid of more than 65,536 cells, an unknown layer bit, a query that is too short). At most 8 streams
+are open at once (`ResourceExhausted` for the next). A stream that stops reading holds one gRPC thread and nothing else: worldd never waits for it.
+
+**`worldctl watch`** subscribes and prints one line a second: the frames that came and what they changed, the entities it holds by kind, the stream's bandwidth, and the publish cost `GetStatus` reports. It checks the frames'
+sequence and subscribes again after a gap or when worldd goes away for a moment.
+
+```powershell
+dist\services\worldctl.exe watch                                       # the whole world, until Ctrl+C
+dist\services\worldctl.exe watch --area -2000000,-2000000,2000000,2000000 --seconds 30   # a 40 km square (cm), for 30 seconds
+dist\services\worldctl.exe watch --layers players,npcs                 # only those kinds
+dist\services\worldctl.exe watch --density --cell 100000               # counts per 1 km cell
+```
+
+It finds the stream at `--addr` / `AOC_WORLD_STREAM_ADDR` and the token as the other `worldctl` commands do.
 
 ## City node data (Nodes 1, stage 1, contentc version 12)
 

@@ -44,6 +44,28 @@ service WorldAdminService {
   rpc PlaceStation(PlaceStationRequest) returns (PlaceStationResponse);
   // Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
   rpc RemoveStation(RemoveStationRequest) returns (RemoveStationResponse);
+
+  // ---- NPC actions: a game master's tools on one creature. Each takes the creature's actor id, as the world stream and Inspect give it, and is applied on the network thread like the
+  // calls above. NotFound for an id that is not in the world; InvalidArgument for an actor that is not a creature (a player, a resource node, a mount, a station) and for a point
+  // with no ground; FailedPrecondition for a state the action cannot work in (a dead creature cannot be healed, reset or moved; a creature with no spawn point cannot be made again).
+  // Every answer says in one plain sentence what was done.
+
+  // Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
+  // respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
+  // experience.
+  rpc KillNpc(KillNpcRequest) returns (KillNpcResponse);
+  // A dead creature (its corpse still stands, or only its respawn timer is left: the id of the dead one is known until its spawn point has made it again) is made again at its spawn
+  // point now, without waiting for the timer. A living creature is replaced by a fresh one at its spawn point: the answer carries the new actor id.
+  rpc RespawnNpc(RespawnNpcRequest) returns (RespawnNpcResponse);
+  // A living creature goes back to its spawn point at a run, at full health, its threat table cleared and its leash centred on its spawn point again.
+  rpc ResetNpc(ResetNpcRequest) returns (ResetNpcResponse);
+  // A living creature's health goes to full.
+  rpc HealNpc(HealNpcRequest) returns (HealNpcResponse);
+  // Takes a creature out of the world now (its corpse too). Its spawn point makes it again on its usual respawn timer.
+  rpc DespawnNpc(DespawnNpcRequest) returns (DespawnNpcResponse);
+  // Puts a living creature at a point at once. It stands there, and its leash and its walk home are centred on the point from now on, so a fight leashes it back to the point and not
+  // to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
+  rpc MoveNpc(MoveNpcRequest) returns (MoveNpcResponse);
 }
 
 message Position {
@@ -167,4 +189,298 @@ message GiveItemResponse {
   int64 item_guid = 3;
   int32 count = 4;
   string container = 5;   // where the first stack went: Backpack or a resource container
+}
+
+// The NPC actions' requests name a creature by its actor id; every answer carries the creature's id, its nameplate, where it stands (or stood) and one plain sentence of what was done.
+message KillNpcRequest {
+  uint64 id = 1; // the creature's actor id
+}
+
+message KillNpcResponse {
+  uint64 id = 1;
+  string name = 2;
+  Position position = 3;
+  string result = 4;
+  uint32 loot_stacks = 5;        // the stacks on its corpse
+  double respawn_in_seconds = 6; // until its spawn point makes it again (0: it does not)
+}
+
+message RespawnNpcRequest {
+  uint64 id = 1;
+}
+
+message RespawnNpcResponse {
+  uint64 id = 1;         // the actor id of the creature that was made: a new one for a dead creature and for a living one it replaced
+  string name = 2;
+  Position position = 3; // its spawn point
+  string result = 4;
+}
+
+message ResetNpcRequest {
+  uint64 id = 1;
+}
+
+message ResetNpcResponse {
+  uint64 id = 1;
+  string name = 2;
+  Position position = 3; // where it stands as the call returns, on its way home
+  string result = 4;
+}
+
+message HealNpcRequest {
+  uint64 id = 1;
+}
+
+message HealNpcResponse {
+  uint64 id = 1;
+  string name = 2;
+  Position position = 3;
+  string result = 4;
+}
+
+message DespawnNpcRequest {
+  uint64 id = 1;
+}
+
+message DespawnNpcResponse {
+  uint64 id = 1;
+  string name = 2;
+  Position position = 3;         // where it stood
+  string result = 4;
+  double respawn_in_seconds = 5; // until its spawn point makes it again (0: it does not)
+}
+
+message MoveNpcRequest {
+  uint64 id = 1;
+  Point point = 2; // x, y and z in cm; has_z false: the ground under (x, y)
+}
+
+message MoveNpcResponse {
+  uint64 id = 1;
+  string name = 2;
+  Position position = 3; // where it stands now
+  string result = 4;
+  Position from = 5;     // where it stood
+}
+
+// ---- the world stream ---------------------------------------------------------------------------------------------------------------------
+
+// Internal: worldd's world stream, a read-only view of the world for admin tools (services/cmd/worldctl `watch` is the reference consumer). Nothing here changes the world.
+// worldd serves it on AOC_WORLD_STREAM_ADDR (default 127.0.0.1:50057), a gRPC server of its own beside the admin API, so that streams holding threads cannot starve the admin
+// calls. Every call carries the service token (internal/svcauth); without it the call is refused with Unauthenticated.
+//
+// Publishing. Five times a second worldd's network thread copies a compact snapshot of the world (players, NPCs, resource nodes, mounts and loot piles) into a double buffer, in a
+// fraction of a millisecond; the gRPC threads work out from the newest snapshot what each subscriber is owed and write it. worldd never waits for a subscriber: one that falls
+// behind is sent, when it can take it, the difference between the newest snapshot and what it was last sent, so nothing is lost by skipping.
+//
+// Sequence. A stream numbers its frames: seq is 1 for the first frame and one more for each frame after it. The first frame is a full EntitySnapshot (STREAM_DETAIL_ENTITIES) or a
+// DensityGrid (STREAM_DETAIL_DENSITY); with entities, each later frame is an EntityDelta against the frame before it. A frame is sent when something in the area changed, and at
+// least every 2 seconds (an empty delta: the heartbeat). A reader that sees any other seq than the one it expects drops the stream and subscribes again. `tick` is the publish
+// the frame was made from: it may jump (a slow subscriber) and says nothing about gaps.
+//
+// Ids. An entity's id is its actor's id in the world (a player's is its pawn's); ids are unique across kinds and stay the same while the actor stands. A creature that respawns is a
+// new actor with a new id.
+//
+// Errors: InvalidArgument for a request worldd refuses (an area that is empty or larger than 100 km on a side, a cell size that is not one of the three, an unknown detail or
+// layer, a query shorter than 2 characters), with its reason; NotFound for an Inspect of an id that is not in the world; ResourceExhausted when 8 streams are open already;
+// Unavailable when worldd is stopping or its network thread did not take the call in time.
+service WorldStreamService {
+  // The entities (or a density grid) of an area as a stream of frames, five a second at most.
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+  // The state of one entity as worldd knows it now, read on the network thread.
+  rpc Inspect(InspectRequest) returns (InspectResponse);
+  // Players, NPCs and resource nodes by name (a case-insensitive part of a name), at most `limit`.
+  rpc Search(SearchRequest) returns (SearchResponse);
+  // worldd's numbers as of the newest snapshot (no network-thread hop).
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+enum EntityKind {
+  ENTITY_KIND_UNSPECIFIED = 0;
+  ENTITY_KIND_PLAYER = 1;
+  ENTITY_KIND_NPC = 2;           // a dead NPC stays an NPC with ENTITY_STATE_DEAD until its body goes
+  ENTITY_KIND_RESOURCE_NODE = 3; // a gatherable resource node (the painted trees, plants and stones are not actors)
+  ENTITY_KIND_MOUNT = 4;
+  ENTITY_KIND_LOOT_PILE = 5;
+}
+
+// Bits of Entity.state.
+enum EntityState {
+  ENTITY_STATE_UNSPECIFIED = 0;
+  ENTITY_STATE_IN_COMBAT = 1;
+  ENTITY_STATE_DEAD = 2;
+  ENTITY_STATE_MOUNTED = 4; // a player on a mount
+}
+
+enum StreamDetail {
+  STREAM_DETAIL_UNSPECIFIED = 0;
+  STREAM_DETAIL_ENTITIES = 1; // single entities: an EntitySnapshot, then EntityDeltas
+  STREAM_DETAIL_DENSITY = 2;  // counts per cell: a DensityGrid in every frame sent (a wide, coarse view)
+}
+
+// Bits of SubscribeRequest.layers: which kinds a stream carries.
+enum StreamLayer {
+  STREAM_LAYER_UNSPECIFIED = 0;
+  STREAM_LAYER_PLAYERS = 1;
+  STREAM_LAYER_NPCS = 2;
+  STREAM_LAYER_RESOURCE_NODES = 4;
+  STREAM_LAYER_MOUNTS = 8;
+  STREAM_LAYER_LOOT_PILES = 16;
+  STREAM_LAYER_ALL = 31;
+}
+
+// A box in world centimetres: min inclusive, max exclusive.
+message AreaBox {
+  sint32 min_x_cm = 1;
+  sint32 min_y_cm = 2;
+  sint32 max_x_cm = 3;
+  sint32 max_y_cm = 4;
+}
+
+message SubscribeRequest {
+  AreaBox area = 1;           // at most 100 km on a side
+  StreamDetail detail = 2;    // 0 means STREAM_DETAIL_ENTITIES
+  uint32 density_cell_cm = 3; // STREAM_DETAIL_DENSITY only: 20000, 50000 or 100000 (0 means 50000); the grid may have at most 65,536 cells
+  uint32 layers = 4;          // StreamLayer bits; 0 means STREAM_LAYER_ALL
+}
+
+message Entity {
+  uint64 id = 1;
+  EntityKind kind = 2;
+  sint32 x_cm = 3;
+  sint32 y_cm = 4;
+  sint32 z_cm = 5;
+  uint32 yaw = 6;        // 8 bits: 0..255 is 0..360 degrees
+  uint32 state = 7;      // EntityState bits
+  uint32 health_pct = 8; // 0..100; 255 for an entity whose health is not tracked (a player's, a resource node's)
+  uint32 level = 9;
+  string name = 10;      // players only, and only in the frame in which the entity first appears for this subscriber (empty in an update: unchanged)
+}
+
+message EntitySnapshot {
+  repeated Entity entities = 1;
+}
+
+// What changed since the stream's last frame: the entities that are new or differ (whole records) and the ids that left the area or the world.
+message EntityDelta {
+  repeated Entity changed = 1;
+  repeated uint64 removed = 2;
+}
+
+// Counts per cell, row-major (index = row * cols + col; a row is a step in y). Cell (col, row) covers [origin + col * cell, origin + (col + 1) * cell) in x and the same in y. The
+// origin is the area's minimum floored to a multiple of cell_cm. Each list has cols * rows counts.
+message DensityGrid {
+  uint32 cell_cm = 1;
+  sint32 origin_x_cm = 2;
+  sint32 origin_y_cm = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+  repeated uint32 players = 6;
+  repeated uint32 npcs = 7;            // NPCs that are not dead
+  repeated uint32 resource_nodes = 8;
+}
+
+// worldd's numbers.
+message StreamStats {
+  float tick_ms = 1;         // the network thread's work in one pass of its loop (datagrams, the world's tick, admin calls, the publish), smoothed
+  float publish_ms = 2;      // the network thread's cost of one publish, smoothed (the budget is 0.5)
+  float publish_max_ms = 3;  // ... and the worst of the last minute or two
+  uint32 players = 4;
+  uint32 npcs = 5;           // NPCs in the world now (a dead one counts until its body goes)
+  uint32 resource_nodes = 6;
+  uint32 mounts = 7;
+}
+
+// One frame of a Subscribe stream.
+message SubscribeResponse {
+  uint64 seq = 1;
+  uint64 tick = 2;
+  double world_time = 3; // worldd's world clock, seconds
+  oneof body {
+    EntitySnapshot snapshot = 4;
+    EntityDelta delta = 5;
+    DensityGrid density = 6;
+  }
+  StreamStats stats = 7;
+}
+
+message InspectRequest {
+  uint64 id = 1;
+}
+
+message ThreatEntry {
+  uint64 id = 1;
+  double threat = 2;
+}
+
+// An NPC, resource node, mount or loot pile.
+message ActorDetail {
+  string name = 1;
+  string archetype = 2;
+  string source = 3;               // where it came from: "data" (the design data), "captured" or "runtime" (made by the server)
+  uint32 level = 4;
+  double health = 5;               // 0 for an NPC that has not been in a fight (its health is full)
+  double max_health = 6;
+  string ai_state = 7;             // idle, chase, attack, reset, dead; "none" for an actor that has not been in a fight
+  uint64 target = 8;               // the entity it fights now (0: nobody)
+  repeated ThreatEntry threat = 9; // its threat table, most first
+  sint32 home_x_cm = 10;           // its leash centre, and where it walks back to: where it spawned, until a game master moves it (MoveNpc)
+  sint32 home_y_cm = 11;
+  sint32 home_z_cm = 12;
+  double distance_from_home_cm = 13;
+  double aggro_radius_cm = 14;     // 0: the creature kind's own
+  double leash_radius_cm = 15;     // how far from its home it chases: its own once it has fought, else the data's (0: the default)
+  double respawn_seconds = 16;
+  string respawn_rule = 17;        // Refill, AllDead, NoRespawn
+  repeated int64 loot_tables = 18;
+  bool combatant = 19;             // it has been in a fight, so its health and AI state are live
+  bool standing = 20;              // it has no life of its own: it stands where it is
+  sint32 spawn_x_cm = 21;          // its spawn point: where it is made again after a death (the same as its home until a game master moves it)
+  sint32 spawn_y_cm = 22;
+  sint32 spawn_z_cm = 23;
+  bool corpse = 24;                // it is dead and its corpse still stands
+  uint32 corpse_loot_stacks = 25;  // the stacks left on its corpse
+  double corpse_closes_in_seconds = 26;  // until the corpse is taken off the world
+  double respawn_in_seconds = 27;  // a dead creature: until its spawn point makes it again (0: not scheduled)
+}
+
+message PlayerDetail {
+  string name = 1;
+  string character_id = 2; // the character's guid (32 hex digits)
+  uint32 level = 3;
+  bool mounted = 4;
+  bool dead = 5;
+  double move_speed_multiplier = 6; // the GM run speed; 1 for none
+}
+
+message InspectResponse {
+  Entity entity = 1;
+  oneof detail {
+    ActorDetail actor = 2;
+    PlayerDetail player = 3;
+  }
+}
+
+message SearchRequest {
+  string query = 1; // at least 2 characters
+  uint32 limit = 2; // 1..50 (0 means 20)
+}
+
+message SearchResult {
+  Entity entity = 1;
+  string name = 2; // the entity's name (an NPC's too)
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1; // players first, then by name
+  bool truncated = 2;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  StreamStats stats = 1;
+  double world_time = 2;
+  uint64 tick = 3;        // publishes since worldd started
+  uint32 subscribers = 4; // Subscribe streams open now
 }

@@ -49,6 +49,7 @@ replication library (`libs/aocnet/protocol/repl`, plan A4R) and the connection's
 | `world/node_layout_data`, `world/node_scenery`, `world/node_origins`, `libs/aocnet` `repl/node_layout` | Nodes 1, stage 3a: the towns' scenery: the items of a node's `ANodeLayoutReplicator.LayoutAssetSetGuids` built from content.db (the layout's props and the pre-built plots' buildings, filtered by the asset definitions' level, culture, type, season and biome), the payload writer (the custom `NetDeltaSerialize` header on the fast array), one replicator actor per node awake within 1.45 km, a level change as a new full payload (README, "The towns' scenery") |
 | `spawns/node_population`, `spawns/node_populations`, `world/roads` | Nodes 1, stage 3b: the towns' people: the layout and building population sets of a node at its level (placed at the record's frame and the plots' transforms, judged in the node's own spawn context, the siege tags any-of), the live manager that makes the registry match when a node's level changes (the same NPC stays, a gone point's NPC leaves, a new one arrives; respawns from the current selection; the ground's pending rules), and the roads by node level (README, "The towns' people and the roads by node level") |
 | `session/gm_travel`, `svc/world_admin`, `world/places` | The GM travel tools (teleport and run speed): the admin API (`WorldAdminService`, served on `AOC_WORLD_ADMIN_ADDR`, default `127.0.0.1:50056`, service token; every call is applied on the network thread through `AdminQueue`), the places (the city nodes that have a place on the Verra map, `login`, and `garden`, the centre of G1's GM garden, when `--gm-garden` placed one), `GmTravel` (the work, shared with the client's own GM RPCs behind `--gm-commands`), and `services\cmd\worldctl` as its command line (below) |
+| `world/map_stream`, `svc/world_stream`, `svc/world_stream_impl` | The world stream: a read-only view of the world for admin tools (`WorldStreamService`, served on `AOC_WORLD_STREAM_ADDR`, default `127.0.0.1:50057`, service token): a compact snapshot of the players, NPCs, resource nodes, mounts and loot piles built by the network thread five times a second, the frames each subscriber is owed (a full snapshot, then deltas; or counts per cell), and Inspect, Search and GetStatus (below) |
 | `vendor/node_tax` | Plan E1 (fix 4): the tax table the vendor window waits for: retail's 78 tags (`node_tax_table.h`, generated from the retail capture), every tax 0%, for the node the client asked for (below) |
 | `stats/` | The stat engine (plan B3; a library of its own, `worldd_stats`): the reader and interpreter of the compiled stat program (`stat_program.h`, `stat_engine.h`), the worn items' contribution (`gear.h`) and one player's stats as the client holds them (`character_stats.h`); [README](stats/README.md), and "Stats" below |
 
@@ -1303,6 +1304,66 @@ recipes' reward tables (`craft_*`; `internal/content/crafting.go` says what each
 Agricultural Supply) on a free service plot of a Village or a Town: the actor stands where the building would put it (the plot's transform in the node's frame and the set member's offset). `worldctl remove-station <node> <plot>`
 takes it off. A placed station stays until it is removed, until its node drops below a Village or the plot is not free any more, or until worldd stops: placed stations are not saved.
 
+### The world stream: a read-only view of the world for admin tools
+
+worldd serves `WorldStreamService` (`proto/internal/aoc/worldadmin/v1/worldadmin.proto`, beside `WorldAdminService`) on `--world-stream` / `AOC_WORLD_STREAM_ADDR` (default `127.0.0.1:50057`; `--no-world-stream` turns it off)
+from a gRPC server of its own, so streams that hold threads cannot starve the admin calls. Calls carry the service token, as every internal call does. Nothing in it changes the world. `worldctl watch` is the reference consumer.
+
+**What it carries.** An entity is a player, an NPC (a dead one stays an NPC with the dead bit until its body goes), a resource node, a mount or a loot pile; the painted trees, plants and stones are not actors and are not in it.
+Each is a 32-byte record: the id (the actor's id; a player's is its pawn's), the kind, x, y and z in whole cm, the facing in 8 bits, the state bits (in combat, dead, mounted), the health in percent (255 when it is not tracked: a player's,
+a resource node's, a mount's and a pile's) and the level. A player's name comes once, in the frame in which the player first appears for that subscriber.
+
+**Publishing.** The registry tells a mirror (`world::mapstream::Mirror`, an `ActorRegistry::Observer`) of every actor it adds, changes and removes (every change the replication counts goes through `ActorRegistry::touch`, a
+`move` and a `modify` among them), and the mirror keeps one 32-byte record per mapped actor. `publish()` (`svc/world_stream.h`) runs in every pass of the network thread's loop and, five times a second, copies the mirror into a
+snapshot, puts the fights' overlay on it and appends the players (`world/map_stream.h`). The overlay is what the registry cannot say cheaply: an NPC's health, whether it is in a fight and whether it is dead come from the combat
+world, which lists the NPCs that have been in a fight (`CombatWorld::summaries`: a few, not thousands); every other NPC is alive, at full health and out of combat. The snapshot goes into a double buffer (buffers that no stream
+holds are built into again) and the streams are woken. worldd never waits for a subscriber: each stream works out its own frame on a gRPC thread, and a stream that stops reading holds only its own thread. At most 8 streams are
+open at once (`ResourceExhausted` for the next). The cost of every publish is measured and logged once a minute (`[stream] last 60 s: ...`: the average, the worst, the sizes), and `GetStatus` carries it. Once a minute the mirror is
+also compared with the registry (a walk over it, outside the publish's cost) and rebuilt if a record differs; the log line says how many did.
+
+**Cost.** On the Riverlands (12,584 mapped actors: 12,145 NPCs and 439 resource nodes, no player) a publish took 0.03 ms on average and 0.09 ms at most over two minutes (301 and 300 publishes), against the 0.5 ms it is allowed;
+the mirror check found no difference. A first version that walked the registry at every publish took 0.60 ms on average and 1.50 ms at most for the same world, which is why the mirror exists. The first frame of a stream over the
+whole area is 330 KB (about 26 bytes an entity); a world at rest then costs a heartbeat every 2 s.
+
+**Frames.** `Subscribe(area, detail, density_cell_cm, layers)` returns frames numbered from 1. The area is a box in cm (min inclusive, max exclusive, at most 100 km on a side); the layers choose the kinds. The first frame is a full
+snapshot of the area; each later frame is a delta against what the subscriber was last sent (the entities that are new or differ, whole, and the ids that left the area or the world), so a subscriber that read slowly loses nothing.
+A frame is sent when something changed, and at least every 2 s (an empty delta). A reader that sees a seq it did not expect subscribes again. With `detail` = density the frames are counts per cell (players, NPCs that are not dead,
+resource nodes) for cells of 200, 500 or 1,000 m (20000, 50000 or 100000 cm), whole, when the counts changed; the grid may have at most 65,536 cells.
+
+**On demand.** `Inspect(id)` is read on the network thread, like an admin call: an NPC, node, mount or pile gives its name, Blueprint, level, health, AI state, target and threat table, home (the leash centre) and spawn point, aggro and leash radius, respawn time
+and rule and loot tables, and for a dead creature its corpse and its respawn timer; a player gives its name, character guid, level, state and run speed. `Search(query, limit)` finds players, NPCs, nodes, mounts and piles by a case-insensitive part of the name (2 characters at least, 50 results
+at most, players first). `GetStatus` reads the newest snapshot: the counts, the publish cost (smoothed and the worst of the last minute or two), the loop's work, the publish count and the streams open.
+
+Its code is a header of its own, included from `svc/world_admin.cpp`, so worldd's CMake file did not change: `world/map_stream.h` (the snapshot, the builder, the per-subscriber cursor and the request checks, plain C++),
+`svc/world_stream.h` (the interface) and `svc/world_stream_impl.h` (the gRPC server, the double buffer and the publisher).
+
+### NPC actions: a game master's hands on one creature
+
+Six `WorldAdminService` methods act on one creature, named by its actor id (the id the world stream and `Inspect` give): `KillNpc`, `RespawnNpc`, `ResetNpc`, `HealNpc`, `DespawnNpc` and `MoveNpc`; `worldctl npc` is their
+command line. Each is applied on the network thread between two ticks, like the travel tools, and answers with one plain sentence of what it did. The work is `GmTravel` (`session/gm_travel.cpp`); the fight, movement and respawn
+machinery it uses is the one the game's own deaths, resets and respawns run on.
+
+- **Kill** goes through the combat path as a lethal blow does (`CombatWorld::gm_kill`: health 0, the death flags, the AI stopped, the movement halted, the death hook called): the same corpse, the same corpse timer and the same respawn
+  timer. Nobody fought it, so the corpse is nobody's: **the loot is open to every player in the world at that moment** (they are in the loot interaction's list, as the fighters of a normal kill are), **rolled as for a player of the
+  creature's own level** (no level gap takes anything off), and **nobody is given experience**. With nobody in the world the roll is made and kept on the corpse (the log and `Inspect` say what it holds) but the corpse gets no
+  loot components. A creature the combat data has no stats for (a villager of a town) is refused.
+- **Respawn now** works on a dead creature, a corpse that still stands or one whose body is gone and only its timer is left (the aftermath keeps the dead one's actor id with the pending respawn): its spawn point makes it again at
+  once, and the corpse, if there is one, goes by its own time. A living creature is replaced: the fresh one is made first, and the old one removed only when it was (a spawn point that cannot make one leaves the old one standing). The
+  answer carries the new creature's actor id (a respawn is a new actor).
+- **Reset** sends a living creature home as a broken leash does: its threat table is cleared, it is healed to full and its flags go down at once, an attack under way is stopped, and it walks to its spawn point at a run; its leash
+  centre and its walk home are its spawn point again (a creature that was moved goes back to the place it was made at). A creature with no way home on foot is put there.
+- **Heal** puts a living creature's health at its maximum. **Despawn** takes a creature out of the world at once, its corpse with it; its spawn point makes it again on its usual respawn timer (a creature with no spawn point, or
+  with the rule NoRespawn, stays gone; the answer says so).
+- **Move** stands a living creature at a point at once (`z` is the ground under the point when left out: the walking map's floor near the server's ground, a town's floor inside a bowl; a point with no ground, or one whose ground is not
+  loaded, is refused). **The leash starts from the new place**: the creature's home, the centre of its leash and of its wander and the place it walks back to after a fight, is the point from then on, so a chase leashes it back to
+  the point and not to where it came from. **Its spawn point stays its own**: a death and a respawn make it at the place it was made at (`Inspect` shows both: `home` and `spawn`). Whatever it was doing stops (a walk, a turn, a
+  montage that carried it); a chase it was ordered goes on from the new place; a patrolling creature becomes a wandering one about the point. The change is a reliable one, so a client that holds the creature dormant is sent it again.
+- **Refusals** are plain: an unknown id (`NotFound`), an actor that is not a creature (a player, a resource node, a mount, a station: `InvalidArgument`), a dead creature for heal, reset and move (`FailedPrecondition`), a point with no
+  ground (`InvalidArgument`) or whose ground is not loaded (`FailedPrecondition`).
+
+`Inspect` shows the rest: for a dead creature `corpse`, the stacks left on it and the seconds until the body goes, and the seconds until its spawn point makes it again; for every creature its `spawn` point beside its `home`, and the
+leash radius the AI really uses once it has fought. Every action is logged (`[npc] the admin API (...): killed Wolf (actor 123) at (x, y m): ...`).
+
 ## Run
 
 `scripts\services.ps1 run` starts it with the Go services, and
@@ -1321,6 +1382,7 @@ worldd --bind 127.0.0.1:7777 --public-address 127.0.0.1:7777 --mesh 127.0.0.1:50
        [--content-db dist/content/content.db] [--gamestate-mode tier1|tier2|tier3|captured] [--max-move-speed 2135]
        [--area-radius -1|1000] [--gm-garden] [--no-zone-filter]
        [--world-admin 127.0.0.1:50056] [--no-world-admin] [--gm-commands]
+       [--world-stream 127.0.0.1:50057] [--no-world-stream]
 ```
 
 At start it binds the UDP port, registers with mesh (retrying until mesh answers) and sends

@@ -122,6 +122,7 @@ struct DeathEvent {
     const world::NpcInfo*  info = nullptr;    // valid during the call
     const npc::MotionStats* motion = nullptr; // the Blueprint's row (its reward tables ...), null when the table has none
     std::set<uint64_t>     attackers;         // everyone with threat on it: who may loot and gets XP
+    bool                   gm = false;        // a game master killed it (CombatWorld::gm_kill): nobody fought it
 };
 
 struct CombatWorldConfig {
@@ -214,6 +215,15 @@ public:
     double health_of(uint64_t actor_id) const;
     double max_health_of(uint64_t actor_id) const;
     bool   dead(uint64_t actor_id) const;
+    /// What the world stream (world/map_stream.h) shows of an NPC that has been in a fight: its health as a percentage of its maximum, whether the clients are told it is in combat, and
+    /// whether it is dead.  `summaries` appends one row per combatant, in no particular order; an NPC that has never been in a fight has no row (it is alive, at full health and out of combat).
+    struct Summary {
+        uint64_t id = 0;
+        uint8_t  health_pct = 100;
+        bool     in_combat = false;
+        bool     dead = false;
+    };
+    void summaries(std::vector<Summary>& out) const;
     size_t combatants() const { return npcs_.size(); }
     struct Stats {
         uint64_t aggros = 0, resets = 0, kills = 0, npc_attacks = 0, npc_hits = 0, npc_misses = 0, player_hits = 0, refused_no_attack = 0;
@@ -233,6 +243,18 @@ public:
 
     /// Forgets a dead NPC's combatant (part 2: the corpse closed or the NPC respawned).
     void forget(uint64_t actor_id);
+
+    // ---- a game master's hands on an NPC (the admin API's NPC actions; the network thread)
+    /// Kills the NPC as a lethal hit would (its death, its flags and the death hook, which gets `gm` set: nobody fought it).  False, with `why`, for an NPC that has no stats to fight with
+    /// or that is dead already.
+    bool gm_kill(uint64_t actor_id, double now, std::string& why);
+    /// Puts the NPC's health at its maximum.  False for a dead NPC; an NPC that has never been in a fight is at full health already (true).
+    bool gm_heal(uint64_t actor_id);
+    /// How a reset ended: it runs home on foot, it stands (no way home on foot, or it never fought: the caller puts it at home), or it is dead.
+    enum class GmReset : uint8_t { Walking, Standing, Dead };
+    /// The NPC's fight is over as after a broken leash: its threat table is cleared, it is healed and its flags go down, and it is sent home at a run (the NPC world's home: the caller has set
+    /// it).  A combatant that cannot walk home is left idle and healed (Standing).
+    GmReset gm_reset(uint64_t actor_id, double now);
 
 private:
     struct Attack {
@@ -300,7 +322,7 @@ private:
     bool  can_animate(const Npc& n) const;
     bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
     void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now);
-    void  kill(Npc& n, uint64_t killer, double now);
+    void  kill(Npc& n, uint64_t killer, double now, bool gm = false);
     void  begin_reset(Npc& n, double now);
     void  set_flags(Npc& n, bool in_combat, uint64_t target_actor);
     void  fill_huntable_stats(const world::WorldActor& a);

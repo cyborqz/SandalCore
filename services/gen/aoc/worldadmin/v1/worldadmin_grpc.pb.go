@@ -31,6 +31,12 @@ const (
 	WorldAdminService_GiveItem_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
 	WorldAdminService_PlaceStation_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/PlaceStation"
 	WorldAdminService_RemoveStation_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/RemoveStation"
+	WorldAdminService_KillNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
+	WorldAdminService_RespawnNpc_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
+	WorldAdminService_ResetNpc_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
+	WorldAdminService_HealNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/HealNpc"
+	WorldAdminService_DespawnNpc_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/DespawnNpc"
+	WorldAdminService_MoveNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/MoveNpc"
 )
 
 // WorldAdminServiceClient is the client API for WorldAdminService service.
@@ -74,6 +80,22 @@ type WorldAdminServiceClient interface {
 	PlaceStation(ctx context.Context, in *PlaceStationRequest, opts ...grpc.CallOption) (*PlaceStationResponse, error)
 	// Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
 	RemoveStation(ctx context.Context, in *RemoveStationRequest, opts ...grpc.CallOption) (*RemoveStationResponse, error)
+	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
+	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
+	// experience.
+	KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error)
+	// A dead creature (its corpse still stands, or only its respawn timer is left: the id of the dead one is known until its spawn point has made it again) is made again at its spawn
+	// point now, without waiting for the timer. A living creature is replaced by a fresh one at its spawn point: the answer carries the new actor id.
+	RespawnNpc(ctx context.Context, in *RespawnNpcRequest, opts ...grpc.CallOption) (*RespawnNpcResponse, error)
+	// A living creature goes back to its spawn point at a run, at full health, its threat table cleared and its leash centred on its spawn point again.
+	ResetNpc(ctx context.Context, in *ResetNpcRequest, opts ...grpc.CallOption) (*ResetNpcResponse, error)
+	// A living creature's health goes to full.
+	HealNpc(ctx context.Context, in *HealNpcRequest, opts ...grpc.CallOption) (*HealNpcResponse, error)
+	// Takes a creature out of the world now (its corpse too). Its spawn point makes it again on its usual respawn timer.
+	DespawnNpc(ctx context.Context, in *DespawnNpcRequest, opts ...grpc.CallOption) (*DespawnNpcResponse, error)
+	// Puts a living creature at a point at once. It stands there, and its leash and its walk home are centred on the point from now on, so a fight leashes it back to the point and not
+	// to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
+	MoveNpc(ctx context.Context, in *MoveNpcRequest, opts ...grpc.CallOption) (*MoveNpcResponse, error)
 }
 
 // -- CoA & C | Y | B --
@@ -166,6 +188,66 @@ func (c *worldAdminServiceClient) RemoveStation(ctx context.Context, in *RemoveS
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(KillNpcResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_KillNpc_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) RespawnNpc(ctx context.Context, in *RespawnNpcRequest, opts ...grpc.CallOption) (*RespawnNpcResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RespawnNpcResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_RespawnNpc_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) ResetNpc(ctx context.Context, in *ResetNpcRequest, opts ...grpc.CallOption) (*ResetNpcResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetNpcResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ResetNpc_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) HealNpc(ctx context.Context, in *HealNpcRequest, opts ...grpc.CallOption) (*HealNpcResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HealNpcResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_HealNpc_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) DespawnNpc(ctx context.Context, in *DespawnNpcRequest, opts ...grpc.CallOption) (*DespawnNpcResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DespawnNpcResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_DespawnNpc_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) MoveNpc(ctx context.Context, in *MoveNpcRequest, opts ...grpc.CallOption) (*MoveNpcResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MoveNpcResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_MoveNpc_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldAdminServiceServer is the server API for WorldAdminService service.
 // All implementations must embed UnimplementedWorldAdminServiceServer
 // for forward compatibility.
@@ -207,6 +289,22 @@ type WorldAdminServiceServer interface {
 	PlaceStation(context.Context, *PlaceStationRequest) (*PlaceStationResponse, error)
 	// Takes a station placed by PlaceStation off its plot. NotFound when the plot holds none.
 	RemoveStation(context.Context, *RemoveStationRequest) (*RemoveStationResponse, error)
+	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
+	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
+	// experience.
+	KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error)
+	// A dead creature (its corpse still stands, or only its respawn timer is left: the id of the dead one is known until its spawn point has made it again) is made again at its spawn
+	// point now, without waiting for the timer. A living creature is replaced by a fresh one at its spawn point: the answer carries the new actor id.
+	RespawnNpc(context.Context, *RespawnNpcRequest) (*RespawnNpcResponse, error)
+	// A living creature goes back to its spawn point at a run, at full health, its threat table cleared and its leash centred on its spawn point again.
+	ResetNpc(context.Context, *ResetNpcRequest) (*ResetNpcResponse, error)
+	// A living creature's health goes to full.
+	HealNpc(context.Context, *HealNpcRequest) (*HealNpcResponse, error)
+	// Takes a creature out of the world now (its corpse too). Its spawn point makes it again on its usual respawn timer.
+	DespawnNpc(context.Context, *DespawnNpcRequest) (*DespawnNpcResponse, error)
+	// Puts a living creature at a point at once. It stands there, and its leash and its walk home are centred on the point from now on, so a fight leashes it back to the point and not
+	// to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
+	MoveNpc(context.Context, *MoveNpcRequest) (*MoveNpcResponse, error)
 	mustEmbedUnimplementedWorldAdminServiceServer()
 }
 
@@ -240,6 +338,24 @@ func (UnimplementedWorldAdminServiceServer) PlaceStation(context.Context, *Place
 }
 func (UnimplementedWorldAdminServiceServer) RemoveStation(context.Context, *RemoveStationRequest) (*RemoveStationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveStation not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) RespawnNpc(context.Context, *RespawnNpcRequest) (*RespawnNpcResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RespawnNpc not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ResetNpc(context.Context, *ResetNpcRequest) (*ResetNpcResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetNpc not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) HealNpc(context.Context, *HealNpcRequest) (*HealNpcResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HealNpc not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) DespawnNpc(context.Context, *DespawnNpcRequest) (*DespawnNpcResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DespawnNpc not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) MoveNpc(context.Context, *MoveNpcRequest) (*MoveNpcResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MoveNpc not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) mustEmbedUnimplementedWorldAdminServiceServer() {}
 func (UnimplementedWorldAdminServiceServer) testEmbeddedByValue()                           {}
@@ -408,6 +524,114 @@ func _WorldAdminService_RemoveStation_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(KillNpcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).KillNpc(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_KillNpc_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).KillNpc(ctx, req.(*KillNpcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_RespawnNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RespawnNpcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).RespawnNpc(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_RespawnNpc_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).RespawnNpc(ctx, req.(*RespawnNpcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_ResetNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetNpcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ResetNpc(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ResetNpc_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ResetNpc(ctx, req.(*ResetNpcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_HealNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HealNpcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).HealNpc(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_HealNpc_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).HealNpc(ctx, req.(*HealNpcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_DespawnNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DespawnNpcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).DespawnNpc(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_DespawnNpc_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).DespawnNpc(ctx, req.(*DespawnNpcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_MoveNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MoveNpcRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).MoveNpc(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_MoveNpc_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).MoveNpc(ctx, req.(*MoveNpcRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldAdminService_ServiceDesc is the grpc.ServiceDesc for WorldAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -447,7 +671,299 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "RemoveStation",
 			Handler:    _WorldAdminService_RemoveStation_Handler,
 		},
+		{
+			MethodName: "KillNpc",
+			Handler:    _WorldAdminService_KillNpc_Handler,
+		},
+		{
+			MethodName: "RespawnNpc",
+			Handler:    _WorldAdminService_RespawnNpc_Handler,
+		},
+		{
+			MethodName: "ResetNpc",
+			Handler:    _WorldAdminService_ResetNpc_Handler,
+		},
+		{
+			MethodName: "HealNpc",
+			Handler:    _WorldAdminService_HealNpc_Handler,
+		},
+		{
+			MethodName: "DespawnNpc",
+			Handler:    _WorldAdminService_DespawnNpc_Handler,
+		},
+		{
+			MethodName: "MoveNpc",
+			Handler:    _WorldAdminService_MoveNpc_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
+	Metadata: "aoc/worldadmin/v1/worldadmin.proto",
+}
+
+const (
+	WorldStreamService_Subscribe_FullMethodName = "/aoc.worldadmin.v1.WorldStreamService/Subscribe"
+	WorldStreamService_Inspect_FullMethodName   = "/aoc.worldadmin.v1.WorldStreamService/Inspect"
+	WorldStreamService_Search_FullMethodName    = "/aoc.worldadmin.v1.WorldStreamService/Search"
+	WorldStreamService_GetStatus_FullMethodName = "/aoc.worldadmin.v1.WorldStreamService/GetStatus"
+)
+
+// WorldStreamServiceClient is the client API for WorldStreamService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Internal: worldd's world stream, a read-only view of the world for admin tools (services/cmd/worldctl `watch` is the reference consumer). Nothing here changes the world.
+// worldd serves it on AOC_WORLD_STREAM_ADDR (default 127.0.0.1:50057), a gRPC server of its own beside the admin API, so that streams holding threads cannot starve the admin
+// calls. Every call carries the service token (internal/svcauth); without it the call is refused with Unauthenticated.
+//
+// Publishing. Five times a second worldd's network thread copies a compact snapshot of the world (players, NPCs, resource nodes, mounts and loot piles) into a double buffer, in a
+// fraction of a millisecond; the gRPC threads work out from the newest snapshot what each subscriber is owed and write it. worldd never waits for a subscriber: one that falls
+// behind is sent, when it can take it, the difference between the newest snapshot and what it was last sent, so nothing is lost by skipping.
+//
+// Sequence. A stream numbers its frames: seq is 1 for the first frame and one more for each frame after it. The first frame is a full EntitySnapshot (STREAM_DETAIL_ENTITIES) or a
+// DensityGrid (STREAM_DETAIL_DENSITY); with entities, each later frame is an EntityDelta against the frame before it. A frame is sent when something in the area changed, and at
+// least every 2 seconds (an empty delta: the heartbeat). A reader that sees any other seq than the one it expects drops the stream and subscribes again. `tick` is the publish
+// the frame was made from: it may jump (a slow subscriber) and says nothing about gaps.
+//
+// Ids. An entity's id is its actor's id in the world (a player's is its pawn's); ids are unique across kinds and stay the same while the actor stands. A creature that respawns is a
+// new actor with a new id.
+//
+// Errors: InvalidArgument for a request worldd refuses (an area that is empty or larger than 100 km on a side, a cell size that is not one of the three, an unknown detail or
+// layer, a query shorter than 2 characters), with its reason; NotFound for an Inspect of an id that is not in the world; ResourceExhausted when 8 streams are open already;
+// Unavailable when worldd is stopping or its network thread did not take the call in time.
+type WorldStreamServiceClient interface {
+	// The entities (or a density grid) of an area as a stream of frames, five a second at most.
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error)
+	// The state of one entity as worldd knows it now, read on the network thread.
+	Inspect(ctx context.Context, in *InspectRequest, opts ...grpc.CallOption) (*InspectResponse, error)
+	// Players, NPCs and resource nodes by name (a case-insensitive part of a name), at most `limit`.
+	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
+	// worldd's numbers as of the newest snapshot (no network-thread hop).
+	GetStatus(ctx context.Context, in *GetStatusRequest, opts ...grpc.CallOption) (*GetStatusResponse, error)
+}
+
+type worldStreamServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewWorldStreamServiceClient(cc grpc.ClientConnInterface) WorldStreamServiceClient {
+	return &worldStreamServiceClient{cc}
+}
+
+func (c *worldStreamServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &WorldStreamService_ServiceDesc.Streams[0], WorldStreamService_Subscribe_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeRequest, SubscribeResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type WorldStreamService_SubscribeClient = grpc.ServerStreamingClient[SubscribeResponse]
+
+func (c *worldStreamServiceClient) Inspect(ctx context.Context, in *InspectRequest, opts ...grpc.CallOption) (*InspectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InspectResponse)
+	err := c.cc.Invoke(ctx, WorldStreamService_Inspect_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldStreamServiceClient) Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchResponse)
+	err := c.cc.Invoke(ctx, WorldStreamService_Search_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldStreamServiceClient) GetStatus(ctx context.Context, in *GetStatusRequest, opts ...grpc.CallOption) (*GetStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetStatusResponse)
+	err := c.cc.Invoke(ctx, WorldStreamService_GetStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// WorldStreamServiceServer is the server API for WorldStreamService service.
+// All implementations must embed UnimplementedWorldStreamServiceServer
+// for forward compatibility.
+//
+// Internal: worldd's world stream, a read-only view of the world for admin tools (services/cmd/worldctl `watch` is the reference consumer). Nothing here changes the world.
+// worldd serves it on AOC_WORLD_STREAM_ADDR (default 127.0.0.1:50057), a gRPC server of its own beside the admin API, so that streams holding threads cannot starve the admin
+// calls. Every call carries the service token (internal/svcauth); without it the call is refused with Unauthenticated.
+//
+// Publishing. Five times a second worldd's network thread copies a compact snapshot of the world (players, NPCs, resource nodes, mounts and loot piles) into a double buffer, in a
+// fraction of a millisecond; the gRPC threads work out from the newest snapshot what each subscriber is owed and write it. worldd never waits for a subscriber: one that falls
+// behind is sent, when it can take it, the difference between the newest snapshot and what it was last sent, so nothing is lost by skipping.
+//
+// Sequence. A stream numbers its frames: seq is 1 for the first frame and one more for each frame after it. The first frame is a full EntitySnapshot (STREAM_DETAIL_ENTITIES) or a
+// DensityGrid (STREAM_DETAIL_DENSITY); with entities, each later frame is an EntityDelta against the frame before it. A frame is sent when something in the area changed, and at
+// least every 2 seconds (an empty delta: the heartbeat). A reader that sees any other seq than the one it expects drops the stream and subscribes again. `tick` is the publish
+// the frame was made from: it may jump (a slow subscriber) and says nothing about gaps.
+//
+// Ids. An entity's id is its actor's id in the world (a player's is its pawn's); ids are unique across kinds and stay the same while the actor stands. A creature that respawns is a
+// new actor with a new id.
+//
+// Errors: InvalidArgument for a request worldd refuses (an area that is empty or larger than 100 km on a side, a cell size that is not one of the three, an unknown detail or
+// layer, a query shorter than 2 characters), with its reason; NotFound for an Inspect of an id that is not in the world; ResourceExhausted when 8 streams are open already;
+// Unavailable when worldd is stopping or its network thread did not take the call in time.
+type WorldStreamServiceServer interface {
+	// The entities (or a density grid) of an area as a stream of frames, five a second at most.
+	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error
+	// The state of one entity as worldd knows it now, read on the network thread.
+	Inspect(context.Context, *InspectRequest) (*InspectResponse, error)
+	// Players, NPCs and resource nodes by name (a case-insensitive part of a name), at most `limit`.
+	Search(context.Context, *SearchRequest) (*SearchResponse, error)
+	// worldd's numbers as of the newest snapshot (no network-thread hop).
+	GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error)
+	mustEmbedUnimplementedWorldStreamServiceServer()
+}
+
+// UnimplementedWorldStreamServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedWorldStreamServiceServer struct{}
+
+func (UnimplementedWorldStreamServiceServer) Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error {
+	return status.Error(codes.Unimplemented, "method Subscribe not implemented")
+}
+func (UnimplementedWorldStreamServiceServer) Inspect(context.Context, *InspectRequest) (*InspectResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Inspect not implemented")
+}
+func (UnimplementedWorldStreamServiceServer) Search(context.Context, *SearchRequest) (*SearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Search not implemented")
+}
+func (UnimplementedWorldStreamServiceServer) GetStatus(context.Context, *GetStatusRequest) (*GetStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetStatus not implemented")
+}
+func (UnimplementedWorldStreamServiceServer) mustEmbedUnimplementedWorldStreamServiceServer() {}
+func (UnimplementedWorldStreamServiceServer) testEmbeddedByValue()                            {}
+
+// UnsafeWorldStreamServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to WorldStreamServiceServer will
+// result in compilation errors.
+type UnsafeWorldStreamServiceServer interface {
+	mustEmbedUnimplementedWorldStreamServiceServer()
+}
+
+func RegisterWorldStreamServiceServer(s grpc.ServiceRegistrar, srv WorldStreamServiceServer) {
+	// If the following call panics, it indicates UnimplementedWorldStreamServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&WorldStreamService_ServiceDesc, srv)
+}
+
+func _WorldStreamService_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(WorldStreamServiceServer).Subscribe(m, &grpc.GenericServerStream[SubscribeRequest, SubscribeResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type WorldStreamService_SubscribeServer = grpc.ServerStreamingServer[SubscribeResponse]
+
+func _WorldStreamService_Inspect_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InspectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldStreamServiceServer).Inspect(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldStreamService_Inspect_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldStreamServiceServer).Inspect(ctx, req.(*InspectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldStreamService_Search_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldStreamServiceServer).Search(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldStreamService_Search_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldStreamServiceServer).Search(ctx, req.(*SearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldStreamService_GetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldStreamServiceServer).GetStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldStreamService_GetStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldStreamServiceServer).GetStatus(ctx, req.(*GetStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// WorldStreamService_ServiceDesc is the grpc.ServiceDesc for WorldStreamService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var WorldStreamService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "aoc.worldadmin.v1.WorldStreamService",
+	HandlerType: (*WorldStreamServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Inspect",
+			Handler:    _WorldStreamService_Inspect_Handler,
+		},
+		{
+			MethodName: "Search",
+			Handler:    _WorldStreamService_Search_Handler,
+		},
+		{
+			MethodName: "GetStatus",
+			Handler:    _WorldStreamService_GetStatus_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Subscribe",
+			Handler:       _WorldStreamService_Subscribe_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "aoc/worldadmin/v1/worldadmin.proto",
 }

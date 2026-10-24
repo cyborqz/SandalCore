@@ -45,6 +45,14 @@ void NpcAi::revive() {
     pending_fight_ = false;
 }
 
+void NpcAi::reset_now() {
+    if (state_ == State::Dead) return;
+    state_ = State::Reset;
+    threat_.clear();
+    target_ = 0;
+    pending_fight_ = false;
+}
+
 Orders NpcAi::think(const Sense& s) {
     Orders o;
     if (state_ == State::Dead) return o;

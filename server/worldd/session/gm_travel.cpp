@@ -276,6 +276,275 @@ GmItemGrant GmTravel::give_item(const std::string& character, const std::string&
     return out;
 }
 
+// ---- the NPC actions ------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+std::string metres_at(double x, double y) {
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "(%.0f, %.0f m)", x / 100.0, y / 100.0);
+    return buf;
+}
+
+std::string count_of(uint64_t n, const char* one, const char* many) { return std::to_string(n) + " " + (n == 1 ? one : many); }
+
+std::string seconds_of(double s) {
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%.0f s", s);
+    return buf;
+}
+
+/// What a creature is called: its nameplate, else its Blueprint's name.
+std::string npc_name_of(const world::WorldActor& a) {
+    if (!a.npc.name.empty()) return a.npc.name;
+    std::string leaf = spawns::blueprint_leaf(a.npc.archetype);
+    constexpr char kDefault[] = "Default__";   // a class default object's name: "Default__AlphaWolf" is an AlphaWolf
+    if (leaf.compare(0, sizeof kDefault - 1, kDefault) == 0) leaf.erase(0, sizeof kDefault - 1);
+    return leaf.empty() ? std::string("creature") : leaf;
+}
+
+const char* kind_word(world::ActorKind k) {
+    switch (k) {
+        case world::ActorKind::Npc: return "creature";
+        case world::ActorKind::Gatherable: return "resource node";
+        case world::ActorKind::Effect: return "lingering effect";
+        case world::ActorKind::Pile: return "loot pile";
+        case world::ActorKind::Mount: return "mount";
+        case world::ActorKind::NodeLayout: return "town's scenery";
+        case world::ActorKind::Foliage: return "foliage cell";
+        case world::ActorKind::Station: return "crafting station";
+    }
+    return "actor";
+}
+
+/// The creature the call names; null, with the answer's status and message set, when it names none.
+world::WorldActor* npc_named(PlayerWorld& world, const std::vector<PlayerHandle>& players, uint64_t id, GmNpcResult& out) {
+    out.id = id;
+    world::WorldActor* a = world.registry().find(id);
+    if (!a) {
+        for (const PlayerHandle& h : players) {
+            if (h && h.player->bootstrap().setup().guids.pawn.ObjectId == id) {
+                out.status = GmStatus::InvalidArgument;
+                out.message = "actor " + std::to_string(id) + " is the player " + h.player->name() + ", not a creature";
+                return nullptr;
+            }
+        }
+        out.status = GmStatus::NotFound;
+        out.message = "no creature with the actor id " + std::to_string(id) + " is in the world (the world stream and Inspect give the ids; a creature that came back has a new one)";
+        return nullptr;
+    }
+    if (a->kind != world::ActorKind::Npc) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "actor " + std::to_string(id) + " is a " + kind_word(a->kind) + ", not a creature";
+        return nullptr;
+    }
+    out.name = npc_name_of(*a);
+    out.position = {a->x, a->y, a->z};
+    return a;
+}
+
+/// Whether the creature is dead: a fighter at 0 Health, or a corpse the aftermath holds (a hunted huntable's, too).
+bool npc_is_dead(PlayerWorld& world, uint64_t id) {
+    if (world.combat() && world.combat()->dead(id)) return true;
+    const combat::Aftermath* after = world.aftermath();
+    const combat::Corpse* c = after ? after->corpse_of(id) : nullptr;
+    return c && !c->living && !c->is_pile;
+}
+
+GmNpcResult refused(GmNpcResult out, GmStatus status, std::string message) {
+    out.status = status;
+    out.message = std::move(message);
+    return out;
+}
+
+}  // namespace
+
+GmNpcResult GmTravel::kill_npc(uint64_t id, const std::string& by) {
+    GmNpcResult out;
+    const std::vector<PlayerHandle> players = directory_();
+    world::WorldActor* a = npc_named(world_, players, id, out);
+    if (!a) return out;
+    combat::CombatWorld* combat = world_.combat();
+    if (!combat) return refused(out, GmStatus::FailedPrecondition, "the fights are switched off (--no-combat): nothing can be killed");
+    if (npc_is_dead(world_, id)) return refused(out, GmStatus::FailedPrecondition, out.name + " is dead already");
+    const double now = world_.world_clock();
+    std::string why;
+    if (!combat->gm_kill(id, now, why)) return refused(out, GmStatus::InvalidArgument, out.name + ": " + why);
+    combat::Aftermath* after = world_.aftermath();
+    const combat::Corpse* corpse = after ? after->corpse_of(id) : nullptr;
+    out.loot_stacks = corpse ? static_cast<uint32_t>(corpse->loot.size()) : 0;
+    out.respawn_in_seconds = after ? after->respawn_in(id, now) : 0.0;
+    std::string m = out.name + " was killed";
+    if (out.loot_stacks > 0) {
+        m += ": its corpse holds " + count_of(out.loot_stacks, "stack", "stacks") + " of loot" +
+             (corpse->parts ? ", open to every player in the world" : ", and nobody is in the world to take it");
+    } else {
+        m += ": it dropped nothing";
+    }
+    m += out.respawn_in_seconds > 0 ? "; its spawn point makes it again in " + seconds_of(out.respawn_in_seconds) : std::string("; its spawn point does not make it again");
+    out.message = m;
+    spdlog::info("[npc] {}: killed {} (actor {}) at {}: {}", by, log_text(out.name), id, metres_at(a->x, a->y), log_text(out.message));
+    return out;
+}
+
+GmNpcResult GmTravel::respawn_npc(uint64_t id, const std::string& by) {
+    GmNpcResult out;
+    const std::vector<PlayerHandle> players = directory_();
+    combat::Aftermath* after = world_.aftermath();
+    const double now = world_.world_clock();
+    world::WorldActor* a = world_.registry().find(id);
+    uint64_t made = 0;
+    std::string how;
+    if (!a) {
+        // a dead creature whose corpse has gone: only its timer is left, and the timer still knows the id
+        made = after ? after->respawn_now(id, now) : 0;
+        if (made == 0) {
+            npc_named(world_, players, id, out);
+            return out;
+        }
+        how = " was made again at its spawn point now, without waiting for its timer";
+        out.name = "the creature";
+    } else {
+        if (!npc_named(world_, players, id, out)) return out;
+        if (npc_is_dead(world_, id)) {
+            made = after ? after->respawn_now(id, now) : 0;
+            if (made == 0) {
+                if (after && after->refills(a->npc)) return refused(out, GmStatus::FailedPrecondition, out.name + " was made again already (its timer ran out, or a respawn was asked for): look for the new one");
+                return refused(out, GmStatus::FailedPrecondition, out.name + "'s spawn point does not make it again (its respawn rule is NoRespawn, or it has no spawn point)");
+            }
+            how = " was made again at its spawn point now, without waiting for its timer";
+        } else {
+            const uint32_t ref = a->npc.spawn_ref;
+            if (ref == 0) return refused(out, GmStatus::FailedPrecondition, out.name + " has no spawn point to be made again at (it was placed, not spawned)");
+            if (spawns::NodePopulations::is_node_ref(ref)) return refused(out, GmStatus::FailedPrecondition, out.name + " belongs to a town's people: despawn or kill it first, and its node makes it again");
+            made = world_.respawn_npc(ref, now);   // the fresh one first: when the spawn point cannot make it, the old one stays
+            if (made == 0) return refused(out, GmStatus::FailedPrecondition, out.name + "'s spawn point could not make a new one");
+            if (after) after->despawn(id, now, false, nullptr);
+            else world_.registry().remove(id);
+            how = " was replaced by a fresh one at its spawn point";
+        }
+    }
+    if (const world::WorldActor* fresh = world_.registry().find(made)) {
+        out.name = npc_name_of(*fresh);
+        out.position = {fresh->x, fresh->y, fresh->z};
+    }
+    out.id = made;
+    out.message = out.name + how + " (actor " + std::to_string(made) + ")";
+    spdlog::info("[npc] {}: respawned {} (was actor {}, now actor {}) at {}", by, log_text(out.name), id, made, metres_at(out.position.x, out.position.y));
+    return out;
+}
+
+GmNpcResult GmTravel::reset_npc(uint64_t id, const std::string& by) {
+    GmNpcResult out;
+    const std::vector<PlayerHandle> players = directory_();
+    world::WorldActor* a = npc_named(world_, players, id, out);
+    if (!a) return out;
+    if (npc_is_dead(world_, id)) return refused(out, GmStatus::FailedPrecondition, out.name + " is dead: respawn it instead");
+    npc::NpcWorld* npcs = world_.npcs();
+    nav::Vec3 ground_home, ai_home;
+    if (!npcs || !npcs->spawn_point(id, &ground_home, &ai_home)) return refused(out, GmStatus::FailedPrecondition, out.name + " has no walking life in the world to reset (worldd has no ground for it)");
+    const double now = world_.world_clock();
+    // its leash centre is its spawn point again
+    a->npc.home_x = ai_home.x;
+    a->npc.home_y = ai_home.y;
+    a->npc.home_z = ai_home.z;
+    npcs->restore_home(id, nullptr);
+    std::string how;
+    const combat::CombatWorld::GmReset fight = world_.combat() ? world_.combat()->gm_reset(id, now) : combat::CombatWorld::GmReset::Standing;
+    if (fight == combat::CombatWorld::GmReset::Walking) {
+        how = "runs back to its spawn point";
+    } else if (std::hypot(a->x - ground_home.x, a->y - ground_home.y) <= 150.0) {
+        how = "is at its spawn point";
+    } else if (npcs->order_return_home(id)) {
+        how = "runs back to its spawn point";
+    } else {
+        npcs->relocate(id, ground_home.x, ground_home.y, ground_home.z, false);   // no way home on foot: it is put there
+        how = "was put back at its spawn point (there is no way home on foot)";
+    }
+    out.position = {a->x, a->y, a->z};
+    out.message = out.name + " " + how + " " + metres_at(ground_home.x, ground_home.y) + ", at full health and with its threat cleared; its leash is centred there again";
+    spdlog::info("[npc] {}: reset {} (actor {}): {}", by, log_text(out.name), id, log_text(out.message));
+    return out;
+}
+
+GmNpcResult GmTravel::heal_npc(uint64_t id, const std::string& by) {
+    GmNpcResult out;
+    const std::vector<PlayerHandle> players = directory_();
+    world::WorldActor* a = npc_named(world_, players, id, out);
+    if (!a) return out;
+    if (npc_is_dead(world_, id)) return refused(out, GmStatus::FailedPrecondition, out.name + " is dead: respawn it instead");
+    combat::CombatWorld* combat = world_.combat();
+    const double before = combat ? combat->health_of(id) : -1.0;
+    const double max = combat ? combat->max_health_of(id) : -1.0;
+    if (combat) combat->gm_heal(id);
+    if (before < 0 || max <= 0 || before >= max - 0.5) {
+        out.message = out.name + " was at full health already";
+    } else {
+        char buf[96];
+        std::snprintf(buf, sizeof buf, " from %.0f to %.0f health", before, max);
+        out.message = out.name + " was healed" + buf;
+    }
+    spdlog::info("[npc] {}: healed {} (actor {}): {}", by, log_text(out.name), id, log_text(out.message));
+    return out;
+}
+
+GmNpcResult GmTravel::despawn_npc(uint64_t id, const std::string& by) {
+    GmNpcResult out;
+    const std::vector<PlayerHandle> players = directory_();
+    world::WorldActor* a = npc_named(world_, players, id, out);
+    if (!a) return out;
+    const world::NpcInfo info = a->npc;
+    combat::Aftermath* after = world_.aftermath();
+    double secs = 0;
+    if (after) after->despawn(id, world_.world_clock(), true, &secs);
+    else world_.registry().remove(id);
+    out.respawn_in_seconds = secs;
+    std::string m = out.name + " was taken out of the world";
+    if (secs > 0) m += "; its spawn point makes it again in " + seconds_of(secs);
+    else if (info.spawn_ref == 0) m += "; it has no spawn point, so it stays gone until worldd restarts";
+    else m += "; its spawn point does not make it again (its respawn rule is " + (info.respawn_rule.empty() ? std::string("off") : info.respawn_rule) + ")";
+    out.message = m;
+    spdlog::info("[npc] {}: despawned {} (actor {}) at {}: {}", by, log_text(out.name), id, metres_at(out.position.x, out.position.y), log_text(out.message));
+    return out;
+}
+
+GmNpcResult GmTravel::move_npc(uint64_t id, double x, double y, double z, bool has_z, const std::string& by) {
+    GmNpcResult out;
+    const std::vector<PlayerHandle> players = directory_();
+    world::WorldActor* a = npc_named(world_, players, id, out);
+    if (!a) return out;
+    if (npc_is_dead(world_, id)) return refused(out, GmStatus::FailedPrecondition, out.name + " is dead: respawn it instead");
+    if (!std::isfinite(x) || !std::isfinite(y) || (has_z && !std::isfinite(z))) return refused(out, GmStatus::InvalidArgument, "the point is not a finite number");
+    npc::NpcWorld* npcs = world_.npcs();
+    if (!npcs || !npcs->has(id)) return refused(out, GmStatus::FailedPrecondition, out.name + " has no walking life in the world to move (worldd has no ground for it)");
+    double use_z = z;
+    if (!has_z) {
+        if (const auto town = world_.town_ground_at(x, y)) use_z = town->z;   // inside a town's bowl the floor is the town's, not the pit's
+        else if (const auto ground = world_.ground_at(x, y)) use_z = *ground;
+        else return refused(out, GmStatus::InvalidArgument, "the server has no ground at " + coords(x, y) + ": give z");
+    }
+    out.from = {a->x, a->y, a->z};
+    const npc::NpcWorld::RelocateResult r = npcs->relocate(id, x, y, use_z, has_z);
+    switch (r.status) {
+        case npc::NpcWorld::Relocated::Ok: break;
+        case npc::NpcWorld::Relocated::UnknownNpc: return refused(out, GmStatus::NotFound, out.name + " is not held by the NPC world");
+        case npc::NpcWorld::Relocated::WaitingForGround: return refused(out, GmStatus::FailedPrecondition, out.name + " still waits for its ground to load: try again in a moment");
+        case npc::NpcWorld::Relocated::NotLoaded: return refused(out, GmStatus::FailedPrecondition, "the ground at " + coords(x, y) + " is not loaded (it loads around the players): move the creature near one");
+        case npc::NpcWorld::Relocated::NotANumber: return refused(out, GmStatus::InvalidArgument, "the point is not a finite number");
+    }
+    // its leash is centred on the new place from now on (the AI reads the actor's home); its spawn point, where it comes back after a death, is the spawn point's and stays
+    a->npc.home_x = x;
+    a->npc.home_y = y;
+    a->npc.home_z = r.origin_z;
+    out.position = {a->x, a->y, a->z};
+    nav::Vec3 spawn, ignored;
+    npcs->spawn_point(id, &spawn, &ignored);
+    out.message = out.name + " was moved from " + metres_at(out.from.x, out.from.y) + " to " + metres_at(a->x, a->y) + ": it stands there and its leash is centred there now; its spawn point stays " +
+                  metres_at(spawn.x, spawn.y);
+    spdlog::info("[npc] {}: moved {} (actor {}): {}", by, log_text(out.name), id, log_text(out.message));
+    return out;
+}
+
 size_t GmTravel::teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) {
     size_t moved = 0;
     std::string token;

@@ -19,6 +19,7 @@ type Config struct {
 	CityNodeGRPCAddr  string        // AOC_CITYNODE_GRPC_ADDR: the city node service (Nodes 1)
 	CityNodeSeed      string        // AOC_CITYNODE_SEED: the node seed file citynode applies once (default deploy/citynode_seed.json)
 	WorldAdminAddr    string        // AOC_WORLD_ADMIN_ADDR: worldd's admin API (worldctl, the admin app to come); worldd listens here, default 127.0.0.1:50056
+	WorldStreamAddr   string        // AOC_WORLD_STREAM_ADDR: worldd's world stream (worldctl watch, admin tools); worldd listens here, default 127.0.0.1:50057
 	TokenTTL          time.Duration // AOC_TOKEN_TTL, e.g. "24h"
 	ServiceTokenFile  string        // AOC_SERVICE_TOKEN_FILE: the internal services' shared token (internal/svcauth)
 	ContentDB         string        // AOC_CONTENT_DB: the content.db contentc builds; the character service checks new characters against it
@@ -45,6 +46,7 @@ func Load() Config {
 		CityNodeGRPCAddr:  str("AOC_CITYNODE_GRPC_ADDR", "127.0.0.1:50055"),
 		CityNodeSeed:      str("AOC_CITYNODE_SEED", "deploy/citynode_seed.json"),
 		WorldAdminAddr:    str("AOC_WORLD_ADMIN_ADDR", "127.0.0.1:50056"),
+		WorldStreamAddr:   str("AOC_WORLD_STREAM_ADDR", "127.0.0.1:50057"),
 		TokenTTL:          duration("AOC_TOKEN_TTL", 24*time.Hour),
 		ServiceTokenFile:  str("AOC_SERVICE_TOKEN_FILE", "dist/services/service.token"),
 		ContentDB:         str("AOC_CONTENT_DB", "dist/content/content.db"),

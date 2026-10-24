@@ -197,12 +197,16 @@ bool NpcWorld::add(uint64_t actor_id, const NpcMotionSetup& setup, bool* ground_
         }
         pending_by_chunk_[nav_->chunk_at(a->x, a->y)].push_back(actor_id);
         ++pending_count_;
+        n.spawn_home = n.home;
+        n.spawn_ai_home = {a->npc.home_x, a->npc.home_y, a->npc.home_z};
         npcs_.emplace(actor_id, std::move(n));
         if (pending) *pending = true;
         return true;
     }
     const bool found = ground_npc(n, *a);
     if (ground_found) *ground_found = found;
+    n.spawn_home = n.home;   // where it was made: a game master's move changes `home` and leaves this
+    n.spawn_ai_home = {a->npc.home_x, a->npc.home_y, a->npc.home_z};
     npcs_.emplace(actor_id, std::move(n));
     return true;
 }
@@ -343,6 +347,7 @@ void NpcWorld::chunks_resident(const std::vector<nav::ChunkKey>& chunks) {
             if (pending_count_ > 0) --pending_count_;
             const double z_before = a->z;
             ground_npc(n->second, *a);
+            if (!n->second.relocated) n->second.spawn_home = n->second.home;   // (its home as grounded now is where it was made)
             // (the investigation's D1) a view that holds this NPC as a Snapshot or Dormant actor sends it again only when a reliable change happened: grounding that moves it by more
             // than a hand's breadth (a floor under it, a data height that was not the terrain's) is one, or the client keeps showing it at the terrain's height until it wakes
             if (std::fabs(a->z - z_before) > kRegroundReliableCm) registry_.touch(*a, world::Change::State);
@@ -1048,6 +1053,69 @@ bool NpcWorld::set_home(uint64_t id, const nav::Vec3& home) {
     if (it == npcs_.end() || !std::isfinite(home.x) || !std::isfinite(home.y) || !std::isfinite(home.z)) return false;
     it->second.home = home;
     return true;
+}
+
+bool NpcWorld::spawn_point(uint64_t id, nav::Vec3* ground_home, nav::Vec3* ai_home) const {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    if (ground_home) *ground_home = it->second.spawn_home;
+    if (ai_home) *ai_home = it->second.spawn_ai_home;
+    return true;
+}
+
+bool NpcWorld::restore_home(uint64_t id, nav::Vec3* ground_home) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    it->second.home = it->second.spawn_home;
+    if (ground_home) *ground_home = it->second.home;
+    return true;
+}
+
+NpcWorld::RelocateResult NpcWorld::relocate(uint64_t id, double x, double y, double z, bool z_is_origin) {
+    RelocateResult r;
+    const auto it = npcs_.find(id);
+    world::WorldActor* a = registry_.find(id);
+    if (it == npcs_.end() || !a) {
+        r.status = Relocated::UnknownNpc;
+        return r;
+    }
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+        r.status = Relocated::NotANumber;
+        return r;
+    }
+    Npc& n = it->second;
+    if (n.pending_ground) {
+        r.status = Relocated::WaitingForGround;
+        return r;
+    }
+    if (!nav_->ready_at(x, y)) {
+        r.status = Relocated::NotLoaded;
+        return r;
+    }
+    const double foot = n.mover.foot_offset();
+    double gz = z_is_origin ? z - foot : z;
+    if (!z_is_origin) {
+        double floor = 0;
+        if (nav_->ground_height(x, y, z, &floor, 400.0, 400.0)) gz = floor;   // the walking map's floor near the server's ground, when it has one
+    }
+    // the feet are taken from what they were doing: a montage that carried it ends, a turn and a look end, a walk is dropped (a chase it was ordered goes on from here)
+    if (n.rm) finish_root_motion(n, now_);
+    n.turning = false;
+    n.track = nullptr;
+    n.mover.stop();
+    n.mover.place(x, y, gz, n.mover.yaw_degrees());
+    n.home = {x, y, gz};
+    n.relocated = true;
+    if (n.setup.ambient == Ambient::Patrol) n.setup.ambient = Ambient::Wander;   // a route is walked where the data put it: moved, it wanders about its new place
+    n.grounded = true;
+    n.data_feet = gz;
+    n.ground_dz = 0;
+    if (n.mode != Mode::Ordered) go_idle(n);
+    commit(n, now_, true);
+    registry_.touch(*a, world::Change::State);
+    r.ground = n.mover.ground();
+    r.origin_z = n.mover.origin_z();
+    return r;
 }
 
 NpcWorld::Stats NpcWorld::stats() const {

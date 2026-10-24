@@ -75,18 +75,23 @@ void Aftermath::on_death(const DeathEvent& d) {
 
     // who fought it and is here to be rewarded
     std::vector<PlayerPort*> fighters;
-    if (const auto killer = combat_.find_player(d.killer)) fighters.push_back(killer);
-    for (const uint64_t id : d.attackers) {
-        PlayerPort* p = combat_.find_player(id);
-        if (p && std::find(fighters.begin(), fighters.end(), p) == fighters.end()) fighters.push_back(p);
+    if (d.gm) {
+        // a game master's kill: nobody fought it, so every player in the world may take its loot, and nobody is given experience
+        fighters = combat_.players();
+    } else {
+        if (const auto killer = combat_.find_player(d.killer)) fighters.push_back(killer);
+        for (const uint64_t id : d.attackers) {
+            PlayerPort* p = combat_.find_player(id);
+            if (p && std::find(fighters.begin(), fighters.end(), p) == fighters.end()) fighters.push_back(p);
+        }
     }
     for (PlayerPort* p : fighters) c.rights.insert(p->actor_id());
 
     // the respawn: from the death, not from the corpse's closing
-    if (d.info) schedule_respawn(*d.info, d.at);
+    if (d.info) schedule_respawn(*d.info, d.at, d.npc);
 // C.Y.B and C-O-A
 
-    if (book_ && !fighters.empty()) {
+    if (book_ && (!fighters.empty() || d.gm)) {
         Fighter* npc = combat_.fighter_of(d.npc);
         std::string err;
         std::unique_ptr<stats::CharacterStats::Evaluation> ev = npc ? npc->stats().evaluation({}, err) : nullptr;
@@ -94,6 +99,7 @@ void Aftermath::on_death(const DeathEvent& d) {
             std::vector<std::string> tags = d.motion ? tags_of(d.motion->tags) : std::vector<std::string>{};
             double max_level = 1;
             for (PlayerPort* p : fighters) max_level = std::max<double>(max_level, p->fighter().level());
+            if (d.gm) max_level = std::max(1, d.level);   // rolled as for a player of the creature's own level: no level gap takes anything off
             RollContext ctx;
             ctx.npc = ev.get();
             ctx.npc_tags = &tags;
@@ -104,6 +110,7 @@ void Aftermath::on_death(const DeathEvent& d) {
             const int gap = static_cast<int>(std::lround(std::fabs(max_level - static_cast<double>(d.level))));
             looter_note = ", looter level " + std::to_string(static_cast<int>(std::lround(max_level))) + " (" + std::to_string(gap) + " level" + (gap == 1 ? "" : "s") + " apart: Loot_Falloff " +
                           (gap >= 10 ? "0, no gear, recipe or Glint loot" : "1") + ")" + (cfg_.loot_chance_mult != 1.0 ? ", loot chances x" + std::to_string(cfg_.loot_chance_mult).substr(0, 5) : std::string());
+            if (d.gm) looter_note = ", a game master's kill, rolled as for a player of the creature's own level" + (cfg_.loot_chance_mult != 1.0 ? ", loot chances x" + std::to_string(cfg_.loot_chance_mult).substr(0, 5) : std::string());
             if (nodes_) {
                 // the zone of influence where it died: its biome and node answer the tables' node reads
                 const world::NodeSite site = nodes_->node_at(d.position.x, d.position.y);
@@ -152,9 +159,13 @@ void Aftermath::on_death(const DeathEvent& d) {
                 } else {
                     spdlog::warn("[loot] {} ({}) died with {} stack(s) of loot but its corpse takes no components: {}", c.name, d.blueprint, stacks.size(), why);
                 }
+            } else if (!stacks.empty() && d.gm) {
+                // a game master's kill with nobody in the world to take it: the roll stays on the corpse (the log and Inspect say what it holds), but it gets no loot components
+                c.loot = std::move(stacks);
             }
-            // the experience: each fighter's own decay
+            // the experience: each fighter's own decay (a game master's kill gives none)
             for (PlayerPort* p : fighters) {
+                if (d.gm) break;
                 ctx.player_level = p->fighter().level();
                 KillReward kr;
                 kr.npc = d.npc;
@@ -180,19 +191,62 @@ void Aftermath::on_death(const DeathEvent& d) {
         const std::string n = name_of_ ? name_of_(s.item) : std::string();
         items += (items.empty() ? "" : ", ") + (n.empty() ? "item " + std::to_string(s.item) : n) + " x" + std::to_string(s.quantity);
     }
-    spdlog::info("[loot] {} ({}, level {}) died: {} fought it{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", c.name, d.blueprint, d.level, fighters.size(), looter_note, c.loot.size(),
+    const std::string who = d.gm ? std::to_string(fighters.size()) + " player(s) in the world may take its loot" : std::to_string(fighters.size()) + " fought it";
+    spdlog::info("[loot] {} ({}, level {}) died: {}{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", c.name, d.blueprint, d.level, who, looter_note, c.loot.size(),
                  items.empty() ? "" : " (", items, items.empty() ? "" : ")", c.close_at - d.at, respawns_.empty() ? "" : "; its spawn point refills it",
                  huntable ? "; a huntable: its corpse is hunted with a Bow (no loot)" : "");
     corpses_[d.npc] = std::move(c);
 }
 
-void Aftermath::schedule_respawn(const world::NpcInfo& info, double at) {
-    const uint32_t ref = info.spawn_ref;
-    if (!cfg_.respawn || !respawner_ || ref == 0 || info.respawn_rule == "NoRespawn") return;
+bool Aftermath::refills(const world::NpcInfo& info) const {
+    return cfg_.respawn && respawner_ && info.spawn_ref != 0 && info.respawn_rule != "NoRespawn";
+}
+
+double Aftermath::respawn_delay(const world::NpcInfo& info) {
+    if (!refills(info)) return 0.0;
     const double base = info.respawn_seconds > 0 ? info.respawn_seconds : cfg_.default_respawn_seconds;
     const double var = std::max(0.0, info.respawn_variance);
-    const double delay = std::max(cfg_.min_respawn_seconds, base + var * (2.0 * rng_.rand_double() - 1.0));
-    respawns_.push_back({at + delay, ref});
+    return std::max(cfg_.min_respawn_seconds, base + var * (2.0 * rng_.rand_double() - 1.0));
+}
+
+void Aftermath::schedule_respawn(const world::NpcInfo& info, double at, uint64_t npc) {
+    if (!refills(info)) return;
+    respawns_.push_back({at + respawn_delay(info), info.spawn_ref, npc});
+}
+
+double Aftermath::respawn_in(uint64_t npc, double now) const {
+    if (npc == 0) return 0.0;
+    for (const Respawn& r : respawns_) {
+        if (r.npc == npc) return std::max(0.0, r.at - now);
+    }
+    return 0.0;
+}
+
+uint64_t Aftermath::respawn_now(uint64_t npc, double now) {
+    if (npc == 0 || !respawner_) return 0;
+    for (auto it = respawns_.begin(); it != respawns_.end(); ++it) {
+        if (it->npc != npc) continue;
+        const uint32_t ref = it->spawn_ref;
+        respawns_.erase(it);
+        const uint64_t made = respawner_(ref, now);
+        if (made != 0) ++stats_.respawns;
+        return made;
+    }
+    return 0;
+}
+
+bool Aftermath::despawn(uint64_t npc, double now, bool refill, double* seconds) {
+    if (seconds) *seconds = 0.0;
+    const world::WorldActor* a = registry_.find(npc);
+    if (!a) return false;
+    const world::NpcInfo info = a->npc;   // (a copy: the actor goes)
+    const bool waiting = respawn_in(npc, now) > 0.0 || std::any_of(respawns_.begin(), respawns_.end(), [&](const Respawn& r) { return r.npc == npc; });
+    corpses_.erase(npc);
+    registry_.remove(npc);   // every connection that holds it closes the channel (Destroyed)
+    combat_.forget(npc);
+    if (refill && !waiting) schedule_respawn(info, now, npc);
+    if (seconds) *seconds = respawn_in(npc, now);
+    return true;
 }
 
 void Aftermath::tick(double now) {
@@ -302,7 +356,7 @@ bool Aftermath::hunt_done(uint64_t npc, double now) {
     if (c.living) {   // the hunt is the creature's end: it dies for its clients with the done update, and its spawn point refills it
         c.living = false;
         c.died_at = now;
-        if (const world::WorldActor* a = registry_.find(npc)) schedule_respawn(a->npc, now);
+        if (const world::WorldActor* a = registry_.find(npc)) schedule_respawn(a->npc, now, npc);
     }
     c.hunted = true;
     c.close_at = std::min(c.close_at, now + cfg_.hunt_done_seconds);

@@ -42,6 +42,7 @@ bool ActorRegistry::add(WorldActor actor) {
     if (it->second.awake_radius_cm > kWideCm) wide_.push_back(id);
     if (it->second.npc.interact_component != 0) by_component_[it->second.npc.interact_component] = id;
     if (it->second.npc.collision_cylinder != 0) by_component_[it->second.npc.collision_cylinder] = id;
+    if (observer_) observer_->added(it->second);
     return true;
 }
 // ~ C | Y | B - C.O.A ~
@@ -52,6 +53,7 @@ bool ActorRegistry::remove(uint64_t id) {
     // a listener may add or remove listeners (a session ending): walk a copy
     const auto listeners = listeners_;
     for (const auto& [handle, fn] : listeners) fn(it->second);
+    if (observer_) observer_->removed(it->second);
     grid_remove(it->second);
     wide_.erase(std::remove(wide_.begin(), wide_.end(), id), wide_.end());
     if (it->second.npc.interact_component != 0) by_component_.erase(it->second.npc.interact_component);
@@ -93,6 +95,7 @@ size_t ActorRegistry::count(ActorKind kind) const {
 void ActorRegistry::touch(WorldActor& a, Change kind) {
     ++a.version;
     if (kind != Change::Movement) ++a.reliable_version;
+    if (observer_) observer_->touched(a);
 }
 
 bool ActorRegistry::move(uint64_t id, double x, double y, double z, double yaw_degrees) {

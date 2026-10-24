@@ -238,6 +238,17 @@ public:
     uint32_t on_remove(Listener l);
     void     off_remove(uint32_t handle);
 
+    /// One observer of every change the registry counts, for the world stream's mirror (world/map_stream.h): `added` after an actor is in, `touched` after any change counted by `touch`
+    /// (a `move` and a `modify` among them), `removed` just before an actor goes.  Called on the thread that changes the registry.  At most one; null (the default) for none.
+    class Observer {
+    public:
+        virtual ~Observer() = default;
+        virtual void added(const WorldActor& a) = 0;
+        virtual void touched(const WorldActor& a) = 0;
+        virtual void removed(const WorldActor& a) = 0;
+    };
+    void set_observer(Observer* observer) { observer_ = observer; }
+
     double cell_cm() const { return config_.cell_cm; }
 
 private:
@@ -253,6 +264,7 @@ private:
     std::vector<uint64_t>                         wide_;
     std::vector<std::pair<uint32_t, Listener>>    listeners_;
     uint32_t                                      next_listener_ = 1;
+    Observer*                                     observer_ = nullptr;
 };
 
 }  // namespace aoc::worldd::world

@@ -138,6 +138,20 @@ public:
     /// Closes the corpses whose time has come and respawns the NPCs whose time has come.
     void tick(double now);
 
+    // ---- a game master's hands on the dead and the respawns (the admin API's NPC actions; the network thread)
+    /// The spawn point of the dead creature `npc` makes it again now, without waiting for its timer (the corpse, when it still stands, goes by its own time).  The new creature's actor id; 0
+    /// when `npc` is no dead creature waiting to come back (or its spawn point could not make it).
+    uint64_t respawn_now(uint64_t npc, double now);
+    /// Seconds until the dead creature `npc` is made again; 0 when none is waiting for it.
+    double respawn_in(uint64_t npc, double now) const;
+    /// Takes the creature `npc` out of the world now, its corpse and its record with it (a living one or a dead one); when `refill` its spawn point makes it again on its usual respawn timer
+    /// (a dead one's timer already runs, so it is not started twice).  `seconds` (optional) gets the time to its return, 0 when it does not come back.  False for an actor the registry does not hold.
+    bool despawn(uint64_t npc, double now, bool refill, double* seconds);
+    /// The seconds a creature of this kind waits to be made again after a death, with a throw of its variance (0: its spawn point never makes it: NoRespawn, no spawn point or no respawner).
+    double respawn_delay(const world::NpcInfo& info);
+    /// Whether the creature's spawn point can make it again (a respawner, a spawn point and a rule that allows it).
+    bool refills(const world::NpcInfo& info) const;
+
     // ---- the loot, for the sessions
     const Corpse* corpse_of(uint64_t npc) const;
     /// The corpse a client's interaction names (the InteractableComponent's object id), null when it names none.
@@ -162,10 +176,11 @@ private:
     struct Respawn {
         double   at = 0;
         uint32_t spawn_ref = 0;
+        uint64_t npc = 0;    // the actor id of the creature that died (a game master names it)
     };
 
-    /// The spawn point of `info` refills the creature `at` plus its respawn time (a death's, and a hunted creature's end).
-    void schedule_respawn(const world::NpcInfo& info, double at);
+    /// The spawn point of `info` refills the creature `at` plus its respawn time (a death's, and a hunted creature's end).  `npc` is the actor that went.
+    void schedule_respawn(const world::NpcInfo& info, double at, uint64_t npc = 0);
 
     world::ActorRegistry&      registry_;
     CombatWorld&               combat_;

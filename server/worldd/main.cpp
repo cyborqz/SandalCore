@@ -30,6 +30,7 @@
 #include "svc/grpc_services.h"
 #include "svc/service_token.h"
 #include "svc/world_admin.h"
+#include "svc/world_stream.h"
 #include "svc/city_node_control.h"
 #include "world/city_nodes.h"
 #include "world/node_layout_data.h"
@@ -104,6 +105,14 @@ int main(int argc, char** argv) {
         ->envname("AOC_WORLD_ADMIN_ADDR")
         ->capture_default_str();
     app.add_flag("--no-world-admin", no_world_admin, "do not serve the admin API")->envname("AOC_NO_WORLD_ADMIN");
+    // the world stream (svc/world_stream.h): a read-only view of the world for admin tools, on a gRPC server of its own
+    std::string world_stream = "127.0.0.1:50057";
+    bool no_world_stream = false;
+    app.add_option("--world-stream", world_stream,
+                   "the address worldd's world stream (WorldStreamService: the players, NPCs and resource nodes of an area five times a second, inspect, search; services/cmd/worldctl watch) listens on; calls need the service token")
+        ->envname("AOC_WORLD_STREAM_ADDR")
+        ->capture_default_str();
+    app.add_flag("--no-world-stream", no_world_stream, "do not serve the world stream")->envname("AOC_NO_WORLD_STREAM");
     app.add_flag("--gm-commands", gm_commands,
                  "answer the game client's own GM teleport commands (ServerTeleportXYZ, ServerTeleport, ServerTeleportPlayer on the PlayerController); off by default. Each one the client sends is logged either way")
         ->envname("AOC_GM_COMMANDS");
@@ -653,6 +662,23 @@ int main(int argc, char** argv) {
         }
     }
 
+    // the world stream: its Inspect and Search are applied on this thread too (through the same queue), and every pass of the loop below offers it a publish
+    std::unique_ptr<svc::WorldStreamServer> stream;
+    if (no_world_stream) {
+        spdlog::info("[stream] --no-world-stream: the world stream is not served");
+    } else {
+        stream = std::make_unique<svc::WorldStreamServer>(players, [&] { return endpoint.players(); }, admin_queue, svc::WorldStreamServer::Options{world_stream, *token});
+        std::string stream_error;
+        if (stream->start(&stream_error)) {
+            const bool loopback = world_stream.rfind("127.", 0) == 0 || world_stream.rfind("localhost", 0) == 0 || world_stream.rfind("[::1]", 0) == 0;
+            spdlog::info("[stream] the world stream listens on {} (a snapshot of the world five times a second; services/cmd/worldctl: watch){}", world_stream,
+                         loopback ? "" : "; NOT loopback: anyone who can reach it and has the service token can watch the world");
+        } else {
+            spdlog::error("[stream] the world stream is not served: {}", stream_error);
+            stream.reset();
+        }
+    }
+
     std::vector<uint8_t> buf(4096);
     // The exception barrier: the Endpoint drops a session whose own handling throws; anything that gets past it
     // (the handshake, a login result) is logged and the loop goes on, so one fault never ends every player's session.
@@ -687,8 +713,13 @@ int main(int argc, char** argv) {
         if (*n > 0) guarded_datagram(from, *n, now);
         guarded_tick(now);
         admin_queue.drain();
+        if (stream) {
+            stream->publish();
+            stream->note_loop(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - now));
+        }
     }
 
+    if (stream) stream->stop();
     if (admin) admin->stop();
     players.set_gm_port(nullptr);
     spdlog::info("stopping: telling {} connected clients", endpoint.session_count());

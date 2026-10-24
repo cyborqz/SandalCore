@@ -8,6 +8,7 @@
 
 #include "aoc/worldadmin/v1/worldadmin.grpc.pb.h"
 #include "svc/service_token.h"
+#include "svc/world_stream_impl.h"   // the world stream's server (svc/world_stream.h) is built in this file: its implementation is a header of its own, included here only
 
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/resource_quota.h>
@@ -284,6 +285,82 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         resp->mutable_position()->set_x(out.position.x);
         resp->mutable_position()->set_y(out.position.y);
         resp->mutable_position()->set_z(out.position.z);
+        return grpc::Status::OK;
+    }
+
+    // ---- the NPC actions: each runs on the network thread and answers in one plain sentence
+
+    template <class Run>
+    grpc::Status npc_action(grpc::ServerContext* ctx, const char* method, Run&& run, GmNpcResult& out) {
+        if (auto s = authorize(ctx, method); !s.ok()) return s;
+        if (auto s = on_net_thread([&] { out = run("the admin API (" + ctx->peer() + ")"); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status KillNpc(grpc::ServerContext* ctx, const adminv1::KillNpcRequest* req, adminv1::KillNpcResponse* resp) override {
+        GmNpcResult out;
+        if (auto s = npc_action(ctx, "KillNpc", [&](const std::string& by) { return owner.travel_.kill_npc(req->id(), by); }, out); !s.ok()) return s;
+        resp->set_id(out.id);
+        resp->set_name(out.name);
+        put(resp->mutable_position(), out.position);
+        resp->set_result(out.message);
+        resp->set_loot_stacks(out.loot_stacks);
+        resp->set_respawn_in_seconds(out.respawn_in_seconds);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status RespawnNpc(grpc::ServerContext* ctx, const adminv1::RespawnNpcRequest* req, adminv1::RespawnNpcResponse* resp) override {
+        GmNpcResult out;
+        if (auto s = npc_action(ctx, "RespawnNpc", [&](const std::string& by) { return owner.travel_.respawn_npc(req->id(), by); }, out); !s.ok()) return s;
+        resp->set_id(out.id);
+        resp->set_name(out.name);
+        put(resp->mutable_position(), out.position);
+        resp->set_result(out.message);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ResetNpc(grpc::ServerContext* ctx, const adminv1::ResetNpcRequest* req, adminv1::ResetNpcResponse* resp) override {
+        GmNpcResult out;
+        if (auto s = npc_action(ctx, "ResetNpc", [&](const std::string& by) { return owner.travel_.reset_npc(req->id(), by); }, out); !s.ok()) return s;
+        resp->set_id(out.id);
+        resp->set_name(out.name);
+        put(resp->mutable_position(), out.position);
+        resp->set_result(out.message);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status HealNpc(grpc::ServerContext* ctx, const adminv1::HealNpcRequest* req, adminv1::HealNpcResponse* resp) override {
+        GmNpcResult out;
+        if (auto s = npc_action(ctx, "HealNpc", [&](const std::string& by) { return owner.travel_.heal_npc(req->id(), by); }, out); !s.ok()) return s;
+        resp->set_id(out.id);
+        resp->set_name(out.name);
+        put(resp->mutable_position(), out.position);
+        resp->set_result(out.message);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status DespawnNpc(grpc::ServerContext* ctx, const adminv1::DespawnNpcRequest* req, adminv1::DespawnNpcResponse* resp) override {
+        GmNpcResult out;
+        if (auto s = npc_action(ctx, "DespawnNpc", [&](const std::string& by) { return owner.travel_.despawn_npc(req->id(), by); }, out); !s.ok()) return s;
+        resp->set_id(out.id);
+        resp->set_name(out.name);
+        put(resp->mutable_position(), out.position);
+        resp->set_result(out.message);
+        resp->set_respawn_in_seconds(out.respawn_in_seconds);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status MoveNpc(grpc::ServerContext* ctx, const adminv1::MoveNpcRequest* req, adminv1::MoveNpcResponse* resp) override {
+        if (!req->has_point()) return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "give a point");
+        GmNpcResult out;
+        const adminv1::Point& p = req->point();
+        if (auto s = npc_action(ctx, "MoveNpc", [&](const std::string& by) { return owner.travel_.move_npc(req->id(), p.x(), p.y(), p.z(), p.has_z(), by); }, out); !s.ok()) return s;
+        resp->set_id(out.id);
+        resp->set_name(out.name);
+        put(resp->mutable_position(), out.position);
+        resp->set_result(out.message);
+        put(resp->mutable_from(), out.from);
         return grpc::Status::OK;
     }
 

@@ -125,6 +125,18 @@ struct GmStationResult {
     GmPosition  position;
 };
 
+/// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
+struct GmNpcResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;                 // why it was refused, or one plain sentence of what was done
+    uint64_t    id = 0;                  // the creature's actor id after the call (a new one when a living creature was replaced)
+    std::string name;                    // its nameplate
+    GmPosition  position;                // where it stands now (where it stood, for one that is gone)
+    GmPosition  from;                    // a move: where it stood
+    uint32_t    loot_stacks = 0;         // a kill: the stacks on its corpse
+    double      respawn_in_seconds = 0;  // a kill or a despawn: until its spawn point makes it again (0: it does not)
+};
+
 /// The GM travel tools on the network thread.  `directory` lists the players of the world (Endpoint::players), `now` is the Endpoint's clock.
 class GmTravel : public GmPort {
 public:
@@ -148,6 +160,20 @@ public:
     /// Puts the station `station` of an artisan building on the free plot `plot` of the node `node` (a Village or a Town), and takes it off again.
     GmStationResult  place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by);
     GmStationResult  remove_station(const std::string& node, const std::string& plot, const std::string& by);
+
+    // ---- the NPC actions (a creature is named by its actor id, as the world stream and Inspect give it)
+    /// Kills it as a blow would: the same death and corpse, the loot a kill gives (rolled as for a player of the creature's own level, open to every player in the world, no experience), and its
+    /// spawn point makes it again on its usual timer.
+    GmNpcResult kill_npc(uint64_t id, const std::string& by);
+    /// A dead creature (its corpse still stands, or only its timer is left) is made again at its spawn point now; a living one is replaced by a fresh one there.
+    GmNpcResult respawn_npc(uint64_t id, const std::string& by);
+    /// A living creature goes back to its spawn point at a run, healed, its threat cleared and its leash centred on the spawn point again.
+    GmNpcResult reset_npc(uint64_t id, const std::string& by);
+    GmNpcResult heal_npc(uint64_t id, const std::string& by);
+    /// Takes it out of the world, corpse and all; its spawn point makes it again on its usual timer.
+    GmNpcResult despawn_npc(uint64_t id, const std::string& by);
+    /// Puts a living creature at (x, y) at once, on the ground there (or at `z` when `has_z`); its leash and its walk home are centred on the point from then on; its spawn point stays.
+    GmNpcResult move_npc(uint64_t id, double x, double y, double z, bool has_z, const std::string& by);
 
     size_t teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) override;
 

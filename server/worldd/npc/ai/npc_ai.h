@@ -94,6 +94,8 @@ public:
     void kill();
     /// It is alive again at home (a respawn).
     void revive();
+    /// A game master's reset: the threat table is cleared and the NPC goes home as after a broken leash (its walk home and its healing are the caller's).  No effect on a dead NPC.
+    void reset_now();
 
     Orders think(const Sense& sense);
 

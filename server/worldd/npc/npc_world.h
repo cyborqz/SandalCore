@@ -240,6 +240,23 @@ public:
     /// Moves an NPC's home (a leash that is re-set, a respawn point): its wander and its walk home are about the new place.  False for an unknown NPC or a
     /// place that is not a number.
     bool         set_home(uint64_t actor_id, const nav::Vec3& home);
+
+    /// A game master's move: stands the NPC at (x, y) at once, on the ground there, its feet taken from whatever it was doing (a walk, a turn, a montage; a chase it was ordered
+    /// goes on from the new place), and its home (the centre its wander and its walk home are about) put at the new place.  The place it was made at (`spawn_point`) is not touched.
+    /// `z` is the height the caller gives: the NPC's origin when `z_is_origin` (a game master's own z, believed), else a height of the ground under the point (the server's: the landscape's or a
+    /// town's floor), which the walking map's floor within 4 m of it replaces when there is one.  The facing is kept.  A patrolling NPC becomes a wandering one (it stays about the new place).
+    /// The NPC's change is a reliable one, so a view that holds it dormant or as a snapshot is sent it again.
+    enum class Relocated : uint8_t { Ok, UnknownNpc, WaitingForGround, NotLoaded, NotANumber };
+    struct RelocateResult {
+        Relocated status = Relocated::Ok;
+        nav::Vec3 ground;     // where its feet stand now
+        double    origin_z = 0;
+    };
+    RelocateResult relocate(uint64_t actor_id, double x, double y, double z, bool z_is_origin);
+    /// Where the NPC was made, as the world put it on the ground: false for an NPC the world does not hold.  `ai_home` is the home its NpcInfo had then (the data's point).
+    bool         spawn_point(uint64_t actor_id, nav::Vec3* ground_home, nav::Vec3* ai_home) const;
+    /// Puts the NPC's home back at the place it was made at; returns it (false for an unknown NPC).  The NPC is not moved.
+    bool         restore_home(uint64_t actor_id, nav::Vec3* ground_home);
 // C O A with Cyb
 
     Stats stats() const;
@@ -278,6 +295,9 @@ private:
         uint64_t     id = 0;
         NpcMotionSetup setup;
         nav::Vec3    home;
+        nav::Vec3    spawn_home;              // where it was made (its home as grounded then): a game master's move changes `home`, never this
+        nav::Vec3    spawn_ai_home;           // ... and the home its NpcInfo had then (the data's point)
+        bool         relocated = false;       // a game master has moved it
         Mover        mover;
         Mode         mode = Mode::Stand;
         double       timer = 0;               // seconds to the next decision
