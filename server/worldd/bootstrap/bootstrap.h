@@ -163,6 +163,8 @@ inline constexpr size_t kMaxKnownRecipes = 4400;
 
 /// The most finished tutorials one character keeps (UFTUEComponent.CompletedFTUEs; the design data has fewer than 100 tutorials, and the client reports one id per call).
 inline constexpr size_t kMaxCompletedFtues = 1024;
+/// Missing systems, step 1: how many triggers that carried the PvP flag are remembered for their ability items.
+inline constexpr size_t kMaxTriggerFlags = 64;
 
 /// A property of an actor by its schema path and the value to set ("CharacterInGameSettings.CombatSettings.Input.BufferDuration").
 struct PropertyValue {
@@ -510,6 +512,16 @@ public:
     /// Plan E1, stage 3 fix: the pawn's CombatInfo.bIsUsingRangedWeapon (ServerSetUseRangedWeapon's answer in retail: the client's weapon in hand follows
     /// it). The caller sends the pawn's update.
     bool set_using_ranged_weapon(bool ranged);
+    /// Missing systems, step 1: what the pawn's CombatInfo says of the client's quiet requests; the caller sends the pawn's update (pawn_state_update).
+    /// ActiveTargets.ActiveTargets: the array of two the client keeps (index = slot - 1; a default guid for no target).  False when the pawn has no such property.
+    bool set_active_targets(const std::array<emit::FIntrepidNetworkGUID, 2>& targets);
+    /// HoverTargetGuid.A..D: the four words of the FGuid the client points at (all 0: nothing).
+    bool set_hover_target(const std::array<uint32_t, 4>& words);
+    /// bPvPForceFlag: the player's own PvP flag.
+    bool set_pvp_force_flag(bool on);
+    /// The PvP flag a ServerTriggerAbility carried, for the ReplicatedActiveAbilities item that trigger makes (the item copies it): note it before the trigger is run.  Only a set flag is
+    /// kept, at most kMaxTriggerFlags of them, and it goes with the item.
+    void note_trigger_pvp_flag(int64_t instance, bool flag);
     /// Plan D1, stage 2: OwnerInfo.WeaponSkillLineId (the weapon line of the weapon in hand), sent with the next pawn update.
     bool set_weapon_skill_line(int64_t guid, const std::string& name);
     /// Marks the TempHealth float-array item dirty, as every captured level-up's packet has it (the same item, no value):
@@ -656,6 +668,7 @@ private:
     std::string       error_;
     // plan A7: the runtime's keys and the fast arrays' ReplicationIDs (ability_replication.h "Keys")
     std::map<int64_t, int32_t>     effect_ids_, ability_ids_, cooldown_ids_;
+    std::set<int64_t>              trigger_pvp_;       // missing systems, step 1: the instances whose trigger carried the PvP flag (their item copies it)
     bool                           pawn_mounted_ = false;   // the mounts milestone, stage 3: pawn_mounted() ran and pawn_dismounted() has not
     std::map<uint64_t, int32_t>    callout_ids_;       // the mounts milestone: the callouts keys and their ReplicationIDs
     std::set<uint64_t>             callouts_removed_;  // keys taken off (a chain built again after a restore only builds the update)

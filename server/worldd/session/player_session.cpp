@@ -1111,6 +1111,11 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerTeleport") return on_gm_teleport_key(conn, rpc, now);
         if (name_of_rpc == "ServerTeleportPlayer") return on_gm_teleport_player(conn, rpc, now);
         if (name_of_rpc == "ServerHandleVendorTransaction") return on_vendor_transaction(conn, rpc, now);
+        // Missing systems, step 1: the quiet requests (a flag, a closed loot window, a batch of bar slots, a marker)
+        if (name_of_rpc == "ServerSetPvpFlag") return on_set_pvp_flag(conn, rpc, now);
+        if (name_of_rpc == "ServerCloseLoot") return on_close_loot(conn, rpc, now);
+        if (name_of_rpc == "ServerSetActionbarMultiSlotUseData") return on_set_slots(conn, rpc, now);
+        if (name_of_rpc == "ServerSetMapMarkerLocation") return on_set_map_marker(conn, rpc, now);
     } else if (rpc.on_actor && role == Role::Pawn) {
         if (name_of_rpc == "ServerClientIsReadyToPhaseIn") {
             if (phase_in_requested_ || !room_for(1)) return;
@@ -1144,6 +1149,8 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "RequestServerRespawnChoices") return on_respawn_choices_request(conn, rpc, now);
         if (name_of_rpc == "SendServerRespawnChoice") return on_respawn_choice(conn, rpc, now);
         if (name_of_rpc == "ServerSetUseRangedWeapon") return on_set_ranged(conn, rpc, now);
+        if (name_of_rpc == "ServerSetActiveTarget") return on_set_active_target(conn, rpc, now);
+        if (name_of_rpc == "ServerSetHoverTargetGuid") return on_set_hover_target(conn, rpc, now);
         if (name_of_rpc == "ServerActivateItem") {
             // the retail client sends it with every ServerItemUsed of an item that can be worn, with the same parameters; the answer to the
             // pair is one set of events, made for ServerItemUsed
@@ -1162,7 +1169,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "Server_RemoveLocaleFTUEs") return on_remove_ftues(conn, rpc, now);
     }
     if (unhandled_logged_.insert(std::string(name_of_rpc)).second) {
-        // (info since retest 3: which calls of the client worldd answers with nothing, once each; the hunt's ServerSetActiveTarget is one)
+        // (info since retest 3: which calls of the client worldd answers with nothing, once each)
         spdlog::info("[session] {}: ignoring the client's {} ({}): worldd does not answer it (once per call)", name(), name_of_rpc, role_name(role));
     }
 }
@@ -1636,6 +1643,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     if (const auto t = repl::parse_trigger_ability(rpc.call)) {
         ability = t->ability_guid;
         instance = t->client_instance_id;
+        pb_.note_trigger_pvp_flag(instance, t->pvp_force);   // (the item this trigger makes carries the flag the trigger carried)
         item_slot = t->item_slot;
         item_location = t->item_location;
         info.animation_index = t->animation_index;
@@ -3821,6 +3829,191 @@ size_t PlayerSession::gm_reset_tutorials(Connection& conn, const std::string& by
     return n;
 }
 
+// -- missing systems, step 1: the client's quiet requests ------------------------------------------------------------------------------------------------------
+// A target, a hover, the PvP flag, a closed loot window, a marker and a batch of bar slots: the client sends them and waits for nothing, but the game's own server keeps
+// them (and answers the first three with a property update a tenth of a second later).  Nothing here is saved: the flag, the targets and the marker last as long as the session.
+
+void PlayerSession::on_set_active_target(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    ++target_calls_;
+    std::optional<uint64_t> slot;
+    const repl::Value* named = nullptr;
+    if (rpc.call.decoded) {
+        slot = repl::rpcf::uint_or(repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "Slot"), 0);   // (a slot at 0 is not on the wire)
+        named = repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "InActiveTarget");               // (no object is not on the wire either)
+    }
+    const FIntrepidNetworkGUID* object = named ? named->get_if<FIntrepidNetworkGUID>() : nullptr;
+    if (!rpc.call.decoded || !slot || (named && !object)) {
+        if (++quiet_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a ServerSetActiveTarget does not read ({} parameter bits): the target is not kept (further ones are not logged)", name(), rpc.call.param_bits);
+        return;
+    }
+    if (!within_budget(quiet_budget_, "ServerSetActiveTarget", now) || !room_for(1)) return;
+    if (*slot < 1 || *slot > 2) {
+        if (++quiet_refused_logged_ <= kLoggedPerKind) spdlog::info("[session] {}: ServerSetActiveTarget names target slot {}: only the slots 1 and 2 exist, ignored", name(), *slot);
+        return;
+    }
+    // the target is an actor of the world or the player's own pawn; any other object is no target
+    FIntrepidNetworkGUID target;
+    if (object && object->is_valid()) {
+        const FIntrepidNetworkGUID& own = pb_.setup().guids.pawn;
+        const world::WorldActor* actor = registry_ ? registry_->find(object->ObjectId) : nullptr;
+        if (object->ObjectId == own.ObjectId) {
+            target = own;
+        } else if (actor) {
+            target = actor->actor.guid;
+        } else {
+            ++target_unknown_;
+            if (++quiet_refused_logged_ <= kLoggedPerKind) {
+                spdlog::info("[session] {}: ServerSetActiveTarget names object {}, which is no actor the world knows: the slot is left empty", name(), object->ObjectId);
+            }
+        }
+    }
+    FIntrepidNetworkGUID& held = active_targets_[static_cast<size_t>(*slot - 1)];
+    if (held == target) return;   // (the same target again: the client is told what it was told, so nothing goes out)
+    held = target;
+    ++target_changes_;
+    if (!pb_.set_active_targets(active_targets_)) {
+        spdlog::warn("[session] {}: the pawn does not take CombatInfo.ActiveTargets: the client is not told", name());
+        return;
+    }
+    // the answer is the property update of the game's own server, about 84 ms after the call
+    queue_later("CombatInfo (target)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("active target"); }, conn, now, /*must_build=*/false);
+    spdlog::log(level_for(target_logged_, 20), "[session] {}: target slot {} is {} now", name(), *slot, target.is_valid() ? "object " + std::to_string(target.ObjectId) : std::string("empty"));
+}
+
+void PlayerSession::on_set_hover_target(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    ++hover_calls_;
+    std::array<uint32_t, 4> words{};
+    bool ok = rpc.call.decoded;
+    constexpr const char* kWords[4] = {"InHoverTargetGuid.A", "InHoverTargetGuid.B", "InHoverTargetGuid.C", "InHoverTargetGuid.D"};
+    for (size_t i = 0; ok && i < 4; ++i) {
+        const auto w = repl::rpcf::int_or(repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, kWords[i]), 0);   // (a word at 0 is not on the wire)
+        ok = w && *w >= std::numeric_limits<int32_t>::min() && *w <= std::numeric_limits<uint32_t>::max();
+        if (ok) words[i] = static_cast<uint32_t>(*w);
+    }
+    if (!ok) {
+        if (++quiet_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a ServerSetHoverTargetGuid does not read ({} parameter bits): the hover target is not kept (further ones are not logged)", name(), rpc.call.param_bits);
+        return;
+    }
+    if (!within_budget(quiet_budget_, "ServerSetHoverTargetGuid", now) || !room_for(1)) return;
+    if (words == hover_words_) return;
+    hover_words_ = words;
+    ++hover_changes_;
+    if (!pb_.set_hover_target(words)) {
+        spdlog::warn("[session] {}: the pawn does not take CombatInfo.HoverTargetGuid: the client is not told", name());
+        return;
+    }
+    queue_later("CombatInfo (hover)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("hover target"); }, conn, now, /*must_build=*/false);
+    const bool nothing = words == std::array<uint32_t, 4>{};
+    spdlog::log(level_for(hover_logged_, 20), "[session] {}: points at {}", name(), nothing ? std::string("nothing") : fmt::format("{:08x}-{:08x}-{:08x}-{:08x}", words[0], words[1], words[2], words[3]));
+}
+
+void PlayerSession::on_set_pvp_flag(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    ++flag_calls_;
+    const auto flag = rpc.call.decoded ? repl::rpcf::bool_or(repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "Flag"), false) : std::nullopt;
+    if (!flag) {
+        if (++quiet_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a ServerSetPvpFlag does not read ({} parameter bits): the flag is not changed (further ones are not logged)", name(), rpc.call.param_bits);
+        return;
+    }
+    if (!within_budget(quiet_budget_, "ServerSetPvpFlag", now) || !room_for(1)) return;
+    if (*flag == pvp_flag_) return;   // (a flag that is the flag: the game's server marks it and sends nothing, as nothing changed)
+    pvp_flag_ = *flag;
+    ++flag_changes_;
+    if (!pb_.set_pvp_force_flag(pvp_flag_)) {
+        spdlog::warn("[session] {}: the pawn does not take CombatInfo.bPvPForceFlag: the client is not told", name());
+        return;
+    }
+    queue_later("CombatInfo (PvP flag)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("PvP flag"); }, conn, now, /*must_build=*/false);
+    spdlog::log(level_for(flag_logged_, 20), "[session] {}: the PvP flag is {} (kept until the session ends)", name(), pvp_flag_ ? "on" : "off");
+}
+
+void PlayerSession::on_close_loot(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    (void)conn;
+    const repl::Value* named = rpc.call.decoded ? repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "LootContainer") : nullptr;
+    const FIntrepidNetworkGUID* container = named ? named->get_if<FIntrepidNetworkGUID>() : nullptr;
+    if (!rpc.call.decoded || (named && !container)) {
+        if (++quiet_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a ServerCloseLoot does not read ({} parameter bits): the loot window is not closed (further ones are not logged)", name(), rpc.call.param_bits);
+        return;
+    }
+    if (!within_budget(quiet_budget_, "ServerCloseLoot", now)) return;
+    if (loot_actor_ == 0) return;   // (the window is closed already: the corpse was emptied, left behind or looted out)
+    combat::Aftermath* after = npc_world_ ? npc_world_->aftermath() : nullptr;
+    const combat::Corpse* corpse = after ? after->corpse_of(loot_actor_) : nullptr;
+    // the call names the container the window shows (the game's server ignores a close that names another one)
+    if (!container || (corpse && corpse->parts && container->ObjectId != corpse->parts->container)) {
+        if (++quiet_refused_logged_ <= kLoggedPerKind) spdlog::info("[session] {}: ServerCloseLoot names another container than the open loot window's: the window stays open", name());
+        return;
+    }
+    const std::string closed = corpse ? corpse->name : std::string("a corpse that is gone");
+    loot_actor_ = 0;
+    ++loot_closes_;
+    spdlog::log(level_for(close_logged_, 20), "[session] {}: closes the loot window of {}", name(), closed);
+}
+
+void PlayerSession::on_set_slots(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    (void)conn;
+    if (!book_) return;
+    ++slot_calls_;
+    const auto slots = repl::parse_set_actionbar_slots(rpc.call);
+    if (!slots) {
+        if (++quiet_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a ServerSetActionbarMultiSlotUseData does not read ({} parameter bits): ignored (further ones are not logged)", name(), rpc.call.param_bits);
+        return;
+    }
+    if (slots->empty()) return;
+    if (slots->size() > kMaxMultiSlots) {
+        ++bar_refused_;
+        if (++quiet_refused_logged_ <= kLoggedPerKind) spdlog::info("[session] {}: ServerSetActionbarMultiSlotUseData names {} slots, more than {}: refused, nothing changed", name(), slots->size(), kMaxMultiSlots);
+        return;
+    }
+    if (!within_budget(bar_budget_, "ServerSetActionbarMultiSlotUseData", now)) return;
+    // each slot is judged and stored as the single-slot call would (the game's server runs that call for each), the progress is handed over once
+    size_t stored = 0, refused = 0;
+    for (const repl::ActionbarSlot& slot : *slots) {
+        std::string why;
+        if (!bar_.set(slot, &why)) {
+            ++refused;
+            ++bar_refused_;
+            spdlog::log(level_for(bar_refused_logged_), "[session] {}: ServerSetActionbarMultiSlotUseData (bank {}, slot {}) refused, nothing changed: {}", name(), slot.bank_index, slot.slot_index, why);
+            continue;
+        }
+        if (slot.use.use_type == repl::ActionbarUseType::Skill && slot.use.skill_rank_id != 0 && slot.bank_index < actionbar::kClassBanks) {
+            bar_.remove_other_copies(slot.use.skill_rank_id, slot.bank_index, slot.slot_index);   // (a skill is on the class pages once: the client moved it)
+        }
+        ++stored;
+        ++bar_sets_;
+    }
+    spdlog::log(level_for(slots_logged_, 20), "[session] {}: the client set {} action bar slot(s) at once: {} stored, {} refused", name(), slots->size(), stored, refused);
+    if (stored > 0) {
+        progress_changed_ = true;
+        hand_over_progress("the action bar");
+    }
+}
+
+void PlayerSession::on_set_map_marker(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    (void)conn;
+    ++marker_calls_;
+    const repl::Value* named = rpc.call.decoded ? repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "Location") : nullptr;
+    const repl::Vec3d* at = named ? named->get_if<repl::Vec3d>() : nullptr;
+    if (!rpc.call.decoded || (named && !at)) {
+        if (++quiet_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a ServerSetMapMarkerLocation does not read ({} parameter bits): the marker is not changed (further ones are not logged)", name(), rpc.call.param_bits);
+        return;
+    }
+    const repl::Vec3d where = at ? *at : repl::Vec3d{};   // (a location of 0, 0, 0 is not on the wire: it is the call that takes the marker away)
+    if (!std::isfinite(where.x) || !std::isfinite(where.y) || !std::isfinite(where.z)) {
+        if (++quiet_refused_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: ServerSetMapMarkerLocation names a location that is not a number: the marker is not changed", name());
+        return;
+    }
+    if (!within_budget(quiet_budget_, "ServerSetMapMarkerLocation", now)) return;
+    if (where.x == 0 && where.y == 0 && where.z == 0) {
+        if (!map_marker_) return;
+        map_marker_.reset();
+        spdlog::log(level_for(marker_logged_, 20), "[session] {}: the map marker is taken away", name());
+        return;
+    }
+    if (map_marker_ && *map_marker_ == where) return;
+    map_marker_ = where;
+    spdlog::log(level_for(marker_logged_, 20), "[session] {}: the map marker is at ({:.0f}, {:.0f}, {:.0f}) (kept until the session ends)", name(), where.x, where.y, where.z);
+}
+
 // -- crafting, step 2: collecting a job ---------------------------------------------------------------------------------------------------------------------
 
 std::optional<crafting::JobRewards> PlayerSession::job_rewards(const svc::ProcessingJob& job) const {
@@ -5285,20 +5478,30 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
     if (events->empty() || events->size() > kMaxLootTakes) return refuse(events->empty() ? "no events" : "too many events");
     if (!room_for(4)) return;
 
-    // what the client asks for, checked event by event: the container is the corpse's, the slot holds a stack that is still there, the item is that stack
+    // what the client asks for, checked event by event: the container is the corpse's, the slot holds a stack that is still there, the item is that stack.
+    // An event that fails is skipped and the others are taken (the game's server judges each event of a request on its own); a request with no event left is refused.
     std::vector<size_t> slots;
+    size_t skipped = 0;
+    std::string first_why;
+    const auto skip = [&](const std::string& why) {
+        ++skipped;
+        if (first_why.empty()) first_why = why;
+    };
     for (const repl::ItemStorageEvent& e : *events) {
-        if (e.move_source.object.ObjectId != corpse->parts->container || e.move_source.slots.size() != 1) return refuse("an event names another container");
+        if (e.move_source.object.ObjectId != corpse->parts->container || e.move_source.slots.size() != 1) { skip("an event names another container"); continue; }
         const repl::StorageEventSlot& s = e.move_source.slots[0];
-        if (s.slot < 0 || static_cast<size_t>(s.slot) >= corpse->loot.size()) return refuse("an event names a slot that is none");
+        if (s.slot < 0 || static_cast<size_t>(s.slot) >= corpse->loot.size()) { skip("an event names a slot that is none"); continue; }
         const size_t slot = static_cast<size_t>(s.slot);
-        if (corpse->loot[slot].taken) return refuse("a stack was taken already");
+        if (corpse->loot[slot].taken) { skip("a stack was taken already"); continue; }
         if (!e.item.has_item || e.item.record_id != static_cast<uint64_t>(corpse->loot[slot].item) || !(e.item.guid == loot_guid(corpse->npc, slot))) {
-            return refuse("an event's item is not the stack of its slot");
+            skip("an event's item is not the stack of its slot");
+            continue;
         }
-        if (std::find(slots.begin(), slots.end(), slot) != slots.end()) return refuse("a slot twice");
+        if (std::find(slots.begin(), slots.end(), slot) != slots.end()) { skip("a slot twice"); continue; }
         slots.push_back(slot);
     }
+    if (slots.empty()) return refuse(first_why.empty() ? std::string("no event can be taken") : first_why);
+    if (skipped > 0) spdlog::log(level_for(loot_logged_), "[session] {}: {} event(s) of the loot request are skipped ({}); the other {} are taken", name(), skipped, first_why, slots.size());
     // the bag takes each stack or leaves it (a full bag leaves the rest in the corpse)
     std::vector<bootstrap::LootRemoval> removed;
     items::Outcome all;

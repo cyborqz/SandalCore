@@ -69,6 +69,14 @@
 //                       ServerActivateItem                   not answered: the client sends it with ServerItemUsed, the same four
 //                                                            parameters, for an item that can be worn, and the server's answer is one
 //    PlayerController   ServerRequestStorageEvent            a stack moved or swapped inside the Backpack (plan B2, below)
+//    Missing systems, step 1 (the client's quiet requests; session/player_session.cpp "quiet confirmations"):
+//    pawn               ServerSetActiveTarget        the target of slot 1 or 2 is kept (an actor of the world or the player itself; anything else is no target)
+//                                                    and CombatInfo.ActiveTargets answers about 84 ms later
+//    pawn               ServerSetHoverTargetGuid     CombatInfo.HoverTargetGuid, the same way
+//    PlayerController   ServerSetPvpFlag             the player's PvP flag is kept for the session (it starts off at each login) and CombatInfo.bPvPForceFlag
+//                                                    answers a change; the ability entries copy the flag their trigger carried
+//    PlayerController   ServerCloseLoot              the open loot window is closed on the server (no reply); a loot request after it is refused
+//    PlayerController   ServerSetMapMarkerLocation   the marker is kept for the session (0, 0, 0 clears it; no reply)
 //    anything else      logged once per name, at debug, and ignored
 //
 //  Items (plan B2, items/inventory.h has the rules and what the retail server does).  The session plays the character's Inventory, built
@@ -125,8 +133,10 @@
 //                                                the pawn's weapon skill line follows; the ranks of a weapon tree apply while that line is in hand; the
 //                                                pawn's CombatInfo.bIsUsingRangedWeapon follows the request (E1 stage 3 fix: retail's reply has it, and
 //                                                the client's weapon in hand follows it).
-//    PlayerController ServerSetActionbarSlotUseData  the slot is stored (no reply); a slot outside the banks 0-19 and slots 0-15, an enumeration the
+//    PlayerController ServerSetActionbarSlotUseData  the slot is stored (no reply); a slot outside the banks 0-19 and slots 0-11, an enumeration the
 //                                                client does not have or a full bar is refused and counted.
+//    PlayerController ServerSetActionbarMultiSlotUseData  the same for an array of slots (the pets' bar), each judged on its own, the good ones stored and
+//                                                the progress handed over once (no reply).
 //    PlayerController ServerRequestClientLoad    the stored bar is sent once as one ClientReceiveActionbarSlotPayload.
 //  A level crossed grants the ranks the Universal tree and the class tree give by themselves (the part-2 spec's "Settled in D1": the abilities join
 //  KnownAbilities, the passives get their item, the skills with the hotbar flag are put on the bar and announced).  A class scroll switches the class
@@ -605,6 +615,12 @@ public:
     static constexpr std::chrono::milliseconds kLootInterval{100};
     /// The most stacks one request takes (a corpse holds a handful).
     static constexpr size_t                    kMaxLootTakes = 16;
+    /// Missing systems, step 1, the quiet requests (a target, a hover, the PvP flag, the loot close, the map marker): a burst of sixteen, then twenty a second (the mouse sweeping over
+    /// creatures sends a hover target for each).
+    static constexpr uint32_t                  kQuietBurst = 16;
+    static constexpr std::chrono::milliseconds kQuietInterval{50};
+    /// The most slots one ServerSetActionbarMultiSlotUseData takes (a pet's bar holds a handful).
+    static constexpr size_t                    kMaxMultiSlots = 64;
     /// The corpse whose loot window is open (0: none), and the windows opened, the stacks taken, the takes refused.
     uint64_t loot_actor() const { return loot_actor_; }
     size_t   loot_opens() const { return loot_opens_; }
@@ -672,6 +688,13 @@ public:
     /// the character is saved.
     bool     gm_teach_recipe(Connection& conn, int64_t recipe, const std::string& by);
     bool     gm_forget_recipe(Connection& conn, int64_t recipe, const std::string& by);
+    /// Missing systems, step 1: what the client's quiet requests left on the session.  The ObjectId of the target of slot 1 or 2 (0: none or another slot), the four words of the hover
+    /// target, the player's PvP flag (off at each login), the map marker (none until the client sets one) and how many loot windows the client closed.
+    uint64_t active_target(int slot) const { return slot >= 1 && slot <= 2 ? active_targets_[static_cast<size_t>(slot - 1)].ObjectId : 0; }
+    const std::array<uint32_t, 4>& hover_target() const { return hover_words_; }
+    bool     pvp_flag() const { return pvp_flag_; }
+    const std::optional<protocol::repl::Vec3d>& map_marker() const { return map_marker_; }
+    size_t   loot_closes() const { return loot_closes_; }
     /// Missing systems, step 0: the tutorials the character finished (FirstTimeEvent Guids, in the order they were finished).
     const std::vector<int64_t>& completed_ftues() const { return completed_ftues_; }
     /// A game master's tool: puts the finished tutorials back (the list is emptied, the client is told and the character is saved).  How many were put back (0: it had none, nothing happens).
@@ -942,6 +965,20 @@ private:
     /// Missing systems, step 0: the tutorial component's call Server_RemoveLocaleFTUEs(FTUEsToRemove): the client says these tutorials are finished.  Each id not on the list yet joins it,
     /// in call order, and the list is saved and sent back, which is what makes the client stop reporting them.  An id of 0 or less is ignored; a call that would take the list over its cap is refused.
     void on_remove_ftues(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    // ---- missing systems, step 1: the client's quiet requests -------------------------------------------------------------------------------
+    /// ServerSetActiveTarget(InActiveTarget, Slot) on the pawn: slot 1 or 2 keeps the actor (a world actor or the player's own pawn; another object is no target, with a log); a change goes back
+    /// in CombatInfo.ActiveTargets a moment later, a repeat sends nothing.
+    void on_set_active_target(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// ServerSetHoverTargetGuid(FGuid) on the pawn: the four words are kept and go back in CombatInfo.HoverTargetGuid when they changed.
+    void on_set_hover_target(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// ServerSetPvpFlag(Flag): the player's flag for this session; a change goes back in CombatInfo.bPvPForceFlag a moment later, a repeat sends nothing.
+    void on_set_pvp_flag(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// ServerCloseLoot(LootContainer): the open loot window is closed (when the call names the container it shows); nothing is sent.
+    void on_close_loot(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// ServerSetActionbarMultiSlotUseData(UseData): each slot of the array is set as ServerSetActionbarSlotUseData would, the progress is handed over once.
+    void on_set_slots(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// ServerSetMapMarkerLocation(Location): kept for the session; (0, 0, 0) clears it; nothing is sent.
+    void on_set_map_marker(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// A fresh instance guid no item of the inventory has (32 lowercase hex digits).
     std::string fresh_guid();
     /// Tells the client what an applied request did (the events, then the visible gear) and marks the inventory dirty.
@@ -1372,6 +1409,14 @@ private:
     std::vector<int64_t> completed_ftues_;            // missing systems, step 0: the tutorials the client reported finished, in the order they came (saved with the progress)
     size_t ftue_calls_ = 0, ftue_repeats_ = 0, ftue_ignored_ = 0, ftue_ignored_logged_ = 0, ftue_logged_ = 0, ftue_refused_logged_ = 0;
     bool   ftue_unreadable_logged_ = false;
+    // missing systems, step 1: the client's quiet requests (nothing of it is saved: the flag, the targets and the marker last as long as the session)
+    RequestBudget                                       quiet_budget_{kQuietBurst, kQuietInterval};
+    std::array<protocol::emit::FIntrepidNetworkGUID, 2> active_targets_{};   // the target of slot 1 and 2 as CombatInfo.ActiveTargets holds them
+    std::array<uint32_t, 4>                             hover_words_{};
+    bool                                                pvp_flag_ = false;
+    std::optional<protocol::repl::Vec3d>                map_marker_;
+    size_t target_calls_ = 0, target_changes_ = 0, target_unknown_ = 0, hover_calls_ = 0, hover_changes_ = 0, flag_calls_ = 0, flag_changes_ = 0, marker_calls_ = 0, loot_closes_ = 0, slot_calls_ = 0;
+    size_t target_logged_ = 0, hover_logged_ = 0, flag_logged_ = 0, marker_logged_ = 0, close_logged_ = 0, slots_logged_ = 0, quiet_refused_logged_ = 0, quiet_unreadable_logged_ = 0;
     size_t quick_started_ = 0, quick_made_ = 0, quick_interrupted_ = 0, quick_refused_ = 0, quick_logged_ = 0, quick_refused_logged_ = 0, quick_made_logged_ = 0;
     bool   interrupt_unreadable_logged_ = false;
     std::vector<std::array<int32_t, 4>> active_words_;   // the stations OwnerInfo.ActiveProcessingStations lists

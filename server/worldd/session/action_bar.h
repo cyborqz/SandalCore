@@ -9,7 +9,7 @@
 //
 //  What the retail captures show [R: scratchpad research/stage2/evidence.md section 6]: the whole bar is one ClientReceiveActionbarSlotPayload
 //  on the PlayerController, sent about 20-40 packets after ServerRequestClientLoad; the client arranges its own bar and reports each change
-//  with ServerSetActionbarSlotUseData (no reply; a UseType of 0 clears the slot); a bought skill gets a ClientUpdateSkillOnActionbar with a
+//  with ServerSetActionbarSlotUseData, or several at once with ServerSetActionbarMultiSlotUseData (no reply; a UseType of 0 clears the slot); a bought skill gets a ClientUpdateSkillOnActionbar with a
 //  placement hint. Whether the retail server places a bought skill on the stored bar itself, or the client reports it, or the bar is saved
 //  some other way, is not in the captures.
 //
@@ -17,7 +17,7 @@
 //    - a bought or granted skill with an ability is placed by worldd on the first empty slot of the banks 0-3 (so that it survives a relog):
 //      a DESIGN CHOICE, not retail behaviour; the client is told with the usual ClientUpdateSkillOnActionbar, and a ServerSetActionbarSlotUseData
 //      that puts the same skill elsewhere moves it (a skill the server placed is on one slot at most);
-//    - a slot the client sets must be inside the banks 0-19 and slots 0-15, hold an enumeration value the client has and a rarity and combo
+//    - a slot the client sets must be inside the banks 0-19 and slots 0-11, hold an enumeration value the client has and a rarity and combo
 //      button of 0-15; the bar holds at
 //      most kMaxSlots slots; anything else is refused and nothing changes;
 //    - a character with no stored bar gets the default: the weapon bank as the captured Bard's (Guard, Sprint, the weapon swap, Dodge) and
@@ -40,10 +40,10 @@ namespace aoc::worldd::actionbar {
 namespace repl = ::aoc::protocol::repl;
 
 inline constexpr int    kMaxBank = 19;        // Fishing; the banks past it do not exist
-inline constexpr int    kMaxSlot = 15;
+inline constexpr int    kMaxSlot = 11;        // 12 slots, 0-11, in every bank (the client's bars have no more, and neither ServerSetActionbarSlotUseData nor the multi-slot call takes one past it)
 inline constexpr int    kClassBanks = 4;      // banks 0-3: the class pages
 inline constexpr int    kClassSlots = 12;     // slots 0-11 of a class page
-inline constexpr size_t kMaxSlots = 256;
+inline constexpr size_t kMaxSlots = 256;     // (20 banks of 12 slots hold 240 at most: this bound stays should the ranges grow)
 
 /// The weapon bank's abilities in the captured Bard's bar (slot 3 holds the weapon swap, whose AbilityId is Dodge's, as captured).
 struct WeaponBank {

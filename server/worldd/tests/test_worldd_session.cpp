@@ -1169,7 +1169,7 @@ static void test_possession_bunch_and_requests() {
     h.settle();
     CHECK(h.got.size() == b3, "a container worldd does not know gets no reply");
 
-    // an RPC worldd does not answer, one on an unknown channel, and bits that are no bunch
+    // a target no actor of the world holds (it changes nothing, so nothing is sent), one on an unknown channel, and bits that are no bunch
     const size_t b4 = h.got.size();
     h.client_sends({h.client.actor(pawn_ch, hex_bits(capture_blocks::kClientSetActiveTarget), true)});
     h.client_sends({h.client.actor(40, hex_bits(capture_blocks::kClientReadyToPhaseIn), true)});
@@ -1180,7 +1180,7 @@ static void test_possession_bunch_and_requests() {
     truncated.write_bit_range(possession.data(), 0, 300);   // cut in the middle of a block
     h.client_sends({h.client.actor(pc_ch, truncated, true)});
     h.settle();
-    CHECK(h.got.size() == b4 && !h.s->failed(), "ServerSetActiveTarget, a bunch on a channel that is not the player's, garbage and a cut bunch: ignored, nothing sent");
+    CHECK(h.got.size() == b4 && !h.s->failed(), "ServerSetActiveTarget of an object that is no actor, a bunch on a channel that is not the player's, garbage and a cut bunch: nothing sent");
     h.client_sends({h.client.actor(pc_ch, client_rpc(pc_cls, "ServerRequestClientLoad"), true)});
     h.settle();
     CHECK(h.got.size() == b4 + 6, "and the session still answers afterwards");

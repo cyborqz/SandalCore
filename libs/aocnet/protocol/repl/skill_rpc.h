@@ -165,6 +165,11 @@ using SetActionbarSlot = ActionbarSlot;
 std::optional<SetActionbarSlot> parse_set_actionbar_slot(const RpcCall& call);
 std::optional<RpcParams> set_actionbar_slot_params(const schema::RpcSchema& rpc, const SetActionbarSlot& slot);
 
+/// ServerSetActionbarMultiSlotUseData: the client set several slots of its bar in one call (an array of bank, slot and use data, in the order the
+/// client lists them; an empty array is the default and reads as no slot). nullopt for another RPC, a call whose parameters were not decoded, an
+/// element that does not read and a list of more than kMaxActionbarSlots.
+std::optional<std::vector<ActionbarSlot>> parse_set_actionbar_slots(const RpcCall& call);
+
 // ---- ServerSetUseRangedWeapon ------------------------------------------------------------------------------------------------
 
 /// ServerSetUseRangedWeapon(bUseRanged) on the pawn (APlayerCharacter field 184): the player swapped between the melee and the ranged

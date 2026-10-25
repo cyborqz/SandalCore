@@ -919,6 +919,49 @@ bool PlayerBootstrap::set_using_ranged_weapon(bool ranged) {
     return combat->obj.state.set(*combat->obj.schema, "bIsUsingRangedWeapon", Value::boolean(ranged));
 }
 
+bool PlayerBootstrap::set_active_targets(const std::array<FIntrepidNetworkGUID, 2>& targets) {
+    if (!ok_) return false;
+    repl::Subobject* combat = component(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema->command("ActiveTargets.ActiveTargets")) return false;
+    repl::ArrayValue list;
+    for (const FIntrepidNetworkGUID& t : targets) {
+        repl::ElementState e;
+        e.values[1] = Value(t);   // (a default guid is the empty slot; the update carries the elements that changed)
+        list.elements.push_back(std::move(e));
+    }
+    return combat->obj.state.set(*combat->obj.schema, "ActiveTargets.ActiveTargets", Value(std::move(list)));
+}
+
+bool PlayerBootstrap::set_hover_target(const std::array<uint32_t, 4>& words) {
+    if (!ok_) return false;
+    repl::Subobject* combat = component(setup_.guids.combat_info);
+    constexpr const char* kPaths[4] = {"HoverTargetGuid.A", "HoverTargetGuid.B", "HoverTargetGuid.C", "HoverTargetGuid.D"};
+    if (!combat) return false;
+    for (const char* path : kPaths) {
+        if (!combat->obj.schema->command(path)) return false;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        if (!combat->obj.state.set(*combat->obj.schema, kPaths[i], Value::i64(static_cast<int32_t>(words[i])))) return false;   // (the words are int32 on the wire)
+    }
+    return true;
+}
+
+bool PlayerBootstrap::set_pvp_force_flag(bool on) {
+    if (!ok_) return false;
+    repl::Subobject* combat = component(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema->command("bPvPForceFlag")) return false;
+    return combat->obj.state.set(*combat->obj.schema, "bPvPForceFlag", Value::boolean(on));
+}
+
+void PlayerBootstrap::note_trigger_pvp_flag(int64_t instance, bool flag) {
+    if (!flag) {
+        trigger_pvp_.erase(instance);   // (a trigger that carried no flag: the instance's item shows none)
+        return;
+    }
+    trigger_pvp_.insert(instance);
+    while (trigger_pvp_.size() > kMaxTriggerFlags) trigger_pvp_.erase(trigger_pvp_.begin());   // (the oldest triggers: the lowest instances)
+}
+
 bool PlayerBootstrap::set_weapon_skill_line(int64_t guid, const std::string& name) {
     if (!ok_ || !second_state_added_ || guid == 0) return false;
     repl::Subobject* owner = component(setup_.guids.owner_info);
@@ -2011,7 +2054,7 @@ repl::ElementState effect_state(const PlayerSetup& s, const EffectItem& e) { ret
 
 /// A ReplicatedActiveAbilities item (the 17 commands of UAoCAbilityComponent field 4), as pkt#8175 and the retail Sprint and Dodge
 /// replies carry it.
-repl::ElementState ability_state(const PlayerSetup& s, const ActiveAbilityItem& a) {
+repl::ElementState ability_state(const PlayerSetup& s, const ActiveAbilityItem& a, bool pvp_force) {
     repl::ElementState es;
     auto& v = es.values;
     v[1] = Value::i64(a.ability_guid);
@@ -2029,7 +2072,7 @@ repl::ElementState ability_state(const PlayerSetup& s, const ActiveAbilityItem& 
     }
     v[3] = Value(std::move(targets));
     v[4] = Value(repl::ArrayValue{});   // TargetTransforms: none
-    v[5] = Value::boolean(false);       // bPvpForceFlag
+    v[5] = Value::boolean(pvp_force);   // bPvpForceFlag: the flag the trigger carried
     v[6] = Value::i64(0);               // ReplicatedProgressInfo.NumDisruptiveHits
     v[7] = Value::f32(0);               // .TotalDisruptionSeconds
     v[8] = Value::f32(0);               // .CastDuration
@@ -2190,18 +2233,19 @@ bool PlayerBootstrap::apply_ability_change(const AbilityChange& c) {
         abilities->remove(ability_ids_.at(k));
         abilities->mark_array_dirty();
         ability_ids_.erase(k);
+        trigger_pvp_.erase(k);
         ability_montages_.erase(k);
         ability_targets_.erase(k);
     }
     for (const ActiveAbilityItem& a : c.abilities_added) {
-        const auto id = abilities->add(ability_state(setup_, a));
+        const auto id = abilities->add(ability_state(setup_, a, trigger_pvp_.count(a.server_instance_id) != 0));
         if (!id) return fail("an ability item does not fit ReplicatedActiveAbilities");
         ability_ids_[a.server_instance_id] = *id;
         ability_montages_[a.server_instance_id] = {a.montage_path, a.montage_guid};
         ability_targets_[a.server_instance_id] = targets_of(a);
     }
     for (const ActiveAbilityItem& a : c.abilities_changed) {
-        if (!abilities->change(ability_ids_.at(a.server_instance_id), ability_state(setup_, a))) return fail("an ability item does not take its change");
+        if (!abilities->change(ability_ids_.at(a.server_instance_id), ability_state(setup_, a, trigger_pvp_.count(a.server_instance_id) != 0))) return fail("an ability item does not take its change");
         ability_montages_[a.server_instance_id] = {a.montage_path, a.montage_guid};
         ability_targets_[a.server_instance_id] = targets_of(a);
     }

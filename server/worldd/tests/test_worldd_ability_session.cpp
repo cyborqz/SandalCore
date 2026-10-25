@@ -3601,7 +3601,6 @@ static void test_e1_whole_fight() {
         auto bad_guid = take_event(win, 0, container_guid, setup);
         bad_guid.item.guid.a ^= 0xffu;
         refused_by({bad_guid}, "an event whose instance guid is forged is refused");
-        refused_by({take_event(win, 0, container_guid, setup), take_event(win, 0, container_guid, setup)}, "the same slot twice in one request is refused");
         repl::ItemStorageEvent light;   // (no item: a bunch of seventeen whole events does not fit the connection's bunch size at all)
         light.type = static_cast<uint8_t>(repl::StorageEventType::Fill);
         light.move_source.object = container_guid;
@@ -3628,6 +3627,13 @@ static void test_e1_whole_fight() {
     std::vector<repl::ItemStorageEvent> all;
     const repl::LootPayload win2 = r.m.loot_windows.back();
     for (size_t i = 0; i < expect.size(); ++i) all.push_back(take_event(win2, i, container_guid, setup));
+    // an event that fails (a forged item, a slot named twice) is skipped and the others are taken
+    {
+        repl::ItemStorageEvent forged = take_event(win2, 0, container_guid, setup);
+        forged.item.record_id += 1;
+        all.insert(all.begin(), forged);
+        all.push_back(take_event(win2, 0, container_guid, setup));
+    }
     std::map<int64_t, int64_t> held_before;
     for (const combat::LootStack& s : expect) held_before[s.item] = held_of(*r.h.s, s.item);
     const size_t events_before = r.m.storage_events.size();

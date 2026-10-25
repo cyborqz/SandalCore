@@ -966,9 +966,9 @@ static void test_action_bar() {
     CHECK(b.set(slot(0, 0, repl::ActionbarUseType::None)) && b.size() == 1 && !b.at(0, 0), "a UseType of None clears the slot");
     CHECK(b.set(slot(0, 0, repl::ActionbarUseType::None)), "...a clear of a slot that is empty is fine");
     // out of range, enumerations
-    for (const auto& s : {slot(-1, 0, 1), slot(20, 0, 1), slot(0, -1, 1), slot(0, 16, 1), slot(0, 0, 10), slot(2147483647, 0, 1)}) {
+    for (const auto& s : {slot(-1, 0, 1), slot(20, 0, 1), slot(0, -1, 1), slot(0, 12, 1), slot(19, 12, 1), slot(0, 16, 1), slot(0, 0, 10), slot(2147483647, 0, 1)}) {
         why.clear();
-        CHECK(!b.set(s, &why) && !why.empty(), "a slot outside the banks 0-19 and slots 0-15, or a use type past 9, is refused with a reason");
+        CHECK(!b.set(s, &why) && !why.empty(), "a slot outside the banks 0-19 and slots 0-11, or a use type past 9, is refused with a reason");
     }
     repl::ActionbarSlot bad_instigator = slot(0, 2, 1);
     bad_instigator.use.instigator = 4;
@@ -993,7 +993,8 @@ static void test_action_bar() {
     for (int bank = 0; bank <= kMaxBank && placed < kMaxSlots; ++bank) {
         for (int s = 0; s <= kMaxSlot && placed < kMaxSlots; ++s) placed += full.set(slot(bank, s, 1, 5)) ? 1 : 0;
     }
-    CHECK(full.size() == kMaxSlots && !full.set(slot(19, 15, 1, 5)) && full.set(slot(0, 0, 1, 6)), "a bar holds at most kMaxSlots slots: one more is refused, one that replaces a slot is not");
+    CHECK(full.size() == static_cast<size_t>((kMaxBank + 1) * (kMaxSlot + 1)) && !full.set(slot(19, 12, 1, 5)) && full.set(slot(0, 0, 1, 6)),
+          "every slot of the 20 banks of 12 can be set: one past the last slot is refused, one that replaces a slot is not");
     // placing skills
     Bar p;
     const auto a = p.place_skill(900, 9001);

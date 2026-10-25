@@ -320,6 +320,31 @@ std::optional<SetActionbarSlot> parse_set_actionbar_slot(const RpcCall& call) {
     return SetActionbarSlot{static_cast<int32_t>(*bank), static_cast<int32_t>(*slot), *u};
 }
 
+std::optional<std::vector<ActionbarSlot>> parse_set_actionbar_slots(const RpcCall& call) {
+    if (!is_rpc(call, "ServerSetActionbarMultiSlotUseData") || !call.rpc) return std::nullopt;
+    const RpcSchema& rpc = *call.rpc;
+    const RepCommand* cmd = rpc_command(rpc, "UseData");
+    if (!cmd || cmd->type != schema::PropType::DynamicArray) return std::nullopt;
+    const auto elems = rpcf::elements_of(rpc, *cmd);
+    // an element holds the bank, the slot and the slot's use data under their own prefix
+    const uint16_t h_bank = rpcf::local(elems, "UseData.BankIndex"), h_slot = rpcf::local(elems, "UseData.SlotIndex");
+    const auto use = use_handles(elems, "UseData.UseData.");
+    if (!h_bank || !h_slot || !use) return std::nullopt;
+    std::vector<ActionbarSlot> out;
+    const Value* v = rpcf::value_of(rpc, call.params, "UseData");
+    if (!v) return out;   // an empty array is the default: not on the wire
+    const ArrayValue* a = v->get_if<ArrayValue>();
+    if (!a || a->elements.size() > kMaxActionbarSlots) return std::nullopt;
+    for (const ElementState& e : a->elements) {
+        const auto bank = rpcf::int_or(rpcf::element_value(e, h_bank), 0);
+        const auto slot = rpcf::int_or(rpcf::element_value(e, h_slot), 0);
+        const auto u = take_use(*use, [&](uint16_t h) { return rpcf::element_value(e, h); });
+        if (!bank || !slot || !u || *bank < INT32_MIN || *bank > INT32_MAX || *slot < INT32_MIN || *slot > INT32_MAX) return std::nullopt;
+        out.push_back({static_cast<int32_t>(*bank), static_cast<int32_t>(*slot), *u});
+    }
+    return out;
+}
+
 std::optional<RpcParams> set_actionbar_slot_params(const RpcSchema& rpc, const SetActionbarSlot& slot) {
     if (!is_set_slot_rpc(rpc) || !fits_use(slot.use)) return std::nullopt;
     RpcParams params;
