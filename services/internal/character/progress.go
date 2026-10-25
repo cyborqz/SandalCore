@@ -42,6 +42,9 @@ type Progress struct {
 	ActionBar         []ActionbarSlot
 	// Gathering stage 2: each profession replaces the character's row of that profession (professions.go); the others are left alone.
 	Professions []Profession
+	// Missing systems, step 0: with ReplaceCompletedFTUEs the character's finished tutorials become exactly CompletedFTUEs, in this order (completed_ftues.go); without it they are left alone.
+	ReplaceCompletedFTUEs bool
+	CompletedFTUEs        []int64
 }
 
 // C-Y-B x C O A
@@ -96,6 +99,13 @@ func (p Progress) Validate() error {
 		}
 	} else if len(p.ActionBar) > 0 {
 		return fmt.Errorf("%w: action bar slots are given without replace_action_bar", ErrInvalid)
+	}
+	if p.ReplaceCompletedFTUEs {
+		if err := ValidateCompletedFTUEs(p.CompletedFTUEs); err != nil {
+			return err
+		}
+	} else if len(p.CompletedFTUEs) > 0 {
+		return fmt.Errorf("%w: completed tutorials are given without replace_completed_ftues", ErrInvalid)
 	}
 	return nil
 }
@@ -189,6 +199,11 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if p.ReplaceActionBar {
 		if err := replaceActionBar(ctx, tx, characterID, p.ActionBar); err != nil {
+			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplaceCompletedFTUEs {
+		if err := replaceCompletedFTUEs(ctx, tx, characterID, p.CompletedFTUEs); err != nil {
 			return Character{}, itemsError(err)
 		}
 	}

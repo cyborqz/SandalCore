@@ -723,8 +723,8 @@ static void test_join_through_endpoint() {
     const NewActor pc = read_new_actor(j.got[0].content, true), gs = read_new_actor(j.got[4].content, false),
                    pawn = read_new_actor(j.got[6].content, false), ps = read_new_actor(j.got[14].content, false);
     CHECK(pc.ok && gs.ok && pawn.ok && ps.ok, "the four opens' SerializeNewActor read");
-    CHECK(gs.actor == guid(0x1000000) && ps.actor == guid(0x1000002) && pc.actor == guid(0x1000004) && pawn.actor == guid(0x1000008),
-          "GUIDs are minted under worldd's ServerId: the GameState's first, then the PlayerState, PlayerController and pawn (even ObjectIds)");
+    CHECK(gs.actor == guid(0x1000000) && ps.actor == guid(0x1000002) && pc.actor == guid(0x1000004) && pawn.actor == guid(0x100000a),
+          "GUIDs are minted under worldd's ServerId: the GameState's first, then the PlayerState, PlayerController and pawn (even ObjectIds; GlobalGMCommands and the tutorial component come between the controller and the pawn)");
     CHECK(pc.archetype.ObjectId == bs::pc_archetype_export().front().guid.ObjectId &&
               gs.archetype.ObjectId == bs::game_state_archetype_export().front().guid.ObjectId &&
               pawn.archetype.ObjectId == bs::pawn_archetype_export().front().guid.ObjectId &&

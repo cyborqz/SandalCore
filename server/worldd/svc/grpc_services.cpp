@@ -159,6 +159,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         r.character.processing_jobs.push_back(std::move(job));
     }
     for (const int64_t recipe : c.known_recipes()) r.character.known_recipes.push_back(recipe);
+    for (const int64_t id : c.completed_ftues()) r.character.completed_ftues.push_back(id);
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -253,6 +254,8 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
         p->set_item_quality(a.item_quality);
         p->set_combo_button(a.combo_button);
     }
+    req.set_replace_completed_ftues(progress.replace_completed_ftues);
+    for (const int64_t id : progress.completed_ftues) req.add_completed_ftues(id);
     characterv1::SaveProgressResponse resp;
     return map_grpc_status(stubs_->character->SaveProgress(&ctx, req, &resp));
 }

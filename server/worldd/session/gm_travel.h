@@ -149,6 +149,14 @@ struct GmTaughtList {
     std::vector<std::pair<std::string, int64_t>> recipes;   // name and Guid, in the order they were taught
 };
 
+/// Missing systems, step 0: the test command that puts a player's finished tutorials back.
+struct GmTutorialResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    uint32_t    cleared = 0;   // the finished tutorials put back
+};
+
 /// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
 struct GmNpcResult {
     GmStatus    status = GmStatus::Ok;
@@ -191,6 +199,8 @@ public:
     GmRecipeResult   teach_recipe(const std::string& character, const std::string& recipe, const std::string& by);
     GmRecipeResult   forget_recipe(const std::string& character, const std::string& recipe, const std::string& by);
     GmTaughtList     list_taught(const std::string& character);
+    /// Puts a player's finished tutorials back: the list is emptied, the client is told (its hints can start again) and the empty list is saved.
+    GmTutorialResult reset_tutorials(const std::string& character, const std::string& by);
 
     // ---- the NPC actions (a creature is named by its actor id, as the world stream and Inspect give it)
     /// Kills it as a blow would: the same death and corpse, the loot a kill gives (rolled as for a player of the creature's own level, open to every player in the world, no experience), and its

@@ -35,6 +35,7 @@ const (
 	WorldAdminService_TeachRecipe_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/TeachRecipe"
 	WorldAdminService_ForgetRecipe_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ForgetRecipe"
 	WorldAdminService_ListTaughtRecipes_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/ListTaughtRecipes"
+	WorldAdminService_ResetTutorials_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/ResetTutorials"
 	WorldAdminService_KillNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
 	WorldAdminService_RespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
 	WorldAdminService_ResetNpc_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
@@ -96,6 +97,9 @@ type WorldAdminServiceClient interface {
 	ForgetRecipe(ctx context.Context, in *ForgetRecipeRequest, opts ...grpc.CallOption) (*ForgetRecipeResponse, error)
 	// The recipes a character was taught, by name and Guid, in the order they were taught. NotFound for a character that is not in the world.
 	ListTaughtRecipes(ctx context.Context, in *ListTaughtRecipesRequest, opts ...grpc.CallOption) (*ListTaughtRecipesResponse, error)
+	// Missing systems, step 0. Puts a player's tutorials back: the list of tutorials the character finished is emptied, the client is told (its tutorial hints can start again, as for a character that
+	// never saw them) and the empty list is saved. NotFound for a character that is not in the world; FailedPrecondition for a character that has finished none.
+	ResetTutorials(ctx context.Context, in *ResetTutorialsRequest, opts ...grpc.CallOption) (*ResetTutorialsResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -242,6 +246,16 @@ func (c *worldAdminServiceClient) ListTaughtRecipes(ctx context.Context, in *Lis
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) ResetTutorials(ctx context.Context, in *ResetTutorialsRequest, opts ...grpc.CallOption) (*ResetTutorialsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetTutorialsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ResetTutorials_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldAdminServiceClient) KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillNpcResponse)
@@ -355,6 +369,9 @@ type WorldAdminServiceServer interface {
 	ForgetRecipe(context.Context, *ForgetRecipeRequest) (*ForgetRecipeResponse, error)
 	// The recipes a character was taught, by name and Guid, in the order they were taught. NotFound for a character that is not in the world.
 	ListTaughtRecipes(context.Context, *ListTaughtRecipesRequest) (*ListTaughtRecipesResponse, error)
+	// Missing systems, step 0. Puts a player's tutorials back: the list of tutorials the character finished is emptied, the client is told (its tutorial hints can start again, as for a character that
+	// never saw them) and the empty list is saved. NotFound for a character that is not in the world; FailedPrecondition for a character that has finished none.
+	ResetTutorials(context.Context, *ResetTutorialsRequest) (*ResetTutorialsResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -416,6 +433,9 @@ func (UnimplementedWorldAdminServiceServer) ForgetRecipe(context.Context, *Forge
 }
 func (UnimplementedWorldAdminServiceServer) ListTaughtRecipes(context.Context, *ListTaughtRecipesRequest) (*ListTaughtRecipesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTaughtRecipes not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ResetTutorials(context.Context, *ResetTutorialsRequest) (*ResetTutorialsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetTutorials not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
@@ -672,6 +692,24 @@ func _WorldAdminService_ListTaughtRecipes_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_ResetTutorials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetTutorialsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ResetTutorials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ResetTutorials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ResetTutorials(ctx, req.(*ResetTutorialsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillNpcRequest)
 	if err := dec(in); err != nil {
@@ -834,6 +872,10 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTaughtRecipes",
 			Handler:    _WorldAdminService_ListTaughtRecipes_Handler,
+		},
+		{
+			MethodName: "ResetTutorials",
+			Handler:    _WorldAdminService_ResetTutorials_Handler,
 		},
 		{
 			MethodName: "KillNpc",

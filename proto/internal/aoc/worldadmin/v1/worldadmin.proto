@@ -56,6 +56,9 @@ service WorldAdminService {
   rpc ForgetRecipe(ForgetRecipeRequest) returns (ForgetRecipeResponse);
   // The recipes a character was taught, by name and Guid, in the order they were taught. NotFound for a character that is not in the world.
   rpc ListTaughtRecipes(ListTaughtRecipesRequest) returns (ListTaughtRecipesResponse);
+  // Missing systems, step 0. Puts a player's tutorials back: the list of tutorials the character finished is emptied, the client is told (its tutorial hints can start again, as for a character that
+  // never saw them) and the empty list is saved. NotFound for a character that is not in the world; FailedPrecondition for a character that has finished none.
+  rpc ResetTutorials(ResetTutorialsRequest) returns (ResetTutorialsResponse);
 
   // ---- NPC actions: a game master's tools on one creature. Each takes the creature's actor id, as the world stream and Inspect give it, and is applied on the network thread like the
   // calls above. NotFound for an id that is not in the world; InvalidArgument for an actor that is not a creature (a player, a resource node, a mount, a station) and for a point
@@ -235,6 +238,15 @@ message TaughtRecipe {
 message ListTaughtRecipesResponse {
   string character = 1;
   repeated TaughtRecipe recipes = 2;
+}
+
+message ResetTutorialsRequest {
+  string character = 1;
+}
+
+message ResetTutorialsResponse {
+  string character = 1; // the name worldd has it under
+  int32 cleared = 2;    // how many finished tutorials were put back
 }
 
 message GiveItemRequest {

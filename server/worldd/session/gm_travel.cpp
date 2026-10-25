@@ -312,6 +312,23 @@ GmRecipeResult GmTravel::forget_recipe(const std::string& character, const std::
     return out;
 }
 
+GmTutorialResult GmTravel::reset_tutorials(const std::string& character, const std::string& by) {
+    GmTutorialResult out;
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = handle.player->name();
+    out.cleared = static_cast<uint32_t>(handle.player->gm_reset_tutorials(*handle.connection, by));
+    if (out.cleared == 0) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = out.character + " has finished no tutorial";
+    }
+    return out;
+}
+
 GmTaughtList GmTravel::list_taught(const std::string& character) {
     GmTaughtList out;
     const PlayerHandle handle = find_player(character);

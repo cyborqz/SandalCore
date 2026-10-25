@@ -948,10 +948,10 @@ static void test_guids_and_parts() {
     ServerGuidAllocator alloc(60, 1860730596u);
     const auto g = bs::mint_session_guids(alloc, guid(4608, 60, 1860730596u));
     CHECK(g.player_state.ObjectId == ServerGuidAllocator::kFirstObjectId && g.player_controller.ObjectId == g.player_state.ObjectId + 2 &&
-              g.stats.ObjectId == g.player_state.ObjectId + 2 * 16 && g.game_state.ObjectId == 4608 && g.pawn.ServerId == 60 && g.pawn.Randomizer == 1860730596u,
+              g.stats.ObjectId == g.player_state.ObjectId + 2 * 17 && g.ftue.ObjectId == g.global_gm_commands.ObjectId + 2 && g.pawn.ObjectId == g.ftue.ObjectId + 2 && g.game_state.ObjectId == 4608 && g.pawn.ServerId == 60 && g.pawn.Randomizer == 1860730596u,
           "mint_session_guids: consecutive even ids under the ServerId, the GameState's passed through");
     bool even = true;
-    for (const auto* x : {&g.player_state, &g.player_controller, &g.global_gm_commands, &g.pawn, &g.base_character_info, &g.combat_info, &g.owner_info,
+    for (const auto* x : {&g.player_state, &g.player_controller, &g.global_gm_commands, &g.ftue, &g.pawn, &g.base_character_info, &g.combat_info, &g.owner_info,
                           &g.backpack, &g.equipment, &g.quest_storage, &g.reward_storage, &g.appearance, &g.resource_storage[0], &g.resource_storage[1], &g.resource_storage[2], &g.collision_cylinder,
                           &g.alignment, &g.ability, &g.stats}) {
         even = even && (x->ObjectId % 2) == 0;

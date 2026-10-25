@@ -1326,6 +1326,17 @@ A craft ends with nothing taken, and `ClientInterruptCraft` to the client, when 
 craft stops. `PlayerKnownRecipeIds` (OwnerInfo) holds the recipes a game master taught a character (the client knows the others by the recipe's own flag); `worldctl craft teach|forget <character> <recipe>` and `craft taught
 <character>` (`WorldAdmin.TeachRecipe`, `ForgetRecipe`, `ListTaughtRecipes`) change it, and the list is saved with the items (`character_known_recipes`, migration 0014).
 
+### Finished tutorials: the tutorial component (missing systems, step 0)
+
+The client keeps a running list of the tutorial hints it can start, and reports each one it starts to the server (`Server_RemoveLocaleFTUEs`, one id per call); it takes an id off that running list only when the
+server's list of finished tutorials (`CompletedFTUEs`) holds it. Until worldd exported the PlayerController's tutorial component ("FTUE Component", `UFTUEComponent`) the client named it by path and worldd skipped its calls, so
+every hint was reported again at every matching event, hundreds of times in one session, and in every session. Now the component is exported with the XPTracker's chain at the join (`PlayerBootstrap::xp_tracker_open`,
+`kChecksumFTUE`, its id minted right after GlobalGMCommands), holding the character's list (`PlayerSetup::completed_ftues`; an empty list writes nothing, the component's block still goes out). A call is read by the session
+(`PlayerSession::on_remove_ftues`): an id of 0 or less is ignored, an id already on the list adds nothing, a call that would take the list over 1,024 is refused with a log, and every new id joins the list in call order, is saved
+with the progress (`SaveProgress` with `replace_completed_ftues`, table `character_completed_ftues`, migration 0015) and is sent back 84 ms later as the whole list (`PlayerBootstrap::set_completed_ftues` and `ftue_update`). The
+list is loaded by `GetCharacter` (with items) and sent with the join. `worldctl tutorials reset <character>` (`WorldAdmin.ResetTutorials`) empties a player's list: the client is told and its hints can start again. The hints the
+server starts itself (a level reached, becoming a citizen) are not sent yet (`Client_ReceiveFTUEToTrigger`).
+
 ### The world stream: a read-only view of the world for admin tools
 
 worldd serves `WorldStreamService` (`proto/internal/aoc/worldadmin/v1/worldadmin.proto`, beside `WorldAdminService`) on `--world-stream` / `AOC_WORLD_STREAM_ADDR` (default `127.0.0.1:50057`; `--no-world-stream` turns it off)

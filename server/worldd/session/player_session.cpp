@@ -338,6 +338,12 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
             built.setup->account_characters.insert(built.setup->account_characters.begin(), std::move(n));
         }
     }
+    // missing systems, step 0: the tutorials the character finished go to the client with the join (an id the store would never hold, a repeat, or what is over the cap is left out)
+    std::vector<int64_t> finished;
+    for (const int64_t id : character.completed_ftues) {
+        if (id > 0 && finished.size() < bootstrap::kMaxCompletedFtues && std::find(finished.begin(), finished.end(), id) == finished.end()) finished.push_back(id);
+    }
+    built.setup->completed_ftues = finished;
     std::unique_ptr<PlayerSession> p(
         new PlayerSession(std::move(*built.setup), world.gamestate_mode(), character.id, world.movement(), world.position_sink(),
                           world.ability_rules(), std::move(*built.inventory), world.item_catalog(), std::move(built.character_stats), &world,
@@ -346,6 +352,8 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->jobs_ = character.processing_jobs;   // crafting, step 1: the jobs run on the wall clock, whether the character was logged in or not
     for (const svc::ProcessingJob& j : p->jobs_) p->job_seen_[j.job_guid] = crafting::status_at(j, wall_ms());   // (step 2: a window opened now shows them so; the changes after are sent)
     p->sync_active_stations(wall_ms());
+    p->completed_ftues_ = std::move(finished);
+    if (!p->completed_ftues_.empty()) spdlog::info("[session] {}: {} finished tutorial(s) on the character's list, sent with the join", p->pb_.setup().name, p->completed_ftues_.size());
     p->taught_ = character.known_recipes;   // crafting, step 3: the recipes a game master taught the character (the others are known to the client by their own flag)
     if (!p->taught_.empty() && !p->pb_.set_known_recipes(p->taught_)) {
         spdlog::warn("[session] {}: the {} recipes the character was taught do not fit the player's state: the client is not told of them", p->pb_.setup().name, p->taught_.size());
@@ -844,6 +852,8 @@ void PlayerSession::hand_over_progress(const char* why) {
             p.action_bar.push_back(std::move(a));
         }
     }
+    p.replace_completed_ftues = true;   // missing systems, step 0: the finished tutorials go whole with every hand-over (what the session holds is what the character has)
+    p.completed_ftues = completed_ftues_;
     sink_->save_progress(character_id_, std::move(p));
     ++progress_handed_over_;
     spdlog::info("[session] {}: saving the progress (level {}, class {}, Adventuring {} XP, debt {}) ({})", name(), progress_.level, class_id_, progress_.xp,
@@ -1148,6 +1158,8 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerNotifyHeldAbilityCancelled") return on_ability_cancel(conn, rpc, now);
         if (name_of_rpc == "RequestHitVerification_Server") return on_hit_request(conn, rpc, now);
         if (name_of_rpc == "ServerEndAbility") return on_ability_end(conn, rpc, now);
+    } else if (!rpc.on_actor && role == Role::PlayerController && rpc.object == pb_.setup().guids.ftue) {
+        if (name_of_rpc == "Server_RemoveLocaleFTUEs") return on_remove_ftues(conn, rpc, now);
     }
     if (unhandled_logged_.insert(std::string(name_of_rpc)).second) {
         // (info since retest 3: which calls of the client worldd answers with nothing, once each; the hunt's ServerSetActiveTarget is one)
@@ -3735,6 +3747,78 @@ bool PlayerSession::gm_forget_recipe(Connection& conn, int64_t recipe, const std
     if (pb_.set_known_recipes(taught_)) queue("OwnerInfo", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
     spdlog::info("[session] {}: was made to forget recipe {} by {} ({} taught in all)", name(), recipe, by, taught_.size());
     return true;
+}
+
+// -- missing systems, step 0: tutorials stay done -------------------------------------------------------------------------------------------------------
+
+void PlayerSession::on_remove_ftues(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now) {
+    ++ftue_calls_;
+    if (!rpc.call.decoded) {
+        if (!ftue_unreadable_logged_) {
+            ftue_unreadable_logged_ = true;
+            spdlog::warn("[session] {}: Server_RemoveLocaleFTUEs arrived and its parameters do not decode: nothing is recorded (further ones are not logged)", name());
+        }
+        return;
+    }
+    const protocol::repl::Value* v = protocol::repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "FTUEsToRemove");
+    const protocol::repl::ArrayValue* list = v ? v->get_if<protocol::repl::ArrayValue>() : nullptr;
+    if (!list || list->elements.empty()) return;   // (an empty list is the default: not on the wire)
+    // the ids that would join the list: 0 and below are ignored, a repeat adds nothing, and the whole call is refused when the list would go over its cap
+    if (list->elements.size() > bootstrap::kMaxCompletedFtues) {
+        if (++ftue_refused_logged_ <= kLoggedPerKind) {
+            spdlog::warn("[session] {}: Server_RemoveLocaleFTUEs names {} tutorials, more than a character can have finished ({}): refused", name(), list->elements.size(),
+                         bootstrap::kMaxCompletedFtues);
+        }
+        return;
+    }
+    std::vector<int64_t> fresh;
+    for (const protocol::repl::ElementState& e : list->elements) {
+        const auto it = e.values.find(1);
+        const int64_t* id = it != e.values.end() ? it->second.get_if<int64_t>() : nullptr;
+        if (!id || *id <= 0) {   // (0 is the id of no tutorial; an element that is not on the wire is 0)
+            ++ftue_ignored_;
+            if (++ftue_ignored_logged_ <= kLoggedPerKind) spdlog::info("[session] {}: Server_RemoveLocaleFTUEs names tutorial {}: ignored", name(), id ? *id : 0);
+            continue;
+        }
+        if (std::find(completed_ftues_.begin(), completed_ftues_.end(), *id) != completed_ftues_.end() || std::find(fresh.begin(), fresh.end(), *id) != fresh.end()) {
+            ++ftue_repeats_;
+            continue;
+        }
+        fresh.push_back(*id);
+    }
+    if (fresh.empty()) {
+        spdlog::debug("[session] {}: Server_RemoveLocaleFTUEs: nothing new ({} calls, {} repeats, {} ignored so far)", name(), ftue_calls_, ftue_repeats_, ftue_ignored_);
+        return;
+    }
+    if (completed_ftues_.size() + fresh.size() > bootstrap::kMaxCompletedFtues) {
+        if (++ftue_refused_logged_ <= kLoggedPerKind) {
+            spdlog::warn("[session] {}: Server_RemoveLocaleFTUEs would take the finished tutorials over {}: refused, nothing changes", name(), bootstrap::kMaxCompletedFtues);
+        }
+        return;
+    }
+    for (const int64_t id : fresh) {
+        completed_ftues_.push_back(id);
+        spdlog::log(level_for(ftue_logged_, 20), "[session] {}: finished tutorial {} ({} finished in all)", name(), id, completed_ftues_.size());
+    }
+    progress_changed_ = true;
+    hand_over_progress("a tutorial was finished");
+    // the list goes back to the client a moment later, as the retail server's quiet replies do: the client takes the finished ones off its running list when it arrives
+    if (pb_.set_completed_ftues(completed_ftues_)) {
+        queue_later("FTUE Component", [](bootstrap::PlayerBootstrap& pb) { return pb.ftue_update(); }, conn, now, /*must_build=*/false);
+    } else {
+        spdlog::warn("[session] {}: the tutorial component does not take the {} finished tutorials: the client is not told", name(), completed_ftues_.size());
+    }
+}
+
+size_t PlayerSession::gm_reset_tutorials(Connection& conn, const std::string& by) {
+    const size_t n = completed_ftues_.size();
+    if (n == 0) return 0;
+    completed_ftues_.clear();
+    progress_changed_ = true;
+    hand_over_progress("the tutorials were put back by a game master");
+    if (pb_.set_completed_ftues(completed_ftues_)) queue("FTUE Component", [](bootstrap::PlayerBootstrap& pb) { return pb.ftue_update(); }, conn, /*must_build=*/false);
+    spdlog::info("[session] {}: had {} finished tutorial(s) put back by {}", name(), n, by);
+    return n;
 }
 
 // -- crafting, step 2: collecting a job ---------------------------------------------------------------------------------------------------------------------

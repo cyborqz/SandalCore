@@ -72,10 +72,9 @@ type CharacterServiceClient interface {
 	// XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
 	// replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
 	// the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
+	// Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues).
 	SaveProgress(ctx context.Context, in *SaveProgressRequest, opts ...grpc.CallOption) (*SaveProgressResponse, error)
 }
-
-// [C.O.A - C-Y-B]
 
 type characterServiceClient struct {
 	cc grpc.ClientConnInterface
@@ -155,8 +154,6 @@ func (c *characterServiceClient) SaveProgress(ctx context.Context, in *SaveProgr
 	return out, nil
 }
 
-// C Y B.CoA
-
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -197,6 +194,7 @@ type CharacterServiceServer interface {
 	// XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
 	// replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
 	// the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
+	// Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues).
 	SaveProgress(context.Context, *SaveProgressRequest) (*SaveProgressResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
@@ -267,8 +265,6 @@ func _CharacterService_CreateCharacter_Handler(srv interface{}, ctx context.Cont
 	}
 	return interceptor(ctx, in, info, handler)
 }
-
-// Cyb x C-O-A
 
 func _CharacterService_ListCharacters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListCharactersRequest)

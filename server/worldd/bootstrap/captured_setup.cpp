@@ -132,6 +132,7 @@ std::optional<PlayerSetup> captured_character_setup() {
     g.player_state = session_guid(10341528);
     g.player_controller = session_guid(10341530);
     g.global_gm_commands = session_guid(10341532);
+    g.ftue = session_guid(10341536);   // the capture's tutorial component (the quest component, 10341534, is not sent)
     g.game_state = session_guid(4608);
     g.pawn = session_guid(10341538);
     g.base_character_info = session_guid(10341540);

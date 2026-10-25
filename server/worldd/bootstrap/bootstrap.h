@@ -31,8 +31,10 @@
 //        bHidden 1, Alignment, Ability, Stats, the dynamic ResourceStorageComponent and
 //        what the components gain (pkt#107)
 //    10  PlayerState open (pkt#434)
+//    11  (missing systems, step 0) the XPTracker's chain also adds the tutorial component, "FTUE Component", with the character's finished
+//        tutorials, so that the client reports a tutorial it finished to a component the server knows
 //
-//  Left out, as the spec says: the PlayerController's quest, FTUE and XP subobjects,
+//  Left out, as the spec says: the PlayerController's quest subobject,
 //  inventory items and storage events, world actors, the two unreliable load tracker
 //  values of pkt#46 and #50, per-connection replication conditions.
 //
@@ -159,6 +161,9 @@ inline constexpr size_t kMaxEventsPerChain = 16;
 /// The most recipes OwnerInfo.PlayerKnownRecipeIds holds (the design data has fewer than 4,300 recipes in all).
 inline constexpr size_t kMaxKnownRecipes = 4400;
 
+/// The most finished tutorials one character keeps (UFTUEComponent.CompletedFTUEs; the design data has fewer than 100 tutorials, and the client reports one id per call).
+inline constexpr size_t kMaxCompletedFtues = 1024;
+
 /// A property of an actor by its schema path and the value to set ("CharacterInGameSettings.CombatSettings.Input.BufferDuration").
 struct PropertyValue {
     std::string_view path;
@@ -199,6 +204,14 @@ public:
     /// sent it in pkt#103 with the possession update (8,051 bits of a level-20 tester's maps); it is its own chain here so
     /// that the PlayerController's pkt#103 golden holds.
     std::optional<Send> xp_tracker_open();
+    /// Missing systems, step 0: the PlayerController's tutorial component ("FTUE Component", UFTUEComponent), a stably named subobject that holds the tutorials the character finished
+    /// (CompletedFTUEs, in the order given; an empty list writes nothing, but the component's block still goes out: that is how the client learns its id).  xp_tracker_open() adds it,
+    /// into the XPTracker's chain (the retail login sends them together).
+    /// The tutorials the character finished, whole and in order: the next ftue_update() sends the change, if any.  False, nothing changed, when the list is over `kMaxCompletedFtues`.
+    /// Before the component is on the actor the list is only remembered for the join.
+    bool set_completed_ftues(const std::vector<int64_t>& ids);
+    /// What changed on the tutorial component since the last update, as one PlayerController chain, reliable; nullopt when nothing did (or before the join's last chain).
+    std::optional<Send> ftue_update();
 
     // ---- replies ----------------------------------------------------------------------------------------------------
 
@@ -621,6 +634,8 @@ private:
     bool mount_bar_calls(int64_t dash_ability, int32_t slot, std::vector<repl::RpcRequest>& calls) const;
     /// Plan D1: copies the LevelingState's arrays into the XPTracker subobject (the update is built from the subobject).
     void sync_xp_tracker();
+    /// Missing systems, step 0: puts the tutorial component on the PlayerController with the setup's list (once); false when it does not build.
+    bool add_ftue_component();
     std::optional<Send> update(Role role, const char* what, repl::Actor& actor, repl::ActorShadow& shadow);
     std::optional<Send> rpcs(Role role, const char* what, std::span<const repl::RpcRequest> calls);
     std::optional<Send> verbatim_block(Role role, const char* what, const char* hex, size_t bits);
@@ -661,6 +676,7 @@ private:
     // plan D1: the XPTracker's maps (the typed state keeps the keys the way MarkItemDirty does) and whether the subobject is on the actor
     repl::LevelingState leveling_;
     bool                xp_tracker_added_ = false;
+    bool                ftue_added_ = false;   // missing systems, step 0: the tutorial component is on the PlayerController
     /// Nodes 1, stage 2: the GameState's node maps as they were before the last node_maps_update that built an update (it changes them before the chain exists); restore()
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;

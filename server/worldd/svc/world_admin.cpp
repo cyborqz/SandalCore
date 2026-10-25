@@ -308,6 +308,17 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         return grpc::Status::OK;
     }
 
+    grpc::Status ResetTutorials(grpc::ServerContext* ctx, const adminv1::ResetTutorialsRequest* req, adminv1::ResetTutorialsResponse* resp) override {
+        if (auto s = authorize(ctx, "ResetTutorials"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmTutorialResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.reset_tutorials(req->character(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_cleared(static_cast<int32_t>(out.cleared));
+        return grpc::Status::OK;
+    }
+
     grpc::Status ListTaughtRecipes(grpc::ServerContext* ctx, const adminv1::ListTaughtRecipesRequest* req, adminv1::ListTaughtRecipesResponse* resp) override {
         if (auto s = authorize(ctx, "ListTaughtRecipes"); !s.ok()) return s;
         GmTaughtList out;

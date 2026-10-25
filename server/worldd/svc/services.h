@@ -199,6 +199,8 @@ struct Character {
     /// Crafting, step 3: the recipes the character was taught although the game makes a player learn them (recipe Guids, in the order they were taught; with the items).  A service of an
     /// older version sends none.
     std::vector<int64_t> known_recipes;
+    /// Missing systems, step 0: the tutorials the character finished (FirstTimeEvent Guids, in the order they were finished; with the items).  A service of an older version sends none.
+    std::vector<int64_t> completed_ftues;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -218,13 +220,17 @@ struct Progress {
     /// Gathering stage 2: each profession replaces the character's row of that profession; the others are left alone (the character service refuses a profession
     /// that is none of the 22, one twice, a tier outside 0-4, a level outside 1-50 or a negative XP).
     std::vector<ProfessionState> professions;
+    /// Missing systems, step 0: with replace_completed_ftues the character's finished tutorials become exactly `completed_ftues`, in this order; without it they are left alone (the character
+    /// service refuses an id of 0 or less, one twice, and more than 1,024).
+    bool                         replace_completed_ftues = false;
+    std::vector<int64_t>         completed_ftues;
     bool operator==(const Progress& o) const {
         if (level != o.level || class_id != o.class_id || experience.size() != o.experience.size()) return false;
         for (size_t i = 0; i < experience.size(); ++i) {
             if (!(experience[i] == o.experience[i])) return false;
         }
         return replace_skill_ranks == o.replace_skill_ranks && skill_ranks == o.skill_ranks && replace_action_bar == o.replace_action_bar &&
-               action_bar == o.action_bar && professions == o.professions;
+               action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues;
     }
 };
 // [C:Y:B :: C O A]

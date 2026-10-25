@@ -672,6 +672,10 @@ public:
     /// the character is saved.
     bool     gm_teach_recipe(Connection& conn, int64_t recipe, const std::string& by);
     bool     gm_forget_recipe(Connection& conn, int64_t recipe, const std::string& by);
+    /// Missing systems, step 0: the tutorials the character finished (FirstTimeEvent Guids, in the order they were finished).
+    const std::vector<int64_t>& completed_ftues() const { return completed_ftues_; }
+    /// A game master's tool: puts the finished tutorials back (the list is emptied, the client is told and the character is saved).  How many were put back (0: it had none, nothing happens).
+    size_t   gm_reset_tutorials(Connection& conn, const std::string& by);
     /// Crafting, step 3: whether a quick make is under way, and how many were started, made, interrupted and refused.
     bool     quick_active() const { return quick_.active; }
     size_t   quick_started() const { return quick_started_; }
@@ -935,6 +939,9 @@ private:
     void queue_profession_level_ups(Connection& conn, const std::vector<professions::Change>& changes);
     /// Hands the progress (level, class, XP, debt) to the sink; `why` is for the log.
     void hand_over_progress(const char* why);
+    /// Missing systems, step 0: the tutorial component's call Server_RemoveLocaleFTUEs(FTUEsToRemove): the client says these tutorials are finished.  Each id not on the list yet joins it,
+    /// in call order, and the list is saved and sent back, which is what makes the client stop reporting them.  An id of 0 or less is ignored; a call that would take the list over its cap is refused.
+    void on_remove_ftues(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// A fresh instance guid no item of the inventory has (32 lowercase hex digits).
     std::string fresh_guid();
     /// Tells the client what an applied request did (the events, then the visible gear) and marks the inventory dirty.
@@ -1362,6 +1369,9 @@ private:
     bool   claim_unreadable_logged_ = false;
     crafting::QuickMake quick_;                       // crafting, step 3: the craft that runs
     std::vector<int64_t> taught_;                     // the recipes the character was taught, in the order they were taught (saved with the inventory)
+    std::vector<int64_t> completed_ftues_;            // missing systems, step 0: the tutorials the client reported finished, in the order they came (saved with the progress)
+    size_t ftue_calls_ = 0, ftue_repeats_ = 0, ftue_ignored_ = 0, ftue_ignored_logged_ = 0, ftue_logged_ = 0, ftue_refused_logged_ = 0;
+    bool   ftue_unreadable_logged_ = false;
     size_t quick_started_ = 0, quick_made_ = 0, quick_interrupted_ = 0, quick_refused_ = 0, quick_logged_ = 0, quick_refused_logged_ = 0, quick_made_logged_ = 0;
     bool   interrupt_unreadable_logged_ = false;
     std::vector<std::array<int32_t, 4>> active_words_;   // the stations OwnerInfo.ActiveProcessingStations lists

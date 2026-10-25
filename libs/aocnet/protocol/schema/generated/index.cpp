@@ -56,6 +56,7 @@
 #include "protocol/schema/generated/UCharacterCombatInfo.h"
 #include "protocol/schema/generated/UCharacterInfo.h"
 #include "protocol/schema/generated/UCharacterSecondaryInfo.h"
+#include "protocol/schema/generated/UFTUEComponent.h"
 #include "protocol/schema/generated/UInteractableComponent.h"
 #include "protocol/schema/generated/UIntrepidFoliageStateComponent.h"
 #include "protocol/schema/generated/UIntrepidRepKeyComponent.h"
@@ -125,6 +126,7 @@ constexpr Entry kByName[] = {
     {"UCharacterCombatInfo", &kUCharacterCombatInfo},
     {"UCharacterInfo", &kUCharacterInfo},
     {"UCharacterSecondaryInfo", &kUCharacterSecondaryInfo},
+    {"UFTUEComponent", &kUFTUEComponent},
     {"UInteractableComponent", &kUInteractableComponent},
     {"UIntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
     {"UIntrepidRepKeyComponent", &kUIntrepidRepKeyComponent},
@@ -154,6 +156,7 @@ constexpr Entry kComponents[] = {
     {"Character Appearance", &kUCharacterAppearanceComponent},
     {"CombatInfo", &kUPlayerCombatInfo},
     {"EquipmentComponent", &kUItemStorageComponent},
+    {"FTUE Component", &kUFTUEComponent},
     {"FlyingMountComponent", &kUMountComponent},
     {"GroundMountComponent", &kUMountComponent},
     {"InteractInfo", &kUNPCSecondaryInfo},
@@ -208,6 +211,7 @@ constexpr const ClassSchema* kAll[] = {
     &kUCharacterCombatInfo,
     &kUCharacterInfo,
     &kUCharacterSecondaryInfo,
+    &kUFTUEComponent,
     &kUInteractableComponent,
     &kUIntrepidFoliageStateComponent,
     &kUIntrepidRepKeyComponent,

@@ -834,7 +834,52 @@ std::optional<Send> PlayerBootstrap::xp_tracker_open() {
         pc_.subobjects.push_back(std::move(tracker));
         xp_tracker_added_ = true;
     }
+    if (!ftue_added_ && !add_ftue_component()) return std::nullopt;   // (the tutorial component comes after the tracker in the chain, as in the retail login's big chain)
     return update(Role::PlayerController, "XPTracker", pc_, pc_shadow_);
+}
+
+namespace {
+
+/// CompletedFTUEs as the replicator holds it: one element per id, in order (the element's only member is handle 1).
+repl::Value ftue_list(const std::vector<int64_t>& ids) {
+    repl::ArrayValue list;
+    list.elements.reserve(ids.size());
+    for (const int64_t id : ids) {
+        repl::ElementState e;
+        e.values[1] = Value::i64(id);
+        list.elements.push_back(std::move(e));
+    }
+    return Value(std::move(list));
+}
+
+}  // namespace
+
+bool PlayerBootstrap::add_ftue_component() {
+    repl::Subobject ftue = make_component(setup_.guids.ftue, "FTUE Component", kChecksumFTUE);
+    if (!ftue.obj.schema) return fail("no schema for the tutorial component (UFTUEComponent)");
+    if (setup_.completed_ftues.size() > kMaxCompletedFtues) return fail("the character has more finished tutorials than the tutorial component holds");
+    // (an empty list is the property's default: the client holds it already and nothing is written for it, but the component's block still goes out, which is how the client learns its id)
+    if (!setup_.completed_ftues.empty() && !ftue.obj.state.set(*ftue.obj.schema, "CompletedFTUEs", ftue_list(setup_.completed_ftues))) {
+        return fail("CompletedFTUEs refused");
+    }
+    pc_.subobjects.push_back(std::move(ftue));
+    ftue_added_ = true;
+    return true;
+}
+
+bool PlayerBootstrap::set_completed_ftues(const std::vector<int64_t>& ids) {
+    if (!ok_ || ids.size() > kMaxCompletedFtues) return false;
+    setup_.completed_ftues = ids;
+    if (!ftue_added_) return true;   // the join sends the list
+    repl::Subobject* ftue = pc_.find(setup_.guids.ftue);
+    if (!ftue) return false;
+    // (a list that became empty is written as one, so that the client takes the change: it puts its tutorials back)
+    return ftue->obj.state.set(*ftue->obj.schema, "CompletedFTUEs", ftue_list(ids));
+}
+
+std::optional<Send> PlayerBootstrap::ftue_update() {
+    if (!ok_ || !ftue_added_) return std::nullopt;
+    return update(Role::PlayerController, "FTUE Component", pc_, pc_shadow_);
 }
 
 std::optional<Send> PlayerBootstrap::leveling_update() {

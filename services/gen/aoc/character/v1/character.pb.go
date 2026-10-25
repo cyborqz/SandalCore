@@ -203,9 +203,12 @@ type Character struct {
 	ProcessingJobs []*ProcessingJob `protobuf:"bytes,21,rep,name=processing_jobs,json=processingJobs,proto3" json:"processing_jobs,omitempty"`
 	// Crafting, step 3: the recipes the character was taught (migration 0014) although the game makes a player learn them, with the items (include_items), in the order they were taught.
 	// A recipe the game does not make a player learn is known to everybody and is not listed.
-	KnownRecipes  []int64 `protobuf:"varint,22,rep,packed,name=known_recipes,json=knownRecipes,proto3" json:"known_recipes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	KnownRecipes []int64 `protobuf:"varint,22,rep,packed,name=known_recipes,json=knownRecipes,proto3" json:"known_recipes,omitempty"`
+	// Missing systems, step 0: the tutorials the character finished (migration 0015), the design database's FirstTimeEvent Guids in the order they were finished, with the items (include_items).
+	// A character that finished none has none.
+	CompletedFtues []int64 `protobuf:"varint,23,rep,packed,name=completed_ftues,json=completedFtues,proto3" json:"completed_ftues,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Character) Reset() {
@@ -388,6 +391,13 @@ func (x *Character) GetProcessingJobs() []*ProcessingJob {
 func (x *Character) GetKnownRecipes() []int64 {
 	if x != nil {
 		return x.KnownRecipes
+	}
+	return nil
+}
+
+func (x *Character) GetCompletedFtues() []int64 {
+	if x != nil {
+		return x.CompletedFtues
 	}
 	return nil
 }
@@ -1847,9 +1857,13 @@ type SaveProgressRequest struct {
 	ActionBar         []*ActionbarSlot `protobuf:"bytes,8,rep,name=action_bar,json=actionBar,proto3" json:"action_bar,omitempty"`
 	// Gathering stage 2: each profession replaces the character's row of that profession, the others are left alone. InvalidArgument, with nothing
 	// changed, for a profession that is none of the 22, one given twice, a tier outside 0-4, a level outside 1-50 or a negative xp.
-	Professions   []*ProfessionState `protobuf:"bytes,9,rep,name=professions,proto3" json:"professions,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Professions []*ProfessionState `protobuf:"bytes,9,rep,name=professions,proto3" json:"professions,omitempty"`
+	// Missing systems, step 0: with replace_completed_ftues the character's finished tutorials become exactly `completed_ftues`, in this order; without it they are left alone. InvalidArgument,
+	// with nothing changed, for a Guid of 0 or less, one given twice, or more than 1,024.
+	ReplaceCompletedFtues bool    `protobuf:"varint,10,opt,name=replace_completed_ftues,json=replaceCompletedFtues,proto3" json:"replace_completed_ftues,omitempty"`
+	CompletedFtues        []int64 `protobuf:"varint,11,rep,packed,name=completed_ftues,json=completedFtues,proto3" json:"completed_ftues,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *SaveProgressRequest) Reset() {
@@ -1945,6 +1959,20 @@ func (x *SaveProgressRequest) GetProfessions() []*ProfessionState {
 	return nil
 }
 
+func (x *SaveProgressRequest) GetReplaceCompletedFtues() bool {
+	if x != nil {
+		return x.ReplaceCompletedFtues
+	}
+	return false
+}
+
+func (x *SaveProgressRequest) GetCompletedFtues() []int64 {
+	if x != nil {
+		return x.CompletedFtues
+	}
+	return nil
+}
+
 type SaveProgressResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     *Character             `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"` // with its experience rows
@@ -1998,7 +2026,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
 	"\x01z\x18\x03 \x01(\x01R\x01z\x12\x10\n" +
-	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\x93\a\n" +
+	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xbc\a\n" +
 	"\tCharacter\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2030,7 +2058,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\vprofessions\x18\x13 \x03(\v2!.aoc.character.v1.ProfessionStateR\vprofessions\x125\n" +
 	"\x06wallet\x18\x14 \x03(\v2\x1d.aoc.character.v1.WalletEntryR\x06wallet\x12H\n" +
 	"\x0fprocessing_jobs\x18\x15 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\x12#\n" +
-	"\rknown_recipes\x18\x16 \x03(\x03R\fknownRecipes\"\xf3\x02\n" +
+	"\rknown_recipes\x18\x16 \x03(\x03R\fknownRecipes\x12'\n" +
+	"\x0fcompleted_ftues\x18\x17 \x03(\x03R\x0ecompletedFtues\"\xf3\x02\n" +
 	"\rProcessingJob\x12\x19\n" +
 	"\bjob_guid\x18\x01 \x01(\tR\ajobGuid\x12\x1f\n" +
 	"\vstation_key\x18\x02 \x01(\tR\n" +
@@ -2160,7 +2189,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x15replace_known_recipes\x18\a \x01(\bR\x13replaceKnownRecipes\x12#\n" +
 	"\rknown_recipes\x18\b \x03(\x03R\fknownRecipes\"-\n" +
 	"\x15SaveInventoryResponse\x12\x14\n" +
-	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xb5\x03\n" +
+	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\x96\x04\n" +
 	"\x13SaveProgressRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\x05R\x05level\x12\x19\n" +
@@ -2174,7 +2203,10 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x12replace_action_bar\x18\a \x01(\bR\x10replaceActionBar\x12>\n" +
 	"\n" +
 	"action_bar\x18\b \x03(\v2\x1f.aoc.character.v1.ActionbarSlotR\tactionBar\x12C\n" +
-	"\vprofessions\x18\t \x03(\v2!.aoc.character.v1.ProfessionStateR\vprofessions\"Q\n" +
+	"\vprofessions\x18\t \x03(\v2!.aoc.character.v1.ProfessionStateR\vprofessions\x126\n" +
+	"\x17replace_completed_ftues\x18\n" +
+	" \x01(\bR\x15replaceCompletedFtues\x12'\n" +
+	"\x0fcompleted_ftues\x18\v \x03(\x03R\x0ecompletedFtues\"Q\n" +
 	"\x14SaveProgressResponse\x129\n" +
 	"\tcharacter\x18\x01 \x01(\v2\x1b.aoc.character.v1.CharacterR\tcharacter*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +

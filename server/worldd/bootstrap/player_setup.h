@@ -165,6 +165,9 @@ struct SessionGuids {
     emit::FIntrepidNetworkGUID player_state;
     emit::FIntrepidNetworkGUID player_controller;
     emit::FIntrepidNetworkGUID global_gm_commands;     // the PlayerController's dynamic subobject
+    /// Missing systems, step 0: the PlayerController's tutorial component ("FTUE Component", UFTUEComponent), minted right after GlobalGMCommands.  It is a default subobject the client
+    /// knows by name: its content block is what gives it this id.
+    emit::FIntrepidNetworkGUID ftue;
     emit::FIntrepidNetworkGUID game_state;
     emit::FIntrepidNetworkGUID pawn;
     emit::FIntrepidNetworkGUID base_character_info;    // the pawn's components, in the capture's order
@@ -214,7 +217,7 @@ struct ProgressSetup {
 };
 
 /// Mints every GUID of a joining player but the GameState's, in the capture's order (PlayerState, PlayerController,
-/// GlobalGMCommands, the pawn, its components).
+/// GlobalGMCommands, the tutorial component, the pawn, its components).
 SessionGuids mint_session_guids(protocol::ServerGuidAllocator& allocator, const emit::FIntrepidNetworkGUID& game_state);
 
 // ---- everything -----------------------------------------------------------------------------------------------------
@@ -260,6 +263,8 @@ struct PlayerSetup {
     std::array<ResourceBagSetup, 3>  resource_bags = {ResourceBagSetup{true, 6, 4, {}}, ResourceBagSetup{}, ResourceBagSetup{}};
     /// Plan D1: the XPTracker's state at the join.
     ProgressSetup                    progress;
+    /// Missing systems, step 0: the tutorials the character finished, as FirstTimeEvent Guids in the order they were finished (UFTUEComponent.CompletedFTUEs).  Empty: nothing is sent for the list.
+    std::vector<int64_t>             completed_ftues;
     /// BaseCharacterInfo.bShouldSendOrgsAtWarWithToast: the client shows "Your Settlement is at war!" after login.
     /// The captured character's settlement was at war (pkt#107 sends 1); a character with no settlement at war leaves
     /// it at its default, false, and it is not sent (in-game check 2026-10-01: with 1 the toast showed for cyb).

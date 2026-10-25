@@ -43,6 +43,7 @@ service CharacterService {
   // XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
   // replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
   // the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
+  // Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues).
   rpc SaveProgress(SaveProgressRequest) returns (SaveProgressResponse);
 }
 
@@ -98,6 +99,9 @@ message Character {
   // Crafting, step 3: the recipes the character was taught (migration 0014) although the game makes a player learn them, with the items (include_items), in the order they were taught.
   // A recipe the game does not make a player learn is known to everybody and is not listed.
   repeated int64 known_recipes = 22;
+  // Missing systems, step 0: the tutorials the character finished (migration 0015), the design database's FirstTimeEvent Guids in the order they were finished, with the items (include_items).
+  // A character that finished none has none.
+  repeated int64 completed_ftues = 23;
 }
 
 // One processing job of a character (crafting, step 1, migration 0013): a batch of a recipe started at a station. Times are Unix milliseconds on the server's wall clock, so a job runs
@@ -303,6 +307,10 @@ message SaveProgressRequest {
   // Gathering stage 2: each profession replaces the character's row of that profession, the others are left alone. InvalidArgument, with nothing
   // changed, for a profession that is none of the 22, one given twice, a tier outside 0-4, a level outside 1-50 or a negative xp.
   repeated ProfessionState professions = 9;
+  // Missing systems, step 0: with replace_completed_ftues the character's finished tutorials become exactly `completed_ftues`, in this order; without it they are left alone. InvalidArgument,
+  // with nothing changed, for a Guid of 0 or less, one given twice, or more than 1,024.
+  bool replace_completed_ftues = 10;
+  repeated int64 completed_ftues = 11;
 }
 
 message SaveProgressResponse {

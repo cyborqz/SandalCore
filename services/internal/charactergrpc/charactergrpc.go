@@ -63,6 +63,13 @@ type JobStore interface {
 
 var _ JobStore = (*character.Store)(nil)
 
+// FTUEStore is the part of character.Store that keeps the tutorials a character finished (missing systems, step 0). A store without it keeps none: GetCharacter sends none.
+type FTUEStore interface {
+	CompletedFTUEs(ctx context.Context, id string) ([]int64, error)
+}
+
+var _ FTUEStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -247,6 +254,13 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			}
 			out.KnownRecipes = known
 		}
+		if fs, ok := s.store.(FTUEStore); ok {
+			done, err := fs.CompletedFTUEs(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.CompletedFtues = done
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -255,7 +269,8 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 
 // SaveProgress writes the level, the class and the XP rows (plan D1; worldd saves them as its player levels).
 func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRequest) (*characterv1.SaveProgressResponse, error) {
-	p := character.Progress{Level: r.GetLevel(), ClassID: r.GetClassId(), ReplaceSkillRanks: r.GetReplaceSkillRanks(), ReplaceActionBar: r.GetReplaceActionBar()}
+	p := character.Progress{Level: r.GetLevel(), ClassID: r.GetClassId(), ReplaceSkillRanks: r.GetReplaceSkillRanks(), ReplaceActionBar: r.GetReplaceActionBar(),
+		ReplaceCompletedFTUEs: r.GetReplaceCompletedFtues(), CompletedFTUEs: r.GetCompletedFtues()}
 	for _, e := range r.GetExperience() {
 		p.Experience = append(p.Experience, character.Experience{LevelingTypeGuid: e.GetLevelingTypeGuid(), XP: e.GetXp(), Debt: e.GetDebt()})
 	}

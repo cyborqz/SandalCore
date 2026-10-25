@@ -20,6 +20,7 @@
 //	worldctl craft teach <character> <recipe>         teaches the character a recipe the game makes a player learn (its record name or Guid): it is known from then on and is saved
 //	worldctl craft forget <character> <recipe>        takes a taught recipe away again
 //	worldctl craft taught <character>                 lists the recipes the character was taught
+//	worldctl tutorials reset <character>              puts the character's finished tutorials back: its tutorial hints can start again (a test command)
 //	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one creature, named by its actor id (npc.go says what each does)
 //	worldctl npc move <id> <x> <y> [<z>]              stands a creature at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
 //	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
@@ -79,6 +80,7 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   craft finish <character> [<st>]   finish the character's processing jobs at once, ready to collect (a test command)
   craft teach|forget <character> <recipe>   teach a recipe the game makes a player learn (name or Guid), or take it away again (a test command)
   craft taught <character>          list the recipes the character was taught
+  tutorials reset <character>       put the character's finished tutorials back, so its hints can start again (a test command)
   npc kill|respawn|reset|heal|despawn <id>   a game master's action on one creature, by its actor id
   npc move <id> <x> <y> [<z>]       stand a creature at a point (cm); its leash is centred there, its spawn point stays
   watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
@@ -96,7 +98,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "npc":
+	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "tutorials", "npc":
 	case "watch":
 		return runWatch(ctx, rest, out, errw)
 	case "help", "-h", "--help":
@@ -247,6 +249,18 @@ func parse(cmd string, pos []string) (call, error) {
 				where = " at " + station
 			}
 			fmt.Fprintf(out, "%s: %d job(s) finished%s; they are ready to collect\n", r.GetCharacter(), r.GetFinished(), where)
+			return nil
+		}, nil
+	case "tutorials":
+		if len(pos) != 2 || pos[0] != "reset" {
+			return nil, usageError("needs reset and a character: worldctl tutorials reset <character>")
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.ResetTutorials(ctx, &worldadminv1.ResetTutorialsRequest{Character: pos[1]})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s: %d finished tutorial(s) put back; the hints can start again\n", r.GetCharacter(), r.GetCleared())
 			return nil
 		}, nil
 	case "speed":
