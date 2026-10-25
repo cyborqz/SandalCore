@@ -282,6 +282,46 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         return grpc::Status::OK;
     }
 
+    grpc::Status TeachRecipe(grpc::ServerContext* ctx, const adminv1::TeachRecipeRequest* req, adminv1::TeachRecipeResponse* resp) override {
+        if (auto s = authorize(ctx, "TeachRecipe"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmRecipeResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.teach_recipe(req->character(), req->recipe(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_recipe(out.recipe);
+        resp->set_recipe_guid(out.recipe_guid);
+        resp->set_taught(out.taught);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ForgetRecipe(grpc::ServerContext* ctx, const adminv1::ForgetRecipeRequest* req, adminv1::ForgetRecipeResponse* resp) override {
+        if (auto s = authorize(ctx, "ForgetRecipe"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmRecipeResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.forget_recipe(req->character(), req->recipe(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_recipe(out.recipe);
+        resp->set_recipe_guid(out.recipe_guid);
+        resp->set_taught(out.taught);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ListTaughtRecipes(grpc::ServerContext* ctx, const adminv1::ListTaughtRecipesRequest* req, adminv1::ListTaughtRecipesResponse* resp) override {
+        if (auto s = authorize(ctx, "ListTaughtRecipes"); !s.ok()) return s;
+        GmTaughtList out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.list_taught(req->character()); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        for (const auto& [name, guid] : out.recipes) {
+            auto* r = resp->add_recipes();
+            r->set_recipe(name);
+            r->set_recipe_guid(guid);
+        }
+        return grpc::Status::OK;
+    }
+
     grpc::Status PlaceStation(grpc::ServerContext* ctx, const adminv1::PlaceStationRequest* req, adminv1::PlaceStationResponse* resp) override {
         if (auto s = authorize(ctx, "PlaceStation"); !s.ok()) return s;
         const std::string by = "the admin API (" + ctx->peer() + ")";

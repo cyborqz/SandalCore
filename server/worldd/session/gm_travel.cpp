@@ -231,6 +231,104 @@ GmFinishResult GmTravel::finish_jobs(const std::string& character, const std::st
     return out;
 }
 
+namespace {
+
+/// The recipe a GM names: its record name (case does not count) or its Guid in digits.  nullptr, with `out` filled, when there is none or several.
+const content::CraftRecipe* recipe_named(const content::CraftRecipeData* data, const std::string& text, GmRecipeResult& out) {
+    if (!data) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "worldd has no recipes (an older content.db)";
+        return nullptr;
+    }
+    if (text.empty()) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "no recipe is named";
+        return nullptr;
+    }
+    const bool digits = std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (digits) {
+        if (const content::CraftRecipe* r = data->recipe(std::atoll(text.c_str()))) return r;
+    }
+    const content::CraftRecipe* found = nullptr;
+    size_t count = 0;
+    for (const auto& [guid, r] : data->recipes) {
+        if (r.name.size() == text.size() && std::equal(r.name.begin(), r.name.end(), text.begin(), [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })) {
+            found = &r;
+            ++count;
+        }
+    }
+    if (count == 1) return found;
+    out.status = count == 0 ? GmStatus::NotFound : GmStatus::InvalidArgument;
+    out.message = count == 0 ? "no recipe is named \"" + log_text(text) + "\"" : std::to_string(count) + " recipes are named \"" + log_text(text) + "\": give the Guid";
+    return nullptr;
+}
+
+}  // namespace
+
+GmRecipeResult GmTravel::teach_recipe(const std::string& character, const std::string& recipe, const std::string& by) {
+    GmRecipeResult out;
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = handle.player->name();
+    const content::CraftRecipe* r = recipe_named(world_.craft_recipes(), recipe, out);
+    if (!r) return out;
+    out.recipe = r->name;
+    out.recipe_guid = r->guid;
+    if (!r->learnable) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = r->name + " needs no teaching: every character knows it";
+        return out;
+    }
+    if (!handle.player->gm_teach_recipe(*handle.connection, r->guid, by)) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = out.character + " was taught " + r->name + " already";
+    }
+    out.taught = static_cast<int32_t>(handle.player->taught_recipes().size());
+    return out;
+}
+
+GmRecipeResult GmTravel::forget_recipe(const std::string& character, const std::string& recipe, const std::string& by) {
+    GmRecipeResult out;
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = handle.player->name();
+    const content::CraftRecipe* r = recipe_named(world_.craft_recipes(), recipe, out);
+    if (!r) return out;
+    out.recipe = r->name;
+    out.recipe_guid = r->guid;
+    if (!handle.player->gm_forget_recipe(*handle.connection, r->guid, by)) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = out.character + " was not taught " + r->name;
+    }
+    out.taught = static_cast<int32_t>(handle.player->taught_recipes().size());
+    return out;
+}
+
+GmTaughtList GmTravel::list_taught(const std::string& character) {
+    GmTaughtList out;
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = handle.player->name();
+    const content::CraftRecipeData* data = world_.craft_recipes();
+    for (const int64_t guid : handle.player->taught_recipes()) {
+        const content::CraftRecipe* r = data ? data->recipe(guid) : nullptr;
+        out.recipes.emplace_back(r ? r->name : std::to_string(guid), guid);
+    }
+    return out;
+}
+
 GmItemGrant GmTravel::give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by) {
     GmItemGrant out;
     if (item.empty()) {

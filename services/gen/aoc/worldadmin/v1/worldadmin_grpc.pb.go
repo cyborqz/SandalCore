@@ -23,21 +23,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorldAdminService_ListPlayers_FullMethodName   = "/aoc.worldadmin.v1.WorldAdminService/ListPlayers"
-	WorldAdminService_ListPlaces_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/ListPlaces"
-	WorldAdminService_Teleport_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/Teleport"
-	WorldAdminService_SetMoveSpeed_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/SetMoveSpeed"
-	WorldAdminService_GiveMoney_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/GiveMoney"
-	WorldAdminService_GiveItem_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
-	WorldAdminService_PlaceStation_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/PlaceStation"
-	WorldAdminService_RemoveStation_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/RemoveStation"
-	WorldAdminService_FinishJobs_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/FinishJobs"
-	WorldAdminService_KillNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
-	WorldAdminService_RespawnNpc_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
-	WorldAdminService_ResetNpc_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
-	WorldAdminService_HealNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/HealNpc"
-	WorldAdminService_DespawnNpc_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/DespawnNpc"
-	WorldAdminService_MoveNpc_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/MoveNpc"
+	WorldAdminService_ListPlayers_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/ListPlayers"
+	WorldAdminService_ListPlaces_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/ListPlaces"
+	WorldAdminService_Teleport_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/Teleport"
+	WorldAdminService_SetMoveSpeed_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/SetMoveSpeed"
+	WorldAdminService_GiveMoney_FullMethodName         = "/aoc.worldadmin.v1.WorldAdminService/GiveMoney"
+	WorldAdminService_GiveItem_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/GiveItem"
+	WorldAdminService_PlaceStation_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/PlaceStation"
+	WorldAdminService_RemoveStation_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/RemoveStation"
+	WorldAdminService_FinishJobs_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/FinishJobs"
+	WorldAdminService_TeachRecipe_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/TeachRecipe"
+	WorldAdminService_ForgetRecipe_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ForgetRecipe"
+	WorldAdminService_ListTaughtRecipes_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/ListTaughtRecipes"
+	WorldAdminService_KillNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
+	WorldAdminService_RespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
+	WorldAdminService_ResetNpc_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
+	WorldAdminService_HealNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/HealNpc"
+	WorldAdminService_DespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/DespawnNpc"
+	WorldAdminService_MoveNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/MoveNpc"
 )
 
 // WorldAdminServiceClient is the client API for WorldAdminService service.
@@ -85,6 +88,14 @@ type WorldAdminServiceClient interface {
 	// told. With a station (its Blueprint's or its definition's name) only the jobs there. NotFound for a character that is not in the world; FailedPrecondition when the character has no job
 	// that is not over (at that station).
 	FinishJobs(ctx context.Context, in *FinishJobsRequest, opts ...grpc.CallOption) (*FinishJobsResponse, error)
+	// Crafting, step 3. Teaches a character a recipe the game makes a player learn (a recipe scroll will do it later), by the recipe's name (case does not count) or its Guid: the server and
+	// the character's window count it as known from now on, and it is saved with the character. NotFound for a character that is not in the world or a recipe the data does not have;
+	// InvalidArgument for a name that several recipes have (give the Guid); FailedPrecondition for a recipe everybody knows already or one the character was taught already.
+	TeachRecipe(ctx context.Context, in *TeachRecipeRequest, opts ...grpc.CallOption) (*TeachRecipeResponse, error)
+	// Takes a taught recipe away again. The same errors, with FailedPrecondition for a recipe the character was not taught.
+	ForgetRecipe(ctx context.Context, in *ForgetRecipeRequest, opts ...grpc.CallOption) (*ForgetRecipeResponse, error)
+	// The recipes a character was taught, by name and Guid, in the order they were taught. NotFound for a character that is not in the world.
+	ListTaughtRecipes(ctx context.Context, in *ListTaughtRecipesRequest, opts ...grpc.CallOption) (*ListTaughtRecipesResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -201,6 +212,36 @@ func (c *worldAdminServiceClient) FinishJobs(ctx context.Context, in *FinishJobs
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) TeachRecipe(ctx context.Context, in *TeachRecipeRequest, opts ...grpc.CallOption) (*TeachRecipeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TeachRecipeResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_TeachRecipe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) ForgetRecipe(ctx context.Context, in *ForgetRecipeRequest, opts ...grpc.CallOption) (*ForgetRecipeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ForgetRecipeResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ForgetRecipe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) ListTaughtRecipes(ctx context.Context, in *ListTaughtRecipesRequest, opts ...grpc.CallOption) (*ListTaughtRecipesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTaughtRecipesResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ListTaughtRecipes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldAdminServiceClient) KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillNpcResponse)
@@ -306,6 +347,14 @@ type WorldAdminServiceServer interface {
 	// told. With a station (its Blueprint's or its definition's name) only the jobs there. NotFound for a character that is not in the world; FailedPrecondition when the character has no job
 	// that is not over (at that station).
 	FinishJobs(context.Context, *FinishJobsRequest) (*FinishJobsResponse, error)
+	// Crafting, step 3. Teaches a character a recipe the game makes a player learn (a recipe scroll will do it later), by the recipe's name (case does not count) or its Guid: the server and
+	// the character's window count it as known from now on, and it is saved with the character. NotFound for a character that is not in the world or a recipe the data does not have;
+	// InvalidArgument for a name that several recipes have (give the Guid); FailedPrecondition for a recipe everybody knows already or one the character was taught already.
+	TeachRecipe(context.Context, *TeachRecipeRequest) (*TeachRecipeResponse, error)
+	// Takes a taught recipe away again. The same errors, with FailedPrecondition for a recipe the character was not taught.
+	ForgetRecipe(context.Context, *ForgetRecipeRequest) (*ForgetRecipeResponse, error)
+	// The recipes a character was taught, by name and Guid, in the order they were taught. NotFound for a character that is not in the world.
+	ListTaughtRecipes(context.Context, *ListTaughtRecipesRequest) (*ListTaughtRecipesResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -358,6 +407,15 @@ func (UnimplementedWorldAdminServiceServer) RemoveStation(context.Context, *Remo
 }
 func (UnimplementedWorldAdminServiceServer) FinishJobs(context.Context, *FinishJobsRequest) (*FinishJobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FinishJobs not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) TeachRecipe(context.Context, *TeachRecipeRequest) (*TeachRecipeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TeachRecipe not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ForgetRecipe(context.Context, *ForgetRecipeRequest) (*ForgetRecipeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForgetRecipe not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ListTaughtRecipes(context.Context, *ListTaughtRecipesRequest) (*ListTaughtRecipesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTaughtRecipes not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
@@ -560,6 +618,60 @@ func _WorldAdminService_FinishJobs_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_TeachRecipe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TeachRecipeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).TeachRecipe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_TeachRecipe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).TeachRecipe(ctx, req.(*TeachRecipeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_ForgetRecipe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForgetRecipeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ForgetRecipe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ForgetRecipe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ForgetRecipe(ctx, req.(*ForgetRecipeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_ListTaughtRecipes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTaughtRecipesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ListTaughtRecipes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ListTaughtRecipes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ListTaughtRecipes(ctx, req.(*ListTaughtRecipesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillNpcRequest)
 	if err := dec(in); err != nil {
@@ -710,6 +822,18 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FinishJobs",
 			Handler:    _WorldAdminService_FinishJobs_Handler,
+		},
+		{
+			MethodName: "TeachRecipe",
+			Handler:    _WorldAdminService_TeachRecipe_Handler,
+		},
+		{
+			MethodName: "ForgetRecipe",
+			Handler:    _WorldAdminService_ForgetRecipe_Handler,
+		},
+		{
+			MethodName: "ListTaughtRecipes",
+			Handler:    _WorldAdminService_ListTaughtRecipes_Handler,
 		},
 		{
 			MethodName: "KillNpc",

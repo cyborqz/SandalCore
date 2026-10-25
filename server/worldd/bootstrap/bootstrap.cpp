@@ -1117,6 +1117,7 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         ev.item = e.item;
         if (e.instigated) ev.instigator = character;
         ev.callout = e.callout;
+        ev.extra_guid_b = e.craft_txn;   // the quick make's product: the id of the craft it ends
         repl::StorageEventContainer target;
         target.object = item_storage_guid(e.storage);
         target.slots.push_back({e.slot, e.count > 0 ? e.count : static_cast<int32_t>(e.item.quantity), e.item.guid});
@@ -1272,6 +1273,28 @@ std::optional<Send> PlayerBootstrap::open_station(const emit::FIntrepidNetworkGU
     call.rpc = "ClientOpenCraftingStationUI";
     call.params = std::move(*params);
     return rpcs(Role::PlayerController, "ClientOpenCraftingStationUI", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::craft_interrupted() {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    if (!pc_.obj.schema->rpc("ClientInterruptCraft")) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientInterruptCraft";   // (no parameters)
+    return rpcs(Role::PlayerController, "ClientInterruptCraft", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+bool PlayerBootstrap::set_known_recipes(const std::vector<int64_t>& recipes) {
+    if (!ok_ || recipes.size() > kMaxKnownRecipes) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    repl::ArrayValue list;
+    list.elements.reserve(recipes.size());
+    for (const int64_t id : recipes) {
+        repl::ElementState e;
+        e.values[1] = Value::i64(id);   // PlayerKnownRecipeIds
+        list.elements.push_back(std::move(e));
+    }
+    return owner->obj.state.set(*owner->obj.schema, "PlayerKnownRecipeIds", Value(std::move(list)));
 }
 
 bool PlayerBootstrap::set_active_stations(const std::vector<std::array<int32_t, 4>>& stations) {
@@ -1539,6 +1562,7 @@ std::optional<repl::RpcRequest> PlayerBootstrap::batched_events_call(std::span<c
         ev.item = e.item;
         if (e.instigated) ev.instigator = character;
         ev.callout = e.callout;
+        ev.extra_guid_b = e.craft_txn;
         repl::StorageEventContainer target;
         target.object = item_storage_guid(e.storage);
         target.slots.push_back({e.slot, e.count > 0 ? e.count : static_cast<int32_t>(e.item.quantity), e.item.guid});

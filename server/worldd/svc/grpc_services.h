@@ -46,6 +46,8 @@ public:
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items) override;
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet) override;
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs) override;
+    CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                              const std::vector<int64_t>& known_recipes) override;
     CallStatus save_progress(const std::string& id, const Progress& progress) override;
     RegisterResult register_server(const std::string& address,
                                    const std::vector<std::string>& regions) override;
@@ -53,7 +55,8 @@ public:
 
 private:
     struct Stubs;
-    CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs = nullptr);
+    CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs = nullptr,
+                              const std::vector<int64_t>* known_recipes = nullptr);
     void prepare(grpc::ClientContext& ctx, std::chrono::milliseconds timeout) const;
     void prepare(grpc::ClientContext& ctx) const { prepare(ctx, timeout_); }
 

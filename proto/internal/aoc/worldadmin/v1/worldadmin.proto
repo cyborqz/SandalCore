@@ -48,6 +48,14 @@ service WorldAdminService {
   // told. With a station (its Blueprint's or its definition's name) only the jobs there. NotFound for a character that is not in the world; FailedPrecondition when the character has no job
   // that is not over (at that station).
   rpc FinishJobs(FinishJobsRequest) returns (FinishJobsResponse);
+  // Crafting, step 3. Teaches a character a recipe the game makes a player learn (a recipe scroll will do it later), by the recipe's name (case does not count) or its Guid: the server and
+  // the character's window count it as known from now on, and it is saved with the character. NotFound for a character that is not in the world or a recipe the data does not have;
+  // InvalidArgument for a name that several recipes have (give the Guid); FailedPrecondition for a recipe everybody knows already or one the character was taught already.
+  rpc TeachRecipe(TeachRecipeRequest) returns (TeachRecipeResponse);
+  // Takes a taught recipe away again. The same errors, with FailedPrecondition for a recipe the character was not taught.
+  rpc ForgetRecipe(ForgetRecipeRequest) returns (ForgetRecipeResponse);
+  // The recipes a character was taught, by name and Guid, in the order they were taught. NotFound for a character that is not in the world.
+  rpc ListTaughtRecipes(ListTaughtRecipesRequest) returns (ListTaughtRecipesResponse);
 
   // ---- NPC actions: a game master's tools on one creature. Each takes the creature's actor id, as the world stream and Inspect give it, and is applied on the network thread like the
   // calls above. NotFound for an id that is not in the world; InvalidArgument for an actor that is not a creature (a player, a resource node, a mount, a station) and for a point
@@ -189,6 +197,44 @@ message FinishJobsRequest {
 message FinishJobsResponse {
   string character = 1; // the name worldd has it under
   int32 finished = 2;   // the jobs finished
+}
+
+message TeachRecipeRequest {
+  string character = 1;
+  string recipe = 2; // the recipe record's name ("Armorsmithing_T1_Armor_Deepward_Waist"; case does not count), or its Guid in digits
+}
+
+message TeachRecipeResponse {
+  string character = 1; // the name worldd has it under
+  string recipe = 2;    // the recipe's record name
+  int64 recipe_guid = 3;
+  int32 taught = 4;     // how many recipes the character has been taught now
+}
+
+message ForgetRecipeRequest {
+  string character = 1;
+  string recipe = 2;
+}
+
+message ForgetRecipeResponse {
+  string character = 1;
+  string recipe = 2;
+  int64 recipe_guid = 3;
+  int32 taught = 4;
+}
+
+message ListTaughtRecipesRequest {
+  string character = 1;
+}
+
+message TaughtRecipe {
+  string recipe = 1;
+  int64 recipe_guid = 2;
+}
+
+message ListTaughtRecipesResponse {
+  string character = 1;
+  repeated TaughtRecipe recipes = 2;
 }
 
 message GiveItemRequest {

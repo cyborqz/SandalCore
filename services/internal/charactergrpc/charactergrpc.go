@@ -53,11 +53,12 @@ type WalletStore interface {
 
 var _ WalletStore = (*character.Store)(nil)
 
-// JobStore is the part of character.Store that keeps a character's processing jobs (the crafting milestone, step 1). A store without it keeps none: GetCharacter sends none and a
-// save that replaces the jobs is refused.
+// JobStore is the part of character.Store that keeps a character's processing jobs and the recipes it was taught (the crafting milestone, steps 1 and 3). A store without it keeps none:
+// GetCharacter sends none and a save that replaces the jobs or the recipes is refused.
 type JobStore interface {
 	ProcessingJobs(ctx context.Context, id string) ([]character.ProcessingJob, error)
-	SaveInventoryAll(ctx context.Context, id string, items []character.Item, wallet []character.WalletEntry, replaceWallet bool, jobs []character.ProcessingJob, replaceJobs bool) error
+	KnownRecipes(ctx context.Context, id string) ([]int64, error)
+	SaveInventoryAll(ctx context.Context, id string, items []character.Item, wallet []character.WalletEntry, replaceWallet bool, jobs []character.ProcessingJob, replaceJobs bool, known []int64, replaceKnown bool) error
 }
 
 var _ JobStore = (*character.Store)(nil)
@@ -240,6 +241,11 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 				return nil, toStatus(ctx, err)
 			}
 			out.ProcessingJobs = toProtoJobs(jobs)
+			known, err := js.KnownRecipes(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.KnownRecipes = known
 		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
@@ -393,16 +399,16 @@ func (s *Server) SaveInventory(ctx context.Context, r *characterv1.SaveInventory
 		}
 		items = append(items, item)
 	}
-	if r.GetReplaceProcessingJobs() {
+	if r.GetReplaceProcessingJobs() || r.GetReplaceKnownRecipes() {
 		js, ok := s.store.(JobStore)
 		if !ok {
-			return nil, status.Error(codes.Unimplemented, "this character store keeps no processing jobs")
+			return nil, status.Error(codes.Unimplemented, "this character store keeps no processing jobs or known recipes")
 		}
 		wallet := make([]character.WalletEntry, 0, len(r.GetWallet()))
 		for _, e := range r.GetWallet() {
 			wallet = append(wallet, character.WalletEntry{CurrencyGuid: e.GetCurrencyGuid(), Amount: e.GetAmount()})
 		}
-		if err := js.SaveInventoryAll(ctx, r.GetId(), items, wallet, r.GetReplaceWallet(), fromProtoJobs(r.GetProcessingJobs()), true); err != nil {
+		if err := js.SaveInventoryAll(ctx, r.GetId(), items, wallet, r.GetReplaceWallet(), fromProtoJobs(r.GetProcessingJobs()), r.GetReplaceProcessingJobs(), r.GetKnownRecipes(), r.GetReplaceKnownRecipes()); err != nil {
 			return nil, toStatus(ctx, err)
 		}
 		return &characterv1.SaveInventoryResponse{Saved: int32(len(items))}, nil

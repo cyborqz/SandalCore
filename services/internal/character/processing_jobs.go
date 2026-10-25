@@ -146,9 +146,10 @@ func (s *Store) ProcessingJobs(ctx context.Context, characterID string) ([]Proce
 	return out, nil
 }
 
-// SaveInventoryAll is SaveInventory plus, in the same transaction, the wallet (when replaceWallet: each currency named is set to its amount, the others are left) and the processing jobs
-// (when replaceJobs: the character's jobs become exactly jobs, an empty list removes them all). The wallet and the jobs are checked before anything is written.
-func (s *Store) SaveInventoryAll(ctx context.Context, characterID string, items []Item, wallet []WalletEntry, replaceWallet bool, jobs []ProcessingJob, replaceJobs bool) error {
+// SaveInventoryAll is SaveInventory plus, in the same transaction, the wallet (when replaceWallet: each currency named is set to its amount, the others are left), the processing jobs
+// (when replaceJobs: the character's jobs become exactly jobs, an empty list removes them all) and the recipes the character was taught (when replaceKnown: they become exactly known).
+// The wallet, the jobs and the recipes are checked before anything is written.
+func (s *Store) SaveInventoryAll(ctx context.Context, characterID string, items []Item, wallet []WalletEntry, replaceWallet bool, jobs []ProcessingJob, replaceJobs bool, known []int64, replaceKnown bool) error {
 	if !idPattern.MatchString(characterID) {
 		return ErrNotFound
 	}
@@ -164,7 +165,12 @@ func (s *Store) SaveInventoryAll(ctx context.Context, characterID string, items 
 			return err
 		}
 	}
-	return s.saveInventory(ctx, characterID, items, wallet, jobs, replaceJobs)
+	if replaceKnown {
+		if err := ValidateKnownRecipes(known); err != nil {
+			return err
+		}
+	}
+	return s.saveInventory(ctx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown)
 }
 
 // replaceProcessingJobs makes the character's jobs exactly jobs in tx, in the order given.

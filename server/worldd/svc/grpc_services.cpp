@@ -158,6 +158,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         }
         r.character.processing_jobs.push_back(std::move(job));
     }
+    for (const int64_t recipe : c.known_recipes()) r.character.known_recipes.push_back(recipe);
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -280,11 +281,21 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
     return save_inventory(id, items, wallet, /*with_wallet=*/true, &jobs);
 }
 
-CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs) {
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                        const std::vector<int64_t>& known_recipes) {
+    return save_inventory(id, items, wallet, /*with_wallet=*/true, &jobs, &known_recipes);
+}
+
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs,
+                                        const std::vector<int64_t>* known_recipes) {
     grpc::ClientContext ctx;
     prepare(ctx, save_timeout_);
     characterv1::SaveInventoryRequest req;
     req.set_id(id);
+    if (known_recipes) {
+        req.set_replace_known_recipes(true);
+        for (const int64_t recipe : *known_recipes) req.add_known_recipes(recipe);
+    }
     if (jobs) {
         req.set_replace_processing_jobs(true);
         for (const ProcessingJob& job : *jobs) {

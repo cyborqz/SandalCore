@@ -201,8 +201,11 @@ type Character struct {
 	Wallet []*WalletEntry `protobuf:"bytes,20,rep,name=wallet,proto3" json:"wallet,omitempty"`
 	// Crafting, step 1: the character's processing jobs (migration 0013), with the items (include_items), in the order they were queued. A character that never started one has none.
 	ProcessingJobs []*ProcessingJob `protobuf:"bytes,21,rep,name=processing_jobs,json=processingJobs,proto3" json:"processing_jobs,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Crafting, step 3: the recipes the character was taught (migration 0014) although the game makes a player learn them, with the items (include_items), in the order they were taught.
+	// A recipe the game does not make a player learn is known to everybody and is not listed.
+	KnownRecipes  []int64 `protobuf:"varint,22,rep,packed,name=known_recipes,json=knownRecipes,proto3" json:"known_recipes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Character) Reset() {
@@ -378,6 +381,13 @@ func (x *Character) GetWallet() []*WalletEntry {
 func (x *Character) GetProcessingJobs() []*ProcessingJob {
 	if x != nil {
 		return x.ProcessingJobs
+	}
+	return nil
+}
+
+func (x *Character) GetKnownRecipes() []int64 {
+	if x != nil {
+		return x.KnownRecipes
 	}
 	return nil
 }
@@ -1685,8 +1695,12 @@ type SaveInventoryRequest struct {
 	// stored together or not at all); without it they are left alone. InvalidArgument, with nothing changed, for a job that breaks the rules (processing_jobs.go says which).
 	ReplaceProcessingJobs bool             `protobuf:"varint,5,opt,name=replace_processing_jobs,json=replaceProcessingJobs,proto3" json:"replace_processing_jobs,omitempty"`
 	ProcessingJobs        []*ProcessingJob `protobuf:"bytes,6,rep,name=processing_jobs,json=processingJobs,proto3" json:"processing_jobs,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Crafting, step 3: with replace_known_recipes the character's taught recipes become exactly `known_recipes` (recipe Guids), in the same transaction as the items; without it they are
+	// left alone. InvalidArgument, with nothing changed, for a Guid of 0 or less, one given twice, or more than 5,000.
+	ReplaceKnownRecipes bool    `protobuf:"varint,7,opt,name=replace_known_recipes,json=replaceKnownRecipes,proto3" json:"replace_known_recipes,omitempty"`
+	KnownRecipes        []int64 `protobuf:"varint,8,rep,packed,name=known_recipes,json=knownRecipes,proto3" json:"known_recipes,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SaveInventoryRequest) Reset() {
@@ -1757,6 +1771,20 @@ func (x *SaveInventoryRequest) GetReplaceProcessingJobs() bool {
 func (x *SaveInventoryRequest) GetProcessingJobs() []*ProcessingJob {
 	if x != nil {
 		return x.ProcessingJobs
+	}
+	return nil
+}
+
+func (x *SaveInventoryRequest) GetReplaceKnownRecipes() bool {
+	if x != nil {
+		return x.ReplaceKnownRecipes
+	}
+	return false
+}
+
+func (x *SaveInventoryRequest) GetKnownRecipes() []int64 {
+	if x != nil {
+		return x.KnownRecipes
 	}
 	return nil
 }
@@ -1970,7 +1998,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
 	"\x01z\x18\x03 \x01(\x01R\x01z\x12\x10\n" +
-	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xee\x06\n" +
+	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\x93\a\n" +
 	"\tCharacter\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2001,7 +2029,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"action_bar\x18\x12 \x03(\v2\x1f.aoc.character.v1.ActionbarSlotR\tactionBar\x12C\n" +
 	"\vprofessions\x18\x13 \x03(\v2!.aoc.character.v1.ProfessionStateR\vprofessions\x125\n" +
 	"\x06wallet\x18\x14 \x03(\v2\x1d.aoc.character.v1.WalletEntryR\x06wallet\x12H\n" +
-	"\x0fprocessing_jobs\x18\x15 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\"\xf3\x02\n" +
+	"\x0fprocessing_jobs\x18\x15 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\x12#\n" +
+	"\rknown_recipes\x18\x16 \x03(\x03R\fknownRecipes\"\xf3\x02\n" +
 	"\rProcessingJob\x12\x19\n" +
 	"\bjob_guid\x18\x01 \x01(\tR\ajobGuid\x12\x1f\n" +
 	"\vstation_key\x18\x02 \x01(\tR\n" +
@@ -2120,14 +2149,16 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x02 \x01(\x03R\taccountId\"\x19\n" +
-	"\x17DeleteCharacterResponse\"\xb4\x02\n" +
+	"\x17DeleteCharacterResponse\"\x8d\x03\n" +
 	"\x14SaveInventoryRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12,\n" +
 	"\x05items\x18\x02 \x03(\v2\x16.aoc.character.v1.ItemR\x05items\x12%\n" +
 	"\x0ereplace_wallet\x18\x03 \x01(\bR\rreplaceWallet\x125\n" +
 	"\x06wallet\x18\x04 \x03(\v2\x1d.aoc.character.v1.WalletEntryR\x06wallet\x126\n" +
 	"\x17replace_processing_jobs\x18\x05 \x01(\bR\x15replaceProcessingJobs\x12H\n" +
-	"\x0fprocessing_jobs\x18\x06 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\"-\n" +
+	"\x0fprocessing_jobs\x18\x06 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\x122\n" +
+	"\x15replace_known_recipes\x18\a \x01(\bR\x13replaceKnownRecipes\x12#\n" +
+	"\rknown_recipes\x18\b \x03(\x03R\fknownRecipes\"-\n" +
 	"\x15SaveInventoryResponse\x12\x14\n" +
 	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xb5\x03\n" +
 	"\x13SaveProgressRequest\x12\x0e\n" +

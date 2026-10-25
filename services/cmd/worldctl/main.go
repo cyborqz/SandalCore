@@ -17,6 +17,9 @@
 //	worldctl remove-station <node> <plot>             takes a placed station off its plot
 //	worldctl craft finish <character> [<station>]     finishes the character's processing jobs that are not over (the one running and the ones waiting), all of them or only those at one
 //	                                                  station: each is over now and ready to collect
+//	worldctl craft teach <character> <recipe>         teaches the character a recipe the game makes a player learn (its record name or Guid): it is known from then on and is saved
+//	worldctl craft forget <character> <recipe>        takes a taught recipe away again
+//	worldctl craft taught <character>                 lists the recipes the character was taught
 //	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one creature, named by its actor id (npc.go says what each does)
 //	worldctl npc move <id> <x> <y> [<z>]              stands a creature at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
 //	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
@@ -74,6 +77,8 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   place-station <node> <plot> <st>  put an artisan building's station on a free plot of a Village or a Town
   remove-station <node> <plot>      take a placed station off its plot
   craft finish <character> [<st>]   finish the character's processing jobs at once, ready to collect (a test command)
+  craft teach|forget <character> <recipe>   teach a recipe the game makes a player learn (name or Guid), or take it away again (a test command)
+  craft taught <character>          list the recipes the character was taught
   npc kill|respawn|reset|heal|despawn <id>   a game master's action on one creature, by its actor id
   npc move <id> <x> <y> [<z>]       stand a creature at a point (cm); its leash is centred there, its spawn point stays
   watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
@@ -191,8 +196,42 @@ func parse(cmd string, pos []string) (call, error) {
 	case "npc":
 		return parseNpc(pos)
 	case "craft":
+		if len(pos) >= 1 && (pos[0] == "teach" || pos[0] == "forget") {
+			if len(pos) != 3 {
+				return nil, usageError("needs a character and a recipe: worldctl craft " + pos[0] + " <character> <recipe>, such as: worldctl craft " + pos[0] + " cyb Armorsmithing_T1_Armor_Deepward_Waist")
+			}
+			return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+				if pos[0] == "teach" {
+					r, err := c.TeachRecipe(ctx, &worldadminv1.TeachRecipeRequest{Character: pos[1], Recipe: pos[2]})
+					if err != nil {
+						return err
+					}
+					fmt.Fprintf(out, "%s was taught %s (%d); %d recipe(s) taught in all\n", r.GetCharacter(), r.GetRecipe(), r.GetRecipeGuid(), r.GetTaught())
+					return nil
+				}
+				r, err := c.ForgetRecipe(ctx, &worldadminv1.ForgetRecipeRequest{Character: pos[1], Recipe: pos[2]})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "%s forgot %s (%d); %d recipe(s) taught in all\n", r.GetCharacter(), r.GetRecipe(), r.GetRecipeGuid(), r.GetTaught())
+				return nil
+			}, nil
+		}
+		if len(pos) == 2 && pos[0] == "taught" {
+			return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+				r, err := c.ListTaughtRecipes(ctx, &worldadminv1.ListTaughtRecipesRequest{Character: pos[1]})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "%s was taught %d recipe(s)\n", r.GetCharacter(), len(r.GetRecipes()))
+				for _, rec := range r.GetRecipes() {
+					fmt.Fprintf(out, "  %s (%d)\n", rec.GetRecipe(), rec.GetRecipeGuid())
+				}
+				return nil
+			}, nil
+		}
 		if len(pos) < 2 || len(pos) > 3 || pos[0] != "finish" {
-			return nil, usageError("needs finish and a character: worldctl craft finish <character> [<station>], such as: worldctl craft finish cyb ProcessingStation_Lumbermilling_T2")
+			return nil, usageError("needs finish, teach, forget or taught and a character: worldctl craft finish <character> [<station>], worldctl craft teach <character> <recipe>, worldctl craft taught <character>")
 		}
 		station := ""
 		if len(pos) == 3 {

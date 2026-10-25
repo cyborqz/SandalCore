@@ -1313,6 +1313,19 @@ its clock says. `ServerSendProcessingStationRequest` (Claim) finds the job by it
 call for each product, the last product first, one event for each stack), pays the experience (the level-up effects as a harvest's), deletes the job and saves the items and the jobs together. A Cancel is refused and logged.
 `worldctl craft finish <character> [<station>]` (`WorldAdmin.FinishJobs`) finishes a player's running and waiting jobs at once: each one's start moves back so that it ends now, and the window is told as for any job that ended.
 
+**The quick make (step 3).** A start at a crafting station (`ServerStartCraft`; the same checks as a job's, `crafting/rules.h` with `quick`) begins a craft that needs the player to stand still for the recipe's base
+duration (`crafting/quick.h`; two seconds for the gear and goods): nothing is taken, nothing is sent, and a player has one craft at a time (a second start is refused and changes nothing). The station must be a profession's own
+(the crate tables and the stations that make gathering tools answer nothing), the recipe known (the game's recipes that a player does not have to learn, or one a game master taught), within the station's tier and the
+character's certification, free of any service-building condition, a product that goes to the bags, a material named by record, one unit. When the time is over the checks run again on what the player holds, and then, together: the
+reagent and the named stacks leave the material bags (one Remove event for each stack, the reagent first), the price leaves the purse (the recipe's copper plus the station's service tax, as a job's), the product arrives (one Add event
+for each stack; materials to the material bags, anything else to the item bag), and the experience is paid (`crafting/rewards.h`: the profession's by the recipe's tier, the product's rarity and its slot; Adventuring's by the
+character's level). The client is sent the Removes, then in one tick the money callout and the Adds, then the purse and the experience. **The last Add carries the id of the start request** (the Add's fourth optional guid): the
+client counts its own crafts by it, and without it stays "crafting" and refuses the next press. The product's quality is the mean over the recipe's materials of their stacks' mean quality, rounded up (the reagent does not count).
+A craft ends with nothing taken, and `ClientInterruptCraft` to the client, when the player moves more than 60 cm from where it began, dies, mounts, leaves the station's range, closes the window or presses Cancel
+(`ServerInterruptStationCraft`), or when the product does not fit the bags at the end (the player is told "Not enough inventory space."). A start that is refused, or that cannot be read (one that names its materials by tags), sends `ClientInterruptCraft` too, so that the client's own
+craft stops. `PlayerKnownRecipeIds` (OwnerInfo) holds the recipes a game master taught a character (the client knows the others by the recipe's own flag); `worldctl craft teach|forget <character> <recipe>` and `craft taught
+<character>` (`WorldAdmin.TeachRecipe`, `ForgetRecipe`, `ListTaughtRecipes`) change it, and the list is saved with the items (`character_known_recipes`, migration 0014).
+
 ### The world stream: a read-only view of the world for admin tools
 
 worldd serves `WorldStreamService` (`proto/internal/aoc/worldadmin/v1/worldadmin.proto`, beside `WorldAdminService`) on `--world-stream` / `AOC_WORLD_STREAM_ADDR` (default `127.0.0.1:50057`; `--no-world-stream` turns it off)

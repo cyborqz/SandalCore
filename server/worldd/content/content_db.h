@@ -857,6 +857,7 @@ struct CraftRecipe {
     bool        inventory_destination = true;
     int         fuel = 0;
     bool        blacklisted = false;
+    std::string category_tag;    // CategoryTag: for a piece of gear its slot ("Slot.Head"), else the kind of thing ("Item.Caravan.Component")
     std::vector<CraftInput> inputs;   // the general resources in order, then the reagents
     std::vector<CraftPred>  preds;
 };
@@ -880,7 +881,7 @@ struct CraftRewardContainer {
 enum class XpRule : uint8_t { None, Processing, AnimalHusbandry, Crafting, Unknown };
 struct CraftReward {
     std::vector<CraftRewardContainer> containers;   // the table's own and then its sub-tables', in order
-    XpRule                            profession_rule = XpRule::None;    // Artisanship_Processing_BaseXP (Processing) or its Animal Husbandry form
+    XpRule                            profession_rule = XpRule::None;    // Artisanship_Processing_BaseXP (Processing), its Animal Husbandry form, or Artisanship_Crafting_BaseXP (Crafting)
     XpRule                            adventuring_rule = XpRule::None;   // Adventuring_Processing_BaseXP (Processing) or Adventuring_Crafting_BaseXP (Crafting)
     int64_t                           profession = 0;                    // the profession the experience goes to
     std::string                       unknown_formula;                   // the first formula of the experience this reader does not know

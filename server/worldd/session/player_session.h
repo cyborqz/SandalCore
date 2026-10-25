@@ -250,6 +250,7 @@
 
 #include "bootstrap/bootstrap.h"
 #include "crafting/job.h"
+#include "crafting/quick.h"
 #include "dialogue/talk.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
@@ -665,6 +666,18 @@ public:
     /// Crafting, step 2, a game master's tool: finishes the character's jobs that are not over (all of them, or those at one station when `station_name` is not empty: its Blueprint's name or
     /// its definition's), at once and ready to collect.  The number of jobs finished (0 when there were none, or none at that station).
     size_t   gm_finish_jobs(Connection& conn, Clock::time_point now, const std::string& station_name, const std::string& by);
+    /// Crafting, step 3: the recipes the character was taught although the game makes a player learn them (the others are known to everybody), in the order they were taught.
+    const std::vector<int64_t>& taught_recipes() const { return taught_; }
+    /// A game master's tools: teaches a recipe (true; false when it was taught already) or takes a taught one away (true; false when it was not taught).  The client is sent the new list and
+    /// the character is saved.
+    bool     gm_teach_recipe(Connection& conn, int64_t recipe, const std::string& by);
+    bool     gm_forget_recipe(Connection& conn, int64_t recipe, const std::string& by);
+    /// Crafting, step 3: whether a quick make is under way, and how many were started, made, interrupted and refused.
+    bool     quick_active() const { return quick_.active; }
+    size_t   quick_started() const { return quick_started_; }
+    size_t   quick_made() const { return quick_made_; }
+    size_t   quick_interrupted() const { return quick_interrupted_; }
+    size_t   quick_refused() const { return quick_refused_; }
     size_t   vendor_purchases() const { return vendor_purchases_; }
     size_t   vendor_sales() const { return vendor_sales_; }
     size_t   vendor_repairs() const { return vendor_repairs_; }
@@ -945,6 +958,17 @@ private:
     /// made (all or nothing: with none the player is told so and the job stays), hands over the products and the experience, deletes the job and answers in the retail order.  A cancel is
     /// refused and logged.
     void on_processing_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Crafting, step 3: the player pressed Craft at a crafting station (the quick-make half of ServerStartCraft, after the checks of the station).  Nothing is taken and nothing is sent: the
+    /// craft begins and ends in run_quick_make.  A start that is refused is logged, and the client is told to stop crafting (ClientInterruptCraft) unless a craft of this player runs.
+    void on_quick_start(Connection& conn, const protocol::repl::StartCraft& req, const world::WorldActor& station, Clock::time_point now);
+    /// Crafting, step 3: the player closed the window or pressed Cancel during a craft (ServerInterruptStationCraft).
+    void on_interrupt_station_craft(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Crafting, step 3: called every tick: ends the craft that runs when the player left, died, mounted or went out of range, and makes the product when the time is over.
+    void run_quick_make(Connection& conn, Clock::time_point now);
+    /// Ends the craft that runs with nothing taken; the client is told (ClientInterruptCraft) when `conn` is given.  False when none ran.
+    bool cancel_quick_make(Connection* conn, const std::string& why);
+    /// The materials leave the bags, the price the purse, the product arrives and the experience is paid, together.  false when the craft cannot be made now (nothing changed).
+    bool complete_quick_make(Connection& conn, Clock::time_point now);
     /// Crafting, step 2: sends the window the states of the jobs that changed since it was last told (a job ended, the next began) and updates the active stations; called every tick.
     void run_crafting(Connection& conn, Clock::time_point now);
     /// The earliest moment any job of the character changes status again (wall milliseconds; INT64_MAX when none will).
@@ -1336,6 +1360,10 @@ private:
     size_t crafts_started_ = 0, crafts_refused_ = 0, craft_logged_ = 0, craft_refused_logged_ = 0;
     size_t crafts_claimed_ = 0, claims_refused_ = 0, claim_logged_ = 0, claim_refused_logged_ = 0, crafts_finished_ = 0, craft_update_logged_ = 0;   // crafting, step 2
     bool   claim_unreadable_logged_ = false;
+    crafting::QuickMake quick_;                       // crafting, step 3: the craft that runs
+    std::vector<int64_t> taught_;                     // the recipes the character was taught, in the order they were taught (saved with the inventory)
+    size_t quick_started_ = 0, quick_made_ = 0, quick_interrupted_ = 0, quick_refused_ = 0, quick_logged_ = 0, quick_refused_logged_ = 0, quick_made_logged_ = 0;
+    bool   interrupt_unreadable_logged_ = false;
     std::vector<std::array<int32_t, 4>> active_words_;   // the stations OwnerInfo.ActiveProcessingStations lists
     bool   active_told_ = false;                      // the list was set on the pawn at least once (before that an empty list stays out of the state)
     std::map<std::string, uint8_t> job_seen_;         // job guid -> the status the window was last told of (or an open shows): a change is sent

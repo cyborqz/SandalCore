@@ -21,6 +21,11 @@
 //          rarity band; the reagent is not named: the server takes it)
 //      ServerSendProcessingStationRequest(ProcessingStation, CraftItemState, RequestType, bWarehouse)
 //          the player pressed Claim (RequestType 4) or Cancel (5) on a job: the station ACTOR, the job's state as the window holds it, and whether the products were asked to go to the warehouse
+//      ServerInterruptStationCraft(CraftingStation)
+//          the player closed the window of a quick make, or pressed its Cancel button, while the craft ran
+//    server, on the PlayerController
+//      ClientInterruptCraft()
+//          no parameters: the client's craft stops (its progress, and the flag that says it is crafting, which only this or the product's arrival clears)
 //
 //  TaxDetails (FRuntimeTaxDetails) is the tax record the numbers come from, a flat amount, the node's percent, the owning node's share of it, and two flags the window
 //  reads as "the tax is set" and "use these numbers".
@@ -336,6 +341,25 @@ inline std::optional<RpcParams> start_craft_params(const schema::RpcSchema& rpc,
     }
     if (!s.general.empty() && !set_rpc_param(rpc, params, "GeneralResources", craft_detail::resources_value(s.general))) return std::nullopt;
     if (!s.flexible.empty() && !set_rpc_param(rpc, params, "FlexibleResources", craft_detail::resources_value(s.flexible))) return std::nullopt;
+    return params;
+}
+
+/// ServerInterruptStationCraft(CraftingStation): the player closed the station's window, or pressed Cancel, while a craft ran.  The station ACTOR, or nullopt for another RPC, an undecoded
+/// call or a parameter of another kind.
+inline std::optional<emit::FIntrepidNetworkGUID> parse_interrupt_craft(const RpcCall& call) {
+    if (!call.rpc || !call.decoded || !call.rpc->name || std::string_view(call.rpc->name) != "ServerInterruptStationCraft") return std::nullopt;
+    const Value* v = rpcf::value_of(*call.rpc, call.params, "CraftingStation");
+    if (!v) return emit::FIntrepidNetworkGUID{};
+    const auto* g = rpcf::as<emit::FIntrepidNetworkGUID>(v);
+    if (!g) return std::nullopt;
+    return *g;
+}
+
+/// ServerInterruptStationCraft's parameters, the form the client sends.  nullopt when `rpc` is not that RPC or a value is refused.
+inline std::optional<RpcParams> interrupt_craft_params(const schema::RpcSchema& rpc, const emit::FIntrepidNetworkGUID& station) {
+    if (!rpc.name || std::string_view(rpc.name) != "ServerInterruptStationCraft") return std::nullopt;
+    RpcParams params;
+    if (!set_rpc_param(rpc, params, "CraftingStation", Value(station))) return std::nullopt;
     return params;
 }
 

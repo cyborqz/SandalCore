@@ -133,6 +133,22 @@ struct GmFinishResult {
     uint32_t    finished = 0;   // the jobs finished (running and waiting ones)
 };
 
+/// Crafting, step 3: the test commands that teach a player a recipe the game makes a player learn, take it away again, and list what was taught.
+struct GmRecipeResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    std::string recipe;        // the recipe record's name
+    int64_t     recipe_guid = 0;
+    int32_t     taught = 0;    // how many recipes the character has been taught now
+};
+struct GmTaughtList {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    std::vector<std::pair<std::string, int64_t>> recipes;   // name and Guid, in the order they were taught
+};
+
 /// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
 struct GmNpcResult {
     GmStatus    status = GmStatus::Ok;
@@ -171,6 +187,10 @@ public:
     /// Finishes the processing jobs of a player that are not over (running and waiting ones), all of them or only those at the station named by `station` (its Blueprint's or its definition's
     /// name; empty for all): each is over now and ready to collect.
     GmFinishResult   finish_jobs(const std::string& character, const std::string& station, const std::string& by);
+    /// Teaches a player a recipe (named by its record name or its Guid in digits) that the game makes a player learn, takes a taught one away, and lists the taught ones.
+    GmRecipeResult   teach_recipe(const std::string& character, const std::string& recipe, const std::string& by);
+    GmRecipeResult   forget_recipe(const std::string& character, const std::string& recipe, const std::string& by);
+    GmTaughtList     list_taught(const std::string& character);
 
     // ---- the NPC actions (a creature is named by its actor id, as the world stream and Inspect give it)
     /// Kills it as a blow would: the same death and corpse, the loot a kill gives (rolled as for a player of the creature's own level, open to every player in the world, no experience), and its

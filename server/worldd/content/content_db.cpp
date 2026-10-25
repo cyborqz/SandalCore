@@ -2887,6 +2887,7 @@ std::vector<int64_t> formula_guids_of(const std::string& text) {
 XpRule profession_rule_named(const std::string& name) {
     if (name == "Artisanship_Processing_BaseXP") return XpRule::Processing;
     if (name == "Artisanship_Processing_BaseXP_AnimalHusbandry") return XpRule::AnimalHusbandry;
+    if (name == "Artisanship_Crafting_BaseXP") return XpRule::Crafting;
     return XpRule::Unknown;
 }
 XpRule adventuring_rule_named(const std::string& name) {
@@ -2999,7 +3000,7 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
         return std::nullopt;
     };
     {
-        Stmt q(db_, "SELECT guid, name, profession_guid, tier, base_duration, std_cost, cost_guid, reward_guid, learnable, destination, fuel, blacklisted FROM craft_recipe");
+        Stmt q(db_, "SELECT guid, name, profession_guid, tier, base_duration, std_cost, cost_guid, reward_guid, learnable, destination, fuel, blacklisted, category_tag FROM craft_recipe");
         if (!q.ok()) return failed("craft_recipe");
         int step;
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
@@ -3021,6 +3022,7 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
             r.inventory_destination = column_text(s, 9) == "Inventory";
             r.fuel = static_cast<int>(sqlite3_column_int64(s, 10));
             r.blacklisted = sqlite3_column_int64(s, 11) != 0;
+            r.category_tag = column_text(s, 12);
             out.recipes[r.guid] = std::move(r);
         }
         if (step != SQLITE_DONE) return failed("craft_recipe");

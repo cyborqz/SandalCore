@@ -95,6 +95,9 @@ message Character {
   repeated WalletEntry wallet = 20;
   // Crafting, step 1: the character's processing jobs (migration 0013), with the items (include_items), in the order they were queued. A character that never started one has none.
   repeated ProcessingJob processing_jobs = 21;
+  // Crafting, step 3: the recipes the character was taught (migration 0014) although the game makes a player learn them, with the items (include_items), in the order they were taught.
+  // A recipe the game does not make a player learn is known to everybody and is not listed.
+  repeated int64 known_recipes = 22;
 }
 
 // One processing job of a character (crafting, step 1, migration 0013): a batch of a recipe started at a station. Times are Unix milliseconds on the server's wall clock, so a job runs
@@ -276,6 +279,10 @@ message SaveInventoryRequest {
   // stored together or not at all); without it they are left alone. InvalidArgument, with nothing changed, for a job that breaks the rules (processing_jobs.go says which).
   bool replace_processing_jobs = 5;
   repeated ProcessingJob processing_jobs = 6;
+  // Crafting, step 3: with replace_known_recipes the character's taught recipes become exactly `known_recipes` (recipe Guids), in the same transaction as the items; without it they are
+  // left alone. InvalidArgument, with nothing changed, for a Guid of 0 or less, one given twice, or more than 5,000.
+  bool replace_known_recipes = 7;
+  repeated int64 known_recipes = 8;
 }
 
 message SaveInventoryResponse {

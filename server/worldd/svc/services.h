@@ -196,6 +196,9 @@ struct Character {
     std::vector<WalletEntry> wallet;
     /// Crafting, step 1: the character's processing jobs, in the order they were queued (with the items). A service of an older version sends none.
     std::vector<ProcessingJob> processing_jobs;
+    /// Crafting, step 3: the recipes the character was taught although the game makes a player learn them (recipe Guids, in the order they were taught; with the items).  A service of an
+    /// older version sends none.
+    std::vector<int64_t> known_recipes;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -271,6 +274,13 @@ public:
     virtual CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs) {
         (void)jobs;
         return save_inventory(id, items, wallet);
+    }
+    /// Crafting, step 3: the same that also stores the recipes the character was taught (they become exactly `known_recipes`), in the same transaction.  A fake that does not care saves the
+    /// items, the wallet and the jobs.
+    virtual CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                      const std::vector<int64_t>& known_recipes) {
+        (void)known_recipes;
+        return save_inventory(id, items, wallet, jobs);
     }
     /// Plan D1: SaveProgress: the level, the class and the XP rows, in one transaction (the latest save wins). Refused: a level
     /// outside 1-25, a class outside 1-8, a leveling type of 0, a negative XP or debt; NotFound: no such character.

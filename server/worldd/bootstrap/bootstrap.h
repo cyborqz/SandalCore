@@ -139,6 +139,9 @@ struct ItemEvent {
     repl::ItemInstance     item;
     bool                   instigated = true;   // the character's guid is the event's instigator, else the zero guid
     int32_t                count = 0;           // a Remove of part of a stack: how many leave, `item` being the stack as it was (0: all of item.quantity)
+    /// Crafting, step 3: the ClientTransactionId of the start request that made this item.  The quick make's client counts its crafts by it: the Add of the product that carries the id of the
+    /// craft it is waiting for ends that craft (and starts the next one of a batch); without it the client stays "crafting" and refuses the next press.
+    std::optional<repl::GuidValue> craft_txn;
     /// Gathering stage 3, "the pick-up popup": the FCalloutQueueInfo the retail server sends with the Add of a harvested item (items/acquired.h); the client shows the popup with the
     /// item's icon from it.  Unset for every other event.
     std::optional<repl::CalloutQueueInfo> callout;
@@ -152,6 +155,9 @@ struct LootRemoval {
 
 /// The most ClientReceiveStorageEvent calls one chain carries (a Backpack's 70 Adds go out in five).
 inline constexpr size_t kMaxEventsPerChain = 16;
+
+/// The most recipes OwnerInfo.PlayerKnownRecipeIds holds (the design data has fewer than 4,300 recipes in all).
+inline constexpr size_t kMaxKnownRecipes = 4400;
 
 /// A property of an actor by its schema path and the value to set ("CharacterInGameSettings.CombatSettings.Input.BufferDuration").
 struct PropertyValue {
@@ -273,6 +279,11 @@ public:
     std::optional<Send> craft_claimed_answer(const emit::FIntrepidNetworkGUID& station, const repl::CraftItemState& claimed, std::span<const ItemEvent> events);
     /// Crafting, step 2: the stacks of one more product of a collected job, one ClientRecieveBatchedStorageEvents call (at most 256 events).  What the storages hold follows the events.
     std::optional<Send> craft_batched_events(std::span<const ItemEvent> events);
+    /// Crafting, step 3: ClientInterruptCraft (no parameters) on the PlayerController: the client's quick make stops, with nothing taken.  nullopt before the pawn's second state.
+    std::optional<Send> craft_interrupted();
+    /// OwnerInfo.PlayerKnownRecipeIds: the recipes the character has learned (the ones the game makes a player learn; the others are known to the client by their own flag), in the order
+    /// given.  Sent with the next currencies_update().  False when the pawn has no OwnerInfo or the list is over `kMaxKnownRecipes`.
+    bool set_known_recipes(const std::vector<int64_t>& recipes);
     /// OwnerInfo.ActiveProcessingStations: the stations where the player has a job running or waiting, each as the four words of its StationGuid.  Sent with the next currencies_update() (the
     /// pawn's update that carries the OwnerInfo changes).  False when the pawn has no OwnerInfo.
     bool set_active_stations(const std::vector<std::array<int32_t, 4>>& stations);

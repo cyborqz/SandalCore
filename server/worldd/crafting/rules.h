@@ -2,22 +2,23 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  crafting/rules.h  (crafting, step 1: "start a processing job"; header only)
+//  crafting/rules.h  (crafting, steps 1 and 3: "start a processing job", "craft"; header only)
 //
-//  What a start at a processing station asks of the player, the station and the recipe, in the order the checks run.  A start that fails a check is refused whole: nothing is taken and
-//  the client is told nothing (the window stays as it was); the reason goes to the log.
+//  What a start at a processing station (a job) or at a crafting station (the quick make, `quick`) asks of the player, the station and the recipe, in the order the checks run.  A start
+//  that fails a check is refused whole: nothing is taken and the client is told nothing (the window stays as it was); the reason goes to the log.
 //
 //  The order.  The recipe exists and may be made at a station (not blacklisted, its products go to the bags); it is in the station's recipe set; the player knows it (a recipe the game makes
-//  the player learn is refused until learning exists); the player's certification in the recipe's profession reaches its tier and the station's tier reaches it; the node the station is in
-//  allows it (the recipe's and its list's availability predicates: the node's level and biome, the nodes it is for, and the service building it needs, which no node has yet); the quantity is
-//  1 to 250; the player's queue at the station has room; the stacks the player named add up to the recipe's inputs for that quantity (the same records, rarity bands at or above the recipe's
-//  minimum, no warehouse), the bags hold them, and hold the reagent too; the purse holds the price.
+//  the player learn is known only once a game master taught it); the player's certification in the recipe's profession reaches its tier and the station's tier reaches it; the node the
+//  station is in allows it (the recipe's and its list's availability predicates: the node's level and biome, the nodes it is for, and the service building it needs, which no node has yet);
+//  the quantity is 1 to 250 (a quick make is one unit); the player's queue at the station has room (a quick make has none); the stacks the player named add up to the recipe's inputs for that
+//  quantity (the same records, rarity bands at or above the recipe's minimum, no warehouse), the bags hold them, and hold the reagent too; the purse holds the price.
 //
 //  The price.  The recipe's cost is a number of copper for one unit (its own, or its cost record's); the station's service tax makes it `round(cost x (1 + percent) + flat)` for one unit,
 //  rounded half up, in double precision on the percent the window is sent (a float, 0.1 is a little under a tenth), and the job costs that for each unit.  The retail starts fit it: 138
 //  Granite crushed at 5 each with a tenth of tax cost 690, not 759 (the rounding is for one unit); a log at 23 with half the price in tax costs 35.
 //
-//  The time.  A job takes the recipe's base duration for each unit: the time equation of the recipes is 1 for a character with no artisan gear, and no character has any yet.
+//  The time.  A job takes the recipe's base duration for each unit: the time equation of the recipes is 1 for a character with no artisan gear, and no character has any yet.  A quick make
+//  takes the base duration, and takes the materials and the price when it ends, not when it starts.
 // ============================================================================
 #pragma once
 
@@ -73,7 +74,20 @@ struct StartFacts {
     int64_t                         copper = 0;
     size_t                          unfinished_here = 0;   // the player's jobs at this station that are not over
     size_t                          held_here = 0;         // ... and all of them, finished ones too
+    bool                            quick = false;         // the station crafts at once (a crafting station): one unit, no queue, no job
+    std::function<bool(int64_t)>    taught;                // whether the character was taught a recipe (one that has to be learned)
 };
+
+/// Whether a station definition is one the quick make serves: a profession's crafting station.  The crate tables, the stations that make gathering tools and the event and dungeon
+/// stations answer nothing.
+inline bool serves_quick_make(const content::CraftStationDef& d) {
+    const std::string& n = d.name;
+    if (d.processing || n.rfind("CraftingStation_", 0) != 0) return false;
+    for (const char* other : {"GatheringTools", "Commodity", "HarbingerEvent", "BefallenForge"}) {
+        if (n.find(other) != std::string::npos) return false;
+    }
+    return true;
+}
 
 struct Plan {
     bool                                  ok = false;
@@ -158,7 +172,12 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
         return plan;
     };
     if (!f.recipes || !f.station || !f.inventory) return refuse("worldd has no recipes or no station definition");
-    if (!f.station->processing) return refuse("the station is not a processing station");
+    if (f.quick) {
+        if (f.station->processing) return refuse(f.station->name + " is a processing station: a start there is a job");
+        if (!serves_quick_make(*f.station)) return refuse(f.station->name + " makes nothing yet (crate tables and the stations of gathering tools are not served)");
+    } else if (!f.station->processing) {
+        return refuse("the station is not a processing station");
+    }
     const content::CraftRecipe* r = f.recipes->recipe(req.recipe);
     if (!r) return refuse("recipe " + std::to_string(req.recipe) + " is none of the data's");
     plan.recipe = r;
@@ -167,7 +186,8 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     if (!r->inventory_destination) return refuse(r->name + " makes gear that is worn at once: not made yet");
     std::vector<int64_t> lists;
     if (!f.recipes->set_holds(f.station->recipe_set, r->guid, &lists)) return refuse(r->name + " is not one of the recipes of " + f.station->name);
-    if (r->learnable) return refuse(r->name + " has to be learned, and no recipe can be learned yet");
+    if (r->learnable && !(f.taught && f.taught(r->guid))) return refuse(r->name + " has to be learned, and the character was not taught it");
+    if (r->fuel > 0) return refuse(r->name + " burns fuel: not made yet");
     if (r->tier < 0) return refuse(r->name + " needs no certification tier the data names");
     const int have = f.tier_of ? f.tier_of(r->profession) : 0;
     if (have < r->tier) return refuse(r->name + " needs certification tier " + std::to_string(r->tier) + " and the character has " + std::to_string(have));
@@ -186,12 +206,16 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
         }
         if (!any) return refuse(r->name + ": " + last);
     }
-    if (req.quantity < 1 || req.quantity > kMaxQuantity) return refuse("a quantity of " + std::to_string(req.quantity) + " (the station makes 1 to " + std::to_string(kMaxQuantity) + ")");
-    if (f.unfinished_here >= static_cast<size_t>(std::max(1, f.station->queue_size))) {
-        return refuse("the queue at " + f.station->name + " is full (" + std::to_string(f.unfinished_here) + " of " + std::to_string(f.station->queue_size) + ")");
+    if (f.quick) {
+        if (req.quantity != 1) return refuse("a quantity of " + std::to_string(req.quantity) + " (a quick make is one unit)");
+    } else {
+        if (req.quantity < 1 || req.quantity > kMaxQuantity) return refuse("a quantity of " + std::to_string(req.quantity) + " (the station makes 1 to " + std::to_string(kMaxQuantity) + ")");
+        if (f.unfinished_here >= static_cast<size_t>(std::max(1, f.station->queue_size))) {
+            return refuse("the queue at " + f.station->name + " is full (" + std::to_string(f.unfinished_here) + " of " + std::to_string(f.station->queue_size) + ")");
+        }
+        if (f.held_here >= kMaxJobsAtStation) return refuse(std::to_string(f.held_here) + " jobs are held at " + f.station->name + " already (the finished ones stay until they are collected)");
     }
-    if (f.held_here >= kMaxJobsAtStation) return refuse(std::to_string(f.held_here) + " jobs are held at " + f.station->name + " already (the finished ones stay until they are collected)");
-    if (req.has_tags || req.has_fuel || !req.flexible.empty()) return refuse("the request names tag, flexible or fuel resources: a processing station takes only the general ones");
+    if (req.has_tags || req.has_fuel || !req.flexible.empty()) return refuse("the request names tag, flexible or fuel resources: only the general ones are served");
 
     // what the player named, by record and rarity (a record named twice is added up)
     std::map<int64_t, std::map<int, int64_t>> named;
