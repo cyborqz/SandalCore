@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace aoc::worldd::combat {
 
@@ -74,6 +75,7 @@ void Aftermath::on_death(const DeathEvent& d) {
     // (the Nodes 1 test of 2026-10-10: the death and loot lines had an empty creature name) the creature's name, else its Blueprint's
     c.name = d.info && !d.info->name.empty() ? d.info->name : d.blueprint;
     std::string looter_note;   // for the death line: the highest looter's level, the level gap and the data's Loot_Falloff
+    std::string roll_note;     // ... and what the rarity rolls did (item rarities, step 1)
 
     // who fought it and is here to be rewarded
     std::vector<PlayerPort*> fighters;
@@ -107,12 +109,18 @@ void Aftermath::on_death(const DeathEvent& d) {
             ctx.npc_tags = &tags;
             ctx.loot_max_level = max_level;
             ctx.chance_mult = cfg_.loot_chance_mult;
+            ctx.rarity_boost = cfg_.loot_rarity_boost;
             ctx.rng = &rng_;
             // Loot_Falloff is 1 for a gap of 0 to 9 levels and 0 from 10 (the reward tables' own, settled against retail 2026-10-08): said on the line so a drop that did not come can be read
             const int gap = static_cast<int>(std::lround(std::fabs(max_level - static_cast<double>(d.level))));
             looter_note = ", looter level " + std::to_string(static_cast<int>(std::lround(max_level))) + " (" + std::to_string(gap) + " level" + (gap == 1 ? "" : "s") + " apart: Loot_Falloff " +
                           (gap >= 10 ? "0, no gear, recipe or Glint loot" : "1") + ")" + (cfg_.loot_chance_mult != 1.0 ? ", loot chances x" + std::to_string(cfg_.loot_chance_mult).substr(0, 5) : std::string());
             if (d.gm) looter_note = ", a game master's kill, rolled as for a player of the creature's own level" + (cfg_.loot_chance_mult != 1.0 ? ", loot chances x" + std::to_string(cfg_.loot_chance_mult).substr(0, 5) : std::string());
+            if (cfg_.loot_rarity_boost != 1.0) {   // the test boost of the rarity rolls (worldd --loot-rarity-boost): said on every kill's line
+                char boost[32];
+                std::snprintf(boost, sizeof boost, "%g", cfg_.loot_rarity_boost);
+                looter_note += std::string(", rarity odds x") + boost + " (test boost)";
+            }
             if (nodes_) {
                 // the zone of influence where it died: its biome and node answer the tables' node reads
                 const world::NodeSite site = nodes_->node_at(d.position.x, d.position.y);
@@ -129,7 +137,13 @@ void Aftermath::on_death(const DeathEvent& d) {
                 rolled.loot.clear();
                 rolled.direct.clear();
             }
-            // the loot
+            // what the rarity rolls did, for the death line: the creature's elite rank (a gear roll adds 2 per rank), the qualities rolled, and the Common outcomes the test boost threw back
+            if (rolled.quality_rolls > 0 || rolled.quality_failures > 0) {
+                roll_note = ", " + std::to_string(rolled.quality_rolls) + " quality roll(s) at elite rank " + std::to_string(static_cast<int>(std::lround(npc->stats().npc().elite_rank))) +
+                            (rolled.boost_redraws > 0 ? " (" + std::to_string(rolled.boost_redraws) + " Common outcome(s) thrown back by the rarity boost)" : std::string()) +
+                            (rolled.quality_failures > 0 ? ", " + std::to_string(rolled.quality_failures) + " quality formula(s) did not run" : std::string());
+            }
+            // the loot: a stack has the quality its variation rolled (a gear or a resource drop), else the item record's default (a Glint tier keeps its 1, 21 or 41)
             std::vector<LootStack> stacks;
             for (const std::vector<RolledItem>* list : {&rolled.loot, &rolled.direct}) {
                 for (const RolledItem& it : *list) {
@@ -137,7 +151,7 @@ void Aftermath::on_death(const DeathEvent& d) {
                     s.item = it.item;
                     s.variation = it.variation;
                     s.quantity = it.quantity;
-                    s.quality = quality_of_ ? std::max(1, quality_of_(it.item)) : 1;
+                    s.quality = it.quality > 0 ? std::clamp(it.quality, items::kMinQuality, items::kMaxQuality) : (quality_of_ ? std::max(1, quality_of_(it.item)) : 1);
                     stacks.push_back(s);
                 }
             }
@@ -188,14 +202,16 @@ void Aftermath::on_death(const DeathEvent& d) {
             spdlog::debug("[loot] {} has no stats to roll its rewards with: {}", d.blueprint, err);
         }
     }
-    std::string items;
+    std::string listing;
     for (const LootStack& s : c.loot) {
         const std::string n = name_of_ ? name_of_(s.item) : std::string();
-        items += (items.empty() ? "" : ", ") + (n.empty() ? "item " + std::to_string(s.item) : n) + " x" + std::to_string(s.quantity);
+        // each stack names its quality and the rarity the client shows for it (a Glint tier is always its colour)
+        listing += (listing.empty() ? "" : ", ") + (n.empty() ? "item " + std::to_string(s.item) : n) + " x" + std::to_string(s.quantity) + " q" + std::to_string(s.quality) + " " +
+                 std::string(items::rarity_name(rarity_of(s.item, s.quality)));
     }
     const std::string who = d.gm ? std::to_string(fighters.size()) + " player(s) in the world may take its loot" : std::to_string(fighters.size()) + " fought it";
-    spdlog::info("[loot] {} ({}, level {}) died: {}{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", c.name, d.blueprint, d.level, who, looter_note, c.loot.size(),
-                 items.empty() ? "" : " (", items, items.empty() ? "" : ")", c.close_at - d.at, respawns_.empty() ? "" : "; its spawn point refills it",
+    spdlog::info("[loot] {} ({}, level {}) died: {}{}{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", c.name, d.blueprint, d.level, who, looter_note, roll_note, c.loot.size(),
+                 listing.empty() ? "" : " (", listing, listing.empty() ? "" : ")", c.close_at - d.at, respawns_.empty() ? "" : "; its spawn point refills it",
                  huntable ? "; a huntable: its corpse is hunted with a Bow (no loot)" : "");
     corpses_[d.npc] = std::move(c);
 }

@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
         ->envname("AOC_NPC_DAMAGE_MULT")->check(CLI::Range(0.0, 100.0))->capture_default_str();
     // plan E1, stage 3, part 2: what follows a death (combat/aftermath.h)
     bool no_loot = false, no_respawn = false, no_death_loss = false;
-    double corpse_seconds = 15.0, loot_corpse_seconds = 120.0, loot_chance_mult = 1.0;
+    double corpse_seconds = 15.0, loot_corpse_seconds = 120.0, loot_chance_mult = 1.0, loot_rarity_boost = 1.0;
     app.add_flag("--no-loot", no_loot, "the kill switch for what follows a death: no experience, no loot, no respawn (the corpse still goes)")->envname("AOC_NO_LOOT");
     app.add_flag("--no-death-loss", no_death_loss, "a player's death takes no materials (retail: about half of each stack, into a pile where it fell)")->envname("AOC_NO_DEATH_LOSS");
     app.add_flag("--no-respawn", no_respawn, "the kill switch for respawns: a dead NPC stays dead")->envname("AOC_NO_RESPAWN");
@@ -266,6 +266,10 @@ int main(int argc, char** argv) {
     app.add_option("--loot-corpse-seconds", loot_corpse_seconds, "how long a corpse with loot that nobody takes stays (modelled: 120 s)")->envname("AOC_LOOT_CORPSE_SECONDS")->capture_default_str();
     app.add_option("--loot-chance-mult", loot_chance_mult, "multiplies the chance of every RollEachByPercent loot draw (never a quantity; each chance is capped at 1): 3 makes small drop chances 3 times as likely (1: the data's own)")
         ->envname("AOC_LOOT_CHANCE_MULT")->check(CLI::Range(0.0, 1000.0))->capture_default_str();
+    app.add_option("--loot-rarity-boost", loot_rarity_boost,
+                   "TEST ONLY: multiplies the weight of every outcome above Common in the rarity rolls of a kill's gear and resource drops (never a harvest, a quantity or which Glint tier drops): "
+                   "20 makes an Uncommon or better drop about 20 times as likely against a Common one (1: the game's own odds)")
+        ->envname("AOC_LOOT_RARITY_BOOST")->check(CLI::Range(1.0, 1000.0))->capture_default_str();
     // Gathering stage 2, "Harvesting": the resource nodes (gather/gathering.h)
     bool no_gathering = false, gather_quality_literal = false;
     double gather_respawn_mult = 1.0;
@@ -505,6 +509,7 @@ int main(int argc, char** argv) {
             aftermath.corpse_seconds = corpse_seconds;
             aftermath.loot_corpse_seconds = loot_corpse_seconds;
             aftermath.loot_chance_mult = loot_chance_mult;
+            aftermath.loot_rarity_boost = loot_rarity_boost;
             players.set_aftermath_config(std::move(aftermath));
             std::string table_error;
             if (!players.load_blueprints(npc_motion_path, table_error)) {

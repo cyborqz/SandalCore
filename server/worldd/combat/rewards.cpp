@@ -7,6 +7,7 @@
 #include "combat/rewards.h"
 
 #include "combat/hit_context.h"
+#include "items/rarity.h"
 #include "stats/stat_program.h"
 
 #include <algorithm>
@@ -20,6 +21,7 @@ namespace {
 
 constexpr int kMaxDepth = 8;
 constexpr size_t kMaxRolled = 64;   // the most stacks one death rolls (a table cannot make a corpse of thousands)
+constexpr int kMaxBoostDraws = 4096;   // the most times the rarity boost draws one quality again (a line whose every outcome is Common is kept after this many)
 
 /// The host of a reward expression.
 class RewardHost final : public stats::ExprHost {
@@ -123,6 +125,29 @@ private:
         return v && *v != 0.0;
     }
 
+    /// Item rarities, step 1: the quality a KILL's reward line gives its item: the line's variation rolls it, run as the dead creature (its elite rank adds 2 per rank to a gear roll).  0 when
+    /// the line has no variation, the book holds no rules or the formula does not run (the item keeps the record's quality).  The test boost throws a Common outcome back with the chance
+    /// 1 - 1 / boost and draws again, which makes every outcome above Common that many times as likely against Common; at 1 the formula runs once and nothing else is drawn.
+    int kill_quality(const content::LootItem& it) {
+        const int64_t program = book_.quality_program(it.variation);
+        if (program == 0) return 0;
+        const double boost = ctx_.rarity_boost > 1.0 ? ctx_.rarity_boost : 1.0;
+        for (int draw = 1;; ++draw) {
+            const std::optional<double> rolled = value(program);
+            if (!rolled || !(*rolled >= 1.0 && *rolled <= 1000.0)) {
+                ++out_.quality_failures;
+                return 0;
+            }
+            const int quality = std::clamp(static_cast<int>(std::floor(*rolled + 1e-9)), items::kMinQuality, items::kMaxQuality);   // (the character store holds 1 to 200)
+            if (boost > 1.0 && ctx_.rng && draw < kMaxBoostDraws && book_.rarity_of(it.item, quality) == 0 && ctx_.rng->rand_double() * boost >= 1.0) {
+                ++out_.boost_redraws;
+                continue;
+            }
+            ++out_.quality_rolls;
+            return quality;
+        }
+    }
+
     double weight_at(const std::vector<double>& w, size_t i) { return i < w.size() ? std::max(0.0, w[i]) : 1.0; }
 
     std::vector<size_t> select(const std::string& algo, int64_t n, size_t count, const std::vector<double>& w, const std::vector<int64_t>& pct,
@@ -217,6 +242,8 @@ private:
                             ++g.quality_failures;
                         }
                     }
+                } else if (!ctx_.gather && it.item != 0 && it.variation != 0) {
+                    quality = kill_quality(it);   // a kill: the same variations roll the drops of a creature (item rarities, step 1)
                 }
                 const std::optional<double> q = value(it.qty);
                 if (borrowed) ctx_.gather->context = saved;
@@ -247,6 +274,10 @@ private:
 };
 
 }  // namespace
+
+int RewardBook::rarity_of(int64_t item, int quality) const {
+    return rarity_of_ ? rarity_of_(item, quality) : items::default_rarity_facts().rarity_of(static_cast<double>(quality));
+}
 
 Rolled RewardBook::roll(const std::vector<int64_t>& roots, RollContext& ctx) const {
     Rolled out;

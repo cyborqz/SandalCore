@@ -15,6 +15,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <map>
 #include <set>
@@ -1111,7 +1112,17 @@ void PlayerWorld::start_aftermath() {
     if (!tables.empty()) {
         const size_t n = tables.size();
         rewards_.emplace(*ability_catalog(), std::move(tables), decay);
-        spdlog::info("[loot] {} reward tables of the {} the area's creatures name, the experience decay {}", n, roots.size(), decay != 0 ? "of the Adventuring leveling type" : "(none)");
+        // item rarities, step 1: the gear and resource lines of a kill roll their item's quality by the line's variation, as a harvest does (a content.db without the variation tables rolls none)
+        size_t formulas = 0;
+        std::string variation_error;
+        if (auto variations = content_->gather_data(variation_error)) {
+            formulas = variations->quality_expr.size();
+            rewards_->set_quality_rules(std::move(variations->quality_expr), [this](int64_t item, int quality) { return item_rarity(item, quality); });
+        } else if (!variation_error.empty()) {
+            spdlog::warn("[loot] no item variations: {} (the kills' items keep their record's quality)", variation_error);
+        }
+        spdlog::info("[loot] {} reward tables of the {} the area's creatures name, the experience decay {}, {} item variation formulas for the quality of the drops", n, roots.size(),
+                     decay != 0 ? "of the Adventuring leveling type" : "(none)", formulas);
     }
     aftermath_ = std::make_unique<combat::Aftermath>(registry_, *combat_, rewards_ ? &*rewards_ : nullptr, [this] { return guids_.next(); }, aftermath_config_);
     aftermath_->set_quality_of([this](int64_t item) { return item_quality(item); });
@@ -1127,9 +1138,12 @@ void PlayerWorld::start_aftermath() {
     if (!aftermath_config_.enabled) {
         spdlog::info("[loot] OFF (--no-loot): a death gives no experience and no loot, and nothing respawns (the corpse still goes)");
     } else {
-        spdlog::info("[loot] on: a corpse stays {:.0f} s ({:.0f} s after its loot is taken, {:.0f} s unlooted), a spawn point refills its NPC after the instance's respawn time{}{}",
+        char boost[32];
+        std::snprintf(boost, sizeof boost, "%g", aftermath_config_.loot_rarity_boost);
+        spdlog::info("[loot] on: a corpse stays {:.0f} s ({:.0f} s after its loot is taken, {:.0f} s unlooted), a spawn point refills its NPC after the instance's respawn time{}{}{}",
                      aftermath_config_.corpse_seconds, aftermath_config_.emptied_seconds, aftermath_config_.loot_corpse_seconds, aftermath_config_.respawn ? "" : " (respawn off)",
-                     aftermath_config_.loot_chance_mult != 1.0 ? "; every RollEachByPercent loot chance x" + std::to_string(aftermath_config_.loot_chance_mult).substr(0, 5) + " (--loot-chance-mult)" : std::string());
+                     aftermath_config_.loot_chance_mult != 1.0 ? "; every RollEachByPercent loot chance x" + std::to_string(aftermath_config_.loot_chance_mult).substr(0, 5) + " (--loot-chance-mult)" : std::string(),
+                     aftermath_config_.loot_rarity_boost != 1.0 ? std::string("; TEST BOOST: every outcome above Common in the rarity rolls of a kill's gear and resources x") + boost + " (--loot-rarity-boost; harvests are never boosted)" : std::string());
     }
 }
 // built by C Y B with C-O-A

@@ -5590,7 +5590,8 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
     // retail's order: the removal from the loot container, the add to the bag, and the window closes when nothing is left
     const FIntrepidNetworkGUID container = corpse->parts->container_guid;
     queue("ClientReceiveStorageEvent (loot)", [container, removed](bootstrap::PlayerBootstrap& pb) { return pb.loot_removed(container, removed); }, conn, /*must_build=*/true);
-    const std::vector<bootstrap::ItemEvent> adds = item_events_for(all);
+    std::vector<bootstrap::ItemEvent> adds = item_events_for(all);
+    add_item_toasts(adds, /*removals=*/false);   // every Add of the bag carries the "Acquired" popup of the item feed, in the stack's own quality and rarity
     for (size_t at2 = 0; at2 < adds.size(); at2 += bootstrap::kMaxEventsPerChain) {
         const std::vector<bootstrap::ItemEvent> part(adds.begin() + static_cast<std::ptrdiff_t>(at2),
                                                      adds.begin() + static_cast<std::ptrdiff_t>(std::min(adds.size(), at2 + bootstrap::kMaxEventsPerChain)));

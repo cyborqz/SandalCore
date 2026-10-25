@@ -57,6 +57,7 @@ struct AftermathConfig {
     double pile_seconds = 600.0;            // [modelled] a dead player's pile (no capture shows one close unemptied)
     double default_respawn_seconds = 60.0;  // [modelled] a data NPC whose instance says 0
     double loot_chance_mult = 1.0;          // [modelled] x the chance of every RollEachByPercent loot draw (never the quantities): worldd --loot-chance-mult, AOC_LOOT_CHANCE_MULT
+    double loot_rarity_boost = 1.0;         // [modelled, test only] x the weight of every outcome above Common in a kill's rarity rolls (RollContext::rarity_boost; never a harvest): worldd --loot-rarity-boost, AOC_LOOT_RARITY_BOOST
     double min_respawn_seconds = 1.0;       // [R] the shortest retail respawn: 1.07 s
     uint64_t seed = 1;
 };
@@ -66,7 +67,7 @@ struct LootStack {
     int64_t item = 0;
     int64_t variation = 0;
     int64_t quantity = 0;
-    int     quality = 1;       // the item record's default quality (1, 21, 41 for Glint's tiers)
+    int     quality = 1;       // what the item's variation rolled for a kill (item rarities, step 1: gear and resource drops), else the item record's default quality (1, 21, 41 for Glint's tiers)
     bool    taken = false;     // a slot keeps its index when its stack is taken
 };
 
@@ -108,7 +109,7 @@ public:
 
     /// Makes an NPC of a spawn point again (the spawn_ref of its NpcInfo): its new actor id, 0 when it could not.  Without one nothing respawns.
     void set_respawner(std::function<uint64_t(uint32_t spawn_ref, double now)> fn) { respawner_ = std::move(fn); }
-    /// The default quality of an item record (what a rolled stack's instance has); without one every stack is quality 1.
+    /// The default quality of an item record (what a stack has when no variation rolled its quality, Glint's tiers for one); without one every such stack is quality 1.
     void set_quality_of(std::function<int(int64_t item)> fn) { quality_of_ = std::move(fn); }
     /// The rarity the client shows for a quality of an item record (items/rarity.h: the band of the record's curve held inside its RarityMin..RarityMax); it colours a corpse's loot marker
     /// by the best of its stacks.  Without one the common curve, held by nothing, is read.

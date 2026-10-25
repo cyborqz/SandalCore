@@ -48,7 +48,7 @@ struct RolledItem {
     int64_t item = 0;
     int64_t variation = 0;
     int64_t quantity = 0;
-    /// Gathering stage 2: the quality the item's variation rolled (0: none rolled, the item record's default stands).
+    /// The quality the item's variation rolled: a harvest's (Gathering stage 2) or a kill's (item rarities, step 1); 0: none rolled, the item record's default stands.
     int     quality = 0;
 };
 
@@ -64,6 +64,11 @@ struct Rolled {
     size_t tables = 0;                // tables rolled (the roots and the sub tables they chose)
     size_t gated = 0;                 // expressions that did not run, read as "no"
     size_t currency = 0;              // currency rewards left out
+    /// A kill (item rarities, step 1): how many items had their quality rolled by their line's variation, how many formulas did not run (the item keeps the record's quality), and how many
+    /// Common outcomes the test boost threw back (RollContext::rarity_boost; 0 at 1).
+    size_t quality_rolls = 0;
+    size_t quality_failures = 0;
+    size_t boost_redraws = 0;
 };
 // (C-O-A : Cyb)
 
@@ -93,6 +98,11 @@ struct RollContext {
     /// Multiplies the chance of every RollEachByPercent element (the draw is `rand < min(1, percent x chance_mult)`); never a quantity, a weight or a predicate.  1: the data's own odds
     /// (worldd --loot-chance-mult / AOC_LOOT_CHANCE_MULT; the user's test of 2026-10-10 found drops too rare).
     double  chance_mult = 1.0;
+    /// Item rarities, step 1 (a kill, never a harvest): the test boost.  Multiplies the weight of every outcome above Common in the quality roll of a reward line's variation (a gear or a resource
+    /// drop): a roll that comes out Common is thrown back with the chance 1 - 1 / rarity_boost and drawn again, so each better outcome is that many times as likely against Common and their
+    /// odds among themselves stay the data's.  Never a quantity, a percentage or which Glint tier drops.  1: the data's own odds, the formula runs once and nothing else is drawn
+    /// (worldd --loot-rarity-boost / AOC_LOOT_RARITY_BOOST).
+    double  rarity_boost = 1.0;
     stats::SplitMix* rng = nullptr;
     /// Nodes 1, stage 1: where the kill is.  The node reads of the tables' expressions (GetNodeBiome, GetCurrentNode, GetNodeRecord, Node_GetLevel ...) are
     /// answered over `nodes` (null: a world with no nodes) in the zone of influence of the creature's body: `node` is the rank of that zone's node (-1:
@@ -114,6 +124,22 @@ public:
         return it == tables_.end() ? nullptr : &it->second;
     }
 
+    /// Item rarities, step 1: what a KILL's rolls need to give an item its quality (a harvest carries its own, see GatherRoll): the Quality formula of each item variation (the variation's
+    /// guid -> the ab_expr id of the formula, content::GatherData::quality_expr) and the rarity an item shows at a quality (items/rarity.h).  The creature's own numbers run the formula, so
+    /// its elite rank adds to a gear roll.  A book given no rules rolls no quality: its items keep the item record's.
+    void set_quality_rules(std::map<int64_t, int64_t> quality_expr, std::function<int(int64_t item, int quality)> rarity_of) {
+        quality_expr_ = std::move(quality_expr);
+        rarity_of_ = std::move(rarity_of);
+    }
+    size_t quality_formulas() const { return quality_expr_.size(); }
+    /// The ab_expr id of the Quality formula of an item variation; 0 for a variation that has none and for a book given no rules.
+    int64_t quality_program(int64_t variation) const {
+        const auto it = quality_expr_.find(variation);
+        return it == quality_expr_.end() ? 0 : it->second;
+    }
+    /// The rarity (0 Common ... 6 Artifact) the client shows for an item of `item` at `quality`; the common quality curve held nowhere when the book was given no function.
+    int rarity_of(int64_t item, int quality) const;
+
     /// Rolls the tables `roots` for one death.
     Rolled roll(const std::vector<int64_t>& roots, RollContext& ctx) const;
 
@@ -124,6 +150,8 @@ private:
     const abilities::Catalog&               catalog_;
     std::map<int64_t, content::LootTable>   tables_;
     int64_t                                 decay_expr_;
+    std::map<int64_t, int64_t>              quality_expr_;   // item variation guid -> its Quality formula (a kill's rolls: set_quality_rules)
+    std::function<int(int64_t, int)>        rarity_of_;
 };
 
 }  // namespace aoc::worldd::combat
