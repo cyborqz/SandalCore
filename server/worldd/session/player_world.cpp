@@ -1115,6 +1115,7 @@ void PlayerWorld::start_aftermath() {
     }
     aftermath_ = std::make_unique<combat::Aftermath>(registry_, *combat_, rewards_ ? &*rewards_ : nullptr, [this] { return guids_.next(); }, aftermath_config_);
     aftermath_->set_quality_of([this](int64_t item) { return item_quality(item); });
+    aftermath_->set_rarity_of([this](int64_t item, int quality) { return item_rarity(item, quality); });
     aftermath_->set_name_of([this](int64_t item) { return item_name(item); });
     aftermath_->set_respawner([this](uint32_t ref, double now) { return respawn_npc(ref, now); });
     aftermath_->set_city_nodes(city_nodes_);
@@ -1386,6 +1387,19 @@ int PlayerWorld::item_quality(int64_t item) const {
     }
     quality_cache_[item] = q;
     return q;
+}
+
+int PlayerWorld::item_rarity(int64_t item, int quality) const {
+    auto it = rarity_cache_.find(item);
+    if (it == rarity_cache_.end()) {
+        items::ItemRarityFacts facts = items::default_rarity_facts();
+        if (content_) {
+            std::string err;
+            if (const auto rec = content_->item(item, err)) facts = *rec;   // (its rarity facts: the quality curve and RarityMin..RarityMax)
+        }
+        it = rarity_cache_.emplace(item, facts).first;
+    }
+    return it->second.rarity_of(static_cast<double>(quality));
 }
 
 std::string PlayerWorld::item_name(int64_t item) const {

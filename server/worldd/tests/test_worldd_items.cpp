@@ -1804,9 +1804,9 @@ static void test_acquired_popup() {
         const std::string name = said.substr(open + 3, close - open - 3);
         // our event: the retail one with its callout taken out and made again
         repl::ItemStorageEvent mine = *retail;
-        mine.callout = items::acquired_callout(mine.item, name, retail->callout->creation_time.ticks);
+        mine.callout = items::acquired_callout(mine.item, name, items::default_rarity_facts(), retail->callout->creation_time.ticks);
         same_text += mine.callout->message == said ? 1 : 0;
-        bands += items::rarity_band_name(h.quality) == std::string_view(said).substr(said.find("Item_") + 5, said.find('"', said.find("Item_")) - said.find("Item_") - 5) ? 1 : 0;
+        bands += items::rarity_name(items::default_rarity_facts().rarity_of(h.quality)) == std::string_view(said).substr(said.find("Item_") + 5, said.find('"', said.find("Item_")) - said.find("Item_") - 5) ? 1 : 0;
         const auto mine_params = repl::storage_event_params(*rpc, mine);
         BunchWriter w;
         bool failed = false;
@@ -1817,9 +1817,9 @@ static void test_acquired_popup() {
     CHECK(bands == n, "the style is the band of the quality (Common 1, Uncommon 6, Rare 16, Heroic 31) in all 24");
     CHECK(same_bits == n, "the event with acquired_callout's callout is the retail event to the last bit, 24 of 24 (the creation time is the capture's)");
     // the bands of the qualities no capture shows, and a quantity of 1 or 2
-    CHECK(items::rarity_band_name(5) == "Common" && items::rarity_band_name(6) == "Uncommon" && items::rarity_band_name(15) == "Uncommon" && items::rarity_band_name(16) == "Rare" &&
-              items::rarity_band_name(30) == "Rare" && items::rarity_band_name(31) == "Heroic" && items::rarity_band_name(50) == "Heroic" && items::rarity_band_name(51) == "Epic" &&
-              items::rarity_band_name(71) == "Legendary" && items::rarity_band_name(101) == "Artifact" && items::rarity_band_name(200) == "Artifact" && items::rarity_band_name(0) == "Common",
+    const auto band = [](double quality) { return items::rarity_name(items::default_rarity_facts().rarity_of(quality)); };
+    CHECK(band(5) == "Common" && band(6) == "Uncommon" && band(15) == "Uncommon" && band(16) == "Rare" && band(30) == "Rare" && band(31) == "Heroic" && band(50) == "Heroic" &&
+              band(51) == "Epic" && band(71) == "Legendary" && band(101) == "Artifact" && band(200) == "Artifact" && band(0) == "Common",
           "the rarity bands: Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50, Epic 51-70, Legendary 71-100, Artifact 101-200");
     repl::ItemInstance one;
     one.has_item = true;
@@ -1828,8 +1828,9 @@ static void test_acquired_popup() {
     one.quantity = 1;
     repl::ItemInstance two = one;
     two.quantity = 2;
-    CHECK(items::acquired_text(one, "A").find("[A]</>") != std::string::npos && items::acquired_text(one, "A").find("</>x") == std::string::npos &&
-              items::acquired_text(two, "A").find("[A] </>x2") != std::string::npos,
+    const items::ItemRarityFacts& common = items::default_rarity_facts();
+    CHECK(items::acquired_text(one, "A", common).find("[A]</>") != std::string::npos && items::acquired_text(one, "A", common).find("</>x") == std::string::npos &&
+              items::acquired_text(two, "A", common).find("[A] </>x2") != std::string::npos,
           "a quantity of 1 ends [Name]</> and of 2 ends [Name] </>x2");
 }
 

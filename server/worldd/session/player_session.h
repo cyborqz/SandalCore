@@ -764,14 +764,20 @@ public:
     /// What a GM grant of an item did.
     struct GmItemResult {
         bool        ok = false;
+        bool        bad_request = false;   // refused for the rarity or the quality asked for (not for the item, the count or the room)
         std::string refusal;
         std::string item_name;
         int32_t     count = 0;
         std::string container;   // where the first stack went: Backpack or a resource container
+        int32_t     quality = 0;   // the quality the stacks were given at
+        std::string rarity;        // ... and the rarity the player sees them in
     };
-    /// Gives `count` of the item record: stacks of its stack size, routed by the bag rule (materials to the resource bags, everything else to the item bag).  Refused, changing nothing, for
-    /// an item the data does not hold, a count outside 1 to 100,000, or bags without room for the whole grant.
-    GmItemResult gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by);
+    /// Gives `count` of the item record: stacks of its stack size, routed by the bag rule (materials to the resource bags, everything else to the item bag).  `rarity` (a name: the lowest
+    /// quality of that colour) or `quality` (1 to 200) says which quality the stacks have; both empty: the record's default quality.  Refused, changing nothing, for an item the data
+    /// does not hold, a count outside 1 to 100,000, a rarity or quality the item can never show (the refusal lists the rarities it allows), an item that has no quality to choose, or bags
+    /// without room for the whole grant.
+    GmItemResult gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by, const std::string& rarity = std::string(),
+                              int32_t quality = 0);
 
     // ---- Nodes 1, stage 2: the world knows its nodes ----------------------------------------------------------------------------------
     /// The client asks for the summary and the siege summary of every node at login (49 + 49 in the possession bunch) and again from the node window.  Each request is

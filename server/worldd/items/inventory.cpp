@@ -21,7 +21,6 @@ namespace {
 constexpr int64_t kTicksAtUnixEpoch = 621355968000000000ll;   // 1970-01-01 as FDateTime ticks
 constexpr int64_t kTicksPerMs = 10000;
 constexpr int32_t kMaxQuantity = 1000000;
-constexpr int32_t kMaxQuality = 200;
 constexpr int64_t kMaxMs = 9'000'000'000'000ll;   // year 2255: ticks stay far inside an int64
 constexpr int64_t kMaxLockExpiration = 253402300799ll;   // Unix seconds: the end of the year 9999 (character service migration 0007)
 
@@ -54,7 +53,7 @@ std::string item_problem(const svc::InventoryItem& it) {
         return "instance guid '" + it.instance_guid + "' is not 32 lowercase hex digits (or is the zero guid)";
     }
     if (it.quantity < 1 || it.quantity > kMaxQuantity) return "quantity " + std::to_string(it.quantity) + " is not 1 to " + std::to_string(kMaxQuantity);
-    if (it.quality < 1 || it.quality > kMaxQuality) return "quality " + std::to_string(it.quality) + " is not 1 to " + std::to_string(kMaxQuality);
+    if (it.quality < kMinQuality || it.quality > kMaxQuality) return "quality " + std::to_string(it.quality) + " is not " + std::to_string(kMinQuality) + " to " + std::to_string(kMaxQuality);
     if (!std::isfinite(it.durability) || it.durability < 0) return "durability is not a number from 0";
     if (it.created_at_ms < 0 || it.created_at_ms > kMaxMs) return "creation time " + std::to_string(it.created_at_ms) + " ms is out of range";
     for (const std::optional<float>* p : {&it.persisted_health, &it.persisted_mana}) {

@@ -11,12 +11,14 @@
 //  What the 24 retail events (tests/capture_resource.h, 22 retail captures into Resource0, 6 into Resource1) say, and this header writes bit for bit:
 //    * the text is `Acquired <a id="Item" style="Item_<rarity>" metaType="ItemLink" metaGUID="<record>" metaItemQuality="<quality>" metaEnchantLevel="0" metaTemperingPercent="0"
 //      metaDurability="0" metaSockets=""> [<name>] </>x<quantity>`, and for a quantity of 1 `... [<name>]</>` (no space before the closing tag and no "x1"): 5 of the 24 events have
-//      a quantity of 1 (the carcass portions and the Wolf), 19 have 2 to 6.  <rarity> is the band of the quality (Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50; the events
-//      show Common, Uncommon, Rare and Heroic, qualities 1, 6, 16 and 31); <name> is the record's ItemName ("Coconut Wood": content.db's item.display_name, contentc version 16).
+//      a quantity of 1 (the carcass portions and the Wolf), 19 have 2 to 6.  <rarity> is the rarity the item shows (items/rarity.h): the band of the quality (Common 1-5, Uncommon
+//      6-15, Rare 16-30, Heroic 31-50 ...) held inside the record's own RarityMin..RarityMax, so a Glint of tier 2 (quality 21, always Uncommon) reads Item_Uncommon and Bee's Wax
+//      (quality 1, never below Rare) reads Item_Rare; the 24 events show Common, Uncommon, Rare and Heroic, qualities 1, 6, 16 and 31; <name> is the record's ItemName ("Coconut
+//      Wood": content.db's item.display_name, contentc version 16).
 //    * the callout holds that text twice (Message and FormattedOnScreenMessage), the stored item again (ItemAssociated: the same instance, guid and quantity), the callout type 6,
 //      the point size 36 and the chat category 141, and nothing else but the time it was made (CreationTime, FDateTime ticks): no title, no localized message, no FText, no
 //      emblems, ids 0, location 0.
-//  What is inferred: the style names of the bands above Heroic (Item_Epic, Item_Legendary, Item_Artifact); that a top-up of an existing stack is told the quantity that was added
+//  What is inferred: the style names of the rarities above Epic (Item_Legendary, Item_Artifact); that a top-up of an existing stack is told the quantity that was added
 //  (no capture shows one: the events are all new stacks); that the metadata after the quality is zero for an item that has an enchantment, a tempering or sockets (resources have none).
 //
 //  The vendors milestone, step 1: the same callout rides the other storage events the item feed shows.  A purchase's Add event carries the type 6 "Acquired" form, as a harvest's does;
@@ -25,6 +27,7 @@
 // ============================================================================
 #pragma once
 
+#include "items/rarity.h"
 #include "protocol/repl/value.h"
 
 #include <cmath>
@@ -40,17 +43,6 @@ inline constexpr uint8_t kAcquiredCalloutType = 6;
 inline constexpr int32_t kAcquiredPointSize = 36;
 inline constexpr uint8_t kAcquiredChatCategory = 141;
 
-/// The name of the rarity band of an item quality: Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50, Epic 51-70, Legendary 71-100, Artifact 101-200 (any other quality reads Common).
-inline std::string_view rarity_band_name(uint32_t quality) {
-    if (quality >= 101 && quality <= 200) return "Artifact";
-    if (quality >= 71) return "Legendary";
-    if (quality >= 51) return "Epic";
-    if (quality >= 31) return "Heroic";
-    if (quality >= 16) return "Rare";
-    if (quality >= 6) return "Uncommon";
-    return "Common";
-}
-
 /// The item link's durability as the text shows it: a whole number without decimals ("14"), else up to two ("13.5").
 inline std::string durability_text(float durability) {
     if (!(durability > 0.0f)) return "0";
@@ -63,12 +55,12 @@ inline std::string durability_text(float durability) {
     return s;
 }
 
-/// The rich text of a toast about `item` named `name`, led by `word` ("Acquired", "Removed"): the item link with its record, quality and durability, and "x<quantity>" after it
-/// for a stack of more than one.
-inline std::string item_toast_text(std::string_view word, const ::aoc::protocol::repl::ItemInstance& item, std::string_view name) {
+/// The rich text of a toast about `item` named `name`, led by `word` ("Acquired", "Removed"): the item link with the rarity the item shows (`facts`: its record's quality curve and
+/// RarityMin..RarityMax), its record, quality and durability, and "x<quantity>" after it for a stack of more than one.
+inline std::string item_toast_text(std::string_view word, const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, const ItemRarityFacts& facts) {
     std::string s(word);
     s += " <a id=\"Item\" style=\"Item_";
-    s += rarity_band_name(item.quality);
+    s += rarity_name(facts.rarity_of(static_cast<double>(item.quality)));
     s += "\" metaType=\"ItemLink\" metaGUID=\"";
     s += std::to_string(item.record_id);
     s += "\" metaItemQuality=\"";
@@ -86,8 +78,10 @@ inline std::string item_toast_text(std::string_view word, const ::aoc::protocol:
     return s;
 }
 
-/// The popup's rich text for `item` (its record, quality and quantity) named `name`.
-inline std::string acquired_text(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name) { return item_toast_text("Acquired", item, name); }
+/// The popup's rich text for `item` (its record, quality and quantity) named `name`, in the rarity `facts` give it.
+inline std::string acquired_text(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, const ItemRarityFacts& facts) {
+    return item_toast_text("Acquired", item, name, facts);
+}
 // C.Y.B / CoA
 
 /// The FCalloutQueueInfo of a storage event for `item` as it is stored, toasting `text`, made at `creation_ticks` (FDateTime ticks).
@@ -104,16 +98,16 @@ inline ::aoc::protocol::repl::CalloutQueueInfo item_callout(std::string text, ui
 }
 
 /// The FCalloutQueueInfo of a harvest's storage event for `item` as it is stored (its quantity is what was acquired), made at `creation_ticks` (FDateTime ticks).
-inline ::aoc::protocol::repl::CalloutQueueInfo acquired_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, int64_t creation_ticks) {
-    return item_callout(acquired_text(item, name), kAcquiredCalloutType, item, creation_ticks);
+inline ::aoc::protocol::repl::CalloutQueueInfo acquired_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, const ItemRarityFacts& facts, int64_t creation_ticks) {
+    return item_callout(acquired_text(item, name, facts), kAcquiredCalloutType, item, creation_ticks);
 }
 
 /// The callout type of the toast of an item that leaves a bag: sold to a shop, or destroyed.
 inline constexpr uint8_t kRemovedCalloutType = 16;
 
 /// The FCalloutQueueInfo of the Remove event of an item that was sold or destroyed ("Removed <link> [Name]"): the same struct as the pick-up toast, type 16.
-inline ::aoc::protocol::repl::CalloutQueueInfo removed_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, int64_t creation_ticks) {
-    return item_callout(item_toast_text("Removed", item, name), kRemovedCalloutType, item, creation_ticks);
+inline ::aoc::protocol::repl::CalloutQueueInfo removed_callout(const ::aoc::protocol::repl::ItemInstance& item, std::string_view name, const ItemRarityFacts& facts, int64_t creation_ticks) {
+    return item_callout(item_toast_text("Removed", item, name, facts), kRemovedCalloutType, item, creation_ticks);
 }
 
 }  // namespace aoc::worldd::items

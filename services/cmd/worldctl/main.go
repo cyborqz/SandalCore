@@ -11,7 +11,10 @@
 //	worldctl tp <character> <x> <y> [<z>]             moves the player to a point (cm); without z, the ground height under it
 //	worldctl speed <character> <multiplier>           the character's run speed, 0.5 to 10 (1 resets); until relog
 //	worldctl give-money <character> <copper>          adds copper to the character's purse (100 copper = 1 silver, 100 silver = 1 gold; the purse holds 10,000,000 at most)
-//	worldctl give-item <character> <item> [<count>]   gives an item by its record name or Guid (count 1 by default), into the bag its kind belongs to
+//	worldctl give-item <character> <item> [<count>] [<rarity>|q<NN>]
+//	                                                  gives an item by its record name or Guid (count 1 by default), into the bag its kind belongs to. A rarity (Common, Uncommon, Rare,
+//	                                                  Heroic, Epic, Legendary or Artifact) gives the lowest quality of that colour; q<NN> (q1 to q200) gives an exact quality. An item is
+//	                                                  only given a rarity it can have: the answer lists the ones it can
 //	worldctl place-station <node> <plot> <station>    puts an artisan building's station on a free service plot of a Village or a Town (it stays until removed, until the node drops below
 //	                                                  a Village, or until worldd restarts)
 //	worldctl remove-station <node> <plot>             takes a placed station off its plot
@@ -74,7 +77,7 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   tp <character> <x> <y> [<z>]      move a player to a point (cm); without z, the ground height
   speed <character> <multiplier>    run speed, 0.5 to 10; 1 resets (until relog)
   give-money <character> <copper>   add copper to the purse (a test command)
-  give-item <character> <item> [n]  give an item by record name or Guid, into the right bag (a test command)
+  give-item <character> <item> [n] [rarity|qNN]  give an item by record name or Guid, into the right bag, in a rarity (Common ... Artifact) or at a quality (q1 to q200) (a test command)
   place-station <node> <plot> <st>  put an artisan building's station on a free plot of a Village or a Town
   remove-station <node> <plot>      take a placed station off its plot
   craft finish <character> [<st>]   finish the character's processing jobs at once, ready to collect (a test command)
@@ -87,6 +90,56 @@ const usage = `usage: worldctl <command> [flags] [arguments]
 every command takes --addr and --token-file`
 
 type usageError string
+
+// rarityNames are the rarities give-item takes, as the game spells them.
+var rarityNames = []string{"Common", "Uncommon", "Rare", "Heroic", "Epic", "Legendary", "Artifact"}
+
+// parseGiveWords reads the words after the item of give-item: a whole number is the count (1 to 100000), q<NN> an exact quality (1 to 200), and a rarity name the rarity (the lowest
+// quality of that colour). Each kind may be given once, in any order.
+func parseGiveWords(words []string) (count int64, rarity string, quality int64, err error) {
+	count = 1
+	var sawCount, sawRarity, sawQuality bool
+	for _, raw := range words {
+		w := strings.TrimSpace(raw)
+		isDigits := func(s string) bool {
+			if s == "" {
+				return false
+			}
+			for _, c := range s {
+				if c < '0' || c > '9' {
+					return false
+				}
+			}
+			return true
+		}
+		switch {
+		case isDigits(w) || strings.HasPrefix(w, "-") || strings.HasPrefix(w, "+") || strings.ContainsAny(w, ".,"):
+			n, perr := strconv.ParseInt(w, 10, 32)
+			if perr != nil || n < 1 || n > 100000 || sawCount {
+				return 0, "", 0, usageError(fmt.Sprintf("the count %q is not a whole number from 1 to 100000 (or it was given twice)", raw))
+			}
+			count, sawCount = n, true
+		case len(w) > 1 && (w[0] == 'q' || w[0] == 'Q') && isDigits(w[1:]):
+			n, perr := strconv.ParseInt(w[1:], 10, 32)
+			if perr != nil || n < 1 || n > 200 || sawQuality {
+				return 0, "", 0, usageError(fmt.Sprintf("the quality %q is not q1 to q200 (or it was given twice)", raw))
+			}
+			quality, sawQuality = n, true
+		default:
+			name := ""
+			for _, r := range rarityNames {
+				if strings.EqualFold(w, r) {
+					name = r
+				}
+			}
+			if name == "" || sawRarity {
+				return 0, "", 0, usageError(fmt.Sprintf("%q is not a rarity (or it was given twice): use %s, or q<number> (q1 to q200) for an exact quality", raw, strings.Join(rarityNames, ", ")))
+			}
+			rarity, sawRarity = name, true
+		}
+	}
+	return count, rarity, quality, nil
+}
 
 func (u usageError) Error() string { return string(u) }
 
@@ -307,23 +360,23 @@ func parse(cmd string, pos []string) (call, error) {
 			return nil
 		}, nil
 	case "give-item":
-		if len(pos) < 2 || len(pos) > 3 {
-			return nil, usageError("needs a character and an item: worldctl give-item <character> <item name or Guid> [<count>]")
+		if len(pos) < 2 || len(pos) > 5 {
+			return nil, usageError("needs a character and an item: worldctl give-item <character> <item name or Guid> [<count>] [<rarity>|q<NN>]")
 		}
-		count := int64(1)
-		if len(pos) == 3 {
-			n, err := strconv.ParseInt(strings.TrimSpace(pos[2]), 10, 32)
-			if err != nil || n < 1 || n > 100000 {
-				return nil, usageError(fmt.Sprintf("the count %q is not a whole number from 1 to 100000", pos[2]))
-			}
-			count = n
+		count, rarity, quality, err := parseGiveWords(pos[2:])
+		if err != nil {
+			return nil, err
 		}
 		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
-			r, err := c.GiveItem(ctx, &worldadminv1.GiveItemRequest{Character: pos[0], Item: pos[1], Count: int32(count)})
+			r, err := c.GiveItem(ctx, &worldadminv1.GiveItemRequest{Character: pos[0], Item: pos[1], Count: int32(count), Rarity: rarity, Quality: int32(quality)})
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "%s: %d x %s (%d) given, into %s\n", r.GetCharacter(), r.GetCount(), r.GetItem(), r.GetItemGuid(), r.GetContainer())
+			as := ""
+			if r.GetRarity() != "" { // (an older worldd does not say)
+				as = fmt.Sprintf(" as %s (quality %d)", r.GetRarity(), r.GetQuality())
+			}
+			fmt.Fprintf(out, "%s: %d x %s (%d) given%s, into %s\n", r.GetCharacter(), r.GetCount(), r.GetItem(), r.GetItemGuid(), as, r.GetContainer())
 			return nil
 		}, nil
 	case "place-station":

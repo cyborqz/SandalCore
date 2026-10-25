@@ -56,8 +56,6 @@ private:
     const std::map<int64_t, double>&      ratings_;
 };
 
-constexpr std::array<int, stats::kRarities> kCommonFloors = {1, 6, 16, 31, 51, 71, 101};
-
 /// An item record the design data retired: its name says so.
 bool retired_name(const std::string& name) { return name.rfind("RETIRED_", 0) == 0 || name.rfind("NOTUSED_", 0) == 0; }
 
@@ -273,27 +271,16 @@ const content::GatherDefRow* Gathering::def_of(const world::WorldActor& node) co
 }
 
 int Gathering::rarity_of(int64_t item, int quality) const {
-    auto it = floors_.find(item);
-    if (it == floors_.end()) {
-        std::array<int, stats::kRarities> floors = kCommonFloors;
+    auto it = rarity_facts_.find(item);
+    if (it == rarity_facts_.end()) {
+        items::ItemRarityFacts facts = items::default_rarity_facts();
         if (db_) {
             std::string err;
-            if (const auto gear = db_->item_gear(item, err); gear && gear->has_curve) {
-                bool ok = true;
-                for (int r = 0; r < stats::kRarities; ++r) {
-                    floors[static_cast<size_t>(r)] = static_cast<int>(std::lround(gear->bands[static_cast<size_t>(r)].x));
-                    if (r > 0 && floors[static_cast<size_t>(r)] <= floors[static_cast<size_t>(r - 1)]) ok = false;
-                }
-                if (!ok) floors = kCommonFloors;
-            }
+            if (const auto rec = db_->item(item, err)) facts = *rec;   // (its rarity facts: the quality curve and RarityMin..RarityMax)
         }
-        it = floors_.emplace(item, floors).first;
+        it = rarity_facts_.emplace(item, facts).first;
     }
-    int rarity = 0;
-    for (int r = 0; r < stats::kRarities; ++r) {
-        if (quality >= it->second[static_cast<size_t>(r)]) rarity = r;
-    }
-    return rarity;
+    return it->second.rarity_of(static_cast<double>(quality));
 }
 // C.O.A with Cyb
 

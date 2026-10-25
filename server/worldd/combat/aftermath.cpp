@@ -6,6 +6,7 @@
 // ============================================================================
 #include "combat/aftermath.h"
 
+#include "items/rarity.h"
 #include "protocol/repl/value.h"
 
 #include <spdlog/spdlog.h>
@@ -29,10 +30,11 @@ std::vector<std::string> tags_of(const std::string& csv) {
     return out;
 }
 
-/// EItemRarity of a quality: the retail rarities seen (0, 1, 2 for the Glint tiers of quality 1, 21 and 41) are the twenties.
-int rarity_of(int quality) { return std::max(0, (quality - 1) / 20); }
-
 }  // namespace
+
+int Aftermath::rarity_of(int64_t item, int quality) const {
+    return rarity_of_ ? rarity_of_(item, quality) : items::default_rarity_facts().rarity_of(static_cast<double>(quality));
+}
 
 Aftermath::Aftermath(world::ActorRegistry& registry, CombatWorld& combat, const RewardBook* book, world::Minter mint, AftermathConfig config)
     : registry_(registry), combat_(combat), book_(book), mint_(std::move(mint)), cfg_(std::move(config)) {
@@ -141,7 +143,7 @@ void Aftermath::on_death(const DeathEvent& d) {
             }
             if (!stacks.empty() && !fighters.empty()) {
                 int top = 0;
-                for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.quality));
+                for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));
                 std::vector<protocol::repl::GuidValue> guids;
                 for (PlayerPort* p : fighters) {
                     const auto w = p->character_guid();
@@ -306,7 +308,7 @@ uint64_t Aftermath::drop_pile(double x, double y, double z, const protocol::repl
                               std::string& error) {
     if (stacks.empty()) return 0;
     int top = 0;
-    for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.quality));
+    for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));
     const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, top, error);
     if (!pile) return 0;
     Corpse c;

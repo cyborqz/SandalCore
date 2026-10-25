@@ -393,10 +393,12 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
     // the stacks: the rolled items cut to the record's stack size
     std::vector<combat::LootStack> stacks;
     std::map<int64_t, std::string> shown_name;   // each rolled record's name for the pick-up popup (the record's ItemName; its internal name in a content.db older than contentc 16)
+    std::map<int64_t, items::ItemRarityFacts> shown_rarity;   // ... and the rarity facts the popup's colour comes from
     for (const combat::RolledItem& it : harvest.items) {
         std::string err;
         const auto rec = db ? db->item(it.item, err) : std::nullopt;
         if (rec && !shown_name.count(it.item)) shown_name[it.item] = rec->display_name.empty() ? rec->name : rec->display_name;
+        if (rec && !shown_rarity.count(it.item)) shown_rarity[it.item] = *rec;
         const int64_t max_stack = rec ? std::max(1, rec->max_stack_size) : 1;
         const int quality = it.quality > 0 ? it.quality : (rec ? std::max(1, rec->default_quality) : 1);
         for (int64_t left = it.quantity; left > 0;) {
@@ -428,7 +430,7 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
         }
         it.quantity = static_cast<int32_t>(std::min<int64_t>(stacks[i].quantity, 1 << 20));
         it.quality = stacks[i].quality;
-        it.durability = rec ? static_cast<float>(std::floor(rec->max_durability + 0.5)) : 0.0f;
+        it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
         it.created_at_ms = created;
         variation_of[it.instance_guid] = stacks[i].variation;
         fresh.push_back(std::move(it));
@@ -500,7 +502,9 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
                 shown.quantity = ev.item.quantity - events[i - 1].item.quantity;
             }
             const auto name = shown_name.find(static_cast<int64_t>(shown.record_id));
-            ev.callout = items::acquired_callout(shown, name != shown_name.end() ? std::string_view(name->second) : std::string_view("Unknown item"), made);
+            const auto facts = shown_rarity.find(static_cast<int64_t>(shown.record_id));
+            ev.callout = items::acquired_callout(shown, name != shown_name.end() ? std::string_view(name->second) : std::string_view("Unknown item"),
+                                                 facts != shown_rarity.end() ? facts->second : items::default_rarity_facts(), made);
         }
         for (size_t at2 = 0; at2 < events.size(); at2 += bootstrap::kMaxEventsPerChain) {
             const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at2),

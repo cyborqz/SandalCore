@@ -346,7 +346,7 @@ GmTaughtList GmTravel::list_taught(const std::string& character) {
     return out;
 }
 
-GmItemGrant GmTravel::give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by) {
+GmItemGrant GmTravel::give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by, const std::string& rarity, int32_t quality) {
     GmItemGrant out;
     if (item.empty()) {
         out.status = GmStatus::InvalidArgument;
@@ -395,14 +395,16 @@ GmItemGrant GmTravel::give_item(const std::string& character, const std::string&
         }
         guid = found.front();
     }
-    const PlayerSession::GmItemResult r = handle.player->gm_give_item(*handle.connection, guid, count, now_(), by);
+    const PlayerSession::GmItemResult r = handle.player->gm_give_item(*handle.connection, guid, count, now_(), by, rarity, quality);
     out.character = handle.player->name();
     out.item = r.item_name;
     out.item_guid = guid;
     out.count = r.count;
     out.container = r.container;
+    out.quality = r.quality;
+    out.rarity = r.rarity;
     if (!r.ok) {
-        out.status = r.item_name.empty() ? GmStatus::NotFound : GmStatus::FailedPrecondition;
+        out.status = r.item_name.empty() ? GmStatus::NotFound : (r.bad_request ? GmStatus::InvalidArgument : GmStatus::FailedPrecondition);
         out.message = r.refusal;
     }
     return out;

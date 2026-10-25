@@ -43,14 +43,8 @@
 
 namespace aoc::worldd::crafting {
 
-/// The rarity band (Common 0 ... Artifact 6) a quality is in.
-inline int rarity_of_quality(int quality) {
-    int band = 0;
-    for (int i = 0; i < 7; ++i) {
-        if (quality >= kBandStart[i]) band = i;
-    }
-    return band;
-}
+/// The rarity band (Common 0 ... Artifact 6) a quality is in on the common curve, held inside no bound: for a product the data does not hold (items/rarity.h).
+inline int rarity_of_quality(int quality) { return items::default_rarity_facts().rarity_of(quality); }
 
 /// The quality the products of a job that was paid with `paid` have (see the top of this file); 1 for a job that paid no item.
 inline int product_quality(const std::vector<svc::JobResource>& paid) {
@@ -243,7 +237,7 @@ inline std::optional<JobRewards> roll_craft(const content::CraftRecipeData& data
     out.products = roll_products(*reward, 1, seed);
     std::optional<content::ItemSaleFacts> product;
     if (!out.products.empty() && facts_of) product = facts_of(out.products.front().item);
-    out.rarity = product && product->bands.size() == 7 ? product->rarity_of(out.quality) : rarity_of_quality(out.quality);
+    out.rarity = product ? product->rarity_of(out.quality) : rarity_of_quality(out.quality);
     out.profession_xp = craft_profession_xp(reward->profession_rule, recipe.tier, out.rarity, product ? slot_mod(product->tags) : 1.0);
     out.adventuring_xp = adventuring_xp(data.xp_curves, reward->adventuring_rule, recipe.tier, out.level, out.rarity, 1);
     return out;

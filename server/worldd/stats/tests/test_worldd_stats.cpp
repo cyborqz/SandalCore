@@ -850,8 +850,8 @@ void test_gear_rules() {
     CHECK(mod_of(one(20, Rounding::None), 100) == 50 && mod_of(one(60, Rounding::None), 100) == 70 && mod_of(one(90, Rounding::None), 100) == 80, "Rare, Epic and Legendary read their own band");
     CHECK(mod_of(one(1, Rounding::None), 101) == 7 && mod_of(one(150, Rounding::None), 101) == 7, "a stat that is the same at every rarity is the same at every quality");
     CHECK(mod_of(one(150, Rounding::None), 100) == 0, "Artifact 101-200: 0 here");
-    // below and past the curve: extrapolated in the nearest band, as Go's gear.go does
-    CHECK(mod_of(one(0, Rounding::None), 100) == 10 + 10.0 * (0 - 1) / 4 && mod_of(one(250, Rounding::None), 100) == 0, "quality 0 reads the Common band, extrapolated; 250 reads Artifact");
+    // below and past the curve: the share inside the band is held to 0..1, as the game client does (a quality before the Common band reads CommonMin; past the last band, Artifact)
+    CHECK(mod_of(one(0, Rounding::None), 100) == 10 && mod_of(one(250, Rounding::None), 100) == 0, "quality 0 reads the Common band at its Min (the share is held to the band); 250 reads Artifact");
     // an item with no curve reads CommonMin
     ItemGear nc = a;
     nc.record = 2;

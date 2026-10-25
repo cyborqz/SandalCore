@@ -77,7 +77,8 @@ type WorldAdminServiceClient interface {
 	GiveMoney(ctx context.Context, in *GiveMoneyRequest, opts ...grpc.CallOption) (*GiveMoneyResponse, error)
 	// Gives a player an item by its record name (case does not count) or its Guid, in stacks of the item's stack size, routed by the bag rule: materials to the resource bags, everything
 	// else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
-	// the whole grant (nothing is given, the answer says why).
+	// the whole grant (nothing is given, the answer says why). The request may ask for a rarity (by name: the lowest quality of that colour) or an exact quality: InvalidArgument for a
+	// rarity or quality the item can never show (the answer lists the rarities the item allows), or for an item that has no quality to choose.
 	GiveItem(ctx context.Context, in *GiveItemRequest, opts ...grpc.CallOption) (*GiveItemResponse, error)
 	// Crafting, step 0. Puts the station of an artisan building on a free service plot of a Village or a Town (the mayor's buildings do not exist yet): the station's actor stands where the
 	// building would have put it, and stays until RemoveStation, until the node drops below a Village, or until worldd restarts (placed stations are not saved). NotFound for a node,
@@ -349,7 +350,8 @@ type WorldAdminServiceServer interface {
 	GiveMoney(context.Context, *GiveMoneyRequest) (*GiveMoneyResponse, error)
 	// Gives a player an item by its record name (case does not count) or its Guid, in stacks of the item's stack size, routed by the bag rule: materials to the resource bags, everything
 	// else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
-	// the whole grant (nothing is given, the answer says why).
+	// the whole grant (nothing is given, the answer says why). The request may ask for a rarity (by name: the lowest quality of that colour) or an exact quality: InvalidArgument for a
+	// rarity or quality the item can never show (the answer lists the rarities the item allows), or for an item that has no quality to choose.
 	GiveItem(context.Context, *GiveItemRequest) (*GiveItemResponse, error)
 	// Crafting, step 0. Puts the station of an artisan building on a free service plot of a Village or a Town (the mayor's buildings do not exist yet): the station's actor stands where the
 	// building would have put it, and stays until RemoveStation, until the node drops below a Village, or until worldd restarts (placed stations are not saved). NotFound for a node,

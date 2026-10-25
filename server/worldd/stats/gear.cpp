@@ -11,36 +11,7 @@
 
 namespace aoc::worldd::stats {
 
-namespace {
-
-/// The rarity whose range holds the quality, else the last rarity that starts at or below it, else Common (gear.go's band).
-int band_of(const ItemGear& item, double q, double& x, double& y) {
-    bool found = false;
-    int rarity = 0;
-    for (int i = 0; i < kRarities; ++i) {
-        const QualityBand& b = item.bands[static_cast<size_t>(i)];
-        if (b.x <= q && q <= b.y) {
-            x = b.x;
-            y = b.y;
-            return i;
-        }
-        if (b.x <= q) {
-            rarity = i;
-            x = b.x;
-            y = b.y;
-            found = true;
-        }
-    }
-    if (!found) {
-        x = item.bands[0].x;
-        y = item.bands[0].y;
-        return 0;
-    }
-    return rarity;
-}
 // CoA + C | Y | B
-
-}  // namespace
 
 GearInputs gear_inputs(const GearCatalog& catalog, std::span<const WornItem> worn, Rounding rounding) {
     GearInputs out;
@@ -53,22 +24,8 @@ GearInputs gear_inputs(const GearCatalog& catalog, std::span<const WornItem> wor
             continue;
         }
         const double q = static_cast<double>(w.quality);
-        double x = 0, y = 0;
-        int rarity = 0;
-        if (item->has_curve) rarity = band_of(*item, q, x, y);
-        for (const BlockStat& s : item->stats) {
-            double val;
-            if (item->has_curve) {
-                const double lo = s.min[static_cast<size_t>(rarity)], hi = s.max[static_cast<size_t>(rarity)];
-                double t = 0.0;
-                if (y != x) t = (q - x) / (y - x);
-                val = lo + (hi - lo) * t;
-            } else {
-                val = s.min[0];
-            }
-            if (rounding == Rounding::HalfUp) val = std::floor(val + 0.5);
-            sum[s.stat] += val;
-        }
+        const int rarity = item->rarity_of(q);   // the rarity the item shows: its band held inside its RarityMin..RarityMax
+        for (const BlockStat& s : item->stats) sum[s.stat] += item->stat_at(s, q, rounding == Rounding::HalfUp);
         for (const int64_t set : item->sets) set_rarities[set].push_back(rarity);
         for (const std::string& tag : item->tags) out.equipped.push_back({catalog.slot_name(w.slot), tag});
     }

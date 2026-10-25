@@ -110,6 +110,9 @@ public:
     void set_respawner(std::function<uint64_t(uint32_t spawn_ref, double now)> fn) { respawner_ = std::move(fn); }
     /// The default quality of an item record (what a rolled stack's instance has); without one every stack is quality 1.
     void set_quality_of(std::function<int(int64_t item)> fn) { quality_of_ = std::move(fn); }
+    /// The rarity the client shows for a quality of an item record (items/rarity.h: the band of the record's curve held inside its RarityMin..RarityMax); it colours a corpse's loot marker
+    /// by the best of its stacks.  Without one the common curve, held by nothing, is read.
+    void set_rarity_of(std::function<int(int64_t item, int quality)> fn) { rarity_of_ = std::move(fn); }
     /// The name of an item record, for the log's death line (without one the record's number is logged).
     void set_name_of(std::function<std::string(int64_t item)> fn) { name_of_ = std::move(fn); }
     /// Nodes 1, stage 1: the city nodes.  A death is rolled in the zone of influence of its position (world/city_nodes.h node_at): its biome and node
@@ -173,6 +176,7 @@ public:
     size_t respawns_pending() const { return respawns_.size(); }
 
 private:
+    int rarity_of(int64_t item, int quality) const;
     struct Respawn {
         double   at = 0;
         uint32_t spawn_ref = 0;
@@ -189,6 +193,7 @@ private:
     AftermathConfig            cfg_;
     std::function<uint64_t(uint32_t, double)> respawner_;
     std::function<int(int64_t)> quality_of_;
+    std::function<int(int64_t, int)> rarity_of_;
     std::function<std::string(int64_t)> name_of_;
     HuntablePredicate          huntable_;
     const world::CityNodes*    nodes_ = nullptr;

@@ -114,6 +114,8 @@ struct GmItemGrant {
     int64_t     item_guid = 0;
     int32_t     count = 0;
     std::string container;   // where the first stack went
+    int32_t     quality = 0;   // the quality the stacks were given at
+    std::string rarity;        // ... and the rarity the player sees them in
 };
 
 /// Crafting, step 0: the test commands that put an artisan building's station on a free plot, and take it off.
@@ -188,7 +190,8 @@ public:
     /// Adds copper to a player's purse (the cap is 10,000,000 copper) and shows it; the amount is 1 or more.
     GmMoneyGrant     give_money(const std::string& character, int64_t copper, const std::string& by);
     /// Gives a player `count` of an item named by its record name or its Guid (digits), routed by the bag rule.
-    GmItemGrant      give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by);
+    /// `rarity` (a name) or `quality` (1 to 200) says which quality the item is given at; both empty: its default quality (PlayerSession::gm_give_item).
+    GmItemGrant      give_item(const std::string& character, const std::string& item, int32_t count, const std::string& by, const std::string& rarity = std::string(), int32_t quality = 0);
     /// Puts the station `station` of an artisan building on the free plot `plot` of the node `node` (a Village or a Town), and takes it off again.
     GmStationResult  place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by);
     GmStationResult  remove_station(const std::string& node, const std::string& plot, const std::string& by);

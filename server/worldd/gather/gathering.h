@@ -129,7 +129,8 @@ public:
     /// Every kind, by PlayerInteractionDef.
     const std::map<int64_t, HuntKind>& hunting() const { return hunting_; }
 
-    /// The EItemRarity ordinal of a quality of an item (the band of its record's quality curve; the common curve for an item without one).
+    /// The EItemRarity ordinal of a quality of an item: the rarity the game client shows for it (items/rarity.h: the band of the record's quality curve held inside its RarityMin..RarityMax;
+    /// the common curve, held by nothing, for a record the data does not hold).
     int rarity_of(int64_t item, int quality) const;
 
     /// The channel's length in seconds: the interaction's duration formula run for the player (null when the formula does not run, `why` says why).
@@ -155,7 +156,7 @@ private:
     std::optional<combat::RewardBook> rewards_;
     stats::SplitMix                 rng_;
     std::map<int64_t, double>       ratings_;
-    mutable std::map<int64_t, std::array<int, stats::kRarities>> floors_;   // item -> the lowest quality of each rarity band
+    mutable std::map<int64_t, items::ItemRarityFacts> rarity_facts_;   // item -> the facts of the rarity rule (items/rarity.h), read once
 };
 
 }  // namespace aoc::worldd::gather

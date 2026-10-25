@@ -261,13 +261,15 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         if (auto s = authorize(ctx, "GiveItem"); !s.ok()) return s;
         const std::string by = "the admin API (" + ctx->peer() + ")";
         GmItemGrant out;
-        if (auto s = on_net_thread([&] { out = owner.travel_.give_item(req->character(), req->item(), req->count() == 0 ? 1 : req->count(), by); }); !s.ok()) return s;
+        if (auto s = on_net_thread([&] { out = owner.travel_.give_item(req->character(), req->item(), req->count() == 0 ? 1 : req->count(), by, req->rarity(), req->quality()); }); !s.ok()) return s;
         if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
         resp->set_character(out.character);
         resp->set_item(out.item);
         resp->set_item_guid(out.item_guid);
         resp->set_count(out.count);
         resp->set_container(out.container);
+        resp->set_quality(out.quality);
+        resp->set_rarity(out.rarity);
         return grpc::Status::OK;
     }
 

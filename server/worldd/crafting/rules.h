@@ -25,6 +25,7 @@
 #include "content/content_db.h"
 #include "crafting/job.h"
 #include "items/inventory.h"
+#include "items/rarity.h"
 #include "items/wallet.h"
 #include "protocol/repl/craft_rpc.h"
 
@@ -43,11 +44,10 @@ namespace aoc::worldd::crafting {
 /// The most units one job makes (the station gives 1 to 250).
 inline constexpr int kMaxQuantity = 250;
 
-/// The first quality of each rarity band (Common 0 ... Artifact 6), and the last quality there is.
-inline constexpr int kBandStart[7] = {1, 6, 16, 31, 51, 71, 101};
-inline constexpr int kMaxQuality = 200;
-inline int band_lo(int rarity) { return kBandStart[std::clamp(rarity, 0, 6)]; }
-inline int band_hi(int rarity) { return rarity >= 6 ? kMaxQuality : kBandStart[std::clamp(rarity, 0, 5) + 1] - 1; }
+/// The first and the last quality of a rarity band (Common 0 ... Artifact 6), and the last quality there is: the rarity rule's (items/rarity.h).
+inline constexpr int kMaxQuality = items::kMaxQuality;
+inline int band_lo(int rarity) { return items::first_quality_of(rarity); }
+inline int band_hi(int rarity) { return items::last_quality_of(std::clamp(rarity, 0, 6)); }
 
 /// One take from the material bags: `count` of `record` of a quality band.
 struct Take {

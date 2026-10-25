@@ -43,6 +43,7 @@
 // ============================================================================
 #pragma once
 
+#include "items/rarity.h"
 #include "stats/gear.h"
 
 #include <array>
@@ -198,8 +199,9 @@ struct AbilityRules {
 
 // ---- plan B2: items ---------------------------------------------------------------------------------------------------------
 
-/// The facts of one ItemRecord the equip rules need (rows of `item` and `item_equip_slot`).
-struct ItemRecord {
+/// The facts of one ItemRecord the equip rules need (rows of `item` and `item_equip_slot`).  Item rarities, step 0: it carries the rarity rule's facts too (items/rarity.h: the
+/// quality curve and RarityMin..RarityMax), so a toast, a price or a new item's durability read the rarity the client shows.
+struct ItemRecord : items::ItemRarityFacts {
     int64_t              guid = 0;              // the item's record Guid (an item instance's ItemRecordId)
     std::string          name;                  // "Gear_Armor_Light_Starter_Chest"
     /// The record's bCanEquip: NOT what the client wears. The three starter armor pieces of every class's kit have it 0 and are
@@ -214,7 +216,11 @@ struct ItemRecord {
     /// durability at that quality (the kit's rule: MaxDurability rounded half up, 0 for an item with none).
     int32_t              default_quality = 1;
     int32_t              max_stack_size = 1;
-    double               max_durability = 0;
+    double               max_durability = 0;   // at the default quality, held by no bound (the value of contentc's item.max_durability); a new item's is max_durability_at
+    /// false when the data's DefaultQuality is below 1 (six reagents hold -3 or -2: a marker no instance can hold; a fresh instance takes quality 1 and no rarity can be chosen for it).
+    bool                 has_quality = true;
+    /// The item's MaxDurability at each rarity (the row of its stat block); none for an item whose block has no such stat.
+    std::optional<items::RarityRange> durability_stat;
     /// Gathering stage 3 (contentc version 14): the cells the item takes in a resource container's grid (inv_w x inv_h, never turned), and whether it is a resource
     /// (its gameplay tags hold a child of item.resource): a resource item is kept in a Resource container, any other item in the Backpack, the Equipment or the Quest storage.
     int32_t              inv_w = 1;
@@ -223,6 +229,12 @@ struct ItemRecord {
     /// Gathering stage 3, "the pick-up popup" (contentc version 16): the record's ItemName as the player reads it ("Coconut Wood"; item.display_name).  Empty where the record has
     /// no name and in a file older than version 16 (it opens all the same; the popup's text then uses the record's `name`).
     std::string          display_name;
+
+    /// The maximum durability of a new item of this record at `quality`: its MaxDurability stat at the rarity the item shows (items/rarity.h max_durability_at), else the record's own
+    /// value; 0 for an item that does not wear.  A repair restores the same maximum.
+    float max_durability_at(int quality) const {
+        return static_cast<float>(items::max_durability_at(*this, durability_stat ? &*durability_stat : nullptr, max_durability, static_cast<double>(quality)));
+    }
 };
 
 /// Gathering stage 3 (contentc version 14): the grid a worn resource bag gives its container (rows of resource_bag and resource_bag_cell).
@@ -1008,32 +1020,15 @@ struct VendorData {
     std::map<std::pair<int64_t, int>, std::vector<VendorPredicateRow>> predicates;   // (tab, listing; -1 for the tab's own) -> its predicates
 };
 
-/// What a sale or a repair needs of an item (contentc version 19: item_vendor, item_sell_value, item_tag, quality_curve), read for one item by ContentDb::item_sale.
-struct ItemSaleFacts {
+/// What a sale or a repair needs of an item (contentc version 19: item_vendor, item_sell_value, item_tag, quality_curve), read for one item by ContentDb::item_sale.  The item's
+/// quality curve and RarityMin..RarityMax come from the rarity rule's facts (items/rarity.h): rarity_of(quality) is the rarity a price is looked up at.
+struct ItemSaleFacts : items::ItemRarityFacts {
     bool                  known = false;          // item_vendor has a row for the item
     bool                  vendorable = false;     // a shop may buy it at all
     bool                  blacklisted = false;
-    int                   rarity_min = 0;         // the rarity ordinals the item's rarity is held inside (Common 0 ... Artifact 6)
-    int                   rarity_max = 6;
     int                   level = 0;
-    std::vector<std::pair<double, double>> bands; // the item's quality curve: the Quality range (x, y) of each rarity, in order (empty: the item has none)
     std::set<std::string> tags;                   // lower case, each tag with its parents
     std::map<std::pair<int, int64_t>, int64_t> values;   // (rarity, currency tier) -> the base value of a sale, per unit, rounded up
-
-    /// The rarity of a quality: the band of the quality curve, held inside rarity_min..rarity_max; Common without a curve.
-    int rarity_of(int64_t quality) const {
-        int band = 0;
-        if (bands.size() == 7) {
-            for (size_t i = 0; i < bands.size(); ++i) {
-                const double q = static_cast<double>(quality);
-                if (q >= bands[i].first) band = static_cast<int>(i);
-                if (q >= bands[i].first && q <= bands[i].second) break;
-            }
-        }
-        if (band < rarity_min) band = rarity_min;
-        if (band > rarity_max) band = rarity_max;
-        return band;
-    }
 };
 
 struct PopulationData {
@@ -1223,6 +1218,10 @@ public:
     std::optional<ActionResponse> action_response(int64_t guid, std::string& error) const;
     /// Plan D1: a RewardTable; nullopt with `error` empty when there is none. A row of another storage class than its column's is an error.
     std::optional<RewardTable> reward_table(int64_t guid, std::string& error) const;
+    /// Item rarities, step 0: the Quality an ItemVariation gives when its formula is one whole number from 1 to 200 (the Rarity_* family: 1, 6, 16, 31, 51, 71, 101 and the mid-band
+    /// 3, 13, 25, 45, 65, 90; the game master scrolls name no other).  nullopt with `error` empty for a variation that has no formula, whose formula is more than a number (a random
+    /// loot roll), or that a file without the variation tables cannot tell; nullopt with `error` set when a query failed.
+    std::optional<int32_t> variation_quality(int64_t variation, std::string& error) const;
     /// Plan D1: the leveling type named ("Adventuring") with its curve; nullopt with `error` set when there is none or a key is not a
     /// whole level at a whole XP total ascending.
     std::optional<LevelingType> leveling_type_named(const std::string& name, std::string& error) const;

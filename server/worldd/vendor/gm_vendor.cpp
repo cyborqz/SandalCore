@@ -139,7 +139,7 @@ PurchasePlan GmVendors::plan_purchase(const content::ContentDb& db, const GmVend
             g.record = e.item_record;
             g.quantity = left < stack ? left : stack;
             g.quality = rec->default_quality;
-            g.durability = static_cast<float>(std::floor(rec->max_durability + 0.5));
+            g.durability = rec->max_durability_at(g.quality);
             plan.stacks.push_back(g);
             left -= g.quantity;
         }

@@ -3595,7 +3595,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
             }
             it.quantity = static_cast<int32_t>(take);
             it.quality = rewards.quality;
-            it.durability = rec ? static_cast<float>(std::floor(rec->max_durability + 0.5)) : 0.0f;
+            it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             by_product.back().push_back(it);
             fresh.push_back(std::move(it));
@@ -4187,7 +4187,7 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
             }
             it.quantity = static_cast<int32_t>(take);
             it.quality = rewards.quality;
-            it.durability = rec ? static_cast<float>(std::floor(rec->max_durability + 0.5)) : 0.0f;
+            it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             by_product.back().push_back(it);
             fresh.push_back(std::move(it));
@@ -4759,16 +4759,16 @@ void PlayerSession::on_vendor_purchase(Connection& conn, const repl::ClientRpc& 
 
 namespace {
 
-/// The stacks of `count` of an item: the record's stack size each, its default quality and full durability, as the GM vendors' goods are made.
-void stacks_of(int64_t record, int32_t count, const content::ItemRecord& rec, std::vector<svc::InventoryItem>& out, int64_t created_ms) {
+/// The stacks of `count` of an item: the record's stack size each, at `quality` (0: its default quality) and with the full durability of that quality, as the GM vendors' goods are made.
+void stacks_of(int64_t record, int32_t count, const content::ItemRecord& rec, std::vector<svc::InventoryItem>& out, int64_t created_ms, int32_t quality = 0) {
     const int32_t stack = rec.max_stack_size > 0 ? rec.max_stack_size : 1;
     for (int32_t left = count; left > 0;) {
         svc::InventoryItem it;
         it.container = svc::ItemContainer::Backpack;   // Inventory::grant routes it
         it.item_record_id = record;
         it.quantity = std::min(left, stack);
-        it.quality = rec.default_quality;
-        it.durability = static_cast<float>(std::floor(rec.max_durability + 0.5));
+        it.quality = quality > 0 ? quality : rec.default_quality;
+        it.durability = rec.max_durability_at(it.quality);
         it.created_at_ms = created_ms;
         left -= it.quantity;
         out.push_back(std::move(it));
@@ -4886,14 +4886,20 @@ void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurch
 void PlayerSession::add_item_toasts(std::vector<bootstrap::ItemEvent>& events, bool removals) const {
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     std::map<int64_t, std::string> names;
+    std::map<int64_t, items::ItemRarityFacts> rarities;   // the rarity each toast's colour comes from: the record's quality curve held inside its RarityMin..RarityMax
     const auto name_of = [&](int64_t record) -> const std::string& {
         const auto known = names.find(record);
         if (known != names.end()) return known->second;
         std::string shown = "Unknown item";
         std::string error;
+        items::ItemRarityFacts facts = items::default_rarity_facts();
         if (db) {
-            if (const auto rec = db->item(record, error)) shown = !rec->display_name.empty() ? rec->display_name : rec->name;
+            if (const auto rec = db->item(record, error)) {
+                shown = !rec->display_name.empty() ? rec->display_name : rec->name;
+                facts = *rec;
+            }
         }
+        rarities.emplace(record, facts);
         return names.emplace(record, std::move(shown)).first->second;
     };
     const int64_t made = items::ticks_of_ms(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
@@ -4908,10 +4914,14 @@ void PlayerSession::add_item_toasts(std::vector<bootstrap::ItemEvent>& events, b
                 events[i - 1].item.quantity < ev.item.quantity) {
                 shown.quantity = ev.item.quantity - events[i - 1].item.quantity;
             }
-            ev.callout = items::acquired_callout(shown, name_of(static_cast<int64_t>(shown.record_id)), made);
+            const std::string& shown_name = name_of(static_cast<int64_t>(shown.record_id));
+            ev.callout = items::acquired_callout(shown, shown_name, rarities.at(static_cast<int64_t>(shown.record_id)), made);
         } else if (removals && ev.type == repl::StorageEventType::Remove) {
             const bool restacked = i + 1 < events.size() && events[i + 1].type == repl::StorageEventType::Add && same_slot(events[i + 1], ev);
-            if (!restacked) ev.callout = items::removed_callout(ev.item, name_of(static_cast<int64_t>(ev.item.record_id)), made);
+            if (!restacked) {
+                const std::string& removed_name = name_of(static_cast<int64_t>(ev.item.record_id));
+                ev.callout = items::removed_callout(ev.item, removed_name, rarities.at(static_cast<int64_t>(ev.item.record_id)), made);
+            }
         }
     }
 }
@@ -5046,7 +5056,7 @@ void PlayerSession::repair_at_town_shop(Connection& conn, const repl::VendorTran
         if (!rec) return refuse(error.empty() ? "content.db has no item record " + std::to_string(held->item_record_id) : error);
         const auto facts = db->item_sale(held->item_record_id, error);
         if (!facts) return refuse(error);
-        const float full = static_cast<float>(std::floor(rec->max_durability + 0.5));
+        const float full = rec->max_durability_at(held->quality);
         const vendor::RepairQuote quote = vendor::quote_repair(shops->data(), vendor_def_, held->item_record_id, held->quality, static_cast<double>(held->durability), static_cast<double>(full),
                                                                *facts, items::kMoneyTier, tax, progress_.level);
         if (!quote.ok) return refuse("item " + std::to_string(held->item_record_id) + " is not repaired: " + quote.refusal);
@@ -5117,7 +5127,8 @@ PlayerSession::GmMoneyResult PlayerSession::gm_give_money(Connection& conn, int6
     return r;
 }
 
-PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by) {
+PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by, const std::string& rarity,
+                                                         int32_t quality) {
     (void)now;
     GmItemResult r;
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
@@ -5136,12 +5147,30 @@ PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_
         return r;
     }
     r.item_name = rec->name;
+    // item rarities, step 0: the rarity or the quality asked for; an item that can never show it is refused, and the answer lists what it can be
+    int32_t given_quality = 0;   // 0: the record's default quality
+    if (!rarity.empty() || quality != 0) {
+        r.bad_request = true;
+        if (!rec->has_quality) {
+            r.refusal = rec->name + " has no quality in the game's data (its rarity is fixed by the record): give it without a rarity or a quality";
+            return r;
+        }
+        std::string why;
+        given_quality = items::quality_for_request(*rec, rec->name, rarity, quality, why);
+        if (given_quality == 0) {
+            r.refusal = why;
+            return r;
+        }
+        r.bad_request = false;
+    }
+    r.quality = given_quality > 0 ? given_quality : rec->default_quality;
+    r.rarity = std::string(items::rarity_name(rec->rarity_of(static_cast<double>(r.quality))));
     if (!room_for(2 + static_cast<size_t>(count / std::max(1, rec->max_stack_size)) / bootstrap::kMaxEventsPerChain)) {
         r.refusal = name() + "'s connection is busy: try again in a moment";
         return r;
     }
     std::vector<svc::InventoryItem> fresh;
-    stacks_of(item_record, count, *rec, fresh, std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000);
+    stacks_of(item_record, count, *rec, fresh, std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000, given_quality);
     for (svc::InventoryItem& it : fresh) {
         it.instance_guid = fresh_guid();
         for (const svc::InventoryItem& other : fresh) {
@@ -5165,7 +5194,7 @@ PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_
                                                      events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at_event + bootstrap::kMaxEventsPerChain)));
         queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
     }
-    spdlog::info("[gm] {}: {} x {} given by {} ({} storage event(s), first into {})", name(), count, r.item_name, by, outcome.events.size(), r.container);
+    spdlog::info("[gm] {}: {} x {} given by {} as {} (quality {}), {} storage event(s), first into {}", name(), count, r.item_name, by, r.rarity, r.quality, outcome.events.size(), r.container);
     return r;
 }
 
@@ -5429,7 +5458,7 @@ void PlayerSession::open_loot(Connection& conn, const combat::Corpse& corpse, co
             it.instance_guid = items::guid_hex(loot_guid(corpse.npc, i));
             it.quantity = static_cast<int32_t>(std::min<int64_t>(s.quantity, 1 << 20));
             it.quality = s.quality;
-            it.durability = rec ? static_cast<float>(std::floor(rec->max_durability + 0.5)) : 0.0f;
+            it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             slot.item = items::to_instance(it);
             slot.slot = static_cast<int32_t>(i);
@@ -5528,7 +5557,7 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
             }
             it.quantity = static_cast<int32_t>(std::min<int64_t>(left, max_stack));
             it.quality = stack->quality;
-            it.durability = rec ? static_cast<float>(std::floor(rec->max_durability + 0.5)) : 0.0f;
+            it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             left -= it.quantity;
             fresh.push_back(std::move(it));
@@ -5547,7 +5576,7 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
         shown.instance_guid = items::guid_hex(loot_guid(corpse->npc, slot));
         shown.quantity = static_cast<int32_t>(std::min<int64_t>(stack->quantity, 1 << 20));
         shown.quality = stack->quality;
-        shown.durability = rec ? static_cast<float>(std::floor(rec->max_durability + 0.5)) : 0.0f;
+        shown.durability = rec ? rec->max_durability_at(shown.quality) : 0.0f;
         shown.created_at_ms = created;
         removed.push_back({static_cast<int32_t>(slot), items::to_instance(shown)});
         all.events.insert(all.events.end(), got.events.begin(), got.events.end());

@@ -44,6 +44,7 @@
 #include "foliage/foliage.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
+#include "items/rarity.h"
 #include "nav/area_nav.h"
 #include "npc/area_npcs.h"
 #include "protocol/server_guid_allocator.h"
@@ -337,6 +338,8 @@ public:
     double spawn_height(double x, double y, double data_z, bool* grounded = nullptr) const;
     /// The default quality of an item record, cached (the loot's stacks).
     int item_quality(int64_t item) const;
+    /// The rarity the client shows for a quality of an item record (items/rarity.h: the band of the record's curve held inside its RarityMin..RarityMax), its facts cached.
+    int item_rarity(int64_t item, int quality) const;
     /// The name of an item record ("Certificate_T1_Glint"), cached; empty when content.db has none (the log's loot lines).
     std::string item_name(int64_t item) const;
 
@@ -565,6 +568,7 @@ private:
     GmPort*                              gm_port_ = nullptr;
     uint64_t                             respawns_made_ = 0;
     mutable std::map<int64_t, int>       quality_cache_;
+    mutable std::map<int64_t, items::ItemRarityFacts> rarity_cache_;
     mutable std::map<int64_t, std::string> name_cache_;
     double                               world_clock_ = 0;
     std::unordered_map<uint64_t, bool>   outside_;     // per player: beyond the region's edge at the last note

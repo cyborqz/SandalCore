@@ -36,7 +36,8 @@ service WorldAdminService {
   rpc GiveMoney(GiveMoneyRequest) returns (GiveMoneyResponse);
   // Gives a player an item by its record name (case does not count) or its Guid, in stacks of the item's stack size, routed by the bag rule: materials to the resource bags, everything
   // else to the item bag. NotFound for a name no item has; InvalidArgument for a name that several items have (give the Guid); FailedPrecondition when the bags have no room for
-  // the whole grant (nothing is given, the answer says why).
+  // the whole grant (nothing is given, the answer says why). The request may ask for a rarity (by name: the lowest quality of that colour) or an exact quality: InvalidArgument for a
+  // rarity or quality the item can never show (the answer lists the rarities the item allows), or for an item that has no quality to choose.
   rpc GiveItem(GiveItemRequest) returns (GiveItemResponse);
   // Crafting, step 0. Puts the station of an artisan building on a free service plot of a Village or a Town (the mayor's buildings do not exist yet): the station's actor stands where the
   // building would have put it, and stays until RemoveStation, until the node drops below a Village, or until worldd restarts (placed stations are not saved). NotFound for a node,
@@ -253,6 +254,8 @@ message GiveItemRequest {
   string character = 1;
   string item = 2; // the item record's name, or its Guid in digits
   int32 count = 3; // 1 to 100000
+  string rarity = 4; // optional: Common, Uncommon, Rare, Heroic, Epic, Legendary or Artifact (case does not count); the item is given at the lowest quality of that rarity. Empty: the item's own quality
+  int32 quality = 5; // optional: an exact quality, 1 to 200 (0: not asked). Asked together with a rarity, the quality must be one of that rarity
 }
 
 message GiveItemResponse {
@@ -261,6 +264,8 @@ message GiveItemResponse {
   int64 item_guid = 3;
   int32 count = 4;
   string container = 5;   // where the first stack went: Backpack or a resource container
+  int32 quality = 6;      // the quality the stacks were given at
+  string rarity = 7;      // ... and the rarity the player sees them in
 }
 
 // The NPC actions' requests name a creature by its actor id; every answer carries the creature's id, its nameplate, where it stands (or stood) and one plain sentence of what was done.

@@ -78,6 +78,13 @@ constexpr const char* kResourceBagCellSql = "SELECT col, row, value FROM resourc
 // Gathering stage 3, "the pick-up popup" (contentc version 16): schema.go's item.display_name.  Not among the statements every file must answer: a file of version 15 has no such column
 constexpr const char* kItemNameSql = "SELECT display_name FROM item WHERE guid = ?1";
 constexpr const char* kItemSlotsSql = "SELECT slot FROM item_equip_slot WHERE item_guid = ?1 ORDER BY ord";
+// Item rarities, step 0: RarityMin and RarityMax (contentc version 19's item_vendor; not among the statements every file must answer: an older file holds no bound), an item's MaxDurability
+// row (stat_block_stat: its Min and Max at each rarity) and a variation's Quality formula (item_variation, ab_expr)
+constexpr const char* kRarityBoundsSql = "SELECT rarity_min, rarity_max FROM item_vendor WHERE item_guid = ?1";
+constexpr const char* kStatRowSql =
+    "SELECT common_min, common_max, uncommon_min, uncommon_max, rare_min, rare_max, heroic_min, heroic_max, epic_min, epic_max, "
+    "legendary_min, legendary_max, artifact_min, artifact_max FROM stat_block_stat WHERE block_guid = ?1 AND stat_guid = ?2";
+constexpr const char* kVariationQualitySql = "SELECT e.text FROM item_variation v JOIN ab_expr e ON e.id = v.quality_expr WHERE v.guid = ?1";
 // plan B3 (contentc version 4): schema.go's stat_program, item (stat_block_guid, quality_curve_guid), quality_curve, stat_block_stat, item_set,
 // item_tag, set_bonus and equip_slot
 constexpr const char* kStatProgramSql = "SELECT version, mode, stats, classes, crc32, data FROM stat_program WHERE id = 1";
@@ -158,6 +165,64 @@ bool column_is_real(sqlite3_stmt* s, int col) {
 }
 bool column_is_text(sqlite3_stmt* s, int col) { return sqlite3_column_type(s, col) == SQLITE_TEXT; }
 // C | Y | B captures, CoA code
+
+/// Item rarities, step 0: RarityMin and RarityMax of an item, as rarity ordinals.  A file without item_vendor (older than contentc 19), or an item without a row, holds no bound (0 to 6).
+void read_rarity_bounds(sqlite3* db, int64_t guid, items::ItemRarityFacts& out) {
+    Stmt q(db, kRarityBoundsSql);
+    if (!q.ok()) return;
+    sqlite3_bind_int64(q.get(), 1, guid);
+    if (sqlite3_step(q.get()) != SQLITE_ROW || !column_is_int(q.get(), 0) || !column_is_int(q.get(), 1)) return;
+    out.rarity_min = static_cast<int>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 0), 0, items::kRarityCount - 1));
+    out.rarity_max = static_cast<int>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 1), 0, items::kRarityCount - 1));
+}
+
+/// Item rarities, step 0: the rows of a quality curve into the facts.  A curve that does not hold exactly the seven rarities in order, as numbers, is no curve (the item reads its RarityMin).
+void read_quality_curve(sqlite3* db, int64_t curve, items::ItemRarityFacts& out) {
+    out.has_curve = false;
+    if (curve == 0) return;
+    Stmt q(db, kQualityCurveSql);
+    if (!q.ok()) return;
+    sqlite3_bind_int64(q.get(), 1, curve);
+    std::array<items::QualityBand, items::kRarityCount> bands{};
+    int n = 0, step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        if (n >= items::kRarityCount || !column_is_int(q.get(), 0) || sqlite3_column_int64(q.get(), 0) != n || !column_is_real(q.get(), 1) || !column_is_real(q.get(), 2)) return;
+        bands[static_cast<size_t>(n)] = {sqlite3_column_double(q.get(), 1), sqlite3_column_double(q.get(), 2)};
+        ++n;
+    }
+    if (step != SQLITE_DONE || n != items::kRarityCount) return;
+    out.bands = bands;
+    out.has_curve = true;
+}
+
+/// Item rarities, step 0: what the rarity rule needs of an item record: its quality curve, RarityMin and RarityMax, and its MaxDurability row.  Nothing here fails the record: an item the
+/// tables cannot answer for reads the common rules (no bound, no durability stat).
+void read_item_rarity(sqlite3* db, int64_t guid, ItemRecord& rec) {
+    int64_t block = 0, curve = 0;
+    {
+        Stmt q(db, kItemGearSql);
+        if (!q.ok()) return;
+        sqlite3_bind_int64(q.get(), 1, guid);
+        if (sqlite3_step(q.get()) != SQLITE_ROW) return;
+        if (column_is_int(q.get(), 0)) block = sqlite3_column_int64(q.get(), 0);
+        if (column_is_int(q.get(), 1)) curve = sqlite3_column_int64(q.get(), 1);
+    }
+    read_rarity_bounds(db, guid, rec);
+    read_quality_curve(db, curve, rec);
+    if (block == 0) return;
+    Stmt q(db, kStatRowSql);
+    if (!q.ok()) return;
+    sqlite3_bind_int64(q.get(), 1, block);
+    sqlite3_bind_int64(q.get(), 2, items::kMaxDurabilityStat);
+    if (sqlite3_step(q.get()) != SQLITE_ROW) return;
+    items::RarityRange row;
+    for (int r = 0; r < items::kRarityCount; ++r) {
+        if (!column_is_real(q.get(), 2 * r) || !column_is_real(q.get(), 2 * r + 1)) return;
+        row.min[static_cast<size_t>(r)] = sqlite3_column_double(q.get(), 2 * r);
+        row.max[static_cast<size_t>(r)] = sqlite3_column_double(q.get(), 2 * r + 1);
+    }
+    rec.durability_stat = row;
+}
 
 }  // namespace
 
@@ -508,6 +573,7 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
         // (six resource reagents of the design data -- the Ashlar ones and the sugar cane seeds -- have a DefaultQuality of -3 or -2, a marker no instance can hold: a fresh instance of
         // them takes quality 1, which is what a harvest did for a record it could not read; without this they were unknown records and went to the Backpack, which the client refuses)
         const int64_t quality = std::max<int64_t>(1, sqlite3_column_int64(q.get(), 4)), stack = sqlite3_column_int64(q.get(), 5);
+        rec.has_quality = sqlite3_column_int64(q.get(), 4) >= 1;
         if (quality > 200 || stack < 1 || stack > 1000000) {
             error = "content.db item " + std::to_string(guid) + " has default_quality " + std::to_string(quality) + " or max_stack_size " + std::to_string(stack) +
                     " outside the character service's ranges";
@@ -538,6 +604,7 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
             if (sqlite3_step(q.get()) == SQLITE_ROW) rec.display_name = column_text(q.get(), 0);
         }
     }
+    read_item_rarity(db_, guid, rec);   // item rarities, step 0: its quality curve, RarityMin..RarityMax and MaxDurability row
     Stmt q(db_, kItemSlotsSql);
     if (!q.ok()) {
         error = "content.db item slot query failed: " + db_message(db_);
@@ -688,6 +755,7 @@ std::optional<stats::ItemGear> ContentDb::item_gear(int64_t guid, std::string& e
         block = sqlite3_column_int64(q.get(), 0);
         curve = sqlite3_column_int64(q.get(), 1);
     }
+    read_rarity_bounds(db_, guid, g);   // item rarities, step 0: the rarity an item shows is held inside its RarityMin..RarityMax
     const auto fail = [&](const char* what) {
         error = std::string("content.db ") + what + " query failed for item " + std::to_string(guid) + ": " + db_message(db_);
         return std::nullopt;
@@ -1015,6 +1083,30 @@ std::optional<RewardTable> ContentDb::reward_table(int64_t guid, std::string& er
     return t;
 }
 // (CoA | C-Y-B)
+
+std::optional<int32_t> ContentDb::variation_quality(int64_t variation, std::string& error) const {
+    error.clear();
+    if (variation == 0) return std::nullopt;
+    Stmt q(db_, kVariationQualitySql);
+    if (!q.ok()) return std::nullopt;   // a file without the variation tables (older than contentc 13) reads none
+    sqlite3_bind_int64(q.get(), 1, variation);
+    const int step = sqlite3_step(q.get());
+    if (step == SQLITE_DONE) return std::nullopt;   // no such variation, or one with no formula
+    if (step != SQLITE_ROW) {
+        error = "content.db item_variation query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    // the formula is one whole number ("71") or it is more than that (a roll): only the number is read here
+    std::string text = column_text(q.get(), 0);
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+    size_t from = 0;
+    while (from < text.size() && std::isspace(static_cast<unsigned char>(text[from]))) ++from;
+    text.erase(0, from);
+    if (text.empty() || text.size() > 3 || !std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) return std::nullopt;
+    const int value = std::atoi(text.c_str());
+    if (value < items::kMinQuality || value > items::kMaxQuality) return std::nullopt;
+    return static_cast<int32_t>(value);
+}
 
 std::optional<LevelingType> ContentDb::leveling_type_named(const std::string& name, std::string& error) const {
     LevelingType t;
@@ -3361,11 +3453,16 @@ std::optional<ItemSaleFacts> ContentDb::item_sale(int64_t item, std::string& err
         }
         sqlite3_bind_int64(q.get(), 1, curve);
         int step;
-        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.bands.push_back({sqlite3_column_double(q.get(), 0), sqlite3_column_double(q.get(), 1)});
+        int rows = 0;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            if (rows < items::kRarityCount) out.bands[static_cast<size_t>(rows)] = {sqlite3_column_double(q.get(), 0), sqlite3_column_double(q.get(), 1)};
+            ++rows;
+        }
         if (step != SQLITE_DONE) {
             error = "content.db quality_curve query failed: " + db_message(db_);
             return std::nullopt;
         }
+        out.has_curve = rows == items::kRarityCount;   // a curve of any other length is none: the item reads its RarityMin
     }
     {
         Stmt q(db_, "SELECT rarity, currency_guid, price FROM item_sell_value WHERE item_guid = ?1");

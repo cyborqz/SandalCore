@@ -1948,8 +1948,10 @@ func (x *ResetTutorialsResponse) GetCleared() int32 {
 type GiveItemRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
-	Item          string                 `protobuf:"bytes,2,opt,name=item,proto3" json:"item,omitempty"`    // the item record's name, or its Guid in digits
-	Count         int32                  `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"` // 1 to 100000
+	Item          string                 `protobuf:"bytes,2,opt,name=item,proto3" json:"item,omitempty"`        // the item record's name, or its Guid in digits
+	Count         int32                  `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`     // 1 to 100000
+	Rarity        string                 `protobuf:"bytes,4,opt,name=rarity,proto3" json:"rarity,omitempty"`    // optional: Common, Uncommon, Rare, Heroic, Epic, Legendary or Artifact (case does not count); the item is given at the lowest quality of that rarity. Empty: the item's own quality
+	Quality       int32                  `protobuf:"varint,5,opt,name=quality,proto3" json:"quality,omitempty"` // optional: an exact quality, 1 to 200 (0: not asked). Asked together with a rarity, the quality must be one of that rarity
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2005,6 +2007,20 @@ func (x *GiveItemRequest) GetCount() int32 {
 	return 0
 }
 
+func (x *GiveItemRequest) GetRarity() string {
+	if x != nil {
+		return x.Rarity
+	}
+	return ""
+}
+
+func (x *GiveItemRequest) GetQuality() int32 {
+	if x != nil {
+		return x.Quality
+	}
+	return 0
+}
+
 type GiveItemResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     string                 `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"`
@@ -2012,6 +2028,8 @@ type GiveItemResponse struct {
 	ItemGuid      int64                  `protobuf:"varint,3,opt,name=item_guid,json=itemGuid,proto3" json:"item_guid,omitempty"`
 	Count         int32                  `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`
 	Container     string                 `protobuf:"bytes,5,opt,name=container,proto3" json:"container,omitempty"` // where the first stack went: Backpack or a resource container
+	Quality       int32                  `protobuf:"varint,6,opt,name=quality,proto3" json:"quality,omitempty"`    // the quality the stacks were given at
+	Rarity        string                 `protobuf:"bytes,7,opt,name=rarity,proto3" json:"rarity,omitempty"`       // ... and the rarity the player sees them in
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2077,6 +2095,20 @@ func (x *GiveItemResponse) GetCount() int32 {
 func (x *GiveItemResponse) GetContainer() string {
 	if x != nil {
 		return x.Container
+	}
+	return ""
+}
+
+func (x *GiveItemResponse) GetQuality() int32 {
+	if x != nil {
+		return x.Quality
+	}
+	return 0
+}
+
+func (x *GiveItemResponse) GetRarity() string {
+	if x != nil {
+		return x.Rarity
 	}
 	return ""
 }
@@ -4375,17 +4407,21 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\tcharacter\x18\x01 \x01(\tR\tcharacter\"P\n" +
 	"\x16ResetTutorialsResponse\x12\x1c\n" +
 	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x18\n" +
-	"\acleared\x18\x02 \x01(\x05R\acleared\"Y\n" +
+	"\acleared\x18\x02 \x01(\x05R\acleared\"\x8b\x01\n" +
 	"\x0fGiveItemRequest\x12\x1c\n" +
 	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x12\n" +
 	"\x04item\x18\x02 \x01(\tR\x04item\x12\x14\n" +
-	"\x05count\x18\x03 \x01(\x05R\x05count\"\x95\x01\n" +
+	"\x05count\x18\x03 \x01(\x05R\x05count\x12\x16\n" +
+	"\x06rarity\x18\x04 \x01(\tR\x06rarity\x12\x18\n" +
+	"\aquality\x18\x05 \x01(\x05R\aquality\"\xc7\x01\n" +
 	"\x10GiveItemResponse\x12\x1c\n" +
 	"\tcharacter\x18\x01 \x01(\tR\tcharacter\x12\x12\n" +
 	"\x04item\x18\x02 \x01(\tR\x04item\x12\x1b\n" +
 	"\titem_guid\x18\x03 \x01(\x03R\bitemGuid\x12\x14\n" +
 	"\x05count\x18\x04 \x01(\x05R\x05count\x12\x1c\n" +
-	"\tcontainer\x18\x05 \x01(\tR\tcontainer\" \n" +
+	"\tcontainer\x18\x05 \x01(\tR\tcontainer\x12\x18\n" +
+	"\aquality\x18\x06 \x01(\x05R\aquality\x12\x16\n" +
+	"\x06rarity\x18\a \x01(\tR\x06rarity\" \n" +
 	"\x0eKillNpcRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\"\xd5\x01\n" +
 	"\x0fKillNpcResponse\x12\x0e\n" +

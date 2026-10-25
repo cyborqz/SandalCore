@@ -11,11 +11,11 @@
 //  C++ and the Go reading are compared on the real file.
 //
 //    - An item's ItemStatBlock gives, per stat, a Min and a Max at each rarity (Common, Uncommon, Rare,
-//      Heroic, Epic, Legendary, Artifact). The item's Quality picks the rarity band of its QualityCurve
-//      (Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50, Epic 51-70, Legendary 71-100, Artifact
-//      101-200) and the value is Min + (Max - Min) * (q - X) / (Y - X) in it; an item with no curve reads
-//      CommonMin. With Rounding::HalfUp each value is made floor(v + 0.5) first (the research's best fit
-//      of a retail level-20 Ranger's 29 items, 376 of 442 stats against 358 unrounded: not proven).
+//      Heroic, Epic, Legendary, Artifact). The item's Quality picks the rarity (items/rarity.h: the band of its
+//      QualityCurve, Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50, Epic 51-70, Legendary 71-100, Artifact
+//      101-200, held inside the record's own RarityMin..RarityMax) and the value is Min + (Max - Min) * (q - X) / (Y - X)
+//      at THAT rarity, the share (q - X) / (Y - X) never outside 0 to 1; an item with no curve reads the Min of its
+//      RarityMin. With Rounding::HalfUp each value is made floor(v + 0.5) first (the game client rounds a stat half up).
 //    - A SetBonus adds, for each tier (the pieces of the set that must be worn), stat bonuses by rarity:
 //      every tier up to the worn count applies, at the lowest rarity among the worn pieces of the set.
 //    - Every gameplay tag of an item is given under the name of the slot it is worn in.
@@ -26,6 +26,7 @@
 // ============================================================================
 #pragma once
 
+#include "items/rarity.h"
 #include "stats/stat_engine.h"
 
 #include <array>
@@ -37,16 +38,13 @@
 
 namespace aoc::worldd::stats {
 
-inline constexpr int kRarities = 7;   // Common, Uncommon, Rare, Heroic, Epic, Legendary, Artifact
+inline constexpr int kRarities = items::kRarityCount;   // Common, Uncommon, Rare, Heroic, Epic, Legendary, Artifact
 
-struct QualityBand {
-    double x = 0, y = 0;   // Quality x..y is this rarity
-};
+using QualityBand = items::QualityBand;   // Quality x..y is this rarity
 
-/// One stat of an item stat block: its Min and Max at each rarity.
-struct BlockStat {
-    int64_t                      stat = 0;
-    std::array<double, kRarities> min{}, max{};
+/// One stat of an item stat block: its Min and Max at each rarity (min and max, from the base).
+struct BlockStat : items::RarityRange {
+    int64_t stat = 0;
 };
 
 /// One bonus of a set tier: the stat and its value at each rarity (has[r] false: none, adds 0).
@@ -65,11 +63,9 @@ struct SetBonus {
     std::vector<SetTier> tiers;
 };
 
-/// What the stat engine needs of one ItemRecord.
-struct ItemGear {
+/// What the stat engine needs of one ItemRecord.  The quality curve (has_curve, bands) and the item's RarityMin..RarityMax are the rarity rule's facts (items/rarity.h).
+struct ItemGear : items::ItemRarityFacts {
     int64_t                         record = 0;
-    bool                            has_curve = false;
-    std::array<QualityBand, kRarities> bands{};
     std::vector<BlockStat>          stats;
     std::vector<int64_t>            sets;   // the SetBonus guids, in the record's order
     std::vector<std::string>        tags;   // GameplayTags, in the record's order

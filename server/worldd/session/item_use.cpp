@@ -130,13 +130,26 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
                     return refuse("the reward table " + table->name + " grants item record " + std::to_string(r.item) + ", which content.db does not have");
                 }
                 const int32_t stack = rec->max_stack_size > 0 ? rec->max_stack_size : 1;
+                // the line's variation gives the quality (the game master scrolls' Rarity_* variations are one whole number each: Legendary gear is 71, a Rare reagent 16); a line with no
+                // variation, or one that is more than a number, keeps the record's default quality
+                int32_t quality = rec->default_quality;
+                if (r.variation != 0) {
+                    std::string variation_error;
+                    if (const auto q = db.variation_quality(r.variation, variation_error)) {
+                        quality = *q;
+                    } else if (!variation_error.empty()) {
+                        return refuse("content.db failed: " + variation_error);
+                    } else {
+                        plan.notes.push_back(table->name + " grants " + rec->name + " by a variation that is not a fixed quality: it keeps its default quality");
+                    }
+                }
                 int32_t left = r.quantity;
                 while (left > 0) {
                     Granted g;
                     g.record = r.item;
                     g.quantity = left < stack ? left : stack;
-                    g.quality = rec->default_quality;
-                    g.durability = static_cast<float>(std::floor(rec->max_durability + 0.5));
+                    g.quality = quality;
+                    g.durability = rec->max_durability_at(quality);
                     plan.items.push_back(g);
                     left -= g.quantity;
                     if (plan.items.size() > kMaxGrantedItems) return refuse("the reward table " + table->name + " grants more than " + std::to_string(kMaxGrantedItems) + " stacks");
