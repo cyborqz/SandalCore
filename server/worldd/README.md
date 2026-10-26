@@ -647,8 +647,13 @@ refunded (free): the lists shrink, the effects go, the auto-granted ranks stay; 
 (`SaveProgress`, whole: `replace_skill_ranks`, `replace_action_bar`; migration 0006). A purchase takes a token of its own budget (`kTalentBurst` 8, then ten a second).
 
 **A weapon swap** (`ServerSetUseRangedWeapon`): when a weapon is worn in the target slot (Ranged 17, or Primary 15), its combo leaves the old combo's place and becomes the last element of
-`KnownAbilities` (and of the records), and `OwnerInfo.WeaponSkillLineId` follows. Equipping or taking off items changes the weapon line in hand but not the lists (retail changed only the
-records; not done).
+`KnownAbilities` (and of the records), and `OwnerInfo.WeaponSkillLineId` follows. **Wearing, replacing or taking off a weapon** (`ServerItemUsed`, or a drag into or out of slot 15 or 17)
+moves the weapon in hand the same way, in the chain of the `HeldItems` update [R: the recorded equips and unequips of a weapon]: a weapon worn in the set in hand (put there, or replacing the one in hand)
+makes its combo the last known ability and its line the weapon line, and the combo that was in hand is no longer answered; a weapon put into the set that is not in hand changes none of this
+(the swap to that set reads the slot); when the set in hand holds no weapon and the other set does (the weapon in hand was taken off, or the first weapon is worn) the hand moves to the other set
+(`bIsUsingRangedWeapon` follows), and with no weapon left the
+combo leaves `KnownAbilities` (the weapon line stays as the client has it and the records keep the carried combo [M]). Before this fix wearing a weapon changed the weapon line in hand
+only: with a wand worn the longbow's combo was still the one the server answered, and the wand's was refused.
 
 **The action bar** is stored per character (migration 0006) and sent once, whole, as one `ClientReceiveActionbarSlotPayload` when the client asks for its load. The client's
 `ServerSetActionbarSlotUseData` is stored without a reply (a `UseType` of None clears the slot; a bank outside 0-19, a slot outside 0-11, a use type past 9, an instigator past 3, a rarity or combo button past 15 or a
@@ -1035,10 +1040,16 @@ weapon swing) and a test for each in `test_worldd_ability_session` (`test_e1_npc
   carries but that fire one (the Split hits), as retail's second record. The weapon combos' hits stay in the client's request slots too (a melee swing is the
   client's request, as before).
 
-**Modelled, not retail:** the impact normal's direction; the step matching by name (the shortbow's finisher montages carry no step number: they fall back to
-the first swing's projectile) and the book's second-projectile variants (`_4_2`: retail fires it with `_4`; here too, by the shared step). **Not done:**
-`StopAnimMontageOnNpc` (retail sends it two packets after the first hit on an NPC that plays an ambient montage), and the client's `ServerUpdateLevelVisibility`
-(the three unreadable 550-bit PlayerController bunches of every run: the streaming levels; nothing of combat).
+**Modelled, not retail:** the impact normal's direction. **The swing's step** is the one the montage's select expression names in its first comment (`// Hit 5 Proc
+...`); the montage's file name decides only when the expression says none (the shortbow's montages carry the wrong number or none: its first swing is `..._02`
+and its finishers `Weapon_Shortbow_Finisher[+]`). A step's projectile hit flies once, from the first row that lists it (the wand's last step lists two rows for one
+hit), and a second-projectile variant (`_2`) only where a direct hit of its own lands with it (the book's step 4: `Weapon_Book_Hit_4_2` with `Book_Projectile_Split_Hit_4_2`;
+step 3 has no `_2` Split hit, so its `_2` row confirms nothing). A **beam** step (the wand's finisher) takes up to 24 requests per hit, 50 ms apart: the client asks for
+its tick hit again and again while it burns (up to a dozen requests about 100 ms apart, the closest 68 ms). **Not done:** `StopAnimMontageOnNpc` (retail sends it two
+packets after the first hit on an NPC that plays an ambient montage), the client's `ServerUpdateLevelVisibility` (the three unreadable 550-bit PlayerController bunches
+of every run: the streaming levels; nothing of combat), and **the reactions that listen to a combo's finishing hit** (`ComboStep.End`): the Bard's Resonant Weapon (a
+melody-based effect that spends up to three Resonance stacks), the class resources a finisher fills, the weapon-tree finisher procs. The tables hold the effects that
+carry them and not the reactions or the hits they apply, and the server runs no reactions; a finisher's own damage lands as any swing's does.
 
 ### The cylinder's GUID and the split projectile's origin (plan E1, stage 3 fix 3; an uncommitted draft)
 

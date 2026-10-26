@@ -145,6 +145,10 @@ public:
     static constexpr double kRequestWindow = 5.0;
     static constexpr int    kMaxRequestsPerHit = 8;
     static constexpr double kMinRequestGap = 0.100;
+    /// A beam (the wand's finisher) keeps the client asking for its tick hit for as long as it burns: up to a dozen requests about 100 ms apart, the closest 68 ms.
+    /// A cast of a beam step takes that many requests per hit, that close together.
+    static constexpr int    kBeamRequestsPerHit = 24;
+    static constexpr double kBeamRequestGap = 0.050;
     static constexpr size_t kMaxRecords = 16;
     /// The most casts waiting for their steps at once.
     static constexpr size_t kMaxCasts = 16;
@@ -370,6 +374,7 @@ private:
         double                       window_end = 0;
         double                       hit_delay = kHitDelay;   // how long after the cost step the cast's hits may apply (its montage's, none without one)
         int                          max_requests = kMaxRequestsPerHit;   // a zone's tick hit is asked for as often as the zone's life holds ticks
+        double                       min_gap = kMinRequestGap;            // the least time between two requests for one hit
         std::vector<HitSlot>         slots;
         std::set<int64_t>            reach;            // every hit that belongs to the ability
         std::map<int64_t, std::pair<int, double>> asked;   // hit guid -> (requests, time of the last) for the hits that are no slot

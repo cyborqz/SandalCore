@@ -19,7 +19,8 @@ This document tracks known issues, behaviors under active investigation, workaro
 | **Towns** | The floor of the five towns is solid, but their walls, stairs, upper floors and towers have no collision yet, town NPCs stand still, some guards and townspeople stand in the wrong place or have 0 HP, and trees inside towns can't be cut. Nearby town NPCs can hit you with no visible attack (no animation or projectile). A long teleport into a town falls about 140 m before the safety net puts the player back, 4.5 to 6 seconds later. | Walk into a town from outside, or teleport to a point close to its streets. | Planned: the towns' structures and a navmesh for their streets (the next City Nodes work). |
 | **Combat / Falling** | A fall does no damage, however far. | None. | Planned: fall damage. |
 | **Abilities** | Chilling Laminate shows a placeholder blue circle on the ground below the player. | None. | Investigating which visual effect is sent for it. |
-| **Bard** | Resonance isn't consumed by songs. | None. | Investigating the consume rule of the songs. |
+| **Bard** | A weapon combo's finisher doesn't spend Resonance (only Fortissimo does). | None. | Open: the finisher's melody effect, which spends up to 3 stacks, is one of the game's reactions, and reactions are not built yet. |
+| **Combat / Finishers** | The extra effects of a weapon combo's last hit (class resources, weapon-tree finisher procs) are missing; its damage lands. | None. | Open: they are the game's reactions, which are not built yet. |
 
 ---
 

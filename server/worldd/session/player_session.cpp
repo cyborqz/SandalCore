@@ -2842,9 +2842,14 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     inventory_changed_ = true;
     ++items_applied_;
     if (outcome.equipment_changed && book_ && world_ && world_->content()) {
-        // plan D1, stage 2: the weapon line in hand follows what is worn (a weapon tree's passives apply while its line is in hand)
-        const auto w = bootstrap::worn_weapon(*world_->content(), inventory_, use_ranged_ ? items::equip::Ranged : items::equip::Primary);
-        wielded_line_ = w ? w->line : 0;
+        // plan D1, stage 2: the weapon line in hand follows what is worn (a weapon tree's passives apply while its line is in hand).  The weapon swap fix: so do the weapon's combo, the
+        // ability lists, OwnerInfo's line and the ranged flag; they are staged in the pawn here and ride in the chain of the HeldItems step queued below (it diffs the whole pawn)
+        for (const items::Event& e : outcome.events) {
+            if (e.container == svc::ItemContainer::Equipment && (e.slot == items::equip::Primary || e.slot == items::equip::Ranged)) {
+                follow_worn_weapon();
+                break;
+            }
+        }
     }
     if (outcome.equipment_changed) apply_gear_stats();   // before the replies are queued: they are built later, and carry the stats' deltas
     std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
@@ -5962,19 +5967,64 @@ void PlayerSession::on_set_ranged(Connection& conn, const repl::ClientRpc& rpc, 
         return;
     }
     // KnownAbilities: the old combo leaves, the new one is the last element; the records: the new one is the last (the old one stays carried)
-    if (combo_ != 0) known_.erase(std::remove(known_.begin(), known_.end(), combo_), known_.end());
-    known_.erase(std::remove(known_.begin(), known_.end(), weapon->combo), known_.end());
-    known_.push_back(weapon->combo);
-    records_.erase(std::remove(records_.begin(), records_.end(), weapon->combo), records_.end());
-    records_.push_back(weapon->combo);
-    combo_ = weapon->combo;
-    wielded_line_ = weapon->line;
-    push_abilities();
-    pb_.set_weapon_skill_line(weapon->line, weapon->line_name);
+    put_weapon_in_hand(weapon->combo, weapon->line, weapon->line_name);
     apply_gear_stats("the weapon swap");   // a weapon tree's constant mods apply while its line is in hand
     spdlog::info("[session] {}: the {} weapon set: combo {} is the last known ability, weapon line {}", name(), use_ranged_ ? "ranged" : "melee", weapon->combo,
                  weapon->line_name);
     queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("weapon swap"); }, conn);
+}
+
+void PlayerSession::put_weapon_in_hand(int64_t combo, int64_t line, const std::string& line_name) {
+    if (combo_ != 0) known_.erase(std::remove(known_.begin(), known_.end(), combo_), known_.end());
+    known_.erase(std::remove(known_.begin(), known_.end(), combo), known_.end());
+    known_.push_back(combo);
+    records_.erase(std::remove(records_.begin(), records_.end(), combo), records_.end());
+    records_.push_back(combo);
+    combo_ = combo;
+    wielded_line_ = line;
+    push_abilities();   // (the pipeline answers to the new combo from here on, and not to the old one)
+    pb_.set_weapon_skill_line(line, line_name);
+}
+
+void PlayerSession::follow_worn_weapon() {
+    if (!book_ || !world_ || !world_->content()) return;
+    const content::ContentDb& db = *world_->content();
+    // The weapon swap fix (a wand worn over a longbow used to leave the longbow's combo the last known ability: the longbow kept shooting and the wand's combo was refused).  What a
+    // ServerItemUsed wears or takes off in a weapon slot moves the weapon in hand the way the retail server's reply did, in the chain of the HeldItems
+    // update [R: the recorded equips and unequips of a weapon; the replacement of the weapon in hand by another is the same reply, M]:
+    //  - the set in hand holds a weapon: its combo is the last known ability, its line is the weapon line, and the combo that was in hand stops being answered; a weapon put into the set
+    //    that is not in hand changes none of this (the swap to that set reads the slot) [R: a weapon worn into the other set changed no ability list, line or flag];
+    //  - the set in hand holds no weapon and the other set does (the weapon in hand was taken off, or the first weapon was worn into the other set): the hand moves to that set and the
+    //    flag follows [R: the weapon taken off; M: the first weapon worn, where one recording sends the flag that two like it do not];
+    //  - nothing is left to hold: the combo leaves KnownAbilities and the line stays as the client has it [R; the records keep the carried combo, M].
+    std::optional<bootstrap::WeaponInfo> weapon = bootstrap::worn_weapon(db, inventory_, use_ranged_ ? items::equip::Ranged : items::equip::Primary);
+    bool moved_hand = false;
+    if (!weapon) {
+        if (const auto other = bootstrap::worn_weapon(db, inventory_, use_ranged_ ? items::equip::Primary : items::equip::Ranged)) {
+            use_ranged_ = !use_ranged_;
+            if (!pb_.set_using_ranged_weapon(use_ranged_)) spdlog::warn("[session] {}: the pawn does not take CombatInfo.bIsUsingRangedWeapon", name());
+            weapon = other;
+            moved_hand = true;
+        }
+    }
+    if (weapon) {
+        if (!moved_hand && weapon->combo == combo_) {   // the same combo stays in hand (another item of the same weapon, or a weapon in the other set)
+            wielded_line_ = weapon->line;
+            return;
+        }
+        put_weapon_in_hand(weapon->combo, weapon->line, weapon->line_name);
+        spdlog::info("[session] {}: {}: the {} weapon set is in hand, combo {} is the last known ability, weapon line {}", name(),
+                     moved_hand ? "the weapon in hand was taken off and the other set holds a weapon" : "the weapon worn in the set in hand changed", use_ranged_ ? "ranged" : "melee",
+                     weapon->combo, weapon->line_name);
+        return;
+    }
+    wielded_line_ = 0;
+    if (combo_ == 0) return;
+    const int64_t gone = combo_;
+    known_.erase(std::remove(known_.begin(), known_.end(), gone), known_.end());
+    combo_ = 0;
+    push_abilities();
+    spdlog::info("[session] {}: the weapon in hand was taken off and no other is worn: combo {} leaves KnownAbilities", name(), gone);
 }
 
 void PlayerSession::run_timers(Connection& conn, Clock::time_point now) {

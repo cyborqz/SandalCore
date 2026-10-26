@@ -917,6 +917,12 @@ private:
     void refuse_purchase(Connection& conn, const protocol::repl::SkillBuild& build, const std::string& why, Clock::time_point now);
     void on_set_slot(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_set_ranged(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// The weapon with combo `combo` and weapon line `line` is in hand now: its combo is the last known ability (the combo that was in hand leaves KnownAbilities and stays carried in the
+    /// records), its line is the line in hand.  The lists, OwnerInfo's line and CombatInfo's flag go out with the caller's next pawn update.
+    void put_weapon_in_hand(int64_t combo, int64_t line, const std::string& line_name);
+    /// The weapon swap fix: what an equip, an unequip or a move in a weapon slot (Primary 15, Ranged 17) left worn moves the weapon in hand the way the retail server's reply did (see the
+    /// definition): the combo the server answers to, the lists, the weapon line and the flag follow it, in the chain of the HeldItems update.
+    void follow_worn_weapon();
     /// The ranks `granted` become the character's by itself (a level, a class): their abilities join the lists, a passive gets an item (added to
     /// `effects`), a skill with the hotbar flag is put on the bar and announced (`updates`).
     void grant_ranks(const std::vector<talents::RankRef>& granted, Clock::time_point now, bootstrap::AbilityChange& effects,

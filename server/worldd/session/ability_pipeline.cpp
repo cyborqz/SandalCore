@@ -134,6 +134,25 @@ StepToken step_token(std::string_view name) {
 
 bool same_step(const StepToken& a, const StepToken& b) { return a.ok && b.ok && a.step == b.step && a.proc == b.proc; }
 
+/// The step a montage plays as its select expression states it. The first comment line of the expression names the hit ("// Hit 4 Proc (Combo Count 3) --
+/// Deadly Finisher", "// Book Hit 3 (Combo Count 2) -- Finisher"). The montages' file names do not always carry the step: the shortbow's first swing is
+/// "..._02" and its finishers are "Weapon_Shortbow_Finisher[+]" with no number, so the name alone fires the wrong arrows. False when the expression says no such thing.
+bool step_of_expression(std::string_view text, int& step, bool& proc) {
+    const size_t slashes = text.find("//");
+    if (slashes == std::string_view::npos) return false;
+    const size_t eol = text.find_first_of("\r\n", slashes);
+    const std::string_view line = text.substr(slashes + 2, eol == std::string_view::npos ? std::string_view::npos : eol - (slashes + 2));
+    const size_t hit = line.find("Hit ");
+    if (hit == std::string_view::npos || hit > 12) return false;   // "Hit N" or "Book Hit N" opens the line
+    size_t p = hit + 4;
+    if (p >= line.size() || line[p] < '0' || line[p] > '9') return false;
+    int n = 0;
+    while (p < line.size() && line[p] >= '0' && line[p] <= '9' && n < 1000) n = n * 10 + (line[p++] - '0');
+    step = n;
+    proc = line.compare(p, 5, " Proc") == 0;
+    return true;
+}
+
 std::string_view leaf_of_path(const std::string& path) {
     const size_t dot = path.rfind('.');
     const size_t slash = path.rfind('/');
@@ -1441,14 +1460,14 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
         if (targeting_guid == content::kTargetingDefaultSelf) return HitVerdict::Quiet;
         const auto [it, fresh] = rec->asked.try_emplace(hit_guid, std::make_pair(0, -1e9));
         (void)fresh;
-        if (it->second.first >= max_requests || now - it->second.second < kMinRequestGap) return HitVerdict::TooMany;
+        if (it->second.first >= max_requests || now - it->second.second < rec->min_gap) return HitVerdict::TooMany;
         ++it->second.first;
         it->second.second = now;
         return HitVerdict::Unsupported;
     }
     // (the targeting record the client names is not checked against the ability's key map: 122 of 1,854 retail requests name another record than the
     // map's, and the hit is what decides what happens)
-    if (slot->requests >= max_requests || now - slot->last_request < kMinRequestGap) return HitVerdict::TooMany;
+    if (slot->requests >= max_requests || now - slot->last_request < rec->min_gap) return HitVerdict::TooMany;
     ++slot->requests;
     slot->last_request = now;
     const bool found = own > 0 && slot->reaches;
@@ -1839,6 +1858,15 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     rec.window_end = rec.cost_due + kRequestWindow;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
     rec.reach = reach_of(*def);
+    // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes more requests, closer together
+    if (is_weapon_combo(row)) {
+        for (const content::MontageRow& m : def->montages) {
+            if (m.anim_index == cast.animation_index && step_token(leaf_of_path(m.soft_path)).beam) {
+                rec.max_requests = kBeamRequestsPerHit;
+                rec.min_gap = kBeamRequestGap;
+            }
+        }
+    }
     std::set<int64_t> seen;
     for (const content::AbilityHitRow& h : def->hits) {
         if (h.source != "hit" || !seen.insert(h.hit_guid).second) continue;
@@ -2145,7 +2173,18 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which) {
             if (m.anim_index == cast.animation_index) montage = &m;
         }
         if (!montage && !def.montages.empty()) montage = &def.montages.front();
-        if (montage) step = step_token(leaf_of_path(montage->soft_path));
+        if (montage) {
+            step = step_token(leaf_of_path(montage->soft_path));
+            // the step the montage's select expression names wins over the file's name (the shortbow's montages carry the wrong number or none)
+            int named_step = 0;
+            bool named_proc = false;
+            if (const content::ExprRow* e = catalog_->expr(montage->select_expr)) {
+                if (step_of_expression(e->text, named_step, named_proc)) {
+                    step.step = named_step;
+                    step.proc = named_proc;
+                }
+            }
+        }
         if (step.beam) {   // the wand's beam: its hits are the client's requests
             emit({std::move(c), std::nullopt, t, "the projectile step of " + def.row.name + " (a beam: nothing flies)"});
             return;
@@ -2170,6 +2209,21 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which) {
             if (combo_step) {
                 const StepToken mine = step_token(hit->row.name);
                 if (!mine.ok || (step.ok && !same_step(step, mine))) continue;
+                // A step's projectile hit flies once, from the first row that lists it (the wand's last step lists two rows for one hit)...
+                if (std::find(fired.begin(), fired.end(), hit) != fired.end()) continue;
+                // ...and a second-projectile variant ("_2") only where a direct hit of its own lands with it (the book's step 4 has Book_Projectile_Split_Hit_4_2; step 3 has
+                // no "_2" Split hit, so its "_2" row is a leftover that confirms an extra hit with no damage)
+                if (mine.variant != 0) {
+                    bool paired = false;
+                    for (const content::AbilityHitRow& d : def.hits) {
+                        if (d.source != "hit") continue;
+                        const HitDef* direct = catalog_->hit(d.hit_guid);
+                        if (!direct || direct->fires.empty()) continue;
+                        const StepToken theirs = step_token(direct->row.name);
+                        paired = paired || (same_step(mine, theirs) && theirs.variant == mine.variant);
+                    }
+                    if (!paired) continue;
+                }
                 fired.push_back(hit);
                 fired_by.push_back(h.owner_guid);
             }
