@@ -340,6 +340,8 @@ public:
     int item_quality(int64_t item) const;
     /// The rarity the client shows for a quality of an item record (items/rarity.h: the band of the record's curve held inside its RarityMin..RarityMax), its facts cached.
     int item_rarity(int64_t item, int quality) const;
+    /// The facts that rule works from (the record's quality curve and RarityMin..RarityMax), cached; the common curve with no bound for a record the data does not hold.  The reference stays valid.
+    const items::ItemRarityFacts& item_rarity_facts(int64_t item) const;
     /// The name of an item record ("Certificate_T1_Glint"), cached; empty when content.db has none (the log's loot lines).
     std::string item_name(int64_t item) const;
 

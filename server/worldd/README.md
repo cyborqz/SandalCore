@@ -1315,6 +1315,13 @@ its clock says. `ServerSendProcessingStationRequest` (Claim) finds the job by it
 call for each product, the last product first, one event for each stack), pays the experience (the level-up effects as a harvest's), deletes the job and saves the items and the jobs together. A Cancel is refused and logged.
 `worldctl craft finish <character> [<station>]` (`WorldAdmin.FinishJobs`) finishes a player's running and waiting jobs at once: each one's start moves back so that it ends now, and the window is told as for any job that ended.
 
+**Recipe inputs by rarity (item rarities, step 2).** A stack's rarity is the one the client shows for it (`items/rarity.h`: the band its quality falls in, held inside the item's own lowest and highest rarity), and a recipe finds its inputs by it
+(`Inventory::count_materials` / `take_materials` take the item's rarity facts, `PlayerWorld::item_rarity_facts`), not by a range of quality. The client groups the stacks it offers by that rarity and names it for each general input, so a
+request that names a rarity of an item is served from the stacks that show it: an ingredient that is never Common (a Scorpion Venom Gland, bought or given at quality 1) is found when the request names Uncommon. A reagent, which the
+request does not name, is taken from the stacks whose rarity is the recipe's minimum or better, the lowest quality first: a Flux or a Thistlecoil Sap (always Uncommon) and a Bee's Wax (always Rare or better) bought at quality 1 meet
+the recipes that ask for them (591 recipes, 299 of them known without teaching, used to refuse them for that reason). The stacks are taken in the order the request names the rarities. A rarity above Artifact is refused, and a refusal lists what the bags hold of the item by rarity. A job is still saved with the rarity it was paid with and a claim reads only that, so jobs saved before this step are
+collected as they were.
+
 **The quick make (step 3).** A start at a crafting station (`ServerStartCraft`; the same checks as a job's, `crafting/rules.h` with `quick`) begins a craft that needs the player to stand still for the recipe's base
 duration (`crafting/quick.h`; two seconds for the gear and goods): nothing is taken, nothing is sent, and a player has one craft at a time (a second start is refused and changes nothing). The station must be a profession's own
 (the crate tables and the stations that make gathering tools answer nothing), the recipe known (the game's recipes that a player does not have to learn, or one a game master taught), within the station's tier and the

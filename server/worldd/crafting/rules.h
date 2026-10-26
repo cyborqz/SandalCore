@@ -11,7 +11,11 @@
 //  the player learn is known only once a game master taught it); the player's certification in the recipe's profession reaches its tier and the station's tier reaches it; the node the
 //  station is in allows it (the recipe's and its list's availability predicates: the node's level and biome, the nodes it is for, and the service building it needs, which no node has yet);
 //  the quantity is 1 to 250 (a quick make is one unit); the player's queue at the station has room (a quick make has none); the stacks the player named add up to the recipe's inputs for that
-//  quantity (the same records, rarity bands at or above the recipe's minimum, no warehouse), the bags hold them, and hold the reagent too; the purse holds the price.
+//  quantity (the same records, rarities at or above the recipe's minimum, no warehouse), the bags hold them, and hold the reagent too; the purse holds the price.
+//
+//  The rarity of a stack is the one the client shows for it (items/rarity.h): the band its quality falls in, held inside the item's own RarityMin..RarityMax.  The client groups the stacks it
+//  offers by that rarity and names it in the request, so a general input is taken from the stacks whose rarity is the one named, and a reagent (which the request does not name) from the
+//  stacks whose rarity is the recipe's minimum or better: a Bee's Wax or a Flux bought at quality 1 is Rare or Uncommon and meets the recipes that ask for it.
 //
 //  The price.  The recipe's cost is a number of copper for one unit (its own, or its cost record's); the station's service tax makes it `round(cost x (1 + percent) + flat)` for one unit,
 //  rounded half up, in double precision on the percent the window is sent (a float, 0.1 is a little under a tenth), and the job costs that for each unit.  The retail starts fit it: 138
@@ -44,17 +48,17 @@ namespace aoc::worldd::crafting {
 /// The most units one job makes (the station gives 1 to 250).
 inline constexpr int kMaxQuantity = 250;
 
-/// The first and the last quality of a rarity band (Common 0 ... Artifact 6), and the last quality there is: the rarity rule's (items/rarity.h).
+/// The first quality of a rarity band (Common 0 ... Artifact 6), and the last quality there is: the rarity rule's (items/rarity.h).  A job counts a rarity it was paid with as that quality.
 inline constexpr int kMaxQuality = items::kMaxQuality;
 inline int band_lo(int rarity) { return items::first_quality_of(rarity); }
-inline int band_hi(int rarity) { return items::last_quality_of(std::clamp(rarity, 0, 6)); }
 
-/// One take from the material bags: `count` of `record` of a quality band.
+/// One take from the material bags: `count` of `record` whose rarity (by the record's rarity facts) is `rarity_lo` to `rarity_hi`.
 struct Take {
-    int64_t record = 0;
-    int     quality_lo = 1, quality_hi = kMaxQuality;
-    int64_t count = 0;
-    bool    lowest_first = false;   // the reagent: the lowest quality that qualifies goes first
+    int64_t                record = 0;
+    items::ItemRarityFacts facts = items::default_rarity_facts();   // the record's quality curve and RarityMin..RarityMax
+    int                    rarity_lo = 0, rarity_hi = items::kRarityCount - 1;
+    int64_t                count = 0;
+    bool                   lowest_first = false;   // the reagent: the lowest quality that qualifies goes first
 };
 
 /// The node a station stands in, as the availability predicates see it.
@@ -76,6 +80,7 @@ struct StartFacts {
     size_t                          held_here = 0;         // ... and all of them, finished ones too
     bool                            quick = false;         // the station crafts at once (a crafting station): one unit, no queue, no job
     std::function<bool(int64_t)>    taught;                // whether the character was taught a recipe (one that has to be learned)
+    std::function<items::ItemRarityFacts(int64_t)> rarity_facts;   // an item record's rarity rule (its quality curve and RarityMin..RarityMax); none: the common curve with no bound
 };
 
 /// Whether a station definition is one the quick make serves: a profession's crafting station.  The crate tables, the stations that make gathering tools and the event and dungeon
@@ -217,29 +222,45 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     }
     if (req.has_tags || req.has_fuel || !req.flexible.empty()) return refuse("the request names tag, flexible or fuel resources: only the general ones are served");
 
-    // what the player named, by record and rarity (a record named twice is added up)
-    std::map<int64_t, std::map<int, int64_t>> named;
+    // what the player named, by record and rarity, in the order it was named (a record or a rarity named twice is added up: the client names each stack it offers)
+    std::map<int64_t, std::vector<std::pair<int, int64_t>>> named;
     for (const protocol::repl::CraftResource& res : req.general) {
         for (const protocol::repl::CraftRarityCount& c : res.rarities) {
             if (c.from_warehouse) return refuse("the request takes from the warehouse: none can be used yet");
             if (c.count < 1) return refuse("the request names " + std::to_string(c.count) + " items");
-            named[res.record][c.rarity] += c.count;
+            std::vector<std::pair<int, int64_t>>& by_rarity = named[res.record];
+            const auto same = std::find_if(by_rarity.begin(), by_rarity.end(), [&](const std::pair<int, int64_t>& x) { return x.first == c.rarity; });
+            if (same == by_rarity.end()) by_rarity.emplace_back(c.rarity, c.count);
+            else same->second += c.count;
         }
     }
     const content::CraftRecipeData& data = *f.recipes;
+    // the rarity rule of an item, and what the bags hold of it by rarity (a refusal says it, so the log shows what the client named against what is held)
+    const auto facts_of = [&](int64_t record) { return f.rarity_facts ? f.rarity_facts(record) : items::default_rarity_facts(); };
+    const auto held_text = [&](int64_t record, const items::ItemRarityFacts& facts) {
+        const auto held = f.inventory->materials_by_rarity(record, facts);
+        std::string text;
+        for (int rarity = 0; rarity < items::kRarityCount; ++rarity) {
+            if (held[static_cast<size_t>(rarity)] > 0) text += (text.empty() ? "" : ", ") + std::string(items::rarity_name(rarity)) + " " + std::to_string(held[static_cast<size_t>(rarity)]);
+        }
+        return text.empty() ? std::string("none") : text;
+    };
     std::vector<Take> general_takes, reagent_takes;
     for (const content::CraftInput& in : r->inputs) {
         const int64_t need = static_cast<int64_t>(in.quantity) * req.quantity;
         if (need < 1) continue;
         if (in.primary) {
+            // the reagent: stacks whose rarity is the recipe's minimum or better, the lowest quality first (a shop sells it at quality 1, and an item that is never Common shows its own rarity)
             Take t;
             t.record = in.item;
-            t.quality_lo = band_lo(in.min_rarity);
+            t.facts = facts_of(in.item);
+            t.rarity_lo = std::clamp(in.min_rarity, 0, items::kRarityCount - 1);
             t.count = need;
             t.lowest_first = true;
-            if (f.inventory->count_materials(t.record, t.quality_lo, t.quality_hi) < t.count) {
-                return refuse("the material bags hold " + std::to_string(f.inventory->count_materials(t.record, t.quality_lo, t.quality_hi)) + " of the reagent " + std::to_string(t.record) + ", the job needs " +
-                              std::to_string(t.count));
+            const int64_t held = f.inventory->count_materials(t.record, t.facts, t.rarity_lo, t.rarity_hi);
+            if (held < t.count) {
+                return refuse("the material bags hold " + std::to_string(held) + " of the reagent " + std::to_string(t.record) + " at " + items::rarity_range_text(t.rarity_lo, t.rarity_hi) +
+                              " (they hold: " + held_text(t.record, t.facts) + "), the job needs " + std::to_string(t.count));
             }
             reagent_takes.push_back(t);
             continue;
@@ -251,22 +272,27 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
         for (const auto& [rarity, count] : it->second) total += count;
         if (total != need) return refuse("the request names " + std::to_string(total) + " of item " + std::to_string(in.item) + ", " + r->name + " takes " + std::to_string(need) + " for " + std::to_string(req.quantity));
         for (const auto& [rarity, count] : it->second) {
+            if (rarity < 0 || rarity >= items::kRarityCount) {
+                return refuse("the request names rarity " + std::to_string(rarity) + " of item " + std::to_string(in.item) + ": the rarities are 0 (Common) to " + std::to_string(items::kRarityCount - 1) + " (Artifact)");
+            }
             if (rarity < in.min_rarity) return refuse("the request names rarity " + std::to_string(rarity) + " of item " + std::to_string(in.item) + ", the recipe takes " + std::to_string(in.min_rarity) + " or better");
+            // a general input: the stacks that show the rarity the request names (the client groups what it offers by that rarity)
             Take t;
             t.record = in.item;
-            t.quality_lo = band_lo(rarity);
-            t.quality_hi = band_hi(rarity);
+            t.facts = facts_of(in.item);
+            t.rarity_lo = t.rarity_hi = rarity;
             t.count = count;
-            if (f.inventory->count_materials(t.record, t.quality_lo, t.quality_hi) < t.count) {
-                return refuse("the material bags hold " + std::to_string(f.inventory->count_materials(t.record, t.quality_lo, t.quality_hi)) + " of item " + std::to_string(t.record) + " of rarity " +
-                              std::to_string(rarity) + ", the request names " + std::to_string(t.count));
+            const int64_t held = f.inventory->count_materials(t.record, t.facts, t.rarity_lo, t.rarity_hi);
+            if (held < t.count) {
+                return refuse("the material bags hold " + std::to_string(held) + " of item " + std::to_string(t.record) + " of rarity " + std::string(items::rarity_name(rarity)) + " (they hold: " +
+                              held_text(t.record, t.facts) + "), the request names " + std::to_string(t.count));
             }
             general_takes.push_back(t);
         }
         named.erase(it);
     }
     if (!named.empty()) return refuse("the request names item " + std::to_string(named.begin()->first) + ", which " + r->name + " does not take");
-    // (two takes of one record and band would each pass the count check alone; the bags are checked again when the stacks are taken)
+    // (two takes of one record and rarity would each pass the count check alone; the bags are checked again when the stacks are taken)
     plan.takes = reagent_takes;
     plan.takes.insert(plan.takes.end(), general_takes.begin(), general_takes.end());
     // what the job is shown with: the records and the rarities in the order the player named them, a record or a rarity named twice added up

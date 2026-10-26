@@ -1403,7 +1403,7 @@ int PlayerWorld::item_quality(int64_t item) const {
     return q;
 }
 
-int PlayerWorld::item_rarity(int64_t item, int quality) const {
+const items::ItemRarityFacts& PlayerWorld::item_rarity_facts(int64_t item) const {
     auto it = rarity_cache_.find(item);
     if (it == rarity_cache_.end()) {
         items::ItemRarityFacts facts = items::default_rarity_facts();
@@ -1413,8 +1413,10 @@ int PlayerWorld::item_rarity(int64_t item, int quality) const {
         }
         it = rarity_cache_.emplace(item, facts).first;
     }
-    return it->second.rarity_of(static_cast<double>(quality));
+    return it->second;
 }
+
+int PlayerWorld::item_rarity(int64_t item, int quality) const { return item_rarity_facts(item).rarity_of(static_cast<double>(quality)); }
 
 std::string PlayerWorld::item_name(int64_t item) const {
     const auto it = name_cache_.find(item);

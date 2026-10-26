@@ -563,29 +563,41 @@ Outcome Inventory::take(int64_t record, int64_t count) {
     return out;
 }
 
-int64_t Inventory::count_materials(int64_t record, int quality_lo, int quality_hi) const {
+int64_t Inventory::count_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi) const {
     int64_t held = 0;
     for (const auto& [key, it] : slots_) {
-        if (it.item_record_id == record && is_resource(static_cast<svc::ItemContainer>(key.first)) && it.quality >= quality_lo && it.quality <= quality_hi) held += it.quantity;
+        if (it.item_record_id != record || !is_resource(static_cast<svc::ItemContainer>(key.first))) continue;
+        const int rarity = facts.rarity_of(static_cast<double>(it.quality));   // (what the client shows for this stack)
+        if (rarity >= rarity_lo && rarity <= rarity_hi) held += it.quantity;
     }
     return held;
 }
 
-Outcome Inventory::take_materials(int64_t record, int quality_lo, int quality_hi, int64_t count, bool lowest_first) {
+std::array<int64_t, kRarityCount> Inventory::materials_by_rarity(int64_t record, const ItemRarityFacts& facts) const {
+    std::array<int64_t, kRarityCount> held{};
+    for (const auto& [key, it] : slots_) {
+        if (it.item_record_id != record || !is_resource(static_cast<svc::ItemContainer>(key.first))) continue;
+        held[static_cast<size_t>(std::clamp(facts.rarity_of(static_cast<double>(it.quality)), 0, kRarityCount - 1))] += it.quantity;
+    }
+    return held;
+}
+
+Outcome Inventory::take_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi, int64_t count, bool lowest_first) {
     Outcome out;
     if (count < 1) {
         out.refusal = "nothing to take: the count is " + std::to_string(count);
         return out;
     }
-    const int64_t held = count_materials(record, quality_lo, quality_hi);
+    const int64_t held = count_materials(record, facts, rarity_lo, rarity_hi);
     if (held < count) {
-        out.refusal = "the material bags hold " + std::to_string(held) + " of item " + std::to_string(record) + " of quality " + std::to_string(quality_lo) + " to " + std::to_string(quality_hi) +
-                      ", not " + std::to_string(count);
+        out.refusal = "the material bags hold " + std::to_string(held) + " of item " + std::to_string(record) + " of rarity " + rarity_range_text(rarity_lo, rarity_hi) + ", not " + std::to_string(count);
         return out;
     }
-    std::vector<Key> order;   // the stacks of that item and band
+    std::vector<Key> order;   // the stacks of that item and rarity range
     for (const auto& [key, it] : slots_) {
-        if (it.item_record_id == record && is_resource(static_cast<svc::ItemContainer>(key.first)) && it.quality >= quality_lo && it.quality <= quality_hi) order.push_back(key);
+        if (it.item_record_id != record || !is_resource(static_cast<svc::ItemContainer>(key.first))) continue;
+        const int rarity = facts.rarity_of(static_cast<double>(it.quality));
+        if (rarity >= rarity_lo && rarity <= rarity_hi) order.push_back(key);
     }
     if (lowest_first) {
         std::stable_sort(order.begin(), order.end(), [&](const Key& a, const Key& b) { return slots_.at(a).quality < slots_.at(b).quality; });

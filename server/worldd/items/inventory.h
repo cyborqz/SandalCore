@@ -54,6 +54,7 @@
 #pragma once
 
 #include "content/content_db.h"
+#include "items/rarity.h"
 #include "items/resource_grid.h"
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/repl/value.h"
@@ -260,11 +261,15 @@ public:
     /// that names the stack as it was and how many leave (the stack keeps the rest in its slot; a stack that is emptied is gone).  Refused, changing nothing, when fewer are held.
     Outcome take(int64_t record, int64_t count);
 
-    /// Crafting, step 1: how many items of `record` whose quality is `quality_lo` to `quality_hi` the material bags (the resource containers) hold.
-    int64_t count_materials(int64_t record, int quality_lo, int quality_hi) const;
-    /// Takes `count` items of `record` of that quality band from the stacks of the material bags (never the item bag), in the order of their container and slot, or the lowest quality first with
+    /// Crafting, step 1; by rarity since item rarities, step 2: how many items of `record` whose rarity is `rarity_lo` to `rarity_hi` (Common 0 ... Artifact 6) the material bags (the resource containers)
+    /// hold.  A stack's rarity is the one the client shows for it (items/rarity.h): `facts.rarity_of(quality)`, the quality's band held inside the record's own RarityMin..RarityMax, so a Bee's Wax
+    /// bought at quality 1 is Rare and meets a minimum of Rare.
+    int64_t count_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi) const;
+    /// How many items of `record` the material bags hold at each rarity (Common ... Artifact), by the same rule: what a refusal says the bags hold.
+    std::array<int64_t, kRarityCount> materials_by_rarity(int64_t record, const ItemRarityFacts& facts) const;
+    /// Takes `count` items of `record` of that rarity range from the stacks of the material bags (never the item bag), in the order of their container and slot, or the lowest quality first with
     /// `lowest_first`.  Each stack that gives something is ONE Remove event that names the stack as it was and how many leave, as take() does.  Refused, changing nothing, when fewer are held.
-    Outcome take_materials(int64_t record, int quality_lo, int quality_hi, int64_t count, bool lowest_first = false);
+    Outcome take_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi, int64_t count, bool lowest_first = false);
 
     /// Plan D1: items granted (a GiveItem reward, a purchase, a use): THE routing of Gathering stage 3 -- each item goes where its kind says (see the top of this file): a resource item
     /// tops up the stacks of its record and quality in the resource containers and starts new ones at the first free rectangle of the first container with room, any other item takes

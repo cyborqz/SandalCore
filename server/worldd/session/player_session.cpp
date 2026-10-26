@@ -3298,6 +3298,7 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
     }
     facts.tier_of = [this](int64_t profession) { return professions_.valid() ? professions_.tier(profession) : 0; };
     facts.inventory = &inventory_;
+    facts.rarity_facts = [this](int64_t item) { return world_->item_rarity_facts(item); };   // (the rarity the client shows for a stack: the inputs are found by it)
     facts.copper = wallet_.copper();
     facts.unfinished_here = crafting::unfinished_at(jobs_, key, now_ms);
     facts.held_here = crafting::held_at(jobs_, key);
@@ -3309,7 +3310,7 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
     items::Outcome taken;
     taken.ok = true;
     for (const crafting::Take& t : plan.takes) {
-        items::Outcome o = inventory_.take_materials(t.record, t.quality_lo, t.quality_hi, t.count, t.lowest_first);
+        items::Outcome o = inventory_.take_materials(t.record, t.facts, t.rarity_lo, t.rarity_hi, t.count, t.lowest_first);
         if (!o.ok) {
             inventory_ = kept;
             return refuse(o.refusal);
@@ -3393,6 +3394,7 @@ void PlayerSession::on_quick_start(Connection& conn, const repl::StartCraft& req
     }
     facts.tier_of = [this](int64_t profession) { return professions_.valid() ? professions_.tier(profession) : 0; };
     facts.inventory = &inventory_;
+    facts.rarity_facts = [this](int64_t item) { return world_->item_rarity_facts(item); };   // (the rarity the client shows for a stack: the inputs are found by it)
     facts.copper = wallet_.copper();
     const crafting::Plan plan = crafting::plan_start(req, facts);
     if (!plan.ok) return refuse(plan.refusal);
@@ -3521,6 +3523,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     }
     facts.tier_of = [this](int64_t profession) { return professions_.valid() ? professions_.tier(profession) : 0; };
     facts.inventory = &inventory_;
+    facts.rarity_facts = [this](int64_t item) { return world_->item_rarity_facts(item); };   // (the rarity the client shows for a stack: the inputs are found by it)
     facts.copper = wallet_.copper();
     const repl::StartCraft req = quick_.request;
     const crafting::Plan plan = crafting::plan_start(req, facts);
@@ -3534,7 +3537,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     taken.ok = true;
     std::vector<crafting::PaidUnits> paid;   // what the recipe's own materials really were (the reagent is not part of the quality)
     for (const crafting::Take& t : plan.takes) {
-        items::Outcome o = inventory_.take_materials(t.record, t.quality_lo, t.quality_hi, t.count, t.lowest_first);
+        items::Outcome o = inventory_.take_materials(t.record, t.facts, t.rarity_lo, t.rarity_hi, t.count, t.lowest_first);
         if (!o.ok) {
             inventory_ = kept_bags;
             return fail(o.refusal);

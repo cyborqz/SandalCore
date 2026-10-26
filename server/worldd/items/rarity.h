@@ -61,6 +61,16 @@ inline int rarity_named(std::string_view name) {
     return -1;
 }
 
+/// A range of rarities in words, for a refusal: "Rare", "Rare or better", "Common to Epic", "any rarity"; the ends are held inside Common to Artifact.
+inline std::string rarity_range_text(int lo, int hi) {
+    lo = std::clamp(lo, 0, kRarityCount - 1);
+    hi = std::clamp(hi, 0, kRarityCount - 1);
+    if (lo == hi) return std::string(rarity_name(lo));
+    if (lo == 0 && hi == kRarityCount - 1) return "any rarity";
+    if (hi == kRarityCount - 1) return std::string(rarity_name(lo)) + " or better";
+    return std::string(rarity_name(lo)) + " to " + std::string(rarity_name(hi));
+}
+
 /// The Quality range (x, y) of one rarity on an item's quality curve.
 struct QualityBand {
     double x = 0, y = 0;   // quality x..y is this rarity
