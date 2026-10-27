@@ -8,15 +8,19 @@
 //  the caller gives: it sees what the world tells it (where it is and where home is, who is near, whether it can see them) and says what to do (walk
 //  there, stand, walk home, attack now); the CombatWorld does it through stage 2's movement service and the hit rules.
 //
-//    aggro   a hostile, living combatant inside the aggro radius (the instance's, else the asset's, else kDefaultAggroCm) that the NPC has a line of sight
-//            to, or anyone that hurt it, adds to its threat table and starts the fight.  Proximity aggro never starts beyond the leash.
+//    aggro   a hostile, living combatant that the NPC has a line of sight to and that it notices, or anyone that hurt it, adds to its threat table and starts the fight.
+//            A creature with a senses table row (Params::senses) notices someone only within its aggro radius, and then by hearing (all round, up to its hearing radius)
+//            or by sight (inside the cone in front of it, up to its sight radius), each with its own vertical limit, and it looks for players once every
+//            sense_interval.  A creature without a row notices anyone within a flat radius, in the plane, every quarter second, and never beyond its leash from home.
 //    chase   it walks to its top target (threat.h picks it) until the target is within the attack's range, repathing as the target moves.
 //    attack  it stands and attacks while the target stays in range (a little farther once started, so it does not flicker between the two).
-//    leash   it gives up when it is farther than the leash radius from home, or when the table is empty (every attacker died or left).
+//    leash   it gives up when it is farther than the leash radius from its anchor (the place the fight began, or its home), when its target is farther than the leash
+//            radius from it, or when the table is empty (every attacker died or left).
 //    reset   it walks home at a run, its threat is cleared, and when it is there stage 2's behaviour takes it back (the CombatWorld heals it to full).
 //
-//  [modelled: no capture shows an aggro by proximity, a leash or a reset (research/combat 6 and 9); the numbers are the data's where it has them (the
-//  asset's AggroRadius with its override flag: 500 to 2,500 cm; LeashRadius is 0 for every NPC type of the area) and kDefault... where it does not.]
+//  [modelled: no capture shows an aggro by proximity, a leash or a reset (research/combat 6 and 9); the numbers are the data's where it has them (a creature's
+//  intelligence settings from its Blueprint, tools/npcabilities; the asset's AggroRadius with its override flag: 500 to 2,500 cm; LeashRadius is 0 for every NPC type of
+//  the area) and kDefault... where it does not.]
 // ============================================================================
 #pragma once
 
@@ -32,8 +36,21 @@ namespace aoc::worldd::npc::ai {
 enum class State : uint8_t { Idle, Chase, Attack, Reset, Dead };
 const char* state_name(State s);
 
+/// What a creature notices with (the intelligence component of its Blueprint): the older flat radius does not apply to it.
+struct Senses {
+    bool   enabled = false;               // false: the flat aggro radius (the planar distance plus the candidate's radius) decides
+    double hearing_radius_cm = 0;         // all round; 0: it does not hear
+    double hearing_vertical_cm = 0;       // how far above or below it can hear (0: no limit)
+    double sight_radius_cm = 0;           // in front of it only; 0: it does not see
+    double sight_vertical_cm = 0;         // how far above or below it can see (0: no limit)
+    double sight_cone_deg = 45.0;         // the half angle either side of its facing
+};
+
 struct Params {
-    double aggro_radius_cm = 800.0;       // a Wolf's (the data's 800; 0 in the data means the Blueprint's, which is not in it)
+    double aggro_radius_cm = 800.0;       // a Wolf's (the data's 800; 0 in the data means the Blueprint's, which is not in it); with Senses: the most it can notice anyone at, after the level curve
+    Senses senses;
+    /// true: the leash is measured from the place the fight began (the creature's tree saves it), not from home.
+    bool   anchor_at_fight_start = false;
     /// false: it never starts a fight by noticing someone (an NPC friendly to players, or one whose data switches its aggro off: a Timid Grem); it still fights what hurts it.
     bool   proximity_aggro = true;
     double leash_radius_cm = 3000.0;      // from home
@@ -63,6 +80,7 @@ struct Sense {
     combat::Vec3                 self;
     double                       self_radius_cm = 50.0;
     combat::Vec3                 home;
+    double                       self_yaw_degrees = 0;   // the way it faces (the same angle as atan2(dy, dx) in degrees)
     std::vector<Candidate>       known;              // everyone near enough to matter (the threat table's entries that are not here have left)
     /// The ground's line of sight between two points (Detour's raycast); null: always.
     std::function<bool(const combat::Vec3&, const combat::Vec3&)> line_of_sight;
@@ -81,6 +99,7 @@ struct Orders {
     bool         in_combat = false;
     bool         began_fight = false; // the first order of a fight (the flags go up)
     bool         began_reset = false; // the leash broke or the table emptied
+    const char*  reset_reason = "";   // why (for the log), set with began_reset
     bool         reset_done = false;  // it reached home
 };
 
@@ -104,11 +123,15 @@ public:
     const ThreatTable& threat() const { return threat_; }
     ThreatTable& threat() { return threat_; }
     const Params& params() const { return params_; }
+    /// Where its leash is measured from: the place its fight began, or `home`.
+    combat::Vec3 leash_anchor(const combat::Vec3& home) const { return params_.anchor_at_fight_start ? anchor_ : home; }
     void set_params(const Params& p) { params_ = p; }
     bool in_combat() const { return state_ == State::Chase || state_ == State::Attack; }
 
 private:
     bool within_leash(const combat::Vec3& self, const combat::Vec3& home) const;
+    /// Whether the creature notices the candidate: its distance from the creature in `distance` (the plane, or all three directions with Senses).
+    bool notices(const Sense& s, const Candidate& c, double& distance) const;
 
     Params      params_;
     State       state_ = State::Idle;
@@ -117,6 +140,7 @@ private:
     double      next_sense_ = 0;
     double      last_order_at_ = -1e9;
     combat::Vec3 last_order_dest_;
+    combat::Vec3 anchor_;               // where the fight began
     bool        pending_fight_ = false;
 };
 

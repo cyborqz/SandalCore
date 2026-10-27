@@ -85,4 +85,40 @@ private:
     std::map<std::string, MotionStats> rows_;
 };
 
+/// What a creature notices and how far it follows (dist/content/npc_senses.tsv and npc_aggro_curves.tsv, tools/npcabilities): the settings of its Blueprint's intelligence
+/// component along the Blueprint's parents, in centimetres.  A negative number or an empty text is "no Blueprint on the chain sets it": the game's own default then stands.
+struct SensesRow {
+    double      aggro_radius = -1;       // how far it can notice anyone at all (before the level curve)
+    std::string aggro_curve;             // the curve that scales that radius by the creature's level ("" none)
+    double      link_radius = -1;        // a pack: creatures this close to one that notices someone join in
+    int         sight = -1;              // 1: it sees (a cone in front of it), 0: it does not
+    double      sight_radius = -1, sight_vertical = -1, sight_cone = -1;   // vertical: how far above or below it can see (0: no limit); cone: the half angle either side of its facing, degrees
+    int         hearing = -1;            // 1: it hears (all round), 0: it does not
+    double      hearing_radius = -1, hearing_vertical = -1;
+    double      threat_cooldown = -1;
+    double      pc_interval = -1;        // seconds between its looks for players
+    double      leash_distance = -1;     // how far a fight may take it from where the fight began
+    int         detect_players = -1;
+    bool        leash_at_fight_start = false;   // its tree saves the place a fight began as its leash location
+};
+
+class SensesTable {
+public:
+    /// Loads the two files; false with `error` when the senses file is missing or malformed (the table stays empty).  A missing curves file only leaves every factor at 1.
+    bool load(const std::string& senses_path, const std::string& curves_path, std::string& error);
+    /// Parses the files' text (the tests).
+    bool parse(const std::string& senses_text, const std::string& curves_text, std::string& error);
+
+    /// The line of `archetype_path` ("/Game/.../Wolf.Default__Wolf_C"); null when the table has no such line.
+    const SensesRow* find(const std::string& archetype_path) const;
+    /// What the curve says at `level` (1 to 100; beyond the last the last stands); 1 for no curve or an unknown name.
+    double curve_factor(const std::string& curve, int level) const;
+    size_t size() const { return rows_.size(); }
+    bool empty() const { return rows_.empty(); }
+
+private:
+    std::map<std::string, SensesRow>           rows_;
+    std::map<std::string, std::vector<double>> curves_;
+};
+
 }  // namespace aoc::worldd::npc

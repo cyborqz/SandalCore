@@ -24,6 +24,14 @@ namespace {
 
 nav::Vec3 to_nav(const Vec3& v) { return nav::Vec3{v.x, v.y, v.z}; }
 
+// The game's own defaults for the intelligence settings no Blueprint on a creature's chain sets (the base pawn sets all of them but the sight cone, so these stand only for a creature
+// that is not built on it, and for the cone).
+constexpr double kBlueprintAggroDefaultCm = 1000.0;
+constexpr double kBlueprintSightDefaultCm = 3000.0;
+constexpr double kBlueprintSightConeDefaultDeg = 45.0;   // the half angle either side of its facing
+constexpr double kBlueprintHearingDefaultCm = 2000.0;
+constexpr double kBlueprintPlayerLookSeconds = 2.0;      // how often a creature looks for players
+
 /// The kit of a creature kind: by the Blueprint's leaf without "_C"; else the kit whose name is the longest prefix of the leaf (or the leaf of it).
 const npc_kits::Kit* kit_of(const std::string& leaf_in) {
     std::string leaf = leaf_in;
@@ -175,6 +183,23 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     // huntable, whose alignment is Friendly, never attack first)
     p.proximity_aggro = notices_players(n->hostile, a.npc);
     p.leash_radius_cm = a.npc.leash_radius_cm > 0 ? a.npc.leash_radius_cm : std::max(cfg_.default_leash_cm, p.aggro_radius_cm * 3.0);
+    if (const npc::SensesRow* row = senses_ ? senses_->find(a.npc.archetype) : nullptr) {
+        // what its Blueprint says: the aggro radius (the population's own when it gives one) scaled by the creature's level, the senses, how often it looks, where its fights anchor and how far they
+        // may go.  A setting no Blueprint on its chain makes stands at the game's default.
+        const double radius = a.npc.aggro_radius_cm > 0 ? a.npc.aggro_radius_cm : (row->aggro_radius >= 0 ? row->aggro_radius : kBlueprintAggroDefaultCm);
+        p.aggro_radius_cm = radius * senses_->curve_factor(row->aggro_curve, a.npc.level);
+        p.proximity_aggro = p.proximity_aggro && p.aggro_radius_cm > 0 && row->detect_players != 0;
+        npc::ai::Senses& e = p.senses;
+        e.enabled = true;
+        e.sight_radius_cm = row->sight == 1 ? (row->sight_radius >= 0 ? row->sight_radius : kBlueprintSightDefaultCm) : 0.0;
+        e.sight_vertical_cm = std::max(0.0, row->sight_vertical);
+        e.sight_cone_deg = row->sight_cone >= 0 ? row->sight_cone : kBlueprintSightConeDefaultDeg;
+        e.hearing_radius_cm = row->hearing == 1 ? (row->hearing_radius >= 0 ? row->hearing_radius : kBlueprintHearingDefaultCm) : 0.0;
+        e.hearing_vertical_cm = std::max(0.0, row->hearing_vertical);
+        p.sense_interval = row->pc_interval >= 0 ? row->pc_interval : kBlueprintPlayerLookSeconds;
+        p.anchor_at_fight_start = row->leash_at_fight_start;
+        if (a.npc.leash_radius_cm <= 0 && row->leash_distance >= 0) p.leash_radius_cm = row->leash_distance;
+    }
     const double run = std::max({bp.max_run_speed, bp.max_walk_speed, 300.0});
     p.chase_speed_cm_s = run;
     p.run_home_speed_cm_s = run;
@@ -1076,6 +1101,7 @@ void CombatWorld::think(Npc& n, double now) {
     s.self = {a->x, a->y, a->z};
     s.self_radius_cm = n.bp.radius;
     s.home = {a->npc.home_x, a->npc.home_y, a->npc.home_z};
+    s.self_yaw_degrees = a->yaw_degrees;
     s.attack_range_cm = n.next.range_cm;
     const double far = n.ai.params().leash_radius_cm * 2.0 + n.ai.params().aggro_radius_cm;
     for (PlayerPort* p : players_) {
@@ -1101,8 +1127,21 @@ void CombatWorld::think(Npc& n, double now) {
     if (o.began_fight) {
         ++stats_.aggros;
         n.fight_began = now;
+        if (n.ai.params().senses.enabled) {
+            const npc::ai::Params& pr = n.ai.params();
+            PlayerPort* who = player(o.target);
+            spdlog::info("[combat] {} ({}, level {}) began a fight with player {}{}: it notices within {:.1f} m (hears {:.1f} m, sees {:.1f} m in front), leashes {:.0f} m from {}", n.leaf, n.actor_id, a->npc.level, o.target,
+                         who ? fmt::format(", {:.1f} m away", distance_xy_cm(who->fighter().position(), s.self) / 100.0) : std::string(), pr.aggro_radius_cm / 100.0, pr.senses.hearing_radius_cm / 100.0,
+                         pr.senses.sight_radius_cm / 100.0, pr.leash_radius_cm / 100.0, pr.anchor_at_fight_start ? "where the fight began" : "home");
+        }
     }
-    if (o.began_reset) begin_reset(n, now);
+    if (o.began_reset) {
+        if (n.ai.params().senses.enabled) {
+            spdlog::info("[combat] {} ({}, level {}) leashed: {}; {:.1f} m from {}, {:.1f} m from home", n.leaf, n.actor_id, a->npc.level, o.reset_reason,
+                         distance_xy_cm(s.self, n.ai.leash_anchor(s.home)) / 100.0, n.ai.params().anchor_at_fight_start ? "where the fight began" : "home", distance_xy_cm(s.self, s.home) / 100.0);
+        }
+        begin_reset(n, now);
+    }
     if (o.reset_done) {
         n.returning = false;
         if (npcs_world_) npcs_world_->release(n.actor_id);

@@ -3,6 +3,7 @@
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 #include "npc/motion_table.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -170,6 +171,125 @@ std::optional<MotionStats> MotionTable::find(const std::string& archetype_path) 
 MotionStats MotionTable::get(const std::string& archetype_path) const {
     if (const auto m = find(archetype_path)) return *m;
     return MotionStats{};
+}
+
+// ---- the senses table ---------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+std::string read_all(const std::string& path, bool& ok) {
+    std::ifstream in(path, std::ios::binary);
+    ok = static_cast<bool>(in);
+    std::ostringstream buf;
+    if (ok) buf << in.rdbuf();
+    return buf.str();
+}
+
+/// A number cell of the senses file: an empty cell is "not set" (-1).
+bool senses_number(const std::string& cell, double* v) {
+    if (cell.empty()) {
+        *v = -1;
+        return true;
+    }
+    return number(cell, v);
+}
+
+}  // namespace
+
+bool SensesTable::parse(const std::string& senses_text, const std::string& curves_text, std::string& error) {
+    std::map<std::string, SensesRow> rows;
+    {
+        std::istringstream in(senses_text);
+        std::string line;
+        bool header = false;
+        size_t at = 0;
+        while (std::getline(in, line)) {
+            ++at;
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty()) continue;
+            const std::vector<std::string> c = split_tabs(line);
+            if (!header) {
+                header = true;
+                if (c.size() < 16 || c[0] != "archetype") {
+                    error = "npc_senses.tsv: the header is not the expected one";
+                    return false;
+                }
+                continue;
+            }
+            if (c.size() < 16) {
+                error = "npc_senses.tsv line " + std::to_string(at) + ": " + std::to_string(c.size()) + " columns, expected 16";
+                return false;
+            }
+            SensesRow r;
+            double sight = -1, hearing = -1, detect = -1;
+            const bool ok = senses_number(c[1], &r.aggro_radius) && senses_number(c[3], &r.link_radius) && senses_number(c[4], &sight) && senses_number(c[5], &r.sight_radius) &&
+                            senses_number(c[6], &r.sight_vertical) && senses_number(c[7], &r.sight_cone) && senses_number(c[8], &hearing) && senses_number(c[9], &r.hearing_radius) &&
+                            senses_number(c[10], &r.hearing_vertical) && senses_number(c[11], &r.threat_cooldown) && senses_number(c[12], &r.pc_interval) &&
+                            senses_number(c[13], &r.leash_distance) && senses_number(c[14], &detect);
+            if (!ok || c[0].empty()) {
+                error = "npc_senses.tsv line " + std::to_string(at) + ": a number does not read";
+                return false;
+            }
+            r.aggro_curve = c[2];
+            r.sight = static_cast<int>(sight);
+            r.hearing = static_cast<int>(hearing);
+            r.detect_players = static_cast<int>(detect);
+            r.leash_at_fight_start = c[15] == "combat_start";
+            rows[c[0]] = std::move(r);
+        }
+        if (!header) {
+            error = "npc_senses.tsv is empty";
+            return false;
+        }
+    }
+    std::map<std::string, std::vector<double>> curves;
+    {
+        std::istringstream in(curves_text);
+        std::string line;
+        bool header = false;
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.empty()) continue;
+            if (!header) {
+                header = true;
+                continue;
+            }
+            const std::vector<std::string> c = split_tabs(line);
+            double level = 0, factor = 0;
+            if (c.size() < 3 || !number(c[1], &level) || !number(c[2], &factor) || level < 1 || level > 1000) continue;   // (a line that does not read leaves its level at the nearest one before)
+            std::vector<double>& v = curves[c[0]];
+            if (v.size() < static_cast<size_t>(level)) v.resize(static_cast<size_t>(level), factor);
+            v[static_cast<size_t>(level) - 1] = factor;
+        }
+    }
+    rows_ = std::move(rows);
+    curves_ = std::move(curves);
+    return true;
+}
+
+bool SensesTable::load(const std::string& senses_path, const std::string& curves_path, std::string& error) {
+    bool ok = false;
+    const std::string senses = read_all(senses_path, ok);
+    if (!ok) {
+        error = "cannot open " + senses_path;
+        return false;
+    }
+    bool curves_ok = false;
+    const std::string curves = read_all(curves_path, curves_ok);   // (a missing curves file leaves every factor at 1)
+    return parse(senses, curves_ok ? curves : std::string(), error);
+}
+
+const SensesRow* SensesTable::find(const std::string& archetype_path) const {
+    const auto it = rows_.find(archetype_path);
+    return it == rows_.end() ? nullptr : &it->second;
+}
+
+double SensesTable::curve_factor(const std::string& curve, int level) const {
+    if (curve.empty()) return 1.0;
+    const auto it = curves_.find(curve);
+    if (it == curves_.end() || it->second.empty()) return 1.0;
+    const int at = std::clamp(level, 1, static_cast<int>(it->second.size()));
+    return it->second[static_cast<size_t>(at) - 1];
 }
 
 }  // namespace aoc::worldd::npc

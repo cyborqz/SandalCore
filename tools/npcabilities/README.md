@@ -2,13 +2,13 @@
 
 Reads what the creatures of the game attack with out of your own game files, for the creatures that play their attacks with their own animation.
 
-    dotnet tools/npcabilities/bin/Release/net8.0/npcabilities.dll read --dir AOC/Content/DesignAssets/Population/NPC/Beast/Rabid [--dir ...] [--out-dir dist/content] [--check]
+    dotnet tools/npcabilities/bin/Release/net8.0/npcabilities.dll read --dir AOC/Content/DesignAssets/Population/NPC/Beast/Rabid [--dir ...] [--senses-dir AOC/Content/DesignAssets/Population] [--out-dir dist/content] [--check]
 
-`scripts/extract_game_data.ps1` runs it as the `npcabilities` step (`-Only tools,npcabilities`); it needs only the game's containers (no map read, a few seconds).
+`scripts/extract_game_data.ps1` runs it as the `npcabilities` step (`-Only tools,npcabilities`); it needs only the game's containers (no map read, about a minute).
 The folders it reads are listed in the script (`$NpcFolders`): one per creature kind, holding the kind's Blueprints and the animation montages beside them.
 A kind that is not listed keeps the single swing every creature had before. `--check` writes nothing and exits 1 when `--out-dir` holds different files.
 
-It writes three tables:
+It writes three tables (five with `--senses-dir`):
 
 - `npc_abilities.tsv`: one line per use-ability task of a creature Blueprint's state tree: the Blueprint (as `npc_motion.tsv` names it), the ability record, the task's name,
   the seconds the creature waits before it uses the ability again, whether it stands still to use it, the task's place in the tree (`order`) and the conditions the tree puts on it:
@@ -43,7 +43,17 @@ It writes three tables:
     in that box; one whose lunge `pause`s is held while a body is in it, with `bRootMotionObstructed` going out (the client then holds its own copy too), and goes on by what the montage still travels when
     the box is clear. The box decides only where a lunge halts; it never decides whether a hit lands.
 
-worldd reads all three (`--npc-abilities`, `--npc-montages`, `--npc-targeting`). A creature whose Blueprint is in the first table uses its abilities in the order the tree tries them, among
+- `npc_senses.tsv` and `npc_aggro_curves.tsv` (only with `--senses-dir`, which the extractor gives the whole population folder: every creature, animated or not): what each creature Blueprint
+  notices and how far it follows. One line per Blueprint of the folder whose class descends from the base pawn (1,194 of them), with the settings of its intelligence component along its parents
+  (a child sets only what it changes; an empty cell is "no Blueprint on the chain sets it": the game's own default stands):
+  - `aggro_radius` (cm) and `aggro_curve` (the curve that scales the radius by the creature's level; `npc_aggro_curves.tsv` holds its factor at the levels 1 to 100: 0.1 at level 1, 0.63 at
+    level 2, 1 from level 3), `link_radius` (a pack: creatures this close to one that notices someone);
+  - `sight` / `sight_radius` / `sight_vertical` / `sight_cone` (0 or 1, cm, cm, the half angle either side of the creature's facing in degrees), `hearing` / `hearing_radius` / `hearing_vertical`;
+  - `threat_cooldown` (seconds), `pc_interval` (seconds between its looks for players), `leash_distance` (cm), `detect_players` (0 or 1);
+  - `leash_anchor` is `combat_start` when the creature's state tree saves the place its fight began as its leash location (866 of the 1,194), else empty.
+  The extractor reads the folder in about a minute and keeps the .NET heap under 4 GB (reading every Blueprint peaks near 8 GB without the limit).
+
+worldd reads all five (`--npc-abilities`, `--npc-montages`, `--npc-targeting`, `--npc-senses`, `--npc-aggro-curves`). A creature whose Blueprint is in the first table uses its abilities in the order the tree tries them, among
 the tasks of its fight whose conditions the tables can say (the conditions are asked afresh at every try, a roll included); starts each attack with the ability's montage, lands every hit when its notify says, by the hit's targeting record (on the target wherever it stands unless the record measures, and on everyone inside its volumes), stands still for the montage when the task says so,
 moves the creature along the montage's root motion as the client does (it stops at a player's capsule and at the edge of the walkable ground, is held or stopped by its freeze box, and the
 world says where it is at every step), turns it to its target while the ability plays when the tree says so (the lunge then goes the way the creature faces at each step), keeps the AI's walk orders waiting until

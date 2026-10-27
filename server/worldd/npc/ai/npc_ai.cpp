@@ -26,6 +26,35 @@ const char* state_name(State s) {
 
 bool NpcAi::within_leash(const Vec3& self, const Vec3& home) const { return combat::distance_xy_cm(self, home) <= params_.leash_radius_cm; }
 
+namespace {
+
+/// The angle between two headings, 0 to 180 degrees.
+double heading_difference_degrees(double a, double b) {
+    const double d = std::fmod(std::fabs(a - b), 360.0);
+    return d > 180.0 ? 360.0 - d : d;
+}
+
+}  // namespace
+
+bool NpcAi::notices(const Sense& s, const Candidate& c, double& distance) const {
+    if (!params_.senses.enabled) {
+        distance = combat::distance_xy_cm(s.self, c.pos);
+        return distance <= params_.aggro_radius_cm + c.radius_cm && within_leash(s.self, s.home);
+    }
+    // within the aggro radius (centre to centre), and then heard (all round) or seen (inside the cone in front of it), each within its own radius and vertical limit
+    const double dx = c.pos.x - s.self.x, dy = c.pos.y - s.self.y, dz = c.pos.z - s.self.z;
+    distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(distance < params_.aggro_radius_cm)) return false;
+    const Senses& e = params_.senses;
+    const double vertical = std::fabs(dz);
+    if (e.hearing_radius_cm > 0 && distance < e.hearing_radius_cm && (e.hearing_vertical_cm <= 0 || vertical < e.hearing_vertical_cm)) return true;
+    if (e.sight_radius_cm > 0 && distance < e.sight_radius_cm && (e.sight_vertical_cm <= 0 || vertical < e.sight_vertical_cm)) {
+        const double bearing = std::atan2(dy, dx) * 180.0 / 3.14159265358979323846;
+        return heading_difference_degrees(bearing, s.self_yaw_degrees) < e.sight_cone_deg;
+    }
+    return false;
+}
+
 void NpcAi::notice(uint64_t id, double threat, double now) {
     if (state_ == State::Dead || state_ == State::Reset) return;
     threat_.add(id, threat, now);
@@ -94,8 +123,8 @@ Orders NpcAi::think(const Sense& s) {
             next_sense_ = s.now + params_.sense_interval;
             for (const Candidate& c : s.known) {
                 if (!c.alive || !c.hostile) continue;
-                const double d = combat::distance_xy_cm(s.self, c.pos);
-                if (d > params_.aggro_radius_cm + c.radius_cm || !within_leash(s.self, s.home)) continue;
+                double d = 0;
+                if (!notices(s, c, d)) continue;
                 if (s.line_of_sight && !s.line_of_sight(s.self, c.pos)) continue;
                 threat_.add(c.id, params_.proximity_threat + (params_.aggro_radius_cm - d) * 0.001, s.now);
                 pending_fight_ = true;
@@ -109,25 +138,32 @@ Orders NpcAi::think(const Sense& s) {
         o.began_fight = true;
         target_ = 0;
         pending_fight_ = false;
+        anchor_ = s.self;   // where the fight began
     }
 
     // chase and attack: the leash first
-    if (home_dist > params_.leash_radius_cm || threat_.empty()) {
+    const auto leash = [&](const char* reason) {
         threat_.clear();
         target_ = 0;
         state_ = State::Reset;
         o.began_reset = true;
+        o.reset_reason = reason;
         o.move = Orders::Move::Home;
         o.dest = s.home;
         o.speed_cm_s = params_.run_home_speed_cm_s;
         return o;
-    }
+    };
+    const double anchor_dist = combat::distance_xy_cm(s.self, params_.anchor_at_fight_start ? anchor_ : s.home);
+    if (anchor_dist > params_.leash_radius_cm) return leash(params_.anchor_at_fight_start ? "it is farther from where its fight began than its leash distance" : "it is farther from home than its leash distance");
+    if (threat_.empty()) return leash("nobody is left to fight");
     target_ = threat_.pick(target_);
     const Candidate* t = find(target_);
     if (!t) {   // (cannot happen: the table only holds what is known)
         threat_.remove(target_);
         return o;
     }
+    // a creature with senses also gives up on a target that has got farther from it than the leash radius
+    if (params_.senses.enabled && combat::distance_xy_cm(s.self, t->pos) > params_.leash_radius_cm) return leash("its target is farther from it than its leash distance");
     o.target = target_;
     o.in_combat = true;
     const double surface = combat::distance_xy_cm(s.self, t->pos) - s.self_radius_cm - t->radius_cm;

@@ -167,6 +167,10 @@ public:
     /// each hit when the montage's notify says and starts its next attack when the montage is over; every other creature swings as it always did.  Null (the default) for none.
     /// The tables outlive the world.
     void set_ability_data(const NpcAbilityData* data) { anim_ = data; }
+    /// What each creature notices and how far it follows (npc/motion_table.h, the senses table): a creature whose Blueprint the table lists notices by its Blueprint's aggro radius (scaled by its
+    /// level), hearing and sight, and leashes at its Blueprint's distance from the place its fight began; every other creature keeps the flat radius and leash of the config.  Null (the default) for
+    /// none.  The table outlives the world, and is set before the creatures are made.
+    void set_senses_data(const npc::SensesTable* data) { senses_ = data; }
     /// How many of the creature attacks the tables list and the world can animate land by each kind of rule (see combat/bite_area.h), and how many keep the single swing because a volume of theirs
     /// cannot be placed.  An attack none of whose hits is a hit of its montage (a thrown rock, a bolt) has no area to decide by: `unplayed` counts those.  One attack counts once, whichever
     /// Blueprints use it.
@@ -344,6 +348,7 @@ private:
     std::map<uint64_t, double> player_combat_until_;   // actor id -> when its combat flag ends
     std::vector<Pending>   pending_;
     const NpcAbilityData*  anim_ = nullptr;
+    const npc::SensesTable* senses_ = nullptr;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
     HuntablePredicate      huntable_;
     std::set<uint64_t>     huntable_stats_;   // the huntables whose stats were filled

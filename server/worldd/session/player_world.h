@@ -185,6 +185,9 @@ public:
     /// The creature attack animations (tools/npcabilities: the ability tasks of the creature Blueprints and the animation montages): a creature whose Blueprint the tables list attacks with
     /// its own animation.  Before the fights start (load_ground); false, with `error`, for a table that cannot be read.
     bool load_npc_abilities(const std::string& abilities_path, const std::string& montages_path, const std::string& targeting_path, std::string& error);
+    /// What each creature notices and how far it follows (tools/npcabilities: the intelligence settings of the creature Blueprints and the aggro level curve): a creature whose Blueprint the table lists
+    /// notices and leashes by them.  Before the fights start (load_ground); false, with `error`, for a table that cannot be read (every creature then keeps the flat radius and leash).
+    bool load_npc_senses(const std::string& senses_path, const std::string& curves_path, std::string& error);
     void set_generic_npcs(spawns::GenericConfig config) { generic_config_ = std::move(config); }
     /// Plan E1, stage 3: what this world is for the conditions a spawn names (spawns/spawn_filter.h); before load_area.  `enabled = false` is the kill switch.
     void set_spawn_context(spawns::SpawnContext context) { spawn_context_ = std::move(context); }
@@ -539,6 +542,7 @@ private:
     std::optional<npc::GroundReport>     ground_report_;
     combat::CombatWorldConfig            combat_config_;
     combat::NpcAbilityData               npc_abilities_;   // before combat_: it holds a pointer to it
+    npc::SensesTable                     npc_senses_;      // before combat_: it holds a pointer to it
     std::optional<combat::NpcStatBook>   npc_book_;
     std::optional<combat::CombatData>    combat_data_;
     std::unique_ptr<combat::CombatWorld> combat_;     // after npcs_ and the ground: it is destroyed first

@@ -461,6 +461,18 @@ bool PlayerWorld::load_npc_abilities(const std::string& abilities_path, const st
     return true;
 }
 
+bool PlayerWorld::load_npc_senses(const std::string& senses_path, const std::string& curves_path, std::string& error) {
+    if (combat_) {
+        error = "the fights have started";
+        return false;
+    }
+    npc::SensesTable table;
+    if (!table.load(senses_path, curves_path, error)) return false;
+    npc_senses_ = std::move(table);
+    spdlog::info("[combat] creature senses: {} Blueprints (what each notices, how far it follows)", npc_senses_.size());
+    return true;
+}
+
 bool PlayerWorld::load_ground(const std::string& nav_path, const std::string& motion_path, std::string& error) {
     if (!area_report_) {
         error = "the area is not loaded";
@@ -922,6 +934,7 @@ void PlayerWorld::start_combat() {
     if (!npc_book_) npc_book_.emplace(*bundle_, *gear_);
     combat_ = std::make_unique<combat::CombatWorld>(registry_, npcs_.get(), nav_.get(), *combat_data_, *ability_catalog(), *npc_book_, motion_, combat_config_);
     combat_->set_ability_data(&npc_abilities_);
+    if (!npc_senses_.empty()) combat_->set_senses_data(&npc_senses_);
     if (!npc_abilities_.empty()) spdlog::info("[combat] {}", combat_->gate_census().text());
     start_aftermath();
     spdlog::info("[combat] on: {} abilities in the tables, damage profile of {} elements, in combat for {} s, NPCs fight within their aggro radius (default {} cm) and leash at {} cm, and their hits do {} x the data's damage to a player",

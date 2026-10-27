@@ -82,6 +82,8 @@ $lastLog   = Join-Path $stampDir 'last_run.log'
 # worldd animates exactly the Blueprints this reads; a kind that is not listed keeps its single swing.
 $NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Content/DesignAssets/Population/NPC/Beast/Canine', 'AOC/Content/DesignAssets/Population/NPC/Beast/Bear',
                'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin')
+# The folders whose creature Blueprints are read for what they notice and how far they follow (their intelligence component): every creature of the population, animated or not.
+$NpcSensesFolders = @('AOC/Content/DesignAssets/Population')
 
 # The client build this code was made for (the player's own files are only compared by size).
 $Supported = @{ ExeBytes = 235606624; DbcBytes = 144085052; Date = '2026-01-29' }
@@ -404,7 +406,7 @@ function Get-Id([string]$step) {
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
         'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-CodeLayouts) + (Get-Id 'database')) }
-        'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + (Get-Id 'database')) }
+        'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + ($NpcSensesFolders -join ';') + (Get-Id 'database')) }
         'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-Id 'townlayouts') + (Get-Id 'database')) }
     }
     $ids[$step] = $v
@@ -512,11 +514,14 @@ $steps = @(
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\capture\gen_town_layouts.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out', (Join-Path $outDir 'town_layout_items.tsv'))) 'gen_town_layouts'
         Invoke-Checked $dotnet @($mapcDll, 'town-layouts', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir, '--min-free-gb', '8') 'mapc_town_layouts'
     } },
-    @{ Name = 'npcabilities'; Title = 'Read the creature Blueprints and animation montages that give the creatures their attacks (tools/npcabilities; a few seconds)'; Outputs = @('dist\content\npc_abilities.tsv', 'dist\content\npc_montages.tsv', 'dist\content\npc_targeting.tsv'); Run = {
+    @{ Name = 'npcabilities'; Title = 'Read the creature Blueprints and animation montages that give the creatures their attacks, and what every creature notices and how far it follows (tools/npcabilities; about a minute)'; Outputs = @('dist\content\npc_abilities.tsv', 'dist\content\npc_montages.tsv', 'dist\content\npc_targeting.tsv', 'dist\content\npc_senses.tsv', 'dist\content\npc_aggro_curves.tsv'); Run = {
         Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll', 'dist\content\content.db') 'run the tools and database steps first'
         $npcArgs = @($npcAbilitiesDll, 'read', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir)
         foreach ($f in $NpcFolders) { $npcArgs += @('--dir', $f) }
-        Invoke-Checked $dotnet $npcArgs 'npcabilities_read'
+        foreach ($f in $NpcSensesFolders) { $npcArgs += @('--senses-dir', $f) }
+        $savedHeap = $env:DOTNET_GCHeapHardLimit
+        if (-not $env:DOTNET_GCHeapHardLimit) { $env:DOTNET_GCHeapHardLimit = '0x100000000' }     # reading every creature Blueprint peaks at 7.7 GB without this limit
+        try { Invoke-Checked $dotnet $npcArgs 'npcabilities_read' } finally { $env:DOTNET_GCHeapHardLimit = $savedHeap }
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\npcabilities\targeting.py'), '--content-db', (Join-Path $outDir 'content.db'),
             '--abilities', (Join-Path $outDir 'npc_abilities.tsv'), '--out', (Join-Path $outDir 'npc_targeting.tsv'))) 'npcabilities_targeting'
     } },

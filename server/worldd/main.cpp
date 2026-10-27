@@ -203,6 +203,13 @@ int main(int argc, char** argv) {
     app.add_option("--npc-montages", npc_montages_path, "the creature animation montages tools/npcabilities reads from the game: their lengths and hit notifies (a missing file: every creature swings without an animation)")
         ->envname("AOC_NPC_MONTAGES")
         ->capture_default_str();
+    std::string npc_senses_path = "dist/content/npc_senses.tsv", npc_aggro_curves_path = "dist/content/npc_aggro_curves.tsv";
+    app.add_option("--npc-senses", npc_senses_path, "what each creature Blueprint notices and how far it follows, tools/npcabilities (a missing file: every creature notices within --npc-aggro-cm and leashes at --npc-leash-cm)")
+        ->envname("AOC_NPC_SENSES")
+        ->capture_default_str();
+    app.add_option("--npc-aggro-curves", npc_aggro_curves_path, "the level curve that scales a creature's aggro radius, tools/npcabilities (a missing file: no scaling)")
+        ->envname("AOC_NPC_AGGRO_CURVES")
+        ->capture_default_str();
     // the mounts milestone: the speeds of the mount Blueprints (tools/mapc mount-speeds), what a desummoned mount runs at
     std::string mount_speeds_path = "dist/content/mount_speeds.tsv";
     app.add_option("--mount-speeds", mount_speeds_path, "the mount Blueprints' speeds tools/mapc reads from the game (a missing file: 600 cm/s times the item's ground percentage)")
@@ -270,6 +277,10 @@ int main(int argc, char** argv) {
                    "TEST ONLY: multiplies the weight of every outcome above Common in the rarity rolls of a kill's gear and resource drops (never a harvest, a quantity or which Glint tier drops): "
                    "20 makes an Uncommon or better drop about 20 times as likely against a Common one (1: the game's own odds)")
         ->envname("AOC_LOOT_RARITY_BOOST")->check(CLI::Range(1.0, 1000.0))->capture_default_str();
+    uint64_t loot_seed = 0;
+    app.add_option("--loot-seed", loot_seed,
+                   "the number the kills' loot rolls (and the respawn delays) start from: 0 (the default) takes a new one on every start, so each run rolls different drops; any other number repeats the same rolls on every start")
+        ->envname("AOC_LOOT_SEED")->capture_default_str();
     // Gathering stage 2, "Harvesting": the resource nodes (gather/gathering.h)
     bool no_gathering = false, gather_quality_literal = false;
     double gather_respawn_mult = 1.0;
@@ -510,6 +521,8 @@ int main(int argc, char** argv) {
             aftermath.loot_corpse_seconds = loot_corpse_seconds;
             aftermath.loot_chance_mult = loot_chance_mult;
             aftermath.loot_rarity_boost = loot_rarity_boost;
+            aftermath.seed = loot_seed != 0 ? loot_seed : gather::fresh_seed();
+            spdlog::info("[loot] the kills' loot rolls start from seed {}{}", aftermath.seed, loot_seed != 0 ? " (--loot-seed: the same rolls on every start)" : " (new on every start)");
             players.set_aftermath_config(std::move(aftermath));
             std::string table_error;
             if (!players.load_blueprints(npc_motion_path, table_error)) {
@@ -520,6 +533,12 @@ int main(int argc, char** argv) {
             std::string animation_error;
             if (!players.load_npc_abilities(npc_abilities_path, npc_montages_path, npc_targeting_path, animation_error)) {
                 spdlog::warn("[combat] no creature attack animations ({}): the creatures swing without an animation (run scripts/extract_game_data.ps1)", animation_error);
+            }
+        }
+        {
+            std::string senses_error;
+            if (!players.load_npc_senses(npc_senses_path, npc_aggro_curves_path, senses_error)) {
+                spdlog::warn("[combat] no creature senses ({}): every creature notices within {} cm and leashes at {} cm (run scripts/extract_game_data.ps1)", senses_error, npc_aggro_cm, npc_leash_cm);
             }
         }
         {
