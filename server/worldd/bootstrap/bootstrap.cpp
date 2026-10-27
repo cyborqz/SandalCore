@@ -834,7 +834,8 @@ std::optional<Send> PlayerBootstrap::xp_tracker_open() {
         pc_.subobjects.push_back(std::move(tracker));
         xp_tracker_added_ = true;
     }
-    if (!ftue_added_ && !add_ftue_component()) return std::nullopt;   // (the tutorial component comes after the tracker in the chain, as in the retail login's big chain)
+    if (!quest_added_ && !add_quest_component()) return std::nullopt;   // (the quest component and the tutorial component come after the tracker in the chain, as in the retail login's big chain)
+    if (!ftue_added_ && !add_ftue_component()) return std::nullopt;
     return update(Role::PlayerController, "XPTracker", pc_, pc_shadow_);
 }
 
@@ -865,6 +866,28 @@ bool PlayerBootstrap::add_ftue_component() {
     pc_.subobjects.push_back(std::move(ftue));
     ftue_added_ = true;
     return true;
+}
+
+bool PlayerBootstrap::add_quest_component() {
+    repl::Subobject quest = make_component(setup_.guids.quest, "QuestConsumerComponent", kChecksumQuest);
+    if (!quest.obj.schema) return fail("no schema for the quest component (UQuestConsumerComponent)");
+    quest.obj.arrays = std::move(quest_arrays_);
+    quest_arrays_ = repl::FastArrays{};
+    pc_.subobjects.push_back(std::move(quest));
+    quest_added_ = true;
+    return true;
+}
+
+repl::FastArrays* PlayerBootstrap::quest_arrays() {
+    if (!ok_) return nullptr;
+    if (!quest_added_) return &quest_arrays_;
+    repl::Subobject* quest = pc_.find(setup_.guids.quest);
+    return quest ? &quest->obj.arrays : nullptr;
+}
+
+std::optional<Send> PlayerBootstrap::quest_update() {
+    if (!ok_ || !quest_added_) return std::nullopt;
+    return update(Role::PlayerController, "QuestConsumerComponent", pc_, pc_shadow_);
 }
 
 bool PlayerBootstrap::set_completed_ftues(const std::vector<int64_t>& ids) {
@@ -1426,6 +1449,75 @@ std::optional<Send> PlayerBootstrap::dialogue_update(const DialogueView& view) {
         return pc_.obj.state.set(cls, full, std::move(v));
     };
     const bool no_lines = lines.elements.empty();
+    // quests, slice 1: the quest offer on top of the conversation.  The queue is a dynamic array of structs: one element while an offer is open, and the empty array (24 bits) when it is
+    // answered; an array the connection never had stays out of the state.
+    repl::ArrayValue queued;
+    if (view.sub) {
+        const DialogueView::SubDialogue& sd = *view.sub;
+        const schema::RepCommand* array_cmd = cls.command(path("QueuedSubDialogues"));
+        if (!array_cmd) return std::nullopt;
+        const auto elems = cls.elements(*array_cmd);
+        const auto find = [&](const std::string& tail) -> uint16_t {
+            for (const schema::RepCommand& c : elems) {
+                if (tail == c.path) return c.handle;
+            }
+            return 0;
+        };
+        repl::ElementState e;
+        bool ok = true;
+        const auto setv = [&](const std::string& tail, Value v) {
+            const uint16_t h = find("QueuedSubDialogues." + tail);
+            if (h == 0) ok = false;
+            else e.values[h] = std::move(v);
+        };
+        const auto node_id = [&](const std::string& prefix, int64_t guid) {
+            setv(prefix + ".Guid", Value::i64(guid));
+            setv(prefix + ".TypeId", Value::i64(repl::kDialogueNodeTypeId));
+            setv(prefix + ".Name", Value(repl::NameValue::hardcoded_name(0)));
+        };
+        const auto record_id = [&](const std::string& prefix, int64_t guid, int64_t type) {
+            setv(prefix + ".Guid", Value::i64(guid));
+            setv(prefix + ".TypeId", Value::i64(type));
+            setv(prefix + ".Name", Value(repl::NameValue::hardcoded_name(0)));
+        };
+        constexpr int64_t kQuestTypeId = 6732126019658962568LL, kObjectiveTypeId = 2174867120698124769LL;
+        setv("SubDialogueType", Value::u64(2));   // ESubDialogueType::QuestAccept
+        node_id("PendingNextNode", sd.pending_next);
+        node_id("PreviousNode", sd.previous_node);
+        node_id("SubDialogueNodeId", sd.node);
+        for (const char* w : {"A", "B", "C", "D"}) {
+            setv(std::string("QuestPreview.InstanceGuid.") + w, Value::i64(0));   // (the quest has no instance yet)
+            setv(std::string("QuestGuid.") + w, Value::i64(0));
+        }
+        record_id("QuestPreview.QuestId", sd.quest, kQuestTypeId);
+        record_id("QuestId", sd.quest, kQuestTypeId);
+        setv("QuestPreview.BaseQuestRewards", Value(repl::RewardInstance{}));   // (slice 1 pays nothing: the preview lists nothing)
+        setv("QuestPreview.NodeId", Value::i64(0));
+        setv("QuestPreview.bCompletedAlready", Value::boolean(false));
+        const auto id_list = [&](const std::string& tail, const std::vector<int64_t>& ids) {
+            const schema::RepCommand* c = nullptr;
+            for (const schema::RepCommand& x : elems) {
+                if (("QueuedSubDialogues." + tail) == x.path) c = &x;
+            }
+            if (!c || c->type != schema::PropType::DynamicArray || c->elem_end <= c->elem_begin) {
+                ok = false;
+                return;
+            }
+            repl::ArrayValue list;
+            for (const int64_t id : ids) {
+                repl::ElementState item;
+                item.values[1] = Value::i64(id);
+                item.values[2] = Value::i64(kObjectiveTypeId);
+                item.values[3] = Value(repl::NameValue::hardcoded_name(0));
+                list.elements.push_back(std::move(item));
+            }
+            e.values[find("QueuedSubDialogues." + tail)] = Value(std::move(list));
+        };
+        id_list("QuestPreview.InitialObjectives", sd.initial_objectives);
+        id_list("ObjectiveIds", sd.objectives);
+        if (!ok) return std::nullopt;
+        queued.elements.push_back(std::move(e));
+    }
     bool good = true;
     good = good && put("PreviousNode.Guid", Value::i64(view.previous_node), view.previous_node == 0);
     good = good && put("PreviousSelectedChoice.SourceNodeId.Guid", Value::i64(view.previous_choice_node), view.previous_choice_node == 0);
@@ -1435,6 +1527,8 @@ std::optional<Send> PlayerBootstrap::dialogue_update(const DialogueView& view) {
     good = good && put("SourceHandle.ObjectSource", Value(view.source), view.source == emit::FIntrepidNetworkGUID{});
     good = good && put("ResponseText.DialogueNodeId.Guid", Value::i64(view.shown_node), view.shown_node == 0);
     good = good && put("bIsInGreeting", Value::boolean(view.greeting), !view.greeting);
+    good = good && put("QueuedSubDialogues", Value(std::move(queued)), !view.sub);
+    if (view.exhaust) good = good && put("ExhaustBehavior", Value::u64(0), false);
     if (!good) return std::nullopt;
     return update(Role::PlayerController, "dialogue", pc_, pc_shadow_);
 }

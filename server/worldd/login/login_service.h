@@ -59,8 +59,9 @@ public:
 
 class LoginService {
 public:
-    LoginService(svc::GatewayApi& gateway, svc::CharacterApi& characters)
-        : gateway_(gateway), characters_(characters) {}
+    /// `quests` (optional): the quest service; a character's saved quest log is read from it at the login.
+    LoginService(svc::GatewayApi& gateway, svc::CharacterApi& characters, svc::QuestApi* quests = nullptr)
+        : gateway_(gateway), characters_(characters), quests_(quests) {}
 
     /// Redeems the ticket for this server and loads the character.  Blocks
     /// on the services: call it off the network thread.
@@ -69,6 +70,7 @@ public:
 private:
     svc::GatewayApi& gateway_;
     svc::CharacterApi& characters_;
+    svc::QuestApi*     quests_ = nullptr;
 };
 
 }} // namespace aoc::worldd

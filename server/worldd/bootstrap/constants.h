@@ -146,6 +146,7 @@ inline constexpr uint32_t kChecksumPawnMesh          = 3094778671u;   // Charact
 inline constexpr uint32_t kChecksumInteractInfo      = 3257521646u;
 inline constexpr uint64_t kMountInteractableZone     = 2;
 inline constexpr uint32_t kChecksumXPTracker         = 0x037669d1;   // plan D1: the PlayerController's ULevelingComponent (transcript section 4.2)
+inline constexpr uint32_t kChecksumQuest             = 0x00b41150;   // quests, slice 1: the PlayerController's quest component, "QuestConsumerComponent" (UQuestConsumerComponent): exported with flags 7 and this checksum
 inline constexpr uint32_t kChecksumFTUE              = 0x32ccd811;   // missing systems, step 0: the PlayerController's tutorial component, "FTUE Component" (UFTUEComponent): exported with flags 7 and this checksum
 
 // ---- the PlayerController and the pawn ---------------------------------------------------------------------------------

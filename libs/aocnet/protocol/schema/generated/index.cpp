@@ -72,6 +72,7 @@
 #include "protocol/schema/generated/UOwnerInfoComponent.h"
 #include "protocol/schema/generated/UPlayerCombatInfo.h"
 #include "protocol/schema/generated/UPlayerInfo.h"
+#include "protocol/schema/generated/UQuestConsumerComponent.h"
 #include "protocol/schema/generated/UResourceStorageComponent.h"
 #include "protocol/schema/generated/URewardStorageComponent.h"
 
@@ -142,12 +143,14 @@ constexpr Entry kByName[] = {
     {"UOwnerInfoComponent", &kUOwnerInfoComponent},
     {"UPlayerCombatInfo", &kUPlayerCombatInfo},
     {"UPlayerInfo", &kUPlayerInfo},
+    {"UQuestConsumerComponent", &kUQuestConsumerComponent},
     {"UResourceStorageComponent", &kUResourceStorageComponent},
     {"URewardStorageComponent", &kURewardStorageComponent},
 };
 
 constexpr Entry kComponents[] = {
     {"AbilityComponent", &kUAoCAbilityComponent},
+    {"ActorAuthGlobalQuestConsumerComponent", &kUQuestConsumerComponent},
     {"AlignmentComponent", &kUAlignmentComponent},
     {"AoCNodePlot", &kUAoCNodePlotComponent},
     {"AquaticMountComponent", &kUMountComponent},
@@ -164,6 +167,7 @@ constexpr Entry kComponents[] = {
     {"IntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
     {"NPCAppearanceComponent", &kUNPCAppearanceComponent},
     {"OwnerInfo", &kUOwnerInfoComponent},
+    {"QuestConsumerComponent", &kUQuestConsumerComponent},
     {"QuestStorageComponent", &kUItemStorageComponent},
     {"RewardStorageComponent", &kURewardStorageComponent},
     {"StatsComponent", &kUAoCStatsComponent},
@@ -227,6 +231,7 @@ constexpr const ClassSchema* kAll[] = {
     &kUOwnerInfoComponent,
     &kUPlayerCombatInfo,
     &kUPlayerInfo,
+    &kUQuestConsumerComponent,
     &kUResourceStorageComponent,
     &kURewardStorageComponent,
 };

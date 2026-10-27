@@ -35,6 +35,7 @@ SessionGuids mint_session_guids(protocol::ServerGuidAllocator& a, const emit::FI
     g.ability = a.next();
     g.stats = a.next();
     g.xp_tracker = a.next();   // plan D1: after the pawn's components, as the capture's 578 was
+    g.quest = a.next();        // quests, slice 1: after everything else, so that no id of the capture's order moves
     return g;   // (Resource1 and Resource2 are minted by the session when the character wears a bag for them: no other id moves)
 }
 

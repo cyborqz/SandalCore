@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "20"
+const Version = "21"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -431,6 +431,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildCrafting(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildQuests(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
 

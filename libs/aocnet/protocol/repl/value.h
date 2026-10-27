@@ -687,6 +687,21 @@ struct CraftItemState {
     }
 };
 
+/// FRewardInstance (quests, slice 1): what a quest pays, as the offer's preview and a quest of the log carry it; NetSerialize (quest_codec.h has the layout).  Its two maps and its list of reward
+/// table ids are empty in every captured reward and only that form is modelled, so the struct holds the items and the two experience numbers.
+struct RewardInstance {
+    std::vector<ItemInstance> items;
+    int32_t node_activity_experience = 0;
+    int32_t guild_activity_experience = 0;
+    bool operator==(const RewardInstance&) const = default;
+};
+
+/// FHashedVariable (quests, slice 1): the variables of one quest instance, each a 64-bit key (CityHash64 of its name) and an int32 value, in the map's order; NetSerialize (quest_codec.h).
+struct HashedVariable {
+    std::vector<std::pair<uint64_t, int32_t>> variables;
+    bool operator==(const HashedVariable&) const = default;
+};
+
 // ---- Value -----------------------------------------------------------------
 
 struct ElementState;
@@ -709,7 +724,8 @@ public:
         Vec3d, Vec2d, Rot, QuantVec, Normal16, RepMovement, LoadTracker, UniqueNetId, Ticks,
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
-        EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState>;
+        EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
+        RewardInstance, HashedVariable>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

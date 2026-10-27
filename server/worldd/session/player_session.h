@@ -267,6 +267,8 @@
 #include "items/wallet.h"
 #include "net/connection.h"
 #include "net/control_channel.h"
+#include "quest/quest_log.h"
+#include "quest/quest_service.h"
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/node_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
@@ -720,6 +722,13 @@ public:
     size_t   dialogue_steps() const { return dialogue_steps_; }
     size_t   dialogue_closes() const { return dialogue_closes_; }
     size_t   dialogue_refused() const { return dialogue_refused_; }
+    // ---- quests, slice 1 ----
+    const quest::QuestLog& quest_log() const { return quest_log_; }
+    /// Whether the character's quest log loaded (or it has none): the quests work.  False: no quest service, or it did not answer at the login.
+    bool     quests_on() const { return quests_on_; }
+    size_t   quests_taken() const { return quests_taken_; }
+    size_t   quests_refused() const { return quests_refused_; }
+    size_t   quests_abandoned() const { return quests_abandoned_; }
     /// The tax-table requests of the vendor windows, and the tables sent in answer.
     size_t   tax_requests() const { return tax_requests_; }
     size_t   tax_tables_sent() const { return tax_tables_sent_; }
@@ -869,8 +878,31 @@ private:
     bool open_dialogue(Connection& conn, const world::WorldActor& npc, Clock::time_point now);
     /// ServerSelectDialogueChoice: a line chosen, the window closed, a window the line opened closed.
     void on_dialogue_choice(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
-    /// Sends the conversation as it is now (the PlayerController's CurrentDialogueInstance).
-    void send_dialogue(Connection& conn, const char* why);
+    /// Whether the NPC offers a quest the world knows (it may open a conversation although it has no root of its own).
+    bool npc_offers_quests(const world::WorldActor& npc) const;
+    /// Sends the conversation as it is now (the PlayerController's CurrentDialogueInstance).  `exhaust`: the quest offer was answered, so ExhaustBehavior goes with the cleared queue.
+    void send_dialogue(Connection& conn, const char* why, bool exhaust = false);
+    // ---- quests, slice 1: the quest log and the quest panel -----------------------------------------------------------------------------------------
+    /// At the join: the character's saved log becomes the quest component's arrays.
+    void init_quests(PlayerWorld& world, const svc::Character& character);
+    /// Brings the quest component in line with the log, queues the update and marks the log to be saved.
+    void quest_sync(Connection& conn, const char* why);
+    /// Every tick: the GM commands that arrived, the zone the character stands in, and the save when the log changed.
+    void run_quests(Connection& conn, Clock::time_point now);
+    /// Takes a quest: the log, the client's component, the save.  The caller has checked quest::QuestLog::can_start (or is a GM).
+    void start_quest(Connection& conn, const content::QuestRow& def, int64_t source, const char* why, Clock::time_point now);
+    /// The player answered the quest panel (SubDialogue / Accept, Decline).
+    void on_quest_offer(Connection& conn, uint8_t response, Clock::time_point now);
+    /// ServerAbandonQuests(QuestGuids, QuestState): the quests the client names leave the log.
+    void on_abandon_quests(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// The client's own debug calls (ServerDebugStartQuest, ServerDebugEndQuest, ServerDebugFailQuestByInstance, ServerClearCompletedQuests): GM commands.
+    void on_quest_debug_rpc(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// A GM command from the inbox (questctl): give, finish, fail, abandon, clear, set-var.
+    void apply_quest_command(Connection& conn, const svc::QuestCommand& cmd, Clock::time_point now);
+    /// The quests with the given record leave the log (kind "abandon" / "fail" / "finish"): the log, the quest items, the client, the save.  False when the quest is not in the log.
+    bool end_quest(Connection& conn, int64_t record, const char* kind, Clock::time_point now);
+    /// The items of the quest bag that are bound to a quest that left the log are deleted (item records the data binds to quests).
+    void remove_quest_items(Connection& conn, int64_t quest, Clock::time_point now);
     /// Ends the conversation on the server's side (the player walked away or died, the NPC is gone) and tells the client.
     void end_dialogue(Connection& conn, const char* why);
     /// Every tick: a conversation whose NPC is gone or far away ends.
@@ -1445,6 +1477,15 @@ private:
     RequestBudget  dialogue_budget_{kVendorBurst, kVendorInterval};
     size_t         dialogue_opens_ = 0, dialogue_steps_ = 0, dialogue_closes_ = 0, dialogue_refused_ = 0, dialogue_logged_ = 0;
     std::set<std::string> dialogue_told_;   // what the conversation skipped or could not answer, told once for each text
+    // quests, slice 1: the quest log
+    quest::QuestLog      quest_log_;
+    bool                 quests_on_ = false;        // the log loaded
+    quest::QuestWorker*  quest_worker_ = nullptr;   // saves the log, takes the GM commands (null: no quest service)
+    bool                 quests_touched_ = false;   // the log changed during this session (it is saved once more when the session ends)
+    int64_t              zoi_seen_ = -1;            // the zone of influence the character stood in at the last check (-1: none checked yet)
+    Clock::time_point    zone_checked_{};
+    size_t               quests_taken_ = 0, quests_refused_ = 0, quests_abandoned_ = 0, quests_logged_ = 0;
+    std::set<std::string> quest_told_;               // what a quest's start skipped, told once for each text
     Clock::time_point last_save_{};
     bool save_clock_started_ = false;
     bool finished_ = false;

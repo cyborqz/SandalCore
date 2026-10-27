@@ -24,6 +24,7 @@
 #include "protocol/server_guid_allocator.h"
 #include "session/player_world.h"
 #include "session/gm_travel.h"
+#include "quest/quest_service.h"
 #include "session/position_saver.h"
 #include "spawns/node_population.h"
 #include "svc/city_node_feed.h"
@@ -389,6 +390,12 @@ int main(int argc, char** argv) {
     CharacterSaver::Config saver_config;
     saver_config.destructor_wait = std::chrono::milliseconds(0);
     CharacterSaver saver(services, saver_config);
+    // Quests, slice 1: the quest service (AOC_QUESTS_GRPC_ADDR, default 127.0.0.1:50058) keeps the characters' quest logs and the GM commands for them.  It is declared after the saver and
+    // before the world, so it outlives every session.  A service that is down only costs the characters their quests: the login says so and plays on.
+    const char* quests_env = std::getenv("AOC_QUESTS_GRPC_ADDR");
+    const std::string quests_addr = quests_env && *quests_env ? quests_env : "127.0.0.1:50058";
+    quest::GrpcQuestApi quest_api(quests_addr, *token);
+    quest::QuestWorker quest_worker(quest_api);
     PlayerWorld players(content ? &*content : nullptr, content_problem, mode, reg.server_id, guids);
     if (content && !players.ready()) {
         // content.db opened, but its ability rows are not what this worldd runs (plan A7): the same refusal as a missing file
@@ -397,6 +404,7 @@ int main(int argc, char** argv) {
     players.set_movement(movement);
     players.set_position_sink(&saver);
     players.set_gm_commands(gm_commands);
+    players.set_quest_worker(&quest_worker);
     spdlog::info("[gm] the client's own GM teleport commands are {}", gm_commands ? "ON (--gm-commands)" : "off (--gm-commands, or AOC_GM_COMMANDS=1, turns them on); each one the client sends is logged");
     // Nodes 1, stage 1: the registry from content.db, the seed's levels at once (login never waits for the service), then the stream.  The feed is declared
     // after the world, so it stops first.
@@ -655,7 +663,7 @@ int main(int argc, char** argv) {
     });
 
     CookieSigner signer;
-    LoginService login(services, services);
+    LoginService login(services, services, &quest_api);
     Endpoint* endpoint_ptr = nullptr;
     LoginWorker worker(login, reg.server_id, [&](uint64_t id, LoginResult r) {
         endpoint_ptr->post_login_result(id, std::move(r));
@@ -762,6 +770,7 @@ int main(int argc, char** argv) {
     if (!saver.flush(std::chrono::seconds(5))) {
         spdlog::warn("stopping: {} position(s) were not saved in 5 s", saver.queued());
     }
+    if (!quest_worker.flush(std::chrono::seconds(5))) spdlog::warn("stopping: a quest log was not saved in 5 s");
     heartbeat.join();
     return exit_code;
 }

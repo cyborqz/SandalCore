@@ -165,6 +165,59 @@ struct AccountCharacter {
     std::string name;
 };
 
+/// Quests, slice 1: one objective of a quest the character took, as the quest service keeps it (aoc.quest.v1.ObjectiveState).
+struct SavedObjective {
+    std::string instance_guid;               // 32 lower-case hex digits
+    int64_t     record_id = 0;
+    bool        active = false, awake = false, hidden = false, completed = false, succeeded = false, failed = false;
+    int32_t     count = 0;
+    double      start_time = 0;
+    bool operator==(const SavedObjective&) const = default;
+};
+
+/// A quest the character took and has not finished (aoc.quest.v1.QuestInstance).
+struct SavedQuest {
+    std::string instance_guid;               // 32 lower-case hex digits
+    int64_t     record_id = 0;
+    int32_t     status = 0;                  // 0 active, 1 completed, 2 failed, 3 paused
+    double      start_time = 0;
+    int64_t     source_guid = 0;
+    std::vector<SavedObjective> objectives;
+    bool operator==(const SavedQuest&) const = default;
+};
+
+struct SavedCompleted {
+    int64_t record_id = 0;
+    int32_t count = 0;
+    bool operator==(const SavedCompleted&) const = default;
+};
+
+struct SavedVariable {
+    std::string name;
+    int64_t     value = 0;
+    bool operator==(const SavedVariable&) const = default;
+};
+
+/// A character's whole quest log (aoc.quest.v1.QuestLog).
+struct SavedQuestLog {
+    std::vector<SavedQuest>     instances;   // in the order the quests were taken
+    std::vector<SavedCompleted> completed;
+    std::vector<SavedVariable>  variables;
+    bool operator==(const SavedQuestLog&) const = default;
+};
+
+/// A GM command waiting for a character (aoc.quest.v1.Command): kind give / finish / fail / abandon / clear / set-var.
+struct QuestCommand {
+    int64_t     id = 0;
+    std::string kind, quest, name;
+    int64_t     value = 0;
+};
+
+struct QuestLogResult {
+    CallStatus    status = CallStatus::Failed;
+    SavedQuestLog log;
+};
+
 struct Character {
     std::string id;
     int64_t account_id = 0;
@@ -201,6 +254,9 @@ struct Character {
     std::vector<int64_t> known_recipes;
     /// Missing systems, step 0: the tutorials the character finished (FirstTimeEvent Guids, in the order they were finished; with the items).  A service of an older version sends none.
     std::vector<int64_t> completed_ftues;
+    /// Quests, slice 1: the character's saved quest log, read from the quest service at the login.  Empty (nullopt) when the world server has no quest service or it did not answer: the
+    /// character then plays without quests, and nothing is saved over what the service holds.
+    std::optional<SavedQuestLog> quest_log;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -295,6 +351,18 @@ public:
         (void)progress;
         return CallStatus::Failed;
     }
+};
+
+/// Quests, slice 1: the quest service (aoc.quest.v1.QuestService).  A world server that cannot reach it plays without quests.
+class QuestApi {
+public:
+    virtual ~QuestApi() = default;
+    /// The character's saved log (empty for a character that took nothing).
+    virtual QuestLogResult load_log(const std::string& character_id) = 0;
+    /// Replaces the character's whole log.  Refused: a log the service finds invalid; NotFound: no such character.
+    virtual CallStatus save_log(const std::string& character_id, const SavedQuestLog& log) = 0;
+    /// The GM commands queued for the character, oldest first; they are removed from the service.
+    virtual CallStatus take_commands(const std::string& character_id, std::vector<QuestCommand>& out) = 0;
 };
 
 class MeshApi {

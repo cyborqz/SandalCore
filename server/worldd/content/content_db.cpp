@@ -2898,6 +2898,157 @@ std::optional<DialogueData> ContentDb::dialogue_data(std::string& error) const {
     return out;
 }
 
+namespace {
+
+/// A JSON list of whole numbers ("[1, 2]"); false when the text does not read.
+bool parse_guid_list(const std::string& text, std::vector<int64_t>& out) {
+    out.clear();
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_array()) return false;
+    for (const auto& v : j) {
+        if (!v.is_number_integer()) return false;
+        out.push_back(v.get<int64_t>());
+    }
+    return true;
+}
+
+/// A quest's start actions ([{"a": kind, "o": objective, "q": quest, "n": name, "v": value, "c": 1}]); false when the text does not read.
+bool parse_quest_start_actions(const std::string& text, std::vector<QuestStartAction>& out) {
+    out.clear();
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_array()) return false;
+    for (const auto& a : j) {
+        if (!a.is_object()) return false;
+        QuestStartAction r;
+        if (const auto it = a.find("a"); it != a.end() && it->is_string()) r.action = it->get<std::string>();
+        if (const auto it = a.find("o"); it != a.end() && it->is_number_integer()) r.objective = it->get<int64_t>();
+        if (const auto it = a.find("q"); it != a.end() && it->is_number_integer()) r.quest = it->get<int64_t>();
+        if (const auto it = a.find("n"); it != a.end() && it->is_string()) r.variable = it->get<std::string>();
+        if (const auto it = a.find("v"); it != a.end() && it->is_number_integer()) r.value = it->get<int64_t>();
+        if (const auto it = a.find("c"); it != a.end() && it->is_number_integer()) r.conditional = it->get<int64_t>() != 0;
+        out.push_back(std::move(r));
+    }
+    return true;
+}
+
+}  // namespace
+
+std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
+    QuestData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the quest tables are contentc version 21's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    const auto unread = [&](const char* table, int64_t guid) {
+        error = std::string("content.db ") + table + " row " + std::to_string(guid) + " does not read";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT guid, name, flavor, locality, level, can_abandon, repeatable, disabled, default_activate, activation, start_actions, rewards FROM quest");
+        if (!q.ok()) return failed("quest");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (int c : {0, 4, 5, 6, 7, 8}) {
+                if (!column_is_int(s, c)) return unread("quest", 0);
+            }
+            QuestRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.flavor = column_text(s, 2);
+            r.locality = column_text(s, 3);
+            r.level = static_cast<int>(sqlite3_column_int64(s, 4));
+            r.can_abandon = sqlite3_column_int64(s, 5) != 0;
+            r.repeatable = sqlite3_column_int64(s, 6) != 0;
+            r.disabled = sqlite3_column_int64(s, 7) != 0;
+            r.default_activate = sqlite3_column_int64(s, 8) != 0;
+            if (!parse_dialogue_requirement(column_text(s, 9), r.activation) || !parse_quest_start_actions(column_text(s, 10), r.start_actions) || !parse_guid_list(column_text(s, 11), r.rewards)) {
+                return unread("quest", r.guid);
+            }
+            out.by_name[r.name] = r.guid;
+            out.quests[r.guid] = std::move(r);
+        }
+        if (step != SQLITE_DONE) return failed("quest");
+    }
+    {
+        Stmt q(db_, "SELECT quest_guid, idx, guid, name, obj_type, completion_count, default_awake, default_hidden, completes_quest, optional FROM quest_objective ORDER BY quest_guid, idx");
+        if (!q.ok()) return failed("quest_objective");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (int c : {0, 1, 2, 5, 6, 7, 8, 9}) {
+                if (!column_is_int(s, c)) return unread("quest_objective", 0);
+            }
+            const auto it = out.quests.find(sqlite3_column_int64(s, 0));
+            if (it == out.quests.end()) return unread("quest_objective", sqlite3_column_int64(s, 0));
+            QuestObjectiveRow o;
+            o.guid = sqlite3_column_int64(s, 2);
+            o.name = column_text(s, 3);
+            o.type = column_text(s, 4);
+            o.count = sqlite3_column_int64(s, 5);
+            o.awake = sqlite3_column_int64(s, 6) != 0;
+            o.hidden = sqlite3_column_int64(s, 7) != 0;
+            o.completes = sqlite3_column_int64(s, 8) != 0;
+            o.optional = sqlite3_column_int64(s, 9) != 0;
+            it->second.objectives.push_back(std::move(o));
+        }
+        if (step != SQLITE_DONE) return failed("quest_objective");
+    }
+    {
+        Stmt q(db_, "SELECT source_kind, source_guid, quest_guid, dynamic_node FROM npc_offered_quest ORDER BY source_kind, source_guid, idx");
+        if (!q.ok()) return failed("npc_offered_quest");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 1) || !column_is_int(s, 2) || !column_is_int(s, 3)) return unread("npc_offered_quest", 0);
+            const std::string kind = column_text(s, 0);
+            (kind == "instance" ? out.instance_offers : out.asset_offers)[sqlite3_column_int64(s, 1)].push_back({sqlite3_column_int64(s, 2), sqlite3_column_int64(s, 3)});
+        }
+        if (step != SQLITE_DONE) return failed("npc_offered_quest");
+    }
+    {
+        Stmt q(db_, "SELECT node_guid, quest_guid, on_success, objectives FROM dialogue_accept");
+        if (!q.ok()) return failed("dialogue_accept");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1) || !column_is_int(s, 2)) return unread("dialogue_accept", 0);
+            QuestAcceptRow r;
+            r.node = sqlite3_column_int64(s, 0);
+            r.quest = sqlite3_column_int64(s, 1);
+            r.on_success = sqlite3_column_int64(s, 2);
+            if (!parse_guid_list(column_text(s, 3), r.objectives)) return unread("dialogue_accept", r.node);
+            out.accepts[r.node] = std::move(r);
+        }
+        if (step != SQLITE_DONE) return failed("dialogue_accept");
+    }
+    {
+        Stmt q(db_, "SELECT zoi_guid, quest_guid FROM zoi_quest ORDER BY zoi_guid, idx");
+        if (!q.ok()) return failed("zoi_quest");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("zoi_quest", 0);
+            out.zoi_quests[sqlite3_column_int64(s, 0)].push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed("zoi_quest");
+    }
+    {
+        Stmt q(db_, "SELECT item_guid, quest_guid, kind FROM item_quest ORDER BY item_guid, quest_guid, kind");
+        if (!q.ok()) return failed("item_quest");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("item_quest", 0);
+            out.item_quests[sqlite3_column_int64(s, 0)].push_back({sqlite3_column_int64(s, 1), column_text(s, 2)});
+        }
+        if (step != SQLITE_DONE) return failed("item_quest");
+    }
+    return out;
+}
+
 std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string& error) const {
     std::vector<int64_t> out;
     Stmt q(db_, "SELECT guid FROM item WHERE name = ?1 COLLATE NOCASE ORDER BY guid LIMIT 8");

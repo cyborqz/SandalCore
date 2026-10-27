@@ -16,6 +16,7 @@
 #include "protocol/repl/callout_codec.h"
 #include "protocol/repl/channeling_codec.h"
 #include "protocol/repl/craft_codec.h"
+#include "protocol/repl/quest_codec.h"
 #include "protocol/repl/item_codec.h"
 
 #include <algorithm>
@@ -112,7 +113,7 @@ void   write_double(BunchWriter& out, double d) { out.write_uint64(std::bit_cast
 enum class S {
     Unknown, Vec3, Vec2, Ticks, Rotator, Quantized, Normal, RepMovement, LoadTracker, UniqueId, Tag, TagContainer,
     StatInt32, Quat, GuidToBool, Alignment, AppearanceId, Customization, ItemInstance, ItemStorageEvent, HitConfirmations,
-    MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData, CraftState,
+    MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData, CraftState, RewardInstance, HashedVariable,
 };
 
 S find_struct(std::string_view n) {
@@ -143,6 +144,8 @@ S find_struct(std::string_view n) {
     if (n == "FLocalizedMessage") return S::LocalizedMessage;
     if (n == "FChannelingData") return S::ChannelingData;
     if (n == "FCraftItemState") return S::CraftState;
+    if (n == "FRewardInstance") return S::RewardInstance;
+    if (n == "FHashedVariable") return S::HashedVariable;
     return S::Unknown;
 }
 
@@ -1136,6 +1139,14 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
             const auto* s = v.get_if<CraftItemState>();
             return s && craft_state_fits(*s);
         }
+        case S::RewardInstance: {
+            const auto* s = v.get_if<RewardInstance>();
+            return s && reward_instance_fits(*s);
+        }
+        case S::HashedVariable: {
+            const auto* s = v.get_if<HashedVariable>();
+            return s && hashed_variable_fits(*s);
+        }
         case S::ChannelingData: {
             const auto* d = v.get_if<ChannelingData>();
             return d && channeling_data_fits(*d);
@@ -1157,6 +1168,8 @@ std::optional<Value> zero_struct(std::string_view struct_name) {
         case S::MovementInput: return Value(PlayerMovementInput{});   // no direction held
         case S::LocalizedMessage: return Value(LocalizedMessage{});     // no table, no key
         case S::CraftState:   return Value(CraftItemState{});           // no recipe, no resources
+        case S::RewardInstance: return Value(RewardInstance{});         // no items, no experience
+        case S::HashedVariable: return Value(HashedVariable{});         // no variables
         default:              break;
     }
     return std::nullopt;
@@ -1321,6 +1334,16 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
             if (!s) return std::nullopt;
             return Value(std::move(*s));
         }
+        case S::RewardInstance: {
+            auto s = read_reward_instance(r);
+            if (!s) return std::nullopt;
+            return Value(std::move(*s));
+        }
+        case S::HashedVariable: {
+            auto s = read_hashed_variable(r);
+            if (!s) return std::nullopt;
+            return Value(std::move(*s));
+        }
         case S::Unknown:
             break;
     }
@@ -1424,6 +1447,10 @@ bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out
             return write_channeling_data(out, *v.get_if<ChannelingData>());
         case S::CraftState:
             return write_craft_item_state(out, *v.get_if<CraftItemState>());
+        case S::RewardInstance:
+            return write_reward_instance(out, *v.get_if<RewardInstance>());
+        case S::HashedVariable:
+            return write_hashed_variable(out, *v.get_if<HashedVariable>());
         case S::Unknown:
             break;
     }

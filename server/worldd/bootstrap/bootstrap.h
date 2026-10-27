@@ -215,6 +215,13 @@ public:
     /// What changed on the tutorial component since the last update, as one PlayerController chain, reliable; nullopt when nothing did (or before the join's last chain).
     std::optional<Send> ftue_update();
 
+    /// Quests, slice 1: the PlayerController's quest component ("QuestConsumerComponent", UQuestConsumerComponent), a stably named subobject whose two fast arrays hold the character's quests
+    /// (quest/quest_wire.h).  xp_tracker_open() adds it into the XPTracker's chain, before the tutorial component (the retail login's order).  Until it is on the actor the arrays
+    /// are the setup's, for the join; the caller fills them (quest::sync) before the join's last chain and after every change.
+    repl::FastArrays* quest_arrays();
+    /// What changed on the quest component since the last update, as one PlayerController chain, reliable; nullopt when nothing did (or before the join's last chain).
+    std::optional<Send> quest_update();
+
     // ---- replies ----------------------------------------------------------------------------------------------------
 
     /// The pawn's phase-in (the reply to ServerClientIsReadyToPhaseIn, pkt#2523): bHidden 0 and BaseCharacterInfo
@@ -338,6 +345,18 @@ public:
         emit::FIntrepidNetworkGUID source;                       // SourceHandle.ObjectSource: the NPC (the zero reference: nobody)
         int64_t                   shown_node = 0;                // ResponseText.DialogueNodeId.Guid
         bool                      greeting = false;              // bIsInGreeting
+        /// Quests, slice 1: the quest offer the window shows on top of the conversation (QueuedSubDialogues holds this one entry, or none): a QuestAccept panel with a QuestPreview.
+        struct SubDialogue {
+            int64_t              pending_next = 0;       // PendingNextNode: where the talk goes on after the quest is taken
+            int64_t              previous_node = 0;      // PreviousNode: the node the player left to get here
+            int64_t              node = 0;               // SubDialogueNodeId: the node that offers the quest
+            int64_t              quest = 0;              // QuestPreview.QuestId and QuestId
+            std::vector<int64_t> initial_objectives;     // QuestPreview.InitialObjectives
+            std::vector<int64_t> objectives;             // ObjectiveIds
+        };
+        std::optional<SubDialogue> sub;
+        /// The offer was answered (taken, declined, refused): ExhaustBehavior is written (CloseAndClear, 0) in the same update as the cleared queue, as the game's server does.
+        bool                      exhaust = false;
     };
     /// The update for `view` (reliable); nullopt when it differs from what the connection has in nothing, before the pawn's second state, or when the schema refuses a value.
     std::optional<Send> dialogue_update(const DialogueView& view);
@@ -648,6 +667,7 @@ private:
     void sync_xp_tracker();
     /// Missing systems, step 0: puts the tutorial component on the PlayerController with the setup's list (once); false when it does not build.
     bool add_ftue_component();
+    bool add_quest_component();
     std::optional<Send> update(Role role, const char* what, repl::Actor& actor, repl::ActorShadow& shadow);
     std::optional<Send> rpcs(Role role, const char* what, std::span<const repl::RpcRequest> calls);
     std::optional<Send> verbatim_block(Role role, const char* what, const char* hex, size_t bits);
@@ -690,6 +710,8 @@ private:
     repl::LevelingState leveling_;
     bool                xp_tracker_added_ = false;
     bool                ftue_added_ = false;   // missing systems, step 0: the tutorial component is on the PlayerController
+    bool                quest_added_ = false;  // quests, slice 1: the quest component is on the PlayerController
+    repl::FastArrays    quest_arrays_;         // ... and, until it is, its two arrays
     /// Nodes 1, stage 2: the GameState's node maps as they were before the last node_maps_update that built an update (it changes them before the chain exists); restore()
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;

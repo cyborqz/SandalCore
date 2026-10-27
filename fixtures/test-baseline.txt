@@ -36,6 +36,7 @@ test_repl_move_packed                PASS exit=0
 test_repl_node_layout                PASS exit=0
 test_repl_nodes                      PASS exit=0
 test_repl_npc                        PASS exit=0
+test_repl_quest                      PASS exit=0
 test_repl_rep_block                  PASS exit=0
 test_repl_resource                   PASS exit=0
 test_repl_rpc                        PASS exit=0

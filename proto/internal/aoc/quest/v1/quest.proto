@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+syntax = "proto3";
+
+package aoc.quest.v1;
+
+option go_package = "aocrop/services/gen/aoc/quest/v1;questv1";
+
+// Internal: the quest service (quests milestone, slice 1). The saved quest log of each character: the quests it has taken, the ones it finished
+// and its quest variables, and the inbox of GM commands for a character (give, finish, clear ...). API-FIRST: worldd, questctl and the admin app to
+// come all call these same methods. Calls carry the service token (internal/svcauth).
+//
+// worldd is the only writer of a log while its character plays (it loads the log at login and saves it whenever it changes); a GM change for a
+// character that plays goes through the inbox: worldd takes the commands every moment and does them in the character's own session. Errors:
+// NotFound for a character that is not there; InvalidArgument for input the service refuses, with its reason.
+service QuestService {
+  // The character's whole log.
+  rpc LoadLog(LoadLogRequest) returns (LoadLogResponse);
+  // Replaces the character's whole log in one transaction.
+  rpc SaveLog(SaveLogRequest) returns (SaveLogResponse);
+  // Puts a GM command in the character's inbox.
+  rpc QueueCommand(QueueCommandRequest) returns (QueueCommandResponse);
+  // Returns the character's queued commands, oldest first, and removes them.
+  rpc TakeCommands(TakeCommandsRequest) returns (TakeCommandsResponse);
+}
+
+// One objective of a taken quest. The instance guid is the client's name for it; the flags are the states the client reads.
+message ObjectiveState {
+  string instance_guid = 1;   // 32 hex digits: the four words of an FGuid
+  int64 record_id = 2;        // the objective's design record
+  bool active = 3;
+  bool awake = 4;
+  bool hidden = 5;
+  bool completed = 6;
+  bool succeeded = 7;
+  bool failed = 8;
+  int32 count = 9;
+  double start_time = 10;     // when the objective started, in the world's seconds
+}
+
+// A quest the character took and has not finished.
+message QuestInstance {
+  string instance_guid = 1;   // 32 hex digits; stays the same for as long as the character has the quest
+  int64 record_id = 2;        // the quest's design record
+  int32 status = 3;           // 0 active, 1 completed, 2 failed, 3 paused
+  double start_time = 4;      // when the quest started, in the world's seconds
+  int64 source_guid = 5;      // the NPC population instance that gave it (0: none)
+  repeated ObjectiveState objectives = 6;
+}
+
+// A quest the character finished, and how often.
+message CompletedQuest {
+  int64 record_id = 1;
+  int32 count = 2;
+}
+
+message PlayerVariable {
+  string name = 1;
+  int64 value = 2;
+}
+
+message QuestLog {
+  repeated QuestInstance instances = 1;   // in the order the quests were taken
+  repeated CompletedQuest completed = 2;
+  repeated PlayerVariable variables = 3;
+}
+
+message LoadLogRequest {
+  string character_id = 1;
+}
+
+message LoadLogResponse {
+  QuestLog log = 1;
+}
+
+message SaveLogRequest {
+  string character_id = 1;
+  QuestLog log = 2;
+}
+
+message SaveLogResponse {}
+
+// A GM command. Kinds: "give" (take the quest, whatever its rules say), "finish" (the quest counts as done), "fail", "abandon" (take it out of the log
+// without counting it), "clear" (forget the character's finished quests and variables; with a quest, only that quest's), "set-var" (a quest variable).
+message QueueCommandRequest {
+  string character_id = 1;
+  string kind = 2;
+  string quest = 3;       // a quest's record id or name ("" when the command takes none)
+  string name = 4;        // set-var: the variable
+  int64 value = 5;        // set-var: its value
+}
+
+message QueueCommandResponse {
+  int64 id = 1;
+}
+
+message Command {
+  int64 id = 1;
+  string kind = 2;
+  string quest = 3;
+  string name = 4;
+  int64 value = 5;
+}
+
+message TakeCommandsRequest {
+  string character_id = 1;
+}
+
+message TakeCommandsResponse {
+  repeated Command commands = 1;
+}

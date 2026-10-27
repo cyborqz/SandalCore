@@ -188,6 +188,9 @@ struct SessionGuids {
     /// Plan D1: the PlayerController's XPTracker (ULevelingComponent), minted after the pawn's components (the capture's was
     /// the last id of the player's, 578, after everything else).
     emit::FIntrepidNetworkGUID xp_tracker;
+    /// Quests, slice 1: the PlayerController's quest component ("QuestConsumerComponent", UQuestConsumerComponent), minted after the tracker so that no earlier id moves.  It is a default
+    /// subobject the client knows by name: its content block is what gives it this id.
+    emit::FIntrepidNetworkGUID quest;
 };
 
 // ---- the progress (plan D1) --------------------------------------------------------------------------------------------------

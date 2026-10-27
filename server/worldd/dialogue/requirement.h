@@ -16,8 +16,9 @@
 //    PlayerVariable / WorldVariable    the named variable
 //    Expression      the value of an expression (expression.h)
 //
-//  The character has no quests yet (this milestone saves none): a quest is never active, completed or ready for hand-in, an objective is in no state, and a
-//  quest is Available when it is not disabled and its own activation rule holds (the same evaluation, one level down).  Anything the evaluator cannot answer -- a
+//  The character's quest log (Facts::quest_count and objective_count) answers the quest and objective states; without one (a test, a world with no quest service) the
+//  character has no quests: a quest is never active, completed or ready for hand-in and an objective is in no state.  A quest is Available when it is not disabled, not in the log
+//  now, not finished (unless it is repeatable) and its own activation rule holds (the same evaluation, one level down).  Anything the evaluator cannot answer -- a
 //  function of an expression nobody provides, a criterion of another kind, a tree that does not read -- makes the criterion (the tree) not hold, and is told to
 //  the caller once.
 // ============================================================================
@@ -43,6 +44,10 @@ public:
     virtual int64_t item_count(const std::vector<int64_t>& /*records*/, const std::vector<std::string>& /*tags*/) const { return 0; }
     virtual int64_t currency(int64_t /*def*/) const { return 0; }
     virtual int64_t player_variable(const std::string& /*name*/) const { return 0; }
+    /// Quests, slice 1: how many times the character has the quest in the given state (Active 0 or 1, Completed, Failed, ReadyForHandIn); nullopt: the facts keep no quest log.
+    virtual std::optional<int64_t> quest_count(int64_t /*quest*/, const std::string& /*query*/) const { return std::nullopt; }
+    /// ... and an objective of a quest (Active, Awake, Hidden, Revealed, Completed, Succeeded, Failed or Count); nullopt: no quest log, or a query it cannot answer.
+    virtual std::optional<int64_t> objective_count(int64_t /*quest*/, int64_t /*objective*/, const std::string& /*query*/) const { return std::nullopt; }
     virtual int64_t world_variable(const std::string& /*name*/) const { return 0; }
     std::optional<ExprValue> call(const std::string& /*name*/, const std::vector<ExprValue>& /*args*/) const override { return std::nullopt; }
     int64_t random_range(int64_t lo, int64_t hi) const override {
@@ -72,6 +77,12 @@ public:
         return it == d_.roots.end() ? 0 : it->second;
     }
     bool has_root(int64_t root) const { return d_.roots.count(root) != 0; }
+    /// Quests, slice 1: the nodes that offer a quest (AcceptQuest), by node; set from the quest tables.
+    void set_accepts(std::map<int64_t, content::QuestAcceptRow> accepts) { accepts_ = std::move(accepts); }
+    const content::QuestAcceptRow* accept(int64_t node) const {
+        const auto it = accepts_.find(node);
+        return it == accepts_.end() ? nullptr : &it->second;
+    }
     const content::DialogueQuestRow* quest(int64_t guid) const {
         const auto it = d_.quests.find(guid);
         return it == d_.quests.end() ? nullptr : &it->second;
@@ -109,6 +120,7 @@ public:
 
 private:
     content::DialogueData d_;
+    std::map<int64_t, content::QuestAcceptRow> accepts_;
 };
 
 /// Evaluates conditions for one character.  `unsupported` (optional) is told, once for each text, of everything the evaluator could not answer.
@@ -195,11 +207,15 @@ private:
     std::optional<int64_t> measure(const content::DialogueCriterion& c, int depth) {
         if (c.kind == "QuestState") {
             if (c.quest_query == "Available") return available(c.quest, depth + 1) ? 1 : 0;
-            if (c.quest_query == "Active" || c.quest_query == "Completed" || c.quest_query == "ReadyForHandIn") return 0;   // no quest log yet
+            if (const auto n = facts_.quest_count(c.quest, c.quest_query)) return *n;
+            if (c.quest_query == "Active" || c.quest_query == "Completed" || c.quest_query == "ReadyForHandIn" || c.quest_query == "Failed") return 0;   // no quest log
             unsupported("the quest query " + c.quest_query);
             return std::nullopt;
         }
-        if (c.kind == "ObjectiveState") return 0;   // an objective of a quest nobody has is in no state
+        if (c.kind == "ObjectiveState") {
+            if (const auto n = facts_.objective_count(c.quest, c.objective, c.objective_query)) return *n;
+            return 0;   // an objective of a quest nobody has is in no state
+        }
         if (c.kind == "Item") return facts_.item_count(c.items, c.tags);
         if (c.kind == "Currency") return facts_.currency(c.currency);
         if (c.kind == "PlayerVariable") return facts_.player_variable(c.variable);
@@ -218,9 +234,15 @@ private:
         const content::DialogueQuestRow* q = book_.quest(guid);
         if (!q || q->disabled) return false;
         if (!resolving_.insert(guid).second) return false;   // a rule that leads back to itself
-        const bool ok = q->activation.empty() ? true : tree(q->activation, depth);
+        bool ok = q->activation.empty() ? true : tree(q->activation, depth);
         resolving_.erase(guid);
-        return ok;   // nothing is completed yet, so a quest that was not repeatable is still open
+        if (!ok) return false;
+        // the log: a quest the character has is not on offer, and one it finished only when it can be done again
+        if (const auto active = facts_.quest_count(guid, "Active"); active && *active > 0) return false;
+        if (!q->repeatable) {
+            if (const auto done = facts_.quest_count(guid, "Completed"); done && *done > 0) return false;
+        }
+        return true;
     }
 
     const Book&          book_;

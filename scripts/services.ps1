@@ -4,8 +4,8 @@
     scripts\services.ps1 test    buf lint + generated-code check, go vet + go test (needs 'up'); the tests of the
                                  character creation rules and of the character service's content.db use
                                  $env:AOC_CONTENT_DB (or dist\content\content.db) when that file exists, and skip without it
-    scripts\services.ps1 build   build auth, character, citynode, nodectl, worldctl, charimport, mesh, gateway into dist\services
-    scripts\services.ps1 run     build, then start auth, character, citynode, mesh, gateway and worldd hidden; each logs
+    scripts\services.ps1 build   build auth, character, citynode, nodectl, quests, questctl, worldctl, charimport, mesh, gateway into dist\services
+    scripts\services.ps1 run     build, then start auth, character, citynode, quests, mesh, gateway and worldd hidden; each logs
                                  to dist\services\logs\<name>.log (the previous run's: <name>.prev.log).  citynode
                                  (Nodes 1) serves the city nodes on :50055 and applies deploy\citynode_seed.json once, at its
                                  first start; dist\services\nodectl.exe is its command line (services\README.md, "City nodes").
@@ -45,7 +45,7 @@ function Build {
     New-Item -ItemType Directory -Force $out | Out-Null
     Push-Location $svc
     try {
-        foreach ($name in 'auth', 'character', 'citynode', 'nodectl', 'worldctl', 'charimport', 'mesh', 'gateway') {
+        foreach ($name in 'auth', 'character', 'citynode', 'nodectl', 'quests', 'questctl', 'worldctl', 'charimport', 'mesh', 'gateway') {
             & go build -o (Join-Path $out "$name.exe") "./cmd/$name"
             if ($LASTEXITCODE -ne 0) { throw "go build $name failed" }
         }
@@ -60,11 +60,11 @@ $tokenFile = Join-Path $out 'service.token'
 # (plan C1's contentc, services\README.md "Content").
 $contentDb = if ($env:AOC_CONTENT_DB) { $env:AOC_CONTENT_DB } else { Join-Path $root 'dist\content\content.db' }
 
-# The auth, character, citynode, mesh, gateway and worldd processes running from this
+# The auth, character, citynode, quests, mesh, gateway and worldd processes running from this
 # checkout (not another checkout's copy).
 function Get-ServiceProcess {
-    $exes = @('auth', 'character', 'citynode', 'mesh', 'gateway' | ForEach-Object { Join-Path $out "$_.exe" }) + $worldd
-    Get-Process -Name auth, character, citynode, mesh, gateway, worldd -ErrorAction SilentlyContinue |
+    $exes = @('auth', 'character', 'citynode', 'quests', 'mesh', 'gateway' | ForEach-Object { Join-Path $out "$_.exe" }) + $worldd
+    Get-Process -Name auth, character, citynode, quests, mesh, gateway, worldd -ErrorAction SilentlyContinue |
         Where-Object { $exes -contains $_.Path }
 }
 
@@ -189,7 +189,8 @@ try {
             # output goes to dist\services\logs; the previous run's is kept.
             New-Item -ItemType Directory -Force $logs | Out-Null
             # citynode starts before mesh and the gateway: worldd (started last) asks it for the node levels, and retries if it is late
-            $names = @('auth', 'character', 'citynode', 'mesh', 'gateway', 'worldd')
+            # quests (the saved quest logs) starts with it: worldd loads a character's log at login and retries if it is late
+            $names = @('auth', 'character', 'citynode', 'quests', 'mesh', 'gateway', 'worldd')
             $savedStatic = $env:AOC_MESH_STATIC_WORLD
             # worldd registers itself; a static world would take players
             # whenever its heartbeats lapse, and worldd cannot redeem its tickets.
@@ -230,7 +231,7 @@ try {
         'stop' {
             $procs = @(Get-ServiceProcess)
             if ($procs.Count -eq 0) {
-                Write-Host "nothing to stop: no auth, character, citynode, mesh, gateway or worldd running from this checkout"
+                Write-Host "nothing to stop: no auth, character, citynode, quests, mesh, gateway or worldd running from this checkout"
             } else {
                 $what = Format-Process $procs
                 $procs | Stop-Process -Force -ErrorAction SilentlyContinue

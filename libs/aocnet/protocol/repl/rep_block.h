@@ -162,6 +162,15 @@ bool write_value(const schema::RepCommand& cmd, std::span<const schema::RepComma
 /// whose zero is not known (codecs.h zero_struct) and a flattened struct.
 std::optional<Value> zero_value(const schema::RepCommand& cmd);
 
+/// The TOptional<FMapMarkerOverride> of a quest's marker and of each location of the objective markers (quests, slice 1): the generator does not model an optional (PropType::Unknown), whose
+/// wire form is an IsSet bit and then the value.  Only the unset form is carried: a Value::boolean(false) (the reader refuses a set one), one 0 bit on the wire.
+inline bool is_unset_optional_command(const schema::RepCommand& c) {
+    if (c.type != schema::PropType::Unknown || !c.path) return false;
+    const std::string_view p(c.path);
+    constexpr std::string_view kName = "MapMarkerOverride";
+    return p.size() >= kName.size() && p.substr(p.size() - kName.size()) == kName;
+}
+
 // ---- the field loop ---------------------------------------------------------
 
 struct FieldHeader {

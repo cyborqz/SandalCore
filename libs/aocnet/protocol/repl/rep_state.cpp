@@ -7,6 +7,7 @@
 #include "protocol/repl/rep_state.h"
 
 #include "protocol/repl/codecs.h"
+#include "protocol/repl/rep_block.h"
 
 namespace aoc { namespace protocol { namespace repl {
 
@@ -84,8 +85,11 @@ bool value_matches(const RepCommand& cmd, std::span<const RepCommand> table, con
             const ArrayValue* a = v.get_if<ArrayValue>();
             return a && array_matches(cmd, table, *a);
         }
+        case PropType::Unknown: {
+            const bool* b = v.get_if<bool>();
+            return is_unset_optional_command(cmd) && b && !*b;
+        }
         case PropType::Struct:
-        case PropType::Unknown:
             break;
     }
     return false;

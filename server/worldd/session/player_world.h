@@ -48,6 +48,8 @@
 #include "nav/area_nav.h"
 #include "npc/area_npcs.h"
 #include "protocol/server_guid_allocator.h"
+#include "quest/quest_book.h"
+#include "quest/quest_service.h"
 #include "session/ability_catalog.h"
 #include "session/leveling.h"
 #include "session/move_checker.h"
@@ -201,6 +203,13 @@ public:
     const dialogue::Book*         dialogue() const { return dialogue_ ? &*dialogue_ : nullptr; }
     /// A test's conversations (load_area reads the real ones).
     void                          set_dialogue(dialogue::Book book) { dialogue_ = std::move(book); }
+    /// Quests, slice 1: the quests of the data (quest/quest_book.h), read with the area; null for a content.db older than contentc version 21 (the NPCs offer nothing).
+    const quest::QuestBook*       quests() const { return quests_ ? &*quests_ : nullptr; }
+    /// A test's quests (load_area reads the real ones).
+    void                          set_quests(quest::QuestBook book) { quests_ = std::move(book); }
+    /// The worker that saves the quest logs and takes the GM commands (null: no quest service; the characters play without quests).  Not owned.
+    quest::QuestWorker*           quest_worker() const { return quest_worker_; }
+    void                          set_quest_worker(quest::QuestWorker* worker) { quest_worker_ = worker; }
     /// Vendors, step 0: the towns' shops (vendor/town_shops.h), read with the area; null for a content.db older than contentc version 18 (the NPCs answer as before).
     const vendor::TownShops*      town_shops() const { return shops_ ? &*shops_ : nullptr; }
     /// A test's shops (load_area reads the real ones).
@@ -553,6 +562,8 @@ private:
     const world::NodeWire*               node_wire_ = nullptr;
     world::NodeControl*                  node_control_ = nullptr;
     std::optional<dialogue::Book>        dialogue_;
+    std::optional<quest::QuestBook>      quests_;          // quests, slice 1
+    quest::QuestWorker*                  quest_worker_ = nullptr;
     std::optional<vendor::TownShops>     shops_;
     std::optional<content::CraftStationData> stations_;   // crafting, step 0: the station definitions and which asset is whose station
     std::optional<content::CraftRecipeData>  recipes_;    // crafting, step 1: the recipes

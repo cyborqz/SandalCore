@@ -23,6 +23,7 @@ set(WORLDD_PROTOS
     aoc/citynode/v1/citynode.proto
     aoc/gateway/v1/gateway.proto
     aoc/mesh/v1/mesh.proto
+    aoc/quest/v1/quest.proto
     aoc/worldadmin/v1/worldadmin.proto
 )
 set(WORLDD_PROTO_SRCS "")
@@ -214,6 +215,12 @@ add_library(worldd_core STATIC
     net/endpoint.h
     net/udp_socket.cpp
     net/udp_socket.h
+    quest/quest_log.cpp
+    quest/quest_log.h
+    quest/quest_service.cpp
+    quest/quest_service.h
+    quest/quest_wire.cpp
+    quest/quest_wire.h
     session/abilities.cpp
     session/abilities.h
     session/actor_view.cpp

@@ -121,17 +121,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\make_ce
 echo Cleaning up old emulator processes from this dist ...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$dist = (Resolve-Path -LiteralPath $env:DIST_DIR).Path; Get-Process tether_server,launcher -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dist, [System.StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"
 
-rem  Go services or worldd left running from an earlier launch would hold :8081, :443, :50055 (citynode)
+rem  Go services or worldd left running from an earlier launch would hold :8081, :443, :50055 (citynode), :50058 (quests)
 rem  and UDP :7777: stop them first. This needs neither Go nor Docker.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" stop || goto :fail
 
-echo [1/5] Starting the Go services and worldd: auth, character, citynode, mesh, gateway, worldd ...
+echo [1/5] Starting the Go services and worldd: auth, character, citynode, quests, mesh, gateway, worldd ...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" up || goto :fail
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\services.ps1" run || goto :fail
 call :wait_tcp 8081 auth 30 || goto :fail
 call :wait_tcp 443 gateway 30 || goto :fail
 rem  citynode (Nodes 1) serves the city node levels; migration 0009 runs and the seed is applied at its first start
 call :wait_tcp 50055 citynode 30 || goto :fail
+rem  quests (quests, slice 1) keeps the saved quest logs; migration 0016 runs at its first start
+call :wait_tcp 50058 quests 30 || goto :fail
 call :wait_udp 7777 worldd 30 || goto :fail
 echo        Go services READY.
 
@@ -224,7 +226,7 @@ exit /b 1
 :fail
 echo.
 echo Launch failed. The Go services and worldd log to %REPO_ROOT%\dist\services\logs\
-echo   auth.log, character.log, citynode.log, mesh.log, gateway.log and worldd.log.
+echo   auth.log, character.log, citynode.log, quests.log, mesh.log, gateway.log and worldd.log.
 echo   tether_server shows its errors in its own window.
 pause
 exit /b 1

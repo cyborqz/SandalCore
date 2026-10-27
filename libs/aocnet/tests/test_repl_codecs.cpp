@@ -256,14 +256,14 @@ static void test_other_structs() {
     write_struct("FVector_NetQuantizeNormal", Value(Normal16{1, 2, 3}), w);
     CHECK(w.bit_pos() == 48, "and is 48 bits, the width the schema gives it");
 
-    CHECK(!is_known_struct("FRewardInstance") && is_known_struct("FRepMovement"),
-          "AoC's FRewardInstance has no codec here");
+    CHECK(is_known_struct("FRewardInstance") && is_known_struct("FHashedVariable") && is_known_struct("FRepMovement") && !is_known_struct("FNoSuchStruct"),
+          "FRewardInstance and FHashedVariable (the quest component's) have codecs, a name that is no struct has none");
     BunchWriter zero;
     zero.write_bits(0, 64);
     PacketReader r(zero.data(), zero.byte_size(), zero.bit_pos());
-    CHECK(!read_struct("FRewardInstance", r).has_value(), "an unknown struct is not read");
+    CHECK(!read_struct("FNoSuchStruct", r).has_value(), "an unknown struct is not read");
     BunchWriter out;
-    CHECK(!write_struct("FRewardInstance", Value(Vec3d{}), out) && out.bit_pos() == 0, "an unknown struct is not written");
+    CHECK(!write_struct("FNoSuchStruct", Value(Vec3d{}), out) && out.bit_pos() == 0, "an unknown struct is not written");
     CHECK(!write_struct("FVector", Value(Vec2d{}), out) && out.bit_pos() == 0, "a value of the wrong type is not written");
 }
 

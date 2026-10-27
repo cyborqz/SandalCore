@@ -954,6 +954,63 @@ struct DialogueData {
     std::map<int64_t, int64_t>         asset_roots;     // PopulationAsset guid -> root
 };
 
+// ---- quests, slice 1 (contentc version 21): quest, quest_objective, npc_offered_quest, dialogue_accept, zoi_quest, item_quest ----------------------------------------------
+
+/// One objective of a quest, in the quest's own order.
+struct QuestObjectiveRow {
+    int64_t     guid = 0;
+    std::string name, type;
+    int64_t     count = 1;                 // CompletionCount
+    bool        awake = false, hidden = false, completes = false, optional = false;
+};
+
+/// One thing a quest does when it starts (only what is set in the data).
+struct QuestStartAction {
+    std::string action;                    // ActivateObjective, RevealObjective, SucceedObjective, SetPlayerVariable, GrantItem ...
+    int64_t     objective = 0, quest = 0;
+    std::string variable;
+    int64_t     value = 0;
+    bool        conditional = false;       // the action has a condition of its own
+};
+
+struct QuestRow {
+    int64_t     guid = 0;
+    std::string name, flavor, locality;
+    int         level = 0;
+    bool        can_abandon = true, repeatable = false, disabled = false, default_activate = true;
+    DialogueRequirement            activation;
+    std::vector<QuestStartAction>  start_actions;
+    std::vector<int64_t>           rewards;      // the reward tables
+    std::vector<QuestObjectiveRow> objectives;
+};
+
+/// A quest an NPC offers and the node its talk starts at while the quest is offered.
+struct QuestOfferRow {
+    int64_t quest = 0, node = 0;
+};
+
+/// A dialogue node that offers a quest.
+struct QuestAcceptRow {
+    int64_t node = 0, quest = 0, on_success = 0;
+    std::vector<int64_t> objectives;
+};
+
+/// An item bound to a quest: `kind` is delete_all / delete_one (deleted when the quest leaves the log) or abandon (the quest leaves the log when the item is deleted).
+struct QuestItemLink {
+    int64_t     quest = 0;
+    std::string kind;
+};
+
+struct QuestData {
+    std::map<int64_t, QuestRow>                   quests;
+    std::map<std::string, int64_t>                by_name;
+    std::map<int64_t, std::vector<QuestOfferRow>> instance_offers;   // PopulationInstance guid -> its offers, in the data's order
+    std::map<int64_t, std::vector<QuestOfferRow>> asset_offers;      // PopulationAsset guid -> its offers
+    std::map<int64_t, QuestAcceptRow>             accepts;           // by node
+    std::map<int64_t, std::vector<int64_t>>       zoi_quests;        // zone of influence guid -> the quests it starts
+    std::map<int64_t, std::vector<QuestItemLink>> item_quests;       // item record guid -> its quest links
+};
+
 // ---- vendors, step 0 (contentc version 18): which NPC opens which shop and what its listings cost (npc_vendor_link, vendor_def_data, vendor_price, vendor_availability) ----------
 
 /// One priced listing: the tab (inventory) and the listing's index in it, what it sells (item, the variation and the offer the cart names; 0: none) and the price in one
@@ -1263,6 +1320,8 @@ public:
     /// Quests, slice 0 (contentc version 17): the NPC conversations (dialogue_root, dialogue_node, dialogue_choice, dialogue_quest, npc_dialogue), read whole.
     /// nullopt with `error` set when a table is missing (a file of an older version) or a row does not read.
     std::optional<DialogueData> dialogue_data(std::string& error) const;
+    /// Quests, slice 1 (contentc version 21): the quests, their objectives, the NPCs' offers, the nodes that offer a quest, the zones that start one and the items bound to quests.
+    std::optional<QuestData> quest_data(std::string& error) const;
     /// Crafting, step 0 (contentc version 20): the station definitions and the assets that are their stations, read whole. nullopt, with `error` set, for a file of an older version.
     std::optional<CraftStationData> craft_station_data(std::string& error) const;
     /// Crafting, step 1 (contentc version 20): the recipes, their inputs, predicates and cost records, and the recipe sets' lists, read whole. nullopt, with `error` set, for a file of an older version.

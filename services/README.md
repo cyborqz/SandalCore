@@ -8,6 +8,7 @@ Platform services for the live backend (architecture spec:
 | `auth` | HTTP `127.0.0.1:8081`, gRPC `127.0.0.1:50051` | The launcher's login/register API; `AuthService.ValidateToken` for other services |
 | `character` | gRPC `127.0.0.1:50052` | `CharacterService`: the runtime writer of character records (`charimport` is the offline exception); checks a new character's race, gender, class and customization against `content.db` (below), gives it its class's starting kit and saves its items ("Items and inventory") |
 | `citynode` | gRPC `127.0.0.1:50055` | `CityNodeService` (Nodes 1): the live state of the game world's city nodes (level, XP, vassal link), the node clock and the stream of changes; API-first, see "City nodes" below |
+| `quests` | gRPC `127.0.0.1:50058` | `QuestService` (quests, slice 1): the saved quest log of each character (the quests it took, finished and the variables), the inbox of GM commands for a character; API-first, see "The quest service" below |
 | `charimport` | - | Carries the legacy `dist/Release/data/characters.json` into the database (race, gender, class and appearance taken from each character's `create_info`) |
 | `mesh` | gRPC `127.0.0.1:50053` | `MeshService`: world-server registry and placement (one world: worldd when it has registered, else the configured static world `AOC_MESH_STATIC_WORLD`, none by default) |
 | `gateway` | ICS gRPC over TLS `127.0.0.1:443`, gRPC `127.0.0.1:50054` | The game client's session, world and character screens and Play; `GatewayService.RedeemTicket` for world servers |
@@ -524,6 +525,28 @@ DROP TABLE character_completed_ftues;
 DELETE FROM schema_migrations WHERE version = 15;
 COMMIT;
 ```
+
+**Rolling back migration 0016.** Migration 0016 (quests, slice 1, "take a quest") adds FOUR tables, `character_quests` (the quests a character took, with the instance guid the client knows each by and
+its objectives as JSON), `character_quests_completed`, `character_quest_variables` and `character_quest_commands` (the inbox of GM commands); it writes nowhere else, backfills nothing and touches no
+existing table. worldd loads a character's log at login and saves it whenever it changes (`QuestService.SaveLog`). The rollback drops the four tables with whatever they hold: every quest a character
+took, finished or set is forgotten, and a command nobody took is lost. The characters, their items, their progress, their jobs and their tutorials are untouched. Stop the quest service and worldd first.
+
+```sql
+-- rollback of migration 0016 (quests, slice 1: the quest log)
+BEGIN;
+DROP TABLE character_quest_commands;
+DROP TABLE character_quest_variables;
+DROP TABLE character_quests_completed;
+DROP TABLE character_quests;
+DELETE FROM schema_migrations WHERE version = 16;
+COMMIT;
+```
+
+**The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
+the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
+`questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or
+its name. worldd takes the commands of a character that plays every moment and does them in its session; a command for a character that is away waits for its next login. Content: contentc version 21 adds
+`quest`, `quest_objective`, `npc_offered_quest` and `dialogue_accept` (`internal/content/quests.go` says what each holds).
 
 **Content (vendors, step 0).** contentc version 18 adds `npc_vendor_link` (which shop a shopkeeper's use opens), `vendor_def_data`, `vendor_def_modifier`, `vendor_def_sell_filter`, `vendor_modifier`, `vendor_sell_filter`, `base_item_value`, `item_base_value`, `vendor_offer`, `vendor_availability` and `vendor_price` (`internal/content/vendors.go` says what each holds; `cmd/contentc/vendors.go` writes them), and the `OpenWindow` actions of the dialogue tables carry the shop they open (`vd`). `vendor_price` holds, for every listing of every shop, its price per unit before the town's tax: the listing's value (the offer's, when it has one) rounded up, through the shop's buy modifiers, rounded up, evaluated with `aocexpr` (`Env.IntDivide` makes a division of two whole numbers truncate, as the formulas expect); a listing that needs more than the item gets no row. Rebuild `content.db` (the extractor's `database` step) after pulling it. The character service's `GetCharacter` (with items) also returns the wallet and gives a character with none its start purse once (empty, or 210,000 copper with AOC_GM_STARTER_SET=1, for testing); `SaveInventory` stores the wallet in the same transaction when `replace_wallet` is set.
 

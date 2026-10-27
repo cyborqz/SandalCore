@@ -175,10 +175,10 @@ std::optional<Value> zero_value(const RepCommand& cmd) {
         case PropType::DynamicArray: return Value(ArrayValue{});
         case PropType::NetSerializeStruct:
             return cmd.struct_name ? zero_struct(cmd.struct_name) : std::nullopt;
+        case PropType::Unknown:    return is_unset_optional_command(cmd) ? std::optional<Value>(Value::boolean(false)) : std::nullopt;
         case PropType::Text:       // FText's and FSoftObjectPtr's zero forms are not verified
         case PropType::SoftObject:
         case PropType::Struct:
-        case PropType::Unknown:
             break;
     }
     return std::nullopt;
@@ -237,8 +237,11 @@ std::optional<Value> read_value_in(const RepCommand& cmd, std::span<const RepCom
         case PropType::DynamicArray:
             out = read_array(cmd, table, r, opts, budget);
             break;
-        case PropType::Struct:
         case PropType::Unknown:
+            if (!is_unset_optional_command(cmd) || r.read_bit() != 0) return std::nullopt;   // a set optional is not modelled
+            out = Value::boolean(false);
+            break;
+        case PropType::Struct:
             return std::nullopt;
     }
     if (!out || overran(r)) return std::nullopt;
@@ -321,8 +324,13 @@ bool write_value(const RepCommand& cmd, std::span<const RepCommand> table, const
             const ArrayValue* a = v.get_if<ArrayValue>();
             return a && write_array(cmd, table, *a, sent ? sent->get_if<ArrayValue>() : nullptr, out, opts);
         }
+        case PropType::Unknown: {
+            const bool* b = v.get_if<bool>();
+            if (!is_unset_optional_command(cmd) || !b || *b) return false;
+            out.write_bit(false);
+            return true;
+        }
         case PropType::Struct:
-        case PropType::Unknown:
             break;
     }
     return false;

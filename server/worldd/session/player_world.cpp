@@ -256,6 +256,16 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             spdlog::warn("[world] the NPC conversations do not load, so the NPCs that have one answer as before: {}", de);
         }
     }
+    {   // quests, slice 1: the quests, their offers and the nodes that offer them; a content.db of an older version has none and no NPC offers a quest
+        std::string qe;
+        if (auto data = content_->quest_data(qe)) {
+            if (dialogue_) dialogue_->set_accepts(data->accepts);
+            quests_.emplace(std::move(*data));
+            spdlog::info("[world] quests: {} quests, {} nodes that offer one, {} zones that start one", quests_->quests(), quests_->data().accepts.size(), quests_->data().zoi_quests.size());
+        } else {
+            spdlog::warn("[world] the quests do not load, so no NPC offers one: {}", qe);
+        }
+    }
     {   // vendors, step 0: the towns' shops; a content.db of an older version has none and the NPCs keep their answer
         std::string ve;
         if (auto data = content_->vendor_data(ve)) {

@@ -470,7 +470,7 @@ static void test_index() {
     bool sorted = true;
     auto all = all_class_schemas();
     for (size_t i = 0; i + 1 < all.size(); ++i) sorted = sorted && std::strcmp(all[i]->name, all[i + 1]->name) < 0;
-    CHECK(all.size() == 57 && sorted, "57 schemas (53 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0");
+    CHECK(all.size() == 58 && sorted, "58 schemas (54 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with quests, slice 1");
     const ClassSchema* res = find_class_schema("UResourceStorageComponent");   // the pawn's dynamic subobject (pkt#107)
     CHECK(res && !res->is_actor && same(res->super_name, "UItemStorageComponent") && res->command("ItemLocationType") &&
               res->command("ItemLocationType")->type == PropType::Enum && res->command("ItemLocationType")->width_bits == 5,

@@ -1339,6 +1339,7 @@ static BunchWriter dialogue_choice(const repl::DialogueResponse& response) {
 }
 
 #include "dialogue_session_tests.inc"
+#include "quest_session_tests.inc"
 
 int main() {
     spdlog::set_level(spdlog::level::off);
@@ -1356,6 +1357,11 @@ int main() {
     test_dialogue_town_crier();
     test_dialogue_session();
     test_dialogue_1531();
+    test_quest_data();
+    test_quest_offer_accept_abandon();
+    test_quest_refusals();
+    test_quest_gm();
+    test_quest_zone();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

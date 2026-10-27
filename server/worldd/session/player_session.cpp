@@ -28,6 +28,8 @@
 #include "items/acquired.h"
 #include "vendor/node_tax.h"
 #include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "world/zoi_surface.h"
 
 #include <spdlog/spdlog.h>
 
@@ -353,6 +355,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     for (const svc::ProcessingJob& j : p->jobs_) p->job_seen_[j.job_guid] = crafting::status_at(j, wall_ms());   // (step 2: a window opened now shows them so; the changes after are sent)
     p->sync_active_stations(wall_ms());
     p->completed_ftues_ = std::move(finished);
+    p->init_quests(world, character);   // quests, slice 1: the saved log becomes the quest component's arrays, sent with the join
     if (!p->completed_ftues_.empty()) spdlog::info("[session] {}: {} finished tutorial(s) on the character's list, sent with the join", p->pb_.setup().name, p->completed_ftues_.size());
     p->taught_ = character.known_recipes;   // crafting, step 3: the recipes a game master taught the character (the others are known to the client by their own flag)
     if (!p->taught_.empty() && !p->pb_.set_known_recipes(p->taught_)) {
@@ -645,6 +648,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_foliage(conn, now);
     run_floor_net(conn, now);
     run_dialogue(conn, now);
+    run_quests(conn, now);
     run_crafting(conn, now);
     run_quick_make(conn, now);
     run_nodes(conn);
@@ -814,6 +818,11 @@ void PlayerSession::finish(const char* why) {
     // The saver may have given up on a periodic hand-over (the service was down), so what was last handed over proves
     // nothing: compare with the record the session started from. A position that went away and came back to the
     // record's is covered by the hand-overs made before.
+    // quests, slice 1: the log once more when it changed during the session (an earlier save may have been lost), then the character's commands are not taken any more
+    if (quests_on_ && quest_worker_) {
+        if (quest_log_.changed() || quests_touched_) quest_worker_->save(character_id_, quest_log_.to_saved());
+        quest_worker_->unwatch(character_id_);
+    }
     saved_ = loaded_;
     if (handed_over_ > 0 || position_changed(/*with_yaw=*/true)) hand_over(why, /*periodic=*/false);
     // the inventory, too, if it changed at all: what an earlier hand-over gave the saver may have been lost, and the latest wins
@@ -1093,6 +1102,15 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerRequestStorageEvent") return on_storage_event_request(conn, rpc, now);
         if (name_of_rpc == "ServerSetActionbarSlotUseData") return on_set_slot(conn, rpc, now);
         if (name_of_rpc == "ServerSelectDialogueChoice") return on_dialogue_choice(conn, rpc, now);
+        // quests, slice 1: the quest book's calls
+        if (name_of_rpc == "ServerAbandonQuests") return on_abandon_quests(conn, rpc, now);
+        if (name_of_rpc == "ServerSetQuestBlacklisted") {   // the Destiny window's toggle: accepted, nothing to toggle yet
+            if (quest_told_.insert("ServerSetQuestBlacklisted").second) spdlog::info("[session] {}: ServerSetQuestBlacklisted is accepted and ignored (there is no Destiny track yet; told once)", name());
+            return;
+        }
+        if (name_of_rpc == "ServerDebugStartQuest" || name_of_rpc == "ServerDebugEndQuest" || name_of_rpc == "ServerDebugFailQuestByInstance" || name_of_rpc == "ServerClearCompletedQuests") {
+            return on_quest_debug_rpc(conn, rpc, now);
+        }
         if (name_of_rpc == "ServerHandleVendorPurchase") return on_vendor_purchase(conn, rpc, now);
         if (name_of_rpc == "ServerStartCraft") return on_start_craft(conn, rpc, now);
         if (name_of_rpc == "ServerSendProcessingStationRequest") return on_processing_request(conn, rpc, now);
@@ -3163,7 +3181,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
         if (const combat::Corpse* corpse = npc_world_->aftermath()->corpse_by_interactable(req->interactable.ObjectId)) return open_loot(conn, *corpse, *a, now);
     }
     // quests, slice 0: an NPC with a conversation opens the talking window
-    if (a->kind == world::ActorKind::Npc && a->npc.dialogue_root != 0 && open_dialogue(conn, *a, now)) return;
+    if (a->kind == world::ActorKind::Npc && (a->npc.dialogue_root != 0 || npc_offers_quests(*a)) && open_dialogue(conn, *a, now)) return;
     const vendor::GmVendors* gm = world_ ? world_->gm_vendors() : nullptr;
     const vendor::GmVendor* def = (gm && a->npc.is_gm_vendor) ? gm->find(a->npc.vendor_guid) : nullptr;
     // vendors, step 0: a shopkeeper of a town whose data links it to a switched-on shop opens that shop's window
@@ -4385,6 +4403,13 @@ public:
     bool                            has_npc = false;
     int64_t                         citizen_node = 0;
     const world::CityNodes*         nodes = nullptr;
+    const quest::QuestLog*          quests = nullptr;   // quests, slice 1: the character's log (null: it has none)
+
+    std::optional<int64_t> quest_count(int64_t quest, const std::string& query) const override { return quests ? quests->quest_count(quest, query) : std::nullopt; }
+    std::optional<int64_t> objective_count(int64_t quest, int64_t objective, const std::string& query) const override {
+        return quests ? quests->objective_count(quest, objective, query) : std::nullopt;
+    }
+    int64_t player_variable(const std::string& name) const override { return quests ? quests->variable(name) : 0; }
 
     int64_t item_count(const std::vector<int64_t>& records, const std::vector<std::string>& /*tags*/) const override {
         if (records.empty()) return 0;   // a count by tag needs the items' tags, which the bag does not hold
@@ -4446,6 +4471,7 @@ std::unique_ptr<dialogue::Facts> PlayerSession::dialogue_facts(const world::Worl
     }
     f->citizen_node = pb_.setup().citizen_node;
     f->nodes = world_ ? world_->city_nodes() : nullptr;
+    if (quests_on_) f->quests = &quest_log_;
     return f;
 }
 
@@ -4463,7 +4489,18 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
     dialogue::Evaluator ev(*book, *facts, [this](const std::string& what) {
         if (dialogue_told_.insert(what).second) spdlog::info("[session] {}: a condition of a conversation could not be answered and does not hold: {} (told once)", name(), what);
     });
-    const dialogue::Result r = talk_.begin(*book, ev, npc.id, npc.npc.dialogue_root);
+    // quests, slice 1: an NPC that offers a quest the character can take starts its talk at the node the offer names; otherwise at its root
+    int64_t offered = 0;
+    if (const quest::QuestBook* qb = world_->quests(); qb && quests_on_) {
+        for (const content::QuestOfferRow& offer : qb->offers(npc.npc.instance_guid, npc.npc.asset_guid)) {
+            if (offer.node != 0 && quest_log_.can_start(qb->quest(offer.quest), ev, /*bypass_rules=*/false) == quest::Create::Ok) {
+                offered = offer.node;
+                break;
+            }
+        }
+    }
+    if (npc.npc.dialogue_root == 0 && offered == 0) return false;   // nothing on offer and no conversation
+    const dialogue::Result r = talk_.begin(*book, ev, npc.id, npc.npc.dialogue_root, offered);
     for (const std::string& s : r.skipped) {
         if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
     }
@@ -4479,9 +4516,29 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
     return true;
 }
 
-void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/) {
+void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/, bool exhaust) {
     const dialogue::Talk::State s = talk_.state();   // a copy: the reply is built when the connection has room for it
     bootstrap::PlayerBootstrap::DialogueView v;
+    v.exhaust = exhaust;
+    if (s.sub) {
+        bootstrap::PlayerBootstrap::DialogueView::SubDialogue sd;
+        sd.pending_next = s.sub->pending_next;
+        sd.previous_node = s.sub->previous_node;
+        sd.node = s.sub->node;
+        sd.quest = s.sub->quest;
+        sd.objectives = s.sub->objectives;
+        // the objectives the quest starts with: the ones that are awake or that a start action activates
+        if (const quest::QuestBook* qb = world_ ? world_->quests() : nullptr) {
+            if (const content::QuestRow* def = qb->quest(s.sub->quest)) {
+                for (const content::QuestObjectiveRow& o : def->objectives) {
+                    bool starts = o.awake;
+                    for (const content::QuestStartAction& a : def->start_actions) starts = starts || (a.action == "ActivateObjective" && a.objective == o.guid);
+                    if (starts) sd.initial_objectives.push_back(o.guid);
+                }
+            }
+        }
+        v.sub = std::move(sd);
+    }
     v.previous_node = s.previous_node;
     v.previous_choice_node = s.previous_choice_node;
     v.previous_choice_index = s.previous_choice_index;
@@ -4500,7 +4557,12 @@ void PlayerSession::end_dialogue(Connection& conn, const char* why) {
     if (r.outcome != dialogue::Outcome::Changed) return;
     ++dialogue_closes_;
     spdlog::log(level_for(dialogue_logged_), "[session] {}: the conversation ends: {}", name(), why);
-    send_dialogue(conn, why);
+    send_dialogue(conn, why, /*exhaust=*/r.offer_answered);
+}
+
+bool PlayerSession::npc_offers_quests(const world::WorldActor& npc) const {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    return qb && quests_on_ && !qb->offers(npc.npc.instance_guid, npc.npc.asset_guid).empty();
 }
 
 void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
@@ -4511,13 +4573,18 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
         }
         return;
     }
-    if (!within_budget(dialogue_budget_, "ServerSelectDialogueChoice", now)) return;
     using repl::DialogueResponseType;
     using repl::SubDialogueResponse;
     if (response->response_type == static_cast<uint8_t>(DialogueResponseType::SubDialogue) && response->quest_response == static_cast<uint8_t>(SubDialogueResponse::Close)) {
-        // the window closes: the client says it twice and then names the window it opened; the first clears, the others find nothing to clear
+        // the window closes: the client says it twice and then names the window it opened; the first clears, the others find nothing to clear.  (A close is not held back by the
+        // budget: a lost close would leave the conversation open on the server for good.)
         end_dialogue(conn, "the client closed the window");
         return;
+    }
+    if (!within_budget(dialogue_budget_, "ServerSelectDialogueChoice", now)) return;
+    if (response->response_type == static_cast<uint8_t>(DialogueResponseType::SubDialogue) &&
+        (response->quest_response == static_cast<uint8_t>(SubDialogueResponse::Accept) || response->quest_response == static_cast<uint8_t>(SubDialogueResponse::Decline))) {
+        return on_quest_offer(conn, response->quest_response, now);
     }
     if (response->response_type == static_cast<uint8_t>(DialogueResponseType::ActionWindow)) return;   // a window a line opened was closed: no window opens yet
     if (response->response_type != static_cast<uint8_t>(DialogueResponseType::Choice)) {
@@ -4579,6 +4646,305 @@ void PlayerSession::run_dialogue(Connection& conn, Clock::time_point /*now*/) {
     if (!npc) return end_dialogue(conn, "the NPC is gone");
     const GoodPosition at = checker_.good();
     if (std::hypot(npc->x - at.x, npc->y - at.y) > kDialogueRangeCm) end_dialogue(conn, "the player walked away");
+}
+
+// -- quests, slice 1: take a quest ------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+/// The value of the RPC parameter named `name`, null when the call was not decoded or the parameter is absent (a parameter at its default is not sent).
+const repl::Value* quest_rpc_value(const repl::ClientRpc& rpc, std::string_view name) {
+    if (!rpc.call.decoded || !rpc.call.rpc) return nullptr;
+    const schema::RepCommand* c = repl::rpc_command(*rpc.call.rpc, name);
+    if (!c) return nullptr;
+    const auto it = rpc.call.params.values.find(c->handle);
+    return it == rpc.call.params.values.end() ? nullptr : &it->second;
+}
+
+/// An integer parameter, whatever its width, exact (a record id is 63 bits: a double would round it): 0 when absent.
+int64_t quest_int_value(const repl::Value* v) {
+    if (!v) return 0;
+    if (const auto* i = v->get_if<int64_t>()) return *i;
+    if (const auto* u = v->get_if<uint64_t>()) return static_cast<int64_t>(*u);
+    return 0;
+}
+
+}  // namespace
+
+
+void PlayerSession::init_quests(PlayerWorld& world, const svc::Character& character) {
+    quest_worker_ = world.quest_worker();
+    const quest::QuestBook* book = world.quests();
+    if (!quest_worker_ || !book || !character.quest_log) {
+        spdlog::info("[session] {}: quests are off for this character ({})", pb_.setup().name,
+                     !book ? "this content.db has no quest tables" : !quest_worker_ ? "worldd has no quest service" : "its quest log did not load at the login");
+        return;
+    }
+    const double now = pb_.setup().world_time;
+    const size_t repaired = quest_log_.load(*character.quest_log, book->data(), now);
+    quests_on_ = true;
+    std::string err;
+    repl::FastArrays* arrays = pb_.quest_arrays();
+    if (!arrays || !quest::sync(*arrays, quest_log_, &err)) {
+        spdlog::warn("[session] {}: the quest log does not fit the quest component, so quests are off for this character: {}", pb_.setup().name, err);
+        quests_on_ = false;
+        return;
+    }
+    quest_worker_->watch(character_id_);
+    spdlog::info("[session] {}: quest log: {} quest(s) taken, {} finished, {} variable(s){}", pb_.setup().name, quest_log_.instances().size(), quest_log_.completed().size(),
+                 quest_log_.variables().size(), repaired ? " (" + std::to_string(repaired) + " repaired or dropped: the log is saved again)" : "");
+}
+
+void PlayerSession::quest_sync(Connection& conn, const char* why) {
+    quests_touched_ = true;
+    repl::FastArrays* arrays = pb_.quest_arrays();
+    std::string err;
+    if (!arrays || !quest::sync(*arrays, quest_log_, &err)) {
+        spdlog::warn("[session] {}: the quest component is not brought in line with the log ({}): {}", name(), why, err);
+        return;
+    }
+    queue("QuestConsumerComponent", [](bootstrap::PlayerBootstrap& pb) { return pb.quest_update(); }, conn, /*must_build=*/false);
+}
+
+void PlayerSession::start_quest(Connection& conn, const content::QuestRow& def, int64_t source, const char* why, Clock::time_point now) {
+    const double t = pb_.setup().world_time + session_seconds(now);
+    const quest::Started started = quest_log_.start(def, t, source);
+    for (const std::string& s : started.skipped) {
+        if (quest_told_.insert(def.name + "/" + s).second) spdlog::info("[session] {}: a start action of quest {} is not done yet: {} (told once)", name(), def.name, s);
+    }
+    ++quests_taken_;
+    spdlog::log(level_for(quests_logged_, 100), "[session] {}: took quest {} ({}), {} objective(s) ({})", name(), def.name, def.guid, def.objectives.size(), why);
+    quest_sync(conn, "a quest was taken");
+}
+
+void PlayerSession::on_quest_offer(Connection& conn, uint8_t response, Clock::time_point now) {
+    const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (dead_ || !book || !qb || !talk_.open() || !talk_.sub() || !room_for(2)) {
+        ++dialogue_refused_;
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: an answer to a quest offer is refused: {}", name(), dead_ ? "the player is dead" : !talk_.open() ? "no conversation is open" : !talk_.sub() ? "no offer is open" : "the world has no quests");
+        return;
+    }
+    const world::WorldActor* npc = registry_ ? registry_->find(talk_.state().source) : nullptr;
+    if (!npc) return end_dialogue(conn, "the NPC is gone");
+    const GoodPosition at = checker_.good();
+    if (std::hypot(npc->x - at.x, npc->y - at.y) > kDialogueRangeCm) return end_dialogue(conn, "the player is too far from the NPC");
+    const auto facts = dialogue_facts(npc);
+    dialogue::Evaluator ev(*book, *facts, [this](const std::string& what) {
+        if (dialogue_told_.insert(what).second) spdlog::info("[session] {}: a condition of a conversation could not be answered and does not hold: {} (told once)", name(), what);
+    });
+    const dialogue::Talk::Sub sub = *talk_.sub();
+    bool taken = false;
+    if (response == static_cast<uint8_t>(repl::SubDialogueResponse::Accept)) {
+        const content::QuestRow* def = qb->quest(sub.quest);
+        if (!quests_on_) {
+            ++quests_refused_;
+            spdlog::warn("[session] {}: the offer of quest {} is not taken: quests are off for this character (the quest service did not answer at the login)", name(), sub.quest);
+        } else if (const quest::Create c = quest_log_.can_start(def, ev, /*bypass_rules=*/false); c != quest::Create::Ok) {
+            ++quests_refused_;
+            spdlog::log(level_for(quests_logged_, 100), "[session] {}: the offer of quest {} is refused: {}", name(), sub.quest, quest::create_name(c));
+        } else {
+            start_quest(conn, *def, npc->npc.instance_guid, "the player took the offer", now);
+            taken = true;
+        }
+    } else {
+        spdlog::log(level_for(quests_logged_, 100), "[session] {}: the player declined the offer of quest {}", name(), sub.quest);
+    }
+    const dialogue::Result r = talk_.finish_sub(*book, ev, taken);
+    if (r.outcome == dialogue::Outcome::Changed) {
+        ++dialogue_steps_;
+        if (!talk_.open()) ++dialogue_closes_;
+        send_dialogue(conn, "a quest offer was answered", /*exhaust=*/true);
+    }
+}
+
+bool PlayerSession::end_quest(Connection& conn, int64_t record, const char* kind, Clock::time_point now) {
+    const std::string k = kind;
+    const bool ok = k == "finish" ? quest_log_.finish(record) : quest_log_.remove(record);
+    if (!ok) return false;
+    if (k == "abandon") ++quests_abandoned_;
+    remove_quest_items(conn, record, now);
+    quest_sync(conn, kind);
+    return true;
+}
+
+void PlayerSession::remove_quest_items(Connection& conn, int64_t quest, Clock::time_point /*now*/) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!qb) return;
+    items::Outcome all;
+    all.ok = true;
+    for (const svc::InventoryItem& it : inventory_.items()) {
+        if (it.container != svc::ItemContainer::Quest) continue;   // slice 1 clears the quest bag only
+        const auto* links = qb->item_links(it.item_record_id);
+        if (!links) continue;
+        bool bound = false;
+        for (const content::QuestItemLink& l : *links) bound = bound || (l.quest == quest && (l.kind == "delete_all" || l.kind == "delete_one"));
+        if (!bound) continue;
+        items::Outcome o = inventory_.consume(it.container, it.slot, it.instance_guid, it.quantity);
+        if (!o.ok) continue;
+        all.events.insert(all.events.end(), std::make_move_iterator(o.events.begin()), std::make_move_iterator(o.events.end()));
+    }
+    if (all.events.empty()) return;
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    ++items_applied_;
+    const std::vector<bootstrap::ItemEvent> events = item_events_for(all);
+    for (size_t at = 0; at < events.size(); at += bootstrap::kMaxEventsPerChain) {
+        const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at),
+                                                     events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at + bootstrap::kMaxEventsPerChain)));
+        queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
+    }
+    spdlog::info("[session] {}: {} quest item event(s) left the quest bag with quest {}", name(), events.size(), quest);
+}
+
+void PlayerSession::on_abandon_quests(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    const repl::Value* guids = quest_rpc_value(rpc, "QuestGuids");
+    const repl::ArrayValue* list = guids ? guids->get_if<repl::ArrayValue>() : nullptr;
+    if (!rpc.call.decoded || !list || !qb || !quests_on_) {
+        ++quests_refused_;
+        spdlog::log(level_for(quests_logged_, 100), "[session] {}: ServerAbandonQuests is ignored: {}", name(), !quests_on_ ? "quests are off" : !rpc.call.decoded ? "its parameters do not decode" : "it names no quest");
+        return;
+    }
+    if (list->elements.size() > 64) {
+        ++quests_refused_;
+        return;
+    }
+    for (const repl::ElementState& e : list->elements) {
+        quest::Guid128 g;
+        uint32_t* words[4] = {&g.a, &g.b, &g.c, &g.d};
+        for (uint16_t i = 0; i < 4; ++i) {
+            const auto it = e.values.find(static_cast<uint16_t>(i + 1));
+            const auto* v = it == e.values.end() ? nullptr : it->second.get_if<int64_t>();
+            *words[i] = v ? static_cast<uint32_t>(*v) : 0;
+        }
+        const quest::QuestInstance* q = quest_log_.find_guid(g);
+        if (!q) {
+            ++quests_refused_;
+            spdlog::log(level_for(quests_logged_, 100), "[session] {}: abandon of quest instance {}: it is not in the log", name(), g.hex());
+            continue;
+        }
+        const content::QuestRow* def = qb->quest(q->record);
+        if (def && !def->can_abandon) {   // the client drops these itself; the server refuses them too
+            ++quests_refused_;
+            spdlog::log(level_for(quests_logged_, 100), "[session] {}: quest {} cannot be abandoned (its record says so)", name(), def->name);
+            continue;
+        }
+        const int64_t record = q->record;
+        end_quest(conn, record, "abandon", now);
+        spdlog::log(level_for(quests_logged_, 100), "[session] {}: abandoned quest {}", name(), def ? def->name : std::to_string(record));
+    }
+}
+
+void PlayerSession::apply_quest_command(Connection& conn, const svc::QuestCommand& cmd, Clock::time_point now) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!qb || !quests_on_) return;
+    const content::QuestRow* def = cmd.quest.empty() ? nullptr : qb->find(cmd.quest);
+    if (cmd.kind != "clear" && cmd.kind != "set-var" && !def) {
+        spdlog::warn("[session] {}: GM command {} {}: no such quest", name(), cmd.kind, cmd.quest);
+        return;
+    }
+    if (cmd.kind == "give") {
+        const auto facts = dialogue_facts(nullptr);
+        const dialogue::Book* book = world_->dialogue();
+        if (!book) return;
+        dialogue::Evaluator ev(*book, *facts);
+        const quest::Create c = quest_log_.can_start(def, ev, /*bypass_rules=*/true);
+        if (c != quest::Create::Ok) {
+            spdlog::warn("[session] {}: GM give {}: refused, {}", name(), def->name, quest::create_name(c));
+            return;
+        }
+        start_quest(conn, *def, 0, "a GM gave it", now);
+    } else if (cmd.kind == "finish" || cmd.kind == "fail" || cmd.kind == "abandon") {
+        if (!end_quest(conn, def->guid, cmd.kind.c_str(), now)) spdlog::warn("[session] {}: GM {} {}: the quest is not in the log", name(), cmd.kind, def->name);
+        else spdlog::info("[session] {}: GM {} {}", name(), cmd.kind, def->name);
+    } else if (cmd.kind == "clear") {
+        quest_log_.clear(def ? def->guid : 0);
+        quests_touched_ = true;
+        spdlog::info("[session] {}: GM clear {}", name(), def ? def->name : "(the finished quests and the variables)");
+    } else if (cmd.kind == "set-var") {
+        quest_log_.set_variable(cmd.name, cmd.value);
+        quests_touched_ = true;
+        spdlog::info("[session] {}: GM set-var {} = {}", name(), cmd.name, cmd.value);
+    }
+}
+
+void PlayerSession::on_quest_debug_rpc(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    const std::string_view n = rpc.call.rpc->name;
+    char params[160];
+    std::snprintf(params, sizeof params, "%s", rpc.call.decoded ? "" : "the parameters did not decode");
+    if (!gm_rpc_admitted(rpc.call.rpc->name, params, now) || !rpc.call.decoded) return;
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!qb || !quests_on_) return;
+    if (n == "ServerDebugStartQuest") {
+        const int64_t id = quest_int_value(quest_rpc_value(rpc, "Guid"));
+        const repl::Value* b = quest_rpc_value(rpc, "bBypassActivationRules");
+        const bool bypass = b && b->get_if<bool>() && *b->get_if<bool>();
+        const content::QuestRow* def = qb->quest(id);
+        const dialogue::Book* book = world_->dialogue();
+        if (!def || !book) {
+            spdlog::warn("[gm] {}: ServerDebugStartQuest {}: no such quest", name(), id);
+            return;
+        }
+        const auto facts = dialogue_facts(nullptr);
+        dialogue::Evaluator ev(*book, *facts);
+        const quest::Create c = quest_log_.can_start(def, ev, bypass);
+        if (c != quest::Create::Ok) {
+            spdlog::warn("[gm] {}: ServerDebugStartQuest {} ({}): refused, {}", name(), def->name, bypass ? "rules bypassed" : "rules asked", quest::create_name(c));
+            return;
+        }
+        ++gm_rpcs_answered_;
+        start_quest(conn, *def, 0, "ServerDebugStartQuest", now);
+    } else if (n == "ServerDebugEndQuest") {
+        const int64_t id = quest_int_value(quest_rpc_value(rpc, "Guid"));
+        if (end_quest(conn, id, "finish", now)) ++gm_rpcs_answered_;
+        else spdlog::warn("[gm] {}: ServerDebugEndQuest {}: the quest is not in the log", name(), id);
+    } else if (n == "ServerDebugFailQuestByInstance") {
+        quest::Guid128 g;
+        uint32_t* words[4] = {&g.a, &g.b, &g.c, &g.d};
+        const char* const letters[4] = {"Guid.A", "Guid.B", "Guid.C", "Guid.D"};
+        for (int i = 0; i < 4; ++i) *words[i] = static_cast<uint32_t>(quest_int_value(quest_rpc_value(rpc, letters[i])));
+        const quest::QuestInstance* q = quest_log_.find_guid(g);
+        if (q && end_quest(conn, q->record, "fail", now)) ++gm_rpcs_answered_;
+        else spdlog::warn("[gm] {}: ServerDebugFailQuestByInstance {}: the quest is not in the log", name(), g.hex());
+    } else if (n == "ServerClearCompletedQuests") {
+        quest_log_.clear(0);
+        quests_touched_ = true;
+        ++gm_rpcs_answered_;
+        spdlog::info("[gm] {}: ServerClearCompletedQuests: the finished quests and the variables are forgotten", name());
+    }
+}
+
+void PlayerSession::run_quests(Connection& conn, Clock::time_point now) {
+    if (!quests_on_ || !quest_worker_ || dead_) return;
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    if (!qb) return;
+    // the GM commands that arrived
+    for (const svc::QuestCommand& cmd : quest_worker_->take(character_id_)) apply_quest_command(conn, cmd, now);
+    // a zone of influence that starts a quest for a character who stands in it (once a second): the starting areas' first quests
+    if (phase_in_done_ && now - zone_checked_ >= std::chrono::seconds(1)) {
+        zone_checked_ = now;
+        const GoodPosition at = checker_.good();
+        const int64_t zoi = static_cast<int64_t>(world::zoi_at(at.x, at.y));
+        if (zoi != zoi_seen_) {
+            zoi_seen_ = zoi;
+            for (const int64_t q : qb->zone_quests(zoi)) {
+                const content::QuestRow* def = qb->quest(q);
+                const dialogue::Book* book = world_->dialogue();
+                if (!def || !book) continue;
+                const auto facts = dialogue_facts(nullptr);
+                dialogue::Evaluator ev(*book, *facts);
+                const quest::Create c = quest_log_.can_start(def, ev, /*bypass_rules=*/false);
+                if (c == quest::Create::Ok) start_quest(conn, *def, 0, "the character stands in the zone that starts it", now);
+                else spdlog::log(level_for(quests_logged_, 100), "[session] {}: the zone {} would start quest {}: not taken, {}", name(), zoi, def->name, quest::create_name(c));
+            }
+        }
+    }
+    // the save
+    if (quest_log_.changed()) {
+        quest_worker_->save(character_id_, quest_log_.to_saved());
+        quest_log_.clear_changed();
+    }
 }
 
 

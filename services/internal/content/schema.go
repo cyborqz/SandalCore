@@ -773,5 +773,8 @@ func Create(db *sql.DB) error {
 	if err := createVendors(db); err != nil {
 		return err
 	}
-	return createCrafting(db)
+	if err := createCrafting(db); err != nil {
+		return err
+	}
+	return createQuests(db)
 }

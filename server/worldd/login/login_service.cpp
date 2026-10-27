@@ -77,6 +77,11 @@ LoginResult LoginService::login(const LoginRequest& req, uint32_t server_id) {
     LoginResult r;
     r.accepted = true;
     r.character = loaded.character;
+    if (quests_) {   // quests, slice 1: the saved quest log; without it the character plays without quests and nothing is saved over what the service holds
+        svc::QuestLogResult q = quests_->load_log(r.character.id);
+        if (q.status == svc::CallStatus::Ok) r.character.quest_log = std::move(q.log);
+        else spdlog::warn("[login] character {}: its quest log does not load ({}): it plays without quests", r.character.id, svc::call_status_name(q.status));
+    }
     spdlog::info("[login] character {} ({}) of account {} logged in", r.character.name, r.character.id,
                  r.character.account_id);
     return r;
