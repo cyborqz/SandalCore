@@ -55,7 +55,14 @@ bool HitContext::host_fn(int fn, const std::string& name, const double* /*args*/
             return true;
         }
         const stats::StatView& tgt = target ? *target : *instigator;   // a hit on the caster itself
-        out = profile->calculate(fn, *instigator, tgt, hit);
+        stats::DamageHit seen = hit;
+        if (fn == stats::kHostCalcDamageMitigation) {
+            // the target's mitigation follows the hit's damage type (its element: Element.Physical.* or Element.Magical.*), whichever power the damage scales
+            // with: a bow made for casters scales with magical power, and its Pierce is still mitigated as physical damage
+            if (tag_matches(hit.tag, "Element.Physical")) seen.physical = true;
+            else if (tag_matches(hit.tag, "Element.Magical")) seen.physical = false;
+        }
+        out = profile->calculate(fn, *instigator, tgt, seen);
         return true;
     }
     switch (fn) {
@@ -69,12 +76,21 @@ bool HitContext::host_fn(int fn, const std::string& name, const double* /*args*/
             return true;
         case stats::kHostSameActor: {
             int a = 0, b = 0;
-            out = (parse_pair(name, a, b) && (a == b || target == nullptr)) ? 1.0 : 0.0;
+            if (!parse_pair(name, a, b)) {
+                out = 0;
+                return true;
+            }
+            const auto pair = [&](int x, int y) { return (a == x && b == y) || (a == y && b == x); };
+            if (a == b || target == nullptr) out = 1.0;
+            else if (pair(stats::kRoleActiveHarm, stats::kRoleTarget)) out = active_is_target ? 1.0 : 0.0;
+            else if (pair(stats::kRoleClosestInHit, stats::kRoleTarget)) out = target_is_closest ? 1.0 : 0.0;
+            else out = 0.0;
             return true;
         }
         case stats::kHostHitContains: {
             const int role = std::atoi(name.c_str());
-            out = (role == stats::kRoleTarget || role == stats::kRoleClosestInHit) && target ? 1.0 : 0.0;
+            if (role == stats::kRoleActiveHarm) out = active_in_hit ? 1.0 : 0.0;
+            else out = (role == stats::kRoleTarget || role == stats::kRoleClosestInHit) && target ? 1.0 : 0.0;
             return true;
         }
         case stats::kHostHitSourceType:

@@ -1332,6 +1332,8 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             pipeline_.emplace(world_ ? world_->ability_catalog() : nullptr, *stats_, *abilities_,
                               [this] { return bootstrap::worn_items_of(inventory_); }, pb_.setup().world_time, static_cast<uint64_t>(pb_.setup().player_id) * 7919u + 1u);
             pipeline_->set_known(known_);
+            pipeline_->set_weapon_tags([this] { return weapon_tags(); });
+            pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
             sync_ability_values();
             if (npc_world_ && npc_world_->combat()) {
                 combat_side_ = std::make_shared<CombatSide>(*this);
@@ -2451,6 +2453,16 @@ void PlayerSession::refresh_rank_mods() {
     sync_ability_values();   // (the ranks changed what the formulas give Sprint's speed)
 }
 // CoA with C_Y_B
+
+std::vector<std::string> PlayerSession::weapon_tags() const {
+    // the item in the weapon slot of the set in hand: the ranged slot while the ranged set is in hand, else the main hand
+    if (!world_) return {};
+    const stats::GearCatalog* gear = world_->stat_context().gear;
+    const svc::InventoryItem* held = inventory_.at(svc::ItemContainer::Equipment, use_ranged_ ? items::equip::Ranged : items::equip::Primary);
+    if (!gear || !held) return {};
+    const stats::ItemGear* item = gear->item(held->item_record_id);
+    return item ? item->tags : std::vector<std::string>{};
+}
 
 void PlayerSession::apply_gear_stats(const char* what) {
     if (!stats_ || !stats_->started()) return;

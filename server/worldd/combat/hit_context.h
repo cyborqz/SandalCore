@@ -41,6 +41,9 @@ struct HitContext {
     double                      distance_cm = 0;      // caster to target
     bool                        enemy = true;         // the target is the caster's enemy (IsEnemy(caster, target))
     bool                        neutral = false;      // ... neutral to it
+    bool                        active_is_target = false;   // the caster's selected enemy (GetActiveTarget(caster, Harm)) is the target of this hit
+    bool                        active_in_hit = false;      // ... is among the targets of the hit
+    bool                        target_is_closest = false;  // the target is the one of the hit nearest the caster (GetClosestTargetToActorInHit)
 // C.O.A.Cyb
 
     /// CheckForDamageTag / HitHasTag: the hit carries the tag.

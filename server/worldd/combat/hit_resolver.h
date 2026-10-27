@@ -67,7 +67,12 @@ struct HitMeta {
     int64_t                  source_type = 0;       // content::kSourceType...
     int64_t                  source_guid = 0;
     std::vector<std::string> ability_tags;          // the ability's own tags (ability.Melee ...)
+    std::vector<std::string> item_tags;             // the tags of the weapon the caster holds (a player's); read only by a hit with use_item_tags
     double                   targets = 1;           // how many targets the hit has
+    // which of the hit's targets is its primary one, for the formulas that tell it from the others (the melee combos' target count scaling)
+    bool                     target_is_active = false;    // this target is the caster's selected enemy
+    bool                     active_in_hit = false;       // the caster's selected enemy is among the targets the hit reaches
+    bool                     target_is_closest = false;   // this target is the one the hit reaches nearest the caster
 };
 // (C-O-A ~ C.Y.B)
 

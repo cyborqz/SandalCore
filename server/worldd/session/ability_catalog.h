@@ -46,6 +46,8 @@ struct HitDef {
     int64_t                            crit_rate_expr = 0, block_rate_expr = 0, miss_rate_expr = 0;   // ab_expr ids that override the stats' chances (0: the default)
     bool                               force_cant_crit = false, force_cant_block = false, force_cant_miss = false;
     bool                               force_roll_crit = false, force_roll_block = false, force_roll_miss = false;
+    /// bShouldUseItemTags: the hit of a player also carries the tags of the weapon it holds (a bow made for casters says ability.MagicalScalingOverride).
+    bool                               use_item_tags = false;
 };
 
 struct AbilityDef {

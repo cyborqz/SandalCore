@@ -101,6 +101,7 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
             d.force_roll_crit = flag("bForceRollCrit");
             d.force_roll_block = flag("bForceRollBlock");
             d.force_roll_miss = flag("bForceRollMiss");
+            d.use_item_tags = flag("bShouldUseItemTags");
         }
         c.hit_names_[d.row.name] = g;
         c.hits_.emplace(g, std::move(d));

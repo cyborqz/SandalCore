@@ -93,7 +93,9 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
 
     HitContext ctx;
     ctx.profile = &data_.profile();
-    ctx.tags = hit.tags;
+    // the tags the damage rules read: the held weapon's first when the hit asks for them, then the record's own and the ability's
+    if (hit.use_item_tags) ctx.tags = meta.item_tags;
+    ctx.tags.insert(ctx.tags.end(), hit.tags.begin(), hit.tags.end());
     ctx.tags.insert(ctx.tags.end(), meta.ability_tags.begin(), meta.ability_tags.end());
     ctx.source_type = meta.source_type;
     ctx.instigator = &attacker_view;
@@ -102,6 +104,9 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
     ctx.distance_cm = distance_cm;
     ctx.enemy = enemy;
     ctx.neutral = neutral;
+    ctx.active_is_target = meta.target_is_active;
+    ctx.active_in_hit = meta.active_in_hit;
+    ctx.target_is_closest = meta.target_is_closest;
     const HitAspect aspect = aspect_of(ctx.tags);
     ctx.hit.tag = aspect.element;
     ctx.hit.physical = aspect.physical;

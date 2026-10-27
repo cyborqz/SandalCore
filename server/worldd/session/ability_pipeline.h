@@ -194,6 +194,10 @@ public:
 // CoA captures, C-Y-B code
 
     using WornFn = std::function<std::vector<stats::WornItem>()>;
+    /// The gameplay tags of the weapon the player holds (the ranged one while the ranged set is in hand, else the main hand); empty when none.
+    using WeaponTagsFn = std::function<std::vector<std::string>()>;
+    /// The actor id of the caster's selected enemy (the first target slot); 0 when it has none.
+    using ActiveTargetFn = std::function<uint64_t()>;
 
     /// `catalog` may be null (a content.db without the ability tables, a test with none): only regeneration runs then. `stats` and `a7` belong to
     /// the session and outlive the pipeline; `worn` gives the equipment the stat engine runs with. `seed` seeds RandDouble.
@@ -266,6 +270,10 @@ public:
 
     /// Plan E1, stage 3: the world's port (null: the caster is alone in its world, as in stage 2). Not owned.
     void set_combat(combat::HitPort* port) { combat_ = port; }
+    /// Where a hit that asks for the held weapon's tags (HitDef::use_item_tags) gets them; none set: such a hit carries none.
+    void set_weapon_tags(WeaponTagsFn fn) { weapon_tags_ = std::move(fn); }
+    /// Where a hit finds the caster's selected enemy, to tell its primary target from the others; none set: the target nearest the caster is the primary one.
+    void set_active_target(ActiveTargetFn fn) { active_target_ = std::move(fn); }
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
@@ -547,6 +555,8 @@ private:
     stats::CharacterStats&    stats_;
     AbilityRuntime&           a7_;
     WornFn                    worn_;
+    WeaponTagsFn              weapon_tags_;
+    ActiveTargetFn            active_target_;
     double                    world_time_at_zero_;
     stats::SplitMix           rng_;
     std::unique_ptr<stats::CharacterStats::Evaluation> evaluation_;

@@ -859,14 +859,34 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     }
     const bool melee = ability && (ability->row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                                    std::find(ability->row.tags.begin(), ability->row.tags.end(), "ability.Melee") != ability->row.tags.end());
+    // whether the hit reaches a target: it is there and alive, on a side the hit helps or harms, and within reach
+    const auto reached = [&](const combat::TargetInfo& ti) {
+        if (!ti.exists || !ti.alive) return false;
+        const bool hostile = ti.relation == combat::Relation::Hostile;
+        if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
+        return ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
+    };
+    // the hit's primary target, for the formulas that tell it from the others (the melee combos give every other target a smaller share): the caster's
+    // selected enemy when the hit reaches it, else the target nearest the caster
+    const uint64_t active = active_target_ ? active_target_() : 0;
+    bool active_in_hit = false;
+    uint64_t closest = 0;
+    double closest_cm = 0;
+    for (const uint64_t id : targets) {
+        const combat::TargetInfo ti = combat_->inspect(id);
+        if (!reached(ti)) continue;
+        if (id == active) active_in_hit = true;
+        if (closest == 0 || ti.surface_distance_cm < closest_cm) {
+            closest = id;
+            closest_cm = ti.surface_distance_cm;
+        }
+    }
     std::vector<bootstrap::HitTargetOut> outs;
     for (const uint64_t id : targets) {
         if (static_cast<double>(outs.size()) >= max_targets) break;
         const combat::TargetInfo ti = combat_->inspect(id);
-        if (!ti.exists || !ti.alive) continue;
+        if (!reached(ti)) continue;
         const bool hostile = ti.relation == combat::Relation::Hostile;
-        if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) continue;   // a side this hit does not reach
-        if (ti.surface_distance_cm > combat_->reach_cm(melee) + combat_->data().activation_leeway_cm()) continue;
         combat::Fighter* tf = combat_->fighter(id);
         if (!tf) continue;
         std::string err;
@@ -877,7 +897,11 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         meta.source_type = src.type;
         meta.source_guid = src.guid;
         if (ability) meta.ability_tags = ability->row.tags;
+        if (hit.use_item_tags && weapon_tags_) meta.item_tags = weapon_tags_();
         meta.targets = static_cast<double>(targets.size());
+        meta.target_is_active = id == active;
+        meta.active_in_hit = active_in_hit;
+        meta.target_is_closest = id == closest;
         combat::Resolved r;
         if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, r, why)) {
             if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on another actor: {}", hit.row.name, why);

@@ -554,6 +554,8 @@ public:
     size_t bar_sets_refused() const { return bar_refused_; }
     size_t weapon_swaps() const { return weapon_swaps_; }
     bool   using_ranged_weapon() const { return use_ranged_; }
+    /// The gameplay tags of the weapon in hand (the item in the ranged slot while the ranged set is in hand, else in the main hand); empty when none.
+    std::vector<std::string> weapon_tags() const;
     size_t regen_ticks() const { return pipeline_ ? pipeline_->ticks_regen() : 0; }
     /// Marker effect items (CurrentEffects) whose end the server has yet to send.
     size_t effect_markers_pending() const { return markers_.size(); }
