@@ -49,6 +49,19 @@ type actionJSON struct {
 	Action string `json:"a"`
 	Window string `json:"w,omitempty"`
 	Vendor int64  `json:"vd,omitempty"`
+	// Response is the kind of an ActionResponse line that worldd answers (storage milestone, step 0, version 25): "OpenPlayerWarehouse"; Config is its StorageAccessConfig.
+	// Every other action response keeps only "a": "ActionResponse".
+	Response string `json:"r,omitempty"`
+	Config   int64  `json:"sc,omitempty"`
+}
+
+// answeredResponses are the action response kinds actionJSON names; the others are left out of the JSON.
+var answeredResponses = map[string]bool{"OpenPlayerWarehouse": true}
+
+// actionResponse is what a dialogue line's action response record holds that actionJSON keeps.
+type actionResponse struct {
+	Kind   string
+	Config int64
 }
 
 // intOf reads a number a decoded struct holds as an int64 (ints, floats and enums stored as numbers).
@@ -168,7 +181,7 @@ func readRequirement(v designdb.Value) (string, *reqJSON, error) {
 }
 
 // readActions reads a DialogueActions array into JSON text ("[]" when there is none).
-func readActions(v designdb.Value) (string, error) {
+func readActions(v designdb.Value, responses map[int64]actionResponse) (string, error) {
 	out := []actionJSON{}
 	if l, ok := v.([]designdb.Value); ok {
 		for _, e := range l {
@@ -183,6 +196,12 @@ func readActions(v designdb.Value) (string, error) {
 					x.Vendor = idGuid(a["VendorDefId"])
 				}
 			}
+			if x.Action == "ActionResponse" {
+				if r, ok := responses[idGuid(a["ResponseId"])]; ok && answeredResponses[r.Kind] {
+					x.Response = r.Kind
+					x.Config = r.Config
+				}
+			}
 			out = append(out, x)
 		}
 	}
@@ -195,6 +214,19 @@ func buildDialogue(w *writer, src *source, opt *Options, meta map[string]string)
 		if _, err := src.need(schema); err != nil {
 			return err
 		}
+	}
+	// the action responses worldd answers (the clerk's "OpenPlayerWarehouse"), by record guid
+	responses := map[int64]actionResponse{}
+	for _, r := range src.rows["ActionResponseRecordBase"] {
+		v, ok := r.Fields["ResponseType"]
+		if !ok {
+			continue
+		}
+		kind := enumValue(strOf(v))
+		if !answeredResponses[kind] {
+			continue
+		}
+		responses[r.Guid] = actionResponse{Kind: kind, Config: intOf(r.Fields["StorageAccessConfig"])}
 	}
 	var nodes, choices, gated, roots, emptyRoots int
 	questsNeeded := map[int64]bool{}
@@ -231,11 +263,11 @@ func buildDialogue(w *writer, src *source, opt *Options, meta map[string]string)
 		quest, _ := f.id("QuestId")
 		enterV, _ := f.get("OnEnterDialogueActions")
 		exitV, _ := f.get("OnExitDialogueActions")
-		onEnter, err := readActions(enterV)
+		onEnter, err := readActions(enterV, responses)
 		if err != nil {
 			return err
 		}
-		onExit, err := readActions(exitV)
+		onExit, err := readActions(exitV, responses)
 		if err != nil {
 			return err
 		}
@@ -258,7 +290,7 @@ func buildDialogue(w *writer, src *source, opt *Options, meta map[string]string)
 				return fmt.Errorf("%s: choice %d: %w", f.where, i, err)
 			}
 			noteQuests(parsed)
-			acts, err := readActions(c["DialogueActions"])
+			acts, err := readActions(c["DialogueActions"], responses)
 			if err != nil {
 				return err
 			}

@@ -542,11 +542,26 @@ DELETE FROM schema_migrations WHERE version = 16;
 COMMIT;
 ```
 
+**Rolling back migration 0017.** Migration 0017 (storage clerks, step 0, "put it in, take it out") adds ONE table, `character_warehouse_items` (the items a character keeps in the item chunks, the material tabs
+and the cargo tab of the warehouse, one row each); it writes nowhere else, backfills nothing and touches no existing table.
+worldd keeps a character's warehouse while it plays and saves it with the items (`SaveInventory` with `replace_warehouse`). The rollback drops the table with
+whatever it holds: every stored item is lost. The characters, their bags, their money and their jobs are untouched. Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0017 (storage clerks, step 0: the warehouse items)
+BEGIN;
+DROP TABLE character_warehouse_items;
+DELETE FROM schema_migrations WHERE version = 17;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or
 its name. worldd takes the commands of a character that plays every moment and does them in its session; a command for a character that is away waits for its next login. Content: contentc version 21 adds
 `quest`, `quest_objective`, `npc_offered_quest` and `dialogue_accept` (`internal/content/quests.go` says what each holds).
+
+**Content (storage, step 0).** contentc version 25 adds the warehouse tables (`internal/content/warehouse.go`): `warehouse_node` (the three defs a city node names), `warehouse_def` and `warehouse_def_tab` (the material and cargo tab defs and their tabs in order), `warehouse_tab` (kind, member, availability expression, costs), `warehouse_chunks_def`, `warehouse_chunks_def_chunk` and `warehouse_chunk` (the item chunks: slots, level, availability expression, costs). The dialogue lines' actions JSON also names the action response a clerk's line runs (`"r": "OpenPlayerWarehouse"`, `"sc"`: its access config).
 
 **Content (vendors, step 0).** contentc version 18 adds `npc_vendor_link` (which shop a shopkeeper's use opens), `vendor_def_data`, `vendor_def_modifier`, `vendor_def_sell_filter`, `vendor_modifier`, `vendor_sell_filter`, `base_item_value`, `item_base_value`, `vendor_offer`, `vendor_availability` and `vendor_price` (`internal/content/vendors.go` says what each holds; `cmd/contentc/vendors.go` writes them), and the `OpenWindow` actions of the dialogue tables carry the shop they open (`vd`). `vendor_price` holds, for every listing of every shop, its price per unit before the town's tax: the listing's value (the offer's, when it has one) rounded up, through the shop's buy modifiers, rounded up, evaluated with `aocexpr` (`Env.IntDivide` makes a division of two whole numbers truncate, as the formulas expect); a listing that needs more than the item gets no row. Rebuild `content.db` (the extractor's `database` step) after pulling it. The character service's `GetCharacter` (with items) also returns the wallet and gives a character with none its start purse once (empty, or 210,000 copper with AOC_GM_STARTER_SET=1, for testing); `SaveInventory` stores the wallet in the same transaction when `replace_wallet` is set.
 

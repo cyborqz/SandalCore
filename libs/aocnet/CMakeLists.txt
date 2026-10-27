@@ -100,6 +100,8 @@ add_library(aocnet STATIC
     protocol/repl/dialogue_rpc.h
     protocol/repl/node_rpc.h
     protocol/repl/node_layout.h
+    protocol/repl/warehouse_codec.h
+    protocol/repl/warehouse_rpc.h
     # emit
     protocol/emit/actor_builder.cpp
     protocol/emit/package_map_exporter.cpp

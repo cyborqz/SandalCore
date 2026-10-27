@@ -170,7 +170,7 @@ func (s *Store) SaveInventoryAll(ctx context.Context, characterID string, items 
 			return err
 		}
 	}
-	return s.saveInventory(ctx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown)
+	return s.saveInventory(ctx, characterID, items, wallet, jobs, replaceJobs, known, replaceKnown, nil, false)
 }
 
 // replaceProcessingJobs makes the character's jobs exactly jobs in tx, in the order given.

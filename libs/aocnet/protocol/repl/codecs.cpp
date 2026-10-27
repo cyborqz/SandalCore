@@ -17,6 +17,7 @@
 #include "protocol/repl/channeling_codec.h"
 #include "protocol/repl/craft_codec.h"
 #include "protocol/repl/quest_codec.h"
+#include "protocol/repl/warehouse_codec.h"
 #include "protocol/repl/item_codec.h"
 
 #include <algorithm>
@@ -114,6 +115,7 @@ enum class S {
     Unknown, Vec3, Vec2, Ticks, Rotator, Quantized, Normal, RepMovement, LoadTracker, UniqueId, Tag, TagContainer,
     StatInt32, Quat, GuidToBool, Alignment, AppearanceId, Customization, ItemInstance, ItemStorageEvent, HitConfirmations,
     MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData, CraftState, RewardInstance, HashedVariable,
+    WarehouseEntry,
 };
 
 S find_struct(std::string_view n) {
@@ -146,6 +148,7 @@ S find_struct(std::string_view n) {
     if (n == "FCraftItemState") return S::CraftState;
     if (n == "FRewardInstance") return S::RewardInstance;
     if (n == "FHashedVariable") return S::HashedVariable;
+    if (n == "FWarehouseItemChunkSummary" || n == "FWarehouseMaterialTabSummary") return S::WarehouseEntry;
     return S::Unknown;
 }
 
@@ -1151,6 +1154,10 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
             const auto* d = v.get_if<ChannelingData>();
             return d && channeling_data_fits(*d);
         }
+        case S::WarehouseEntry: {
+            const auto* e = v.get_if<WarehouseSummaryEntry>();
+            return e && warehouse_entry_fits(*e);
+        }
         case S::Unknown:     break;
     }
     return false;
@@ -1344,6 +1351,11 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
             if (!s) return std::nullopt;
             return Value(std::move(*s));
         }
+        case S::WarehouseEntry: {
+            auto e = read_warehouse_entry(r);
+            if (!e) return std::nullopt;
+            return Value(std::move(*e));
+        }
         case S::Unknown:
             break;
     }
@@ -1451,6 +1463,8 @@ bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out
             return write_reward_instance(out, *v.get_if<RewardInstance>());
         case S::HashedVariable:
             return write_hashed_variable(out, *v.get_if<HashedVariable>());
+        case S::WarehouseEntry:
+            return write_warehouse_entry(out, *v.get_if<WarehouseSummaryEntry>());
         case S::Unknown:
             break;
     }

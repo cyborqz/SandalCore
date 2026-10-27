@@ -357,6 +357,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->completed_ftues_ = std::move(finished);
     p->init_quests(world, character);   // quests, slice 1: the saved log becomes the quest component's arrays, sent with the join
     if (!p->completed_ftues_.empty()) spdlog::info("[session] {}: {} finished tutorial(s) on the character's list, sent with the join", p->pb_.setup().name, p->completed_ftues_.size());
+    p->wh_storage_.load(character.warehouse_items);   // storage clerks, step 0: what the character keeps in the warehouse (the base chunk gets its component below, the tabs at the first open of their town)
     p->taught_ = character.known_recipes;   // crafting, step 3: the recipes a game master taught the character (the others are known to the client by their own flag)
     if (!p->taught_.empty() && !p->pb_.set_known_recipes(p->taught_)) {
         spdlog::warn("[session] {}: the {} recipes the character was taught do not fit the player's state: the client is not told of them", p->pb_.setup().name, p->taught_.size());
@@ -487,6 +488,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         spdlog::info("[session] {}: {} professions, {} beyond Novice level 1 with no XP{}", setup.name, p->professions_.book()->size(), beyond,
                      highest.empty() || best <= 1 ? std::string() : "; the highest is " + highest);
     }
+    p->list_item_chunk(conn);   // storage clerks, step 0: the base item chunk is on the pawn from the join, listed in OwnerInfo (queued behind the join)
     p->pump(conn);
     if (refusal) *refusal = bootstrap::SetupRefusal::None;
     return p;
@@ -649,6 +651,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_floor_net(conn, now);
     run_dialogue(conn, now);
     run_quests(conn, now);
+    run_warehouse(conn, now);
     run_crafting(conn, now);
     run_quick_make(conn, now);
     run_nodes(conn);
@@ -874,7 +877,7 @@ void PlayerSession::hand_over_inventory(const char* why, bool periodic) {
     if (!sink_) return;
     std::vector<svc::InventoryItem> items = inventory_.items();
     const size_t n = items.size();
-    sink_->save_inventory(character_id_, std::move(items), wallet_.entries(), jobs_, taught_);
+    sink_->save_inventory(character_id_, std::move(items), wallet_.entries(), jobs_, taught_, wh_storage_.rows());
     ++inventories_handed_over_;
     spdlog::log(periodic ? level_for(item_periodic_logged_) : spdlog::level::info, "[session] {}: saving the inventory ({} items) ({})", name(), n, why);
 }
@@ -1100,6 +1103,8 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerRequestClientLoad") return on_client_load(conn, now);
         if (name_of_rpc == "ServerUpdateAccountCombatSettings") return on_combat_settings(conn, rpc, now);
         if (name_of_rpc == "ServerRequestStorageEvent") return on_storage_event_request(conn, rpc, now);
+        if (name_of_rpc == "ServerRequestWarehouseSummary" || name_of_rpc == "ServerVisitWarehouse") return on_warehouse_request(conn, rpc, now);
+        if (name_of_rpc == "ServerCloseWarehouse") return on_warehouse_close(conn);
         if (name_of_rpc == "ServerSetActionbarSlotUseData") return on_set_slot(conn, rpc, now);
         if (name_of_rpc == "ServerSelectDialogueChoice") return on_dialogue_choice(conn, rpc, now);
         // quests, slice 1: the quest book's calls
@@ -1159,6 +1164,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
             return;
         }
         if (name_of_rpc == "ServerRequestStorageData") return on_storage_request(conn, rpc, now);
+        if (name_of_rpc == "ServerFetchWarehouse") return on_warehouse_request(conn, rpc, now);   // (the client sends it on the pawn: the storage window's "have these containers ready")
         if (name_of_rpc == "ServerMovePacked") return on_move(conn, rpc, bunch, now, /*on_mount=*/false);
         if (name_of_rpc == "ServerItemUsed") return on_item_used(conn, rpc, now);
         if (name_of_rpc == "ServerPurchaseSkillBuild") return on_purchase(conn, rpc, now);
@@ -3062,6 +3068,7 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
         }
         return;
     }
+    if (warehouse_event(conn, *event, now)) return;   // storage clerks, step 0: a move that names a warehouse container is the warehouse's
     if (!within_budget(item_budget_, "ServerRequestStorageEvent", now) || !room_for(4)) return;
     const char* what = "ServerRequestStorageEvent";
     const bootstrap::SessionGuids& g = pb_.setup().guids;
@@ -3155,6 +3162,7 @@ void PlayerSession::on_storage_request(Connection& conn, const repl::ClientRpc& 
     const auto it = rpc.call.params.values.find(1);
     const auto* container = rpc.call.decoded && it != rpc.call.params.values.end() ? it->second.get_if<FIntrepidNetworkGUID>() : nullptr;
     const bootstrap::SessionGuids& g = pb_.setup().guids;
+    if (container && warehouse_payload(conn, *container, now)) return;   // storage clerks, step 0: a warehouse container's data
     std::optional<bootstrap::StorageKind> kind;
     if (container) {
         if (*container == g.backpack) kind = bootstrap::StorageKind::Backpack;
@@ -4581,8 +4589,8 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
     return true;
 }
 
-void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/, bool exhaust) {
-    const dialogue::Talk::State s = talk_.state();   // a copy: the reply is built when the connection has room for it
+bootstrap::PlayerBootstrap::DialogueView PlayerSession::dialogue_view(bool exhaust) const {
+    const dialogue::Talk::State s = talk_.state();
     bootstrap::PlayerBootstrap::DialogueView v;
     v.exhaust = exhaust;
     if (s.sub) {
@@ -4614,6 +4622,11 @@ void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/, bool ex
     if (s.source != 0 && registry_) {
         if (const world::WorldActor* a = registry_->find(s.source)) v.source = a->actor.guid;
     }
+    return v;
+}
+
+void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/, bool exhaust) {
+    const bootstrap::PlayerBootstrap::DialogueView v = dialogue_view(exhaust);   // a copy: the reply is built when the connection has room for it
     queue("dialogue", [v](bootstrap::PlayerBootstrap& pb) { return pb.dialogue_update(v); }, conn);
 }
 
@@ -4682,6 +4695,12 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
     for (const std::string& s : r.skipped) {
         if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
     }
+    // storage clerks, step 0: a line that opens the warehouse ends the conversation (it clears below) and the window opens in its place
+    bool warehouse_opened = false;
+    if (r.open_warehouse != 0) {
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the storage (access {})", name(), response->choice_index, response->node, r.open_warehouse);
+        warehouse_opened = open_warehouse(conn, *npc, r.open_warehouse, now);
+    }
     // vendors, step 2: a line that opens a shop opens its window; the conversation is left as it is (the client closes its own window as the shop's opens)
     if (r.open_vendor != 0) {
         spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the shop {}", name(), response->choice_index, response->node, r.open_vendor);
@@ -4693,7 +4712,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
             if (!talk_.open()) ++dialogue_closes_;
             spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: {}", name(), response->choice_index, response->node,
                         talk_.open() ? "on to node " + std::to_string(talk_.state().shown_node) : std::string("the conversation ends"));
-            send_dialogue(conn, "a line was chosen");
+            if (!warehouse_opened) send_dialogue(conn, "a line was chosen");   // (the warehouse's second half sends the clear after its window call)
             break;
         case dialogue::Outcome::Nothing:
             if (r.open_vendor == 0) spdlog::log(level_for(dialogue_logged_), "[session] {}: line {} of node {} changes nothing: {}", name(), response->choice_index, response->node, r.why);
@@ -4703,6 +4722,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
             spdlog::log(level_for(dialogue_logged_), "[session] {}: a talking-window choice is refused: {}", name(), r.why);
             break;
     }
+    if (warehouse_opened) finish_open_warehouse(conn, now, /*clear=*/r.outcome == dialogue::Outcome::Changed);   // (retail's packet: the window call, the clear, then the lists)
 }
 
 void PlayerSession::run_dialogue(Connection& conn, Clock::time_point /*now*/) {
@@ -6912,5 +6932,8 @@ void PlayerSession::on_gm_node_rpc(const repl::ClientRpc& rpc, Clock::time_point
                     name(), rpc_name);
     }
 }
+
+// storage clerks, step 0: the session's side of the warehouse window (warehouse/player_warehouse.inc is part of this file, so that the build lists stay as they are)
+#include "warehouse/player_warehouse.inc"
 
 }}  // namespace aoc::worldd

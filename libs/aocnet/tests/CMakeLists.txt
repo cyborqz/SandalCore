@@ -65,6 +65,7 @@ foreach(t
     test_repl_node_layout
     test_repl_dialogue
     test_repl_quest
+    test_repl_warehouse
 )
     aocnet_add_test(${t})
 endforeach()

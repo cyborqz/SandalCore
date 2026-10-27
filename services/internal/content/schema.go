@@ -781,5 +781,8 @@ func Create(db *sql.DB) error {
 	if err := createQuests(db); err != nil {
 		return err
 	}
-	return createCurrency(db)
+	if err := createCurrency(db); err != nil {
+		return err
+	}
+	return createWarehouse(db)
 }

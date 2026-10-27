@@ -71,6 +71,16 @@ struct InventoryItem {
     }
 };
 
+/// Storage clerks, step 0: one item of a character's warehouse (aoc.character.v1.WarehouseItem).  `area` is "Items" (the item chunks, the same in every town: node 0), "Materials" or "Cargo"
+/// (the tabs of the town `node_guid`); `container_guid` the chunk's or the tab's record; `item.slot` the place in the container (`item.container` is not used).
+struct WarehouseItem {
+    std::string   area;
+    int64_t       node_guid = 0;
+    int64_t       container_guid = 0;
+    InventoryItem item;
+    bool operator==(const WarehouseItem&) const = default;
+};
+
 /// The vendors milestone, step 0: one currency of a character's wallet (aoc.character.v1.WalletEntry): the BASE currency def's Guid (Copper, Node currency) and the balance in that
 /// unit (copper for money).
 struct WalletEntry {
@@ -257,6 +267,8 @@ struct Character {
     /// Quests, slice 1: the character's saved quest log, read from the quest service at the login.  Empty (nullopt) when the world server has no quest service or it did not answer: the
     /// character then plays without quests, and nothing is saved over what the service holds.
     std::optional<SavedQuestLog> quest_log;
+    /// Storage clerks, step 0: the items the character keeps in the warehouse (with the items).  A service of an older version sends none.
+    std::vector<WarehouseItem> warehouse_items;
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
@@ -343,6 +355,12 @@ public:
                                       const std::vector<int64_t>& known_recipes) {
         (void)known_recipes;
         return save_inventory(id, items, wallet, jobs);
+    }
+    /// Storage clerks, step 0: the same that also stores the character's warehouse (it becomes exactly `warehouse`), in the same transaction.  A fake that does not care saves the rest.
+    virtual CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                      const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) {
+        (void)warehouse;
+        return save_inventory(id, items, wallet, jobs, known_recipes);
     }
     /// Plan D1: SaveProgress: the level, the class and the XP rows, in one transaction (the latest save wins). Refused: a level
     /// outside 1-25, a class outside 1-8, a leveling type of 0, a negative XP or debt; NotFound: no such character.

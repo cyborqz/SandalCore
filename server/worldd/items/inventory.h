@@ -244,6 +244,10 @@ public:
     /// both in the Backpack; or, with a `catalog`, both in resource containers (the same one or two): the stack is moved to the top-left cell `to_slot` of its rectangle, which must lie
     /// in the grid on free cells (its own old cells are free).  The Backpack and a resource container never exchange items, a move onto a stack of the same item (Fill) is refused.
     Outcome move(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot, const ItemCatalog* catalog = nullptr);
+    /// Storage clerks, step 0: puts `item` (an instance that left the warehouse) in `container` slot `slot`: the item bag takes an item that is not a material into an empty slot, a material bag
+    /// takes a material whose rectangle fits there.  Refused, changing nothing, for another container, an instance the inventory holds already, an unknown record, a material in the item bag, a
+    /// non-material in a material bag, an occupied slot or a rectangle that does not fit.  The Add is the outcome's only event.
+    Outcome add_at(svc::ItemContainer container, int slot, svc::InventoryItem item, const ItemCatalog& catalog);
     /// ServerRequestStorageEvent, Swap: the two whole stacks of the Backpack change places; `to_guid` and `to_count` are what the
     /// client says is in the target slot.  A resource container's items are not swapped (refused).
     Outcome swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,

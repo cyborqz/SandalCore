@@ -287,6 +287,7 @@
 #include "session/talents.h"
 #include "stats/character_stats.h"
 #include "svc/services.h"
+#include "warehouse/warehouse.h"
 
 #include <spdlog/common.h>
 
@@ -729,6 +730,22 @@ public:
     size_t   quests_taken() const { return quests_taken_; }
     size_t   quests_refused() const { return quests_refused_; }
     size_t   quests_abandoned() const { return quests_abandoned_; }
+    /// Storage clerks, step 0: whether the storage window is open, the guid the pawn's component of a container of an area has (the one the open window shows; else the first the connection
+    /// made; zero when it has none), the storage windows opened and the stacks moved, the requests refused, and what the character keeps.
+    bool     warehouse_open() const { return wh_open_; }
+    protocol::emit::FIntrepidNetworkGUID warehouse_guid(warehouse::Area area) const {
+        const WhComponent* first = nullptr;
+        for (const WhComponent& w : wh_components_) {
+            if (w.key.area != area) continue;
+            if (wh_open_ && wh_window_.find(w.key)) return w.comp.guid;
+            if (!first) first = &w;
+        }
+        return first ? first->comp.guid : protocol::emit::FIntrepidNetworkGUID{};
+    }
+    size_t   warehouse_opens() const { return wh_opens_; }
+    size_t   warehouse_moves() const { return wh_moves_; }
+    size_t   warehouse_refused() const { return wh_refused_; }
+    const warehouse::Storage& warehouse_storage() const { return wh_storage_; }
     /// The tax-table requests of the vendor windows, and the tables sent in answer.
     size_t   tax_requests() const { return tax_requests_; }
     size_t   tax_tables_sent() const { return tax_tables_sent_; }
@@ -880,6 +897,8 @@ private:
     void on_dialogue_choice(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Whether the NPC offers a quest the world knows (it may open a conversation although it has no root of its own).
     bool npc_offers_quests(const world::WorldActor& npc) const;
+    /// The conversation as it is now, as the PlayerController's CurrentDialogueInstance carries it.  `exhaust`: as for send_dialogue().
+    bootstrap::PlayerBootstrap::DialogueView dialogue_view(bool exhaust = false) const;
     /// Sends the conversation as it is now (the PlayerController's CurrentDialogueInstance).  `exhaust`: the quest offer was answered, so ExhaustBehavior goes with the cleared queue.
     void send_dialogue(Connection& conn, const char* why, bool exhaust = false);
     // ---- quests, slice 1: the quest log and the quest panel -----------------------------------------------------------------------------------------
@@ -907,6 +926,30 @@ private:
     void end_dialogue(Connection& conn, const char* why);
     /// Every tick: a conversation whose NPC is gone or far away ends.
     void run_dialogue(Connection& conn, Clock::time_point now);
+    // ---- storage clerks, step 0 (warehouse/player_warehouse.inc) ----
+    /// The join's last piece for the warehouse: the character's base item chunk gets its component and OwnerInfo lists it, as retail's login does (the client asks for its data and has it
+    /// before any window opens).  Queued behind the join.
+    void list_item_chunk(Connection& conn);
+    /// The clerk's line "access my storage", first half: the town's tabs get their components (read-only, not listed) and OwnerInfo names the town in WarehouseMaterialTabsByIds and
+    /// WarehouseCrateTabsByIds (queued at once).  False, and logged, when the storage does not open.  finish_open_warehouse() follows, after the conversation's other replies.
+    bool open_warehouse(Connection& conn, const world::WorldActor& npc, int access_config, Clock::time_point now);
+    /// The second half, in retail's packet order: the window call, the conversation's clear, then OwnerInfo's lists and the tabs' bReadOnly 0 (an RPC goes out before the property updates of
+    /// its frame); all queued with the replies' delay so that the components have been on the client for some frames when the lists name them.  `clear` is the conversation's end.
+    void finish_open_warehouse(Connection& conn, Clock::time_point now, bool clear);
+    /// Like send_dialogue(), after the replies' delay (the warehouse's second half carries it).
+    void send_dialogue_later(Connection& conn, Clock::time_point now);
+    /// ServerRequestWarehouseSummary, ServerFetchWarehouse, ServerVisitWarehouse.
+    void on_warehouse_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// ServerCloseWarehouse.
+    void on_warehouse_close(Connection& conn);
+    void close_warehouse(Connection& conn, const char* why);
+    /// Every tick: a window whose clerk is gone or far away, or whose player is dead, closes.
+    void run_warehouse(Connection& conn, Clock::time_point now);
+    /// A ServerRequestStorageEvent that names a warehouse container: handled here (true), or not the warehouse's (false: the bags' own).
+    bool warehouse_event(Connection& conn, const protocol::repl::ItemStorageEvent& event, Clock::time_point now);
+    /// ServerRequestStorageData for a warehouse container: answered here (true), or not a warehouse container (false).
+    bool warehouse_payload(Connection& conn, const protocol::emit::FIntrepidNetworkGUID& container, Clock::time_point now);
+    void refuse_warehouse_request(Connection& conn, const char* what, const std::string& why, Clock::time_point now);
     /// What the reader skipped in a bunch that read (calls on subobjects the client names by path, RPC fields the class has no RPC for): counted, and said once per name.
     void note_unserved_blocks(bootstrap::Role role, const protocol::repl::ClientBunch& parsed, const InBunch& bunch);
     void on_move(Connection& conn, const protocol::repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now, bool on_mount);
@@ -1446,6 +1489,21 @@ private:
     int64_t                        vendor_def_ = 0;
     bool                           vendor_by_talk_ = false;   // the open window was opened by a line of the shopkeeper's conversation, not by a use of it
     RequestBudget                  vendor_budget_{kVendorBurst, kVendorInterval};
+    // storage clerks, step 0 (warehouse/player_warehouse.inc)
+    struct WhComponent {
+        warehouse::Key                  key;
+        warehouse::Spec                 spec;   // the container as the window shows it (the base chunk's data is sent with no window open)
+        bootstrap::WarehouseComponent   comp;   // as it is meant to be once the window is open (the tabs listed and writable); the first half of an open sends them read-only and unlisted
+    };
+    uint32_t                       wh_gen_ = 0;                // counts the opens and closes: a reply of an earlier open that finds it changed is dropped
+    warehouse::Storage             wh_storage_;                // what the character keeps in the warehouse (loaded at the join, saved with the inventory)
+    warehouse::OpenWindow          wh_window_;                 // the containers the window has open now
+    bool                           wh_open_ = false;
+    uint64_t                       wh_clerk_ = 0;              // the clerk's actor id
+    uint8_t                        wh_access_ = 0;             // the StorageAccessConfig the window opened with
+    std::vector<WhComponent>       wh_components_;             // the pawn's warehouse components of this connection, with their guids
+    RequestBudget                  wh_budget_{kVendorBurst, kVendorInterval};
+    size_t wh_opens_ = 0, wh_moves_ = 0, wh_refused_ = 0, wh_logged_ = 0, wh_refused_logged_ = 0, wh_unreadable_logged_ = 0;
     RequestBudget                  tax_budget_{kTaxBurst, kTaxInterval};
     size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;
     size_t vendor_opens_ = 0, vendor_purchases_ = 0, vendor_refused_ = 0, interact_ignored_ = 0, vendor_logged_ = 0, interact_logged_ = 0;

@@ -70,6 +70,16 @@ type FTUEStore interface {
 
 var _ FTUEStore = (*character.Store)(nil)
 
+// WarehouseStore is the part of character.Store that keeps a character's warehouse (the storage milestone, step 0). A store without it keeps none: GetCharacter sends none and a save that
+// replaces the warehouse is refused.
+type WarehouseStore interface {
+	WarehouseItems(ctx context.Context, id string) ([]character.WarehouseItem, error)
+	SaveInventoryEverything(ctx context.Context, id string, items []character.Item, wallet []character.WalletEntry, replaceWallet bool, jobs []character.ProcessingJob, replaceJobs bool,
+		known []int64, replaceKnown bool, warehouse []character.WarehouseItem, replaceWarehouse bool) error
+}
+
+var _ WarehouseStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -261,6 +271,13 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			}
 			out.CompletedFtues = done
 		}
+		if ws, ok := s.store.(WarehouseStore); ok {
+			stored, err := ws.WarehouseItems(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.WarehouseItems = toProtoWarehouse(stored)
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -414,6 +431,25 @@ func (s *Server) SaveInventory(ctx context.Context, r *characterv1.SaveInventory
 		}
 		items = append(items, item)
 	}
+	if r.GetReplaceWarehouse() {
+		ws, ok := s.store.(WarehouseStore)
+		if !ok {
+			return nil, status.Error(codes.Unimplemented, "this character store keeps no warehouse")
+		}
+		wallet := make([]character.WalletEntry, 0, len(r.GetWallet()))
+		for _, e := range r.GetWallet() {
+			wallet = append(wallet, character.WalletEntry{CurrencyGuid: e.GetCurrencyGuid(), Amount: e.GetAmount()})
+		}
+		stored := make([]character.WarehouseItem, 0, len(r.GetWarehouseItems()))
+		for _, w := range r.GetWarehouseItems() {
+			stored = append(stored, fromProtoWarehouse(w))
+		}
+		if err := ws.SaveInventoryEverything(ctx, r.GetId(), items, wallet, r.GetReplaceWallet(), fromProtoJobs(r.GetProcessingJobs()), r.GetReplaceProcessingJobs(), r.GetKnownRecipes(),
+			r.GetReplaceKnownRecipes(), stored, true); err != nil {
+			return nil, toStatus(ctx, err)
+		}
+		return &characterv1.SaveInventoryResponse{Saved: int32(len(items))}, nil
+	}
 	if r.GetReplaceProcessingJobs() || r.GetReplaceKnownRecipes() {
 		js, ok := s.store.(JobStore)
 		if !ok {
@@ -551,6 +587,33 @@ func fromProtoItem(p *characterv1.Item) (character.Item, error) {
 		CreatedAt:       time.UnixMilli(p.GetCreatedAtMs()),
 		PersistedHealth: p.PersistedHealth, PersistedMana: p.PersistedMana, LockExpiration: p.GetLockExpiration(),
 	}, nil
+}
+
+// toProtoWarehouse is the warehouse items as GetCharacter sends them.
+func toProtoWarehouse(items []character.WarehouseItem) []*characterv1.WarehouseItem {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.WarehouseItem, 0, len(items))
+	for _, w := range items {
+		out = append(out, &characterv1.WarehouseItem{
+			Area: w.Area, NodeGuid: w.NodeGUID, ContainerGuid: w.ContainerGUID, Slot: w.Slot, ItemRecordId: w.ItemRecordID, InstanceGuid: w.InstanceGUID,
+			Quantity: w.Quantity, Quality: w.Quality, Durability: w.Durability, CreatedAtMs: unixMilli(w.CreatedAt),
+			PersistedHealth: w.PersistedHealth, PersistedMana: w.PersistedMana, LockExpiration: w.LockExpiration,
+		})
+	}
+	return out
+}
+
+// fromProtoWarehouse is a warehouse item as the store takes it (the store checks it).
+func fromProtoWarehouse(p *characterv1.WarehouseItem) character.WarehouseItem {
+	return character.WarehouseItem{
+		Area: p.GetArea(), NodeGUID: p.GetNodeGuid(), ContainerGUID: p.GetContainerGuid(), Slot: p.GetSlot(),
+		Item: character.Item{
+			ItemRecordID: p.GetItemRecordId(), InstanceGUID: p.GetInstanceGuid(), Quantity: p.GetQuantity(), Quality: p.GetQuality(), Durability: p.GetDurability(),
+			CreatedAt: time.UnixMilli(p.GetCreatedAtMs()), PersistedHealth: p.PersistedHealth, PersistedMana: p.PersistedMana, LockExpiration: p.GetLockExpiration(),
+		},
+	}
 }
 
 // unixMilli is t in Unix milliseconds, and 0 for the zero time.

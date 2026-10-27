@@ -15,7 +15,6 @@ This document lists the known issues of the current SandalCore main in one place
 | **Quests / Givers** | Quest givers the world cannot draw yet, and quests that start from items, do not offer their quests. | None. | In progress with NPC looks and names; item quests later. |
 | **Glint / Shops** | Shops take only the Glint kind a price names, so paying with a bigger kind (for example a Dim for a Dull price) is refused. | Keep some Dull Glint. | Planned: paying with change. |
 | **Death / Respawn** | Dying always offers the same single respawn point. | None. | In progress: Embersprings. |
-| **Storage** | Storage clerks do not open the storage yet. | None. | In progress: storage clerks. |
 | **Weapons / Talents** | Weapon lines earn no experience, so weapon-tree talents cannot be picked. | None. | Open: weapon line experience. |
 | **Combat / Finishers** | The extra effects of a weapon combo's last hit (class resources, weapon-tree finisher procs) are missing; its damage lands. | None. | Open: they are the game's reactions, which are not built yet. |
 | **Bard** | A weapon combo's finisher doesn't spend Resonance (only Fortissimo does). | None. | Open: the finisher's melody effect, which spends up to 3 stacks, is one of the game's reactions. |

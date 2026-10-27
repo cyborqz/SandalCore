@@ -815,6 +815,8 @@ struct DialogueActionRow {
     std::string action;   // OpenWindow, ActionResponse, GiveItems, IncrementDialogueObjective, ...
     std::string window;   // for OpenWindow: Vendor
     int64_t     vendor = 0;   // for OpenWindow/Vendor: the VendorDef the window opens (0: none named)
+    std::string response;        // storage, step 0 (contentc version 25), for ActionResponse: the kind worldd answers ("OpenPlayerWarehouse"); empty for any other
+    int64_t     access_config = 0;   // ... and its StorageAccessConfig
 };
 
 struct DialogueChoiceRow {
@@ -1075,6 +1077,51 @@ struct VendorModifier {
     std::vector<Key>     curve;
     TagQuery             filter;
     std::vector<int64_t> currencies, children;
+};
+
+// ---- storage clerks, step 0 (contentc version 25): the warehouse tables ------------------------------------------------------------------------------
+
+/// One cost of a tab or an item chunk (the JSON of warehouse_tab.costs): the currency's record, its record type id, and the value and multiplier expressions (literals in the data).
+struct WarehouseCostRow {
+    int64_t     currency = 0;
+    int64_t     type_id = 0;
+    std::string value, multiplier;
+};
+
+struct WarehouseTabRow {
+    int64_t                       guid = 0;
+    std::string                   name;
+    int                           storage_type = 0;   // 0 General, 1 Crates
+    bool                          member = false, specializable = false;
+    std::string                   requirement;        // the availability expression ("" and "true" always hold)
+    std::vector<WarehouseCostRow> costs;
+};
+
+struct WarehouseChunkRow {
+    int64_t                       guid = 0;
+    std::string                   name;
+    int                           size = 0;           // the slots
+    int                           level = 0;
+    std::string                   requirement;
+    std::vector<WarehouseCostRow> costs;
+};
+
+struct WarehouseDefRow {
+    int64_t              guid = 0;
+    std::string          name;
+    int                  columns = 0, rows = 0;
+    std::vector<int64_t> tabs;   // the tabs in the def's order
+};
+
+struct WarehouseData {
+    struct Node {
+        int64_t resource_def = 0, crate_def = 0, chunks_def = 0;
+    };
+    std::map<int64_t, Node>                 nodes;         // by city node guid
+    std::map<int64_t, WarehouseDefRow>      defs;          // material and cargo tab defs
+    std::map<int64_t, WarehouseTabRow>      tabs;
+    std::map<int64_t, std::vector<int64_t>> chunk_defs;    // the chunks of an item chunks def, in order
+    std::map<int64_t, WarehouseChunkRow>    chunks;
 };
 
 /// One sell filter of a def (vendor_sell_filter): a whitelist of items and a tag query.
@@ -1356,6 +1403,8 @@ public:
     std::optional<CraftRecipeData> craft_recipe_data(std::string& error) const;
     /// Vendors, step 0 (contentc version 18): the shops' links, tax tags, prices and predicates, read whole.  nullopt, with `error` set, for a file of an older version.
     std::optional<VendorData> vendor_data(std::string& error) const;
+    /// Storage clerks, step 0 (contentc version 25): the warehouse tables, read whole.  nullopt, with `error` set, for a file of an older version.
+    std::optional<WarehouseData> warehouse_data(std::string& error) const;
     /// Vendors, the selling step (contentc version 19): what a sale or a repair needs of one item.  `known` is false for an item with no item_vendor row; nullopt, with `error` set,
     /// for a file of an older version or a damaged read.
     std::optional<ItemSaleFacts> item_sale(int64_t item, std::string& error) const;

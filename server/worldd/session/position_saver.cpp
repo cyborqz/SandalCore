@@ -74,8 +74,14 @@ void CharacterSaver::save_inventory(const std::string& character_id, std::vector
     save_inventory_entry(character_id, std::move(items), std::move(wallet), std::move(jobs), std::move(known_recipes));
 }
 
+void CharacterSaver::save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
+                                    std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) {
+    save_inventory_entry(character_id, std::move(items), std::move(wallet), std::move(jobs), std::move(known_recipes), std::move(warehouse));
+}
+
 void CharacterSaver::save_inventory_entry(const std::string& character_id, std::vector<svc::InventoryItem> items, std::optional<std::vector<svc::WalletEntry>> wallet,
-                                          std::optional<std::vector<svc::ProcessingJob>> jobs, std::optional<std::vector<int64_t>> known_recipes) {
+                                          std::optional<std::vector<svc::ProcessingJob>> jobs, std::optional<std::vector<int64_t>> known_recipes,
+                                          std::optional<std::vector<svc::WarehouseItem>> warehouse) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (stop_) return;
@@ -86,6 +92,7 @@ void CharacterSaver::save_inventory_entry(const std::string& character_id, std::
             it->second.wallet = std::move(wallet);
             it->second.jobs = std::move(jobs);
             it->second.known_recipes = std::move(known_recipes);
+            it->second.warehouse = std::move(warehouse);
             it->second.inventory_attempts = 0;
         } else {
             if (entries_.size() >= config_.max_queued) {
@@ -101,6 +108,7 @@ void CharacterSaver::save_inventory_entry(const std::string& character_id, std::
             e.wallet = std::move(wallet);
             e.jobs = std::move(jobs);
             e.known_recipes = std::move(known_recipes);
+            e.warehouse = std::move(warehouse);
             entries_.emplace(character_id, std::move(e));
         }
     }
@@ -179,7 +187,8 @@ void CharacterSaver::run() {
         if (entry.inventory) {
             inventory_status = svc::CallStatus::Failed;
             try {
-                inventory_status = entry.wallet && entry.jobs && entry.known_recipes ? api_.save_inventory(id, *entry.inventory, *entry.wallet, *entry.jobs, *entry.known_recipes)
+                inventory_status = entry.wallet && entry.jobs && entry.known_recipes && entry.warehouse ? api_.save_inventory(id, *entry.inventory, *entry.wallet, *entry.jobs, *entry.known_recipes, *entry.warehouse)
+                                   : entry.wallet && entry.jobs && entry.known_recipes ? api_.save_inventory(id, *entry.inventory, *entry.wallet, *entry.jobs, *entry.known_recipes)
                                    : entry.wallet && entry.jobs   ? api_.save_inventory(id, *entry.inventory, *entry.wallet, *entry.jobs)
                                    : entry.wallet              ? api_.save_inventory(id, *entry.inventory, *entry.wallet)
                                                                : api_.save_inventory(id, *entry.inventory);
@@ -268,6 +277,9 @@ void CharacterSaver::run() {
                 if (retry_inventory) {
                     again.inventory = std::move(entry.inventory);
                     again.wallet = std::move(entry.wallet);
+                    again.jobs = std::move(entry.jobs);                  // (a retried save keeps everything its call carried)
+                    again.known_recipes = std::move(entry.known_recipes);
+                    again.warehouse = std::move(entry.warehouse);
                     again.inventory_attempts = entry.inventory_attempts;
                 }
                 if (retry_progress) {
@@ -286,6 +298,9 @@ void CharacterSaver::run() {
                     if (!newer->second.inventory && again.inventory) {
                         newer->second.inventory = std::move(again.inventory);
                         newer->second.wallet = std::move(again.wallet);
+                        newer->second.jobs = std::move(again.jobs);
+                        newer->second.known_recipes = std::move(again.known_recipes);
+                        newer->second.warehouse = std::move(again.warehouse);
                         newer->second.inventory_attempts = again.inventory_attempts;
                     }
                     if (!newer->second.progress && again.progress) {

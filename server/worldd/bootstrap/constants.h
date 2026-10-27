@@ -58,6 +58,11 @@ repl::ExportChain lingering_effect_archetype_export();
 repl::ExportChain node_layout_archetype_export();
 /// /Script/GameSystemsPlugin.ResourceStorageComponent, the pawn's dynamic subobject class (pkt#107).
 repl::ExportChain resource_storage_class_export();
+/// /Script/GameSystemsPlugin.WarehouseResourceStorageComponent, the dynamic subobject class of a warehouse's material and cargo tabs (storage clerks, step 0; the retail export of a
+/// login: id 15406401492712839829, checksum 860852919).
+repl::ExportChain warehouse_tab_class_export();
+/// /Script/GameSystemsPlugin.NodeItemStorageComponent, the dynamic subobject class of a warehouse's item chunk (the retail export of a login: id 596528838789656347, checksum 4273018994).
+repl::ExportChain warehouse_chunk_class_export();
 /// Default__IntrepidStateIFA in /Script/Foliage: the archetype of a foliage cell's state actor (Gathering stage 3, "Foliage gathering"; the retail capture's export at packet 244:
 /// id 18292086725290287385, checksum 3015814482, the package 12703675336461722793).
 repl::ExportChain foliage_state_actor_archetype_export();

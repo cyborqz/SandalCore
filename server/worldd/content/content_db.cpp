@@ -2876,7 +2876,7 @@ bool parse_dialogue_requirement(const std::string& text, DialogueRequirement& ou
     return true;
 }
 
-/// A list of actions ([{"a": "OpenWindow", "w": "Vendor", "vd": <the shop's def>}]); false when the text does not read.
+/// A list of actions ([{"a": "OpenWindow", "w": "Vendor", "vd": <the shop's def>}, {"a": "ActionResponse", "r": "OpenPlayerWarehouse", "sc": 7}]); false when the text does not read.
 bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionRow>& out) {
     out.clear();
     if (text.empty()) return true;
@@ -2888,6 +2888,8 @@ bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionR
         if (const auto it = a.find("a"); it != a.end() && it->is_string()) r.action = it->get<std::string>();
         if (const auto it = a.find("w"); it != a.end() && it->is_string()) r.window = it->get<std::string>();
         if (const auto it = a.find("vd"); it != a.end() && it->is_number_integer()) r.vendor = it->get<int64_t>();
+        if (const auto it = a.find("r"); it != a.end() && it->is_string()) r.response = it->get<std::string>();
+        if (const auto it = a.find("sc"); it != a.end() && it->is_number_integer()) r.access_config = it->get<int64_t>();
         out.push_back(std::move(r));
     }
     return true;
@@ -3472,6 +3474,130 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
         out.xp_curves.tier[0] = stat_curve_points(db_, kCurveTierModNovice);
         out.xp_curves.tier[1] = stat_curve_points(db_, kCurveTierModApprentice);
         out.xp_curves.tier[2] = stat_curve_points(db_, kCurveTierModJourneyman);
+    }
+    return out;
+}
+
+namespace {
+
+/// The costs of warehouse_tab.costs / warehouse_chunk.costs ([{"c": guid, "ty": type id, "v": "5", "m": "1"}]); false when the text does not read.
+bool parse_warehouse_costs(const std::string& text, std::vector<WarehouseCostRow>& out) {
+    out.clear();
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_array()) return false;
+    for (const auto& c : j) {
+        if (!c.is_object()) return false;
+        WarehouseCostRow r;
+        if (const auto it = c.find("c"); it != c.end() && it->is_number_integer()) r.currency = it->get<int64_t>();
+        if (const auto it = c.find("ty"); it != c.end() && it->is_number_integer()) r.type_id = it->get<int64_t>();
+        if (const auto it = c.find("v"); it != c.end() && it->is_string()) r.value = it->get<std::string>();
+        if (const auto it = c.find("m"); it != c.end() && it->is_string()) r.multiplier = it->get<std::string>();
+        out.push_back(std::move(r));
+    }
+    return true;
+}
+
+}  // namespace
+
+std::optional<WarehouseData> ContentDb::warehouse_data(std::string& error) const {
+    WarehouseData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the warehouse tables are contentc version 25's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    const auto unread = [&](const char* table, int64_t guid) {
+        error = std::string("content.db ") + table + " row " + std::to_string(guid) + " does not read";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT node_guid, resource_def, crate_def, chunks_def FROM warehouse_node");
+        if (!q.ok()) return failed("warehouse_node");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (int c = 0; c < 4; ++c) {
+                if (!column_is_int(s, c)) return unread("warehouse_node", 0);
+            }
+            out.nodes[sqlite3_column_int64(s, 0)] = {sqlite3_column_int64(s, 1), sqlite3_column_int64(s, 2), sqlite3_column_int64(s, 3)};
+        }
+        if (step != SQLITE_DONE) return failed("warehouse_node");
+    }
+    {
+        Stmt q(db_, "SELECT guid, name, columns, rows FROM warehouse_def");
+        if (!q.ok()) return failed("warehouse_def");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3)) return unread("warehouse_def", 0);
+            WarehouseDefRow d;
+            d.guid = sqlite3_column_int64(s, 0);
+            d.name = column_text(s, 1);
+            d.columns = static_cast<int>(sqlite3_column_int64(s, 2));
+            d.rows = static_cast<int>(sqlite3_column_int64(s, 3));
+            out.defs[d.guid] = std::move(d);
+        }
+        if (step != SQLITE_DONE) return failed("warehouse_def");
+    }
+    {
+        Stmt q(db_, "SELECT def_guid, tab_guid FROM warehouse_def_tab ORDER BY def_guid, ord");
+        if (!q.ok()) return failed("warehouse_def_tab");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("warehouse_def_tab", 0);
+            const auto it = out.defs.find(sqlite3_column_int64(s, 0));
+            if (it != out.defs.end()) it->second.tabs.push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed("warehouse_def_tab");
+    }
+    {
+        Stmt q(db_, "SELECT guid, name, storage_type, member, specializable, requirement, costs FROM warehouse_tab");
+        if (!q.ok()) return failed("warehouse_tab");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3) || !column_is_int(s, 4)) return unread("warehouse_tab", 0);
+            WarehouseTabRow t;
+            t.guid = sqlite3_column_int64(s, 0);
+            t.name = column_text(s, 1);
+            t.storage_type = static_cast<int>(sqlite3_column_int64(s, 2));
+            t.member = sqlite3_column_int64(s, 3) != 0;
+            t.specializable = sqlite3_column_int64(s, 4) != 0;
+            t.requirement = column_text(s, 5);
+            if (!parse_warehouse_costs(column_text(s, 6), t.costs)) return unread("warehouse_tab", t.guid);
+            out.tabs[t.guid] = std::move(t);
+        }
+        if (step != SQLITE_DONE) return failed("warehouse_tab");
+    }
+    {
+        Stmt q(db_, "SELECT def_guid, chunk_guid FROM warehouse_chunks_def_chunk ORDER BY def_guid, ord");
+        if (!q.ok()) return failed("warehouse_chunks_def_chunk");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("warehouse_chunks_def_chunk", 0);
+            out.chunk_defs[sqlite3_column_int64(s, 0)].push_back(sqlite3_column_int64(s, 1));
+        }
+        if (step != SQLITE_DONE) return failed("warehouse_chunks_def_chunk");
+    }
+    {
+        Stmt q(db_, "SELECT guid, name, size, level, requirement, costs FROM warehouse_chunk");
+        if (!q.ok()) return failed("warehouse_chunk");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3)) return unread("warehouse_chunk", 0);
+            WarehouseChunkRow c;
+            c.guid = sqlite3_column_int64(s, 0);
+            c.name = column_text(s, 1);
+            c.size = static_cast<int>(sqlite3_column_int64(s, 2));
+            c.level = static_cast<int>(sqlite3_column_int64(s, 3));
+            c.requirement = column_text(s, 4);
+            if (!parse_warehouse_costs(column_text(s, 5), c.costs)) return unread("warehouse_chunk", c.guid);
+            out.chunks[c.guid] = std::move(c);
+        }
+        if (step != SQLITE_DONE) return failed("warehouse_chunk");
     }
     return out;
 }

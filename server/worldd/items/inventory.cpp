@@ -1033,6 +1033,46 @@ Outcome Inventory::move(svc::ItemContainer from, int from_slot, int32_t count, c
 }
 // [C.O.A x Cyb]
 
+Outcome Inventory::add_at(svc::ItemContainer container, int slot, svc::InventoryItem item, const ItemCatalog& catalog) {
+    Outcome out;
+    const auto refuse = [&](std::string why) {
+        out.refusal = std::move(why);
+        return out;
+    };
+    if (container != svc::ItemContainer::Backpack && !is_resource(container)) return refuse("only the item bag and the material bags take an item from the warehouse");
+    item.container = container;
+    item.slot = slot;
+    if (const std::string problem = item_problem(item); !problem.empty()) return refuse(problem);
+    if (find_guid(item.instance_guid)) return refuse("the inventory holds an item with that instance guid already");
+    const auto info = catalog.info(item.item_record_id);
+    if (!info) return refuse("the item's record is not one this server knows");
+    if (info->resource != is_resource(container)) {
+        return refuse(info->resource ? "a material is not put in the item bag (materials go to a material bag)" : "only a material is put in a material bag");
+    }
+    if (!is_resource(container)) {
+        if (slot < 0 || slot >= kBackpackSlots) return refuse("Backpack slot " + std::to_string(slot) + " does not exist");
+        if (find(container, slot)) return refuse("Backpack slot " + std::to_string(slot) + " is not empty");
+    } else {
+        const ResourceGrid& g = grid(container);
+        if (g.empty()) return refuse(std::string(container_name(container)) + " has no bag: it has no cells");
+        if (!g.contains(slot)) return refuse(std::string(container_name(container)) + " slot " + std::to_string(slot) + " does not exist");
+        if (!g.fits(slot, info->inv_w, info->inv_h, covered_cells(container, catalog))) {
+            return refuse("a " + std::to_string(info->inv_w) + " x " + std::to_string(info->inv_h) + " item does not fit " + container_name(container) + " slot " + std::to_string(slot) +
+                          " (outside the grid, on a blocked cell or on another item)");
+        }
+    }
+    slots_[{static_cast<uint8_t>(container), slot}] = item;
+    Event add;
+    add.type = repl::StorageEventType::Add;
+    add.container = container;
+    add.slot = slot;
+    add.item = item;
+    add.instigated = true;
+    out.events.push_back(std::move(add));
+    out.ok = true;
+    return out;
+}
+
 Outcome Inventory::swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
                         const std::string& to_guid, int32_t to_count) {
     Outcome out;

@@ -1230,7 +1230,7 @@ std::optional<Send> PlayerBootstrap::build_item_events(std::span<const ItemEvent
         ev.callout = e.callout;
         ev.extra_guid_b = e.craft_txn;   // the quick make's product: the id of the craft it ends
         repl::StorageEventContainer target;
-        target.object = item_storage_guid(e.storage);
+        target.object = e.container ? *e.container : item_storage_guid(e.storage);
         target.slots.push_back({e.slot, e.count > 0 ? e.count : static_cast<int32_t>(e.item.quantity), e.item.guid});
         ev.targets.push_back(std::move(target));
         auto params = repl::storage_event_params(*rpc, ev);
@@ -1609,6 +1609,7 @@ std::optional<Send> PlayerBootstrap::item_events(std::span<const ItemEvent> even
 
 void PlayerBootstrap::remember(std::span<const ItemEvent> events) {
     for (const ItemEvent& e : events) {
+        if (e.container) continue;   // a warehouse container: the caller keeps what it holds
         const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
         if (e.type == repl::StorageEventType::Add) {
             items_[key] = e.item;
@@ -1948,6 +1949,140 @@ bool PlayerBootstrap::set_resource_container(int index, const ResourceBagSetup& 
 std::optional<Send> PlayerBootstrap::resource_containers_update() {
     if (!ok_ || !second_state_sent_) return std::nullopt;
     return update(Role::Pawn, "resource containers", pawn_, pawn_shadow_);
+}
+
+// ---- storage clerks, step 0: the warehouse components, the window and the summary -----------------------------------------------------------------------------------
+
+namespace {
+
+/// One dynamic warehouse component of the pawn with the members the retail login's creation block carries: an item chunk (location 15, the character, the chunk's record) or a tab (location
+/// 14 for a material tab, 17 for the cargo tab; the town, the character, the tab's index and record; the cargo tab's StorageType 1; a member tab's flag; the tab's bReadOnly).  False when a
+/// class has no schema or a value is refused.
+bool make_warehouse_component(const WarehouseComponent& c, const std::array<uint32_t, 4>& character, repl::Subobject& out) {
+    using Kind = WarehouseComponent::Kind;
+    out = repl::Subobject{};
+    out.guid = c.guid;
+    const bool chunk = c.kind == Kind::ItemChunk;
+    out.dynamic_class = chunk ? warehouse_chunk_class_export() : warehouse_tab_class_export();
+    out.obj.schema = gen::find_class_schema(chunk ? "UNodeItemStorageComponent" : "UWarehouseResourceStorageComponent");
+    if (!out.obj.schema) return false;
+    repl::RepState& st = out.obj.state;
+    const schema::ClassSchema& sc = *out.obj.schema;
+    bool ok = st.set(sc, "ItemLocationType", Value::u64(chunk ? 15 : c.kind == Kind::CargoTab ? 17 : 14));
+    static constexpr const char* kWords[4] = {"A", "B", "C", "D"};
+    for (size_t i = 0; i < 4; ++i) ok = ok && st.set(sc, std::string("PlayerGuid.") + kWords[i], Value::i64(static_cast<int32_t>(character[i])));
+    if (chunk) return ok && st.set(sc, "WarehouseStorageItemChunkRecordId", Value::i64(c.record));
+    ok = ok && st.set(sc, "WarehouseId.Area", Value::u64(repl::kWarehouseAreaNode)) && st.set(sc, "WarehouseId.AreaRecordGuid", Value::i64(c.node)) &&
+         st.set(sc, "ResourceStorageComponentIndex", Value::i64(c.index)) && st.set(sc, "WarehouseStorageMaterialTabRecordGuid", Value::i64(c.record)) &&
+         st.set(sc, "bReadOnly", Value::boolean(c.read_only));
+    if (c.kind == Kind::CargoTab) ok = ok && st.set(sc, "StorageType", Value::u64(repl::kStorageCrates));
+    if (c.member) ok = ok && st.set(sc, "bIsMemberStorage", Value::boolean(true));
+    return ok;
+}
+
+}  // namespace
+
+bool PlayerBootstrap::set_warehouse_components(const std::vector<WarehouseComponent>& components) {
+    using Kind = WarehouseComponent::Kind;
+    if (!ok_ || !second_state_added_) return false;
+    for (const WarehouseComponent& c : components) {
+        if (c.guid.ObjectId == 0) return fail("a warehouse component needs a guid");
+        repl::Subobject* have = component(c.guid);
+        if (!have) {
+            repl::Subobject made;
+            if (!make_warehouse_component(c, setup_.character_guid, made)) return fail("no schema for a warehouse component, or a value of it is refused");
+            pawn_.subobjects.push_back(std::move(made));
+        } else if (c.kind != Kind::ItemChunk && !have->obj.state.set(*have->obj.schema, "bReadOnly", Value::boolean(c.read_only))) {
+            return fail("bReadOnly of a warehouse tab refused");
+        }
+    }
+    repl::Subobject* owner = component(setup_.guids.owner_info);   // (after the push_backs above: they may move the subobjects)
+    if (!owner) return fail("OwnerInfo is not on the pawn");
+    const auto list_of = [&](Kind kind) {
+        repl::ArrayValue list;
+        for (const WarehouseComponent& c : components) {
+            if (c.kind != kind || !c.listed) continue;
+            repl::ElementState e;
+            e.values[1] = object(c.guid);
+            list.elements.push_back(std::move(e));
+        }
+        return Value(std::move(list));
+    };
+    if (!owner->obj.state.set(*owner->obj.schema, "NodeItemContainers", list_of(Kind::ItemChunk)) ||
+        !owner->obj.state.set(*owner->obj.schema, "NodeResourceWarehouse.ActiveComponents", list_of(Kind::MaterialTab)) ||
+        !owner->obj.state.set(*owner->obj.schema, "NodeCrateWarehouse.ActiveComponents", list_of(Kind::CargoTab))) {
+        return fail("OwnerInfo's warehouse lists refused");
+    }
+    return true;
+}
+
+bool PlayerBootstrap::set_warehouse_nodes(const std::vector<int64_t>& material_nodes, const std::vector<int64_t>& crate_nodes) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return fail("OwnerInfo is not on the pawn");
+    // FWarehouseId elements: the area (a node's warehouse) and the town's record
+    const auto ids_of = [](const std::vector<int64_t>& nodes) {
+        repl::ArrayValue list;
+        for (const int64_t node : nodes) {
+            repl::ElementState e;
+            e.values[1] = Value::u64(repl::kWarehouseAreaNode);
+            e.values[2] = Value::i64(node);
+            list.elements.push_back(std::move(e));
+        }
+        return Value(std::move(list));
+    };
+    if (!owner->obj.state.set(*owner->obj.schema, "WarehouseMaterialTabsByIds", ids_of(material_nodes)) ||
+        !owner->obj.state.set(*owner->obj.schema, "WarehouseCrateTabsByIds", ids_of(crate_nodes))) {
+        return fail("OwnerInfo's warehouse node lists refused");
+    }
+    return true;
+}
+
+std::optional<Send> PlayerBootstrap::warehouse_update() {
+    if (!ok_ || !second_state_sent_) return std::nullopt;
+    return update(Role::Pawn, "warehouse", pawn_, pawn_shadow_);
+}
+
+std::optional<Send> PlayerBootstrap::open_warehouse_window(int64_t node, uint8_t access_config) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientOpenWarehouseWindow");
+    if (!rpc) return std::nullopt;
+    auto params = repl::open_warehouse_window_params(*rpc, repl::WarehouseId{repl::kWarehouseAreaNode, node}, access_config);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientOpenWarehouseWindow";
+    call.params = std::move(*params);
+    return rpcs(Role::PlayerController, "ClientOpenWarehouseWindow", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::warehouse_summary(const repl::WarehouseSummary& summary) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveWarehouseSummary");
+    if (!rpc) return std::nullopt;
+    auto params = repl::warehouse_summary_params(*rpc, summary);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = "ClientReceiveWarehouseSummary";
+    call.params = std::move(*params);
+    return rpcs(Role::PlayerController, "ClientReceiveWarehouseSummary", std::span<const repl::RpcRequest>(&call, 1));
+}
+
+std::optional<Send> PlayerBootstrap::container_payload(const repl::StoragePayload& data) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::ClassSchema& cls = *pawn_.obj.schema;
+    const schema::RpcSchema* rpc = cls.rpc("ClientReceiveStoragePayload");
+    if (!rpc) return std::nullopt;
+    const auto params = repl::storage_payload_params(*rpc, data);
+    if (!params) return std::nullopt;
+    BunchWriter bits;
+    bool failed = false;
+    if (repl::write_rpc_params(*rpc, *params, bits, {}, &failed) == 0 || failed) return std::nullopt;
+    BunchWriter field;
+    if (repl::write_field(cls, rpc->field_index, bits, field) == 0) return std::nullopt;
+    Emission e;
+    repl::BlockHeader header;   // an RPC of the actor: no RepLayout block
+    if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
+    return finish(Role::Pawn, false, "ClientReceiveStoragePayload", std::move(e));
 }
 
 std::optional<Send> PlayerBootstrap::verbatim_block(Role role, const char* what, const char* hex, size_t bits) {

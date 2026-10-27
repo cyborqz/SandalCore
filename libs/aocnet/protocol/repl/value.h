@@ -702,6 +702,24 @@ struct HashedVariable {
     bool operator==(const HashedVariable&) const = default;
 };
 
+/// One cost of a warehouse tab or item chunk as the summary lists it (storage clerks, step 0): the currency's record (its guid and its record type id) and the amount, in the currency's own units
+/// (gold: 5.0 is five gold).
+struct WarehouseCost {
+    int64_t currency = 0;
+    int64_t type_id = 0;
+    double  value = 0;
+    bool operator==(const WarehouseCost& o) const { return currency == o.currency && type_id == o.type_id && same_bits(value, o.value); }
+};
+
+/// FWarehouseItemChunkSummary and FWarehouseMaterialTabSummary (ClientReceiveWarehouseSummary's arrays; one layout): a chunk or tab of the warehouse's def, whether the player may buy it and what it costs.
+/// NetSerialize; warehouse_codec.h has the layout.  A free one (the base chunk, the base tab, the cargo tab) lists no cost.
+struct WarehouseSummaryEntry {
+    int64_t                    record = 0;
+    bool                       available = false;
+    std::vector<WarehouseCost> costs;
+    bool operator==(const WarehouseSummaryEntry&) const = default;
+};
+
 // ---- Value -----------------------------------------------------------------
 
 struct ElementState;
@@ -725,7 +743,7 @@ public:
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
-        RewardInstance, HashedVariable>;
+        RewardInstance, HashedVariable, WarehouseSummaryEntry>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

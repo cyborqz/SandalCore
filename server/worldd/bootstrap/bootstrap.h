@@ -65,6 +65,7 @@
 #include "protocol/repl/replicator.h"
 #include "protocol/repl/skill_rpc.h"
 #include "protocol/repl/storage_rpc.h"
+#include "protocol/repl/warehouse_rpc.h"
 #include "protocol/repl/craft_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
 
@@ -147,6 +148,23 @@ struct ItemEvent {
     /// Gathering stage 3, "the pick-up popup": the FCalloutQueueInfo the retail server sends with the Add of a harvested item (items/acquired.h); the client shows the popup with the
     /// item's icon from it.  Unset for every other event.
     std::optional<repl::CalloutQueueInfo> callout;
+    /// Storage clerks, step 0: the component the event names when it is not one of the character's own storages (a warehouse container); `storage` and `slot` then say nothing about the
+    /// bootstrap's copy of the storages, which a warehouse event never changes.
+    std::optional<emit::FIntrepidNetworkGUID> container;
+};
+
+/// One dynamic component of a warehouse that the pawn carries (storage clerks, step 0): an item chunk (a NodeItemStorageComponent) or a material or cargo tab (a
+/// WarehouseResourceStorageComponent), with what the client reads of it and whether OwnerInfo lists it now.
+struct WarehouseComponent {
+    enum class Kind : uint8_t { ItemChunk, MaterialTab, CargoTab };
+    Kind                       kind = Kind::ItemChunk;
+    emit::FIntrepidNetworkGUID guid;
+    int64_t                    node = 0;       // the town's record guid (a tab; 0 for a chunk)
+    int64_t                    record = 0;     // the chunk's or the tab's record guid
+    int32_t                    index = 0;      // a tab's ResourceStorageComponentIndex
+    bool                       member = false; // a tab's bIsMemberStorage
+    bool                       read_only = true;   // a tab's bReadOnly: 0 while the window is open
+    bool                       listed = false; // named by OwnerInfo's list of its kind
 };
 
 /// One item leaving a loot container (plan E1, stage 3, part 2): the slot of the window it was in and the stack.
@@ -387,6 +405,25 @@ public:
     /// nothing changed.  Take a checkpoint() first, as for every send.
     std::optional<Send> resource_containers_update();
 // (C.O.A) (C-Y-B)
+
+    // ---- storage clerks, step 0 ------------------------------------------------------------------------------------------------------------
+    /// Brings the pawn's warehouse components to `components` (a component not on the pawn yet is made, with its class export, and the ones that are get their bReadOnly) and OwnerInfo's three
+    /// lists (NodeItemContainers, NodeResourceWarehouse.ActiveComponents, NodeCrateWarehouse.ActiveComponents) to the ones that are `listed`.  Idempotent.  Nothing goes out until
+    /// warehouse_update().  False when the pawn has no OwnerInfo or a value is refused.
+    bool set_warehouse_components(const std::vector<WarehouseComponent>& components);
+    /// OwnerInfo's WarehouseMaterialTabsByIds and WarehouseCrateTabsByIds: the towns whose tabs the storage window's "Materials" and "Crate" rows list (the client hides a row whose list is empty,
+    /// and builds the row's entry for the town of the window from the list).  Nothing goes out until warehouse_update().  False when the pawn has no OwnerInfo or a value is refused.
+    bool set_warehouse_nodes(const std::vector<int64_t>& material_nodes, const std::vector<int64_t>& crate_nodes);
+    /// What set_warehouse_components changed, as one chain on the pawn: the new components with their exports, the changed lists and read-only flags.  nullopt when nothing changed.  Take a
+    /// checkpoint() first, as for every send.
+    std::optional<Send> warehouse_update();
+    /// ClientOpenWarehouseWindow(WarehouseId{Node, node}, StorageAccessConfig) on the PlayerController (reliable).  nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> open_warehouse_window(int64_t node, uint8_t access_config);
+    /// ClientReceiveWarehouseSummary(Summary) on the PlayerController (reliable).
+    std::optional<Send> warehouse_summary(const repl::WarehouseSummary& summary);
+    /// ClientReceiveStoragePayload on the pawn for a container the caller describes (a warehouse container): `data.target` names its component, the rest is what the container holds.
+    /// No export goes with it: the component is a dynamic subobject the client has.
+    std::optional<Send> container_payload(const repl::StoragePayload& data);
 
     /// How many items the bootstrap holds in a storage (its copy), and the item in a slot (nullptr when empty).
     size_t item_count(ItemStorage storage) const;

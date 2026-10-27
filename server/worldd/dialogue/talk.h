@@ -49,6 +49,7 @@ struct Result {
     int64_t                  open_vendor = 0;   // the line opens this shop (a VendorDef): the caller opens its window; the conversation itself is left as it is
     bool                     offer = false;     // the conversation now shows a quest offer (state().sub)
     bool                     offer_answered = false;   // the quest offer was answered or refused: the update carries the cleared queue and ExhaustBehavior
+    int                      open_warehouse = 0;   // storage, step 0: the line opens the character's warehouse (the action response OpenPlayerWarehouse): its StorageAccessConfig; the conversation ends
 };
 
 class Talk {
@@ -137,12 +138,17 @@ public:
                 if (r.open_vendor == 0) r.open_vendor = a.vendor;
                 continue;
             }
+            if (a.action == "ActionResponse" && a.response == "OpenPlayerWarehouse") {
+                if (r.open_warehouse == 0) r.open_warehouse = a.access_config > 0 && a.access_config < 64 ? static_cast<int>(a.access_config) : 7;
+                continue;
+            }
             ++others;
             r.skipped.push_back(a.window.empty() ? a.action : a.action + "/" + a.window);
         }
         if (line.next == 0) {
             // a line that ends the conversation and opens a shop leaves the conversation as it is: the client closes its own window as the shop's opens
             if (r.open_vendor != 0) { r.outcome = Outcome::Nothing; r.why = "the line opens a shop"; return r; }
+            // a line that opens the warehouse ends the conversation (the talking window clears) and the window opens in its place
             if (!line.actions.empty() && others > 0) { r.outcome = Outcome::Nothing; r.why = "the line's actions are not done yet"; return r; }
             state_ = State{};
             r.outcome = Outcome::Changed;

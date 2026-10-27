@@ -294,6 +294,15 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             spdlog::warn("[world] the town shops do not load, so the shopkeepers answer as before: {}", ve);
         }
     }
+    {   // storage clerks, step 0: the towns' warehouses; a content.db of an older version has none and the clerks keep their answer
+        std::string we;
+        if (auto data = content_->warehouse_data(we)) {
+            warehouses_.emplace(std::move(*data));
+            spdlog::info("[world] warehouses: {} towns, {} item chunks, {} tabs", warehouses_->nodes(), warehouses_->chunks(), warehouses_->tabs());
+        } else {
+            spdlog::warn("[world] the warehouses do not load, so the storage clerks answer as before: {}", we);
+        }
+    }
     load_crafting_data();   // crafting, steps 0 and 1: the station definitions and the recipes
     // Gathering stage 3, "Hunting": the creatures whose asset names a Hunting_<kind> interaction get the hunting interactable (spawns/generic_npc.h); an older content.db has none
     if (generic_config_.hunting && generic_config_.hunting_defs.empty()) {

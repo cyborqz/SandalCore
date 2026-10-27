@@ -88,6 +88,10 @@ ExportChain resource_storage_class_export() {
     return gameplay_class(11144499416456600109ull, "ResourceStorageComponent", 0xf3927ccd);
 }
 
+ExportChain warehouse_tab_class_export() { return gameplay_class(15406401492712839829ull, "WarehouseResourceStorageComponent", 860852919u); }
+
+ExportChain warehouse_chunk_class_export() { return gameplay_class(596528838789656347ull, "NodeItemStorageComponent", 4273018994u); }
+
 namespace {
 constexpr uint64_t kFoliagePackageId = 12703675336461722793ull;   // /Script/Foliage
 }  // namespace

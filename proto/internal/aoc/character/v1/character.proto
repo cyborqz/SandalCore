@@ -102,6 +102,28 @@ message Character {
   // Missing systems, step 0: the tutorials the character finished (migration 0015), the design database's FirstTimeEvent Guids in the order they were finished, with the items (include_items).
   // A character that finished none has none.
   repeated int64 completed_ftues = 23;
+  // Storage clerks, step 0: the items the character keeps in the warehouse (migration 0017), with the items (include_items): the item chunks (the same in every town), the material tabs and
+  // the cargo tab of each town it stored in. A character that stored nothing has none.
+  repeated WarehouseItem warehouse_items = 30;
+}
+
+// One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
+// WarehouseStorageItemChunk record), "Materials" (the material tabs of the town node_guid, container_guid the WarehouseStorageMaterialTab record) or "Cargo" (the cargo tab, the same keys).
+// slot is the index in a chunk, or the row-major index of the item's top-left cell in a tab; the other fields are those of Item.
+message WarehouseItem {
+  string area = 1;
+  int64 node_guid = 2;
+  int64 container_guid = 3;
+  int32 slot = 4;
+  int64 item_record_id = 5;
+  string instance_guid = 6; // 32 lowercase hex digits, not all zero; unique over the bags and the warehouse
+  int32 quantity = 7; // 1 to 1000000
+  int32 quality = 8; // 1 to 200
+  float durability = 9; // 0 to 1e9
+  int64 created_at_ms = 10; // Unix milliseconds
+  optional float persisted_health = 11;
+  optional float persisted_mana = 12;
+  int64 lock_expiration = 13; // Unix seconds; 0 or a past time: none
 }
 
 // One processing job of a character (crafting, step 1, migration 0013): a batch of a recipe started at a station. Times are Unix milliseconds on the server's wall clock, so a job runs
@@ -287,6 +309,11 @@ message SaveInventoryRequest {
   // left alone. InvalidArgument, with nothing changed, for a Guid of 0 or less, one given twice, or more than 5,000.
   bool replace_known_recipes = 7;
   repeated int64 known_recipes = 8;
+  // Storage clerks, step 0: with replace_warehouse the character's warehouse becomes exactly `warehouse_items`, in the same transaction as the items (a move between a bag and the warehouse is
+  // stored together or not at all); without it the warehouse is left alone. InvalidArgument, with nothing changed, for an item that breaks the rules (warehouse.go says which), an instance
+  // that is on another item of the character, or a place used twice.
+  bool replace_warehouse = 20;
+  repeated WarehouseItem warehouse_items = 21;
 }
 
 message SaveInventoryResponse {

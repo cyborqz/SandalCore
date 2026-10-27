@@ -42,6 +42,7 @@ test_repl_resource                   PASS exit=0
 test_repl_rpc                        PASS exit=0
 test_repl_send_ledger                PASS exit=0
 test_repl_vendor                     PASS exit=0
+test_repl_warehouse                  PASS exit=0
 test_sc_packet_info                  PASS exit=0
 test_server_guid_allocator           PASS exit=0
 test_worldd_abilities                PASS exit=0

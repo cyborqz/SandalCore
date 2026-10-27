@@ -69,6 +69,7 @@
 #include "stats/stat_program.h"
 #include "vendor/gm_vendor.h"
 #include "vendor/town_shops.h"
+#include "warehouse/warehouse.h"
 #include "world/actor_registry.h"
 #include "world/city_nodes.h"
 #include "world/node_control.h"
@@ -219,6 +220,11 @@ public:
     const vendor::TownShops*      town_shops() const { return shops_ ? &*shops_ : nullptr; }
     /// A test's shops (load_area reads the real ones).
     void                          set_town_shops(vendor::TownShops shops) { shops_ = std::move(shops); }
+    /// Storage clerks, step 0: the towns' warehouse defs, tabs and item chunks (warehouse/warehouse.h), read with the area; null for a content.db older than contentc version 22 (the clerk
+    /// answers as before).
+    const warehouse::Book*        warehouses() const { return warehouses_ ? &*warehouses_ : nullptr; }
+    /// A test's warehouses (load_area reads the real ones).
+    void                          set_warehouses(warehouse::Book book) { warehouses_ = std::move(book); }
     /// Crafting, step 0: the station definitions (content.db, contentc version 20), read with the area; null for an older file (the stations still stand and open, with the default tax).
     const content::CraftStationData* station_data() const { return stations_ ? &*stations_ : nullptr; }
     /// Crafting, step 1: the recipes, their inputs and costs (null with an older content.db).
@@ -571,6 +577,7 @@ private:
     std::optional<quest::QuestBook>      quests_;          // quests, slice 1
     quest::QuestWorker*                  quest_worker_ = nullptr;
     std::optional<vendor::TownShops>     shops_;
+    std::optional<warehouse::Book>       warehouses_;   // storage clerks, step 0
     std::optional<content::CraftStationData> stations_;   // crafting, step 0: the station definitions and which asset is whose station
     std::optional<content::CraftRecipeData>  recipes_;    // crafting, step 1: the recipes
     std::map<std::pair<int64_t, int64_t>, uint64_t> placed_stations_;   // (node, plot) -> the actor of a station a game master placed

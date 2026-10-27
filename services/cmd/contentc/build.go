@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "24"
+const Version = "25"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -236,6 +236,11 @@ var keep = map[string]bool{
 	"VendorSellFilterRecordBase":     true,
 	"FVendorPriceModifierRecordBase": true,
 	"BaseItemValueRecordBase":        true,
+	// storage, step 0 (version 25): the warehouse defs, tabs and item chunks (warehouse.go; CityNodeRecordBase and ActionResponseRecordBase are kept above)
+	"WarehouseStorageDefRecordBase":           true,
+	"WarehouseStorageMaterialTabRecordBase":   true,
+	"WarehouseStorageItemChunksDefRecordBase": true,
+	"WarehouseStorageItemChunkRecordBase":     true,
 	// crafting, step 0 (version 20): the stations, their recipe sets, lists and recipes and the costs (crafting.go; the certification, profession, reward, item and population records are kept above)
 	"CraftingStationDefRecordBase":   true,
 	"CraftingRecipeSetRecordBase":    true,
@@ -449,6 +454,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildCurrency(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildWarehouse(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
 

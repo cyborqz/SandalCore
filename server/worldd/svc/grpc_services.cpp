@@ -160,6 +160,23 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     }
     for (const int64_t recipe : c.known_recipes()) r.character.known_recipes.push_back(recipe);
     for (const int64_t id : c.completed_ftues()) r.character.completed_ftues.push_back(id);
+    for (const auto& w : c.warehouse_items()) {
+        WarehouseItem wi;
+        wi.area = w.area();
+        wi.node_guid = w.node_guid();
+        wi.container_guid = w.container_guid();
+        wi.item.slot = w.slot();
+        wi.item.item_record_id = w.item_record_id();
+        wi.item.instance_guid = w.instance_guid();
+        wi.item.quantity = w.quantity();
+        wi.item.quality = w.quality();
+        wi.item.durability = w.durability();
+        wi.item.created_at_ms = w.created_at_ms();
+        if (w.has_persisted_health()) wi.item.persisted_health = w.persisted_health();
+        if (w.has_persisted_mana()) wi.item.persisted_mana = w.persisted_mana();
+        wi.item.lock_expiration = w.lock_expiration();
+        r.character.warehouse_items.push_back(std::move(wi));
+    }
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -289,12 +306,36 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
     return save_inventory(id, items, wallet, /*with_wallet=*/true, &jobs, &known_recipes);
 }
 
+CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
+                                        const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) {
+    return save_inventory(id, items, wallet, /*with_wallet=*/true, &jobs, &known_recipes, &warehouse);
+}
+
 CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, bool with_wallet, const std::vector<ProcessingJob>* jobs,
-                                        const std::vector<int64_t>* known_recipes) {
+                                        const std::vector<int64_t>* known_recipes, const std::vector<WarehouseItem>* warehouse) {
     grpc::ClientContext ctx;
     prepare(ctx, save_timeout_);
     characterv1::SaveInventoryRequest req;
     req.set_id(id);
+    if (warehouse) {
+        req.set_replace_warehouse(true);
+        for (const WarehouseItem& w : *warehouse) {
+            auto* p = req.add_warehouse_items();
+            p->set_area(w.area);
+            p->set_node_guid(w.node_guid);
+            p->set_container_guid(w.container_guid);
+            p->set_slot(w.item.slot);
+            p->set_item_record_id(w.item.item_record_id);
+            p->set_instance_guid(w.item.instance_guid);
+            p->set_quantity(w.item.quantity);
+            p->set_quality(w.item.quality);
+            p->set_durability(w.item.durability);
+            p->set_created_at_ms(w.item.created_at_ms);
+            if (w.item.persisted_health) p->set_persisted_health(*w.item.persisted_health);
+            if (w.item.persisted_mana) p->set_persisted_mana(*w.item.persisted_mana);
+            p->set_lock_expiration(w.item.lock_expiration);
+        }
+    }
     if (known_recipes) {
         req.set_replace_known_recipes(true);
         for (const int64_t recipe : *known_recipes) req.add_known_recipes(recipe);

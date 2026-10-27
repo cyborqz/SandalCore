@@ -69,12 +69,14 @@
 #include "protocol/schema/generated/UNPCCombatInfo.h"
 #include "protocol/schema/generated/UNPCInfo.h"
 #include "protocol/schema/generated/UNPCSecondaryInfo.h"
+#include "protocol/schema/generated/UNodeItemStorageComponent.h"
 #include "protocol/schema/generated/UOwnerInfoComponent.h"
 #include "protocol/schema/generated/UPlayerCombatInfo.h"
 #include "protocol/schema/generated/UPlayerInfo.h"
 #include "protocol/schema/generated/UQuestConsumerComponent.h"
 #include "protocol/schema/generated/UResourceStorageComponent.h"
 #include "protocol/schema/generated/URewardStorageComponent.h"
+#include "protocol/schema/generated/UWarehouseResourceStorageComponent.h"
 
 #include <algorithm>
 
@@ -140,12 +142,14 @@ constexpr Entry kByName[] = {
     {"UNPCCombatInfo", &kUNPCCombatInfo},
     {"UNPCInfo", &kUNPCInfo},
     {"UNPCSecondaryInfo", &kUNPCSecondaryInfo},
+    {"UNodeItemStorageComponent", &kUNodeItemStorageComponent},
     {"UOwnerInfoComponent", &kUOwnerInfoComponent},
     {"UPlayerCombatInfo", &kUPlayerCombatInfo},
     {"UPlayerInfo", &kUPlayerInfo},
     {"UQuestConsumerComponent", &kUQuestConsumerComponent},
     {"UResourceStorageComponent", &kUResourceStorageComponent},
     {"URewardStorageComponent", &kURewardStorageComponent},
+    {"UWarehouseResourceStorageComponent", &kUWarehouseResourceStorageComponent},
 };
 
 constexpr Entry kComponents[] = {
@@ -228,12 +232,14 @@ constexpr const ClassSchema* kAll[] = {
     &kUNPCCombatInfo,
     &kUNPCInfo,
     &kUNPCSecondaryInfo,
+    &kUNodeItemStorageComponent,
     &kUOwnerInfoComponent,
     &kUPlayerCombatInfo,
     &kUPlayerInfo,
     &kUQuestConsumerComponent,
     &kUResourceStorageComponent,
     &kURewardStorageComponent,
+    &kUWarehouseResourceStorageComponent,
 };
 
 const ClassSchema* find(std::span<const Entry> table, std::string_view name) {
