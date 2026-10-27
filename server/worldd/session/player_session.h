@@ -989,6 +989,10 @@ private:
     // ---- plan D1 ----
     /// A ServerItemUsed on a bag item that is worn in no slot: the item's action responses (item_use.h), applied and answered.
     void on_item_activated(Connection& conn, const protocol::repl::ItemUse& use, const svc::InventoryItem& item, Clock::time_point now);
+    /// Glint tiers: a ServerItemUsed on a stack in a material bag.  A full stack of an item whose activation is TierUpItem (a Glint certificate) becomes ONE of the next kind (Inventory::tier_up:
+    /// the whole stack goes, the new item tops up the first stack of its kind with room, else takes the first free place, with the "Acquired" toast); a stack that is not full, the top kind, a
+    /// bag with no place for the new item and every other item are refused: nothing changes and the client is sent the storages again, as for any refused item request.
+    void on_tier_up(Connection& conn, const protocol::repl::ItemUse& use, svc::ItemContainer container, Clock::time_point now);
     /// What a level gained does to the character: the pawn's level, the stats, the ranks and abilities the level grants, the passives' effect items, the
     /// TempHealth mark (item uses and kill experience both end here).  `rank_effects` and `skill_updates` collect what the caller sends.
     void finish_level_up(const leveling::XpResult& xp, bool class_changed, Clock::time_point now, bootstrap::AbilityChange& rank_effects,

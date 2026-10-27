@@ -33,6 +33,7 @@
 
 #include "combat/combat_world.h"
 #include "combat/rewards.h"
+#include "items/currency.h"
 #include "world/actor_registry.h"
 #include "world/corpse.h"
 
@@ -116,6 +117,9 @@ public:
     void set_rarity_of(std::function<int(int64_t item, int quality)> fn) { rarity_of_ = std::move(fn); }
     /// The name of an item record, for the log's death line (without one the record's number is logged).
     void set_name_of(std::function<std::string(int64_t item)> fn) { name_of_ = std::move(fn); }
+    /// Glint tiers: the currency kinds that are items.  A kill's Glint is rolled in the smallest kind and paid in kinds, the biggest first, each under its rate (27 rolled is 2 of the second
+    /// kind and 7 of the first); without a table (null) it is paid as it is rolled.  Outlives the module.
+    void set_currencies(const items::CurrencyTable* table) { currencies_ = table; }
     /// Nodes 1, stage 1: the city nodes.  A death is rolled in the zone of influence of its position (world/city_nodes.h node_at): its biome and node
     /// answer the reward tables' GetNodeBiome and the other node reads.  Without them (null) the node reads answer as in a world with no nodes.  Outlives the module.
     void set_city_nodes(const world::CityNodes* nodes) { nodes_ = nodes; }
@@ -196,6 +200,7 @@ private:
     std::function<int(int64_t)> quality_of_;
     std::function<int(int64_t, int)> rarity_of_;
     std::function<std::string(int64_t)> name_of_;
+    const items::CurrencyTable* currencies_ = nullptr;
     HuntablePredicate          huntable_;
     const world::CityNodes*    nodes_ = nullptr;
     std::map<uint64_t, Corpse> corpses_;

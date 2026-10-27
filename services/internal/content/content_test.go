@@ -87,6 +87,7 @@ func TestCreateMakesTheDocumentedTables(t *testing.T) {
 	want = append(want, VendorTables...)     // vendors, step 0 (contentc version 18): the shops' links and prices
 	want = append(want, CraftingTables...)   // crafting, step 0 (contentc version 20): the stations, recipes and rewards
 	want = append(want, QuestTables...)      // quests, slice 1 (contentc version 21): the quests, their objectives, the NPCs' offers and the accept nodes
+	want = append(want, CurrencyTables...)   // Glint tiers (contentc version 24): the currencies and the bags' stack-size stats
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("tables = %v\nwant     %v", got, want)

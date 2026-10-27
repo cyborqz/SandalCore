@@ -43,6 +43,7 @@
 #include "content/content_db.h"
 #include "foliage/foliage.h"
 #include "gather/gathering.h"
+#include "items/currency.h"
 #include "items/inventory.h"
 #include "items/rarity.h"
 #include "nav/area_nav.h"
@@ -134,6 +135,10 @@ public:
     /// Gathering stage 2: the 22 professions with their level-up curves and the five certification levels (content.db's profession, certification_level and
     /// action_certification, read once at startup). Null when the file has none of those tables (an older fixture): characters then have no professions.
     const professions::Book* professions() const { return professions_ ? &*professions_ : nullptr; }
+    /// Glint tiers (contentc version 24): the currency tiers and their kinds (content.db's currency_tier and currency_def, read once at startup): which item is the next kind of a Glint
+    /// certificate, and how a reward of Glint is split into kinds.  Null when the file has none of those tables (an older file or fixture): no stack of Glint changes kind and a reward
+    /// is paid as it is rolled.
+    const items::CurrencyTable* currencies() const { return currencies_ ? &*currencies_ : nullptr; }
     /// Plan D2: every ability, hit, effect and expression of content.db's ab_* tables, read once at startup: what the generic ability runtime
     /// runs. Null when the file has none (an older fixture) or they did not read: then only Sprint, Dodge and Rest run, and the log says why.
     const abilities::Catalog* ability_catalog() const { return catalog_override_set_ ? ability_catalog_override_ : ability_catalog_ ? &*ability_catalog_ : nullptr; }
@@ -517,6 +522,7 @@ private:
     std::vector<content::AutoGrant>          grants_;          // the Universal tree's, by level
     std::optional<talents::Catalog>          talents_;         // plan D1, stage 2
     std::optional<professions::Book>         professions_;     // Gathering stage 2
+    std::optional<items::CurrencyTable>      currencies_;      // Glint tiers
     std::optional<abilities::Catalog>        ability_catalog_;  // plan D2
     std::optional<spawns::MountBook>         mounts_;           // the mounts milestone
     world::RoadMap                           roads_;            // the mounts milestone, stage 3

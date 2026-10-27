@@ -31,6 +31,7 @@
 #pragma once
 
 #include "content/content_db.h"
+#include "items/currency.h"
 #include "session/leveling.h"
 #include "session/professions.h"
 
@@ -77,6 +78,8 @@ struct Context {
     const professions::Book*  professions = nullptr;
     professions::Professions  held;
     professions::XpRunner     profession_xp;
+    /// Glint tiers: the currency kinds that are items.  The Glint a use grants is paid in kinds, the biggest first, each under its rate (items/currency.h); without a table (null) as the table gives it.
+    const items::CurrencyTable* currencies = nullptr;
 };
 
 /// The most items one use grants (a gear scroll gives 19; the bag has 70 slots).

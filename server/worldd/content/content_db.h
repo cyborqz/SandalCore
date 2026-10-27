@@ -386,6 +386,31 @@ struct ProfessionData {
     std::map<int64_t, CertificationActionRow>    actions;          // by action guid
 };
 
+// ---- Glint tiers (contentc version 24): the currencies (currency_tier, currency_def) ----------------------------------------------------------------------------------------
+
+/// A row of `currency_tier`: a set of currency kinds that make one another up (Money; the six Glint kinds).
+struct CurrencyTierRow {
+    int64_t     guid = 0;
+    std::string name;
+    int64_t     max_base_quantity = 0;   // the most the wallet holds of the tier, in units of its first kind
+};
+
+/// A row of `currency_def`: one kind of a tier.  `ord` is its place in the tier (0 the smallest kind), `rate` how many of it make one of the next kind, `item` the item record it is carried as
+/// (0: the coins have none).
+struct CurrencyDefRow {
+    int64_t     guid = 0;
+    std::string name;
+    int64_t     tier = 0;                // 0: no tier lists the kind
+    int         ord = 0;
+    int64_t     item = 0;
+    int64_t     rate = 0;
+};
+
+struct CurrencyData {
+    std::vector<CurrencyTierRow> tiers;   // guid order
+    std::vector<CurrencyDefRow>  defs;    // by tier, then ord
+};
+
 // ---- Gathering stage 2, part "Harvesting" (contentc version 13): what a harvest reads (gather_def, gather_tool, item_variation) ------------------------------------
 
 /// A row of `gather_def`: a GatherableActorDef joined to its foliage data (the respawn), its PlayerInteractionDef (the range) and its GatheringInteractionData (the rest).
@@ -1285,6 +1310,9 @@ public:
     /// Gathering stage 2, "Professions and GM items": the 22 professions with their curves, the five certification levels and the certification actions. nullopt with
     /// `error` empty when the file has none of these tables (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
     std::optional<ProfessionData> profession_data(std::string& error) const;
+    /// Glint tiers (contentc version 24): the currency tiers and kinds.  nullopt with `error` empty when the file has no such tables (an older file or fixture: no stack of Glint changes kind);
+    /// nullopt with `error` set when a query failed or a row is not what contentc writes.
+    std::optional<CurrencyData> currency_data(std::string& error) const;
     /// Gathering stage 2, "Harvesting": the gather tables, whole (339 defs, 87 tools, 47 item variations in contentc version 13). nullopt with `error` empty when the file has none of the tables
     /// (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
     std::optional<GatherData> gather_data(std::string& error) const;

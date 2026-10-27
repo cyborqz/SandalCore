@@ -27,6 +27,8 @@ _deps/
 /tools/mapc/obj/
 /tools/npcabilities/bin/
 /tools/npcabilities/obj/
+/tools/itemnames/bin/
+/tools/itemnames/obj/
 /tools/mapc/tests/bin/
 /tools/mapc/tests/obj/
 

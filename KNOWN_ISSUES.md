@@ -13,7 +13,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **NPCs** | Human NPCs (guards, shopkeepers, quest givers) all show the same guard look and name, and some peaceful NPCs (villagers, merchants, scholars) are missing. | None. | In progress: NPC looks and names. |
 | **Quests** | A quest can be taken, tracked and abandoned, but its objectives do not count yet: it cannot be finished by play, pays no reward, and has no hand-in or map markers. | A game master can finish a quest with `questctl`. | Next: the second part of quests. |
 | **Quests / Givers** | Quest givers the world cannot draw yet, and quests that start from items, do not offer their quests. | None. | In progress with NPC looks and names; item quests later. |
-| **Glint** | Kills pay Glint as the smallest kind only, in many stacks, and right-clicking a full stack of 10 does nothing. | Sell the Glint at a merchant. | In progress: Glint tiers. |
+| **Glint / Shops** | Shops take only the Glint kind a price names, so paying with a bigger kind (for example a Dim for a Dull price) is refused. | Keep some Dull Glint. | Planned: paying with change. |
 | **Death / Respawn** | Dying always offers the same single respawn point. | None. | In progress: Embersprings. |
 | **Storage** | Storage clerks do not open the storage yet. | None. | In progress: storage clerks. |
 | **Weapons / Talents** | Weapon lines earn no experience, so weapon-tree talents cannot be picked. | None. | Open: weapon line experience. |

@@ -255,6 +255,13 @@ public:
     /// losing one (the consumables retail used were single items, removed with one Remove event).
     Outcome consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count);
 
+    /// Glint tiers: the full stack of `full` items in the material bag `storage` slot `slot` (the instance `guid`) becomes `product`, ONE item of the next kind.  The stack goes (one Remove
+    /// of the whole stack); the product tops up the first stack of its colour with room, in the order of the bags and slots (one Add of the one item, in that stack's slot), else takes the
+    /// first free rectangle of the bags, which the removed stack may have freed (one Add).  `facts` are the product record's rarity facts: two stacks are one colour when the rarity of their
+    /// qualities is.  All or nothing: refused, changing nothing, when the slot holds another item or a stack of another size, or when there is no place for the product.
+    /// `product` carries its record, quality, durability, a fresh instance guid and its creation time; its container and slot are set here.
+    Outcome tier_up(svc::ItemContainer storage, int slot, const std::string& guid, int32_t full, svc::InventoryItem product, const ItemRarityFacts& facts, const ItemCatalog& catalog);
+
     /// How many items of `record` the character holds in the item bag and the resource containers (what an item currency, Glint, is counted from).
     int64_t count_of(int64_t record) const;
     /// Takes `count` items of `record` from the stacks in the item bag and the resource containers, in the order of their storage and slot.  Each stack that gives something is ONE Remove event

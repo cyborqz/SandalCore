@@ -1843,6 +1843,14 @@ std::optional<svc::ItemContainer> container_of_location(uint8_t location) {
     return std::nullopt;
 }
 
+/// The material bag (Resource0 to Resource2) an item location names: the places a Glint stack is used in.
+std::optional<svc::ItemContainer> material_bag_of_location(uint8_t location) {
+    for (int i = 0; i < items::kResourceContainers; ++i) {
+        if (location == static_cast<uint8_t>(repl::ItemLocation::Resource0) + i) return items::resource_container(i);
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 const items::ItemCatalog& PlayerSession::item_catalog() const {
@@ -2640,6 +2648,7 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     ctx.curve = curve;
     // Gathering stage 2: the professions, and the runner of a Profession reward's expression (made when the first one is asked for: it runs the stat graph once)
     ctx.professions = world_->professions();
+    ctx.currencies = world_->currencies();
     ctx.held = professions_;
     const abilities::Catalog* ability_catalog = world_->ability_catalog();
     std::shared_ptr<professions::XpRunner> runner;
@@ -2958,7 +2967,10 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
     if (!within_budget(item_budget_, "ServerItemUsed", now) || !room_for(8)) return;
     if (!catalog_) return refuse_item_request(conn, "ServerItemUsed", "worldd has no item catalog", now);
     const auto storage = container_of_location(use->storage);
-    if (!storage) return refuse_item_request(conn, "ServerItemUsed", "items of storage " + std::to_string(use->storage) + " are not used", now);
+    if (!storage) {
+        if (const auto bag = material_bag_of_location(use->storage)) return on_tier_up(conn, *use, *bag, now);   // Glint tiers: a stack used in a material bag
+        return refuse_item_request(conn, "ServerItemUsed", "items of storage " + std::to_string(use->storage) + " are not used", now);
+    }
     // the mounts milestone: a mount item is neither worn nor consumed; the summon or the desummon is the packet's next call
     if (mounts_ && *storage == svc::ItemContainer::Backpack) {
         const svc::InventoryItem* item = inventory_.at(*storage, use->slot);
@@ -2985,6 +2997,59 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
         return refuse_item_request(conn, "ServerItemUsed", outcome.refusal, now);
     }
     apply_outcome(conn, outcome, *storage == svc::ItemContainer::Backpack ? "an item is worn" : "an item is taken off");
+}
+
+void PlayerSession::on_tier_up(Connection& conn, const repl::ItemUse& use, svc::ItemContainer container, Clock::time_point now) {
+    const char* what = "ServerItemUsed (a Glint tier change)";
+    const auto refuse = [&](const std::string& why) {
+        ++uses_refused_;
+        refuse_item_request(conn, what, why, now);
+    };
+    const char* bag = items::container_name(container);
+    const svc::InventoryItem* held = inventory_.at(container, use.slot);
+    if (!held) return refuse(std::string("no item in ") + bag + " slot " + std::to_string(use.slot));
+    if (held->instance_guid != items::guid_hex(use.expected_item)) return refuse(std::string("the item in ") + bag + " slot " + std::to_string(use.slot) + " is not the instance the client named");
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!db) return refuse("worldd has no content.db to read the item's use from");
+    std::string error;
+    const auto activation = db->item_use(held->item_record_id, error);
+    if (!error.empty()) return refuse("content.db failed: " + error);
+    // only a stack of an item that turns into the next kind is used in a material bag; the other uses (a crate opened from a bag) are not made
+    if (!activation || activation->activation != "TierUpItem") return refuse(std::string("items of the ") + bag + " are used only to change a Glint stack into the next kind");
+    const items::CurrencyTable* currencies = world_->currencies();
+    if (!currencies) return refuse("worldd has no currency tiers (rebuild content.db with this checkout's contentc): no stack changes kind");
+    const items::CurrencyKind* kind = currencies->kind_of(held->item_record_id);
+    const items::CurrencyKind* next = currencies->next_of(held->item_record_id);
+    if (!kind) return refuse("item record " + std::to_string(held->item_record_id) + " is no kind of a currency");
+    if (!next) return refuse("item record " + std::to_string(held->item_record_id) + " is the top kind of its currency: there is no next kind");
+    const auto product_record = db->item(next->item, error);
+    if (!product_record) return refuse(error.empty() ? "the next kind, item record " + std::to_string(next->item) + ", is not in content.db" : "content.db failed: " + error);
+    const auto stack_record = db->item(held->item_record_id, error);
+    // the new item: ONE of the next kind at its record's own quality (21 for a Dim Glint, 41 above), a fresh instance
+    svc::InventoryItem product;
+    product.container = container;
+    product.item_record_id = next->item;
+    product.instance_guid = fresh_guid();
+    product.quantity = 1;
+    product.quality = std::max(1, product_record->default_quality);
+    product.durability = product_record->max_durability_at(product.quality);
+    product.created_at_ms = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000;
+    const svc::InventoryItem stack = *held;   // the inventory changes under the change
+    const items::Outcome outcome = inventory_.tier_up(container, use.slot, stack.instance_guid, static_cast<int32_t>(kind->rate), product, *product_record, item_catalog());
+    if (!outcome.ok) return refuse(outcome.refusal);
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    ++uses_applied_;
+    ++items_applied_;
+    // the whole stack goes with no toast of its own; the one new item is told as it arrives, with the "Acquired" toast of the item feed
+    std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
+    add_item_toasts(events, /*removals=*/false);
+    queue("ClientReceiveStorageEvent", [events](bootstrap::PlayerBootstrap& pb) { return pb.item_events(events); }, conn, /*must_build=*/true);
+    const items::Event& arrival = outcome.events.back();
+    const std::string from_name = stack_record ? (!stack_record->display_name.empty() ? stack_record->display_name : stack_record->name) : std::to_string(stack.item_record_id);
+    const std::string to_name = !product_record->display_name.empty() ? product_record->display_name : product_record->name;
+    spdlog::log(level_for(use_logged_), "[session] {}: a Glint tier change: {} x{} in {} slot {} became {} x1 in {} slot {}, {} storage event(s)", name(), from_name, stack.quantity, bag, use.slot,
+                to_name, items::container_name(arrival.container), arrival.slot, outcome.events.size());
 }
 
 void PlayerSession::on_storage_event_request(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {

@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "21"
+const Version = "24"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -46,6 +46,10 @@ type Options struct {
 	// ArtisanCurves is mapc's artisan_curves.tsv: the profession level-up curves of the paks (the design database holds a placeholder). "" is dist/content/artisan_curves.tsv
 	// of the checkout; a file that is not there leaves the placeholder, and the build says so (and meta artisan_curves.status).
 	ArtisanCurves string
+
+	// ItemNames is itemnames' item_names.tsv: the words of the string-table entries that item records are named with (the Glint kinds). "" is dist/content/item_names.tsv of the checkout; a file
+	// that is not there leaves those names as the table's text keys, and the build says so (and meta item_names.status).
+	ItemNames string
 
 	// Patches are the changes to the mappings the walk needs; nil is
 	// designdb.Patches(). Build refuses a patch that fits nothing (its struct or
@@ -120,6 +124,8 @@ type source struct {
 	statNames map[int64]string
 	// artisan are the profession level-up curves of artisan_curves.tsv, nil when the file is not there (gather.go)
 	artisan *artisanCurves
+	// itemNames are the words of item_names.tsv, nil when the file is not there (names.go)
+	itemNames *itemNames
 }
 
 // keep lists the record structs the typed tables read.
@@ -236,6 +242,9 @@ var keep = map[string]bool{
 	"CraftingRecipeListRecordBase":   true,
 	"CraftingRecipeDefRecordBase":    true,
 	"CraftingCurrencyCostRecordBase": true,
+	// Glint tiers (version 24): the currencies and their tiers (currency.go)
+	"CurrencyTierDefRecordBase": true,
+	"CurrencyDefRecordBase":     true,
 }
 
 // -- C Y B x C.O.A --
@@ -394,6 +403,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 	if err := loadArtisanCurves(src, &opt, meta); err != nil {
 		return nil, err
 	}
+	if err := loadItemNames(src, &opt, meta); err != nil {
+		return nil, err
+	}
 	if err := buildTyped(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
@@ -434,6 +446,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildQuests(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildCurrency(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
 

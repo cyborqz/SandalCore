@@ -185,6 +185,24 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
                     spdlog::warn("[content] content.db has no profession tables: characters have no professions (rebuild content.db with this checkout's contentc)");
                 }
             }
+            // Glint tiers: the currency tiers (a content.db without them runs without tier changes and says so; a damaged one does not stop the world)
+            if (problem.empty()) {
+                std::string why;
+                if (auto data = content_->currency_data(why)) {
+                    if (auto table = items::CurrencyTable::from(*data, why)) {
+                        currencies_ = std::move(*table);
+                        size_t carried = 0;
+                        for (const items::CurrencyTier& t : currencies_->tiers()) carried += t.carried ? 1 : 0;
+                        spdlog::info("[content] currencies: {} tiers ({} of them made of items, the Glint kinds among them), {} kinds", currencies_->tiers().size(), carried, data->defs.size());
+                    } else {
+                        spdlog::warn("[content] the currency tiers are not usable ({}): no stack of Glint changes kind and a reward of Glint is paid as it is rolled", why);
+                    }
+                } else if (!why.empty()) {
+                    spdlog::warn("[content] the currency tiers cannot be read ({}): no stack of Glint changes kind and a reward of Glint is paid as it is rolled", why);
+                } else {
+                    spdlog::warn("[content] content.db has no currency tables: no stack of Glint changes kind (rebuild content.db with this checkout's contentc)");
+                }
+            }
             // plan D2: the ability tables (a content.db without them still runs Sprint, Dodge and Rest)
             if (problem.empty()) {
                 std::string why;
@@ -210,6 +228,7 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
             if (!problem.empty()) {
                 ability_catalog_.reset();
                 professions_.reset();
+                currencies_.reset();
                 talents_.reset();
                 bundle_.reset();
                 gear_.reset();
@@ -1151,6 +1170,7 @@ void PlayerWorld::start_aftermath() {
     aftermath_->set_quality_of([this](int64_t item) { return item_quality(item); });
     aftermath_->set_rarity_of([this](int64_t item, int quality) { return item_rarity(item, quality); });
     aftermath_->set_name_of([this](int64_t item) { return item_name(item); });
+    aftermath_->set_currencies(currencies());   // a kill's Glint is paid in kinds, the biggest first
     aftermath_->set_respawner([this](uint32_t ref, double now) { return respawn_npc(ref, now); });
     aftermath_->set_city_nodes(city_nodes_);
     // Gathering stage 3, "Hunting": a creature whose interaction is a hunting one is hunted when it dies (no loot pile, a corpse that waits 120 s for the hunter)

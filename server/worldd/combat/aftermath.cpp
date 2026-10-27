@@ -155,6 +155,29 @@ void Aftermath::on_death(const DeathEvent& d) {
                     stacks.push_back(s);
                 }
             }
+            if (currencies_ && !stacks.empty()) {
+                // Glint tiers: the rolled Glint of a currency tier is summed and paid in its kinds, the biggest first, each under its rate; the other stacks stay where they are
+                std::vector<items::CurrencyLine> lines;
+                lines.reserve(stacks.size());
+                for (const LootStack& s : stacks) lines.push_back({s.item, s.quantity});
+                const items::CompressedLines split = currencies_->compress(lines);
+                if (split.changed) {
+                    std::vector<LootStack> paid;
+                    paid.reserve(split.lines.size());
+                    for (const items::CompressedLines::Line& l : split.lines) {
+                        if (l.from >= 0) {
+                            paid.push_back(stacks[static_cast<size_t>(l.from)]);
+                            continue;
+                        }
+                        LootStack s;
+                        s.item = l.item;
+                        s.quantity = l.quantity;
+                        s.quality = quality_of_ ? std::max(1, quality_of_(l.item)) : 1;
+                        paid.push_back(s);
+                    }
+                    stacks = std::move(paid);
+                }
+            }
             if (!stacks.empty() && !fighters.empty()) {
                 int top = 0;
                 for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));

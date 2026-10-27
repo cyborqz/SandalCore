@@ -14,6 +14,7 @@
     dist\content\artisan_curves.tsv,           profession curves, mount speeds and riders        (mapc, from the game's containers)
       mount_speeds.tsv, mount_riders.tsv
     dist\content\npc_motion.tsv, region_foliage.tsv, roads_raw.tsv, roads.tsv, roads_levels.tsv
+    dist\content\item_names.tsv                the words the items are named with (the Glint kinds, some quest items)   (tools\itemnames, from the game's containers)
     dist\content\npc_abilities.tsv,          what the creatures that attack with their own animation do: their Blueprints' ability tasks with the conditions they are
       npc_montages.tsv, npc_targeting.tsv      used under, the animation montages' lengths, hit notifies and root motion, and where each ability's hit lands
                                                (tools\npcabilities, from the game's containers and content.db)
@@ -39,7 +40,7 @@
 .PARAMETER GameRoot
   The game's "Game" folder (the one that holds AOCClient.exe and AOC\). Default: GAME_ROOT, config\paths.json, Steam's libraries, the usual folders.
 .PARAMETER Only
-  Run only these steps: tools, config, curves, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, npcabilities, navmesh.
+  Run only these steps: tools, config, curves, names, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, npcabilities, navmesh.
 .PARAMETER Skip
   Leave these steps out (for example -Skip fixtures when you do not build the tests).
 .PARAMETER Force
@@ -73,6 +74,7 @@ $toolsDir  = Join-Path $distDir 'tools'
 $usmapSrc  = Join-Path $repoRoot 'layouts\aoc.usmap'
 $mapcDll   = Join-Path $repoRoot 'tools\mapc\bin\Release\net8.0\mapc.dll'
 $npcAbilitiesDll = Join-Path $repoRoot 'tools\npcabilities\bin\Release\net8.0\npcabilities.dll'
+$itemNamesDll = Join-Path $repoRoot 'tools\itemnames\bin\Release\net8.0\itemnames.dll'
 $contentc  = Join-Path $toolsDir 'contentc.exe'
 $statprog  = Join-Path $toolsDir 'statprog.exe'
 $navbuild  = Join-Path $distDir 'Release\aoc_navbuild.exe'
@@ -84,6 +86,8 @@ $NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Cont
                'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin')
 # The folders whose creature Blueprints are read for what they notice and how far they follow (their intelligence component): every creature of the population, animated or not.
 $NpcSensesFolders = @('AOC/Content/DesignAssets/Population')
+# The string tables that an item's name points at in the design data (an ItemName that is a table entry, not a text of its own): read into item_names.tsv, which contentc puts into the item records.
+$StringTables = @('AOC/Content/UI_Kit/Items.uasset')
 
 # The client build this code was made for (the player's own files are only compared by size).
 $Supported = @{ ExeBytes = 235606624; DbcBytes = 144085052; Date = '2026-01-29' }
@@ -376,6 +380,7 @@ Say ("Tools       : Python {0}, .NET SDK, Go; {1} jobs for C++, {2} threads for 
 function Get-CodeMapc     { Get-CodeHash @('tools\mapc') }
 function Get-CodeContentc { Get-CodeHash @('services\cmd\contentc', 'services\internal\content', 'services\internal\designdb', 'services\internal\usmap', 'services\internal\aocexpr', 'services\internal\chardef', 'services\internal\statprog', 'services\go.mod', 'services\go.sum') }
 function Get-CodeNpcAbilities { Get-CodeHash @('tools\npcabilities') }
+function Get-CodeItemNames { Get-CodeHash @('tools\itemnames') }
 function Get-CodeGens     { Get-CodeHash @('tools\capture\gen_zoi_surface.py', 'tools\capture\gen_region_rects.py', 'tools\capture\gen_region.py', 'tools\capture\gen_node_constants.py', 'tools\capture\gen_gm_garden.py', 'tools\capture\gen_tooltips.py', 'tools\worldd\gen_gear_fixture.py', 'tools\worldd\gen_talent_fixture.py') }
 function Get-CodeNav      { Get-CodeHash @('server\worldd\nav', 'third_party\recastnavigation', 'CMakeLists.txt', 'server\worldd\CMakeLists.txt', 'vcpkg.json') }
 # The level each node starts at in the server's seed file (deploy\citynode_seed.json): the towns' buildings are listed at those levels (tools\capture\gen_town_layouts.py), so a change of a
@@ -398,7 +403,8 @@ function Get-Id([string]$step) {
     $v = switch ($step) {
         'config'   { Get-TextHash ("config $gameId $usmap " + (Get-CodeMapc)) }
         'curves'   { Get-TextHash ("curves $gameId $usmap " + (Get-CodeMapc)) }
-        'database' { Get-TextHash ("database $gameId $usmap " + (Get-CodeContentc) + (Get-Id 'config') + (Get-Id 'curves')) }
+        'names'    { Get-TextHash ("names $gameId $usmap " + (Get-CodeMapc) + (Get-CodeItemNames) + ($StringTables -join ';')) }
+        'database' { Get-TextHash ("database $gameId $usmap " + (Get-CodeContentc) + (Get-Id 'config') + (Get-Id 'curves') + (Get-Id 'names')) }
         'region'   { Get-TextHash ("region $gameId $usmap " + (Get-CodeMapc) + (Get-CodeGens) + (Get-Id 'database')) }
         'headers'  { Get-TextHash ("headers " + (Get-CodeGens) + (Get-Id 'config') + (Get-Id 'region')) }
         'fixtures' { Get-TextHash ("fixtures " + (Get-CodeGens) + (Get-CodeContentc) + (Get-Id 'database')) }
@@ -444,6 +450,8 @@ $steps = @(
         Assert-Files @('tools\mapc\bin\Release\net8.0\mapc.dll') 'the mapc build did not produce it'
         Invoke-Checked $dotnet @('build', '-c', 'Release', (Join-Path $repoRoot 'tools\npcabilities'), '-v', 'q', '-nologo', '-nodeReuse:false', '-p:UseSharedCompilation=false') 'dotnet_build_npcabilities'
         Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll') 'the npcabilities build did not produce it'
+        Invoke-Checked $dotnet @('build', '-c', 'Release', (Join-Path $repoRoot 'tools\itemnames'), '-v', 'q', '-nologo', '-nodeReuse:false', '-p:UseSharedCompilation=false') 'dotnet_build_itemnames'
+        Assert-Files @('tools\itemnames\bin\Release\net8.0\itemnames.dll') 'the itemnames build did not produce it'
         New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
         $svc = Join-Path $repoRoot 'services'
         Invoke-Checked $go @('build', '-trimpath', '-buildvcs=false', '-o', $contentc, './cmd/contentc') 'go_build_contentc' $svc
@@ -460,13 +468,19 @@ $steps = @(
         Invoke-Checked $dotnet (@($mapcDll, 'artisan-curves') + $common) 'mapc_artisan_curves'
         Invoke-Checked $dotnet (@($mapcDll, 'mount-speeds') + $common) 'mapc_mount_speeds'
     } },
+    @{ Name = 'names'; Title = "Read the words the items are named with from the game containers (itemnames; a few seconds)"; Outputs = @('dist\content\item_names.tsv'); Run = {
+        Assert-Files @('tools\itemnames\bin\Release\net8.0\itemnames.dll') 'run the tools step first'
+        $nameArgs = @($itemNamesDll, 'read', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir)
+        foreach ($t in $StringTables) { $nameArgs += @('--table', $t) }
+        Invoke-Checked $dotnet $nameArgs 'itemnames_read'
+    } },
     @{ Name = 'database'; Title = 'Build content.db from CacheDB.dbc (contentc)'; Outputs = @('dist\content\content.db'); Run = {
-        Assert-Files @('dist\tools\contentc.exe', 'dist\content\client_config\DefaultCombat.ini', 'dist\content\artisan_curves.tsv') 'run the tools, config and curves steps first'
+        Assert-Files @('dist\tools\contentc.exe', 'dist\content\client_config\DefaultCombat.ini', 'dist\content\artisan_curves.tsv', 'dist\content\item_names.tsv') 'run the tools, config, curves and names steps first'
         $savedLimit = $env:GOMEMLIMIT
         if (-not $env:GOMEMLIMIT) { $env:GOMEMLIMIT = '3GiB' }     # contentc peaks at 4.4 GB without it and at 2.9 GB with it, in the same time
         try {
             Invoke-Checked $contentc @('--dbc', $gameDbc, '--usmap', (Join-Path $outDir 'aoc.usmap'), '--config', (Join-Path $outDir 'client_config'),
-                '--artisan-curves', (Join-Path $outDir 'artisan_curves.tsv'), '--out', (Join-Path $outDir 'content.db')) 'contentc'
+                '--artisan-curves', (Join-Path $outDir 'artisan_curves.tsv'), '--item-names', (Join-Path $outDir 'item_names.tsv'), '--out', (Join-Path $outDir 'content.db')) 'contentc'
         } finally { $env:GOMEMLIMIT = $savedLimit }
     } },
     @{ Name = 'region'; Title = "Read the zone-of-influence grid and cut the Riverlands' rectangles"; Outputs = @('dist\content\zoi_chunks', 'fixtures\region\riverlands_rects.json', 'fixtures\region\riverlands_zoi_rects.json', 'server\worldd\spawns\region_data.h', 'tools\mapc\region_rects.tsv'); Run = {

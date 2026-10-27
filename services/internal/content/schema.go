@@ -433,7 +433,9 @@ CREATE TABLE item (
     inv_w                    INTEGER NOT NULL DEFAULT 1,   -- Gathering stage 3 (contentc version 14): the record's InventoryDimension in cells; a stack takes
     inv_h                    INTEGER NOT NULL DEFAULT 1,   --   this many in a Resource container's grid (1 x 1 where the record has none)
     resource                 INTEGER NOT NULL DEFAULT 0,   -- 1: its GameplayTags hold a child of item.resource (case-insensitive prefix): it goes to a Resource container
-    display_name             TEXT NOT NULL DEFAULT ''      -- Gathering stage 3, "the pick-up popup" (contentc version 16): the record's ItemName as the player reads it ("Coconut Wood"), '' where the record has none
+    display_name             TEXT NOT NULL DEFAULT '',     -- Gathering stage 3, "the pick-up popup" (contentc version 16): the record's ItemName as the player reads it ("Coconut Wood"), '' where the record has none;
+                                                           --   a name the game keeps in a string table reads as its words from contentc version 24 ("Dim Glint"), and as the table's key (Certificate_Glint_T2) before
+    stack_stats              INTEGER NOT NULL DEFAULT 0    -- Glint tiers (contentc version 24): the record's bMaxStackSizeAffectedByStats: 1 when the stat of the bag that holds a stack (bag_stack_mod) adds to its max_stack_size
 );
 CREATE INDEX item_by_name ON item (name);
 -- The slots an item may be worn in, in the order of the record's EquipSlots (the first free one is used when the client
@@ -776,5 +778,8 @@ func Create(db *sql.DB) error {
 	if err := createCrafting(db); err != nil {
 		return err
 	}
-	return createQuests(db)
+	if err := createQuests(db); err != nil {
+		return err
+	}
+	return createCurrency(db)
 }

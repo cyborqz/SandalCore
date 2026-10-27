@@ -32,6 +32,36 @@ std::string with_commas(int64_t v) {
     return s;
 }
 
+/// Glint tiers: the Glint lines of the use's rewards are summed per currency tier and paid in kinds, the biggest first, each under its rate; every other line stays where it is.
+void compress_granted(const content::ContentDb& db, const items::CurrencyTable& currencies, Plan& plan) {
+    std::vector<items::CurrencyLine> lines;
+    lines.reserve(plan.items.size());
+    for (const Granted& g : plan.items) lines.push_back({g.record, g.quantity});
+    const items::CompressedLines split = currencies.compress(lines);
+    if (!split.changed) return;
+    std::vector<Granted> paid;
+    for (const items::CompressedLines::Line& l : split.lines) {
+        if (l.from >= 0) {
+            paid.push_back(plan.items[static_cast<size_t>(l.from)]);
+            continue;
+        }
+        std::string error;
+        const auto rec = db.item(l.item, error);
+        const int32_t stack = rec && rec->max_stack_size > 0 ? rec->max_stack_size : 1;
+        int64_t left = l.quantity;
+        while (left > 0) {
+            Granted g;
+            g.record = l.item;
+            g.quantity = static_cast<int32_t>(std::min<int64_t>(left, stack));
+            g.quality = rec ? rec->default_quality : 1;
+            g.durability = rec ? rec->max_durability_at(g.quality) : 0.0f;
+            paid.push_back(g);
+            left -= g.quantity;
+        }
+    }
+    plan.items = std::move(paid);
+}
+
 }  // namespace
 // [Cyb + C O A]
 
@@ -243,6 +273,7 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
             }
         }
     }
+    if (ctx.currencies && !plan.items.empty()) compress_granted(db, *ctx.currencies, plan);
     const bool professions_moved = !plan.profession_changes.empty();
     if (plan.items.empty() && plan.adventuring_xp == 0 && !plan.set_class && !professions_moved) {
         if (!xp_lines.empty()) {

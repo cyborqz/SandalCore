@@ -110,6 +110,10 @@ constexpr const char* kRewardItemSql = "SELECT item_guid, variation_guid, quanti
 constexpr const char* kRewardXpSql = "SELECT experience_type, target_level, margin, curve_guid, mult_stat_guid, expr, expression FROM reward_xp WHERE table_guid = ?1 ORDER BY ord";
 // Gathering stage 2 (contentc version 13): schema.go's profession, certification_level and action_certification (internal/content/gather.go)
 constexpr const char* kProfessionTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('profession', 'certification_level', 'action_certification')";
+// Glint tiers (contentc version 24): schema.go's currency_tier and currency_def (internal/content/currency.go).  A file without them is an older one: no error, no tier change.
+constexpr const char* kCurrencyTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('currency_tier', 'currency_def')";
+constexpr const char* kCurrencyTierSql = "SELECT guid, name, max_base_quantity FROM currency_tier ORDER BY guid";
+constexpr const char* kCurrencyDefSql = "SELECT guid, name, tier_guid, ord, item_guid, conversion_rate FROM currency_def ORDER BY tier_guid, ord, guid";
 constexpr const char* kProfessionSql =
     "SELECT p.guid, p.name, p.category, p.leveling_type_guid, p.skill_tree_guid, l.name FROM profession p LEFT JOIN leveling_type l ON l.guid = p.leveling_type_guid ORDER BY p.guid";
 constexpr const char* kCertificationSql =
@@ -1455,6 +1459,87 @@ std::optional<GatherData> ContentDb::gather_data(std::string& error) const {
     return out;
 }
 // ~ Cyb - C O A ~
+
+std::optional<CurrencyData> ContentDb::currency_data(std::string& error) const {
+    error.clear();
+    {
+        Stmt q(db_, kCurrencyTableSql);
+        if (!q.ok()) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int found = 0, step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) ++found;
+        if (step != SQLITE_DONE) {
+            error = "content.db table query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        if (found == 0) return std::nullopt;
+        if (found != 2) {
+            error = "content.db has one of the currency tables (currency_tier, currency_def) and not both: rebuild it with this checkout's contentc";
+            return std::nullopt;
+        }
+    }
+    CurrencyData out;
+    const auto wrong = [&](const char* table) {
+        error = std::string("content.db ") + table + " has a column of the wrong storage class";
+        return std::optional<CurrencyData>{};
+    };
+    {
+        Stmt q(db_, kCurrencyTierSql);
+        if (!q.ok()) {
+            error = "content.db currency_tier query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_text(s, 1) || !column_is_int(s, 2)) return wrong("currency_tier");
+            CurrencyTierRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.max_base_quantity = sqlite3_column_int64(s, 2);
+            out.tiers.push_back(std::move(r));
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db currency_tier query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    {
+        Stmt q(db_, kCurrencyDefSql);
+        if (!q.ok()) {
+            error = "content.db currency_def query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            for (const int c : {0, 2, 3, 4, 5}) {
+                if (!column_is_int(s, c)) return wrong("currency_def");
+            }
+            if (!column_is_text(s, 1)) return wrong("currency_def");
+            const int64_t ord = sqlite3_column_int64(s, 3);
+            if (ord < 0 || ord > 255) {
+                error = "content.db currency_def " + column_text(s, 1) + " has the place " + std::to_string(ord) + " in its tier";
+                return std::nullopt;
+            }
+            CurrencyDefRow r;
+            r.guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.tier = sqlite3_column_int64(s, 2);
+            r.ord = static_cast<int>(ord);
+            r.item = sqlite3_column_int64(s, 4);
+            r.rate = sqlite3_column_int64(s, 5);
+            out.defs.push_back(std::move(r));
+        }
+        if (step != SQLITE_DONE) {
+            error = "content.db currency_def query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    return out;
+}
 
 std::optional<ProfessionData> ContentDb::profession_data(std::string& error) const {
     error.clear();

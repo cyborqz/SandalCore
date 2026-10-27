@@ -98,7 +98,11 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 		resource := hasResourceTag(f)
 		displayName := "" // the record's ItemName (Gathering stage 3, version 16): the name the pick-up popup's text shows; a record without one keeps ''
 		if _, has := f.get("ItemName"); has {
-			displayName = f.text("ItemName")
+			displayName = f.textIn("ItemName", src.itemNames) // a name that is a string-table entry (the Glint kinds) reads as its words, version 24
+		}
+		stackStats := false // bMaxStackSizeAffectedByStats (version 24): the stack size of the record grows with the stat of the bag that holds it (bag_stack_mod)
+		if _, has := f.get("bMaxStackSizeAffectedByStats"); has {
+			stackStats = f.boolean("bMaxStackSizeAffectedByStats")
 		}
 		bagDefGuid := int64(0)
 		if _, has := f.get("ResourceBagDefId"); has {
@@ -138,8 +142,8 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 			}
 		}
 		if err := w.exec(`INSERT INTO item (guid, name, level, can_equip, occupies_all_equip_slots, default_quality, max_stack_size,
-			stat_block_guid, appearance_guid, max_durability, quality_curve_guid, inv_w, inv_h, resource, display_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.Guid, r.Name, level, b2i(canEquip), b2i(occupiesAll), quality, stack, statBlock, appearance, durability, curve, invW, invH, b2i(resource), displayName); err != nil {
+			stat_block_guid, appearance_guid, max_durability, quality_curve_guid, inv_w, inv_h, resource, display_name, stack_stats) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.Guid, r.Name, level, b2i(canEquip), b2i(occupiesAll), quality, stack, statBlock, appearance, durability, curve, invW, invH, b2i(resource), displayName, b2i(stackStats)); err != nil {
 			return err
 		}
 		if resource {
@@ -155,6 +159,11 @@ func buildItems(w *writer, src *source, m *usmap.Map, opt *Options, meta map[str
 		}
 	}
 	opt.logf("item: %d items, %d with a slot, %d with a durability, %d resources", len(items), worn, withDurability, resources)
+	if src.itemNames != nil {
+		meta["item_names.resolved"] = fmt.Sprint(src.itemNames.Resolved)
+		meta["item_names.unresolved"] = fmt.Sprint(src.itemNames.Unresolved)
+		opt.logf("item names: %d item names read from a string table, %d the file does not hold (they keep the key)", src.itemNames.Resolved, src.itemNames.Unresolved)
+	}
 
 	kits, err := buildStartingKits(w, src, slotValue, known, itemSlots)
 	if err != nil {

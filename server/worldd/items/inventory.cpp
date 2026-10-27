@@ -670,6 +670,86 @@ Outcome Inventory::consume(svc::ItemContainer storage, int slot, const std::stri
     return out;
 }
 
+Outcome Inventory::tier_up(svc::ItemContainer storage, int slot, const std::string& guid, int32_t full, svc::InventoryItem product, const ItemRarityFacts& facts, const ItemCatalog& catalog) {
+    Outcome out;
+    const auto refuse = [&](std::string why) {
+        out.ok = false;
+        out.refusal = std::move(why);
+        out.events.clear();
+        return out;
+    };
+    if (!is_resource(storage) || !valid_container(storage)) return refuse(std::string("the ") + (valid_container(storage) ? container_name(storage) : "unknown storage") + " is no material bag");
+    const svc::InventoryItem* item = at(storage, slot);
+    if (!item) return refuse(std::string("no item in ") + container_name(storage) + " slot " + std::to_string(slot));
+    if (!guid_of(guid) || item->instance_guid != guid) {
+        return refuse(std::string("the item in ") + container_name(storage) + " slot " + std::to_string(slot) + " is not the instance named (" + guid + ")");
+    }
+    if (full < 1 || item->quantity != full) {
+        return refuse("the stack in " + std::string(container_name(storage)) + " slot " + std::to_string(slot) + " holds " + std::to_string(item->quantity) + ", a full stack is " + std::to_string(full));
+    }
+    const auto info = catalog.info(product.item_record_id);
+    if (!info || !info->resource) return refuse("item record " + std::to_string(product.item_record_id) + " is not an item of the material bags");
+    product.container = storage;
+    product.slot = 0;
+    if (const std::string why = item_problem(product); !why.empty()) return refuse("the new item: " + why);
+    if (find_guid(product.instance_guid)) return refuse("the new item's instance guid is one the character has");
+
+    Inventory trial = *this;   // all or nothing: the stack goes and the product is placed on a copy
+    const svc::InventoryItem before = *item;
+    Event remove;
+    remove.type = repl::StorageEventType::Remove;
+    remove.container = storage;
+    remove.slot = slot;
+    remove.item = before;
+    remove.instigated = true;
+    trial.slots_.erase({static_cast<uint8_t>(storage), slot});
+    out.events.push_back(std::move(remove));
+
+    // the first stack of the product's colour with room, bag by bag and slot by slot
+    const int product_rarity = facts.rarity_of(static_cast<double>(product.quality));
+    const int32_t max_stack = std::max(1, info->max_stack);
+    bool placed = false;
+    for (int i = 0; i < kResourceContainers && !placed; ++i) {
+        const svc::ItemContainer c = resource_container(i);
+        if (trial.grid(c).empty()) continue;
+        for (auto it = trial.slots_.lower_bound({static_cast<uint8_t>(c), 0}); it != trial.slots_.end() && it->first.first == static_cast<uint8_t>(c); ++it) {
+            svc::InventoryItem& held = it->second;
+            if (held.item_record_id != product.item_record_id || held.quantity + product.quantity > max_stack || held.durability != product.durability ||
+                facts.rarity_of(static_cast<double>(held.quality)) != product_rarity) {
+                continue;
+            }
+            held.quantity += product.quantity;   // the stack keeps its own guid and quality; the client adds the one item to the slot
+            product.container = c;
+            product.slot = held.slot;
+            placed = true;
+            break;
+        }
+    }
+    if (!placed) {
+        // else the first free rectangle of the first bag that has one (the removed stack's cells are free now)
+        for (int i = 0; i < kResourceContainers && !placed; ++i) {
+            const svc::ItemContainer c = resource_container(i);
+            const int where = trial.place(c, info->inv_w, info->inv_h, catalog);
+            if (where < 0) continue;
+            product.container = c;
+            product.slot = where;
+            trial.slots_[{static_cast<uint8_t>(c), where}] = product;
+            placed = true;
+        }
+    }
+    if (!placed) return refuse("the material bags have no place for the next kind (" + std::to_string(info->inv_w) + " x " + std::to_string(info->inv_h) + " cells)");
+    Event add;
+    add.type = repl::StorageEventType::Add;
+    add.container = product.container;
+    add.slot = product.slot;
+    add.item = product;
+    add.instigated = true;
+    out.events.push_back(std::move(add));
+    *this = std::move(trial);
+    out.ok = true;
+    return out;
+}
+
 const svc::InventoryItem* Inventory::find_guid(const std::string& guid) const {
     for (const auto& [key, item] : slots_) {
         if (item.instance_guid == guid) return &item;
