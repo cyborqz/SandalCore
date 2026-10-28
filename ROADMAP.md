@@ -11,7 +11,7 @@
 
 **Current milestones:** `9- City Nodes and Civilization`, `11- Quests and Narrative` and `13- Economy and Player Trading` (all in progress)
 
-Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilities, navigation, mounts, and gathering and professions) are complete and validated against retail captures and test suites in `server/worldd/tests`. Since then the server gained NPC conversations and the first part of quests, merchants and currency, crafting at the towns' stations, item rarities, weapon combo finishers, magic weapon scaling, and creatures that notice and chase by their own settings.
+Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilities, navigation, mounts, and gathering and professions) are complete and validated against retail captures and test suites in `server/worldd/tests`. Since then the server gained NPC conversations and the first part of quests, merchants and currency, crafting at the towns' stations, item rarities, weapon combo finishers, magic weapon scaling, creatures that notice and chase by their own settings, storage, NPC looks and names, and the Embersprings.
 
 ---
 
@@ -32,6 +32,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Glint: all six kinds, ten of a kind into one of the next with a right-click, and kills paying Glint in kinds.
 - Tutorials that stay done, and quiet confirmations (targets, the PvP flag, loot windows, map markers).
 - The first part of quests: quest givers offer their quests; accepting, the journal and the tracker, abandoning; quests are kept across logins; Welcome to Verra starts in the starting area.
+- The second part of quests: objectives that count (talking to people, kills, Embersprings, places to reach, items carried, crates delivered, quest items that creatures drop), the tracker counting, the hand-in with its rewards (items, experience and town experience), and Welcome to Verra (both ways) with the quest after it.
 - Storage: the Storage Clerk's item and materials storage, kept across logins.
 - NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs.
 - Embersprings: discovering them, attuning to one, and choosing where to respawn.
@@ -40,7 +41,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Node stages: building sites below Village, and the Wilderness camp.
 
 ### Left
-- Quests: objectives, hand-in and rewards; the Destiny window, group quests, events and boards.
+- Quests: map markers, and the markers of quests on offer; the rest of the beginner chains (objects placed in the level, such as bodies, carts and crates), item hand-ins; the Destiny window, group quests, events and boards.
 - Reactions: the extra effects of combo finishers (class resources, weapon-tree finisher procs, the Bard's melody).
 - Weapon line experience and the weapon trees.
 - Summoner pets.
@@ -71,9 +72,9 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 6. **6- Combat and Class Abilities** — [Done] Ability pipeline across all classes, cast verification, cooldown ledger, projectiles, hit confirmations, floating text, and status effects.
 7. **7- Living World and Navigation** — [Done] Chunked navmesh windows, Riverlands region partitioning, NPC actor spawning, AI agro/leash behavior, and respawn cycles.
 8. **8- Mounts and Traversal** — [Done] Ground, aquatic, and flying mount summoning, riding possession, mount combat on mount health, dash, and road traversal.
-9. **9- City Nodes and Civilization** — [In progress] CityNodeService, node experience and level state, town asset replication, and citizenship/mayorship structures; the five towns have their real floor and their crafting stations; next: the Wilderness and Camp stages, the towns' buildings and walkable streets.
+9. **9- City Nodes and Civilization** — [In progress] CityNodeService, node experience and level state, town asset replication, and citizenship/mayorship structures; the five towns have their real floor, their buildings in the walking map and their crafting stations; next: the Wilderness and Camp stages, node experience and vassals, citizenship and mayor, and node taxes.
 10. **10- Gathering and Professions** — [Done] Gathering professions, node harvesting, the Riverlands' foliage, hunting, resource bags and the pick-up popup.
-11. **11- Quests and Narrative** — [In progress] NPC conversations, quest offers, acceptance, the journal and abandoning are done; next: objective tracking, hand-in and reward fulfillment.
+11. **11- Quests and Narrative** — [In progress] NPC conversations, quest offers, acceptance, the journal, abandoning, objectives that count, the hand-in and the rewards are done for the first quests of the starting area (both ways); next: map markers, the rest of the beginner chains (objects placed in the level) and item hand-ins.
 12. **12- Guilds and Social Systems** — [Planned] Guild creation, ranks, member permissions, party/raid formations, chat channels, and mail delivery.
 13. **13- Economy and Player Trading** — [In progress] Currency, merchants, selling and repairing, crafting at stations and item rarities are done; next: secure player trading, marketplaces and node currency.
 14. **14- Node Sieges and Territory Wars** — [Planned] Siege declarations, siege weaponry, battlefield boundaries, and node destruction/de-leveling mechanics.

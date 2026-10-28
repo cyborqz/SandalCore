@@ -440,7 +440,7 @@ func AbilityFuncNames() []string {
 		"GetStatModEffectiveValue", "IsNeutral", "IsEnemy", "GetAngleBetween", "Now", "GetProgressDuration",
 		"GetDistanceBetween", "GetHealthPercentage", "HasAlignment", "GetEffectRemainingDuration", "GetRemainingAbilityCooldown", "IsClient", "RandIntRange",
 		"GetHitTriggerCount", "GetAbilityHitCount", "GetAbilityComboCount", "IsComboButtonPressed", "GetCurrentWeaponSkilltree", "DoesHitContainActor", "GetClosestTargetToActorInHit", "GetHitRecord", "GetHitSourceRecord", "GetRecordTypeId", "GetProjectileTypeId", "CalculateDamage", "CalculateDamageMultiplier", "CalculateDamageAdditiveMultiplier",
-		"CalculateDamageMitigation", "CalculateDamageCritical", "CalculateDamagePenetration", "CalculateDamageDampening", "Int", "GetPlayerLootMaxLevel", "GetPlayerLootAvgLuck", "DoesNPCContainTag", "GetPlayerLevel",
+		"CalculateDamageMitigation", "CalculateDamageCritical", "CalculateDamagePenetration", "CalculateDamageDampening", "Int", "GetPlayerLootMaxLevel", "GetPlayerLootAvgLuck", "DoesNPCContainTag", "GetPlayerLevel", "GetNarrativeContentLevel",
 		// Nodes 1, stage 1: the city node reads
 		"GetPlayer", "GetPlayerGuid", "GetNodeBiome", "GetNodeRecord", "GetCurrentNode", "Node_GetNodeType", "Node_GetLevel", "Node_InLevelRangeInclusive",
 		"Node_IsPlayerCitizen", "Node_IsPlayerCitizenOfNode", "Node_IsPlayerMayor", "EnumInt",

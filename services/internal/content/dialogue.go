@@ -36,7 +36,8 @@ CREATE TABLE dialogue_node (
     exhaust    TEXT NOT NULL,          -- CloseAndClear, ReEnterGreeting: what happens when no line is left
     quest_guid INTEGER NOT NULL,       -- the node's QuestId (0: none)
     on_enter   TEXT NOT NULL,          -- JSON list of {"a": action, "w": window}: what entering runs
-    on_exit    TEXT NOT NULL           -- the same for leaving
+    on_exit    TEXT NOT NULL,          -- the same for leaving
+    has_text   INTEGER NOT NULL DEFAULT 1   -- (version 28) 1 when the node has words to show; 0 for a placeholder (a root with nothing to say)
 );
 CREATE TABLE dialogue_choice (
     node_guid   INTEGER NOT NULL,

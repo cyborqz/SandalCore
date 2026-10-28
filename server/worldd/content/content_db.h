@@ -817,6 +817,9 @@ struct DialogueActionRow {
     int64_t     vendor = 0;   // for OpenWindow/Vendor: the VendorDef the window opens (0: none named)
     std::string response;        // storage, step 0 (contentc version 25), for ActionResponse: the kind worldd answers ("OpenPlayerWarehouse"); empty for any other
     int64_t     access_config = 0;   // ... and its StorageAccessConfig
+    /// Quests, slice 2 (contentc version 27): the quest and objective an ActivateObjective / RevealObjective / FailObjective names (0: none), and the reward tables a GiveItems gives.
+    int64_t              quest = 0, objective = 0;
+    std::vector<int64_t> rewards;
 };
 
 struct DialogueChoiceRow {
@@ -829,6 +832,7 @@ struct DialogueNodeRow {
     int64_t                        guid = 0;
     std::string                    name, type, exhaust;   // type: Response, Automatic, AcceptQuest, TurnIn, Confirmation, BuyOrderFulfillment
     int64_t                        quest = 0;
+    bool                           has_text = true;        // contentc version 28: the node has words to show (a placeholder has none); a file of an older version says yes for every node
     std::vector<DialogueChoiceRow> choices;                // by the line's index
     std::vector<DialogueActionRow> on_enter, on_exit;
 };
@@ -1005,21 +1009,78 @@ struct DialogueData {
 
 // ---- quests, slice 1 (contentc version 21): quest, quest_objective, npc_offered_quest, dialogue_accept, zoi_quest, item_quest ----------------------------------------------
 
-/// One objective of a quest, in the quest's own order.
-struct QuestObjectiveRow {
-    int64_t     guid = 0;
-    std::string name, type;
-    int64_t     count = 1;                 // CompletionCount
-    bool        awake = false, hidden = false, completes = false, optional = false;
-};
-
-/// One thing a quest does when it starts (only what is set in the data).
+/// One thing a quest or an objective does (only what is set in the data): the lists of a quest (start, success, failure, tick) and of an objective (start, tick, success, failure).
 struct QuestStartAction {
     std::string action;                    // ActivateObjective, RevealObjective, SucceedObjective, SetPlayerVariable, GrantItem ...
     int64_t     objective = 0, quest = 0;
     std::string variable;
     int64_t     value = 0;
     bool        conditional = false;       // the action has a condition of its own
+    // Quests, slice 2 (contentc version 27):
+    DialogueRequirement rule;              // ... that condition (empty when the action has none)
+    int64_t     reward_table = 0;          // GrantItem: the reward table it gives
+    std::vector<std::pair<int64_t, int64_t>> items;   // RemoveItem: item record, quantity (0: every one)
+    std::string text;                      // Toast
+    std::vector<int64_t> spawns;           // ActivateSpawns / DeactivateSpawns: population sets
+};
+using QuestAction = QuestStartAction;
+
+/// Where a Dialogue or TurnIn objective is met: an NPC (its population instance) and the conversation node it starts at, an interactable or an item.
+struct QuestSource {
+    std::string kind;                      // NPC, Interactable, Item
+    int64_t     instance = 0, node = 0, interactable = 0, item = 0;
+};
+
+/// A place a GoTo objective is done at (world cm).
+struct QuestLocation {
+    double  x = 0, y = 0, z = 0, radius = 0;
+    bool    completes = false;             // standing in it completes the objective
+    bool    hidden = false;                // not drawn on the map
+    std::string display;                   // DisplayType (RadiusArea, Hidden ...)
+    int64_t id = 0;                        // QuestLocationId
+};
+
+/// One objective of a quest, in the quest's own order.
+struct QuestObjectiveRow {
+    int64_t     guid = 0;
+    std::string name, type;
+    int64_t     count = 1;                 // CompletionCount
+    bool        awake = false, hidden = false, completes = false, optional = false;
+    // Quests, slice 2 (contentc version 27): what the objective does and what its kind needs.
+    bool        show_dialogue = false;     // bShowQuestCompletionDialogue
+    double      timeout = 0;               // seconds; 0: none
+    bool        succeed_on_timeout = false;
+    DialogueRequirement      activation;   // the rule that makes an awake objective active (empty: none)
+    std::vector<int64_t>     rewards;      // the reward tables it adds to the quest's
+    std::vector<QuestAction> on_start, on_tick, on_success, on_fail;
+    /// Quest items that listed creatures drop while the objective is active (QuestItemRewards): the reward table, and the creatures (population instances or sets) that drop it.
+    struct ItemReward {
+        int64_t              table = 0;
+        std::vector<int64_t> instances, sets;
+        bool                 tag_query = false;   // the creatures are named by tags: not modelled (it matches nothing)
+    };
+    std::vector<ItemReward> item_rewards;
+    std::vector<int64_t> kill_sets, kill_instances;            // Kill: population sets and instances
+    bool        advanced = false;          // ... EliteRank filter on
+    int         elite = 0;
+    bool        kill_owner = false, use_context = false, tag_query = false;   // ... (a tag query is not modelled)
+    std::vector<QuestSource> sources;      // Dialogue / TurnIn
+    bool        any_source = false;        // TurnIn: any source
+    std::vector<int64_t> components, actors;   // Interact: interactable component and actor definitions
+    std::string collect_type;              // Collect: InventoryUpdate, Purchase, Sell, Craft, Process, Equip
+    std::vector<int64_t>     items;        // Collect / TurnIn item filter: records
+    std::vector<std::string> tags;         // ... or tags
+    std::vector<std::string> rarities;     // ... and rarities
+    std::vector<QuestLocation> locations;  // GoTo
+    bool        area_map = false;
+    bool        crate = false;             // TurnIn: crates put into a construction project
+    std::vector<int64_t> crate_types, crate_items;
+    std::string quest_variable;            // TurnIn: the quest variable a turn-in raises
+    bool        inc_variable = false;
+    std::string notify;                    // EventNotification: the notify type
+    int64_t     recipe = 0;
+    std::vector<int64_t> abilities;        // UseAbility
+    DialogueRequirement rule;              // Custom: one criterion
 };
 
 struct QuestRow {
@@ -1031,6 +1092,10 @@ struct QuestRow {
     std::vector<QuestStartAction>  start_actions;
     std::vector<int64_t>           rewards;      // the reward tables
     std::vector<QuestObjectiveRow> objectives;
+    // Quests, slice 2 (contentc version 27):
+    std::vector<QuestAction> on_success, on_fail, on_tick;
+    double      timeout = 0;                     // seconds; 0: none
+    bool        succeed_on_timeout = false;
 };
 
 /// A quest an NPC offers and the node its talk starts at while the quest is offered.
@@ -1056,8 +1121,12 @@ struct QuestData {
     std::map<int64_t, std::vector<QuestOfferRow>> instance_offers;   // PopulationInstance guid -> its offers, in the data's order
     std::map<int64_t, std::vector<QuestOfferRow>> asset_offers;      // PopulationAsset guid -> its offers
     std::map<int64_t, QuestAcceptRow>             accepts;           // by node
+    std::map<int64_t, int64_t>                    confirms;          // slice 2: a Confirmation node -> the node the talk goes on at after the player confirms (OnSuccessNode)
     std::map<int64_t, std::vector<int64_t>>       zoi_quests;        // zone of influence guid -> the quests it starts
     std::map<int64_t, std::vector<QuestItemLink>> item_quests;       // item record guid -> its quest links
+    std::map<int64_t, int64_t>                    item_crate;        // slice 2 (contentc version 27): crate item record -> its crate type (CrateRecordBase)
+    std::map<int64_t, std::vector<int64_t>>       kill_sets;         // ... population instance -> the sets (of the Kill objectives) it stands in
+    std::map<int64_t, std::vector<int64_t>>       shrine_icds;       // ... attune point -> the interactable definitions of the Emberspring of that place
 };
 
 // ---- vendors, step 0 (contentc version 18): which NPC opens which shop and what its listings cost (npc_vendor_link, vendor_def_data, vendor_price, vendor_availability) ----------

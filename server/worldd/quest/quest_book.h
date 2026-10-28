@@ -13,6 +13,7 @@
 
 #include <cctype>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -62,8 +63,55 @@ public:
         const auto it = d_.item_quests.find(item);
         return it == d_.item_quests.end() ? nullptr : &it->second;
     }
+    /// Quests, slice 2: the population sets (of the Kill objectives) a creature stands in; empty for none.
+    const std::vector<int64_t>& kill_sets(int64_t instance) const {
+        static const std::vector<int64_t> none;
+        const auto it = d_.kill_sets.find(instance);
+        return it == d_.kill_sets.end() ? none : it->second;
+    }
+    /// ... the interactable definitions of the Emberspring of a place (an attune point); empty for none.
+    const std::vector<int64_t>& shrine_icds(int64_t place) const {
+        static const std::vector<int64_t> none;
+        const auto it = d_.shrine_icds.find(place);
+        return it == d_.shrine_icds.end() ? none : it->second;
+    }
+    /// ... and the crate type of a crate item (0: the item is no crate).
+    int64_t crate_of(int64_t item) const {
+        const auto it = d_.item_crate.find(item);
+        return it == d_.item_crate.end() ? 0 : it->second;
+    }
     size_t quests() const { return d_.quests.size(); }
     const content::QuestData& data() const { return d_; }
+
+    /// Every reward table a quest can hand out: its own and its objectives', the ones its actions give (GrantItem), and the ones of the quest items that creatures drop for an objective.
+    /// The world reads them into the reward book that the quests roll.
+    std::set<int64_t> reward_tables() const {
+        std::set<int64_t> out;
+        const auto take = [&](const std::vector<content::QuestAction>& list) {
+            for (const content::QuestAction& a : list) {
+                if (a.reward_table != 0) out.insert(a.reward_table);
+            }
+        };
+        for (const auto& [guid, q] : d_.quests) {
+            out.insert(q.rewards.begin(), q.rewards.end());
+            take(q.start_actions);
+            take(q.on_success);
+            take(q.on_fail);
+            take(q.on_tick);
+            for (const content::QuestObjectiveRow& o : q.objectives) {
+                out.insert(o.rewards.begin(), o.rewards.end());
+                take(o.on_start);
+                take(o.on_tick);
+                take(o.on_success);
+                take(o.on_fail);
+                for (const content::QuestObjectiveRow::ItemReward& ir : o.item_rewards) {
+                    if (ir.table != 0) out.insert(ir.table);
+                }
+            }
+        }
+        out.erase(0);
+        return out;
+    }
 
 private:
     content::QuestData d_;

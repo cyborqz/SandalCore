@@ -244,6 +244,14 @@ void QuestLog::set_variable(const std::string& name, int64_t value) {
     changed_ = true;
 }
 
+namespace {
+std::string quest_variable_key(int64_t quest, const std::string& name) { return "@" + std::to_string(quest) + "." + name; }
+}  // namespace
+
+int64_t QuestLog::quest_variable(int64_t quest, const std::string& name) const { return variable(quest_variable_key(quest, name)); }
+
+void QuestLog::set_quest_variable(int64_t quest, const std::string& name, int64_t value) { set_variable(quest_variable_key(quest, name), value); }
+
 Create QuestLog::can_start(const content::QuestRow* def, dialogue::Evaluator& ev, bool bypass_rules) const {
     if (!def) return Create::InvalidStaticData;
     if (instances_.size() >= kMaxQuests) return Create::MaxQuestLimitReached;
@@ -277,10 +285,14 @@ QuestInstance* QuestLog::start_instance(const content::QuestRow& def, double now
     return &instances_.back();
 }
 
-Started QuestLog::start(const content::QuestRow& def, double now, int64_t source) {
+Started QuestLog::start(const content::QuestRow& def, double now, int64_t source, bool run_actions) {
     Started out;
     QuestInstance* q = start_instance(def, now, source);
     out.instance = q;
+    if (!run_actions) {
+        q->wire_dirty = true;
+        return out;
+    }
     for (const content::QuestStartAction& a : def.start_actions) {
         const auto objective = [&]() -> ObjectiveState* {
             for (ObjectiveState& o : q->objectives) {
@@ -316,6 +328,9 @@ bool QuestLog::remove(int64_t record) {
         if (it->record != record) continue;
         removed_.push_back({it->cache_id, it->vars_id});
         instances_.erase(it);
+        // the quest's own named variables go with it
+        const std::string prefix = quest_variable_key(record, "");
+        for (auto v = variables_.lower_bound(prefix); v != variables_.end() && v->first.compare(0, prefix.size(), prefix) == 0;) v = variables_.erase(v);
         changed_ = true;
         return true;
     }
@@ -342,9 +357,12 @@ void QuestLog::clear(int64_t record) {
 std::vector<QuestLog::Removed> QuestLog::take_removed() { return std::exchange(removed_, {}); }
 
 std::optional<int64_t> QuestLog::quest_count(int64_t quest, const std::string& query) const {
-    if (query == "Active") return find(quest) ? 1 : 0;
-    if (query == "Completed") return completions(quest);
-    if (query == "Failed" || query == "ReadyForHandIn") return 0;
+    // a quest that is done stays in the log for a moment (the client is told it is done before it is taken out): it counts as done then, not as active
+    const QuestInstance* q = find(quest);
+    if (query == "Active") return q && q->status == Status::Active ? 1 : 0;
+    if (query == "Completed") return completions(quest) + (q && q->status == Status::Completed ? 1 : 0);
+    if (query == "Failed") return q && q->status == Status::Failed ? 1 : 0;
+    if (query == "ReadyForHandIn") return 0;
     return std::nullopt;
 }
 

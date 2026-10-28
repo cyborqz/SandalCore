@@ -14,6 +14,7 @@
 //    Item            how many of the named items (or tags) the character carries
 //    Currency        how much of a currency the character has
 //    PlayerVariable / WorldVariable    the named variable
+//    LocalQuestVariable   the named variable of a quest instance (quests, slice 2: IncrementQuestVariable / SetQuestVariable); a rule inside a quest reads its own quest's
 //    Expression      the value of an expression (expression.h)
 //
 //  The character's quest log (Facts::quest_count and objective_count) answers the quest and objective states; without one (a test, a world with no quest service) the
@@ -49,6 +50,8 @@ public:
     /// ... and an objective of a quest (Active, Awake, Hidden, Revealed, Completed, Succeeded, Failed or Count); nullopt: no quest log, or a query it cannot answer.
     virtual std::optional<int64_t> objective_count(int64_t /*quest*/, int64_t /*objective*/, const std::string& /*query*/) const { return std::nullopt; }
     virtual int64_t world_variable(const std::string& /*name*/) const { return 0; }
+    /// Quests, slice 2: a named variable of the quest instance the character has (0 for none); `quest` is the quest's record.
+    virtual int64_t quest_variable(int64_t /*quest*/, const std::string& /*name*/) const { return 0; }
     std::optional<ExprValue> call(const std::string& /*name*/, const std::vector<ExprValue>& /*args*/) const override { return std::nullopt; }
     int64_t random_range(int64_t lo, int64_t hi) const override {
         if (hi <= lo) return lo;
@@ -83,6 +86,12 @@ public:
         const auto it = accepts_.find(node);
         return it == accepts_.end() ? nullptr : &it->second;
     }
+    /// Quests, slice 2: the Confirmation nodes (the path a gatewatcher's welcome asks the player to confirm) and where the talk goes on after a yes.
+    void set_confirms(std::map<int64_t, int64_t> confirms) { confirms_ = std::move(confirms); }
+    std::optional<int64_t> confirm(int64_t node) const {
+        const auto it = confirms_.find(node);
+        return it == confirms_.end() ? std::nullopt : std::optional<int64_t>(it->second);
+    }
     const content::DialogueQuestRow* quest(int64_t guid) const {
         const auto it = d_.quests.find(guid);
         return it == d_.quests.end() ? nullptr : &it->second;
@@ -113,6 +122,22 @@ public:
         }
         return shops;
     }
+    /// Every reward table a conversation can give (the GiveItems actions of its lines and nodes).
+    std::set<int64_t> reward_tables() const {
+        std::set<int64_t> out;
+        const auto take = [&](const std::vector<content::DialogueActionRow>& actions) {
+            for (const content::DialogueActionRow& a : actions) {
+                if (a.action == "GiveItems") out.insert(a.rewards.begin(), a.rewards.end());
+            }
+        };
+        for (const auto& [guid, n] : d_.nodes) {
+            take(n.on_enter);
+            take(n.on_exit);
+            for (const content::DialogueChoiceRow& c : n.choices) take(c.actions);
+        }
+        out.erase(0);
+        return out;
+    }
     size_t nodes() const { return d_.nodes.size(); }
     size_t roots() const { return d_.roots.size(); }
     size_t quests() const { return d_.quests.size(); }
@@ -121,6 +146,7 @@ public:
 private:
     content::DialogueData d_;
     std::map<int64_t, content::QuestAcceptRow> accepts_;
+    std::map<int64_t, int64_t> confirms_;
 };
 
 /// Evaluates conditions for one character.  `unsupported` (optional) is told, once for each text, of everything the evaluator could not answer.
@@ -132,6 +158,10 @@ public:
 
     /// True when the condition holds; an empty condition always does.
     bool holds(const content::DialogueRequirement& r) { return r.empty() ? true : tree(r, 0); }
+
+    /// Quests, slice 2: the quest the rules that follow belong to (a rule inside a quest or an objective says "this quest" with quest 0); 0: none.
+    void scope(int64_t quest) { scope_ = quest; }
+    int64_t scope() const { return scope_; }
 
     /// Quest(X.Available): not disabled, not done (a repeatable quest may be done again), and the quest's activation rule holds.
     bool quest_available(int64_t quest_guid) { return available(quest_guid, 0); }
@@ -205,15 +235,17 @@ private:
     }
 
     std::optional<int64_t> measure(const content::DialogueCriterion& c, int depth) {
+        const int64_t quest = c.quest != 0 ? c.quest : scope_;
+        if (c.kind == "LocalQuestVariable") return facts_.quest_variable(quest, c.variable);
         if (c.kind == "QuestState") {
-            if (c.quest_query == "Available") return available(c.quest, depth + 1) ? 1 : 0;
-            if (const auto n = facts_.quest_count(c.quest, c.quest_query)) return *n;
+            if (c.quest_query == "Available") return available(quest, depth + 1) ? 1 : 0;
+            if (const auto n = facts_.quest_count(quest, c.quest_query)) return *n;
             if (c.quest_query == "Active" || c.quest_query == "Completed" || c.quest_query == "ReadyForHandIn" || c.quest_query == "Failed") return 0;   // no quest log
             unsupported("the quest query " + c.quest_query);
             return std::nullopt;
         }
         if (c.kind == "ObjectiveState") {
-            if (const auto n = facts_.objective_count(c.quest, c.objective, c.objective_query)) return *n;
+            if (const auto n = facts_.objective_count(quest, c.objective, c.objective_query)) return *n;
             return 0;   // an objective of a quest nobody has is in no state
         }
         if (c.kind == "Item") return facts_.item_count(c.items, c.tags);
@@ -250,6 +282,7 @@ private:
     Report               report_;
     std::set<std::string> told_;
     std::set<int64_t>    resolving_;
+    int64_t              scope_ = 0;
 };
 
 }  // namespace aoc::worldd::dialogue

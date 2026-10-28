@@ -39,7 +39,7 @@ Run `extract_game_data.bat` once first (`build_all.bat` does): the build and the
 
 ### Commit Messages
 
-- Use clear, imperative commit titles: e.g., `Fix harvest channel cancel state`, `Add validation for mount possession RPC`.
+- Use clear, past-tense commit titles, as the project's own history does: e.g., `Fixed harvest channel cancel state`, `Added validation for mount possession RPC`.
 - Include the rationale behind non-obvious fixes.
 
 ---

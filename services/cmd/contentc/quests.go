@@ -7,57 +7,159 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
+	"unicode"
 
 	"aocrop/services/internal/designdb"
 )
 
-// Quests (quests milestone, slice 1, "take a quest"; contentc version 21): quest, quest_objective, npc_offered_quest and dialogue_accept
+// Quests (quests milestone, slice 1, "take a quest", contentc version 21; slice 2, "do it and hand it in", version 27): quest, quest_objective, npc_offered_quest and dialogue_accept
 // (internal/content/quests.go says what each holds).  The activation rules are kept as the requirement tree the data holds, as the conversations' conditions are
 // (dialogue.go); worldd evaluates them for the character who asks.
 
 // questRecordTypes are the record structs the builder reads.
 var questRecordTypes = []string{"NarrativeQuestV2", "NarrativeObjectiveV2", "DialogueNode", "PopulationInstanceRecordBase", "PopulationAssetRecordBase", "ZOIRecordBase", "ItemRecordBase"}
 
-// startActionJSON is one thing a quest does when it starts, only what is set.
+// itemQty is an item and how many of it an action takes.
+type itemQty [2]int64
+
+// startActionJSON is one action of a quest or an objective (the data's ActivationRuleActionPair), only what is set.
 type startActionJSON struct {
-	Action string `json:"a"`
-	Obj    int64  `json:"o,omitempty"`
-	Quest  int64  `json:"q,omitempty"`
-	Name   string `json:"n,omitempty"`
-	Value  int64  `json:"v,omitempty"`
-	Cond   int    `json:"c,omitempty"`
+	Action string          `json:"a"`
+	Obj    int64           `json:"o,omitempty"`
+	Quest  int64           `json:"q,omitempty"`
+	Name   string          `json:"n,omitempty"`
+	Value  int64           `json:"v,omitempty"`
+	Cond   int             `json:"c,omitempty"`
+	Rule   json.RawMessage `json:"r,omitempty"`  // the action's own condition, when it has one
+	Reward int64           `json:"rw,omitempty"` // GrantItem: the reward table it gives
+	Items  []itemQty       `json:"it,omitempty"` // RemoveItem: [[item, quantity]]; a quantity of 0 takes every one
+	Text   string          `json:"t,omitempty"`  // Toast
+	Spawns []int64         `json:"sp,omitempty"` // ActivateSpawns / DeactivateSpawns: the population sets
+}
+
+// readActionList reads an ActivationRuleActionPair list.
+func readActionList(v designdb.Value) ([]startActionJSON, error) {
+	out := []startActionJSON{}
+	l, ok := v.([]designdb.Value)
+	if !ok {
+		return out, nil
+	}
+	for _, e := range l {
+		wrap, ok := e.(designdb.Struct)
+		if !ok {
+			continue
+		}
+		a, ok := wrap["Action"].(designdb.Struct)
+		if !ok {
+			continue
+		}
+		x := startActionJSON{
+			Action: enumValue(strOf(a["ActionType"])),
+			Obj:    idGuid(a["TargetObjectiveId"]),
+			Quest:  idGuid(a["TargetQuestID"]),
+			Name:   noneAsEmpty(strOf(a["TargetVariableName"])),
+			Value:  intOf(a["TargetVariableValue"]),
+		}
+		if x.Action == "" || x.Action == "None" {
+			continue
+		}
+		text, req, err := readRequirement(wrap["ActivationRule"])
+		if err != nil {
+			return nil, err
+		}
+		if text != "" {
+			x.Cond = 1
+			b, err := json.Marshal(req)
+			if err != nil {
+				return nil, err
+			}
+			x.Rule = b
+		}
+		switch x.Action {
+		case "GrantItem":
+			x.Reward = idGuid(a["ItemData"])
+		case "RemoveItem":
+			if l, ok := a["ItemsToRemoveAndQuantity"].([]designdb.Value); ok {
+				for _, e := range l {
+					s, ok := e.(designdb.Struct)
+					if !ok {
+						continue
+					}
+					item := idGuid(structOf(s["Item"])["ItemId"])
+					if item == 0 {
+						continue
+					}
+					qty := intOf(s["Quantity"])
+					if b, ok := s["bRemoveAll"].(bool); ok && b {
+						qty = 0
+					}
+					x.Items = append(x.Items, itemQty{item, qty})
+				}
+			}
+		case "Toast":
+			if t, ok := a["ToastText"].(designdb.Text); ok {
+				x.Text = t.Source
+				if x.Text == "" {
+					x.Text = t.Key
+				}
+			}
+		case "ActivateSpawns", "DeactivateSpawns":
+			if l, ok := a["SpawnIDs"].([]designdb.Value); ok {
+				for _, e := range l {
+					if s, ok := e.(designdb.Struct); ok {
+						if g := idGuid(s["PopulationSet"]); g != 0 {
+							x.Spawns = append(x.Spawns, g)
+						}
+					}
+				}
+			}
+		}
+		out = append(out, x)
+	}
+	return out, nil
+}
+
+// structOf reads a value as a struct (an empty one for anything else).
+func structOf(v designdb.Value) designdb.Struct {
+	if s, ok := v.(designdb.Struct); ok {
+		return s
+	}
+	return designdb.Struct{}
 }
 
 // readStartActions reads a quest's OnStartActions into JSON text ("[]" when there is none).
 func readStartActions(v designdb.Value) (string, error) {
-	out := []startActionJSON{}
-	if l, ok := v.([]designdb.Value); ok {
-		for _, e := range l {
-			wrap, ok := e.(designdb.Struct)
-			if !ok {
-				continue
-			}
-			a, ok := wrap["Action"].(designdb.Struct)
-			if !ok {
-				continue
-			}
-			x := startActionJSON{
-				Action: enumValue(strOf(a["ActionType"])),
-				Obj:    idGuid(a["TargetObjectiveId"]),
-				Quest:  idGuid(a["TargetQuestID"]),
-				Name:   noneAsEmpty(strOf(a["TargetVariableName"])),
-				Value:  intOf(a["TargetVariableValue"]),
-			}
-			if text, _, err := readRequirement(wrap["ActivationRule"]); err != nil {
-				return "", err
-			} else if text != "" {
-				x.Cond = 1
-			}
-			out = append(out, x)
-		}
+	out, err := readActionList(v)
+	if err != nil {
+		return "", err
 	}
 	b, err := json.Marshal(out)
 	return string(b), err
+}
+
+// alnum is a name's letters and digits in lower case.
+func alnum(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+	return b.String()
+}
+
+// dedupeIDs is the ids once each, in order.
+func dedupeIDs(ids []int64) []int64 {
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	out := ids[:0:0]
+	for i, id := range ids {
+		if i == 0 || id != ids[i-1] {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func jsonIDs(ids []int64) string {
@@ -66,6 +168,342 @@ func jsonIDs(ids []int64) string {
 	}
 	b, _ := json.Marshal(ids)
 	return string(b)
+}
+
+// questDetailJSON is the quest.detail column.
+type questDetailJSON struct {
+	OnSuccess []startActionJSON `json:"ok,omitempty"`
+	OnFail    []startActionJSON `json:"fail,omitempty"`
+	OnTick    []startActionJSON `json:"tick,omitempty"`
+	Timeout   float64           `json:"to,omitempty"`
+	TimeoutOK int               `json:"so,omitempty"`
+}
+
+// objectiveActionsJSON are the four action lists of an objective.
+type objectiveActionsJSON struct {
+	Start []startActionJSON `json:"start,omitempty"`
+	Tick  []startActionJSON `json:"tick,omitempty"`
+	OK    []startActionJSON `json:"ok,omitempty"`
+	Fail  []startActionJSON `json:"fail,omitempty"`
+}
+
+// objectiveDetailJSON is the quest_objective.detail column.
+type objectiveDetailJSON struct {
+	ShowDialogue int                   `json:"sd,omitempty"`
+	Timeout      float64               `json:"to,omitempty"`
+	TimeoutOK    int                   `json:"so,omitempty"`
+	Activation   json.RawMessage       `json:"ar,omitempty"`
+	Rewards      []int64               `json:"rw,omitempty"`
+	Actions      *objectiveActionsJSON `json:"on,omitempty"`
+	QuestItems   []map[string]any      `json:"qi,omitempty"`
+	Data         map[string]any        `json:"d,omitempty"`
+}
+
+// sourceJSON is the DialogueSources list of a Dialogue or TurnIn objective.
+func sourceJSON(v designdb.Value) []map[string]any {
+	var out []map[string]any
+	l, _ := v.([]designdb.Value)
+	for _, e := range l {
+		s, ok := e.(designdb.Struct)
+		if !ok {
+			continue
+		}
+		m := map[string]any{"k": enumValue(strOf(s["SourceType"]))}
+		if g := idGuid(s["PopulationInstanceId"]); g != 0 {
+			m["i"] = g
+		}
+		if g := idGuid(s["DialogueNode"]); g != 0 {
+			m["n"] = g
+		}
+		if g := idGuid(s["InteractableId"]); g != 0 {
+			m["x"] = g
+		}
+		if g := idGuid(s["ItemId"]); g != 0 {
+			m["it"] = g
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// tagNames reads the tag names of a GameplayTagQuery's dictionary.
+func tagNames(v designdb.Value) []string {
+	var out []string
+	s := structOf(v)
+	l, _ := s["TagDictionary"].([]designdb.Value)
+	for _, e := range l {
+		switch t := e.(type) {
+		case string:
+			if t != "" {
+				out = append(out, t)
+			}
+		case designdb.Struct:
+			if n := strOf(t["TagName"]); n != "" {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
+// filterItems writes a NarrativeItemFilter into an objective's data: the named items, the tags, and "items" holding both the named items and every item that carries one of the tags
+// (or a child of one), so that the engine counts by item records alone.
+func filterItems(w *writer, data map[string]any, flt designdb.Struct) error {
+	items := idsOf(flt["ItemsIds"])
+	tags := tagNames(flt["Tags"])
+	if len(tags) > 0 {
+		data["tags"] = tags
+		seen := map[int64]bool{}
+		for _, id := range items {
+			seen[id] = true
+		}
+		for _, t := range tags {
+			rows, err := w.tx.Query(`SELECT DISTINCT item_guid FROM item_tag WHERE tag = ?1 OR substr(tag, 1, length(?1) + 1) = ?1 || '.' ORDER BY item_guid`, t)
+			if err != nil {
+				return fmt.Errorf("items of the tag %s: %w", t, err)
+			}
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return err
+				}
+				if !seen[id] {
+					seen[id] = true
+					items = append(items, id)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
+			rows.Close()
+		}
+	}
+	if len(items) > 0 {
+		data["items"] = items
+	}
+	return nil
+}
+
+func floatOf(v designdb.Value) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return decimal32(x)
+	case int64:
+		return float64(x)
+	case uint64:
+		return float64(x)
+	}
+	return 0
+}
+
+func boolOf(v designdb.Value) bool {
+	b, _ := v.(bool)
+	return b
+}
+
+// objectiveDetail reads everything the engine needs of an objective record besides the basic columns.
+func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
+	f := orow.Fields
+	typ := enumValue(strOf(f["ObjectiveType"]))
+	d := objectiveDetailJSON{Timeout: floatOf(f["Timeout"]), Rewards: idsOf(f["Rewards"])}
+	if boolOf(f["bShowQuestCompletionDialogue"]) {
+		d.ShowDialogue = 1
+	}
+	if boolOf(f["bSucceedOnTimeout"]) {
+		d.TimeoutOK = 1
+	}
+	if text, req, err := readRequirement(f["ActivationRule"]); err != nil {
+		return "", fmt.Errorf("activation rule: %w", err)
+	} else if text != "" {
+		b, err := json.Marshal(req)
+		if err != nil {
+			return "", err
+		}
+		d.Activation = b
+	}
+	var acts objectiveActionsJSON
+	var err error
+	if acts.Start, err = readActionList(f["OnStartActions"]); err != nil {
+		return "", fmt.Errorf("start actions: %w", err)
+	}
+	if acts.Tick, err = readActionList(f["OnTickActions"]); err != nil {
+		return "", fmt.Errorf("tick actions: %w", err)
+	}
+	if acts.OK, err = readActionList(f["OnSuccessActions"]); err != nil {
+		return "", fmt.Errorf("success actions: %w", err)
+	}
+	if acts.Fail, err = readActionList(f["OnFailureActions"]); err != nil {
+		return "", fmt.Errorf("failure actions: %w", err)
+	}
+	if len(acts.Start)+len(acts.Tick)+len(acts.OK)+len(acts.Fail) > 0 {
+		d.Actions = &acts
+	}
+	// the reward tables of quest items that listed creatures drop while the objective is active (QuestItemRewards)
+	if l, ok := f["QuestItemRewards"].([]designdb.Value); ok {
+		for _, e := range l {
+			q, ok := e.(designdb.Struct)
+			if !ok {
+				continue
+			}
+			table := idGuid(q["RewardTableId"])
+			if table == 0 {
+				continue
+			}
+			m := map[string]any{"t": table}
+			if ids := idsOf(q["PopulationInstanceQueries"]); len(ids) > 0 {
+				m["inst"] = ids
+			}
+			if ids := idsOf(q["PopulationSetQueries"]); len(ids) > 0 {
+				m["sets"] = ids
+			}
+			if len(tagNames(q["NPCTagQuery"])) > 0 {
+				m["tq"] = 1
+			}
+			d.QuestItems = append(d.QuestItems, m)
+		}
+	}
+	data := map[string]any{}
+	switch typ {
+	case "Kill":
+		k := structOf(f["KillObjectiveData"])
+		if l := idsOf(k["PopulationSets"]); len(l) > 0 {
+			data["sets"] = l
+		}
+		if l := idsOf(k["PopulationInstances"]); len(l) > 0 {
+			data["inst"] = l
+		}
+		if boolOf(k["bEnableAdvancedFilters"]) {
+			data["adv"] = 1
+			data["elite"] = intOf(structOf(k["AdvancedFilters"])["EliteRank"])
+		}
+		if boolOf(k["bKillQuestOwner"]) {
+			data["owner"] = 1
+		}
+		if boolOf(k["bUseQuestContext"]) {
+			data["ctx"] = 1
+		}
+		if len(tagNames(k["TagQuery"])) > 0 {
+			data["tq"] = 1
+		}
+	case "Dialogue":
+		if src := sourceJSON(structOf(f["DialogueData"])["DialogueSources"]); len(src) > 0 {
+			data["src"] = src
+		}
+	case "Interact":
+		i := structOf(f["InteractData"])
+		if l := idsOf(i["InteractableComponentDefId"]); len(l) > 0 {
+			data["comp"] = l
+		}
+		if l := idsOf(i["InteractableActorDefIds"]); len(l) > 0 {
+			data["actor"] = l
+		}
+	case "Collect":
+		c := structOf(f["CollectData"])
+		data["cty"] = enumValue(strOf(c["CollectType"]))
+		flt := structOf(c["Filter"])
+		if err := filterItems(w, data, flt); err != nil {
+			return "", err
+		}
+		if l, ok := flt["ItemRarities"].([]designdb.Value); ok && len(l) > 0 {
+			var r []string
+			for _, e := range l {
+				r = append(r, enumValue(strOf(e)))
+			}
+			data["rar"] = r
+		}
+	case "GoTo":
+		g := structOf(f["GoToData"])
+		var locs []map[string]any
+		ml, _ := structOf(g["MapMarkerData"])["Locations"].([]designdb.Value)
+		for _, e := range ml {
+			s, ok := e.(designdb.Struct)
+			if !ok {
+				continue
+			}
+			c := structOf(s["Center"])
+			m := map[string]any{"x": floatOf(c["X"]), "y": floatOf(c["Y"]), "z": floatOf(c["Z"]), "r": floatOf(s["Radius"])}
+			if boolOf(s["bCompletesGoToObjective"]) {
+				m["done"] = 1
+			}
+			if dt := enumValue(strOf(s["DisplayType"])); dt != "" && dt != "None" {
+				m["dt"] = dt
+				if dt == "Hidden" {
+					m["hid"] = 1
+				}
+			}
+			if id := intOf(s["QuestLocationId"]); id != 0 {
+				m["id"] = id
+			}
+			locs = append(locs, m)
+		}
+		if len(locs) > 0 {
+			data["loc"] = locs
+		}
+		if boolOf(g["bUseAreaMap"]) {
+			data["area"] = 1
+		}
+	case "TurnIn":
+		t := structOf(f["TurnInData"])
+		flt := structOf(t["Filter"])
+		if err := filterItems(w, data, flt); err != nil {
+			return "", err
+		}
+		if src := sourceJSON(t["DialogueSources"]); len(src) > 0 {
+			data["src"] = src
+		}
+		if boolOf(t["bAcceptAnySource"]) {
+			data["any"] = 1
+		}
+		if boolOf(t["bCrateTurnIn"]) {
+			data["crate"] = 1
+		}
+		if l := idsOf(t["CrateTypeFilter"]); len(l) > 0 {
+			data["ct"] = l
+		}
+		if l := idsOf(t["CrateItemFilter"]); len(l) > 0 {
+			data["ci"] = l
+		}
+		if n := noneAsEmpty(strOf(t["QuestVariableName"])); n != "" {
+			data["qv"] = n
+		}
+		if boolOf(t["bIncrementQuestVariableOnTurnIn"]) {
+			data["inc"] = 1
+		}
+	case "EventNotification":
+		n := structOf(f["NotificationData"])
+		data["nt"] = enumValue(strOf(n["NotifyType"]))
+		if g := idGuid(n["RecipeId"]); g != 0 {
+			data["recipe"] = g
+		}
+	case "UseAbility":
+		if l := idsOf(structOf(f["AbilityUseData"])["Abilities"]); len(l) > 0 {
+			data["ab"] = l
+		}
+	case "Custom":
+		// the rule is ONE criterion: kept as a requirement of one criterion (an ALL over it) so that the conversations' evaluator reads it
+		rule := structOf(structOf(f["CustomData"])["CustomRule"])
+		if crit, ok := rule["Criteria"].(designdb.Struct); ok {
+			_, req, err := readRequirement(designdb.Struct{
+				"QueryDictionary": []designdb.Value{crit},
+				"TokenStream":     []designdb.Value{int64(1), int64(1), int64(0)},
+			})
+			if err != nil {
+				return "", fmt.Errorf("custom rule: %w", err)
+			}
+			if req != nil {
+				data["rule"] = req
+			}
+		}
+	}
+	if len(data) > 0 {
+		d.Data = data
+	}
+	b, err := json.Marshal(d)
+	return string(b), err
 }
 
 func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) error {
@@ -80,6 +518,7 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 	}
 
 	var quests, objs, missing, gated int
+	killSets := map[int64]bool{}
 	for _, r := range src.rows["NarrativeQuestV2"] {
 		f := newFields(fmt.Sprintf("NarrativeQuestV2 %s (%d)", r.Name, r.Guid), r.Fields)
 		activation, _, err := readRequirement(r.Fields["ActivationRule"])
@@ -91,6 +530,24 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 		if err != nil {
 			return fmt.Errorf("%s: start actions: %w", f.where, err)
 		}
+		var qd questDetailJSON
+		if qd.OnSuccess, err = readActionList(r.Fields["OnSuccessActions"]); err != nil {
+			return fmt.Errorf("%s: success actions: %w", f.where, err)
+		}
+		if qd.OnFail, err = readActionList(r.Fields["OnFailureActions"]); err != nil {
+			return fmt.Errorf("%s: failure actions: %w", f.where, err)
+		}
+		if qd.OnTick, err = readActionList(r.Fields["OnTickActions"]); err != nil {
+			return fmt.Errorf("%s: tick actions: %w", f.where, err)
+		}
+		qd.Timeout = floatOf(r.Fields["Timeout"])
+		if boolOf(r.Fields["bSucceedOnTimeout"]) {
+			qd.TimeoutOK = 1
+		}
+		detail, err := json.Marshal(qd)
+		if err != nil {
+			return err
+		}
 		objIDs := f.ids("ObjectiveIds")
 		rewards := f.ids("Rewards")
 		flavor := enumValue(f.str("Flavor"))
@@ -100,9 +557,9 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 		if f.err != nil {
 			return f.err
 		}
-		if err := w.exec(`INSERT INTO quest (guid, name, flavor, locality, level, can_abandon, repeatable, disabled, default_activate, activation, start_actions, rewards)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.Guid, r.Name, flavor, locality, level, b2i(canAbandon), b2i(repeatable), b2i(disabled), b2i(defAct), activation, start, jsonIDs(rewards)); err != nil {
+		if err := w.exec(`INSERT INTO quest (guid, name, flavor, locality, level, can_abandon, repeatable, disabled, default_activate, activation, start_actions, rewards, detail)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.Guid, r.Name, flavor, locality, level, b2i(canAbandon), b2i(repeatable), b2i(disabled), b2i(defAct), activation, start, jsonIDs(rewards), string(detail)); err != nil {
 			return err
 		}
 		quests++
@@ -122,13 +579,40 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 			if of.err != nil {
 				return of.err
 			}
-			if err := w.exec(`INSERT INTO quest_objective (quest_guid, idx, guid, name, obj_type, completion_count, default_awake, default_hidden, completes_quest, optional)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				r.Guid, i, og, orow.Name, typ, count, b2i(awake), b2i(hidden), b2i(completes), b2i(optional)); err != nil {
+			od, err := objectiveDetail(w, orow)
+			if err != nil {
+				return fmt.Errorf("%s: %w", of.where, err)
+			}
+			if typ == "Kill" {
+				for _, sg := range idsOf(structOf(orow.Fields["KillObjectiveData"])["PopulationSets"]) {
+					killSets[sg] = true
+				}
+			}
+			if l, ok := orow.Fields["QuestItemRewards"].([]designdb.Value); ok {
+				for _, e := range l {
+					for _, sg := range idsOf(structOf(e)["PopulationSetQueries"]) {
+						killSets[sg] = true
+					}
+				}
+			}
+			if err := w.exec(`INSERT INTO quest_objective (quest_guid, idx, guid, name, obj_type, completion_count, default_awake, default_hidden, completes_quest, optional, detail)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				r.Guid, i, og, orow.Name, typ, count, b2i(awake), b2i(hidden), b2i(completes), b2i(optional), od); err != nil {
 				return err
 			}
 			objs++
 		}
+	}
+
+	// the creatures of the population sets the Kill objectives name (a kill counts for the sets its creature stands in)
+	var killMembers int
+	for sg := range killSets {
+		if err := w.exec(`INSERT OR IGNORE INTO quest_kill_set (set_guid, instance_guid) SELECT set_guid, instance_guid FROM npc_set_member WHERE set_guid = ?`, sg); err != nil {
+			return err
+		}
+	}
+	if err := w.tx.QueryRow(`SELECT COUNT(*) FROM quest_kill_set`).Scan(&killMembers); err != nil {
+		return fmt.Errorf("quest_kill_set: %w", err)
 	}
 
 	// the quests an NPC offers
@@ -161,10 +645,10 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 		return err
 	}
 
-	// the nodes that offer a quest
+	// the nodes that offer a quest, and the nodes that ask the player to confirm (a Confirmation node names no quest: its OnSuccessNode is where the talk goes on after a yes)
 	var accepts int
 	for _, r := range src.rows["DialogueNode"] {
-		if enumValue(strOf(r.Fields["NodeType"])) != "AcceptQuest" {
+		if nt := enumValue(strOf(r.Fields["NodeType"])); nt != "AcceptQuest" && nt != "Confirmation" {
 			continue
 		}
 		if err := w.exec(`INSERT INTO dialogue_accept (node_guid, quest_guid, on_success, objectives) VALUES (?, ?, ?, ?)`,
@@ -185,9 +669,82 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 		}
 	}
 
-	// the items bound to quests
-	var itemLinks int
+	// the Emberspring interactables of the places (ICD_<Place>_Attunable_Respawn_Shrine -> the attune point of that place, by name): what an Interact objective names
+	var shrineICDs int
+	{
+		rows, err := w.tx.Query(`SELECT guid, name, descriptor FROM attune_point`)
+		if err != nil {
+			return fmt.Errorf("shrine_icd: read attune_point: %w", err)
+		}
+		places := map[string][]int64{}
+		for rows.Next() {
+			var g int64
+			var name, desc string
+			if err := rows.Scan(&g, &name, &desc); err != nil {
+				rows.Close()
+				return err
+			}
+			// "RVR_Samias_Hope" and "Samia's Hope" are one place: the key is the letters and digits, lower case
+			places[alnum(name)] = append(places[alnum(name)], g)
+			if i := strings.Index(name, "_"); i == 3 {
+				places[alnum(name[i+1:])] = append(places[alnum(name[i+1:])], g)
+			}
+			places[alnum(desc)] = append(places[alnum(desc)], g)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		// the interactable definitions are read from the record table (written above): the quest builder needs only their names
+		icds, err := w.tx.Query(`SELECT guid, name FROM record WHERE schema = 'InteractableComponentDefRecordBase' AND name LIKE 'ICD%Attunable%' ORDER BY guid`)
+		if err != nil {
+			return fmt.Errorf("shrine_icd: read the interactable definitions: %w", err)
+		}
+		type icdRow struct {
+			guid int64
+			name string
+		}
+		var found []icdRow
+		for icds.Next() {
+			var r icdRow
+			if err := icds.Scan(&r.guid, &r.name); err != nil {
+				icds.Close()
+				return err
+			}
+			found = append(found, r)
+		}
+		if err := icds.Err(); err != nil {
+			icds.Close()
+			return err
+		}
+		icds.Close()
+		for _, r := range found {
+			core := strings.TrimPrefix(r.name, "ICD_")
+			i := strings.Index(core, "_Attunable")
+			if !strings.HasPrefix(r.name, "ICD_") || i <= 0 {
+				continue
+			}
+			list := dedupeIDs(places[alnum(core[:i])])
+			if len(list) != 1 {
+				continue // a place the attune points do not name, or two of them: no link
+			}
+			if err := w.exec(`INSERT INTO shrine_icd (icd_guid, attune_guid) VALUES (?, ?)`, r.guid, list[0]); err != nil {
+				return err
+			}
+			shrineICDs++
+		}
+	}
+
+	// the items bound to quests, and the crate type of each crate item
+	var itemLinks, crateItems int
 	for _, r := range src.rows["ItemRecordBase"] {
+		if crate := idGuid(r.Fields["CrateId"]); crate != 0 {
+			if err := w.exec(`INSERT INTO item_crate (item_guid, crate_guid) VALUES (?, ?)`, r.Guid, crate); err != nil {
+				return err
+			}
+			crateItems++
+		}
 		link := func(kind string, quests []int64) error {
 			seen := map[int64]bool{}
 			for _, q := range quests {
@@ -222,6 +779,9 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 	meta["quests.accept_nodes"] = fmt.Sprint(accepts)
 	meta["quests.zoi_quests"] = fmt.Sprint(zoiQuests)
 	meta["quests.item_links"] = fmt.Sprint(itemLinks)
-	opt.logf("quests: %d quests (%d with an activation rule), %d objectives (%d missing), %d offers by NPCs, %d accept nodes, %d zone quests, %d item links", quests, gated, objs, missing, offers, accepts, zoiQuests, itemLinks)
+	meta["quests.crate_items"] = fmt.Sprint(crateItems)
+	meta["quests.shrine_icds"] = fmt.Sprint(shrineICDs)
+	meta["quests.kill_set_members"] = fmt.Sprint(killMembers)
+	opt.logf("quests: %d quests (%d with an activation rule), %d objectives (%d missing), %d offers by NPCs, %d accept nodes, %d zone quests, %d item links, %d crate items, %d creatures of the kill objectives' sets, %d shrine interactables", quests, gated, objs, missing, offers, accepts, zoiQuests, itemLinks, crateItems, killMembers, shrineICDs)
 	return nil
 }

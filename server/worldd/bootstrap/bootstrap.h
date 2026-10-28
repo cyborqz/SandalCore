@@ -375,6 +375,7 @@ public:
         bool                      greeting = false;              // bIsInGreeting
         /// Quests, slice 1: the quest offer the window shows on top of the conversation (QueuedSubDialogues holds this one entry, or none): a QuestAccept panel with a QuestPreview.
         struct SubDialogue {
+            uint8_t              type = 2;               // SubDialogueType: 2 QuestAccept, 4 Confirmation (quests, slice 2)
             int64_t              pending_next = 0;       // PendingNextNode: where the talk goes on after the quest is taken
             int64_t              previous_node = 0;      // PreviousNode: the node the player left to get here
             int64_t              node = 0;               // SubDialogueNodeId: the node that offers the quest

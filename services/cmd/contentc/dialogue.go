@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"aocrop/services/internal/designdb"
 )
@@ -53,6 +54,10 @@ type actionJSON struct {
 	// Every other action response keeps only "a": "ActionResponse".
 	Response string `json:"r,omitempty"`
 	Config   int64  `json:"sc,omitempty"`
+	// Quests slice 2 (version 27): the quest and objective an ActivateObjective / RevealObjective / FailObjective names, and the reward tables a GiveItems gives.
+	Quest   int64   `json:"q,omitempty"`
+	Obj     int64   `json:"o,omitempty"`
+	Rewards []int64 `json:"rw,omitempty"`
 }
 
 // answeredResponses are the action response kinds actionJSON names; the others are left out of the JSON.
@@ -190,6 +195,13 @@ func readActions(v designdb.Value, responses map[int64]actionResponse) (string, 
 				continue
 			}
 			x := actionJSON{Action: enumValue(strOf(a["ActionType"]))}
+			switch x.Action {
+			case "ActivateObjective", "RevealObjective", "FailObjective", "CompleteDialogueObjective", "IncrementDialogueObjective":
+				x.Quest = idGuid(a["QuestId"])
+				x.Obj = idGuid(a["ObjectiveId"])
+			case "GiveItems":
+				x.Rewards = idsOf(a["RewardIds"])
+			}
 			if x.Action == "OpenWindow" {
 				x.Window = enumValue(strOf(a["WindowType"]))
 				if x.Window == "Vendor" {
@@ -275,8 +287,15 @@ func buildDialogue(w *writer, src *source, opt *Options, meta map[string]string)
 		if f.err != nil {
 			return f.err
 		}
-		if err := w.exec(`INSERT INTO dialogue_node (guid, name, node_type, exhaust, quest_guid, on_enter, on_exit) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			r.Guid, r.Name, nodeType, exhaust, quest, onEnter, onExit); err != nil {
+		// (version 28) whether the node has words: the talking window shows them, with a close option of its own when the node has no line; a placeholder has neither
+		hasText := 0
+		if tv, ok := f.get("Text"); ok {
+			if t, isText := tv.(designdb.Text); isText && (strings.TrimSpace(t.Source) != "" || t.Key != "") {
+				hasText = 1
+			}
+		}
+		if err := w.exec(`INSERT INTO dialogue_node (guid, name, node_type, exhaust, quest_guid, on_enter, on_exit, has_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.Guid, r.Name, nodeType, exhaust, quest, onEnter, onExit, hasText); err != nil {
 			return err
 		}
 		nodes++

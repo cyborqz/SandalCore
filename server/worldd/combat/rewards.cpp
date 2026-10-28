@@ -59,6 +59,7 @@ public:
             case stats::kHostLootMaxLevel: return c_.loot_max_level;
             case stats::kHostLootAvgLuck: return c_.avg_luck;
             case stats::kHostPlayerLevel: return c_.player_level;
+            case stats::kHostNarrativeLevel: return c_.narrative_level;
             case stats::kHostNpcTag: {
                 if (!c_.npc_tags) return 0;
                 for (const std::string& t : *c_.npc_tags) {
@@ -247,7 +248,8 @@ private:
                 }
                 const std::optional<double> q = value(it.qty);
                 if (borrowed) ctx_.gather->context = saved;
-                const int64_t qty = q ? static_cast<int64_t>(std::floor(*q + 1e-9)) : 0;
+                // a line the design data gives no Quantity (the quests' rewards: the medallion a guard hands over, a reward box) is one item; a formula that does not run is none
+                const int64_t qty = it.qty == 0 ? 1 : q ? static_cast<int64_t>(std::floor(*q + 1e-9)) : 0;
                 if (qty <= 0 || it.item == 0) continue;
                 add(c.grant == "Auto" ? out_.direct : out_.loot, {it.item, it.variation, qty, quality});
             }

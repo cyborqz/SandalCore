@@ -106,6 +106,7 @@ void PlayerSession::on_home_attunement(Connection& conn, const repl::ClientRpc& 
         spdlog::log(level_for(shrine_logged_, 40), "[embersprings] {}: said yes to a place this world does not hold: nothing changes", name());
         return;
     }
+    quest_shrine(conn, place, now);   // quests, slice 2: attuning to an Emberspring is what an Interact objective of the quests names
     if (!attunements_.has(s->number)) {
         // a place the character has not discovered yet is discovered by this, and that is all (the home is made by the next use)
         attunements_.discover(s->number);

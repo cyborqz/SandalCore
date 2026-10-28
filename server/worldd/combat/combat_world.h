@@ -67,6 +67,7 @@ struct KillReward {
     std::string name;             // the creature's nameplate
     std::string blueprint;        // its Blueprint's leaf ("Wolf")
     int         level = 0;
+    int64_t     instance = 0;     // quests, slice 2: its population instance (0: none), what a Kill objective names
     int64_t     adventuring_xp = 0;
     int64_t     weapon_xp = 0;    // every equipped weapon line gets this (the data's Weapon experience; not modelled by the session yet)
     int64_t     node_xp = 0;      // the node's share (not modelled)

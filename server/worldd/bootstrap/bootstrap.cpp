@@ -1481,7 +1481,7 @@ std::optional<Send> PlayerBootstrap::dialogue_update(const DialogueView& view) {
             setv(prefix + ".Name", Value(repl::NameValue::hardcoded_name(0)));
         };
         constexpr int64_t kQuestTypeId = 6732126019658962568LL, kObjectiveTypeId = 2174867120698124769LL;
-        setv("SubDialogueType", Value::u64(2));   // ESubDialogueType::QuestAccept
+        setv("SubDialogueType", Value::u64(sd.type));   // ESubDialogueType: QuestAccept (2) or Confirmation (4)
         node_id("PendingNextNode", sd.pending_next);
         node_id("PreviousNode", sd.previous_node);
         node_id("SubDialogueNodeId", sd.node);

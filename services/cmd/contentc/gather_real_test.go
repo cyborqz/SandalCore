@@ -463,8 +463,8 @@ func TestRealGatherExpressions(t *testing.T) {
 			t.Errorf("%d expressions still fail on %s", got, fn)
 		}
 	}
-	if got := scalarInt(t, db, `SELECT COUNT(*) FROM ab_expr WHERE program < 0`); got != 198 {
-		t.Errorf("%d expressions do not compile, want 198 (300 in version 12: 24 compile now on the gathering reads, 79 more on GetPlayerProfessionLevel(GetPlayer(), ...), and the Quality formula of the Hunting prototype variation, new in version 13, does not)", got)
+	if got := scalarInt(t, db, `SELECT COUNT(*) FROM ab_expr WHERE program < 0`); got != 155 {
+		t.Errorf("%d expressions do not compile, want 155 (300 in version 12: 24 compile now on the gathering reads, 79 more on GetPlayerProfessionLevel(GetPlayer(), ...), and the Quality formula of the Hunting prototype variation, new in version 13, does not; 43 more in version 28 on GetNarrativeContentLevel, the quests' experience and Glint)", got)
 	}
 	// every gathering interaction's duration and durability formula compiles, as does every ItemVariation's Quality
 	if got := scalarInt(t, db, `SELECT COUNT(*) FROM gather_def g JOIN ab_expr e ON e.id = g.duration_expr WHERE e.program >= 0`); got != 339 {

@@ -17,13 +17,22 @@
 //                the previous node and its chosen line the previous choice
 //    offer       a step (or a greeting) that arrives at a node that offers a quest: the node is entered like any other and the quest panel is queued on top of it
 //                (`sub`).  The player answers the panel (Accept, Decline or Close); an accepted quest goes on to the node the offer names (none: the talk ends), a declined one ends the talk
+//    confirm     (quests, slice 2) a step that arrives at a Confirmation node queues the same kind of panel (ESubDialogueType Confirmation) with no quest: Accept goes on to the node
+//                the confirmation names, Decline goes back to the node the player chose the line on (modelled: no recording shows a declined confirmation), Close ends the talk
 //    cleared     the line ends the conversation, the client closed the window, the player went away or died: every field back to nothing
 //
-//  What this milestone does not do (it opens no windows but a shop's and gives nothing): a line's actions are skipped and reported; a line that ends the
-//  conversation but has actions changes nothing (the window stays); a node of a kind that needs hand-ins or choices (TurnIn, Confirmation, BuyOrderFulfillment)
-//  is never shown (the line that leads there changes nothing).  ExhaustBehavior is CloseAndClear for all but one node of the data, and every node is treated so.
-//  A node with no line that shows is not shown either (the game's own conversations never showed one): a click on an NPC that starts at one does nothing, and a line that leads to
-//  one ends the conversation.
+//  Actions (quests, slice 2): what a conversation does to the character's quests is returned in Result::actions, in the order the conversation ran it, for the session to carry
+//  out: a line's own actions when it is chosen, the OnExit actions of the node it leaves, and the OnEnter actions of every node it enters (also an automatic node it passes
+//  through).  The nodes the talk has been through are kept (State::visited): a Dialogue objective names the node of its NPC's conversation it is met at.
+//  Objective progress (CompleteDialogueObjective, IncrementDialogueObjective) is the exception: the conversation keeps it (Result::deferred, then Talk::pending_) and hands it over in
+//  Result::actions when the conversation ends, so that a talk quest is marked done after the talk and not when its window opens.
+//
+//  What this milestone does not do (it opens no windows but a shop's): an action that is not a quest action (SetCertificationLevel, a window that is not a shop's ...) is skipped and
+//  reported; a line that ends the conversation but has such an action changes nothing (the window stays); a node of a kind that needs hand-ins or choices (TurnIn, Confirmation,
+//  BuyOrderFulfillment) is never shown (the line that leads there changes nothing).  ExhaustBehavior is CloseAndClear for all but one node of the data, and every node is treated so.
+//  A node with no line that shows is shown with its words alone: the talking window adds a close option of its own ("Farewell." for a person, "Close" for anything else) and the
+//  player ends the conversation with it, so the last words of most conversations are seen before the talk ends.  A node with neither words nor a line (a placeholder root) shows
+//  nothing: a click on an NPC that starts at one does nothing, a line that leads to one ends the conversation, and what entering it does still happens.
 // ============================================================================
 #pragma once
 
@@ -31,7 +40,9 @@
 #include "protocol/repl/dialogue_rpc.h"
 
 #include <cstdint>
+#include <iterator>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -50,6 +61,17 @@ struct Result {
     bool                     offer = false;     // the conversation now shows a quest offer (state().sub)
     bool                     offer_answered = false;   // the quest offer was answered or refused: the update carries the cleared queue and ExhaustBehavior
     int                      open_warehouse = 0;   // storage, step 0: the line opens the character's warehouse (the action response OpenPlayerWarehouse): its StorageAccessConfig; the conversation ends
+    /// Quests, slice 2: the quest actions the conversation ran, in order, for the session to carry out (`node` is the node whose line or enter / exit list holds each).  Objective
+    /// progress (CompleteDialogueObjective, IncrementDialogueObjective) is among them only in the result of the step that ends the conversation.
+    struct Run {
+        int64_t                      node = 0;
+        content::DialogueActionRow   action;
+        std::set<int64_t>            visited;   // objective progress: the nodes the conversation had been through when the action ran
+    };
+    std::vector<Run>         actions;
+    std::vector<Run>         deferred;   // the objective progress this step earned, until the step is kept (the talk holds it from then on)
+    bool                     silent = false;   // the click found a placeholder node (no words, no line) whose entering did its quest actions: no window opens, the actions still run
+    std::set<int64_t>        visited;   // the nodes the talk has been through, with the ones this step entered (the state may be cleared by the time the caller reads it)
 };
 
 class Talk {
@@ -63,7 +85,8 @@ public:
 
     /// The quest panel queued on top of the conversation (SubDialogueInstance, QuestAccept).
     struct Sub {
-        int64_t              quest = 0;           // the quest on offer
+        uint8_t              type = 2;            // ESubDialogueType: 2 QuestAccept, 4 Confirmation (quests, slice 2)
+        int64_t              quest = 0;           // the quest on offer (0 for a confirmation)
         int64_t              node = 0;            // the node that offers it
         int64_t              previous_node = 0;   // the node the player left to get there
         int64_t              pending_next = 0;    // where the talk goes on after the quest is taken (0: it ends)
@@ -82,6 +105,7 @@ public:
         bool              greeting = false;
         std::vector<Line> lines;                      // the lines shown
         std::optional<Sub> sub;                       // the quest offer on top, if any
+        std::set<int64_t> visited;                    // quests, slice 2: every node the talk has been through (the shown node, the automatic ones it passed)
         bool operator==(const State&) const = default;
     };
 
@@ -89,12 +113,13 @@ public:
     const State& state() const { return state_; }
 
     /// The click on an NPC whose root is `root`: opens the conversation with its greeting, at `offered_node` (the node an offered quest names) when that is not 0, else at the root's
-    /// top node.  Refused (nothing changes) when one is open, there is no conversation, it leads nowhere (an automatic node with no line that holds), starts at a node this
-    /// milestone cannot show or at one with nothing to say.
+    /// top node.  Refused (nothing changes) when one is open, there is no conversation, it leads nowhere (an automatic node with no line that holds) or starts at a node this
+    /// milestone cannot show.
     Result begin(const Book& book, Evaluator& ev, uint64_t source, int64_t root, int64_t offered_node = 0) {
         Result r;
         r.outcome = Outcome::Refused;
         if (open()) { r.why = "a conversation is open already"; return r; }
+        pending_.clear();
         const int64_t top = offered_node != 0 ? offered_node : book.top_node(root);
         if (top == 0) { r.why = book.has_root(root) ? "the root has no conversation" : "the root is not in the data"; return r; }
         std::vector<Pass> passes;
@@ -107,9 +132,22 @@ public:
         s.shown_node = *shown;
         s.greeting = true;
         s.lines = visible(book, ev, *shown);
+        if (n->type == "Response" && s.lines.empty() && !n->has_text) {   // nothing to show, not even words: entering the node still does what it does
+            entering(book, passes, *shown, s, r);
+            commit(r);
+            finish(r);   // (no window carries this talk: what it earned is carried out at once)
+            r.why = "the node " + std::to_string(*shown) + " has no words and no line that shows";
+            if (!r.actions.empty()) {
+                r.outcome = Outcome::Nothing;
+                r.silent = true;
+                r.why += "; entering it ran its quest actions";
+            }
+            return r;
+        }
         if (!enter(book, *n, *shown, 0, s, r)) return r;
-        noting(*n, r);
+        entering(book, passes, *shown, s, r);
         state_ = std::move(s);
+        commit(r);
         r.outcome = Outcome::Changed;
         return r;
     }
@@ -132,7 +170,7 @@ public:
         const content::DialogueNodeRow* from = book.node(state_.shown_node);
         if (!from || response.choice_index < 0 || static_cast<size_t>(response.choice_index) >= from->choices.size()) { r.why = "the node has no such line"; return r; }
         const content::DialogueChoiceRow& line = from->choices[static_cast<size_t>(response.choice_index)];
-        size_t others = 0;   // the actions that are not a shop's window
+        size_t others = 0;   // the actions that are not a shop's window and not a quest action
         for (const auto& a : line.actions) {
             if (a.action == "OpenWindow" && a.window == "Vendor" && a.vendor != 0) {
                 if (r.open_vendor == 0) r.open_vendor = a.vendor;
@@ -142,14 +180,22 @@ public:
                 if (r.open_warehouse == 0) r.open_warehouse = a.access_config > 0 && a.access_config < 64 ? static_cast<int>(a.access_config) : 7;
                 continue;
             }
+            if (is_quest_action(a)) {
+                note(r, from->guid, a, state_.visited);
+                continue;
+            }
             ++others;
             r.skipped.push_back(a.window.empty() ? a.action : a.action + "/" + a.window);
         }
+        leaving(*from, r, state_.visited);
+        r.visited = state_.visited;
         if (line.next == 0) {
             // a line that ends the conversation and opens a shop leaves the conversation as it is: the client closes its own window as the shop's opens
-            if (r.open_vendor != 0) { r.outcome = Outcome::Nothing; r.why = "the line opens a shop"; return r; }
+            if (r.open_vendor != 0) { drop(r); r.outcome = Outcome::Nothing; r.why = "the line opens a shop"; return r; }
             // a line that opens the warehouse ends the conversation (the talking window clears) and the window opens in its place
-            if (!line.actions.empty() && others > 0) { r.outcome = Outcome::Nothing; r.why = "the line's actions are not done yet"; return r; }
+            if (!line.actions.empty() && others > 0) { drop(r); r.outcome = Outcome::Nothing; r.why = "the line's actions are not done yet"; return r; }
+            commit(r);
+            finish(r);   // the conversation is over: the objective progress it earned is carried out now
             state_ = State{};
             r.outcome = Outcome::Changed;
             return r;
@@ -157,7 +203,7 @@ public:
         std::vector<Pass> passes;
         std::string why;
         const auto target = resolve(book, ev, line.next, passes, why);
-        if (!target) { r.outcome = Outcome::Nothing; r.why = why; return r; }
+        if (!target) { drop(r); r.outcome = Outcome::Nothing; r.why = why; return r; }
         const content::DialogueNodeRow* n = book.node(*target);
         State s = state_;
         s.previous_node = state_.current_node;
@@ -176,16 +222,20 @@ public:
         s.lines = visible(book, ev, *target);
         s.sub.reset();
         Result entered;
-        if (n->type == "Response" && s.lines.empty()) {   // nothing to say: the talk ends here
+        if (n->type == "Response" && s.lines.empty() && !n->has_text) {   // nothing to say, not even words: the talk ends here (what entering the node does still happens)
+            entering(book, passes, *target, s, r);
+            commit(r);
+            finish(r);
             state_ = State{};
             r.outcome = Outcome::Changed;
-            r.why = "the node " + std::to_string(*target) + " has no line that shows";
+            r.why = "the node " + std::to_string(*target) + " has no words and no line that shows";
             return r;
         }
-        if (!enter(book, *n, *target, state_.shown_node, s, entered)) { r.outcome = Outcome::Nothing; r.why = entered.why; return r; }
+        if (!enter(book, *n, *target, state_.shown_node, s, entered)) { drop(r); r.outcome = Outcome::Nothing; r.why = entered.why; return r; }
         r.offer = entered.offer;
-        noting(*n, r);
+        entering(book, passes, *target, s, r);
         state_ = std::move(s);
+        commit(r);
         r.outcome = Outcome::Changed;
         return r;
     }
@@ -195,12 +245,28 @@ public:
 
     /// The player answered the quest panel and the caller has done what the answer asks (taken the quest, or not).  The queue is cleared; a quest that was taken goes on to the node the
     /// offer names when there is one that shows, else the talk ends, as it does for a quest that was declined or refused.  Nothing when no offer is open.
-    Result finish_sub(const Book& book, Evaluator& ev, bool taken) {
+    Result finish_sub(const Book& book, Evaluator& ev, bool taken, bool back = false) {
         Result r;
         if (!open() || !state_.sub) return r;
         const Sub sub = *state_.sub;
         r.outcome = Outcome::Changed;
         r.offer_answered = true;
+        r.visited = state_.visited;
+        if (!taken && back && sub.type == 4 && sub.previous_node != 0) {   // a declined confirmation: back to the node the player chose the line on
+            State s = state_;
+            s.sub.reset();
+            s.previous_node = sub.node;
+            s.previous_choice_node = sub.node;
+            s.previous_choice_index = 0;
+            s.current_node = sub.previous_node;
+            s.shown_node = sub.previous_node;
+            s.greeting = false;
+            s.lines = visible(book, ev, sub.previous_node);
+            if (!s.lines.empty()) {
+                state_ = std::move(s);
+                return r;
+            }
+        }
         if (taken && sub.pending_next != 0) {
             std::vector<Pass> passes;
             std::string why;
@@ -222,22 +288,34 @@ public:
                 s.greeting = false;
                 s.lines = visible(book, ev, *next);
                 Result entered;
-                if (n->type == "Response" && !s.lines.empty() && enter(book, *n, *next, sub.node, s, entered) && !entered.offer) {
-                    noting(*n, r);
+                if (n->type == "Response" && s.lines.empty() && !n->has_text) {   // nothing to say, not even words: the talk ends, what entering the node does still happens
+                    entering(book, passes, *next, s, r);
+                    commit(r);
+                } else if (n->type == "Response" && enter(book, *n, *next, sub.node, s, entered) && !entered.offer) {
+                    entering(book, passes, *next, s, r);
                     state_ = std::move(s);
+                    commit(r);
                     return r;
                 }
             }
         }
+        finish(r);   // the conversation is over: the objective progress it earned is carried out now
         state_ = State{};
         return r;
     }
 
-    /// The window closed (the client's Close, a walk away, death, the NPC gone): every field back to nothing.  Nothing when it was not open.
-    Result close() {
+    /// The window closed (the client's Close, a walk away, death, the NPC gone): every field back to nothing.  Nothing when it was not open.  With the book, the node that was shown is
+    /// left (its OnExit actions are in Result::actions).
+    Result close(const Book* book = nullptr) {
         Result r;
         if (!open()) return r;
         r.offer_answered = state_.sub.has_value();
+        r.visited = state_.visited;
+        if (book && !state_.sub) {
+            if (const content::DialogueNodeRow* n = book->node(state_.shown_node)) leaving(*n, r, state_.visited);
+        }
+        commit(r);
+        finish(r);   // the conversation is over: the objective progress it earned is carried out now
         state_ = State{};
         r.outcome = Outcome::Changed;
         return r;
@@ -249,8 +327,8 @@ private:
         int32_t index = 0;   // the line it took
     };
 
-    /// Whether the node can be shown, and what it adds to the state: an AcceptQuest node queues the quest panel, a Response node needs a line that shows (a greeting only: a step has
-    /// its own rule above).  `from` is the node the player left.
+    /// Whether the node can be shown, and what it adds to the state: an AcceptQuest node queues the quest panel, a Confirmation node the confirmation, a Response node is shown with the lines
+    /// that show (none: its words alone, and the window's own close option).  `from` is the node the player left.
     static bool enter(const Book& book, const content::DialogueNodeRow& n, int64_t guid, int64_t from, State& s, Result& r) {
         if (n.type == "AcceptQuest") {
             const content::QuestAcceptRow* offer = book.accept(guid);
@@ -265,8 +343,19 @@ private:
             r.offer = true;
             return true;
         }
+        if (n.type == "Confirmation") {
+            const std::optional<int64_t> confirm = book.confirm(guid);
+            if (!confirm) { r.outcome = Outcome::Refused; r.why = "the confirmation node " + std::to_string(guid) + " is not in the data"; return false; }
+            Sub sub;
+            sub.type = 4;
+            sub.node = guid;
+            sub.previous_node = from;
+            sub.pending_next = *confirm;
+            s.sub = std::move(sub);
+            r.offer = true;
+            return true;
+        }
         if (n.type != "Response") { r.outcome = Outcome::Refused; r.why = "the node is a " + n.type + " node, which this milestone cannot show"; return false; }
-        if (s.lines.empty()) { r.outcome = Outcome::Refused; r.why = "the node " + std::to_string(guid) + " has no line that shows"; return false; }
         return true;
     }
 
@@ -299,12 +388,58 @@ private:
         return out;
     }
 
-    /// What entering a node would run (its OnEnter actions) is skipped and listed.
-    static void noting(const content::DialogueNodeRow& n, Result& r) {
-        for (const auto& a : n.on_enter) r.skipped.push_back("OnEnter:" + (a.window.empty() ? a.action : a.action + "/" + a.window));
+    /// A quest action: what the session carries out for the character's quests (the others are skipped and listed).
+    static bool is_quest_action(const content::DialogueActionRow& a) {
+        return a.action == "CompleteDialogueObjective" || a.action == "IncrementDialogueObjective" || a.action == "ActivateObjective" || a.action == "RevealObjective" ||
+               a.action == "FailObjective" || a.action == "GiveItems";
     }
 
-    State state_;
+    /// A quest action the conversation ran: carried out with the step (`actions`), except objective progress, which waits for the end of the conversation (`deferred`, with the nodes
+    /// visited so far: the objective it counts for names one of them).
+    static void note(Result& r, int64_t node, const content::DialogueActionRow& a, const std::set<int64_t>& visited) {
+        if (a.action == "CompleteDialogueObjective" || a.action == "IncrementDialogueObjective") r.deferred.push_back({node, a, visited});
+        else r.actions.push_back({node, a, {}});
+    }
+
+    static void collect(int64_t node, const std::vector<content::DialogueActionRow>& list, const char* what, Result& r, const std::set<int64_t>& visited) {
+        for (const auto& a : list) {
+            if (is_quest_action(a)) note(r, node, a, visited);
+            else r.skipped.push_back(std::string(what) + ":" + (a.window.empty() ? a.action : a.action + "/" + a.window));
+        }
+    }
+
+    /// The talk enters `node` (after the automatic nodes in `passes`): their OnEnter actions run, and the nodes are visited.
+    static void entering(const Book& book, const std::vector<Pass>& passes, int64_t node, State& s, Result& r) {
+        for (const Pass& p : passes) {
+            s.visited.insert(p.node);
+            if (const content::DialogueNodeRow* a = book.node(p.node)) collect(p.node, a->on_enter, "OnEnter", r, s.visited);
+        }
+        s.visited.insert(node);
+        if (const content::DialogueNodeRow* n = book.node(node)) collect(node, n->on_enter, "OnEnter", r, s.visited);
+        r.visited = s.visited;
+    }
+
+    /// The talk leaves `n`: its OnExit actions run.
+    static void leaving(const content::DialogueNodeRow& n, Result& r, const std::set<int64_t>& visited) { collect(n.guid, n.on_exit, "OnExit", r, visited); }
+
+    /// The step is kept: the talk holds the objective progress it earned until the conversation ends.
+    void commit(Result& r) {
+        pending_.insert(pending_.end(), std::make_move_iterator(r.deferred.begin()), std::make_move_iterator(r.deferred.end()));
+        r.deferred.clear();
+    }
+    /// The conversation ends: everything the talk held is handed over, after what the step itself did.
+    void finish(Result& r) {
+        r.actions.insert(r.actions.end(), std::make_move_iterator(pending_.begin()), std::make_move_iterator(pending_.end()));
+        pending_.clear();
+    }
+    /// The step changes nothing: what it collected is not done.
+    static void drop(Result& r) {
+        r.actions.clear();
+        r.deferred.clear();
+    }
+
+    State                    state_;
+    std::vector<Result::Run> pending_;   // the objective progress of the conversation so far (see Result::deferred): carried out when it ends
 };
 
 }  // namespace aoc::worldd::dialogue

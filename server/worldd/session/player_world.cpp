@@ -279,7 +279,10 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     {   // quests, slice 1: the quests, their offers and the nodes that offer them; a content.db of an older version has none and no NPC offers a quest
         std::string qe;
         if (auto data = content_->quest_data(qe)) {
-            if (dialogue_) dialogue_->set_accepts(data->accepts);
+            if (dialogue_) {
+                dialogue_->set_accepts(data->accepts);
+                dialogue_->set_confirms(data->confirms);
+            }
             quests_.emplace(std::move(*data));
             spdlog::info("[world] quests: {} quests, {} nodes that offer one, {} zones that start one", quests_->quests(), quests_->data().accepts.size(), quests_->data().zoi_quests.size());
         } else {
@@ -1179,6 +1182,17 @@ void PlayerWorld::start_aftermath() {
     if (area_report_) {
         for (const spawns::SpawnRecipe& r : area_report_->recipes) roots.insert(r.info.loot_tables.begin(), r.info.loot_tables.end());
     }
+    // quests, slice 2: the tables the quests name roll from this book too (a finished quest's rewards, a GrantItem action, the quest items that creatures drop, a conversation's GiveItems)
+    size_t quest_tables = 0;
+    {
+        std::set<int64_t> named;
+        if (quests_) named = quests_->reward_tables();
+        if (dialogue_) {
+            const std::set<int64_t> given = dialogue_->reward_tables();
+            named.insert(given.begin(), given.end());
+        }
+        for (const int64_t t : named) quest_tables += roots.insert(t).second ? 1 : 0;
+    }
     std::string e;
     std::map<int64_t, content::LootTable> tables;
     if (aftermath_config_.enabled && !roots.empty()) {
@@ -1205,8 +1219,8 @@ void PlayerWorld::start_aftermath() {
         } else if (!variation_error.empty()) {
             spdlog::warn("[loot] no item variations: {} (the kills' items keep their record's quality)", variation_error);
         }
-        spdlog::info("[loot] {} reward tables of the {} the area's creatures name, the experience decay {}, {} item variation formulas for the quality of the drops", n, roots.size(),
-                     decay != 0 ? "of the Adventuring leveling type" : "(none)", formulas);
+        spdlog::info("[loot] {} reward tables of the {} the area's creatures and the quests name ({} of them only the quests'), the experience decay {}, {} item variation formulas for the quality of the drops", n,
+                     roots.size(), quest_tables, decay != 0 ? "of the Adventuring leveling type" : "(none)", formulas);
     }
     aftermath_ = std::make_unique<combat::Aftermath>(registry_, *combat_, rewards_ ? &*rewards_ : nullptr, [this] { return guids_.next(); }, aftermath_config_);
     aftermath_->set_quality_of([this](int64_t item) { return item_quality(item); });

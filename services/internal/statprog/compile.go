@@ -1634,6 +1634,11 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 			return val{}, err
 		}
 		return f.hostCall(e, aocexpr.HostPlayerLevel, "", tNum)
+	case "GetNarrativeContentLevel":
+		if err := check(); err != nil {
+			return val{}, err
+		}
+		return f.hostCall(e, aocexpr.HostNarrativeLevel, "", tNum)
 	case "DoesNPCContainTag":
 		if err := check(tStr); err != nil {
 			return val{}, err

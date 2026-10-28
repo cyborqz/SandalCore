@@ -95,6 +95,7 @@ struct RollContext {
     double  loot_max_level = 1;       // GetPlayerLootMaxLevel
     double  avg_luck = 0;             // GetPlayerLootAvgLuck
     double  player_level = 1;         // GetPlayerLevel (the decay)
+    double  narrative_level = 0;      // GetNarrativeContentLevel: the level of the quest whose reward is rolled (0: the reward belongs to no quest)
     /// Multiplies the chance of every RollEachByPercent element (the draw is `rand < min(1, percent x chance_mult)`); never a quantity, a weight or a predicate.  1: the data's own odds
     /// (worldd --loot-chance-mult / AOC_LOOT_CHANCE_MULT; the user's test of 2026-10-10 found drops too rare).
     double  chance_mult = 1.0;

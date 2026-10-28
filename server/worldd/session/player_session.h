@@ -267,6 +267,7 @@
 #include "items/wallet.h"
 #include "net/connection.h"
 #include "net/control_channel.h"
+#include "quest/engine.h"
 #include "quest/quest_log.h"
 #include "respawn/embersprings.h"
 #include "quest/quest_service.h"
@@ -735,6 +736,14 @@ public:
     /// Whether the character's quest log loaded (or it has none): the quests work.  False: no quest service, or it did not answer at the login.
     bool     quests_on() const { return quests_on_; }
     size_t   quests_taken() const { return quests_taken_; }
+    size_t   quests_finished() const { return quests_finished_; }
+    size_t   quest_objectives_done() const { return quest_objectives_done_; }
+    /// Quests, slice 2: the two entry points of the construction crates (the crates' code calls them; they only note the event, the quests count it on the next tick).
+    /// The character carries the construction crate `item_record` now (it picked one up at a construction station): the EventNotification ConstructionCrateEquipped.
+    void     construction_crate_equipped(int64_t item_record);
+    /// The character put `count` of the crate `item_record` into the construction `building_or_project` of the city node `node`: the EventNotification
+    /// ContributedToServiceBuildingConstruction (once for each crate) and the crate objectives (a TurnIn that takes crates of the item's crate type).
+    void     construction_deposit(int64_t node, int64_t building_or_project, int64_t item_record, int32_t count);
     size_t   quests_refused() const { return quests_refused_; }
     size_t   quests_abandoned() const { return quests_abandoned_; }
     /// Storage clerks, step 0: whether the storage window is open, the guid the pawn's component of a container of an area has (the one the open window shows; else the first the connection
@@ -933,6 +942,31 @@ private:
     void end_dialogue(Connection& conn, const char* why);
     /// Every tick: a conversation whose NPC is gone or far away ends.
     void run_dialogue(Connection& conn, Clock::time_point now);
+    // ---- quests, slice 2: objectives, hand-in and rewards (quest/session_quests2.inc) ------------------------------------------------------------
+    /// The quests' clock: the world's seconds.
+    double quest_clock(Clock::time_point now);
+    /// Builds the quest engine over the character's log and the conversations' evaluator, lets `fn` use it, carries out what the engine says the world has to do and tells the client of a change.
+    void quest_engine(Connection& conn, Clock::time_point now, const char* why, const std::function<void(quest::Engine&)>& fn);
+    /// What the engine asked for: rewards, items taken, toasts, quests finished or failed, quests started.
+    void apply_quest_effects(Connection& conn, std::vector<quest::Effect>& effects, Clock::time_point now);
+    /// Rolls the reward tables as the character and gives the items and the experience; a reward that has no room in the reply queue yet waits for the next tick.
+    void grant_quest_rewards(Connection& conn, const std::vector<int64_t>& tables, const char* why, Clock::time_point now, int64_t quest = 0);
+    bool deliver_quest_rewards(Connection& conn, const std::vector<int64_t>& tables, const char* why, Clock::time_point now, int64_t quest = 0);
+    /// The items a RemoveItem action takes (item record, quantity; 0: all) leave the bags.
+    void take_quest_items(Connection& conn, const std::vector<std::pair<int64_t, int64_t>>& items);
+    /// A Toast action: the text as a callout.
+    void quest_toast(Connection& conn, const std::string& text, Clock::time_point now);
+    /// The quest actions a conversation ran (Result::actions), with the NPC the character talks to.
+    void run_talk_actions(Connection& conn, const dialogue::Result& r, const world::WorldActor& npc, Clock::time_point now);
+    /// The character (or one who fought with it) killed a creature: the Kill objectives.
+    void quest_kill(Connection& conn, const combat::KillReward& k, Clock::time_point now);
+    /// The character attuned to the Emberspring of `place`: the Interact objectives that name its interactable.
+    void quest_shrine(Connection& conn, int64_t place, Clock::time_point now);
+    /// Once a second: the places (GoTo), the items carried (Collect), the rules (Custom); and the rewards that waited for room.
+    void tick_quests(Connection& conn, Clock::time_point now);
+    /// A quest-bound crate a reward gives (1100 and 1101 hand one out) is CARRIED, not stored: this is the ONE place that puts it in the character's hands.  False: it was not placed here
+    /// (this build keeps the crate in the bag like any item; the construction crates' carry code takes it over).
+    bool carry_quest_crate(Connection& conn, const combat::RolledItem& crate, Clock::time_point now);
     // ---- storage clerks, step 0 (warehouse/player_warehouse.inc) ----
     /// The join's last piece for the warehouse: the character's base item chunk gets its component and OwnerInfo lists it, as retail's login does (the client asks for its data and has it
     /// before any window opens).  Queued behind the join.
@@ -1569,6 +1603,25 @@ private:
     Clock::time_point    zone_checked_{};
     size_t               quests_taken_ = 0, quests_refused_ = 0, quests_abandoned_ = 0, quests_logged_ = 0;
     std::set<std::string> quest_told_;               // what a quest's start skipped, told once for each text
+    // quests, slice 2
+    stats::SplitMix      quest_rng_{0x51e57a11d0fe5eedull};   // the dice of the reward tables (their weights and chances)
+    Clock::time_point    quest_checked_{};          // the last once-a-second quest tick
+    Clock::time_point    quest_last_now_{};         // the time of the last quest work (what happens outside a tick uses it)
+    size_t               quests_finished_ = 0, quest_objectives_done_ = 0, quest_rewards_given_ = 0;
+    double               quest_giver_x_ = 0, quest_giver_y_ = 0;   // where the NPC a conversation's quest actions ran for stands (node experience goes to its town)
+    bool                 quest_giver_set_ = false;
+    struct WaitingReward {
+        std::vector<int64_t> tables;
+        std::string          why;
+        int64_t              quest = 0;   // the quest the tables belong to (its level is the narrative content level of their formulas); 0: none
+    };
+    std::deque<WaitingReward> quest_rewards_waiting_;   // rewards that wait for room in the reply queue
+    struct CrateEvent {   // what construction_crate_equipped / construction_deposit noted for the next quest tick
+        bool    deposit = false;
+        int64_t node = 0, project = 0, item = 0;
+        int32_t count = 0;
+    };
+    std::deque<CrateEvent> quest_crate_events_;
     Clock::time_point last_save_{};
     bool save_clock_started_ = false;
     bool finished_ = false;

@@ -2832,12 +2832,10 @@ std::string shown_mount_name(const std::string& name) {
 
 namespace {
 
-/// A condition as the dialogue tables hold it ({"tok": [...], "q": [{...}]}); false when the text does not read.
-bool parse_dialogue_requirement(const std::string& text, DialogueRequirement& out) {
+/// A condition as the JSON object the tables hold ({"tok": [...], "q": [{...}]}); false when it does not read.
+bool parse_requirement_object(const nlohmann::json& j, DialogueRequirement& out) {
     out = DialogueRequirement{};
-    if (text.empty()) return true;
-    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
-    if (j.is_discarded() || !j.is_object()) return false;
+    if (!j.is_object()) return false;
     const auto tok = j.find("tok");
     const auto q = j.find("q");
     if (tok == j.end() || !tok->is_array() || q == j.end() || !q->is_array()) return false;
@@ -2876,6 +2874,15 @@ bool parse_dialogue_requirement(const std::string& text, DialogueRequirement& ou
     return true;
 }
 
+/// A condition as the dialogue tables hold it (the JSON text of a requirement object); false when the text does not read.
+bool parse_dialogue_requirement(const std::string& text, DialogueRequirement& out) {
+    out = DialogueRequirement{};
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded()) return false;
+    return parse_requirement_object(j, out);
+}
+
 /// A list of actions ([{"a": "OpenWindow", "w": "Vendor", "vd": <the shop's def>}, {"a": "ActionResponse", "r": "OpenPlayerWarehouse", "sc": 7}]); false when the text does not read.
 bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionRow>& out) {
     out.clear();
@@ -2890,6 +2897,13 @@ bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionR
         if (const auto it = a.find("vd"); it != a.end() && it->is_number_integer()) r.vendor = it->get<int64_t>();
         if (const auto it = a.find("r"); it != a.end() && it->is_string()) r.response = it->get<std::string>();
         if (const auto it = a.find("sc"); it != a.end() && it->is_number_integer()) r.access_config = it->get<int64_t>();
+        if (const auto it = a.find("q"); it != a.end() && it->is_number_integer()) r.quest = it->get<int64_t>();
+        if (const auto it = a.find("o"); it != a.end() && it->is_number_integer()) r.objective = it->get<int64_t>();
+        if (const auto it = a.find("rw"); it != a.end() && it->is_array()) {
+            for (const auto& v : *it) {
+                if (v.is_number_integer()) r.rewards.push_back(v.get<int64_t>());
+            }
+        }
         out.push_back(std::move(r));
     }
     return true;
@@ -2918,7 +2932,11 @@ std::optional<DialogueData> ContentDb::dialogue_data(std::string& error) const {
         if (step != SQLITE_DONE) return failed("dialogue_root");
     }
     {
-        Stmt q(db_, "SELECT guid, name, node_type, exhaust, quest_guid, on_enter, on_exit FROM dialogue_node");
+        // contentc version 28 adds has_text (the node has words to show); a file of an older version has no such column and every node counts as having words
+        Stmt with_text(db_, "SELECT guid, name, node_type, exhaust, quest_guid, on_enter, on_exit, has_text FROM dialogue_node");
+        const bool words_known = with_text.ok();
+        Stmt without_text(db_, "SELECT guid, name, node_type, exhaust, quest_guid, on_enter, on_exit FROM dialogue_node");
+        const Stmt& q = words_known ? with_text : without_text;
         if (!q.ok()) return failed("dialogue_node");
         int step;
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
@@ -2930,6 +2948,7 @@ std::optional<DialogueData> ContentDb::dialogue_data(std::string& error) const {
             n.type = column_text(s, 2);
             n.exhaust = column_text(s, 3);
             n.quest = sqlite3_column_int64(s, 4);
+            if (words_known) n.has_text = sqlite3_column_int64(s, 7) != 0;
             if (!parse_dialogue_actions(column_text(s, 5), n.on_enter) || !parse_dialogue_actions(column_text(s, 6), n.on_exit)) return unread("dialogue_node", n.guid);
             out.nodes[n.guid] = std::move(n);
         }
@@ -3000,23 +3019,184 @@ bool parse_guid_list(const std::string& text, std::vector<int64_t>& out) {
     return true;
 }
 
-/// A quest's start actions ([{"a": kind, "o": objective, "q": quest, "n": name, "v": value, "c": 1}]); false when the text does not read.
-bool parse_quest_start_actions(const std::string& text, std::vector<QuestStartAction>& out) {
+/// A list of quest actions ([{"a": kind, "o": objective, "q": quest, "n": name, "v": value, "c": 1, "r": its condition, "rw": reward table, "it": [[item, quantity]], "t": text, "sp": [sets]}]).
+bool parse_quest_actions_json(const nlohmann::json& j, std::vector<QuestAction>& out) {
     out.clear();
-    if (text.empty()) return true;
-    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
-    if (j.is_discarded() || !j.is_array()) return false;
+    if (!j.is_array()) return false;
     for (const auto& a : j) {
         if (!a.is_object()) return false;
-        QuestStartAction r;
+        QuestAction r;
         if (const auto it = a.find("a"); it != a.end() && it->is_string()) r.action = it->get<std::string>();
         if (const auto it = a.find("o"); it != a.end() && it->is_number_integer()) r.objective = it->get<int64_t>();
         if (const auto it = a.find("q"); it != a.end() && it->is_number_integer()) r.quest = it->get<int64_t>();
         if (const auto it = a.find("n"); it != a.end() && it->is_string()) r.variable = it->get<std::string>();
         if (const auto it = a.find("v"); it != a.end() && it->is_number_integer()) r.value = it->get<int64_t>();
         if (const auto it = a.find("c"); it != a.end() && it->is_number_integer()) r.conditional = it->get<int64_t>() != 0;
+        if (const auto it = a.find("r"); it != a.end() && !parse_requirement_object(*it, r.rule)) return false;
+        if (const auto it = a.find("rw"); it != a.end() && it->is_number_integer()) r.reward_table = it->get<int64_t>();
+        if (const auto it = a.find("it"); it != a.end() && it->is_array()) {
+            for (const auto& pair : *it) {
+                if (!pair.is_array() || pair.size() != 2 || !pair[0].is_number_integer() || !pair[1].is_number_integer()) return false;
+                r.items.emplace_back(pair[0].get<int64_t>(), pair[1].get<int64_t>());
+            }
+        }
+        if (const auto it = a.find("t"); it != a.end() && it->is_string()) r.text = it->get<std::string>();
+        if (const auto it = a.find("sp"); it != a.end() && it->is_array()) {
+            for (const auto& v : *it) {
+                if (v.is_number_integer()) r.spawns.push_back(v.get<int64_t>());
+            }
+        }
         out.push_back(std::move(r));
     }
+    return true;
+}
+
+/// A quest's start actions (the list above, as text); false when the text does not read.
+bool parse_quest_start_actions(const std::string& text, std::vector<QuestStartAction>& out) {
+    out.clear();
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded()) return false;
+    return parse_quest_actions_json(j, out);
+}
+
+int64_t json_int(const nlohmann::json& o, const char* key) {
+    const auto it = o.find(key);
+    return it != o.end() && it->is_number_integer() ? it->get<int64_t>() : int64_t(0);
+}
+double json_num(const nlohmann::json& o, const char* key) {
+    const auto it = o.find(key);
+    return it != o.end() && it->is_number() ? it->get<double>() : 0.0;
+}
+bool json_flag(const nlohmann::json& o, const char* key) { return json_int(o, key) != 0; }
+std::string json_str(const nlohmann::json& o, const char* key) {
+    const auto it = o.find(key);
+    return it != o.end() && it->is_string() ? it->get<std::string>() : std::string();
+}
+bool json_ints(const nlohmann::json& o, const char* key, std::vector<int64_t>& out) {
+    out.clear();
+    const auto it = o.find(key);
+    if (it == o.end()) return true;
+    if (!it->is_array()) return false;
+    for (const auto& v : *it) {
+        if (!v.is_number_integer()) return false;
+        out.push_back(v.get<int64_t>());
+    }
+    return true;
+}
+bool json_strings(const nlohmann::json& o, const char* key, std::vector<std::string>& out) {
+    out.clear();
+    const auto it = o.find(key);
+    if (it == o.end()) return true;
+    if (!it->is_array()) return false;
+    for (const auto& v : *it) {
+        if (!v.is_string()) return false;
+        out.push_back(v.get<std::string>());
+    }
+    return true;
+}
+bool json_actions(const nlohmann::json& o, const char* key, std::vector<QuestAction>& out) {
+    out.clear();
+    const auto it = o.find(key);
+    return it == o.end() || parse_quest_actions_json(*it, out);
+}
+
+/// The sources of a Dialogue or TurnIn objective ([{"k": kind, "i": instance, "n": node, "x": interactable, "it": item}]).
+bool json_sources(const nlohmann::json& o, const char* key, std::vector<QuestSource>& out) {
+    out.clear();
+    const auto it = o.find(key);
+    if (it == o.end()) return true;
+    if (!it->is_array()) return false;
+    for (const auto& s : *it) {
+        if (!s.is_object()) return false;
+        QuestSource q;
+        q.kind = json_str(s, "k");
+        q.instance = json_int(s, "i");
+        q.node = json_int(s, "n");
+        q.interactable = json_int(s, "x");
+        q.item = json_int(s, "it");
+        out.push_back(std::move(q));
+    }
+    return true;
+}
+
+/// A quest's detail column: what it does when it completes, fails and every tick, and its timeout.
+bool parse_quest_detail(const std::string& text, QuestRow& q) {
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return false;
+    if (!json_actions(j, "ok", q.on_success) || !json_actions(j, "fail", q.on_fail) || !json_actions(j, "tick", q.on_tick)) return false;
+    q.timeout = json_num(j, "to");
+    q.succeed_on_timeout = json_flag(j, "so");
+    return true;
+}
+
+/// An objective's detail column (see internal/content/quests.go).
+bool parse_objective_detail(const std::string& text, QuestObjectiveRow& o) {
+    if (text.empty()) return true;
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return false;
+    o.show_dialogue = json_flag(j, "sd");
+    o.timeout = json_num(j, "to");
+    o.succeed_on_timeout = json_flag(j, "so");
+    if (const auto it = j.find("ar"); it != j.end() && !parse_requirement_object(*it, o.activation)) return false;
+    if (!json_ints(j, "rw", o.rewards)) return false;
+    if (const auto on = j.find("on"); on != j.end()) {
+        if (!on->is_object() || !json_actions(*on, "start", o.on_start) || !json_actions(*on, "tick", o.on_tick) || !json_actions(*on, "ok", o.on_success) ||
+            !json_actions(*on, "fail", o.on_fail)) {
+            return false;
+        }
+    }
+    if (const auto qi = j.find("qi"); qi != j.end()) {
+        if (!qi->is_array()) return false;
+        for (const auto& e : *qi) {
+            if (!e.is_object()) return false;
+            QuestObjectiveRow::ItemReward r;
+            r.table = json_int(e, "t");
+            r.tag_query = json_flag(e, "tq");
+            if (!json_ints(e, "inst", r.instances) || !json_ints(e, "sets", r.sets)) return false;
+            o.item_rewards.push_back(std::move(r));
+        }
+    }
+    const auto d = j.find("d");
+    if (d == j.end()) return true;
+    if (!d->is_object()) return false;
+    if (!json_ints(*d, "sets", o.kill_sets) || !json_ints(*d, "inst", o.kill_instances)) return false;
+    o.advanced = json_flag(*d, "adv");
+    o.elite = static_cast<int>(json_int(*d, "elite"));
+    o.kill_owner = json_flag(*d, "owner");
+    o.use_context = json_flag(*d, "ctx");
+    o.tag_query = json_flag(*d, "tq");
+    if (!json_sources(*d, "src", o.sources)) return false;
+    o.any_source = json_flag(*d, "any");
+    if (!json_ints(*d, "comp", o.components) || !json_ints(*d, "actor", o.actors)) return false;
+    o.collect_type = json_str(*d, "cty");
+    if (!json_ints(*d, "items", o.items) || !json_strings(*d, "tags", o.tags) || !json_strings(*d, "rar", o.rarities)) return false;
+    if (const auto locs = d->find("loc"); locs != d->end()) {
+        if (!locs->is_array()) return false;
+        for (const auto& l : *locs) {
+            if (!l.is_object()) return false;
+            QuestLocation q;
+            q.x = json_num(l, "x");
+            q.y = json_num(l, "y");
+            q.z = json_num(l, "z");
+            q.radius = json_num(l, "r");
+            q.completes = json_flag(l, "done");
+            q.hidden = json_flag(l, "hid");
+            q.display = json_str(l, "dt");
+            q.id = json_int(l, "id");
+            o.locations.push_back(q);
+        }
+    }
+    o.area_map = json_flag(*d, "area");
+    o.crate = json_flag(*d, "crate");
+    if (!json_ints(*d, "ct", o.crate_types) || !json_ints(*d, "ci", o.crate_items)) return false;
+    o.quest_variable = json_str(*d, "qv");
+    o.inc_variable = json_flag(*d, "inc");
+    o.notify = json_str(*d, "nt");
+    o.recipe = json_int(*d, "recipe");
+    if (!json_ints(*d, "ab", o.abilities)) return false;
+    if (const auto rule = d->find("rule"); rule != d->end() && !parse_requirement_object(*rule, o.rule)) return false;
     return true;
 }
 
@@ -3033,7 +3213,7 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
         return std::nullopt;
     };
     {
-        Stmt q(db_, "SELECT guid, name, flavor, locality, level, can_abandon, repeatable, disabled, default_activate, activation, start_actions, rewards FROM quest");
+        Stmt q(db_, "SELECT guid, name, flavor, locality, level, can_abandon, repeatable, disabled, default_activate, activation, start_actions, rewards, detail FROM quest");
         if (!q.ok()) return failed("quest");
         int step;
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
@@ -3051,7 +3231,8 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
             r.repeatable = sqlite3_column_int64(s, 6) != 0;
             r.disabled = sqlite3_column_int64(s, 7) != 0;
             r.default_activate = sqlite3_column_int64(s, 8) != 0;
-            if (!parse_dialogue_requirement(column_text(s, 9), r.activation) || !parse_quest_start_actions(column_text(s, 10), r.start_actions) || !parse_guid_list(column_text(s, 11), r.rewards)) {
+            if (!parse_dialogue_requirement(column_text(s, 9), r.activation) || !parse_quest_start_actions(column_text(s, 10), r.start_actions) || !parse_guid_list(column_text(s, 11), r.rewards) ||
+                !parse_quest_detail(column_text(s, 12), r)) {
                 return unread("quest", r.guid);
             }
             out.by_name[r.name] = r.guid;
@@ -3060,7 +3241,7 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
         if (step != SQLITE_DONE) return failed("quest");
     }
     {
-        Stmt q(db_, "SELECT quest_guid, idx, guid, name, obj_type, completion_count, default_awake, default_hidden, completes_quest, optional FROM quest_objective ORDER BY quest_guid, idx");
+        Stmt q(db_, "SELECT quest_guid, idx, guid, name, obj_type, completion_count, default_awake, default_hidden, completes_quest, optional, detail FROM quest_objective ORDER BY quest_guid, idx");
         if (!q.ok()) return failed("quest_objective");
         int step;
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
@@ -3079,6 +3260,7 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
             o.hidden = sqlite3_column_int64(s, 7) != 0;
             o.completes = sqlite3_column_int64(s, 8) != 0;
             o.optional = sqlite3_column_int64(s, 9) != 0;
+            if (!parse_objective_detail(column_text(s, 10), o)) return unread("quest_objective", o.guid);
             it->second.objectives.push_back(std::move(o));
         }
         if (step != SQLITE_DONE) return failed("quest_objective");
@@ -3107,6 +3289,10 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
             r.quest = sqlite3_column_int64(s, 1);
             r.on_success = sqlite3_column_int64(s, 2);
             if (!parse_guid_list(column_text(s, 3), r.objectives)) return unread("dialogue_accept", r.node);
+            if (r.quest == 0) {   // a Confirmation node (contentc version 27): it offers no quest
+                out.confirms[r.node] = r.on_success;
+                continue;
+            }
             out.accepts[r.node] = std::move(r);
         }
         if (step != SQLITE_DONE) return failed("dialogue_accept");
@@ -3132,6 +3318,39 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
             out.item_quests[sqlite3_column_int64(s, 0)].push_back({sqlite3_column_int64(s, 1), column_text(s, 2)});
         }
         if (step != SQLITE_DONE) return failed("item_quest");
+    }
+    {
+        Stmt q(db_, "SELECT item_guid, crate_guid FROM item_crate");
+        if (!q.ok()) return failed("item_crate");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("item_crate", 0);
+            out.item_crate[sqlite3_column_int64(s, 0)] = sqlite3_column_int64(s, 1);
+        }
+        if (step != SQLITE_DONE) return failed("item_crate");
+    }
+    {
+        Stmt q(db_, "SELECT set_guid, instance_guid FROM quest_kill_set ORDER BY instance_guid, set_guid");
+        if (!q.ok()) return failed("quest_kill_set");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("quest_kill_set", 0);
+            out.kill_sets[sqlite3_column_int64(s, 1)].push_back(sqlite3_column_int64(s, 0));
+        }
+        if (step != SQLITE_DONE) return failed("quest_kill_set");
+    }
+    {
+        Stmt q(db_, "SELECT icd_guid, attune_guid FROM shrine_icd ORDER BY attune_guid, icd_guid");
+        if (!q.ok()) return failed("shrine_icd");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) return unread("shrine_icd", 0);
+            out.shrine_icds[sqlite3_column_int64(s, 1)].push_back(sqlite3_column_int64(s, 0));
+        }
+        if (step != SQLITE_DONE) return failed("shrine_icd");
     }
     return out;
 }

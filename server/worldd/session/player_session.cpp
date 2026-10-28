@@ -4492,6 +4492,7 @@ public:
         return quests ? quests->objective_count(quest, objective, query) : std::nullopt;
     }
     int64_t player_variable(const std::string& name) const override { return quests ? quests->variable(name) : 0; }
+    int64_t quest_variable(int64_t quest, const std::string& name) const override { return quests ? quests->quest_variable(quest, name) : 0; }
 
     int64_t item_count(const std::vector<int64_t>& records, const std::vector<std::string>& /*tags*/) const override {
         if (records.empty()) return 0;   // a count by tag needs the items' tags, which the bag does not hold
@@ -4557,7 +4558,7 @@ std::unique_ptr<dialogue::Facts> PlayerSession::dialogue_facts(const world::Worl
     return f;
 }
 
-bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc, Clock::time_point /*now*/) {
+bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc, Clock::time_point now) {
     const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
     if (!book) return false;   // a content.db without the conversations: the NPC answers as it did
     if (talk_.open()) {
@@ -4581,12 +4582,21 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
             }
         }
     }
+    // quests, slice 2: an active Dialogue objective that names this NPC and a node of its conversation starts the talk at that node
+    if (const quest::QuestBook* qb2 = world_->quests(); qb2 && quests_on_) {
+        if (const int64_t entry = quest::dialogue_entry(quest_log_, *qb2, npc.npc.instance_guid)) offered = entry;
+    }
     if (npc.npc.dialogue_root == 0 && offered == 0) return false;   // nothing on offer and no conversation
     const dialogue::Result r = talk_.begin(*book, ev, npc.id, npc.npc.dialogue_root, offered);
     for (const std::string& s : r.skipped) {
         if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
     }
     if (r.outcome != dialogue::Outcome::Changed) {
+        if (r.silent) {   // quests, slice 2: a placeholder with nothing to show whose entering did its work: the click is answered, no window opens
+            spdlog::log(level_for(dialogue_logged_), "[session] {}: talks to {}: {}", name(), npc.npc.name, r.why);
+            run_talk_actions(conn, r, npc, now);
+            return true;
+        }
         ++dialogue_refused_;
         spdlog::log(level_for(dialogue_logged_), "[session] {}: {} has a conversation that cannot be shown ({}): it answers as before", name(), npc.npc.name, r.why);
         return false;
@@ -4594,6 +4604,7 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
     ++dialogue_opens_;
     const dialogue::Talk::State& s = talk_.state();
     spdlog::log(level_for(dialogue_logged_), "[session] {}: talks to {} (node {}, {} line(s) shown)", name(), npc.npc.name, s.shown_node, s.lines.size());
+    run_talk_actions(conn, r, npc, now);   // quests, slice 2: what entering the greeting's nodes does
     send_dialogue(conn, "greeting");
     return true;
 }
@@ -4604,6 +4615,7 @@ bootstrap::PlayerBootstrap::DialogueView PlayerSession::dialogue_view(bool exhau
     v.exhaust = exhaust;
     if (s.sub) {
         bootstrap::PlayerBootstrap::DialogueView::SubDialogue sd;
+        sd.type = s.sub->type;   // a quest offer (2) or a confirmation (4)
         sd.pending_next = s.sub->pending_next;
         sd.previous_node = s.sub->previous_node;
         sd.node = s.sub->node;
@@ -4640,10 +4652,12 @@ void PlayerSession::send_dialogue(Connection& conn, const char* /*why*/, bool ex
 }
 
 void PlayerSession::end_dialogue(Connection& conn, const char* why) {
-    const dialogue::Result r = talk_.close();
+    const world::WorldActor* npc = talk_.open() && registry_ ? registry_->find(talk_.state().source) : nullptr;
+    const dialogue::Result r = talk_.close(world_ ? world_->dialogue() : nullptr);
     if (r.outcome != dialogue::Outcome::Changed) return;
     ++dialogue_closes_;
     spdlog::log(level_for(dialogue_logged_), "[session] {}: the conversation ends: {}", name(), why);
+    if (npc && !r.actions.empty()) run_talk_actions(conn, r, *npc, quest_last_now_);   // quests, slice 2: leaving the node it showed
     send_dialogue(conn, why, /*exhaust=*/r.offer_answered);
 }
 
@@ -4715,6 +4729,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
         spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the shop {}", name(), response->choice_index, response->node, r.open_vendor);
         open_talk_shop(conn, *npc, r.open_vendor, now);
     }
+    if (r.outcome == dialogue::Outcome::Changed) run_talk_actions(conn, r, *npc, now);   // quests, slice 2: the line's actions, the node left and the nodes entered
     switch (r.outcome) {
         case dialogue::Outcome::Changed:
             ++dialogue_steps_;
@@ -4801,14 +4816,14 @@ void PlayerSession::quest_sync(Connection& conn, const char* why) {
 }
 
 void PlayerSession::start_quest(Connection& conn, const content::QuestRow& def, int64_t source, const char* why, Clock::time_point now) {
-    const double t = pb_.setup().world_time + session_seconds(now);
-    const quest::Started started = quest_log_.start(def, t, source);
-    for (const std::string& s : started.skipped) {
-        if (quest_told_.insert(def.name + "/" + s).second) spdlog::info("[session] {}: a start action of quest {} is not done yet: {} (told once)", name(), def.name, s);
-    }
     ++quests_taken_;
     spdlog::log(level_for(quests_logged_, 100), "[session] {}: took quest {} ({}), {} objective(s) ({})", name(), def.name, def.guid, def.objectives.size(), why);
-    quest_sync(conn, "a quest was taken");
+    // quests, slice 2: the quest engine takes the quest (all of its start actions run and the objectives settle) and the client is told in one update
+    quest_engine(conn, now, "a quest was taken", [&](quest::Engine& eng) { eng.start(def, source); });
+    if (!quest_log_.find(def.guid)) {   // (a world with no conversations' book has no engine: the quest joins the log as it did in the first slice)
+        quest_log_.start(def, quest_clock(now), source);
+        quest_sync(conn, "a quest was taken");
+    }
 }
 
 void PlayerSession::on_quest_offer(Connection& conn, uint8_t response, Clock::time_point now) {
@@ -4828,8 +4843,12 @@ void PlayerSession::on_quest_offer(Connection& conn, uint8_t response, Clock::ti
         if (dialogue_told_.insert(what).second) spdlog::info("[session] {}: a condition of a conversation could not be answered and does not hold: {} (told once)", name(), what);
     });
     const dialogue::Talk::Sub sub = *talk_.sub();
-    bool taken = false;
-    if (response == static_cast<uint8_t>(repl::SubDialogueResponse::Accept)) {
+    bool taken = false, back = false;
+    if (sub.type == 4) {   // quests, slice 2: a confirmation (the path a gatewatcher's welcome asks the player to confirm): a yes goes on, a no goes back to the line's node
+        taken = response == static_cast<uint8_t>(repl::SubDialogueResponse::Accept);
+        back = response == static_cast<uint8_t>(repl::SubDialogueResponse::Decline);
+        spdlog::log(level_for(quests_logged_, 100), "[session] {}: the player {} the confirmation of node {}", name(), taken ? "confirmed" : "declined", sub.node);
+    } else if (response == static_cast<uint8_t>(repl::SubDialogueResponse::Accept)) {
         const content::QuestRow* def = qb->quest(sub.quest);
         if (!quests_on_) {
             ++quests_refused_;
@@ -4844,7 +4863,8 @@ void PlayerSession::on_quest_offer(Connection& conn, uint8_t response, Clock::ti
     } else {
         spdlog::log(level_for(quests_logged_, 100), "[session] {}: the player declined the offer of quest {}", name(), sub.quest);
     }
-    const dialogue::Result r = talk_.finish_sub(*book, ev, taken);
+    const dialogue::Result r = talk_.finish_sub(*book, ev, taken, back);
+    run_talk_actions(conn, r, *npc, now);   // quests, slice 2: what entering the node after the answer does
     if (r.outcome == dialogue::Outcome::Changed) {
         ++dialogue_steps_;
         if (!talk_.open()) ++dialogue_closes_;
@@ -5034,6 +5054,8 @@ void PlayerSession::run_quests(Connection& conn, Clock::time_point now) {
             }
         }
     }
+    // quests, slice 2: the places, the items carried, the rules; the rewards that waited
+    tick_quests(conn, now);
     // the save
     if (quest_log_.changed()) {
         quest_worker_->save(character_id_, quest_log_.to_saved());
@@ -5858,6 +5880,7 @@ void PlayerSession::apply_kill(Connection& conn, const combat::KillReward& k, Cl
                 k.adventuring_xp, k.weapon_xp > 0 ? ", weapon lines +" + std::to_string(k.weapon_xp) + " (not modelled)" : "", leveled ? ", level " + std::to_string(xp.after.level) : "",
                 progress_.xp, progress_.debt, k.loot ? "; there is loot" : "");
     if (xp.changed()) hand_over_progress(leveled ? "a level-up" : "XP earned");
+    quest_kill(conn, k, now);   // quests, slice 2: the Kill objectives
 }
 // -- Cyb x C | O | A --
 
@@ -6897,5 +6920,6 @@ void PlayerSession::on_gm_node_rpc(const repl::ClientRpc& rpc, Clock::time_point
 // storage clerks, step 0: the session's side of the warehouse window (warehouse/player_warehouse.inc is part of this file, so that the build lists stay as they are)
 #include "warehouse/player_warehouse.inc"
 #include "respawn/session_embersprings.inc"
+#include "quest/session_quests2.inc"
 
 }}  // namespace aoc::worldd

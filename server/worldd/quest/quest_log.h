@@ -79,6 +79,7 @@ struct QuestInstance {
     int64_t record = 0;
     Status  status = Status::Active;
     double  start_time = 0;         // when it started, in the world's seconds
+    double  end_time = 0;           // quests, slice 2: when it was completed or failed (not saved: a quest found done at the login is taken out of the log at once)
     int64_t source = 0;             // the NPC (population instance) that gave it, 0: none
     std::vector<ObjectiveState> objectives;
     // what the client was told: the replication ids of its two items (kIndexNone while it was not sent), and whether it has to be sent again
@@ -108,12 +109,23 @@ public:
     const std::map<std::string, int64_t, std::less<>>& variables() const { return variables_; }
     int64_t variable(const std::string& name) const;
     void    set_variable(const std::string& name, int64_t value);
+    /// Quests, slice 2: a named variable of one quest (IncrementQuestVariable / SetQuestVariable).  It is kept with the character's variables under the name "@<quest>.<name>" (so it is saved
+    /// with the log and read back by the next login) and is forgotten when the quest leaves the log.
+    int64_t quest_variable(int64_t quest, const std::string& name) const;
+    void    set_quest_variable(int64_t quest, const std::string& name, int64_t value);
+    /// The log changed in a way that is saved (the engine edited an instance); `touch` also marks the instance for the wire.
+    void    mark_changed() { changed_ = true; }
+    void    touch(QuestInstance& q) {
+        q.wire_dirty = true;
+        changed_ = true;
+    }
 
     /// Whether the character may take `def` now.  `ev` answers the activation rule (and the quest conditions inside it).  `bypass_rules`: a GM start (the rule is not asked).
     Create can_start(const content::QuestRow* def, dialogue::Evaluator& ev, bool bypass_rules) const;
 
-    /// Takes the quest: the instance joins the log (its objectives as the record says, then its start actions).  The caller has asked can_start.
-    Started start(const content::QuestRow& def, double now, int64_t source);
+    /// Takes the quest: the instance joins the log (its objectives as the record says, then its start actions).  The caller has asked can_start.  `run_actions` false: the instance only (the
+    /// quest engine runs the start actions itself, all of them).
+    Started start(const content::QuestRow& def, double now, int64_t source, bool run_actions = true);
 
     /// Takes the quest out of the log without counting it as finished (an abandon, a fail).  False when it is not in the log.
     bool remove(int64_t record);
@@ -125,6 +137,15 @@ public:
     /// The dialogue conditions' view of the log (dialogue::Facts).
     std::optional<int64_t> quest_count(int64_t quest, const std::string& query) const;
     std::optional<int64_t> objective_count(int64_t quest, int64_t objective, const std::string& query) const;
+
+    /// Whether the client has to be told of a change: an instance not sent yet or changed since, or one that left the log.
+    bool wire_pending() const {
+        if (!removed_.empty()) return true;
+        for (const QuestInstance& q : instances_) {
+            if (q.wire_dirty || q.cache_id < 0 || q.vars_id < 0) return true;
+        }
+        return false;
+    }
 
     /// The two items of a quest removed from the log that the client has not been told of yet (a removal is a deletion of those ids).
     struct Removed { int32_t cache_id = -1, vars_id = -1; };
