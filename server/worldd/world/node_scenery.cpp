@@ -38,6 +38,13 @@ size_t snapshot_bits(const protocol::schema::ClassSchema& schema, const repl::Fa
     return repl::write_node_layout_snapshot(schema, *state, w);
 }
 
+/// How many items are a building under construction (a plot item in EBuildingState 1): the sites a node below Village shows.
+size_t sites_of(const std::vector<repl::NodeLayoutItem>& items, int64_t node) {
+    size_t n = 0;
+    for (const auto& it : items) n += (it.owner_guid != node && it.owner_secondary == 1) ? 1 : 0;
+    return n;
+}
+
 }  // namespace
 
 NodeScenery::NodeScenery(ActorRegistry& registry, const CityNodes& nodes, const NodeWire& wire, const NodeLayoutData& data, Minter mint, Config config)
@@ -149,7 +156,7 @@ bool NodeScenery::make_actor(Entry& e, const CityNodeInfo& info, const Built& b)
     e.level = b.header.level;
     e.plot_version = b.header.plot_version;
     e.items = b.items.size();
-    spdlog::info("[scenery] {} (node {}): level {}, {} items ({} layout + {} plots), PlotChangeVersion {}, {} payload bits; stands at ({:.0f}, {:.0f}, {:.0f}) facing {:.1f} ({}); awake within {:.0f} m",
+    spdlog::info("[scenery] {} (node {}): level {}, {} items ({} layout + {} plots, {} under construction), PlotChangeVersion {}, {} payload bits; stands at ({:.0f}, {:.0f}, {:.0f}) facing {:.1f} ({}); awake within {:.0f} m",
                  info.display_name, info.guid, b.header.level, b.items.size(), [&] {
                      size_t n = 0;
                      for (const auto& it : b.items) n += it.owner_guid == info.guid ? 1 : 0;
@@ -160,7 +167,7 @@ bool NodeScenery::make_actor(Entry& e, const CityNodeInfo& info, const Built& b)
                      for (const auto& it : b.items) n += it.owner_guid != info.guid ? 1 : 0;
                      return n;
                  }(),
-                 b.header.plot_version, bits, e.x, e.y, e.z, e.yaw, e.captured_origin ? "retail's open location" : "the node record's location", config_.awake_cm / 100.0);
+                 sites_of(b.items, info.guid), b.header.plot_version, bits, e.x, e.y, e.z, e.yaw, e.captured_origin ? "retail's open location" : "the node record's location", config_.awake_cm / 100.0);
     return true;
 }
 // ~ C | Y | B :: C-O-A ~
@@ -203,8 +210,8 @@ bool NodeScenery::refresh(Entry& e, const CityNodeInfo& info, int level) {
     e.items = b.items.size();
     e.plot_version = pv;
     ++rebuilds_;
-    spdlog::info("[scenery] {} (node {}): level {} -> {}: a new full payload of {} items (was {}), PlotChangeVersion {}, {} bits", info.display_name, info.guid, old_level, level,
-                 b.items.size(), old_items, pv, payload_bits(info.guid));
+    spdlog::info("[scenery] {} (node {}): level {} -> {}: a new full payload of {} items (was {}; {} under construction), PlotChangeVersion {}, {} bits", info.display_name, info.guid, old_level,
+                 level, b.items.size(), old_items, sites_of(b.items, info.guid), pv, payload_bits(info.guid));
     return true;
 }
 

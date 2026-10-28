@@ -28,6 +28,8 @@ This document lists the known issues of the current SandalCore main in one place
 | **Towns** | The floor of the five towns is solid, but their walls, stairs, upper floors and towers have no collision yet, town NPCs stand still, some guards and townspeople stand in the wrong place or have 0 HP, and trees inside towns can't be cut. Nearby town NPCs can hit you with no visible attack (no animation or projectile). A long teleport into a town falls about 140 m before the safety net puts the player back, 4.5 to 6 seconds later. | Walk into a town from outside, or teleport to a point close to its streets. | Planned: the towns' structures and a navmesh for their streets (the next City Nodes work). |
 | **Combat / Falling** | A fall does no damage, however far. | None. | Planned: fall damage. |
 | **Abilities** | Chilling Laminate shows a placeholder blue circle on the ground below the player. | None. | Investigating which visual effect is sent for it. |
+| **Summoner / Pets** | Summoner pets are not implemented yet: summoning does not bring out a pet. | None. | Planned: Summoner pets. |
+| **Ranger / Salvo** | Salvo gets stuck in its animation and does no damage. | None. | Open. |
 | **Gathering / Speed** | Gathering takes longer than on retail. | None. | Investigating how the gathering speed ratings (skills, talents, tools and gear) apply. |
 | **Gathering / Full bag** | When the resource bag is full, the extra items drop in an ash pile, the look used for death piles. | Make room in the resource bag before gathering. | Open: dropped items need a look of their own. |
 | **Gathering / Restart** | Cut trees and hunted animals reset when the server restarts. | None. | Open: their state is not saved between runs. |

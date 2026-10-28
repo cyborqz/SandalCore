@@ -23,7 +23,8 @@
 //  The NodeXP projects.  The design data starts all six UnderConstruction (1).  The captures' live nodes at level 3 and 4 show the five small and medium ones Operational (2),
 //  which is proven to render, and retail's summaries of Joeva, Winstead and Halcyon show the LARGE one still under construction (a Town's scenery filters its scaffold out;
 //  KalTorhum alone has it built).  So this world starts every pre-built plot Operational except the Large project, which keeps the data's state (PlotPolicy::PreBuiltOperational,
-//  the same states the node summary lists: NodeWire::plot_rows).  A test can also ask for the data's own starting state for all, or give the state of each plot.
+//  the same states the node summary lists: NodeWire::plot_rows).  A node below Village (Crossroads, Encampment) shows its NodeXP projects as building sites, the state the data
+//  starts them in.  A test can also ask for the data's own starting state for all, or give the state of each plot.
 // ============================================================================
 #pragma once
 

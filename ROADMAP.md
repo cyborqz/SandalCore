@@ -43,6 +43,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Quests: objectives, hand-in and rewards; the Destiny window, group quests, events and boards.
 - Reactions: the extra effects of combo finishers (class resources, weapon-tree finisher procs, the Bard's melody).
 - Weapon line experience and the weapon trees.
+- Summoner pets.
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.

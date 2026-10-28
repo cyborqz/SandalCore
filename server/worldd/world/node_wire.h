@@ -16,7 +16,8 @@
 //  record that is no node).  The retail capture line 47, evidence.md section 4.1.
 //
 //  The plots.  A plot of the layout at the node's level is listed (a Town has 31); the pre-built plots (the civic core and, by the spike's decision, the NodeXP
-//  construction projects) are Operational (2) with their building, the mayor's service plots are Empty (0) with the plot's empty building.  The plot logic is the
+//  construction projects) are Operational (2) with their building (below Village the NodeXP projects are the building sites the data starts them as: UnderConstruction, 1),
+//  the mayor's service plots are Empty (0) with the plot's empty building.  The plot logic is the
 //  one the replicator's payload uses (spike_replicator/derive_payload.py), so the summary and the scenery agree: plot_rows() is the shared source.
 //
 //  What this does NOT know: mayors, citizens, a war, a relic, a skill point (nobody has one until the milestones that make them); the fields are the defaults.

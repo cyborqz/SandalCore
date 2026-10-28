@@ -125,7 +125,10 @@ std::unique_ptr<NodeWire> NodeWire::load(const std::string& path, const CityNode
             const bool large_project = plot_name && std::string(plot_name).find("ConstructionProject_Large") != std::string::npos;
             r.name = plot_name ? plot_name : "";
             r.starting_state = static_cast<uint8_t>(sqlite3_column_int(st.s, 17));
-            r.state = !r.pre_construct ? 0 : large_project ? r.starting_state : 2;
+            // Below Village (Crossroads and Encampment) nobody has built the small projects yet: they are the building sites the data starts them as.  From Village up this world
+            // starts them finished.
+            const bool building_site_level = level < node_constants::kMinimumOperationalNodeLevel;
+            r.state = !r.pre_construct ? 0 : (large_project || building_site_level) ? r.starting_state : 2;
             r.qx = sqlite3_column_double(st.s, 7);
             r.qy = sqlite3_column_double(st.s, 8);
             r.qz = sqlite3_column_double(st.s, 9);
