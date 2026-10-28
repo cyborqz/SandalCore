@@ -358,6 +358,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->init_quests(world, character);   // quests, slice 1: the saved log becomes the quest component's arrays, sent with the join
     if (!p->completed_ftues_.empty()) spdlog::info("[session] {}: {} finished tutorial(s) on the character's list, sent with the join", p->pb_.setup().name, p->completed_ftues_.size());
     p->wh_storage_.load(character.warehouse_items);   // storage clerks, step 0: what the character keeps in the warehouse (the base chunk gets its component below, the tabs at the first open of their town)
+    p->init_attunements(character);   // Embersprings: the places the character discovered, its home and the last use of it, sent with the join
     p->taught_ = character.known_recipes;   // crafting, step 3: the recipes a game master taught the character (the others are known to the client by their own flag)
     if (!p->taught_.empty() && !p->pb_.set_known_recipes(p->taught_)) {
         spdlog::warn("[session] {}: the {} recipes the character was taught do not fit the player's state: the client is not told of them", p->pb_.setup().name, p->taught_.size());
@@ -649,6 +650,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_gather(conn, now);
     run_foliage(conn, now);
     run_floor_net(conn, now);
+    run_embersprings(conn, now);   // Embersprings: a shrine whose radius holds the player is discovered
     run_dialogue(conn, now);
     run_quests(conn, now);
     run_warehouse(conn, now);
@@ -864,6 +866,10 @@ void PlayerSession::hand_over_progress(const char* why) {
             p.action_bar.push_back(std::move(a));
         }
     }
+    p.replace_attunements = true;   // Embersprings: the discovered places, the home and its last use go whole with every hand-over
+    for (const int n : attunements_.discovered) p.attunements.push_back(n);
+    p.home_attunement = attunements_.home;
+    p.home_last_used_ms = attunements_.home_last_used_ms;
     p.replace_completed_ftues = true;   // missing systems, step 0: the finished tutorials go whole with every hand-over (what the session holds is what the character has)
     p.completed_ftues = completed_ftues_;
     sink_->save_progress(character_id_, std::move(p));
@@ -1171,6 +1177,8 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerInteractWithInteractableComponent") return on_interact(conn, rpc, now);
         if (name_of_rpc == "ServerInterruptChannel") return on_interrupt_channel(conn, now);
         if (name_of_rpc == "RequestServerRespawnChoices") return on_respawn_choices_request(conn, rpc, now);
+        if (name_of_rpc == "RequestServerSetHomeAttunement") return on_home_attunement(conn, rpc, now);
+        if (name_of_rpc == "Respawn") return on_plain_respawn(conn, now);
         if (name_of_rpc == "SendServerRespawnChoice") return on_respawn_choice(conn, rpc, now);
         if (name_of_rpc == "ServerSetUseRangedWeapon") return on_set_ranged(conn, rpc, now);
         if (name_of_rpc == "ServerSetActiveTarget") return on_set_active_target(conn, rpc, now);
@@ -3242,6 +3250,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (a->kind == world::ActorKind::Mount) return on_mount_interact(conn, *a, now);   // getting on
     if (a->kind == world::ActorKind::Gatherable) return on_gather_interact(conn, *a, now);   // Gathering stage 2: a resource node
     if (a->kind == world::ActorKind::Station) return on_station_interact(conn, *a, now);     // crafting, step 0: a crafting or processing station
+    if (a->kind == world::ActorKind::Shrine) return on_shrine_interact(conn, *a, now);       // Embersprings: the prompt to make it the home
     if (view_->state_of(a->id) != world::ClientState::Awake) return ignore("the client does not have that actor open");
     const GoodPosition at = checker_.good();
     const double distance = std::hypot(a->x - at.x, a->y - at.y);
@@ -5814,54 +5823,6 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
 }
 // -- C | O | A & Cyb --
 
-void PlayerSession::on_respawn_choices_request(Connection& conn, const repl::ClientRpc&, Clock::time_point now) {
-    if (!dead_) return;
-    if (!within_budget(loot_budget_, "RequestServerRespawnChoices", now) || !room_for(1)) return;
-    const int64_t record = kRespawnRecord;
-    spdlog::log(level_for(death_logged_), "[session] {}: asks where it may come back: the nearest respawn point", name());
-    queue("SendClientRespawnChoices", [record](bootstrap::PlayerBootstrap& pb) {
-        const int64_t list[1] = {record};
-        return pb.respawn_choices(std::span<const int64_t>(list, 1), record);
-    }, conn, /*must_build=*/true);
-}
-
-void PlayerSession::on_respawn_choice(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
-    if (!dead_) return;
-    if (!within_budget(loot_budget_, "SendServerRespawnChoice", now) || !room_for(4)) return;
-    const auto it = rpc.call.params.values.find(1);
-    const int64_t* chosen = it == rpc.call.params.values.end() ? nullptr : it->second.get_if<int64_t>();
-    if (!chosen || *chosen != kRespawnRecord) {
-        // a record the session did not offer: the choices again, marked invalid
-        queue("SendClientRespawnChoices", [](bootstrap::PlayerBootstrap& pb) {
-            const int64_t list[1] = {kRespawnRecord};
-            return pb.respawn_choices(std::span<const int64_t>(list, 1), kRespawnRecord, /*previous_choice_invalid=*/true);
-        }, conn, /*must_build=*/true);
-        return;
-    }
-    const PlayerWorld::RespawnSpot spot = npc_world_ ? npc_world_->respawn_spot(death_x_, death_y_) : PlayerWorld::RespawnSpot{death_x_, death_y_, death_z_, 0, false, "where it fell"};
-    // alive again: full Health and Mana, the pawn not dead, the character at the spot (the move checker moves with it, the client is snapped)
-    dead_ = false;
-    ++respawns_;
-    if (pipeline_) pipeline_->set_dead(false);
-    pb_.set_dead(false);
-    const stats::StatValue* hp = stats_ ? stats_->find(content::kGuidMaxHealth) : nullptr;
-    const stats::StatValue* mp = stats_ ? stats_->find(content::kGuidMaxMana) : nullptr;
-    if (hp) set_current_value(content::kGuidHealth, hp->value);
-    if (mp) set_current_value(content::kGuidMana, mp->value);
-    checker_.teleport(spot.x, spot.y, spot.z, spot.yaw);
-    const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
-    // The death's ClientRestart restarted the client's pawn, and with it its movement clock (the TimeStamp of every move starts again near 0): the checker's last good TimeStamp is
-    // from the old clock, and every move below it would be dropped silently as TimeStampNotRising for as long as the old clock had run (the user's death of 2026-10-10: 66 s frozen
-    // at the shrine, then snapped back).  The respawn forgets it; the correction below still names the old stamp.
-    checker_.restart_clock();
-    const uint8_t mode = checker_.good().movement_mode == 0 ? repl::kMoveWalking : checker_.good().movement_mode;
-    queue("pawn state (respawn)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("respawn"); }, conn, /*must_build=*/true);
-    queue("respawn teleport", [ts, spot, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{spot.x, spot.y, spot.z}, repl::Vec3d{}, mode); }, conn,
-          /*must_build=*/true);
-    spdlog::log(level_for(death_logged_), "[session] {}: comes back at {} ({:.0f}, {:.0f}, {:.0f}) with full Health and Mana", name(), spot.name, spot.x, spot.y, spot.z);
-    (void)now;
-}
-
 void PlayerSession::apply_kill(Connection& conn, const combat::KillReward& k, Clock::time_point now) {
     ++kills_rewarded_;
     const leveling::LevelCurve* curve = world_ ? world_->level_curve() : nullptr;
@@ -6935,5 +6896,6 @@ void PlayerSession::on_gm_node_rpc(const repl::ClientRpc& rpc, Clock::time_point
 
 // storage clerks, step 0: the session's side of the warehouse window (warehouse/player_warehouse.inc is part of this file, so that the build lists stay as they are)
 #include "warehouse/player_warehouse.inc"
+#include "respawn/session_embersprings.inc"
 
 }}  // namespace aoc::worldd

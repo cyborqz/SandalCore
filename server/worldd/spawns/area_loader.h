@@ -20,6 +20,7 @@
 #pragma once
 
 #include "content/content_db.h"
+#include "respawn/embersprings.h"
 #include "spawns/area.h"
 #include "spawns/captured_spawns.h"
 #include "spawns/population.h"
@@ -80,10 +81,13 @@ struct AreaReport {
     std::vector<SpawnRecipe>                   recipes;
     /// Plan E1, stage 3, part 2: the respawn shrines within the area (nearest the centre first): where a dead player may come back.
     std::vector<RespawnPoint>                  respawn_points;
+    /// Embersprings: the respawn points that became Emberspring actors (the book the session asks) and what the making did with the others.
+    respawn::ShrineBook                        shrines;
+    size_t                                     shrines_made = 0, shrines_no_record = 0, shrines_refused = 0;
     /// Nodes 1, stage 3b: the population chain the area was selected from (the node populations select from it too, and an NPC's life reads its instance's and route's rows).
     std::shared_ptr<const content::PopulationData> data;
     std::vector<std::string>      notes;
-    size_t total() const { return data_npcs + captured_npcs + gatherables + gm_vendors; }
+    size_t total() const { return data_npcs + captured_npcs + gatherables + gm_vendors + shrines_made; }
     /// A few lines for the log.
     std::string describe() const;
 };

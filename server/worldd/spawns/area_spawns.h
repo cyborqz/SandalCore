@@ -1746,6 +1746,22 @@ inline constexpr Payload kPayloads[] = {
      "f9dcfcac1c5aa5c60000000e102213b45af1eff9dcf8ac8e59a5c600000008142213b45af1eff9dcf4ace256a5c60000"
      "000c001000001aaaa7c953a81c947b5bfa000000f1ac46a3e2c40000600000e0e772790ad50000c0cfe5f2142a000600"
      "007e2e97a7500d0000fc5c2e4fa10200095c08fe4a5bf2142a00"},
+    {419,
+     "0400000000083880758b41a46004902300c10501222044c98e497552015ca20d60c9c542b375913a8ed392210088a3a2"
+     "3e4fa10200"},
+    {4356,
+     "0c080004080000a0081a000000000000000000000000000000000048000000701000300000306ca199a7500178100008"
+     "84424884460000e4b0c73302000000000000000000800000000002000000000000000000008005000000904f2d7b85a0"
+     "a332f6b93bc2bf5431ad000000807187b42ad22369597e959fd9cd44cabd00000080a04757e86fa12aaa6a3eb449e61d"
+     "ebba00000080b3072f02c0233cfed4a51ac6c997a69900000000c6b55a0124a4255944508edb3dbf5782000000004d2e"
+     "8a6fdea46e85377feed122c215b20000000041952d9dbca21e993aa1d4d05e7a29c500000000e5a31b33362687619ac6"
+     "bdd2a07479c10000008042950e0828a6b175a628fbd7265b6c8d00000080a4407002f5227f87cd215fc7c26cdbc30000"
+     "00801914179b1b249edd623e43415ed65598000000001de4684600000000000000000000100000004000000000000000"
+     "00000000a000000000f2a965af107454c63e7747f8972aa61500000030ee9056457a242dcbaff233bb9948b917000000"
+     "10f4e80afd2d544555cd8736c9bc635d1700000070f6e045007884c79fba54c338f9d23413000000c0b8562b8084b424"
+     "8b08ca71bbe7f74a10000000a0c945f1cd9bd4adf0e6cf3d5a44b8421600000050a8d20101c534b6ce1465ffda648bad"
+     "1100000020a8b2a59357d4235327941ada4b2fa5180000009014084ea05ee4efb039e4eb58986d7b180000003083e262"
+     "7383c4b35bcc6728c8cbba0a1300000000"},
     {841,
      "0400000000083a003711b3647d0dcc462e7b025c17048878d8af190000000000cc000000c80a3f8f8190847ecd000000"
      "0000600600004056f8798cc57ecd0000000000600600004056f879cc850e0007000000000000000000000000000000c0"
@@ -3783,6 +3799,8 @@ inline constexpr Link kLinks[] = {
     {15101510114688925273ull, 0u, 0u, 5, "/Game/DesignAssets/Population/NPC/PCRaces/Quest_NPC_Master", 0u},
     {10178950719879624273ull, 0u, 0u, 5, "Default__1000_SoshaTerim_C", 47039926u},
     {3947754599296130773ull, 0u, 0u, 5, "/Game/DesignAssets/Quests/SidequestAssets/1000_CorruptedMemories/1000_SoshaTerim", 0u},
+    {11777231703737483085ull, 0u, 0u, 5, "Default__AttuneableCharacterRespawnBP_C", 3375144724u},
+    {2697406190279125539ull, 0u, 0u, 5, "/Game/GameBlueprints/AttuneableCharacterRespawnBP", 0u},
     {14116795134121253901ull, 0u, 0u, 5, "Default__GatherableActor", 417180987u},
     {158953490572197689ull, 0u, 0u, 4, "", 0u},
     {14116795134121253901ull, 0u, 0u, 5, "Default__GatherableActor", 417180987u},
@@ -3895,6 +3913,7 @@ inline constexpr Chain kChains[] = {
     {202, 2},
     {204, 2},
     {206, 2},
+    {208, 2},
 };
 
 inline constexpr Block kBlocks[] = {
@@ -4583,92 +4602,92 @@ inline constexpr Block kBlocks[] = {
     {"UAoCStatsComponent", 1, false, 482, "StatsComponent", 4031330514u, 0},
     {"UInteractableComponent", 2, true, 483, "", 0u, 16},
     {"UNPCAppearanceComponent", 2, true, 484, "", 0u, 61},
-    {"ANPCCharacter", 0, true, 485, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 486, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 487, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 488, "BaseCharacterInfo", 3428784297u, 0},
+    {"AAoCAttunablePlayerSpawner", 0, true, 485, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 486, "InteractableComponent", 2170799233u, 0},
+    {"ANPCCharacter", 0, true, 487, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 488, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 489, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 490, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 489, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 490, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 491, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 492, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 493, "BaseCharacterInfo", 3428784297u, 0},
+    {"UAoCStatsComponent", 1, false, 491, "StatsComponent", 4031330514u, 0},
+    {"ANPCCharacter", 0, true, 492, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 493, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 494, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 495, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 113, "AbilityComponent", 2657332828u, 0},
     {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 494, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 495, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 487, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 496, "BaseCharacterInfo", 3428784297u, 0},
+    {"ANPCCharacter", 0, true, 496, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 497, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 489, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 498, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 489, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 497, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 498, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 499, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 500, "BaseCharacterInfo", 3428784297u, 0},
+    {"UAoCStatsComponent", 1, false, 491, "StatsComponent", 4031330514u, 0},
+    {"ANPCCharacter", 0, true, 499, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 500, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 501, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 502, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 501, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 502, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 503, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 499, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 504, "BaseCharacterInfo", 3428784297u, 0},
+    {"UAoCStatsComponent", 1, false, 503, "StatsComponent", 4031330514u, 0},
+    {"ANPCCharacter", 0, true, 504, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 505, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 501, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 506, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 489, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 505, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 506, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 487, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 507, "BaseCharacterInfo", 3428784297u, 0},
-    {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
-    {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 508, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 509, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 487, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 510, "BaseCharacterInfo", 3428784297u, 0},
+    {"UAoCStatsComponent", 1, false, 491, "StatsComponent", 4031330514u, 0},
+    {"ANPCCharacter", 0, true, 507, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 508, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 489, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 509, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
     {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 511, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 512, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 487, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 513, "BaseCharacterInfo", 3428784297u, 0},
+    {"ANPCCharacter", 0, true, 510, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 511, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 489, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 512, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
     {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 514, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 515, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 487, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 516, "BaseCharacterInfo", 3428784297u, 0},
+    {"ANPCCharacter", 0, true, 513, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 514, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 489, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 515, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
     {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 517, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 518, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 519, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 520, "BaseCharacterInfo", 3428784297u, 0},
-    {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
-    {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 489, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 521, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 522, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 523, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 524, "BaseCharacterInfo", 3428784297u, 0},
+    {"ANPCCharacter", 0, true, 516, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 517, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 489, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 518, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
     {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
-    {"ANPCCharacter", 0, true, 525, "", 0u, 0},
-    {"UAlignmentComponent", 1, true, 526, "AlignmentComponent", 1069384348u, 0},
-    {"UNPCSecondaryInfo", 1, true, 519, "InteractInfo", 3806965137u, 0},
-    {"UNPCInfo", 1, true, 527, "BaseCharacterInfo", 3428784297u, 0},
+    {"ANPCCharacter", 0, true, 519, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 520, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 521, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 522, "BaseCharacterInfo", 3428784297u, 0},
     {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
     {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
-    {"UAoCStatsComponent", 1, false, 528, "StatsComponent", 4031330514u, 0},
-    {"AGatherableActor", 0, true, 529, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UAoCStatsComponent", 1, false, 491, "StatsComponent", 4031330514u, 0},
+    {"ANPCCharacter", 0, true, 523, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 524, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 525, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 526, "BaseCharacterInfo", 3428784297u, 0},
+    {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
+    {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
+    {"UAoCStatsComponent", 1, false, 3, "StatsComponent", 4031330514u, 0},
+    {"ANPCCharacter", 0, true, 527, "", 0u, 0},
+    {"UAlignmentComponent", 1, true, 528, "AlignmentComponent", 1069384348u, 0},
+    {"UNPCSecondaryInfo", 1, true, 521, "InteractInfo", 3806965137u, 0},
+    {"UNPCInfo", 1, true, 529, "BaseCharacterInfo", 3428784297u, 0},
+    {"UNPCCombatInfo", 1, true, 100, "CombatInfo", 954698817u, 0},
+    {"UAoCAbilityComponent", 1, true, 164, "AbilityComponent", 2657332828u, 0},
+    {"UAoCStatsComponent", 1, false, 530, "StatsComponent", 4031330514u, 0},
     {"AGatherableActor", 0, true, 531, "", 0u, 0},
     {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 533, "", 0u, 0},
@@ -4680,29 +4699,29 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 539, "", 0u, 0},
     {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 541, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 542, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 543, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 542, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 543, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 544, "", 0u, 0},
     {"UInteractableComponent", 1, true, 545, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 546, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 543, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 547, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 547, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 548, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 545, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 549, "", 0u, 0},
     {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 551, "", 0u, 0},
     {"UInteractableComponent", 1, true, 552, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 553, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 554, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 555, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 554, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 555, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 556, "", 0u, 0},
     {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 558, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 559, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 560, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 560, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 561, "", 0u, 0},
     {"UInteractableComponent", 1, true, 562, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 563, "", 0u, 0},
@@ -4718,67 +4737,67 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 573, "", 0u, 0},
     {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 575, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 570, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 576, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 570, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 576, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 577, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 578, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 578, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 579, "", 0u, 0},
     {"UInteractableComponent", 1, true, 580, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 581, "", 0u, 0},
     {"UInteractableComponent", 1, true, 582, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 583, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 584, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 585, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 584, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 585, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 586, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 587, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 588, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 587, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 588, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 589, "", 0u, 0},
     {"UInteractableComponent", 1, true, 590, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 591, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 592, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 593, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 592, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 593, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 542, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 594, "", 0u, 0},
     {"UInteractableComponent", 1, true, 595, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 596, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 562, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 597, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 598, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 597, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 598, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 599, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 600, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 600, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 601, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 602, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 603, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 603, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 604, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 605, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 605, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 606, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 607, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 607, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 608, "", 0u, 0},
     {"UInteractableComponent", 1, true, 609, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 610, "", 0u, 0},
     {"UInteractableComponent", 1, true, 611, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 612, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 598, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 613, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 598, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 613, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 614, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 615, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 600, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 615, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 600, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 616, "", 0u, 0},
     {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 618, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 619, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 555, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 620, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 621, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 621, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 622, "", 0u, 0},
     {"UInteractableComponent", 1, true, 623, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 624, "", 0u, 0},
@@ -4794,25 +4813,25 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 634, "", 0u, 0},
     {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 636, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 555, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 637, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 555, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 637, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 638, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 639, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 639, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 640, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 641, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 642, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 641, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 642, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 643, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 644, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 645, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 644, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 645, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 576, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 646, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 647, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 647, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 648, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 649, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 649, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 650, "", 0u, 0},
     {"UInteractableComponent", 1, true, 651, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 652, "", 0u, 0},
@@ -4820,85 +4839,85 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 654, "", 0u, 0},
     {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 656, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 657, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 658, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 659, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 659, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 660, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 661, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 661, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 662, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 663, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 663, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 664, "", 0u, 0},
     {"UInteractableComponent", 1, true, 665, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 666, "", 0u, 0},
     {"UInteractableComponent", 1, true, 667, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 668, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 669, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 670, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 669, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 670, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 671, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 672, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 673, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 672, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 673, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 674, "", 0u, 0},
     {"UInteractableComponent", 1, true, 675, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 676, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 677, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 678, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 677, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 678, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 679, "", 0u, 0},
     {"UInteractableComponent", 1, true, 680, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 681, "", 0u, 0},
     {"UInteractableComponent", 1, true, 682, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 683, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 684, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 685, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 684, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 685, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 542, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 686, "", 0u, 0},
     {"UInteractableComponent", 1, true, 687, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 688, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 689, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 690, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 689, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 690, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 691, "", 0u, 0},
     {"UInteractableComponent", 1, true, 692, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 693, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 678, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 694, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 695, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 694, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 695, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 680, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 696, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 697, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 698, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 697, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 698, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 699, "", 0u, 0},
     {"UInteractableComponent", 1, true, 700, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 701, "", 0u, 0},
     {"UInteractableComponent", 1, true, 702, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 703, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 704, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 705, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 704, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 705, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 706, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 707, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 707, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 708, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 667, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 566, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 709, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 710, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 710, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 669, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 711, "", 0u, 0},
     {"UInteractableComponent", 1, true, 712, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 713, "", 0u, 0},
     {"UInteractableComponent", 1, true, 714, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 715, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 716, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 716, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 717, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 718, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 718, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 719, "", 0u, 0},
     {"UInteractableComponent", 1, true, 720, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 721, "", 0u, 0},
@@ -4906,9 +4925,9 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 723, "", 0u, 0},
     {"UInteractableComponent", 1, true, 724, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 725, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 726, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 727, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 726, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 727, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 728, "", 0u, 0},
     {"UInteractableComponent", 1, true, 729, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 730, "", 0u, 0},
@@ -4922,23 +4941,23 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 738, "", 0u, 0},
     {"UInteractableComponent", 1, true, 739, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 740, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 741, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 742, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 741, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 742, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 566, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 743, "", 0u, 0},
     {"UInteractableComponent", 1, true, 744, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 745, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 746, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 747, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 746, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 747, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 748, "", 0u, 0},
     {"UInteractableComponent", 1, true, 749, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 750, "", 0u, 0},
     {"UInteractableComponent", 1, true, 751, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 752, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 753, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 754, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 753, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 754, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 755, "", 0u, 0},
     {"UInteractableComponent", 1, true, 756, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 757, "", 0u, 0},
@@ -4948,33 +4967,33 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 761, "", 0u, 0},
     {"UInteractableComponent", 1, true, 762, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 763, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 764, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 765, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 764, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 765, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 766, "", 0u, 0},
     {"UInteractableComponent", 1, true, 767, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 768, "", 0u, 0},
     {"UInteractableComponent", 1, true, 769, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 770, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 651, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 771, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 771, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 772, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 773, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 653, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 773, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 774, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 749, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 775, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 775, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 776, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 777, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 751, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 777, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 778, "", 0u, 0},
     {"UInteractableComponent", 1, true, 779, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 780, "", 0u, 0},
     {"UInteractableComponent", 1, true, 781, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 782, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 783, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 784, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 783, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 784, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 785, "", 0u, 0},
     {"UInteractableComponent", 1, true, 786, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 787, "", 0u, 0},
@@ -4990,23 +5009,23 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 797, "", 0u, 0},
     {"UInteractableComponent", 1, true, 798, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 799, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 800, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 801, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 800, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 801, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 802, "", 0u, 0},
     {"UInteractableComponent", 1, true, 803, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 804, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 805, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 806, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 805, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 806, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 807, "", 0u, 0},
     {"UInteractableComponent", 1, true, 808, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 809, "", 0u, 0},
     {"UInteractableComponent", 1, true, 810, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 811, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 812, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 813, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 812, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 813, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 814, "", 0u, 0},
     {"UInteractableComponent", 1, true, 815, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 816, "", 0u, 0},
@@ -5018,71 +5037,71 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 822, "", 0u, 0},
     {"UInteractableComponent", 1, true, 823, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 824, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 825, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 825, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 826, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 827, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 827, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 637, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 828, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 829, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 829, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 830, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 651, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 831, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 637, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 832, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 833, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 653, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 833, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 637, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 834, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 835, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 835, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 836, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 837, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 566, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 837, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 637, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 838, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 839, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 840, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 839, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 840, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 841, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 842, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 843, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 842, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 843, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 844, "", 0u, 0},
     {"UInteractableComponent", 1, true, 845, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 846, "", 0u, 0},
     {"UInteractableComponent", 1, true, 847, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 848, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 796, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 849, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 850, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 849, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 850, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 798, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 851, "", 0u, 0},
     {"UInteractableComponent", 1, true, 852, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 853, "", 0u, 0},
     {"UInteractableComponent", 1, true, 854, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 855, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 854, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 856, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 850, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 856, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 857, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 858, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 856, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 858, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 852, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 859, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 860, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 861, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 860, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 861, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 862, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 863, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 864, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 863, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 864, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 865, "", 0u, 0},
     {"UInteractableComponent", 1, true, 866, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 867, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 607, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 868, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 868, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 869, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 796, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 609, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 870, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 871, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 871, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 798, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 872, "", 0u, 0},
     {"UInteractableComponent", 1, true, 873, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 874, "", 0u, 0},
@@ -5090,297 +5109,297 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 876, "", 0u, 0},
     {"UInteractableComponent", 1, true, 877, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 878, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 879, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 880, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 879, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 880, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 881, "", 0u, 0},
     {"UInteractableComponent", 1, true, 882, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 883, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 884, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 884, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 885, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 886, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 886, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 887, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 603, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 888, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 888, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 889, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 665, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 605, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 890, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 685, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 566, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 891, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 892, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 667, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 892, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 687, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 893, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 894, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 894, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 895, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 896, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 897, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 603, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 898, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 899, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 605, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 900, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 901, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 902, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 903, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 904, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 905, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 906, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 907, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 908, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 908, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 909, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 910, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 910, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 911, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 912, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 913, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 914, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 915, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 916, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 917, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 918, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 918, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 919, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 920, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 920, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 921, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 922, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 923, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 924, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 925, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 926, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 927, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 928, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 929, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 929, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 566, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 930, "", 0u, 0},
     {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 932, "", 0u, 0},
     {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 934, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 935, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 935, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 936, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 937, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 938, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 939, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 939, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 940, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 941, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 941, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 942, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 943, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 944, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 945, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 603, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 946, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 947, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 605, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 948, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 949, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 950, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 951, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 952, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 953, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 954, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 955, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 956, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 957, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 958, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 959, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 960, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 961, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 962, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 963, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 963, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 964, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 965, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 530, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 965, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 966, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 967, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 968, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 598, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 969, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 970, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 600, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 971, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 972, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 973, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 974, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 975, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 976, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 977, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 978, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 978, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 979, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 980, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 980, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 981, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 555, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 982, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 983, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 983, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 984, "", 0u, 0},
     {"UInteractableComponent", 1, true, 985, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 986, "", 0u, 0},
     {"UInteractableComponent", 1, true, 987, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 988, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 615, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 989, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 908, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 989, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 990, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 991, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 992, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 910, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 992, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 993, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 994, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 994, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 995, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 996, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 996, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 997, "", 0u, 0},
     {"UInteractableComponent", 1, true, 998, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 999, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1000, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1000, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1001, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1002, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 538, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1003, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1004, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1004, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 540, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1005, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1006, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1007, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 690, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1008, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1009, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1008, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1009, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 692, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1010, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1011, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 698, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1011, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1012, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 861, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1013, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1009, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 700, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1014, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 863, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1015, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1011, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1016, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1017, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1018, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 698, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1019, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 548, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1020, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1009, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 700, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1021, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 550, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1022, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 861, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1011, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1023, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 568, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1024, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 655, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 863, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1025, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 570, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1026, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 861, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 657, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1027, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 675, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1028, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 863, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1029, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 564, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 677, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1030, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1031, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1031, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 566, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1032, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1033, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1034, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1035, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1035, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1036, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 861, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1037, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1038, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 863, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1039, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1040, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 568, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1041, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 568, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1042, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 570, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1043, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 568, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 570, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1044, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1045, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 698, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 570, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1046, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 861, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1047, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1048, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 700, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1048, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 863, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1049, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1050, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1051, "", 0u, 0},
@@ -5392,139 +5411,139 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 1057, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1058, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1059, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1060, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1060, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1061, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1062, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1063, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1064, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1065, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1065, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1066, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1067, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1067, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1068, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 926, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1069, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1070, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1071, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 928, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1071, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 933, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1072, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1073, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1074, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1075, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1076, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 545, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1077, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1078, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1077, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1078, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 547, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1079, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1080, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1081, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1082, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1082, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1083, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1084, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1085, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1086, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1086, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1087, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1088, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 871, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1088, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1089, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1090, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 873, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1091, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 678, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1092, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1093, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1094, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1095, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1075, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1096, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 543, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1097, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 929, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1098, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 532, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1099, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 635, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1100, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1101, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1102, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1103, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1104, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1105, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 929, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1106, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1107, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1108, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1109, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 580, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1110, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 854, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1111, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1112, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1113, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 651, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1114, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1112, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1115, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 698, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1116, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 929, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1117, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1118, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1119, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1120, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 854, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1121, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1093, "", 0u, 0},
     {"UInteractableComponent", 1, true, 680, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1094, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1095, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1096, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1097, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1077, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1098, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 545, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1099, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1100, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 534, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1101, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 637, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1102, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1103, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1104, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1105, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1106, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1107, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1108, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1109, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1110, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1111, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 582, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1112, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 856, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1113, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1114, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1115, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 653, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1116, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1114, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1117, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 700, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1118, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1119, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1120, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1121, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1122, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 929, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 856, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1123, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 663, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 682, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1124, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1125, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 665, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1126, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1104, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1127, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1128, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1106, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1129, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 929, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1130, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1131, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 854, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 931, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1132, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 651, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1133, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 908, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 856, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1134, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 631, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 653, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1135, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1136, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 910, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1136, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 633, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1137, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1136, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1138, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1139, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1138, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1139, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1138, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1140, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1141, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1142, "", 0u, 0},
@@ -5532,19 +5551,21 @@ inline constexpr Block kBlocks[] = {
     {"AGatherableActor", 0, true, 1144, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1145, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1146, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
-    {"AGatherableActor", 0, true, 1147, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 1147, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1148, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 572, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1149, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 617, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1150, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 557, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 574, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1151, "", 0u, 0},
-    {"UInteractableComponent", 1, true, 1152, "InteractableComponent", 2170799233u, 0},
+    {"UInteractableComponent", 1, true, 619, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1152, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 559, "InteractableComponent", 2170799233u, 0},
     {"AGatherableActor", 0, true, 1153, "", 0u, 0},
     {"UInteractableComponent", 1, true, 1154, "InteractableComponent", 2170799233u, 0},
+    {"AGatherableActor", 0, true, 1155, "", 0u, 0},
+    {"UInteractableComponent", 1, true, 1156, "InteractableComponent", 2170799233u, 0},
 };
 
 inline constexpr Open kOpens[] = {
@@ -5744,908 +5765,910 @@ inline constexpr Open kOpens[] = {
      {true, 0, -12389311ll, -4541051ll, 68534ll}, {true, 0, 59164, 0}, {false, 0, 0, 0, 0}, 667, 9},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Quests/SidequestAssets/1000_CorruptedMemories/1000_SoshaTerim.Default__1000_SoshaTerim_C", 101, 721, 294, 747,
      {true, 0, -10848366ll, 5037288ll, 126237ll}, {true, 0, 53271, 0}, {false, 0, 0, 0, 0}, 676, 9},
+    {"shrine", "AAoCAttunablePlayerSpawner", "/Game/GameBlueprints/AttuneableCharacterRespawnBP.Default__AttuneableCharacterRespawnBP_C", 102, 1101, 8, 31,
+     {true, 0, -19629165ll, 358595ll, 45519ll}, {true, 0, 57344, 0}, {false, 0, 0, 0, 0}, 685, 2},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 515, 50, 122,
-     {true, 0, -8142220ll, 5701805ll, 130085ll}, {true, 0, 60074, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 685, 7},
+     {true, 0, -8142220ll, 5701805ll, 130085ll}, {true, 0, 60074, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 687, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Beast/Canine/Wolf.Default__Wolf_C", 36, 576, 9, 40,
-     {true, 0, -7153786ll, 5466109ll, 129768ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 692, 7},
+     {true, 0, -7153786ll, 5466109ll, 129768ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 694, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 27, 112,
-     {true, 0, -8168191ll, 5839698ll, 125588ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 699, 7},
+     {true, 0, -8168191ll, 5839698ll, 125588ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 701, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 35, 154,
-     {true, 0, -8172512ll, 5840065ll, 126226ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 706, 7},
+     {true, 0, -8172512ll, 5840065ll, 126226ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 708, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 54, 241,
-     {true, 0, -8171255ll, 5847531ll, 127397ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 713, 7},
+     {true, 0, -8171255ll, 5847531ll, 127397ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 715, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 58, 477,
-     {true, 0, -8161163ll, 5679977ll, 127881ll}, {true, 0, 8266, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 720, 7},
+     {true, 0, -8161163ll, 5679977ll, 127881ll}, {true, 0, 8266, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 722, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 82, 478,
-     {true, 0, -8203526ll, 5694728ll, 126875ll}, {true, 0, 64110, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 727, 7},
+     {true, 0, -8203526ll, 5694728ll, 126875ll}, {true, 0, 64110, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 729, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 93, 479,
-     {true, 0, -8219078ll, 5695407ll, 126824ll}, {true, 0, 489, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 734, 7},
+     {true, 0, -8219078ll, 5695407ll, 126824ll}, {true, 0, 489, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 736, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 95, 480,
-     {true, 0, -8183760ll, 5687092ll, 127707ll}, {true, 0, 46806, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 741, 7},
+     {true, 0, -8183760ll, 5687092ll, 127707ll}, {true, 0, 46806, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 743, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 97, 557,
-     {true, 0, -8050321ll, 5793008ll, 130882ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 748, 7},
+     {true, 0, -8050321ll, 5793008ll, 130882ll}, {true, 0, 19115, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 750, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 752, 104, 564,
-     {true, 0, -8304253ll, 5832346ll, 120343ll}, {true, 0, 26430, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 755, 7},
+     {true, 0, -8304253ll, 5832346ll, 120343ll}, {true, 0, 26430, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 757, 7},
     {"npc", "ANPCCharacter", "/Game/DesignAssets/Population/NPC/Humanoid/Goblin/Goblin_Bonebinder.Default__Goblin_Bonebinder_C", 46, 918, 43, 179,
-     {true, 0, -8141959ll, 5866969ll, 127398ll}, {true, 0, 19200, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 762, 7},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 745, 10, 218,
-     {true, 0, -12149777ll, 5645630ll, 119723ll}, {true, 0, 51866, 0}, {false, 0, 0, 0, 0}, 769, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 95, 7586,
-     {true, 0, -11271742ll, 4910540ll, 122003ll}, {true, 204, 53271, 407}, {false, 0, 0, 0, 0}, 771, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 341, 6, 24,
-     {true, 0, -11066717ll, 5585824ll, 121889ll}, {true, 65197, 29257, 0}, {false, 0, 0, 0, 0}, 773, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 7, 3966,
-     {true, 0, -11052537ll, 4845077ll, 122608ll}, {true, 60717, 53271, 62523}, {false, 0, 0, 0, 0}, 775, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 295, 10, 626,
-     {true, 0, -11047554ll, 5534209ll, 132427ll}, {true, 456, 37323, 0}, {false, 0, 0, 0, 0}, 777, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 7, 3983,
-     {true, 0, -11047094ll, 4845492ll, 123663ll}, {true, 62470, 53271, 61634}, {false, 0, 0, 0, 0}, 779, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 17, 3983,
-     {true, 0, -11012930ll, 4712614ll, 122998ll}, {true, 425, 604, 999}, {false, 0, 0, 0, 0}, 781, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 17, 3966,
-     {true, 0, -11001400ll, 4724240ll, 120259ll}, {true, 5849, 58183, 2795}, {false, 0, 0, 0, 0}, 783, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 295, 6, 584,
-     {true, 0, -10988772ll, 5541177ll, 123999ll}, {true, 1217, 53271, 2765}, {false, 0, 0, 0, 0}, 785, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 295, 10, 607,
-     {true, 0, -10983655ll, 5546938ll, 122009ll}, {true, 813, 53271, 2201}, {false, 0, 0, 0, 0}, 787, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 887, 7, 2550,
-     {true, 0, -10953821ll, 4679911ll, 129972ll}, {true, 4569, 46518, 62980}, {false, 0, 0, 0, 0}, 789, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1121, 15, 3846,
-     {true, 0, -10934792ll, 4806678ll, 121757ll}, {true, 887, 27676, 0}, {false, 0, 0, 0, 0}, 791, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 754, 5, 595,
-     {true, 0, -10871268ll, 4770705ll, 123099ll}, {true, 0, 53271, 0}, {false, 0, 0, 0, 0}, 793, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 721, 245, 583,
-     {true, 0, -10803232ll, 5239830ll, 130619ll}, {true, 65125, 56171, 0}, {false, 0, 0, 0, 0}, 795, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 151, 47, 692,
-     {true, 0, -10777476ll, 5349325ll, 130468ll}, {true, 0, 38211, 0}, {false, 0, 0, 0, 0}, 797, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 766, 308, 2152,
-     {true, 0, -10744517ll, 5244001ll, 125708ll}, {true, 65342, 40526, 0}, {false, 0, 0, 0, 0}, 799, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 766, 171, 2039,
-     {true, 0, -10726511ll, 5237045ll, 125478ll}, {true, 64886, 62768, 0}, {false, 0, 0, 0, 0}, 801, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 318, 7, 257,
-     {true, 0, -10705809ll, 5236766ll, 125190ll}, {true, 826, 5106, 0}, {false, 0, 0, 0, 0}, 803, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 37, 122,
-     {true, 0, -10671242ll, 4883043ll, 123818ll}, {true, 629, 6814, 0}, {false, 0, 0, 0, 0}, 805, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 766, 295, 2142,
-     {true, 0, -10667418ll, 5319690ll, 122535ll}, {true, 0, 60708, 0}, {false, 0, 0, 0, 0}, 807, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 8, 205,
-     {true, 0, -10666481ll, 4591581ll, 129072ll}, {true, 64987, 9171, 107}, {false, 0, 0, 0, 0}, 809, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 37, 143,
-     {true, 0, -10665462ll, 4571796ll, 128798ll}, {true, 749, 16512, 63851}, {false, 0, 0, 0, 0}, 811, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 8, 241,
-     {true, 0, -10663121ll, 4591890ll, 128989ll}, {true, 65342, 17687, 65287}, {false, 0, 0, 0, 0}, 813, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 34, 122,
-     {true, 0, -10659190ll, 4573782ll, 128213ll}, {true, 64982, 1640, 65080}, {false, 0, 0, 0, 0}, 815, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 33, 165,
-     {true, 0, -10657832ll, 4591229ll, 128825ll}, {true, 65497, 12806, 65028}, {false, 0, 0, 0, 0}, 817, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 8, 187,
-     {true, 0, -10654268ll, 4576030ll, 128240ll}, {true, 581, 5391, 65030}, {false, 0, 0, 0, 0}, 819, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 34, 224,
-     {true, 0, -10653837ll, 4586593ll, 128710ll}, {true, 176, 4052, 65490}, {false, 0, 0, 0, 0}, 821, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 748, 21, 885,
-     {true, 0, -10652169ll, 4584607ll, 128735ll}, {true, 65024, 36964, 65437}, {false, 0, 0, 0, 0}, 823, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 963, 219, 1550,
-     {true, 0, -10651415ll, 5200962ll, 124367ll}, {true, 1617, 53271, 65436}, {false, 0, 0, 0, 0}, 825, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 963, 225, 1448,
-     {true, 0, -10649277ll, 5208235ll, 124164ll}, {true, 0, 17955, 0}, {false, 0, 0, 0, 0}, 827, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 33, 224,
-     {true, 0, -10647281ll, 4893414ll, 124125ll}, {true, 64833, 56110, 0}, {false, 0, 0, 0, 0}, 829, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 329, 15, 134,
-     {true, 0, -10643182ll, 5206345ll, 124184ll}, {true, 1015, 53271, 0}, {false, 0, 0, 0, 0}, 831, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 748, 21, 866,
-     {true, 0, -10642354ll, 4555832ll, 128732ll}, {true, 587, 15169, 284}, {false, 0, 0, 0, 0}, 833, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 329, 23, 151,
-     {true, 0, -10640471ll, 5207426ll, 124175ll}, {true, 0, 50629, 0}, {false, 0, 0, 0, 0}, 835, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 766, 143, 2300,
-     {true, 0, -10637617ll, 5359663ll, 122008ll}, {true, 0, 6993, 0}, {false, 0, 0, 0, 0}, 837, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 748, 21, 938,
-     {true, 0, -10635342ll, 4551774ll, 128761ll}, {true, 312, 17155, 0}, {false, 0, 0, 0, 0}, 839, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 8, 220,
-     {true, 0, -10631892ll, 4963311ll, 122269ll}, {true, 65291, 17872, 0}, {false, 0, 0, 0, 0}, 841, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 748, 24, 956,
-     {true, 0, -10629164ll, 4529645ll, 128912ll}, {true, 1227, 23525, 254}, {false, 0, 0, 0, 0}, 843, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 33, 143,
-     {true, 0, -10621380ll, 4888188ll, 124174ll}, {true, 265, 46263, 0}, {false, 0, 0, 0, 0}, 845, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 963, 78, 1315,
-     {true, 0, -10608381ll, 4920714ll, 124520ll}, {true, 3, 42953, 0}, {false, 0, 0, 0, 0}, 847, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 886, 28, 360,
-     {true, 0, -10606499ll, 4882447ll, 124304ll}, {true, 65533, 44518, 0}, {false, 0, 0, 0, 0}, 849, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 8, 165,
-     {true, 0, -10601004ll, 4972149ll, 127956ll}, {true, 65092, 45088, 0}, {false, 0, 0, 0, 0}, 851, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 766, 222, 2225,
-     {true, 0, -10599969ll, 5348431ll, 122918ll}, {true, 292, 18256, 0}, {false, 0, 0, 0, 0}, 853, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 34, 165,
-     {true, 0, -10599636ll, 4870292ll, 123069ll}, {true, 0, 30675, 0}, {false, 0, 0, 0, 0}, 855, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 34, 143,
-     {true, 0, -10598991ll, 4962339ll, 128055ll}, {true, 786, 40197, 0}, {false, 0, 0, 0, 0}, 857, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 766, 159, 2263,
-     {true, 0, -10588073ll, 5360963ll, 121153ll}, {true, 65528, 25463, 0}, {false, 0, 0, 0, 0}, 859, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 4, 5887,
-     {true, 0, -10586978ll, 4995326ll, 123218ll}, {true, 407, 53271, 64722}, {false, 0, 0, 0, 0}, 861, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 379, 34, 187,
-     {true, 0, -10581457ll, 4899480ll, 123645ll}, {true, 65457, 24433, 0}, {false, 0, 0, 0, 0}, 863, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 963, 277, 1513,
-     {true, 0, -10576578ll, 5186733ll, 119625ll}, {true, 0, 26124, 0}, {false, 0, 0, 0, 0}, 865, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 916, 13, 518,
-     {true, 0, -10568470ll, 5296466ll, 124818ll}, {true, 64728, 17539, 0}, {false, 0, 0, 0, 0}, 867, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 151, 23, 684,
-     {true, 0, -10560833ll, 4950555ll, 125835ll}, {true, 890, 23421, 0}, {false, 0, 0, 0, 0}, 869, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 916, 12, 573,
-     {true, 0, -10546727ll, 5276366ll, 124653ll}, {true, 65299, 33794, 0}, {false, 0, 0, 0, 0}, 871, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 151, 51, 644,
-     {true, 0, -10536024ll, 4974472ll, 125686ll}, {true, 64828, 21922, 0}, {false, 0, 0, 0, 0}, 873, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 916, 12, 518,
-     {true, 0, -10527494ll, 5303676ll, 123603ll}, {true, 759, 18949, 0}, {false, 0, 0, 0, 0}, 875, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 987, 11, 1414,
-     {true, 0, -10525979ll, 4653580ll, 132566ll}, {true, 20, 18734, 65449}, {false, 0, 0, 0, 0}, 877, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 602,
-     {true, 0, -10500962ll, 4771862ll, 125735ll}, {true, 64353, 53209, 61896}, {false, 0, 0, 0, 0}, 879, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 546,
-     {true, 0, -10500702ll, 4756661ll, 126408ll}, {true, 869, 8588, 4282}, {false, 0, 0, 0, 0}, 881, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 583,
-     {true, 0, -10496712ll, 4749097ll, 129787ll}, {true, 63806, 14464, 3817}, {false, 0, 0, 0, 0}, 883, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1428, 11, 202,
-     {true, 0, -10496545ll, 4721510ll, 135365ll}, {true, 1789, 44497, 62887}, {false, 0, 0, 0, 0}, 885, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1428, 11, 244,
-     {true, 0, -10496147ll, 4712897ll, 137021ll}, {true, 1113, 58838, 224}, {false, 0, 0, 0, 0}, 887, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 633,
-     {true, 0, -10489114ll, 4741286ll, 133845ll}, {true, 0, 24831, 0}, {false, 0, 0, 0, 0}, 889, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 17, 3666,
-     {true, 0, -10477354ll, 4699656ll, 140085ll}, {true, 63139, 34677, 64744}, {false, 0, 0, 0, 0}, 891, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 513, 17, 3691,
-     {true, 0, -10475643ll, 4730099ll, 138151ll}, {true, 61818, 34110, 62727}, {false, 0, 0, 0, 0}, 893, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 12, 511,
-     {true, 0, -10461825ll, 4713229ll, 144605ll}, {true, 65118, 47045, 62476}, {false, 0, 0, 0, 0}, 895, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 529,
-     {true, 0, -10458339ll, 4748800ll, 141778ll}, {true, 63147, 8856, 4836}, {false, 0, 0, 0, 0}, 897, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 617,
-     {true, 0, -10453059ll, 4806283ll, 126737ll}, {true, 3150, 47561, 62753}, {false, 0, 0, 0, 0}, 899, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 566,
-     {true, 0, -10451932ll, 4732273ll, 147837ll}, {true, 0, 52090, 0}, {false, 0, 0, 0, 0}, 901, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 251, 6, 511,
-     {true, 0, -10450209ll, 4820084ll, 124498ll}, {true, 109, 49292, 64116}, {false, 0, 0, 0, 0}, 903, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 24, 184,
-     {true, 0, -10414533ll, 4561559ll, 129560ll}, {true, 64666, 57694, 63876}, {false, 0, 0, 0, 0}, 905, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1431, 5, 78,
-     {true, 0, -10382116ll, 5561712ll, 127827ll}, {true, 64944, 22659, 500}, {false, 0, 0, 0, 0}, 907, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 512, 49, 1511,
-     {true, 0, -10358844ll, 4951013ll, 127764ll}, {true, 706, 5569, 231}, {false, 0, 0, 0, 0}, 909, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 512, 52, 1493,
-     {true, 0, -10357723ll, 4929630ll, 128339ll}, {true, 0, 51134, 0}, {false, 0, 0, 0, 0}, 911, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 24, 311,
-     {true, 0, -10354034ll, 4574341ll, 141561ll}, {true, 3176, 4345, 63645}, {false, 0, 0, 0, 0}, 913, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1193, 14, 431,
-     {true, 0, -10346545ll, 4791433ll, 151174ll}, {true, 1436, 42677, 64569}, {false, 0, 0, 0, 0}, 915, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1427, 9, 67,
-     {true, 0, -10343821ll, 4988548ll, 126911ll}, {true, 296, 26839, 538}, {false, 0, 0, 0, 0}, 917, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 14, 292,
-     {true, 0, -10342913ll, 4583317ll, 145948ll}, {true, 63814, 37840, 1123}, {false, 0, 0, 0, 0}, 919, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 24, 329,
-     {true, 0, -10331361ll, 4580818ll, 148264ll}, {true, 4245, 3581, 63590}, {false, 0, 0, 0, 0}, 921, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 14, 261,
-     {true, 0, -10328931ll, 4582207ll, 149308ll}, {true, 4491, 5346, 64264}, {false, 0, 0, 0, 0}, 923, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 541, 7, 414,
-     {true, 0, -10305137ll, 5397823ll, 128479ll}, {true, 399, 10879, 602}, {false, 0, 0, 0, 0}, 925, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 25, 248,
-     {true, 0, -10304240ll, 4558064ll, 145582ll}, {true, 64352, 31634, 3100}, {false, 0, 0, 0, 0}, 927, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 28, 210,
-     {true, 0, -10300542ll, 4528721ll, 136948ll}, {true, 4860, 12466, 65335}, {false, 0, 0, 0, 0}, 929, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 16, 409,
-     {true, 0, -10299347ll, 5298121ll, 119287ll}, {true, 239, 19696, 1164}, {false, 0, 0, 0, 0}, 931, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 15, 387,
-     {true, 0, -10296191ll, 5292882ll, 119305ll}, {true, 64797, 47399, 64724}, {false, 0, 0, 0, 0}, 933, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 15, 426,
-     {true, 0, -10290444ll, 5287808ll, 119578ll}, {true, 32, 54155, 64532}, {false, 0, 0, 0, 0}, 935, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 25, 184,
-     {true, 0, -10283588ll, 4529744ll, 138694ll}, {true, 3926, 18547, 1194}, {false, 0, 0, 0, 0}, 937, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1431, 5, 763,
-     {true, 0, -10278892ll, 5698206ll, 123378ll}, {true, 0, 39479, 0}, {false, 0, 0, 0, 0}, 939, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 14, 307,
-     {true, 0, -10258569ll, 4556034ll, 148230ll}, {true, 63151, 38445, 2198}, {false, 0, 0, 0, 0}, 941, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 446,
-     {true, 0, -10256436ll, 5265705ll, 121866ll}, {true, 845, 13706, 886}, {false, 0, 0, 0, 0}, 943, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 25, 292,
-     {true, 0, -10254588ll, 4563285ll, 151013ll}, {true, 5081, 17555, 1106}, {false, 0, 0, 0, 0}, 945, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 14, 342,
-     {true, 0, -10227768ll, 4531677ll, 142901ll}, {true, 2888, 12678, 64958}, {false, 0, 0, 0, 0}, 947, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 96,
-     {true, 0, -10227254ll, 4425700ll, 128043ll}, {true, 730, 5560, 206}, {false, 0, 0, 0, 0}, 949, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 177,
-     {true, 0, -10225016ll, 4422916ll, 128152ll}, {true, 66, 36286, 65072}, {false, 0, 0, 0, 0}, 951, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 142,
-     {true, 0, -10223706ll, 4428470ll, 128112ll}, {true, 1223, 29921, 69}, {false, 0, 0, 0, 0}, 953, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 119,
-     {true, 0, -10221202ll, 4445350ll, 128575ll}, {true, 1036, 56641, 65112}, {false, 0, 0, 0, 0}, 955, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 191,
-     {true, 0, -10216761ll, 4437509ll, 128319ll}, {true, 1682, 62057, 65256}, {false, 0, 0, 0, 0}, 957, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 550, 8, 5,
-     {true, 0, -10216592ll, 5449349ll, 129504ll}, {true, 1496, 36001, 363}, {false, 0, 0, 0, 0}, 959, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 223,
-     {true, 0, -10215391ll, 4444234ll, 128556ll}, {true, 535, 46993, 75}, {false, 0, 0, 0, 0}, 961, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 387,
-     {true, 0, -10207571ll, 5217881ll, 120340ll}, {true, 64613, 55285, 65362}, {false, 0, 0, 0, 0}, 963, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 17, 409,
-     {true, 0, -10203162ll, 5234201ll, 121007ll}, {true, 135, 12533, 64399}, {false, 0, 0, 0, 0}, 965, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 162,
-     {true, 0, -10200026ll, 4483302ll, 132081ll}, {true, 2637, 20082, 709}, {false, 0, 0, 0, 0}, 967, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 233, 6, 390,
-     {true, 0, -10197628ll, 4928678ll, 129944ll}, {true, 61847, 9733, 5804}, {false, 0, 0, 0, 0}, 969, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 25, 210,
-     {true, 0, -10195541ll, 4573123ll, 158458ll}, {true, 64276, 39626, 2601}, {false, 0, 0, 0, 0}, 971, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 227, 6, 580,
-     {true, 0, -10193636ll, 4952868ll, 128919ll}, {true, 1832, 20145, 2925}, {false, 0, 0, 0, 0}, 973, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 233, 6, 347,
-     {true, 0, -10191715ll, 4914675ll, 136082ll}, {true, 64928, 4421, 1340}, {false, 0, 0, 0, 0}, 975, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 541, 7, 78,
-     {true, 0, -10190686ll, 5292506ll, 125640ll}, {true, 0, 29761, 0}, {false, 0, 0, 0, 0}, 977, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 389, 25, 230,
-     {true, 0, -10186137ll, 4597358ll, 166044ll}, {true, 4250, 18457, 888}, {false, 0, 0, 0, 0}, 979, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 370, 12, 238,
-     {true, 0, -10182245ll, 4452528ll, 129875ll}, {true, 64579, 39337, 65293}, {false, 0, 0, 0, 0}, 981, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1438, 10, 774,
-     {true, 0, -10178608ll, 4704975ll, 186033ll}, {true, 5392, 9471, 62520}, {false, 0, 0, 0, 0}, 983, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 132,
-     {true, 0, -10176695ll, 4746344ll, 183707ll}, {true, 0, 34499, 0}, {false, 0, 0, 0, 0}, 985, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 39, 97,
-     {true, 0, -10176602ll, 4877740ll, 148553ll}, {true, 65061, 35612, 63110}, {false, 0, 0, 0, 0}, 987, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1438, 6, 47,
-     {true, 0, -10175178ll, 4704917ll, 186155ll}, {true, 3641, 25927, 4363}, {false, 0, 0, 0, 0}, 989, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 96,
-     {true, 0, -10174787ll, 4702627ll, 184846ll}, {true, 3970, 24545, 3820}, {false, 0, 0, 0, 0}, 991, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 166,
-     {true, 0, -10171865ll, 4856722ll, 151389ll}, {true, 64098, 38249, 61988}, {false, 0, 0, 0, 0}, 993, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 34, 167,
-     {true, 0, -10170112ll, 4559009ll, 151775ll}, {true, 64073, 59917, 61827}, {false, 0, 0, 0, 0}, 995, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 396, 19, 29,
-     {true, 0, -10167834ll, 4881128ll, 150226ll}, {true, 4698, 60199, 65387}, {false, 0, 0, 0, 0}, 997, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 149,
-     {true, 0, -10166547ll, 4576761ll, 160120ll}, {true, 0, 51630, 0}, {false, 0, 0, 0, 0}, 999, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 149,
-     {true, 0, -10164695ll, 4679104ll, 186551ll}, {true, 6879, 60295, 2646}, {false, 0, 0, 0, 0}, 1001, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 184,
-     {true, 0, -10162320ll, 4812745ll, 174189ll}, {true, 61147, 21829, 64884}, {false, 0, 0, 0, 0}, 1003, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1439, 12, 49,
-     {true, 0, -10154406ll, 4746519ll, 183150ll}, {true, 65162, 31726, 64890}, {false, 0, 0, 0, 0}, 1005, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 388, 37, 108,
-     {true, 0, -10150400ll, 4954768ll, 146703ll}, {true, 292, 51632, 0}, {false, 0, 0, 0, 0}, 1007, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 882, 25, 131,
-     {true, 0, -10149798ll, 5457402ll, 127234ll}, {true, 65371, 38656, 65170}, {false, 0, 0, 0, 0}, 1009, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 255,
-     {true, 0, -10148467ll, 4876190ll, 155084ll}, {true, 4695, 64127, 2370}, {false, 0, 0, 0, 0}, 1011, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 220,
-     {true, 0, -10147456ll, 4885396ll, 153199ll}, {true, 1482, 8037, 3666}, {false, 0, 0, 0, 0}, 1013, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 132,
-     {true, 0, -10146989ll, 4529920ll, 142462ll}, {true, 2736, 16496, 1542}, {false, 0, 0, 0, 0}, 1015, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 574,
-     {true, 0, -10145744ll, 5292666ll, 123363ll}, {true, 437, 38587, 140}, {false, 0, 0, 0, 0}, 1017, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 426,
-     {true, 0, -10141703ll, 5300717ll, 123731ll}, {true, 1814, 17044, 31}, {false, 0, 0, 0, 0}, 1019, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 238,
-     {true, 0, -10141562ll, 4814098ll, 182286ll}, {true, 1056, 47644, 64395}, {false, 0, 0, 0, 0}, 1021, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 539, 14, 70,
-     {true, 0, -10141255ll, 5156006ll, 121919ll}, {true, 3387, 5849, 613}, {false, 0, 0, 0, 0}, 1023, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 37, 150,
-     {true, 0, -10138235ll, 4921879ll, 157934ll}, {true, 2818, 63314, 62180}, {false, 0, 0, 0, 0}, 1025, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 590,
-     {true, 0, -10137166ll, 5289718ll, 123434ll}, {true, 2122, 56149, 64865}, {false, 0, 0, 0, 0}, 1027, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 34, 150,
-     {true, 0, -10136707ll, 4809574ll, 182585ll}, {true, 0, 28395, 0}, {false, 0, 0, 0, 0}, 1029, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 523,
-     {true, 0, -10136441ll, 5285962ll, 123777ll}, {true, 915, 18380, 1132}, {false, 0, 0, 0, 0}, 1031, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 272,
-     {true, 0, -10135545ll, 4978884ll, 154683ll}, {true, 65354, 17262, 1812}, {false, 0, 0, 0, 0}, 1033, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 40, 97,
-     {true, 0, -10134369ll, 4969401ll, 155245ll}, {true, 3373, 5649, 514}, {false, 0, 0, 0, 0}, 1035, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 238,
-     {true, 0, -10133260ll, 4919365ll, 158326ll}, {true, 3519, 9165, 659}, {false, 0, 0, 0, 0}, 1037, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 184,
-     {true, 0, -10132826ll, 4530323ll, 144687ll}, {true, 3289, 11343, 400}, {false, 0, 0, 0, 0}, 1039, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 882, 25, 234,
-     {true, 0, -10132247ll, 5459437ll, 126944ll}, {true, 2860, 45446, 244}, {false, 0, 0, 0, 0}, 1041, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 39, 115,
-     {true, 0, -10129072ll, 4611325ll, 180227ll}, {true, 59753, 42719, 845}, {false, 0, 0, 0, 0}, 1043, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 34, 185,
-     {true, 0, -10129049ll, 4976420ll, 156175ll}, {true, 3287, 831, 1482}, {false, 0, 0, 0, 0}, 1045, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 17, 387,
-     {true, 0, -10127668ll, 5297094ll, 123843ll}, {true, 1754, 61645, 65360}, {false, 0, 0, 0, 0}, 1047, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 220,
-     {true, 0, -10126906ll, 4967632ll, 156651ll}, {true, 62702, 36185, 13}, {false, 0, 0, 0, 0}, 1049, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 34, 133,
-     {true, 0, -10126347ll, 4964360ll, 156524ll}, {true, 2476, 10488, 1898}, {false, 0, 0, 0, 0}, 1051, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 15, 409,
-     {true, 0, -10124632ll, 5276973ll, 125390ll}, {true, 931, 56339, 65369}, {false, 0, 0, 0, 0}, 1053, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 149,
-     {true, 0, -10122625ll, 4719556ll, 182083ll}, {true, 0, 64728, 0}, {false, 0, 0, 0, 0}, 1055, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 488,
-     {true, 0, -10120175ll, 5277105ll, 125576ll}, {true, 64788, 23338, 65229}, {false, 0, 0, 0, 0}, 1057, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 396, 19, 46,
-     {true, 0, -10118345ll, 4852457ll, 172165ll}, {true, 1696, 61750, 1572}, {false, 0, 0, 0, 0}, 1059, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 166,
-     {true, 0, -10117747ll, 4693293ll, 184023ll}, {true, 3013, 42899, 65482}, {false, 0, 0, 0, 0}, 1061, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 202,
-     {true, 0, -10114804ll, 4993573ll, 150030ll}, {true, 2617, 9933, 3857}, {false, 0, 0, 0, 0}, 1063, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 656,
-     {true, 0, -10113363ll, 5228047ll, 122182ll}, {true, 0, 39991, 0}, {false, 0, 0, 0, 0}, 1065, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 255,
-     {true, 0, -10105559ll, 4640371ll, 187103ll}, {true, 460, 46310, 1442}, {false, 0, 0, 0, 0}, 1067, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 272,
-     {true, 0, -10099884ll, 4859810ll, 172447ll}, {true, 0, 19493, 0}, {false, 0, 0, 0, 0}, 1069, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 238,
-     {true, 0, -10097502ll, 4647861ll, 185934ll}, {true, 3566, 32566, 64783}, {false, 0, 0, 0, 0}, 1071, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 396, 23, 29,
-     {true, 0, -10096128ll, 4671999ll, 184363ll}, {true, 677, 28652, 64852}, {false, 0, 0, 0, 0}, 1073, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 37, 96,
-     {true, 0, -10095864ll, 4625592ll, 183851ll}, {true, 64661, 43787, 3944}, {false, 0, 0, 0, 0}, 1075, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 132,
-     {true, 0, -10093824ll, 4661722ll, 184391ll}, {true, 1563, 46084, 1195}, {false, 0, 0, 0, 0}, 1077, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 33, 272,
-     {true, 0, -10090402ll, 4637246ll, 184154ll}, {true, 1156, 7303, 62200}, {false, 0, 0, 0, 0}, 1079, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 34, 202,
-     {true, 0, -10089132ll, 4891062ll, 176492ll}, {true, 3458, 59455, 63345}, {false, 0, 0, 0, 0}, 1081, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 255,
-     {true, 0, -10088841ll, 4911698ll, 173863ll}, {true, 2717, 8317, 4059}, {false, 0, 0, 0, 0}, 1083, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 184,
-     {true, 0, -10088372ll, 4646785ll, 184646ll}, {true, 64957, 56301, 1280}, {false, 0, 0, 0, 0}, 1085, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 202,
-     {true, 0, -10088193ll, 4626221ll, 181064ll}, {true, 4206, 26112, 508}, {false, 0, 0, 0, 0}, 1087, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 40, 115,
-     {true, 0, -10087821ll, 4744188ll, 182585ll}, {true, 0, 44267, 0}, {false, 0, 0, 0, 0}, 1089, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 23, 202,
-     {true, 0, -10086569ll, 4555065ll, 174796ll}, {true, 64350, 56129, 61059}, {false, 0, 0, 0, 0}, 1091, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 17, 588,
-     {true, 0, -10086311ll, 5486573ll, 126945ll}, {true, 65533, 56855, 65478}, {false, 0, 0, 0, 0}, 1093, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 16, 584,
-     {true, 0, -10085762ll, 5488779ll, 126945ll}, {true, 40, 16641, 42}, {false, 0, 0, 0, 0}, 1095, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 396, 19, 9,
-     {true, 0, -10085319ll, 4899459ll, 177484ll}, {true, 784, 45985, 64385}, {false, 0, 0, 0, 0}, 1097, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 28, 166,
-     {true, 0, -10083477ll, 4909046ll, 176431ll}, {true, 64047, 17116, 3360}, {false, 0, 0, 0, 0}, 1099, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 34, 114,
-     {true, 0, -10081952ll, 4554469ll, 175008ll}, {true, 1665, 30447, 3967}, {false, 0, 0, 0, 0}, 1101, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 380, 37, 114,
-     {true, 0, -10081375ll, 4880685ll, 176916ll}, {true, 2156, 14572, 1485}, {false, 0, 0, 0, 0}, 1103, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 607,
-     {true, 0, -10078693ll, 5285925ll, 129198ll}, {true, 65365, 16867, 2152}, {false, 0, 0, 0, 0}, 1105, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 17, 502,
-     {true, 0, -10075216ll, 5494463ll, 126924ll}, {true, 65445, 61709, 23}, {false, 0, 0, 0, 0}, 1107, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 16, 520,
-     {true, 0, -10074572ll, 5491562ll, 126915ll}, {true, 49, 43950, 176}, {false, 0, 0, 0, 0}, 1109, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1432, 4, 254,
-     {true, 0, -10073556ll, 5396784ll, 130372ll}, {true, 0, 7910, 0}, {false, 0, 0, 0, 0}, 1111, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 16, 557,
-     {true, 0, -10072481ll, 5495077ll, 126874ll}, {true, 65360, 10784, 65403}, {false, 0, 0, 0, 0}, 1113, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 16, 640,
-     {true, 0, -10070527ll, 5486536ll, 126794ll}, {true, 52, 16833, 65272}, {false, 0, 0, 0, 0}, 1115, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 16, 659,
-     {true, 0, -10067881ll, 5485424ll, 126707ll}, {true, 65514, 14158, 65242}, {false, 0, 0, 0, 0}, 1117, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 639,
-     {true, 0, -10063359ll, 5291277ll, 132685ll}, {true, 64047, 37214, 64460}, {false, 0, 0, 0, 0}, 1119, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 505,
-     {true, 0, -10062351ll, 5255592ll, 136750ll}, {true, 63809, 10398, 2787}, {false, 0, 0, 0, 0}, 1121, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 541,
-     {true, 0, -10061326ll, 5295256ll, 132931ll}, {true, 1086, 8168, 1103}, {false, 0, 0, 0, 0}, 1123, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 623,
-     {true, 0, -10060352ll, 5299334ll, 133091ll}, {true, 64626, 24490, 1046}, {false, 0, 0, 0, 0}, 1125, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 15, 446,
-     {true, 0, -10060324ll, 5252159ll, 138004ll}, {true, 64856, 5574, 2880}, {false, 0, 0, 0, 0}, 1127, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 469,
-     {true, 0, -10059103ll, 5293391ll, 133258ll}, {true, 1328, 60782, 65222}, {false, 0, 0, 0, 0}, 1129, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 557,
-     {true, 0, -10058609ll, 5255459ll, 137142ll}, {true, 62796, 14101, 1403}, {false, 0, 0, 0, 0}, 1131, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 881, 4, 241,
-     {true, 0, -10046555ll, 5499659ll, 126498ll}, {true, 483, 48278, 110}, {false, 0, 0, 0, 0}, 1133, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 16, 387,
-     {true, 0, -10035167ll, 5222671ll, 146885ll}, {true, 509, 10702, 838}, {false, 0, 0, 0, 0}, 1135, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 236, 11, 409,
-     {true, 0, -10033376ll, 5245219ll, 143420ll}, {true, 1755, 1444, 2276}, {false, 0, 0, 0, 0}, 1137, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1432, 16, 68,
-     {true, 0, -10027125ll, 5343555ll, 138994ll}, {true, 224, 18932, 2904}, {false, 0, 0, 0, 0}, 1139, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1430, 13, 720,
-     {true, 0, -9918501ll, 5035788ll, 147143ll}, {true, 1703, 41188, 612}, {false, 0, 0, 0, 0}, 1141, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1430, 5, 51,
-     {true, 0, -9916830ll, 5031249ll, 147161ll}, {true, 65234, 59696, 1094}, {false, 0, 0, 0, 0}, 1143, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 762, 13, 322,
-     {true, 0, -9815503ll, 5548056ll, 113137ll}, {true, 64829, 40599, 62743}, {false, 0, 0, 0, 0}, 1145, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1429, 5, 649,
-     {true, 0, -9773334ll, 5006774ll, 122154ll}, {true, 2169, 42235, 3251}, {false, 0, 0, 0, 0}, 1147, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 772, 4, 113,
-     {true, 0, -9737492ll, 5614279ll, 105628ll}, {true, 64679, 31284, 64584}, {false, 0, 0, 0, 0}, 1149, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 772, 4, 267,
-     {true, 0, -9716705ll, 5620466ll, 107774ll}, {true, 65371, 35736, 61758}, {false, 0, 0, 0, 0}, 1151, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1435, 10, 937,
-     {true, 0, -9713693ll, 3919664ll, 161233ll}, {true, 65481, 21384, 1227}, {false, 0, 0, 0, 0}, 1153, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1437, 8, 46,
-     {true, 0, -9698375ll, 4080233ll, 152866ll}, {true, 0, 40831, 0}, {false, 0, 0, 0, 0}, 1155, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 761, 6, 1317,
-     {true, 0, -9669633ll, 5748357ll, 122953ll}, {true, 535, 50438, 61106}, {false, 0, 0, 0, 0}, 1157, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1437, 10, 358,
-     {true, 0, -9667994ll, 4041722ll, 153241ll}, {true, 63051, 58652, 63727}, {false, 0, 0, 0, 0}, 1159, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1436, 23, 907,
-     {true, 0, -9543332ll, 3777906ll, 149505ll}, {true, 64469, 24132, 64561}, {false, 0, 0, 0, 0}, 1161, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1436, 19, 50,
-     {true, 0, -9542328ll, 3776867ll, 149617ll}, {true, 0, 28889, 0}, {false, 0, 0, 0, 0}, 1163, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1248,
-     {true, 0, -8980667ll, 4085603ll, 129155ll}, {true, 1149, 11487, 65202}, {false, 0, 0, 0, 0}, 1165, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1267,
-     {true, 0, -8956354ll, 4076782ll, 129733ll}, {true, 0, 50675, 0}, {false, 0, 0, 0, 0}, 1167, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 1227,
-     {true, 0, -8942134ll, 3801610ll, 119528ll}, {true, 1905, 45452, 65410}, {false, 0, 0, 0, 0}, 1169, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 4808,
-     {true, 0, -8941890ll, 3968896ll, 119632ll}, {true, 471, 59976, 58881}, {false, 0, 0, 0, 0}, 1171, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1267,
-     {true, 0, -8941009ll, 3983933ll, 126872ll}, {true, 62109, 39911, 1897}, {false, 0, 0, 0, 0}, 1173, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 1208,
-     {true, 0, -8940565ll, 3804386ll, 119416ll}, {true, 1259, 21806, 65312}, {false, 0, 0, 0, 0}, 1175, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1306,
-     {true, 0, -8929587ll, 3982750ll, 127439ll}, {true, 64873, 52858, 64773}, {false, 0, 0, 0, 0}, 1177, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1248,
-     {true, 0, -8916239ll, 3953896ll, 116426ll}, {true, 65334, 1094, 64045}, {false, 0, 0, 0, 0}, 1179, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1227,
-     {true, 0, -8900079ll, 4001180ll, 130897ll}, {true, 64929, 34590, 2499}, {false, 0, 0, 0, 0}, 1181, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1227,
-     {true, 0, -8891388ll, 3867257ll, 119328ll}, {true, 2560, 38380, 65087}, {false, 0, 0, 0, 0}, 1183, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 748,
-     {true, 0, -8883332ll, 3889523ll, 119266ll}, {true, 1189, 45883, 64656}, {false, 0, 0, 0, 0}, 1185, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 766,
-     {true, 0, -8882855ll, 3852703ll, 118621ll}, {true, 65483, 40511, 2235}, {false, 0, 0, 0, 0}, 1187, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 787,
-     {true, 0, -8879742ll, 3891433ll, 119608ll}, {true, 782, 18099, 2500}, {false, 0, 0, 0, 0}, 1189, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 692,
-     {true, 0, -8878371ll, 4010423ll, 128861ll}, {true, 0, 3344, 0}, {false, 0, 0, 0, 0}, 1191, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 811,
-     {true, 0, -8875723ll, 3894515ll, 120041ll}, {true, 1294, 21763, 0}, {false, 0, 0, 0, 0}, 1193, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 692,
-     {true, 0, -8869010ll, 3884100ll, 121220ll}, {true, 1559, 50432, 203}, {false, 0, 0, 0, 0}, 1195, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 711,
-     {true, 0, -8866961ll, 4188931ll, 126483ll}, {true, 0, 12427, 0}, {false, 0, 0, 0, 0}, 1197, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 830,
-     {true, 0, -8856631ll, 3872974ll, 118262ll}, {true, 0, 54558, 0}, {false, 0, 0, 0, 0}, 1199, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 729,
-     {true, 0, -8847882ll, 4021755ll, 127783ll}, {true, 1911, 35930, 1690}, {false, 0, 0, 0, 0}, 1201, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 692,
-     {true, 0, -8847353ll, 4052717ll, 128473ll}, {true, 0, 9262, 0}, {false, 0, 0, 0, 0}, 1203, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 787,
-     {true, 0, -8846003ll, 4213896ll, 125575ll}, {true, 142, 28335, 65157}, {false, 0, 0, 0, 0}, 1205, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 711,
-     {true, 0, -8845179ll, 3908680ll, 118838ll}, {true, 1894, 29222, 65529}, {false, 0, 0, 0, 0}, 1207, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 711,
-     {true, 0, -8844975ll, 4021651ll, 127423ll}, {true, 20, 43414, 1544}, {false, 0, 0, 0, 0}, 1209, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 729,
-     {true, 0, -8832412ll, 4211761ll, 125265ll}, {true, 279, 6419, 761}, {false, 0, 0, 0, 0}, 1211, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 692,
-     {true, 0, -8821089ll, 4141849ll, 126931ll}, {true, 0, 52835, 0}, {false, 0, 0, 0, 0}, 1213, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 766,
-     {true, 0, -8814552ll, 4159560ll, 126393ll}, {true, 0, 27941, 0}, {false, 0, 0, 0, 0}, 1215, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 748,
-     {true, 0, -8803159ll, 4091010ll, 126363ll}, {true, 0, 58136, 0}, {false, 0, 0, 0, 0}, 1217, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 748,
-     {true, 0, -8796120ll, 4182083ll, 124457ll}, {true, 394, 35153, 0}, {false, 0, 0, 0, 0}, 1219, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 8, 2855,
-     {true, 0, -8775820ll, 4124697ll, 125166ll}, {true, 0, 32569, 0}, {false, 0, 0, 0, 0}, 1221, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 4268,
-     {true, 0, -8770231ll, 3763164ll, 115672ll}, {true, 0, 44447, 0}, {false, 0, 0, 0, 0}, 1223, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 4343,
-     {true, 0, -8769917ll, 3759338ll, 116139ll}, {true, 0, 29484, 0}, {false, 0, 0, 0, 0}, 1225, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 1449,
-     {true, 0, -8763884ll, 4102164ll, 123558ll}, {true, 172, 21491, 0}, {false, 0, 0, 0, 0}, 1227, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 4049,
-     {true, 0, -8758723ll, 4309976ll, 125093ll}, {true, 412, 40903, 0}, {false, 0, 0, 0, 0}, 1229, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 2873,
-     {true, 0, -8754486ll, 4171517ll, 122112ll}, {true, 376, 25023, 0}, {false, 0, 0, 0, 0}, 1231, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 978,
-     {true, 0, -8734102ll, 3672282ll, 126877ll}, {true, 0, 12358, 0}, {false, 0, 0, 0, 0}, 1233, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 4033,
-     {true, 0, -8724950ll, 4295039ll, 125292ll}, {true, 12, 3900, 0}, {false, 0, 0, 0, 0}, 1235, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 3961,
-     {true, 0, -8722520ll, 4274666ll, 125164ll}, {true, 0, 128, 0}, {false, 0, 0, 0, 0}, 1237, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 4069,
-     {true, 0, -8705475ll, 4303602ll, 125028ll}, {true, 0, 8982, 0}, {false, 0, 0, 0, 0}, 1239, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1397,
-     {true, 0, -8704441ll, 3591575ll, 124624ll}, {true, 0, 9980, 0}, {false, 0, 0, 0, 0}, 1241, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 4285,
-     {true, 0, -8702992ll, 3808871ll, 116341ll}, {true, 0, 40314, 0}, {false, 0, 0, 0, 0}, 1243, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 3979,
-     {true, 0, -8701937ll, 4312409ll, 124202ll}, {true, 428, 13740, 0}, {false, 0, 0, 0, 0}, 1245, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 4015,
-     {true, 0, -8701935ll, 4266794ll, 123790ll}, {true, 0, 65424, 0}, {false, 0, 0, 0, 0}, 1247, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1414,
-     {true, 0, -8686320ll, 3586031ll, 123518ll}, {true, 0, 33176, 0}, {false, 0, 0, 0, 0}, 1249, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 3998,
-     {true, 0, -8684184ll, 4295870ll, 123262ll}, {true, 0, 39243, 0}, {false, 0, 0, 0, 0}, 1251, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1015,
-     {true, 0, -8632654ll, 3688510ll, 122631ll}, {true, 323, 5810, 0}, {false, 0, 0, 0, 0}, 1253, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 997,
-     {true, 0, -8617106ll, 3618463ll, 122902ll}, {true, 0, 57556, 0}, {false, 0, 0, 0, 0}, 1255, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1024,
-     {true, 0, -8555318ll, 3615896ll, 128316ll}, {true, 0, 44015, 0}, {false, 0, 0, 0, 0}, 1257, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 977,
-     {true, 0, -8546061ll, 3659790ll, 128677ll}, {true, 0, 21759, 0}, {false, 0, 0, 0, 0}, 1259, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1444,
-     {true, 0, -8544886ll, 3549155ll, 123123ll}, {true, 7, 12232, 0}, {false, 0, 0, 0, 0}, 1261, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1042,
-     {true, 0, -8539090ll, 3705170ll, 126943ll}, {true, 0, 9123, 0}, {false, 0, 0, 0, 0}, 1263, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1116,
-     {true, 0, -8513678ll, 3644569ll, 131234ll}, {true, 151, 38189, 0}, {false, 0, 0, 0, 0}, 1265, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 1006,
-     {true, 0, -8502632ll, 3627672ll, 131234ll}, {true, 74, 16447, 0}, {false, 0, 0, 0, 0}, 1267, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 7, 1426,
-     {true, 0, -8498855ll, 3539450ll, 122992ll}, {true, 0, 3970, 0}, {false, 0, 0, 0, 0}, 1269, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 51,
-     {true, 0, -8464066ll, 5941849ll, 130203ll}, {true, 0, 2494, 0}, {false, 0, 0, 0, 0}, 1271, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 50, 56,
-     {true, 0, -8463582ll, 6117462ll, 213159ll}, {true, 0, 52744, 0}, {false, 0, 0, 0, 0}, 1273, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 50, 3,
-     {true, 0, -8447503ll, 5871037ll, 120746ll}, {true, 305, 34158, 64172}, {false, 0, 0, 0, 0}, 1275, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 3,
-     {true, 0, -8444551ll, 5772438ll, 130799ll}, {true, 64081, 3401, 527}, {false, 0, 0, 0, 0}, 1277, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 17,
-     {true, 0, -8443277ll, 6116790ll, 214637ll}, {true, 0, 6268, 0}, {false, 0, 0, 0, 0}, 1279, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 91,
-     {true, 0, -8441771ll, 5825828ll, 131088ll}, {true, 63752, 33473, 7593}, {false, 0, 0, 0, 0}, 1281, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1352,
-     {true, 0, -8441499ll, 4011532ll, 108290ll}, {true, 0, 4358, 0}, {false, 0, 0, 0, 0}, 1283, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 50, 1,
-     {true, 0, -8436277ll, 6073293ll, 215030ll}, {true, 806, 34985, 0}, {false, 0, 0, 0, 0}, 1285, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 1316,
-     {true, 0, -8433121ll, 3954986ll, 106632ll}, {true, 0, 56490, 0}, {false, 0, 0, 0, 0}, 1287, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 214,
-     {true, 0, -8432448ll, 6063877ll, 214547ll}, {true, 871, 17117, 0}, {false, 0, 0, 0, 0}, 1289, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 39,
-     {true, 0, -8423070ll, 5827654ll, 129784ll}, {true, 0, 34295, 0}, {false, 0, 0, 0, 0}, 1291, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 3961,
-     {true, 0, -8418906ll, 4297985ll, 131730ll}, {true, 408, 33845, 0}, {false, 0, 0, 0, 0}, 1293, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 50, 35,
-     {true, 0, -8415996ll, 6045203ll, 214257ll}, {true, 0, 28213, 0}, {false, 0, 0, 0, 0}, 1295, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 2873,
-     {true, 0, -8413434ll, 4155570ll, 107296ll}, {true, 0, 55386, 0}, {false, 0, 0, 0, 0}, 1297, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 1042,
-     {true, 0, -8412504ll, 3639567ll, 131469ll}, {true, 440, 62394, 0}, {false, 0, 0, 0, 0}, 1299, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 90,
-     {true, 0, -8410882ll, 6138114ll, 213723ll}, {true, 0, 53842, 0}, {false, 0, 0, 0, 0}, 1301, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 1444,
-     {true, 0, -8410712ll, 3545734ll, 118982ll}, {true, 0, 1351, 0}, {false, 0, 0, 0, 0}, 1303, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 93, 1,
-     {true, 0, -8407902ll, 5975647ll, 216555ll}, {true, 0, 19951, 0}, {false, 0, 0, 0, 0}, 1305, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 55,
-     {true, 0, -8399908ll, 5907350ll, 129916ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1307, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 164,
-     {true, 0, -8396952ll, 6097281ll, 216126ll}, {true, 0, 56994, 0}, {false, 0, 0, 0, 0}, 1309, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 109,
-     {true, 0, -8396635ll, 6076474ll, 214923ll}, {true, 0, 41671, 0}, {false, 0, 0, 0, 0}, 1311, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 147,
-     {true, 0, -8394289ll, 6063235ll, 215195ll}, {true, 886, 23655, 0}, {false, 0, 0, 0, 0}, 1313, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 1024,
-     {true, 0, -8392885ll, 3694336ll, 129913ll}, {true, 0, 16417, 0}, {false, 0, 0, 0, 0}, 1315, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 128,
-     {true, 0, -8390275ll, 6073651ll, 216318ll}, {true, 0, 17569, 0}, {false, 0, 0, 0, 0}, 1317, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 75,
-     {true, 0, -8386567ll, 5902129ll, 128010ll}, {true, 166, 36673, 0}, {false, 0, 0, 0, 0}, 1319, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 181,
-     {true, 0, -8386549ll, 6113026ll, 214978ll}, {true, 0, 19445, 0}, {false, 0, 0, 0, 0}, 1321, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 50, 17,
-     {true, 0, -8380703ll, 6032768ll, 214982ll}, {true, 0, 11551, 0}, {false, 0, 0, 0, 0}, 1323, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 197,
-     {true, 0, -8378379ll, 6039573ll, 215367ll}, {true, 0, 52965, 0}, {false, 0, 0, 0, 0}, 1325, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 575,
-     {true, 0, -8373547ll, 3870170ll, 110457ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1327, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 616,
-     {true, 0, -8372176ll, 4210611ll, 111033ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1329, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 520, 4, 73,
-     {true, 0, -8370883ll, 6131505ll, 215772ll}, {true, 0, 7016, 0}, {false, 0, 0, 0, 0}, 1331, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 600,
-     {true, 0, -8368234ll, 4042506ll, 106042ll}, {true, 0, 12826, 0}, {false, 0, 0, 0, 0}, 1333, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 3961,
-     {true, 0, -8366481ll, 4267260ll, 120624ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1335, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 107,
-     {true, 0, -8363090ll, 5840444ll, 119794ll}, {true, 1636, 45611, 45}, {false, 0, 0, 0, 0}, 1337, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 32, 21,
-     {true, 0, -8362001ll, 5826884ll, 121439ll}, {true, 1367, 63109, 118}, {false, 0, 0, 0, 0}, 1339, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 4015,
-     {true, 0, -8354887ll, 4220451ll, 113305ll}, {true, 0, 36713, 0}, {false, 0, 0, 0, 0}, 1341, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 631,
-     {true, 0, -8353229ll, 4000520ll, 106714ll}, {true, 0, 34245, 0}, {false, 0, 0, 0, 0}, 1343, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 3998,
-     {true, 0, -8342038ll, 4289956ll, 130326ll}, {true, 0, 29815, 0}, {false, 0, 0, 0, 0}, 1345, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 655,
-     {true, 0, -8339768ll, 4188674ll, 108228ll}, {true, 0, 43285, 0}, {false, 0, 0, 0, 0}, 1347, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 600,
-     {true, 0, -8337444ll, 4198567ll, 109761ll}, {true, 0, 35995, 0}, {false, 0, 0, 0, 0}, 1349, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 6, 582,
-     {true, 0, -8334781ll, 4138987ll, 107731ll}, {true, 92, 34461, 0}, {false, 0, 0, 0, 0}, 1351, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 2159,
-     {true, 0, -8333785ll, 3692669ll, 118092ll}, {true, 0, 53956, 0}, {false, 0, 0, 0, 0}, 1353, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 4033,
-     {true, 0, -8320357ll, 4245631ll, 116823ll}, {true, 0, 43693, 0}, {false, 0, 0, 0, 0}, 1355, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 635,
-     {true, 0, -8318851ll, 4155180ll, 105476ll}, {true, 0, 37143, 0}, {false, 0, 0, 0, 0}, 1357, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 4, 2177,
-     {true, 0, -8305044ll, 3665706ll, 119036ll}, {true, 0, 7548, 0}, {false, 0, 0, 0, 0}, 1359, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 883, 5, 3979,
-     {true, 0, -8299244ll, 4305362ll, 135479ll}, {true, 0, 41761, 0}, {false, 0, 0, 0, 0}, 1361, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 58, 7,
-     {true, 0, -8048771ll, 5708035ll, 138665ll}, {true, 62946, 8637, 298}, {false, 0, 0, 0, 0}, 1363, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 54, 321,
-     {true, 0, -8046609ll, 4414934ll, 132930ll}, {true, 0, 26279, 0}, {false, 0, 0, 0, 0}, 1365, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 50, 43,
-     {true, 0, -8045931ll, 5707819ll, 138283ll}, {true, 734, 56510, 1947}, {false, 0, 0, 0, 0}, 1367, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 58, 57,
-     {true, 0, -8044039ll, 5705699ll, 138345ll}, {true, 904, 60921, 1884}, {false, 0, 0, 0, 0}, 1369, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 521, 50, 26,
-     {true, 0, -8038564ll, 5713463ll, 135497ll}, {true, 3163, 33379, 62796}, {false, 0, 0, 0, 0}, 1371, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 21, 1592,
-     {true, 0, -8002788ll, 4332206ll, 133802ll}, {true, 0, 27093, 0}, {false, 0, 0, 0, 0}, 1373, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 21, 1563,
-     {true, 0, -7978565ll, 4381469ll, 134787ll}, {true, 0, 2832, 0}, {false, 0, 0, 0, 0}, 1375, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 28, 1563,
-     {true, 0, -7956133ll, 4386101ll, 134389ll}, {true, 0, 39703, 0}, {false, 0, 0, 0, 0}, 1377, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 34, 275,
-     {true, 0, -7923201ll, 4297940ll, 133762ll}, {true, 0, 38105, 0}, {false, 0, 0, 0, 0}, 1379, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 68,
-     {true, 0, -7904302ll, 4306364ll, 134088ll}, {true, 0, 29977, 0}, {false, 0, 0, 0, 0}, 1381, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 20, 3917,
-     {true, 0, -7832049ll, 3984902ll, 157884ll}, {true, 2589, 56054, 62753}, {false, 0, 0, 0, 0}, 1383, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 37, 281,
-     {true, 0, -7831373ll, 4274022ll, 133561ll}, {true, 0, 22865, 0}, {false, 0, 0, 0, 0}, 1385, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 20, 3900,
-     {true, 0, -7808377ll, 3991041ll, 163204ll}, {true, 110, 53836, 0}, {false, 0, 0, 0, 0}, 1387, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 23, 3862,
-     {true, 0, -7796643ll, 4001756ll, 163038ll}, {true, 63834, 15083, 590}, {false, 0, 0, 0, 0}, 1389, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 20, 3882,
-     {true, 0, -7793675ll, 3991764ll, 165505ll}, {true, 2907, 59597, 64841}, {false, 0, 0, 0, 0}, 1391, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 42, 287,
-     {true, 0, -7790362ll, 4266371ll, 135070ll}, {true, 0, 48519, 0}, {false, 0, 0, 0, 0}, 1393, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 40, 286,
-     {true, 0, -7757475ll, 4305871ll, 134224ll}, {true, 0, 37521, 0}, {false, 0, 0, 0, 0}, 1395, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 21, 246,
-     {true, 0, -7749269ll, 4298329ll, 135377ll}, {true, 0, 36577, 0}, {false, 0, 0, 0, 0}, 1397, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 41, 286,
-     {true, 0, -7691179ll, 4398134ll, 132488ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1399, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 9, 4051,
-     {true, 0, -7678271ll, 4064308ll, 137425ll}, {true, 93, 11298, 0}, {false, 0, 0, 0, 0}, 1401, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 29, 264,
-     {true, 0, -7667460ll, 4344421ll, 133053ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1403, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 28, 263,
-     {true, 0, -7665121ll, 4363582ll, 132422ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1405, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 9, 4034,
-     {true, 0, -7654502ll, 4081814ll, 136902ll}, {true, 64378, 23066, 65447}, {false, 0, 0, 0, 0}, 1407, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 3986,
-     {true, 0, -7653108ll, 4047461ll, 149650ll}, {true, 2399, 37975, 58514}, {false, 0, 0, 0, 0}, 1409, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 1809,
-     {true, 0, -7650473ll, 4113263ll, 130029ll}, {true, 1483, 33772, 61083}, {false, 0, 0, 0, 0}, 1411, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 35, 1625,
-     {true, 0, -7650369ll, 4146126ll, 111675ll}, {true, 981, 47037, 60936}, {false, 0, 0, 0, 0}, 1413, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 1826,
-     {true, 0, -7647355ll, 4086747ll, 136771ll}, {true, 64814, 12570, 1627}, {false, 0, 0, 0, 0}, 1415, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 41, 1601,
-     {true, 0, -7647065ll, 4142312ll, 113736ll}, {true, 3985, 55972, 62595}, {false, 0, 0, 0, 0}, 1417, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4008,
-     {true, 0, -7644925ll, 4049195ll, 147957ll}, {true, 59748, 19897, 62187}, {false, 0, 0, 0, 0}, 1419, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4175,
-     {true, 0, -7644822ll, 3994750ll, 165551ll}, {true, 1676, 26425, 65298}, {false, 0, 0, 0, 0}, 1421, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 1757,
-     {true, 0, -7644452ll, 4095745ll, 135233ll}, {true, 64426, 13331, 1757}, {false, 0, 0, 0, 0}, 1423, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4104,
-     {true, 0, -7644447ll, 4047367ll, 149267ll}, {true, 58647, 12970, 640}, {false, 0, 0, 0, 0}, 1425, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 9, 3913,
-     {true, 0, -7643972ll, 4055945ll, 143541ll}, {true, 4179, 53887, 3360}, {false, 0, 0, 0, 0}, 1427, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 43, 1635,
-     {true, 0, -7639081ll, 4093196ll, 135838ll}, {true, 3000, 51708, 850}, {false, 0, 0, 0, 0}, 1429, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 3970,
-     {true, 0, -7638208ll, 4045949ll, 148972ll}, {true, 6760, 46371, 506}, {false, 0, 0, 0, 0}, 1431, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 29, 1791,
-     {true, 0, -7638092ll, 4113621ll, 129745ll}, {true, 1242, 32161, 62434}, {false, 0, 0, 0, 0}, 1433, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4047,
-     {true, 0, -7635824ll, 4075527ll, 137972ll}, {true, 64335, 9202, 400}, {false, 0, 0, 0, 0}, 1435, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4086,
-     {true, 0, -7634712ll, 4049111ll, 146357ll}, {true, 2751, 35457, 61052}, {false, 0, 0, 0, 0}, 1437, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4030,
-     {true, 0, -7634356ll, 4008243ll, 163282ll}, {true, 63295, 6503, 135}, {false, 0, 0, 0, 0}, 1439, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 51, 312,
-     {true, 0, -7628497ll, 4407979ll, 133480ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1441, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4141,
-     {true, 0, -7627752ll, 4071815ll, 138537ll}, {true, 2855, 55186, 1087}, {false, 0, 0, 0, 0}, 1443, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4120,
-     {true, 0, -7626634ll, 4003732ll, 162450ll}, {true, 64679, 2247, 1862}, {false, 0, 0, 0, 0}, 1445, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4158,
-     {true, 0, -7625678ll, 4044313ll, 146813ll}, {true, 62287, 3856, 2111}, {false, 0, 0, 0, 0}, 1447, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 3952,
-     {true, 0, -7618762ll, 4034962ll, 148657ll}, {true, 3324, 50359, 1016}, {false, 0, 0, 0, 0}, 1449, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 55, 322,
-     {true, 0, -7615216ll, 4384217ll, 133602ll}, {true, 0, 41651, 0}, {false, 0, 0, 0, 0}, 1451, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4064,
-     {true, 0, -7604209ll, 4038670ll, 141468ll}, {true, 2, 43105, 0}, {false, 0, 0, 0, 0}, 1453, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 4, 4192,
-     {true, 0, -7592660ll, 4023873ll, 139903ll}, {true, 0, 29407, 0}, {false, 0, 0, 0, 0}, 1455, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 1844,
-     {true, 0, -7584295ll, 4121072ll, 123650ll}, {true, 4010, 35222, 64576}, {false, 0, 0, 0, 0}, 1457, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 34, 1718,
-     {true, 0, -7582225ll, 4125134ll, 122498ll}, {true, 1484, 54381, 2751}, {false, 0, 0, 0, 0}, 1459, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 1860,
-     {true, 0, -7581680ll, 4107066ll, 125659ll}, {true, 0, 6476, 0}, {false, 0, 0, 0, 0}, 1461, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 9, 3895,
-     {true, 0, -7580869ll, 4013739ll, 136689ll}, {true, 29, 30481, 0}, {false, 0, 0, 0, 0}, 1463, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 10, 1773,
-     {true, 0, -7576995ll, 4155753ll, 121015ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1465, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 28, 1620,
-     {true, 0, -7572243ll, 4207394ll, 122805ll}, {true, 64268, 43641, 63626}, {false, 0, 0, 0, 0}, 1467, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 41, 1632,
-     {true, 0, -7571084ll, 4211997ll, 123121ll}, {true, 62930, 23583, 2150}, {false, 0, 0, 0, 0}, 1469, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 43, 1605,
-     {true, 0, -7569508ll, 4201034ll, 123185ll}, {true, 5, 37821, 0}, {false, 0, 0, 0, 0}, 1471, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 29, 1564,
-     {true, 0, -7567805ll, 4222027ll, 121800ll}, {true, 5731, 56870, 65432}, {false, 0, 0, 0, 0}, 1473, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 28, 1592,
-     {true, 0, -7565354ll, 4224230ll, 121993ll}, {true, 61660, 16700, 4205}, {false, 0, 0, 0, 0}, 1475, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1198, 9, 3931,
-     {true, 0, -7558584ll, 4013159ll, 132204ll}, {true, 2603, 38467, 1016}, {false, 0, 0, 0, 0}, 1477, 2},
-    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 103, 1198, 34, 1735,
-     {true, 0, -7557547ll, 4086668ll, 125508ll}, {true, 1591, 25805, 62042}, {false, 0, 0, 0, 0}, 1479, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 576, 14, 259,
-     {true, 0, -7065028ll, 5390855ll, 158613ll}, {true, 2389, 4603, 1724}, {false, 0, 0, 0, 0}, 1481, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 576, 14, 223,
-     {true, 0, -7063530ll, 5387275ll, 159300ll}, {true, 2930, 4343, 1977}, {false, 0, 0, 0, 0}, 1483, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 576, 14, 346,
-     {true, 0, -7058157ll, 5394921ll, 159855ll}, {true, 2115, 14281, 3816}, {false, 0, 0, 0, 0}, 1485, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 576, 14, 174,
-     {true, 0, -7057503ll, 5386047ll, 160658ll}, {true, 4639, 54183, 63633}, {false, 0, 0, 0, 0}, 1487, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1395, 44, 251,
-     {true, 0, -6819654ll, 5390965ll, 164497ll}, {true, 856, 9135, 2363}, {false, 0, 0, 0, 0}, 1489, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 921, 14, 389,
-     {true, 0, -6806784ll, 5754317ll, 137384ll}, {true, 2897, 31477, 1066}, {false, 0, 0, 0, 0}, 1491, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1403, 41, 137,
-     {true, 0, -6695794ll, 5170714ll, 146223ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1493, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 124,
-     {true, 0, -6678085ll, 6437238ll, 231310ll}, {true, 372, 35497, 0}, {false, 0, 0, 0, 0}, 1495, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 44,
-     {true, 0, -6672565ll, 6422216ll, 232169ll}, {true, 846, 1456, 0}, {false, 0, 0, 0, 0}, 1497, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 185,
-     {true, 0, -6669680ll, 6409117ll, 232831ll}, {true, 893, 5950, 0}, {false, 0, 0, 0, 0}, 1499, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 84,
-     {true, 0, -6646617ll, 6437733ll, 230943ll}, {true, 233, 7422, 0}, {false, 0, 0, 0, 0}, 1501, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1403, 35, 146,
-     {true, 0, -6636581ll, 5295977ll, 160956ll}, {true, 1281, 49978, 2363}, {false, 0, 0, 0, 0}, 1503, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 143,
-     {true, 0, -6626896ll, 6473110ll, 221158ll}, {true, 815, 14002, 0}, {false, 0, 0, 0, 0}, 1505, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 6,
-     {true, 0, -6615292ll, 6406246ll, 228587ll}, {true, 696, 43231, 0}, {false, 0, 0, 0, 0}, 1507, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 25,
-     {true, 0, -6615010ll, 6482871ll, 221646ll}, {true, 67, 18553, 0}, {false, 0, 0, 0, 0}, 1509, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1398, 12, 161,
-     {true, 0, -6606832ll, 6448071ll, 228737ll}, {true, 492, 9808, 0}, {false, 0, 0, 0, 0}, 1511, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1402, 23, 68,
-     {true, 0, -6487959ll, 5236373ll, 127909ll}, {true, 64376, 37478, 63777}, {false, 0, 0, 0, 0}, 1513, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1466, 24, 136,
-     {true, 0, -6055793ll, 3719192ll, 122829ll}, {true, 65419, 28517, 0}, {false, 0, 0, 0, 0}, 1515, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1046, 67, 40,
-     {true, 0, -6040104ll, 4089239ll, 127485ll}, {true, 63565, 33509, 2000}, {false, 0, 0, 0, 0}, 1517, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1046, 66, 8,
-     {true, 0, -5993006ll, 4015791ll, 127396ll}, {true, 2611, 3412, 65158}, {false, 0, 0, 0, 0}, 1519, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1061, 5, 440,
-     {true, 0, -5968229ll, 4051313ll, 136284ll}, {true, 6431, 4973, 59501}, {false, 0, 0, 0, 0}, 1521, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1046, 66, 40,
-     {true, 0, -5914959ll, 4050470ll, 147239ll}, {true, 63287, 33328, 1420}, {false, 0, 0, 0, 0}, 1523, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 211,
-     {true, 0, -5848147ll, 4804188ll, 131021ll}, {true, 61765, 18361, 61744}, {false, 0, 0, 0, 0}, 1525, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 262,
-     {true, 0, -5844002ll, 4826822ll, 120903ll}, {true, 1764, 44878, 65293}, {false, 0, 0, 0, 0}, 1527, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 348,
-     {true, 0, -5841605ll, 4543195ll, 163728ll}, {true, 0, 54192, 0}, {false, 0, 0, 0, 0}, 1529, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 348,
-     {true, 0, -5841527ll, 4490349ll, 118107ll}, {true, 63163, 43094, 723}, {false, 0, 0, 0, 0}, 1531, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 143, 242,
-     {true, 0, -5840611ll, 4822875ll, 120763ll}, {true, 64960, 17400, 63996}, {false, 0, 0, 0, 0}, 1533, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 157,
-     {true, 0, -5834218ll, 4622270ll, 106411ll}, {true, 64562, 23045, 3192}, {false, 0, 0, 0, 0}, 1535, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 157,
-     {true, 0, -5832184ll, 4492021ll, 119053ll}, {true, 65416, 28759, 2661}, {false, 0, 0, 0, 0}, 1537, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 310,
-     {true, 0, -5831871ll, 4504539ll, 123167ll}, {true, 3611, 3558, 61650}, {false, 0, 0, 0, 0}, 1539, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 367,
-     {true, 0, -5830141ll, 4567813ll, 161613ll}, {true, 215, 45241, 0}, {false, 0, 0, 0, 0}, 1541, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 253,
-     {true, 0, -5828891ll, 4498874ll, 121432ll}, {true, 1721, 1368, 62432}, {false, 0, 0, 0, 0}, 1543, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 206, 138,
-     {true, 0, -5828520ll, 4493582ll, 119909ll}, {true, 1825, 62019, 62640}, {false, 0, 0, 0, 0}, 1545, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 157,
-     {true, 0, -5828079ll, 4576409ll, 164111ll}, {true, 0, 2392, 0}, {false, 0, 0, 0, 0}, 1547, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 204, 138,
-     {true, 0, -5827723ll, 4663518ll, 134061ll}, {true, 1691, 19408, 61031}, {false, 0, 0, 0, 0}, 1549, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 193,
-     {true, 0, -5825969ll, 4477135ll, 117051ll}, {true, 2453, 5968, 65184}, {false, 0, 0, 0, 0}, 1551, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 271,
-     {true, 0, -5823030ll, 4655172ll, 133420ll}, {true, 61858, 16792, 63822}, {false, 0, 0, 0, 0}, 1553, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 231,
-     {true, 0, -5821634ll, 4480616ll, 118223ll}, {true, 3173, 2980, 64250}, {false, 0, 0, 0, 0}, 1555, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 157,
-     {true, 0, -5819608ll, 4812364ll, 126612ll}, {true, 2038, 34428, 65141}, {false, 0, 0, 0, 0}, 1557, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 175,
-     {true, 0, -5819224ll, 4769137ll, 149034ll}, {true, 0, 62310, 0}, {false, 0, 0, 0, 0}, 1559, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 143, 183,
-     {true, 0, -5817112ll, 4815925ll, 126389ll}, {true, 0, 15790, 0}, {false, 0, 0, 0, 0}, 1561, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 193,
-     {true, 0, -5814826ll, 4741852ll, 151267ll}, {true, 0, 29501, 0}, {false, 0, 0, 0, 0}, 1563, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 387,
-     {true, 0, -5814704ll, 4583052ll, 152575ll}, {true, 0, 28897, 0}, {false, 0, 0, 0, 0}, 1565, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 253,
-     {true, 0, -5813121ll, 4584390ll, 151290ll}, {true, 64876, 21912, 62419}, {false, 0, 0, 0, 0}, 1567, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 367,
-     {true, 0, -5811429ll, 4509701ll, 126467ll}, {true, 3470, 17047, 1131}, {false, 0, 0, 0, 0}, 1569, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 409,
-     {true, 0, -5809246ll, 4546120ll, 158509ll}, {true, 64162, 55805, 4241}, {false, 0, 0, 0, 0}, 1571, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 211,
-     {true, 0, -5808551ll, 4492239ll, 123297ll}, {true, 1587, 16354, 2604}, {false, 0, 0, 0, 0}, 1573, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 193,
-     {true, 0, -5808279ll, 4516371ll, 129693ll}, {true, 5055, 17482, 1368}, {false, 0, 0, 0, 0}, 1575, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1047, 9, 1284,
-     {true, 0, -5807408ll, 4594291ll, 148287ll}, {true, 62757, 10121, 64827}, {false, 0, 0, 0, 0}, 1577, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 205, 138,
-     {true, 0, -5806966ll, 4803717ll, 127677ll}, {true, 3538, 49267, 64853}, {false, 0, 0, 0, 0}, 1579, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1047, 13, 1297,
-     {true, 0, -5806722ll, 4592575ll, 148536ll}, {true, 670, 56708, 2528}, {false, 0, 0, 0, 0}, 1581, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 291,
-     {true, 0, -5806005ll, 4555303ll, 157344ll}, {true, 2074, 60095, 2105}, {false, 0, 0, 0, 0}, 1583, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 211,
-     {true, 0, -5804418ll, 4522407ll, 133545ll}, {true, 64783, 61890, 896}, {false, 0, 0, 0, 0}, 1585, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 175,
-     {true, 0, -5803673ll, 4638320ll, 135510ll}, {true, 0, 39587, 0}, {false, 0, 0, 0, 0}, 1587, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 291,
-     {true, 0, -5803514ll, 4498114ll, 125250ll}, {true, 1802, 17166, 2225}, {false, 0, 0, 0, 0}, 1589, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 175,
-     {true, 0, -5800965ll, 4529580ll, 135076ll}, {true, 123, 7348, 62819}, {false, 0, 0, 0, 0}, 1591, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 328,
-     {true, 0, -5799429ll, 4496073ll, 126140ll}, {true, 108, 46511, 63150}, {false, 0, 0, 0, 0}, 1593, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 271,
-     {true, 0, -5799215ll, 4595363ll, 146997ll}, {true, 3890, 47904, 1125}, {false, 0, 0, 0, 0}, 1595, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 271,
-     {true, 0, -5793449ll, 4509797ll, 127993ll}, {true, 1152, 63339, 62949}, {false, 0, 0, 0, 0}, 1597, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 328,
-     {true, 0, -5789772ll, 4530936ll, 133211ll}, {true, 227, 15680, 0}, {false, 0, 0, 0, 0}, 1599, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 143, 202,
-     {true, 0, -5787709ll, 4877183ll, 108112ll}, {true, 0, 39387, 0}, {false, 0, 0, 0, 0}, 1601, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 143, 220,
-     {true, 0, -5786427ll, 4823618ll, 126388ll}, {true, 306, 64828, 0}, {false, 0, 0, 0, 0}, 1603, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 230,
-     {true, 0, -5784115ll, 4780854ll, 129086ll}, {true, 63853, 57419, 2338}, {false, 0, 0, 0, 0}, 1605, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 175,
-     {true, 0, -5778899ll, 4510116ll, 130416ll}, {true, 88, 45837, 0}, {false, 0, 0, 0, 0}, 1607, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 253,
-     {true, 0, -5777741ll, 4652537ll, 119891ll}, {true, 1582, 26067, 59236}, {false, 0, 0, 0, 0}, 1609, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 211,
-     {true, 0, -5777486ll, 4634013ll, 117552ll}, {true, 0, 51726, 0}, {false, 0, 0, 0, 0}, 1611, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 231,
-     {true, 0, -5776274ll, 4672261ll, 122216ll}, {true, 6558, 24063, 65511}, {false, 0, 0, 0, 0}, 1613, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 132, 193,
-     {true, 0, -5769880ll, 4685383ll, 121213ll}, {true, 65334, 7112, 62746}, {false, 0, 0, 0, 0}, 1615, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 427,
-     {true, 0, -5764046ll, 4531067ll, 131914ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1617, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 136,
-     {true, 0, -5759796ll, 4537517ll, 130533ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1619, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1048, 17, 513,
-     {true, 0, -5645928ll, 4523243ll, 134277ll}, {true, 0, 13106, 0}, {false, 0, 0, 0, 0}, 1621, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1048, 13, 609,
-     {true, 0, -5632383ll, 4520027ll, 134241ll}, {true, 0, 43719, 0}, {false, 0, 0, 0, 0}, 1623, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1048, 19, 791,
-     {true, 0, -5620489ll, 4500089ll, 129974ll}, {true, 57694, 45823, 1225}, {false, 0, 0, 0, 0}, 1625, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1048, 19, 811,
-     {true, 0, -5612829ll, 4505317ll, 130614ll}, {true, 62825, 57324, 59840}, {false, 0, 0, 0, 0}, 1627, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1048, 19, 835,
-     {true, 0, -5611877ll, 4501995ll, 128528ll}, {true, 59286, 52140, 1409}, {false, 0, 0, 0, 0}, 1629, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1084, 24, 997,
-     {true, 0, -5338572ll, 4184297ll, 111109ll}, {true, 64957, 52852, 501}, {false, 0, 0, 0, 0}, 1631, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 136, 765,
-     {true, 0, -5332256ll, 4558951ll, 106015ll}, {true, 0, 11866, 0}, {false, 0, 0, 0, 0}, 1633, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 140, 765,
-     {true, 0, -5329967ll, 4827020ll, 109825ll}, {true, 320, 26275, 0}, {false, 0, 0, 0, 0}, 1635, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 765,
-     {true, 0, -5322825ll, 4447154ll, 105294ll}, {true, 185, 63439, 64018}, {false, 0, 0, 0, 0}, 1637, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 553, 125, 791,
-     {true, 0, -5310481ll, 4567998ll, 105906ll}, {true, 0, 50292, 0}, {false, 0, 0, 0, 0}, 1639, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1084, 22, 997,
-     {true, 0, -5299714ll, 4417347ll, 114283ll}, {true, 0, 21303, 0}, {false, 0, 0, 0, 0}, 1641, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1084, 26, 998,
-     {true, 0, -5285405ll, 4601901ll, 108560ll}, {true, 275, 55133, 465}, {false, 0, 0, 0, 0}, 1643, 2},
-    {"gatherable", "AGatherableActor", "Default__GatherableActor", 102, 1084, 21, 997,
-     {true, 0, -5278532ll, 4353191ll, 106025ll}, {true, 63110, 29564, 2902}, {false, 0, 0, 0, 0}, 1645, 2},
+     {true, 0, -8141959ll, 5866969ll, 127398ll}, {true, 0, 19200, 0}, {true, 3, 4609434218613702656ll, 4609434218613702656ll, 4609434218613702656ll}, 764, 7},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 745, 10, 218,
+     {true, 0, -12149777ll, 5645630ll, 119723ll}, {true, 0, 51866, 0}, {false, 0, 0, 0, 0}, 771, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 95, 7586,
+     {true, 0, -11271742ll, 4910540ll, 122003ll}, {true, 204, 53271, 407}, {false, 0, 0, 0, 0}, 773, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 341, 6, 24,
+     {true, 0, -11066717ll, 5585824ll, 121889ll}, {true, 65197, 29257, 0}, {false, 0, 0, 0, 0}, 775, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 7, 3966,
+     {true, 0, -11052537ll, 4845077ll, 122608ll}, {true, 60717, 53271, 62523}, {false, 0, 0, 0, 0}, 777, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 295, 10, 626,
+     {true, 0, -11047554ll, 5534209ll, 132427ll}, {true, 456, 37323, 0}, {false, 0, 0, 0, 0}, 779, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 7, 3983,
+     {true, 0, -11047094ll, 4845492ll, 123663ll}, {true, 62470, 53271, 61634}, {false, 0, 0, 0, 0}, 781, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 17, 3983,
+     {true, 0, -11012930ll, 4712614ll, 122998ll}, {true, 425, 604, 999}, {false, 0, 0, 0, 0}, 783, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 17, 3966,
+     {true, 0, -11001400ll, 4724240ll, 120259ll}, {true, 5849, 58183, 2795}, {false, 0, 0, 0, 0}, 785, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 295, 6, 584,
+     {true, 0, -10988772ll, 5541177ll, 123999ll}, {true, 1217, 53271, 2765}, {false, 0, 0, 0, 0}, 787, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 295, 10, 607,
+     {true, 0, -10983655ll, 5546938ll, 122009ll}, {true, 813, 53271, 2201}, {false, 0, 0, 0, 0}, 789, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 887, 7, 2550,
+     {true, 0, -10953821ll, 4679911ll, 129972ll}, {true, 4569, 46518, 62980}, {false, 0, 0, 0, 0}, 791, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1121, 15, 3846,
+     {true, 0, -10934792ll, 4806678ll, 121757ll}, {true, 887, 27676, 0}, {false, 0, 0, 0, 0}, 793, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 754, 5, 595,
+     {true, 0, -10871268ll, 4770705ll, 123099ll}, {true, 0, 53271, 0}, {false, 0, 0, 0, 0}, 795, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 721, 245, 583,
+     {true, 0, -10803232ll, 5239830ll, 130619ll}, {true, 65125, 56171, 0}, {false, 0, 0, 0, 0}, 797, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 151, 47, 692,
+     {true, 0, -10777476ll, 5349325ll, 130468ll}, {true, 0, 38211, 0}, {false, 0, 0, 0, 0}, 799, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 766, 308, 2152,
+     {true, 0, -10744517ll, 5244001ll, 125708ll}, {true, 65342, 40526, 0}, {false, 0, 0, 0, 0}, 801, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 766, 171, 2039,
+     {true, 0, -10726511ll, 5237045ll, 125478ll}, {true, 64886, 62768, 0}, {false, 0, 0, 0, 0}, 803, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 318, 7, 257,
+     {true, 0, -10705809ll, 5236766ll, 125190ll}, {true, 826, 5106, 0}, {false, 0, 0, 0, 0}, 805, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 37, 122,
+     {true, 0, -10671242ll, 4883043ll, 123818ll}, {true, 629, 6814, 0}, {false, 0, 0, 0, 0}, 807, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 766, 295, 2142,
+     {true, 0, -10667418ll, 5319690ll, 122535ll}, {true, 0, 60708, 0}, {false, 0, 0, 0, 0}, 809, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 8, 205,
+     {true, 0, -10666481ll, 4591581ll, 129072ll}, {true, 64987, 9171, 107}, {false, 0, 0, 0, 0}, 811, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 37, 143,
+     {true, 0, -10665462ll, 4571796ll, 128798ll}, {true, 749, 16512, 63851}, {false, 0, 0, 0, 0}, 813, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 8, 241,
+     {true, 0, -10663121ll, 4591890ll, 128989ll}, {true, 65342, 17687, 65287}, {false, 0, 0, 0, 0}, 815, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 34, 122,
+     {true, 0, -10659190ll, 4573782ll, 128213ll}, {true, 64982, 1640, 65080}, {false, 0, 0, 0, 0}, 817, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 33, 165,
+     {true, 0, -10657832ll, 4591229ll, 128825ll}, {true, 65497, 12806, 65028}, {false, 0, 0, 0, 0}, 819, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 8, 187,
+     {true, 0, -10654268ll, 4576030ll, 128240ll}, {true, 581, 5391, 65030}, {false, 0, 0, 0, 0}, 821, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 34, 224,
+     {true, 0, -10653837ll, 4586593ll, 128710ll}, {true, 176, 4052, 65490}, {false, 0, 0, 0, 0}, 823, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 748, 21, 885,
+     {true, 0, -10652169ll, 4584607ll, 128735ll}, {true, 65024, 36964, 65437}, {false, 0, 0, 0, 0}, 825, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 963, 219, 1550,
+     {true, 0, -10651415ll, 5200962ll, 124367ll}, {true, 1617, 53271, 65436}, {false, 0, 0, 0, 0}, 827, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 963, 225, 1448,
+     {true, 0, -10649277ll, 5208235ll, 124164ll}, {true, 0, 17955, 0}, {false, 0, 0, 0, 0}, 829, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 33, 224,
+     {true, 0, -10647281ll, 4893414ll, 124125ll}, {true, 64833, 56110, 0}, {false, 0, 0, 0, 0}, 831, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 329, 15, 134,
+     {true, 0, -10643182ll, 5206345ll, 124184ll}, {true, 1015, 53271, 0}, {false, 0, 0, 0, 0}, 833, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 748, 21, 866,
+     {true, 0, -10642354ll, 4555832ll, 128732ll}, {true, 587, 15169, 284}, {false, 0, 0, 0, 0}, 835, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 329, 23, 151,
+     {true, 0, -10640471ll, 5207426ll, 124175ll}, {true, 0, 50629, 0}, {false, 0, 0, 0, 0}, 837, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 766, 143, 2300,
+     {true, 0, -10637617ll, 5359663ll, 122008ll}, {true, 0, 6993, 0}, {false, 0, 0, 0, 0}, 839, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 748, 21, 938,
+     {true, 0, -10635342ll, 4551774ll, 128761ll}, {true, 312, 17155, 0}, {false, 0, 0, 0, 0}, 841, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 8, 220,
+     {true, 0, -10631892ll, 4963311ll, 122269ll}, {true, 65291, 17872, 0}, {false, 0, 0, 0, 0}, 843, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 748, 24, 956,
+     {true, 0, -10629164ll, 4529645ll, 128912ll}, {true, 1227, 23525, 254}, {false, 0, 0, 0, 0}, 845, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 33, 143,
+     {true, 0, -10621380ll, 4888188ll, 124174ll}, {true, 265, 46263, 0}, {false, 0, 0, 0, 0}, 847, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 963, 78, 1315,
+     {true, 0, -10608381ll, 4920714ll, 124520ll}, {true, 3, 42953, 0}, {false, 0, 0, 0, 0}, 849, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 886, 28, 360,
+     {true, 0, -10606499ll, 4882447ll, 124304ll}, {true, 65533, 44518, 0}, {false, 0, 0, 0, 0}, 851, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 8, 165,
+     {true, 0, -10601004ll, 4972149ll, 127956ll}, {true, 65092, 45088, 0}, {false, 0, 0, 0, 0}, 853, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 766, 222, 2225,
+     {true, 0, -10599969ll, 5348431ll, 122918ll}, {true, 292, 18256, 0}, {false, 0, 0, 0, 0}, 855, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 34, 165,
+     {true, 0, -10599636ll, 4870292ll, 123069ll}, {true, 0, 30675, 0}, {false, 0, 0, 0, 0}, 857, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 34, 143,
+     {true, 0, -10598991ll, 4962339ll, 128055ll}, {true, 786, 40197, 0}, {false, 0, 0, 0, 0}, 859, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 766, 159, 2263,
+     {true, 0, -10588073ll, 5360963ll, 121153ll}, {true, 65528, 25463, 0}, {false, 0, 0, 0, 0}, 861, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 4, 5887,
+     {true, 0, -10586978ll, 4995326ll, 123218ll}, {true, 407, 53271, 64722}, {false, 0, 0, 0, 0}, 863, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 379, 34, 187,
+     {true, 0, -10581457ll, 4899480ll, 123645ll}, {true, 65457, 24433, 0}, {false, 0, 0, 0, 0}, 865, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 963, 277, 1513,
+     {true, 0, -10576578ll, 5186733ll, 119625ll}, {true, 0, 26124, 0}, {false, 0, 0, 0, 0}, 867, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 916, 13, 518,
+     {true, 0, -10568470ll, 5296466ll, 124818ll}, {true, 64728, 17539, 0}, {false, 0, 0, 0, 0}, 869, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 151, 23, 684,
+     {true, 0, -10560833ll, 4950555ll, 125835ll}, {true, 890, 23421, 0}, {false, 0, 0, 0, 0}, 871, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 916, 12, 573,
+     {true, 0, -10546727ll, 5276366ll, 124653ll}, {true, 65299, 33794, 0}, {false, 0, 0, 0, 0}, 873, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 151, 51, 644,
+     {true, 0, -10536024ll, 4974472ll, 125686ll}, {true, 64828, 21922, 0}, {false, 0, 0, 0, 0}, 875, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 916, 12, 518,
+     {true, 0, -10527494ll, 5303676ll, 123603ll}, {true, 759, 18949, 0}, {false, 0, 0, 0, 0}, 877, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 987, 11, 1414,
+     {true, 0, -10525979ll, 4653580ll, 132566ll}, {true, 20, 18734, 65449}, {false, 0, 0, 0, 0}, 879, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 602,
+     {true, 0, -10500962ll, 4771862ll, 125735ll}, {true, 64353, 53209, 61896}, {false, 0, 0, 0, 0}, 881, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 546,
+     {true, 0, -10500702ll, 4756661ll, 126408ll}, {true, 869, 8588, 4282}, {false, 0, 0, 0, 0}, 883, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 583,
+     {true, 0, -10496712ll, 4749097ll, 129787ll}, {true, 63806, 14464, 3817}, {false, 0, 0, 0, 0}, 885, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1428, 11, 202,
+     {true, 0, -10496545ll, 4721510ll, 135365ll}, {true, 1789, 44497, 62887}, {false, 0, 0, 0, 0}, 887, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1428, 11, 244,
+     {true, 0, -10496147ll, 4712897ll, 137021ll}, {true, 1113, 58838, 224}, {false, 0, 0, 0, 0}, 889, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 633,
+     {true, 0, -10489114ll, 4741286ll, 133845ll}, {true, 0, 24831, 0}, {false, 0, 0, 0, 0}, 891, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 17, 3666,
+     {true, 0, -10477354ll, 4699656ll, 140085ll}, {true, 63139, 34677, 64744}, {false, 0, 0, 0, 0}, 893, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 513, 17, 3691,
+     {true, 0, -10475643ll, 4730099ll, 138151ll}, {true, 61818, 34110, 62727}, {false, 0, 0, 0, 0}, 895, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 12, 511,
+     {true, 0, -10461825ll, 4713229ll, 144605ll}, {true, 65118, 47045, 62476}, {false, 0, 0, 0, 0}, 897, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 529,
+     {true, 0, -10458339ll, 4748800ll, 141778ll}, {true, 63147, 8856, 4836}, {false, 0, 0, 0, 0}, 899, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 617,
+     {true, 0, -10453059ll, 4806283ll, 126737ll}, {true, 3150, 47561, 62753}, {false, 0, 0, 0, 0}, 901, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 566,
+     {true, 0, -10451932ll, 4732273ll, 147837ll}, {true, 0, 52090, 0}, {false, 0, 0, 0, 0}, 903, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 251, 6, 511,
+     {true, 0, -10450209ll, 4820084ll, 124498ll}, {true, 109, 49292, 64116}, {false, 0, 0, 0, 0}, 905, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 24, 184,
+     {true, 0, -10414533ll, 4561559ll, 129560ll}, {true, 64666, 57694, 63876}, {false, 0, 0, 0, 0}, 907, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1431, 5, 78,
+     {true, 0, -10382116ll, 5561712ll, 127827ll}, {true, 64944, 22659, 500}, {false, 0, 0, 0, 0}, 909, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 512, 49, 1511,
+     {true, 0, -10358844ll, 4951013ll, 127764ll}, {true, 706, 5569, 231}, {false, 0, 0, 0, 0}, 911, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 512, 52, 1493,
+     {true, 0, -10357723ll, 4929630ll, 128339ll}, {true, 0, 51134, 0}, {false, 0, 0, 0, 0}, 913, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 24, 311,
+     {true, 0, -10354034ll, 4574341ll, 141561ll}, {true, 3176, 4345, 63645}, {false, 0, 0, 0, 0}, 915, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1193, 14, 431,
+     {true, 0, -10346545ll, 4791433ll, 151174ll}, {true, 1436, 42677, 64569}, {false, 0, 0, 0, 0}, 917, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1427, 9, 67,
+     {true, 0, -10343821ll, 4988548ll, 126911ll}, {true, 296, 26839, 538}, {false, 0, 0, 0, 0}, 919, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 14, 292,
+     {true, 0, -10342913ll, 4583317ll, 145948ll}, {true, 63814, 37840, 1123}, {false, 0, 0, 0, 0}, 921, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 24, 329,
+     {true, 0, -10331361ll, 4580818ll, 148264ll}, {true, 4245, 3581, 63590}, {false, 0, 0, 0, 0}, 923, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 14, 261,
+     {true, 0, -10328931ll, 4582207ll, 149308ll}, {true, 4491, 5346, 64264}, {false, 0, 0, 0, 0}, 925, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 541, 7, 414,
+     {true, 0, -10305137ll, 5397823ll, 128479ll}, {true, 399, 10879, 602}, {false, 0, 0, 0, 0}, 927, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 25, 248,
+     {true, 0, -10304240ll, 4558064ll, 145582ll}, {true, 64352, 31634, 3100}, {false, 0, 0, 0, 0}, 929, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 28, 210,
+     {true, 0, -10300542ll, 4528721ll, 136948ll}, {true, 4860, 12466, 65335}, {false, 0, 0, 0, 0}, 931, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 16, 409,
+     {true, 0, -10299347ll, 5298121ll, 119287ll}, {true, 239, 19696, 1164}, {false, 0, 0, 0, 0}, 933, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 15, 387,
+     {true, 0, -10296191ll, 5292882ll, 119305ll}, {true, 64797, 47399, 64724}, {false, 0, 0, 0, 0}, 935, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 15, 426,
+     {true, 0, -10290444ll, 5287808ll, 119578ll}, {true, 32, 54155, 64532}, {false, 0, 0, 0, 0}, 937, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 25, 184,
+     {true, 0, -10283588ll, 4529744ll, 138694ll}, {true, 3926, 18547, 1194}, {false, 0, 0, 0, 0}, 939, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1431, 5, 763,
+     {true, 0, -10278892ll, 5698206ll, 123378ll}, {true, 0, 39479, 0}, {false, 0, 0, 0, 0}, 941, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 14, 307,
+     {true, 0, -10258569ll, 4556034ll, 148230ll}, {true, 63151, 38445, 2198}, {false, 0, 0, 0, 0}, 943, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 446,
+     {true, 0, -10256436ll, 5265705ll, 121866ll}, {true, 845, 13706, 886}, {false, 0, 0, 0, 0}, 945, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 25, 292,
+     {true, 0, -10254588ll, 4563285ll, 151013ll}, {true, 5081, 17555, 1106}, {false, 0, 0, 0, 0}, 947, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 14, 342,
+     {true, 0, -10227768ll, 4531677ll, 142901ll}, {true, 2888, 12678, 64958}, {false, 0, 0, 0, 0}, 949, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 96,
+     {true, 0, -10227254ll, 4425700ll, 128043ll}, {true, 730, 5560, 206}, {false, 0, 0, 0, 0}, 951, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 177,
+     {true, 0, -10225016ll, 4422916ll, 128152ll}, {true, 66, 36286, 65072}, {false, 0, 0, 0, 0}, 953, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 142,
+     {true, 0, -10223706ll, 4428470ll, 128112ll}, {true, 1223, 29921, 69}, {false, 0, 0, 0, 0}, 955, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 119,
+     {true, 0, -10221202ll, 4445350ll, 128575ll}, {true, 1036, 56641, 65112}, {false, 0, 0, 0, 0}, 957, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 191,
+     {true, 0, -10216761ll, 4437509ll, 128319ll}, {true, 1682, 62057, 65256}, {false, 0, 0, 0, 0}, 959, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 550, 8, 5,
+     {true, 0, -10216592ll, 5449349ll, 129504ll}, {true, 1496, 36001, 363}, {false, 0, 0, 0, 0}, 961, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 223,
+     {true, 0, -10215391ll, 4444234ll, 128556ll}, {true, 535, 46993, 75}, {false, 0, 0, 0, 0}, 963, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 387,
+     {true, 0, -10207571ll, 5217881ll, 120340ll}, {true, 64613, 55285, 65362}, {false, 0, 0, 0, 0}, 965, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 17, 409,
+     {true, 0, -10203162ll, 5234201ll, 121007ll}, {true, 135, 12533, 64399}, {false, 0, 0, 0, 0}, 967, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 162,
+     {true, 0, -10200026ll, 4483302ll, 132081ll}, {true, 2637, 20082, 709}, {false, 0, 0, 0, 0}, 969, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 233, 6, 390,
+     {true, 0, -10197628ll, 4928678ll, 129944ll}, {true, 61847, 9733, 5804}, {false, 0, 0, 0, 0}, 971, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 25, 210,
+     {true, 0, -10195541ll, 4573123ll, 158458ll}, {true, 64276, 39626, 2601}, {false, 0, 0, 0, 0}, 973, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 227, 6, 580,
+     {true, 0, -10193636ll, 4952868ll, 128919ll}, {true, 1832, 20145, 2925}, {false, 0, 0, 0, 0}, 975, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 233, 6, 347,
+     {true, 0, -10191715ll, 4914675ll, 136082ll}, {true, 64928, 4421, 1340}, {false, 0, 0, 0, 0}, 977, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 541, 7, 78,
+     {true, 0, -10190686ll, 5292506ll, 125640ll}, {true, 0, 29761, 0}, {false, 0, 0, 0, 0}, 979, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 389, 25, 230,
+     {true, 0, -10186137ll, 4597358ll, 166044ll}, {true, 4250, 18457, 888}, {false, 0, 0, 0, 0}, 981, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 370, 12, 238,
+     {true, 0, -10182245ll, 4452528ll, 129875ll}, {true, 64579, 39337, 65293}, {false, 0, 0, 0, 0}, 983, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1438, 10, 774,
+     {true, 0, -10178608ll, 4704975ll, 186033ll}, {true, 5392, 9471, 62520}, {false, 0, 0, 0, 0}, 985, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 132,
+     {true, 0, -10176695ll, 4746344ll, 183707ll}, {true, 0, 34499, 0}, {false, 0, 0, 0, 0}, 987, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 39, 97,
+     {true, 0, -10176602ll, 4877740ll, 148553ll}, {true, 65061, 35612, 63110}, {false, 0, 0, 0, 0}, 989, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1438, 6, 47,
+     {true, 0, -10175178ll, 4704917ll, 186155ll}, {true, 3641, 25927, 4363}, {false, 0, 0, 0, 0}, 991, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 96,
+     {true, 0, -10174787ll, 4702627ll, 184846ll}, {true, 3970, 24545, 3820}, {false, 0, 0, 0, 0}, 993, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 166,
+     {true, 0, -10171865ll, 4856722ll, 151389ll}, {true, 64098, 38249, 61988}, {false, 0, 0, 0, 0}, 995, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 34, 167,
+     {true, 0, -10170112ll, 4559009ll, 151775ll}, {true, 64073, 59917, 61827}, {false, 0, 0, 0, 0}, 997, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 396, 19, 29,
+     {true, 0, -10167834ll, 4881128ll, 150226ll}, {true, 4698, 60199, 65387}, {false, 0, 0, 0, 0}, 999, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 149,
+     {true, 0, -10166547ll, 4576761ll, 160120ll}, {true, 0, 51630, 0}, {false, 0, 0, 0, 0}, 1001, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 149,
+     {true, 0, -10164695ll, 4679104ll, 186551ll}, {true, 6879, 60295, 2646}, {false, 0, 0, 0, 0}, 1003, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 184,
+     {true, 0, -10162320ll, 4812745ll, 174189ll}, {true, 61147, 21829, 64884}, {false, 0, 0, 0, 0}, 1005, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1439, 12, 49,
+     {true, 0, -10154406ll, 4746519ll, 183150ll}, {true, 65162, 31726, 64890}, {false, 0, 0, 0, 0}, 1007, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 388, 37, 108,
+     {true, 0, -10150400ll, 4954768ll, 146703ll}, {true, 292, 51632, 0}, {false, 0, 0, 0, 0}, 1009, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 882, 25, 131,
+     {true, 0, -10149798ll, 5457402ll, 127234ll}, {true, 65371, 38656, 65170}, {false, 0, 0, 0, 0}, 1011, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 255,
+     {true, 0, -10148467ll, 4876190ll, 155084ll}, {true, 4695, 64127, 2370}, {false, 0, 0, 0, 0}, 1013, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 220,
+     {true, 0, -10147456ll, 4885396ll, 153199ll}, {true, 1482, 8037, 3666}, {false, 0, 0, 0, 0}, 1015, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 132,
+     {true, 0, -10146989ll, 4529920ll, 142462ll}, {true, 2736, 16496, 1542}, {false, 0, 0, 0, 0}, 1017, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 574,
+     {true, 0, -10145744ll, 5292666ll, 123363ll}, {true, 437, 38587, 140}, {false, 0, 0, 0, 0}, 1019, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 426,
+     {true, 0, -10141703ll, 5300717ll, 123731ll}, {true, 1814, 17044, 31}, {false, 0, 0, 0, 0}, 1021, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 238,
+     {true, 0, -10141562ll, 4814098ll, 182286ll}, {true, 1056, 47644, 64395}, {false, 0, 0, 0, 0}, 1023, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 539, 14, 70,
+     {true, 0, -10141255ll, 5156006ll, 121919ll}, {true, 3387, 5849, 613}, {false, 0, 0, 0, 0}, 1025, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 37, 150,
+     {true, 0, -10138235ll, 4921879ll, 157934ll}, {true, 2818, 63314, 62180}, {false, 0, 0, 0, 0}, 1027, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 590,
+     {true, 0, -10137166ll, 5289718ll, 123434ll}, {true, 2122, 56149, 64865}, {false, 0, 0, 0, 0}, 1029, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 34, 150,
+     {true, 0, -10136707ll, 4809574ll, 182585ll}, {true, 0, 28395, 0}, {false, 0, 0, 0, 0}, 1031, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 523,
+     {true, 0, -10136441ll, 5285962ll, 123777ll}, {true, 915, 18380, 1132}, {false, 0, 0, 0, 0}, 1033, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 272,
+     {true, 0, -10135545ll, 4978884ll, 154683ll}, {true, 65354, 17262, 1812}, {false, 0, 0, 0, 0}, 1035, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 40, 97,
+     {true, 0, -10134369ll, 4969401ll, 155245ll}, {true, 3373, 5649, 514}, {false, 0, 0, 0, 0}, 1037, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 238,
+     {true, 0, -10133260ll, 4919365ll, 158326ll}, {true, 3519, 9165, 659}, {false, 0, 0, 0, 0}, 1039, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 184,
+     {true, 0, -10132826ll, 4530323ll, 144687ll}, {true, 3289, 11343, 400}, {false, 0, 0, 0, 0}, 1041, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 882, 25, 234,
+     {true, 0, -10132247ll, 5459437ll, 126944ll}, {true, 2860, 45446, 244}, {false, 0, 0, 0, 0}, 1043, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 39, 115,
+     {true, 0, -10129072ll, 4611325ll, 180227ll}, {true, 59753, 42719, 845}, {false, 0, 0, 0, 0}, 1045, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 34, 185,
+     {true, 0, -10129049ll, 4976420ll, 156175ll}, {true, 3287, 831, 1482}, {false, 0, 0, 0, 0}, 1047, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 17, 387,
+     {true, 0, -10127668ll, 5297094ll, 123843ll}, {true, 1754, 61645, 65360}, {false, 0, 0, 0, 0}, 1049, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 220,
+     {true, 0, -10126906ll, 4967632ll, 156651ll}, {true, 62702, 36185, 13}, {false, 0, 0, 0, 0}, 1051, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 34, 133,
+     {true, 0, -10126347ll, 4964360ll, 156524ll}, {true, 2476, 10488, 1898}, {false, 0, 0, 0, 0}, 1053, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 15, 409,
+     {true, 0, -10124632ll, 5276973ll, 125390ll}, {true, 931, 56339, 65369}, {false, 0, 0, 0, 0}, 1055, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 149,
+     {true, 0, -10122625ll, 4719556ll, 182083ll}, {true, 0, 64728, 0}, {false, 0, 0, 0, 0}, 1057, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 488,
+     {true, 0, -10120175ll, 5277105ll, 125576ll}, {true, 64788, 23338, 65229}, {false, 0, 0, 0, 0}, 1059, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 396, 19, 46,
+     {true, 0, -10118345ll, 4852457ll, 172165ll}, {true, 1696, 61750, 1572}, {false, 0, 0, 0, 0}, 1061, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 166,
+     {true, 0, -10117747ll, 4693293ll, 184023ll}, {true, 3013, 42899, 65482}, {false, 0, 0, 0, 0}, 1063, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 202,
+     {true, 0, -10114804ll, 4993573ll, 150030ll}, {true, 2617, 9933, 3857}, {false, 0, 0, 0, 0}, 1065, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 656,
+     {true, 0, -10113363ll, 5228047ll, 122182ll}, {true, 0, 39991, 0}, {false, 0, 0, 0, 0}, 1067, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 255,
+     {true, 0, -10105559ll, 4640371ll, 187103ll}, {true, 460, 46310, 1442}, {false, 0, 0, 0, 0}, 1069, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 272,
+     {true, 0, -10099884ll, 4859810ll, 172447ll}, {true, 0, 19493, 0}, {false, 0, 0, 0, 0}, 1071, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 238,
+     {true, 0, -10097502ll, 4647861ll, 185934ll}, {true, 3566, 32566, 64783}, {false, 0, 0, 0, 0}, 1073, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 396, 23, 29,
+     {true, 0, -10096128ll, 4671999ll, 184363ll}, {true, 677, 28652, 64852}, {false, 0, 0, 0, 0}, 1075, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 37, 96,
+     {true, 0, -10095864ll, 4625592ll, 183851ll}, {true, 64661, 43787, 3944}, {false, 0, 0, 0, 0}, 1077, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 132,
+     {true, 0, -10093824ll, 4661722ll, 184391ll}, {true, 1563, 46084, 1195}, {false, 0, 0, 0, 0}, 1079, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 33, 272,
+     {true, 0, -10090402ll, 4637246ll, 184154ll}, {true, 1156, 7303, 62200}, {false, 0, 0, 0, 0}, 1081, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 34, 202,
+     {true, 0, -10089132ll, 4891062ll, 176492ll}, {true, 3458, 59455, 63345}, {false, 0, 0, 0, 0}, 1083, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 255,
+     {true, 0, -10088841ll, 4911698ll, 173863ll}, {true, 2717, 8317, 4059}, {false, 0, 0, 0, 0}, 1085, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 184,
+     {true, 0, -10088372ll, 4646785ll, 184646ll}, {true, 64957, 56301, 1280}, {false, 0, 0, 0, 0}, 1087, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 202,
+     {true, 0, -10088193ll, 4626221ll, 181064ll}, {true, 4206, 26112, 508}, {false, 0, 0, 0, 0}, 1089, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 40, 115,
+     {true, 0, -10087821ll, 4744188ll, 182585ll}, {true, 0, 44267, 0}, {false, 0, 0, 0, 0}, 1091, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 23, 202,
+     {true, 0, -10086569ll, 4555065ll, 174796ll}, {true, 64350, 56129, 61059}, {false, 0, 0, 0, 0}, 1093, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 17, 588,
+     {true, 0, -10086311ll, 5486573ll, 126945ll}, {true, 65533, 56855, 65478}, {false, 0, 0, 0, 0}, 1095, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 16, 584,
+     {true, 0, -10085762ll, 5488779ll, 126945ll}, {true, 40, 16641, 42}, {false, 0, 0, 0, 0}, 1097, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 396, 19, 9,
+     {true, 0, -10085319ll, 4899459ll, 177484ll}, {true, 784, 45985, 64385}, {false, 0, 0, 0, 0}, 1099, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 28, 166,
+     {true, 0, -10083477ll, 4909046ll, 176431ll}, {true, 64047, 17116, 3360}, {false, 0, 0, 0, 0}, 1101, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 34, 114,
+     {true, 0, -10081952ll, 4554469ll, 175008ll}, {true, 1665, 30447, 3967}, {false, 0, 0, 0, 0}, 1103, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 380, 37, 114,
+     {true, 0, -10081375ll, 4880685ll, 176916ll}, {true, 2156, 14572, 1485}, {false, 0, 0, 0, 0}, 1105, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 607,
+     {true, 0, -10078693ll, 5285925ll, 129198ll}, {true, 65365, 16867, 2152}, {false, 0, 0, 0, 0}, 1107, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 17, 502,
+     {true, 0, -10075216ll, 5494463ll, 126924ll}, {true, 65445, 61709, 23}, {false, 0, 0, 0, 0}, 1109, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 16, 520,
+     {true, 0, -10074572ll, 5491562ll, 126915ll}, {true, 49, 43950, 176}, {false, 0, 0, 0, 0}, 1111, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1432, 4, 254,
+     {true, 0, -10073556ll, 5396784ll, 130372ll}, {true, 0, 7910, 0}, {false, 0, 0, 0, 0}, 1113, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 16, 557,
+     {true, 0, -10072481ll, 5495077ll, 126874ll}, {true, 65360, 10784, 65403}, {false, 0, 0, 0, 0}, 1115, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 16, 640,
+     {true, 0, -10070527ll, 5486536ll, 126794ll}, {true, 52, 16833, 65272}, {false, 0, 0, 0, 0}, 1117, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 16, 659,
+     {true, 0, -10067881ll, 5485424ll, 126707ll}, {true, 65514, 14158, 65242}, {false, 0, 0, 0, 0}, 1119, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 639,
+     {true, 0, -10063359ll, 5291277ll, 132685ll}, {true, 64047, 37214, 64460}, {false, 0, 0, 0, 0}, 1121, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 505,
+     {true, 0, -10062351ll, 5255592ll, 136750ll}, {true, 63809, 10398, 2787}, {false, 0, 0, 0, 0}, 1123, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 541,
+     {true, 0, -10061326ll, 5295256ll, 132931ll}, {true, 1086, 8168, 1103}, {false, 0, 0, 0, 0}, 1125, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 623,
+     {true, 0, -10060352ll, 5299334ll, 133091ll}, {true, 64626, 24490, 1046}, {false, 0, 0, 0, 0}, 1127, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 15, 446,
+     {true, 0, -10060324ll, 5252159ll, 138004ll}, {true, 64856, 5574, 2880}, {false, 0, 0, 0, 0}, 1129, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 469,
+     {true, 0, -10059103ll, 5293391ll, 133258ll}, {true, 1328, 60782, 65222}, {false, 0, 0, 0, 0}, 1131, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 557,
+     {true, 0, -10058609ll, 5255459ll, 137142ll}, {true, 62796, 14101, 1403}, {false, 0, 0, 0, 0}, 1133, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 881, 4, 241,
+     {true, 0, -10046555ll, 5499659ll, 126498ll}, {true, 483, 48278, 110}, {false, 0, 0, 0, 0}, 1135, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 16, 387,
+     {true, 0, -10035167ll, 5222671ll, 146885ll}, {true, 509, 10702, 838}, {false, 0, 0, 0, 0}, 1137, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 236, 11, 409,
+     {true, 0, -10033376ll, 5245219ll, 143420ll}, {true, 1755, 1444, 2276}, {false, 0, 0, 0, 0}, 1139, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1432, 16, 68,
+     {true, 0, -10027125ll, 5343555ll, 138994ll}, {true, 224, 18932, 2904}, {false, 0, 0, 0, 0}, 1141, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1430, 13, 720,
+     {true, 0, -9918501ll, 5035788ll, 147143ll}, {true, 1703, 41188, 612}, {false, 0, 0, 0, 0}, 1143, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1430, 5, 51,
+     {true, 0, -9916830ll, 5031249ll, 147161ll}, {true, 65234, 59696, 1094}, {false, 0, 0, 0, 0}, 1145, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 762, 13, 322,
+     {true, 0, -9815503ll, 5548056ll, 113137ll}, {true, 64829, 40599, 62743}, {false, 0, 0, 0, 0}, 1147, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1429, 5, 649,
+     {true, 0, -9773334ll, 5006774ll, 122154ll}, {true, 2169, 42235, 3251}, {false, 0, 0, 0, 0}, 1149, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 772, 4, 113,
+     {true, 0, -9737492ll, 5614279ll, 105628ll}, {true, 64679, 31284, 64584}, {false, 0, 0, 0, 0}, 1151, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 772, 4, 267,
+     {true, 0, -9716705ll, 5620466ll, 107774ll}, {true, 65371, 35736, 61758}, {false, 0, 0, 0, 0}, 1153, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1435, 10, 937,
+     {true, 0, -9713693ll, 3919664ll, 161233ll}, {true, 65481, 21384, 1227}, {false, 0, 0, 0, 0}, 1155, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1437, 8, 46,
+     {true, 0, -9698375ll, 4080233ll, 152866ll}, {true, 0, 40831, 0}, {false, 0, 0, 0, 0}, 1157, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 761, 6, 1317,
+     {true, 0, -9669633ll, 5748357ll, 122953ll}, {true, 535, 50438, 61106}, {false, 0, 0, 0, 0}, 1159, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1437, 10, 358,
+     {true, 0, -9667994ll, 4041722ll, 153241ll}, {true, 63051, 58652, 63727}, {false, 0, 0, 0, 0}, 1161, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1436, 23, 907,
+     {true, 0, -9543332ll, 3777906ll, 149505ll}, {true, 64469, 24132, 64561}, {false, 0, 0, 0, 0}, 1163, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1436, 19, 50,
+     {true, 0, -9542328ll, 3776867ll, 149617ll}, {true, 0, 28889, 0}, {false, 0, 0, 0, 0}, 1165, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1248,
+     {true, 0, -8980667ll, 4085603ll, 129155ll}, {true, 1149, 11487, 65202}, {false, 0, 0, 0, 0}, 1167, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1267,
+     {true, 0, -8956354ll, 4076782ll, 129733ll}, {true, 0, 50675, 0}, {false, 0, 0, 0, 0}, 1169, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 1227,
+     {true, 0, -8942134ll, 3801610ll, 119528ll}, {true, 1905, 45452, 65410}, {false, 0, 0, 0, 0}, 1171, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 4808,
+     {true, 0, -8941890ll, 3968896ll, 119632ll}, {true, 471, 59976, 58881}, {false, 0, 0, 0, 0}, 1173, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1267,
+     {true, 0, -8941009ll, 3983933ll, 126872ll}, {true, 62109, 39911, 1897}, {false, 0, 0, 0, 0}, 1175, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 1208,
+     {true, 0, -8940565ll, 3804386ll, 119416ll}, {true, 1259, 21806, 65312}, {false, 0, 0, 0, 0}, 1177, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1306,
+     {true, 0, -8929587ll, 3982750ll, 127439ll}, {true, 64873, 52858, 64773}, {false, 0, 0, 0, 0}, 1179, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1248,
+     {true, 0, -8916239ll, 3953896ll, 116426ll}, {true, 65334, 1094, 64045}, {false, 0, 0, 0, 0}, 1181, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1227,
+     {true, 0, -8900079ll, 4001180ll, 130897ll}, {true, 64929, 34590, 2499}, {false, 0, 0, 0, 0}, 1183, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1227,
+     {true, 0, -8891388ll, 3867257ll, 119328ll}, {true, 2560, 38380, 65087}, {false, 0, 0, 0, 0}, 1185, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 748,
+     {true, 0, -8883332ll, 3889523ll, 119266ll}, {true, 1189, 45883, 64656}, {false, 0, 0, 0, 0}, 1187, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 766,
+     {true, 0, -8882855ll, 3852703ll, 118621ll}, {true, 65483, 40511, 2235}, {false, 0, 0, 0, 0}, 1189, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 787,
+     {true, 0, -8879742ll, 3891433ll, 119608ll}, {true, 782, 18099, 2500}, {false, 0, 0, 0, 0}, 1191, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 692,
+     {true, 0, -8878371ll, 4010423ll, 128861ll}, {true, 0, 3344, 0}, {false, 0, 0, 0, 0}, 1193, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 811,
+     {true, 0, -8875723ll, 3894515ll, 120041ll}, {true, 1294, 21763, 0}, {false, 0, 0, 0, 0}, 1195, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 692,
+     {true, 0, -8869010ll, 3884100ll, 121220ll}, {true, 1559, 50432, 203}, {false, 0, 0, 0, 0}, 1197, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 711,
+     {true, 0, -8866961ll, 4188931ll, 126483ll}, {true, 0, 12427, 0}, {false, 0, 0, 0, 0}, 1199, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 830,
+     {true, 0, -8856631ll, 3872974ll, 118262ll}, {true, 0, 54558, 0}, {false, 0, 0, 0, 0}, 1201, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 729,
+     {true, 0, -8847882ll, 4021755ll, 127783ll}, {true, 1911, 35930, 1690}, {false, 0, 0, 0, 0}, 1203, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 692,
+     {true, 0, -8847353ll, 4052717ll, 128473ll}, {true, 0, 9262, 0}, {false, 0, 0, 0, 0}, 1205, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 787,
+     {true, 0, -8846003ll, 4213896ll, 125575ll}, {true, 142, 28335, 65157}, {false, 0, 0, 0, 0}, 1207, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 711,
+     {true, 0, -8845179ll, 3908680ll, 118838ll}, {true, 1894, 29222, 65529}, {false, 0, 0, 0, 0}, 1209, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 711,
+     {true, 0, -8844975ll, 4021651ll, 127423ll}, {true, 20, 43414, 1544}, {false, 0, 0, 0, 0}, 1211, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 729,
+     {true, 0, -8832412ll, 4211761ll, 125265ll}, {true, 279, 6419, 761}, {false, 0, 0, 0, 0}, 1213, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 692,
+     {true, 0, -8821089ll, 4141849ll, 126931ll}, {true, 0, 52835, 0}, {false, 0, 0, 0, 0}, 1215, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 766,
+     {true, 0, -8814552ll, 4159560ll, 126393ll}, {true, 0, 27941, 0}, {false, 0, 0, 0, 0}, 1217, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 748,
+     {true, 0, -8803159ll, 4091010ll, 126363ll}, {true, 0, 58136, 0}, {false, 0, 0, 0, 0}, 1219, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 748,
+     {true, 0, -8796120ll, 4182083ll, 124457ll}, {true, 394, 35153, 0}, {false, 0, 0, 0, 0}, 1221, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 8, 2855,
+     {true, 0, -8775820ll, 4124697ll, 125166ll}, {true, 0, 32569, 0}, {false, 0, 0, 0, 0}, 1223, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 4268,
+     {true, 0, -8770231ll, 3763164ll, 115672ll}, {true, 0, 44447, 0}, {false, 0, 0, 0, 0}, 1225, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 4343,
+     {true, 0, -8769917ll, 3759338ll, 116139ll}, {true, 0, 29484, 0}, {false, 0, 0, 0, 0}, 1227, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 1449,
+     {true, 0, -8763884ll, 4102164ll, 123558ll}, {true, 172, 21491, 0}, {false, 0, 0, 0, 0}, 1229, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 4049,
+     {true, 0, -8758723ll, 4309976ll, 125093ll}, {true, 412, 40903, 0}, {false, 0, 0, 0, 0}, 1231, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 2873,
+     {true, 0, -8754486ll, 4171517ll, 122112ll}, {true, 376, 25023, 0}, {false, 0, 0, 0, 0}, 1233, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 978,
+     {true, 0, -8734102ll, 3672282ll, 126877ll}, {true, 0, 12358, 0}, {false, 0, 0, 0, 0}, 1235, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 4033,
+     {true, 0, -8724950ll, 4295039ll, 125292ll}, {true, 12, 3900, 0}, {false, 0, 0, 0, 0}, 1237, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 3961,
+     {true, 0, -8722520ll, 4274666ll, 125164ll}, {true, 0, 128, 0}, {false, 0, 0, 0, 0}, 1239, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 4069,
+     {true, 0, -8705475ll, 4303602ll, 125028ll}, {true, 0, 8982, 0}, {false, 0, 0, 0, 0}, 1241, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1397,
+     {true, 0, -8704441ll, 3591575ll, 124624ll}, {true, 0, 9980, 0}, {false, 0, 0, 0, 0}, 1243, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 4285,
+     {true, 0, -8702992ll, 3808871ll, 116341ll}, {true, 0, 40314, 0}, {false, 0, 0, 0, 0}, 1245, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 3979,
+     {true, 0, -8701937ll, 4312409ll, 124202ll}, {true, 428, 13740, 0}, {false, 0, 0, 0, 0}, 1247, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 4015,
+     {true, 0, -8701935ll, 4266794ll, 123790ll}, {true, 0, 65424, 0}, {false, 0, 0, 0, 0}, 1249, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1414,
+     {true, 0, -8686320ll, 3586031ll, 123518ll}, {true, 0, 33176, 0}, {false, 0, 0, 0, 0}, 1251, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 3998,
+     {true, 0, -8684184ll, 4295870ll, 123262ll}, {true, 0, 39243, 0}, {false, 0, 0, 0, 0}, 1253, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1015,
+     {true, 0, -8632654ll, 3688510ll, 122631ll}, {true, 323, 5810, 0}, {false, 0, 0, 0, 0}, 1255, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 997,
+     {true, 0, -8617106ll, 3618463ll, 122902ll}, {true, 0, 57556, 0}, {false, 0, 0, 0, 0}, 1257, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1024,
+     {true, 0, -8555318ll, 3615896ll, 128316ll}, {true, 0, 44015, 0}, {false, 0, 0, 0, 0}, 1259, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 977,
+     {true, 0, -8546061ll, 3659790ll, 128677ll}, {true, 0, 21759, 0}, {false, 0, 0, 0, 0}, 1261, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1444,
+     {true, 0, -8544886ll, 3549155ll, 123123ll}, {true, 7, 12232, 0}, {false, 0, 0, 0, 0}, 1263, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1042,
+     {true, 0, -8539090ll, 3705170ll, 126943ll}, {true, 0, 9123, 0}, {false, 0, 0, 0, 0}, 1265, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1116,
+     {true, 0, -8513678ll, 3644569ll, 131234ll}, {true, 151, 38189, 0}, {false, 0, 0, 0, 0}, 1267, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 1006,
+     {true, 0, -8502632ll, 3627672ll, 131234ll}, {true, 74, 16447, 0}, {false, 0, 0, 0, 0}, 1269, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 7, 1426,
+     {true, 0, -8498855ll, 3539450ll, 122992ll}, {true, 0, 3970, 0}, {false, 0, 0, 0, 0}, 1271, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 51,
+     {true, 0, -8464066ll, 5941849ll, 130203ll}, {true, 0, 2494, 0}, {false, 0, 0, 0, 0}, 1273, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 50, 56,
+     {true, 0, -8463582ll, 6117462ll, 213159ll}, {true, 0, 52744, 0}, {false, 0, 0, 0, 0}, 1275, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 50, 3,
+     {true, 0, -8447503ll, 5871037ll, 120746ll}, {true, 305, 34158, 64172}, {false, 0, 0, 0, 0}, 1277, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 3,
+     {true, 0, -8444551ll, 5772438ll, 130799ll}, {true, 64081, 3401, 527}, {false, 0, 0, 0, 0}, 1279, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 17,
+     {true, 0, -8443277ll, 6116790ll, 214637ll}, {true, 0, 6268, 0}, {false, 0, 0, 0, 0}, 1281, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 91,
+     {true, 0, -8441771ll, 5825828ll, 131088ll}, {true, 63752, 33473, 7593}, {false, 0, 0, 0, 0}, 1283, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1352,
+     {true, 0, -8441499ll, 4011532ll, 108290ll}, {true, 0, 4358, 0}, {false, 0, 0, 0, 0}, 1285, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 50, 1,
+     {true, 0, -8436277ll, 6073293ll, 215030ll}, {true, 806, 34985, 0}, {false, 0, 0, 0, 0}, 1287, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 1316,
+     {true, 0, -8433121ll, 3954986ll, 106632ll}, {true, 0, 56490, 0}, {false, 0, 0, 0, 0}, 1289, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 214,
+     {true, 0, -8432448ll, 6063877ll, 214547ll}, {true, 871, 17117, 0}, {false, 0, 0, 0, 0}, 1291, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 39,
+     {true, 0, -8423070ll, 5827654ll, 129784ll}, {true, 0, 34295, 0}, {false, 0, 0, 0, 0}, 1293, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 3961,
+     {true, 0, -8418906ll, 4297985ll, 131730ll}, {true, 408, 33845, 0}, {false, 0, 0, 0, 0}, 1295, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 50, 35,
+     {true, 0, -8415996ll, 6045203ll, 214257ll}, {true, 0, 28213, 0}, {false, 0, 0, 0, 0}, 1297, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 2873,
+     {true, 0, -8413434ll, 4155570ll, 107296ll}, {true, 0, 55386, 0}, {false, 0, 0, 0, 0}, 1299, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 1042,
+     {true, 0, -8412504ll, 3639567ll, 131469ll}, {true, 440, 62394, 0}, {false, 0, 0, 0, 0}, 1301, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 90,
+     {true, 0, -8410882ll, 6138114ll, 213723ll}, {true, 0, 53842, 0}, {false, 0, 0, 0, 0}, 1303, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 1444,
+     {true, 0, -8410712ll, 3545734ll, 118982ll}, {true, 0, 1351, 0}, {false, 0, 0, 0, 0}, 1305, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 93, 1,
+     {true, 0, -8407902ll, 5975647ll, 216555ll}, {true, 0, 19951, 0}, {false, 0, 0, 0, 0}, 1307, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 55,
+     {true, 0, -8399908ll, 5907350ll, 129916ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1309, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 164,
+     {true, 0, -8396952ll, 6097281ll, 216126ll}, {true, 0, 56994, 0}, {false, 0, 0, 0, 0}, 1311, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 109,
+     {true, 0, -8396635ll, 6076474ll, 214923ll}, {true, 0, 41671, 0}, {false, 0, 0, 0, 0}, 1313, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 147,
+     {true, 0, -8394289ll, 6063235ll, 215195ll}, {true, 886, 23655, 0}, {false, 0, 0, 0, 0}, 1315, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 1024,
+     {true, 0, -8392885ll, 3694336ll, 129913ll}, {true, 0, 16417, 0}, {false, 0, 0, 0, 0}, 1317, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 128,
+     {true, 0, -8390275ll, 6073651ll, 216318ll}, {true, 0, 17569, 0}, {false, 0, 0, 0, 0}, 1319, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 75,
+     {true, 0, -8386567ll, 5902129ll, 128010ll}, {true, 166, 36673, 0}, {false, 0, 0, 0, 0}, 1321, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 181,
+     {true, 0, -8386549ll, 6113026ll, 214978ll}, {true, 0, 19445, 0}, {false, 0, 0, 0, 0}, 1323, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 50, 17,
+     {true, 0, -8380703ll, 6032768ll, 214982ll}, {true, 0, 11551, 0}, {false, 0, 0, 0, 0}, 1325, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 197,
+     {true, 0, -8378379ll, 6039573ll, 215367ll}, {true, 0, 52965, 0}, {false, 0, 0, 0, 0}, 1327, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 575,
+     {true, 0, -8373547ll, 3870170ll, 110457ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1329, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 616,
+     {true, 0, -8372176ll, 4210611ll, 111033ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1331, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 520, 4, 73,
+     {true, 0, -8370883ll, 6131505ll, 215772ll}, {true, 0, 7016, 0}, {false, 0, 0, 0, 0}, 1333, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 600,
+     {true, 0, -8368234ll, 4042506ll, 106042ll}, {true, 0, 12826, 0}, {false, 0, 0, 0, 0}, 1335, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 3961,
+     {true, 0, -8366481ll, 4267260ll, 120624ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1337, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 107,
+     {true, 0, -8363090ll, 5840444ll, 119794ll}, {true, 1636, 45611, 45}, {false, 0, 0, 0, 0}, 1339, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 32, 21,
+     {true, 0, -8362001ll, 5826884ll, 121439ll}, {true, 1367, 63109, 118}, {false, 0, 0, 0, 0}, 1341, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 4015,
+     {true, 0, -8354887ll, 4220451ll, 113305ll}, {true, 0, 36713, 0}, {false, 0, 0, 0, 0}, 1343, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 631,
+     {true, 0, -8353229ll, 4000520ll, 106714ll}, {true, 0, 34245, 0}, {false, 0, 0, 0, 0}, 1345, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 3998,
+     {true, 0, -8342038ll, 4289956ll, 130326ll}, {true, 0, 29815, 0}, {false, 0, 0, 0, 0}, 1347, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 655,
+     {true, 0, -8339768ll, 4188674ll, 108228ll}, {true, 0, 43285, 0}, {false, 0, 0, 0, 0}, 1349, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 600,
+     {true, 0, -8337444ll, 4198567ll, 109761ll}, {true, 0, 35995, 0}, {false, 0, 0, 0, 0}, 1351, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 6, 582,
+     {true, 0, -8334781ll, 4138987ll, 107731ll}, {true, 92, 34461, 0}, {false, 0, 0, 0, 0}, 1353, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 2159,
+     {true, 0, -8333785ll, 3692669ll, 118092ll}, {true, 0, 53956, 0}, {false, 0, 0, 0, 0}, 1355, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 4033,
+     {true, 0, -8320357ll, 4245631ll, 116823ll}, {true, 0, 43693, 0}, {false, 0, 0, 0, 0}, 1357, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 635,
+     {true, 0, -8318851ll, 4155180ll, 105476ll}, {true, 0, 37143, 0}, {false, 0, 0, 0, 0}, 1359, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 4, 2177,
+     {true, 0, -8305044ll, 3665706ll, 119036ll}, {true, 0, 7548, 0}, {false, 0, 0, 0, 0}, 1361, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 883, 5, 3979,
+     {true, 0, -8299244ll, 4305362ll, 135479ll}, {true, 0, 41761, 0}, {false, 0, 0, 0, 0}, 1363, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 58, 7,
+     {true, 0, -8048771ll, 5708035ll, 138665ll}, {true, 62946, 8637, 298}, {false, 0, 0, 0, 0}, 1365, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 54, 321,
+     {true, 0, -8046609ll, 4414934ll, 132930ll}, {true, 0, 26279, 0}, {false, 0, 0, 0, 0}, 1367, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 50, 43,
+     {true, 0, -8045931ll, 5707819ll, 138283ll}, {true, 734, 56510, 1947}, {false, 0, 0, 0, 0}, 1369, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 58, 57,
+     {true, 0, -8044039ll, 5705699ll, 138345ll}, {true, 904, 60921, 1884}, {false, 0, 0, 0, 0}, 1371, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 521, 50, 26,
+     {true, 0, -8038564ll, 5713463ll, 135497ll}, {true, 3163, 33379, 62796}, {false, 0, 0, 0, 0}, 1373, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 21, 1592,
+     {true, 0, -8002788ll, 4332206ll, 133802ll}, {true, 0, 27093, 0}, {false, 0, 0, 0, 0}, 1375, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 21, 1563,
+     {true, 0, -7978565ll, 4381469ll, 134787ll}, {true, 0, 2832, 0}, {false, 0, 0, 0, 0}, 1377, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 28, 1563,
+     {true, 0, -7956133ll, 4386101ll, 134389ll}, {true, 0, 39703, 0}, {false, 0, 0, 0, 0}, 1379, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 34, 275,
+     {true, 0, -7923201ll, 4297940ll, 133762ll}, {true, 0, 38105, 0}, {false, 0, 0, 0, 0}, 1381, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 68,
+     {true, 0, -7904302ll, 4306364ll, 134088ll}, {true, 0, 29977, 0}, {false, 0, 0, 0, 0}, 1383, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 20, 3917,
+     {true, 0, -7832049ll, 3984902ll, 157884ll}, {true, 2589, 56054, 62753}, {false, 0, 0, 0, 0}, 1385, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 37, 281,
+     {true, 0, -7831373ll, 4274022ll, 133561ll}, {true, 0, 22865, 0}, {false, 0, 0, 0, 0}, 1387, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 20, 3900,
+     {true, 0, -7808377ll, 3991041ll, 163204ll}, {true, 110, 53836, 0}, {false, 0, 0, 0, 0}, 1389, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 23, 3862,
+     {true, 0, -7796643ll, 4001756ll, 163038ll}, {true, 63834, 15083, 590}, {false, 0, 0, 0, 0}, 1391, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 20, 3882,
+     {true, 0, -7793675ll, 3991764ll, 165505ll}, {true, 2907, 59597, 64841}, {false, 0, 0, 0, 0}, 1393, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 42, 287,
+     {true, 0, -7790362ll, 4266371ll, 135070ll}, {true, 0, 48519, 0}, {false, 0, 0, 0, 0}, 1395, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 40, 286,
+     {true, 0, -7757475ll, 4305871ll, 134224ll}, {true, 0, 37521, 0}, {false, 0, 0, 0, 0}, 1397, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 21, 246,
+     {true, 0, -7749269ll, 4298329ll, 135377ll}, {true, 0, 36577, 0}, {false, 0, 0, 0, 0}, 1399, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 41, 286,
+     {true, 0, -7691179ll, 4398134ll, 132488ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1401, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 9, 4051,
+     {true, 0, -7678271ll, 4064308ll, 137425ll}, {true, 93, 11298, 0}, {false, 0, 0, 0, 0}, 1403, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 29, 264,
+     {true, 0, -7667460ll, 4344421ll, 133053ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1405, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 28, 263,
+     {true, 0, -7665121ll, 4363582ll, 132422ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1407, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 9, 4034,
+     {true, 0, -7654502ll, 4081814ll, 136902ll}, {true, 64378, 23066, 65447}, {false, 0, 0, 0, 0}, 1409, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 3986,
+     {true, 0, -7653108ll, 4047461ll, 149650ll}, {true, 2399, 37975, 58514}, {false, 0, 0, 0, 0}, 1411, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 1809,
+     {true, 0, -7650473ll, 4113263ll, 130029ll}, {true, 1483, 33772, 61083}, {false, 0, 0, 0, 0}, 1413, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 35, 1625,
+     {true, 0, -7650369ll, 4146126ll, 111675ll}, {true, 981, 47037, 60936}, {false, 0, 0, 0, 0}, 1415, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 1826,
+     {true, 0, -7647355ll, 4086747ll, 136771ll}, {true, 64814, 12570, 1627}, {false, 0, 0, 0, 0}, 1417, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 41, 1601,
+     {true, 0, -7647065ll, 4142312ll, 113736ll}, {true, 3985, 55972, 62595}, {false, 0, 0, 0, 0}, 1419, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4008,
+     {true, 0, -7644925ll, 4049195ll, 147957ll}, {true, 59748, 19897, 62187}, {false, 0, 0, 0, 0}, 1421, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4175,
+     {true, 0, -7644822ll, 3994750ll, 165551ll}, {true, 1676, 26425, 65298}, {false, 0, 0, 0, 0}, 1423, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 1757,
+     {true, 0, -7644452ll, 4095745ll, 135233ll}, {true, 64426, 13331, 1757}, {false, 0, 0, 0, 0}, 1425, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4104,
+     {true, 0, -7644447ll, 4047367ll, 149267ll}, {true, 58647, 12970, 640}, {false, 0, 0, 0, 0}, 1427, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 9, 3913,
+     {true, 0, -7643972ll, 4055945ll, 143541ll}, {true, 4179, 53887, 3360}, {false, 0, 0, 0, 0}, 1429, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 43, 1635,
+     {true, 0, -7639081ll, 4093196ll, 135838ll}, {true, 3000, 51708, 850}, {false, 0, 0, 0, 0}, 1431, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 3970,
+     {true, 0, -7638208ll, 4045949ll, 148972ll}, {true, 6760, 46371, 506}, {false, 0, 0, 0, 0}, 1433, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 29, 1791,
+     {true, 0, -7638092ll, 4113621ll, 129745ll}, {true, 1242, 32161, 62434}, {false, 0, 0, 0, 0}, 1435, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4047,
+     {true, 0, -7635824ll, 4075527ll, 137972ll}, {true, 64335, 9202, 400}, {false, 0, 0, 0, 0}, 1437, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4086,
+     {true, 0, -7634712ll, 4049111ll, 146357ll}, {true, 2751, 35457, 61052}, {false, 0, 0, 0, 0}, 1439, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4030,
+     {true, 0, -7634356ll, 4008243ll, 163282ll}, {true, 63295, 6503, 135}, {false, 0, 0, 0, 0}, 1441, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 51, 312,
+     {true, 0, -7628497ll, 4407979ll, 133480ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1443, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4141,
+     {true, 0, -7627752ll, 4071815ll, 138537ll}, {true, 2855, 55186, 1087}, {false, 0, 0, 0, 0}, 1445, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4120,
+     {true, 0, -7626634ll, 4003732ll, 162450ll}, {true, 64679, 2247, 1862}, {false, 0, 0, 0, 0}, 1447, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4158,
+     {true, 0, -7625678ll, 4044313ll, 146813ll}, {true, 62287, 3856, 2111}, {false, 0, 0, 0, 0}, 1449, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 3952,
+     {true, 0, -7618762ll, 4034962ll, 148657ll}, {true, 3324, 50359, 1016}, {false, 0, 0, 0, 0}, 1451, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 55, 322,
+     {true, 0, -7615216ll, 4384217ll, 133602ll}, {true, 0, 41651, 0}, {false, 0, 0, 0, 0}, 1453, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4064,
+     {true, 0, -7604209ll, 4038670ll, 141468ll}, {true, 2, 43105, 0}, {false, 0, 0, 0, 0}, 1455, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 4, 4192,
+     {true, 0, -7592660ll, 4023873ll, 139903ll}, {true, 0, 29407, 0}, {false, 0, 0, 0, 0}, 1457, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 1844,
+     {true, 0, -7584295ll, 4121072ll, 123650ll}, {true, 4010, 35222, 64576}, {false, 0, 0, 0, 0}, 1459, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 34, 1718,
+     {true, 0, -7582225ll, 4125134ll, 122498ll}, {true, 1484, 54381, 2751}, {false, 0, 0, 0, 0}, 1461, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 1860,
+     {true, 0, -7581680ll, 4107066ll, 125659ll}, {true, 0, 6476, 0}, {false, 0, 0, 0, 0}, 1463, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 9, 3895,
+     {true, 0, -7580869ll, 4013739ll, 136689ll}, {true, 29, 30481, 0}, {false, 0, 0, 0, 0}, 1465, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 10, 1773,
+     {true, 0, -7576995ll, 4155753ll, 121015ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1467, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 28, 1620,
+     {true, 0, -7572243ll, 4207394ll, 122805ll}, {true, 64268, 43641, 63626}, {false, 0, 0, 0, 0}, 1469, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 41, 1632,
+     {true, 0, -7571084ll, 4211997ll, 123121ll}, {true, 62930, 23583, 2150}, {false, 0, 0, 0, 0}, 1471, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 43, 1605,
+     {true, 0, -7569508ll, 4201034ll, 123185ll}, {true, 5, 37821, 0}, {false, 0, 0, 0, 0}, 1473, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 29, 1564,
+     {true, 0, -7567805ll, 4222027ll, 121800ll}, {true, 5731, 56870, 65432}, {false, 0, 0, 0, 0}, 1475, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 28, 1592,
+     {true, 0, -7565354ll, 4224230ll, 121993ll}, {true, 61660, 16700, 4205}, {false, 0, 0, 0, 0}, 1477, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1198, 9, 3931,
+     {true, 0, -7558584ll, 4013159ll, 132204ll}, {true, 2603, 38467, 1016}, {false, 0, 0, 0, 0}, 1479, 2},
+    {"gatherable", "AGatherableActor", "/Script/GameSystemsPlugin.Default__GatherableActor", 104, 1198, 34, 1735,
+     {true, 0, -7557547ll, 4086668ll, 125508ll}, {true, 1591, 25805, 62042}, {false, 0, 0, 0, 0}, 1481, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 576, 14, 259,
+     {true, 0, -7065028ll, 5390855ll, 158613ll}, {true, 2389, 4603, 1724}, {false, 0, 0, 0, 0}, 1483, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 576, 14, 223,
+     {true, 0, -7063530ll, 5387275ll, 159300ll}, {true, 2930, 4343, 1977}, {false, 0, 0, 0, 0}, 1485, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 576, 14, 346,
+     {true, 0, -7058157ll, 5394921ll, 159855ll}, {true, 2115, 14281, 3816}, {false, 0, 0, 0, 0}, 1487, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 576, 14, 174,
+     {true, 0, -7057503ll, 5386047ll, 160658ll}, {true, 4639, 54183, 63633}, {false, 0, 0, 0, 0}, 1489, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1395, 44, 251,
+     {true, 0, -6819654ll, 5390965ll, 164497ll}, {true, 856, 9135, 2363}, {false, 0, 0, 0, 0}, 1491, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 921, 14, 389,
+     {true, 0, -6806784ll, 5754317ll, 137384ll}, {true, 2897, 31477, 1066}, {false, 0, 0, 0, 0}, 1493, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1403, 41, 137,
+     {true, 0, -6695794ll, 5170714ll, 146223ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1495, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 124,
+     {true, 0, -6678085ll, 6437238ll, 231310ll}, {true, 372, 35497, 0}, {false, 0, 0, 0, 0}, 1497, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 44,
+     {true, 0, -6672565ll, 6422216ll, 232169ll}, {true, 846, 1456, 0}, {false, 0, 0, 0, 0}, 1499, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 185,
+     {true, 0, -6669680ll, 6409117ll, 232831ll}, {true, 893, 5950, 0}, {false, 0, 0, 0, 0}, 1501, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 84,
+     {true, 0, -6646617ll, 6437733ll, 230943ll}, {true, 233, 7422, 0}, {false, 0, 0, 0, 0}, 1503, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1403, 35, 146,
+     {true, 0, -6636581ll, 5295977ll, 160956ll}, {true, 1281, 49978, 2363}, {false, 0, 0, 0, 0}, 1505, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 143,
+     {true, 0, -6626896ll, 6473110ll, 221158ll}, {true, 815, 14002, 0}, {false, 0, 0, 0, 0}, 1507, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 6,
+     {true, 0, -6615292ll, 6406246ll, 228587ll}, {true, 696, 43231, 0}, {false, 0, 0, 0, 0}, 1509, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 25,
+     {true, 0, -6615010ll, 6482871ll, 221646ll}, {true, 67, 18553, 0}, {false, 0, 0, 0, 0}, 1511, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1398, 12, 161,
+     {true, 0, -6606832ll, 6448071ll, 228737ll}, {true, 492, 9808, 0}, {false, 0, 0, 0, 0}, 1513, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1402, 23, 68,
+     {true, 0, -6487959ll, 5236373ll, 127909ll}, {true, 64376, 37478, 63777}, {false, 0, 0, 0, 0}, 1515, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1466, 24, 136,
+     {true, 0, -6055793ll, 3719192ll, 122829ll}, {true, 65419, 28517, 0}, {false, 0, 0, 0, 0}, 1517, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1046, 67, 40,
+     {true, 0, -6040104ll, 4089239ll, 127485ll}, {true, 63565, 33509, 2000}, {false, 0, 0, 0, 0}, 1519, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1046, 66, 8,
+     {true, 0, -5993006ll, 4015791ll, 127396ll}, {true, 2611, 3412, 65158}, {false, 0, 0, 0, 0}, 1521, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1061, 5, 440,
+     {true, 0, -5968229ll, 4051313ll, 136284ll}, {true, 6431, 4973, 59501}, {false, 0, 0, 0, 0}, 1523, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1046, 66, 40,
+     {true, 0, -5914959ll, 4050470ll, 147239ll}, {true, 63287, 33328, 1420}, {false, 0, 0, 0, 0}, 1525, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 211,
+     {true, 0, -5848147ll, 4804188ll, 131021ll}, {true, 61765, 18361, 61744}, {false, 0, 0, 0, 0}, 1527, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 262,
+     {true, 0, -5844002ll, 4826822ll, 120903ll}, {true, 1764, 44878, 65293}, {false, 0, 0, 0, 0}, 1529, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 348,
+     {true, 0, -5841605ll, 4543195ll, 163728ll}, {true, 0, 54192, 0}, {false, 0, 0, 0, 0}, 1531, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 348,
+     {true, 0, -5841527ll, 4490349ll, 118107ll}, {true, 63163, 43094, 723}, {false, 0, 0, 0, 0}, 1533, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 143, 242,
+     {true, 0, -5840611ll, 4822875ll, 120763ll}, {true, 64960, 17400, 63996}, {false, 0, 0, 0, 0}, 1535, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 157,
+     {true, 0, -5834218ll, 4622270ll, 106411ll}, {true, 64562, 23045, 3192}, {false, 0, 0, 0, 0}, 1537, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 157,
+     {true, 0, -5832184ll, 4492021ll, 119053ll}, {true, 65416, 28759, 2661}, {false, 0, 0, 0, 0}, 1539, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 310,
+     {true, 0, -5831871ll, 4504539ll, 123167ll}, {true, 3611, 3558, 61650}, {false, 0, 0, 0, 0}, 1541, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 367,
+     {true, 0, -5830141ll, 4567813ll, 161613ll}, {true, 215, 45241, 0}, {false, 0, 0, 0, 0}, 1543, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 253,
+     {true, 0, -5828891ll, 4498874ll, 121432ll}, {true, 1721, 1368, 62432}, {false, 0, 0, 0, 0}, 1545, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 206, 138,
+     {true, 0, -5828520ll, 4493582ll, 119909ll}, {true, 1825, 62019, 62640}, {false, 0, 0, 0, 0}, 1547, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 157,
+     {true, 0, -5828079ll, 4576409ll, 164111ll}, {true, 0, 2392, 0}, {false, 0, 0, 0, 0}, 1549, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 204, 138,
+     {true, 0, -5827723ll, 4663518ll, 134061ll}, {true, 1691, 19408, 61031}, {false, 0, 0, 0, 0}, 1551, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 193,
+     {true, 0, -5825969ll, 4477135ll, 117051ll}, {true, 2453, 5968, 65184}, {false, 0, 0, 0, 0}, 1553, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 271,
+     {true, 0, -5823030ll, 4655172ll, 133420ll}, {true, 61858, 16792, 63822}, {false, 0, 0, 0, 0}, 1555, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 231,
+     {true, 0, -5821634ll, 4480616ll, 118223ll}, {true, 3173, 2980, 64250}, {false, 0, 0, 0, 0}, 1557, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 157,
+     {true, 0, -5819608ll, 4812364ll, 126612ll}, {true, 2038, 34428, 65141}, {false, 0, 0, 0, 0}, 1559, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 175,
+     {true, 0, -5819224ll, 4769137ll, 149034ll}, {true, 0, 62310, 0}, {false, 0, 0, 0, 0}, 1561, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 143, 183,
+     {true, 0, -5817112ll, 4815925ll, 126389ll}, {true, 0, 15790, 0}, {false, 0, 0, 0, 0}, 1563, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 193,
+     {true, 0, -5814826ll, 4741852ll, 151267ll}, {true, 0, 29501, 0}, {false, 0, 0, 0, 0}, 1565, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 387,
+     {true, 0, -5814704ll, 4583052ll, 152575ll}, {true, 0, 28897, 0}, {false, 0, 0, 0, 0}, 1567, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 253,
+     {true, 0, -5813121ll, 4584390ll, 151290ll}, {true, 64876, 21912, 62419}, {false, 0, 0, 0, 0}, 1569, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 367,
+     {true, 0, -5811429ll, 4509701ll, 126467ll}, {true, 3470, 17047, 1131}, {false, 0, 0, 0, 0}, 1571, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 409,
+     {true, 0, -5809246ll, 4546120ll, 158509ll}, {true, 64162, 55805, 4241}, {false, 0, 0, 0, 0}, 1573, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 211,
+     {true, 0, -5808551ll, 4492239ll, 123297ll}, {true, 1587, 16354, 2604}, {false, 0, 0, 0, 0}, 1575, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 193,
+     {true, 0, -5808279ll, 4516371ll, 129693ll}, {true, 5055, 17482, 1368}, {false, 0, 0, 0, 0}, 1577, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1047, 9, 1284,
+     {true, 0, -5807408ll, 4594291ll, 148287ll}, {true, 62757, 10121, 64827}, {false, 0, 0, 0, 0}, 1579, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 205, 138,
+     {true, 0, -5806966ll, 4803717ll, 127677ll}, {true, 3538, 49267, 64853}, {false, 0, 0, 0, 0}, 1581, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1047, 13, 1297,
+     {true, 0, -5806722ll, 4592575ll, 148536ll}, {true, 670, 56708, 2528}, {false, 0, 0, 0, 0}, 1583, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 291,
+     {true, 0, -5806005ll, 4555303ll, 157344ll}, {true, 2074, 60095, 2105}, {false, 0, 0, 0, 0}, 1585, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 211,
+     {true, 0, -5804418ll, 4522407ll, 133545ll}, {true, 64783, 61890, 896}, {false, 0, 0, 0, 0}, 1587, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 175,
+     {true, 0, -5803673ll, 4638320ll, 135510ll}, {true, 0, 39587, 0}, {false, 0, 0, 0, 0}, 1589, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 291,
+     {true, 0, -5803514ll, 4498114ll, 125250ll}, {true, 1802, 17166, 2225}, {false, 0, 0, 0, 0}, 1591, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 175,
+     {true, 0, -5800965ll, 4529580ll, 135076ll}, {true, 123, 7348, 62819}, {false, 0, 0, 0, 0}, 1593, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 328,
+     {true, 0, -5799429ll, 4496073ll, 126140ll}, {true, 108, 46511, 63150}, {false, 0, 0, 0, 0}, 1595, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 271,
+     {true, 0, -5799215ll, 4595363ll, 146997ll}, {true, 3890, 47904, 1125}, {false, 0, 0, 0, 0}, 1597, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 271,
+     {true, 0, -5793449ll, 4509797ll, 127993ll}, {true, 1152, 63339, 62949}, {false, 0, 0, 0, 0}, 1599, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 328,
+     {true, 0, -5789772ll, 4530936ll, 133211ll}, {true, 227, 15680, 0}, {false, 0, 0, 0, 0}, 1601, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 143, 202,
+     {true, 0, -5787709ll, 4877183ll, 108112ll}, {true, 0, 39387, 0}, {false, 0, 0, 0, 0}, 1603, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 143, 220,
+     {true, 0, -5786427ll, 4823618ll, 126388ll}, {true, 306, 64828, 0}, {false, 0, 0, 0, 0}, 1605, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 230,
+     {true, 0, -5784115ll, 4780854ll, 129086ll}, {true, 63853, 57419, 2338}, {false, 0, 0, 0, 0}, 1607, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 175,
+     {true, 0, -5778899ll, 4510116ll, 130416ll}, {true, 88, 45837, 0}, {false, 0, 0, 0, 0}, 1609, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 253,
+     {true, 0, -5777741ll, 4652537ll, 119891ll}, {true, 1582, 26067, 59236}, {false, 0, 0, 0, 0}, 1611, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 211,
+     {true, 0, -5777486ll, 4634013ll, 117552ll}, {true, 0, 51726, 0}, {false, 0, 0, 0, 0}, 1613, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 231,
+     {true, 0, -5776274ll, 4672261ll, 122216ll}, {true, 6558, 24063, 65511}, {false, 0, 0, 0, 0}, 1615, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 132, 193,
+     {true, 0, -5769880ll, 4685383ll, 121213ll}, {true, 65334, 7112, 62746}, {false, 0, 0, 0, 0}, 1617, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 427,
+     {true, 0, -5764046ll, 4531067ll, 131914ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1619, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 136,
+     {true, 0, -5759796ll, 4537517ll, 130533ll}, {false, 0, 0, 0}, {false, 0, 0, 0, 0}, 1621, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1048, 17, 513,
+     {true, 0, -5645928ll, 4523243ll, 134277ll}, {true, 0, 13106, 0}, {false, 0, 0, 0, 0}, 1623, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1048, 13, 609,
+     {true, 0, -5632383ll, 4520027ll, 134241ll}, {true, 0, 43719, 0}, {false, 0, 0, 0, 0}, 1625, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1048, 19, 791,
+     {true, 0, -5620489ll, 4500089ll, 129974ll}, {true, 57694, 45823, 1225}, {false, 0, 0, 0, 0}, 1627, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1048, 19, 811,
+     {true, 0, -5612829ll, 4505317ll, 130614ll}, {true, 62825, 57324, 59840}, {false, 0, 0, 0, 0}, 1629, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1048, 19, 835,
+     {true, 0, -5611877ll, 4501995ll, 128528ll}, {true, 59286, 52140, 1409}, {false, 0, 0, 0, 0}, 1631, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1084, 24, 997,
+     {true, 0, -5338572ll, 4184297ll, 111109ll}, {true, 64957, 52852, 501}, {false, 0, 0, 0, 0}, 1633, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 136, 765,
+     {true, 0, -5332256ll, 4558951ll, 106015ll}, {true, 0, 11866, 0}, {false, 0, 0, 0, 0}, 1635, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 140, 765,
+     {true, 0, -5329967ll, 4827020ll, 109825ll}, {true, 320, 26275, 0}, {false, 0, 0, 0, 0}, 1637, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 765,
+     {true, 0, -5322825ll, 4447154ll, 105294ll}, {true, 185, 63439, 64018}, {false, 0, 0, 0, 0}, 1639, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 553, 125, 791,
+     {true, 0, -5310481ll, 4567998ll, 105906ll}, {true, 0, 50292, 0}, {false, 0, 0, 0, 0}, 1641, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1084, 22, 997,
+     {true, 0, -5299714ll, 4417347ll, 114283ll}, {true, 0, 21303, 0}, {false, 0, 0, 0, 0}, 1643, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1084, 26, 998,
+     {true, 0, -5285405ll, 4601901ll, 108560ll}, {true, 275, 55133, 465}, {false, 0, 0, 0, 0}, 1645, 2},
+    {"gatherable", "AGatherableActor", "Default__GatherableActor", 103, 1084, 21, 997,
+     {true, 0, -5278532ll, 4353191ll, 106025ll}, {true, 63110, 29564, 2902}, {false, 0, 0, 0, 0}, 1647, 2},
 };
 
 inline constexpr Template kTemplates[] = {
@@ -6747,461 +6770,462 @@ inline constexpr Template kTemplates[] = {
     {"/Game/DesignAssets/Population/NPC/PCRaces/Node/Vendors/Node_Warehouse_StorageClerk_KAE.Default__Node_Warehouse_StorageClerk_KAE_C", 95},
     {"/Game/DesignAssets/Population/NPC/PCRaces/Quest_NPC_Master.Default__Quest_NPC_Master_C", 96},
     {"/Game/DesignAssets/Quests/SidequestAssets/1000_CorruptedMemories/1000_SoshaTerim.Default__1000_SoshaTerim_C", 97},
+    {"/Game/GameBlueprints/AttuneableCharacterRespawnBP.Default__AttuneableCharacterRespawnBP_C", 98},
 };
 // C | Y | B + CoA
 
 inline constexpr Spawn kSpawns[] = {
-    {98, -814222.0, 570180.5, 13008.5},   // npc Default__Goblin_Bonebinder_C
-    {99, -715378.6, 546610.9, 12976.8},   // npc Default__Wolf_C
-    {100, -816819.1, 583969.8, 12558.8},   // npc Default__Goblin_Bonebinder_C
-    {101, -817251.2, 584006.5, 12622.6},   // npc Default__Goblin_Bonebinder_C
-    {102, -817125.5, 584753.1, 12739.7},   // npc Default__Goblin_Bonebinder_C
-    {103, -816116.3, 567997.7, 12788.1},   // npc Default__Goblin_Bonebinder_C
-    {104, -820352.6, 569472.8, 12687.5},   // npc Default__Goblin_Bonebinder_C
-    {105, -821907.8, 569540.7, 12682.4},   // npc Default__Goblin_Bonebinder_C
-    {106, -818376.0, 568709.2, 12770.7},   // npc Default__Goblin_Bonebinder_C
-    {107, -805032.1, 579300.8, 13088.2},   // npc Default__Goblin_Bonebinder_C
-    {108, -830425.3, 583234.6, 12034.3},   // npc Default__Goblin_Bonebinder_C
-    {109, -814195.9, 586696.9, 12739.8},   // npc Default__Goblin_Bonebinder_C
-    {110, -1214977.7, 564563.0, 11972.3},   // gatherable Default__GatherableActor
-    {111, -1127174.2, 491054.0, 12200.3},   // gatherable Default__GatherableActor
-    {112, -1106671.7, 558582.4, 12188.9},   // gatherable Default__GatherableActor
-    {113, -1105253.7, 484507.7, 12260.8},   // gatherable Default__GatherableActor
-    {114, -1104755.4, 553420.9, 13242.7},   // gatherable Default__GatherableActor
-    {115, -1104709.4, 484549.2, 12366.3},   // gatherable Default__GatherableActor
-    {116, -1101293.0, 471261.4, 12299.8},   // gatherable Default__GatherableActor
-    {117, -1100140.0, 472424.0, 12025.9},   // gatherable Default__GatherableActor
-    {118, -1098877.2, 554117.7, 12399.9},   // gatherable Default__GatherableActor
-    {119, -1098365.5, 554693.8, 12200.9},   // gatherable Default__GatherableActor
-    {120, -1095382.1, 467991.1, 12997.2},   // gatherable Default__GatherableActor
-    {121, -1093479.2, 480667.8, 12175.7},   // gatherable Default__GatherableActor
-    {122, -1087126.8, 477070.5, 12309.9},   // gatherable Default__GatherableActor
-    {123, -1080323.2, 523983.0, 13061.9},   // gatherable Default__GatherableActor
-    {124, -1077747.6, 534932.5, 13046.8},   // gatherable Default__GatherableActor
-    {125, -1074451.7, 524400.1, 12570.8},   // gatherable Default__GatherableActor
-    {126, -1072651.1, 523704.5, 12547.8},   // gatherable Default__GatherableActor
-    {127, -1070580.9, 523676.6, 12519.0},   // gatherable Default__GatherableActor
-    {128, -1067124.2, 488304.3, 12381.8},   // gatherable Default__GatherableActor
-    {129, -1066741.8, 531969.0, 12253.5},   // gatherable Default__GatherableActor
-    {130, -1066648.1, 459158.1, 12907.2},   // gatherable Default__GatherableActor
-    {131, -1066546.2, 457179.6, 12879.8},   // gatherable Default__GatherableActor
-    {132, -1066312.1, 459189.0, 12898.9},   // gatherable Default__GatherableActor
-    {133, -1065919.0, 457378.2, 12821.3},   // gatherable Default__GatherableActor
-    {134, -1065783.2, 459122.9, 12882.5},   // gatherable Default__GatherableActor
-    {135, -1065426.8, 457603.0, 12824.0},   // gatherable Default__GatherableActor
-    {136, -1065383.7, 458659.3, 12871.0},   // gatherable Default__GatherableActor
-    {137, -1065216.9, 458460.7, 12873.5},   // gatherable Default__GatherableActor
-    {138, -1065141.5, 520096.2, 12436.7},   // gatherable Default__GatherableActor
-    {139, -1064927.7, 520823.5, 12416.4},   // gatherable Default__GatherableActor
-    {140, -1064728.1, 489341.4, 12412.5},   // gatherable Default__GatherableActor
-    {141, -1064318.2, 520634.5, 12418.4},   // gatherable Default__GatherableActor
-    {142, -1064235.4, 455583.2, 12873.2},   // gatherable Default__GatherableActor
-    {143, -1064047.1, 520742.6, 12417.5},   // gatherable Default__GatherableActor
-    {144, -1063761.7, 535966.3, 12200.8},   // gatherable Default__GatherableActor
-    {145, -1063534.2, 455177.4, 12876.1},   // gatherable Default__GatherableActor
-    {146, -1063189.2, 496331.1, 12226.9},   // gatherable Default__GatherableActor
-    {147, -1062916.4, 452964.5, 12891.2},   // gatherable Default__GatherableActor
-    {148, -1062138.0, 488818.8, 12417.4},   // gatherable Default__GatherableActor
-    {149, -1060838.1, 492071.4, 12452.0},   // gatherable Default__GatherableActor
-    {150, -1060649.9, 488244.7, 12430.4},   // gatherable Default__GatherableActor
-    {151, -1060100.4, 497214.9, 12795.6},   // gatherable Default__GatherableActor
-    {152, -1059996.9, 534843.1, 12291.8},   // gatherable Default__GatherableActor
-    {153, -1059963.6, 487029.2, 12306.9},   // gatherable Default__GatherableActor
-    {154, -1059899.1, 496233.9, 12805.5},   // gatherable Default__GatherableActor
-    {155, -1058807.3, 536096.3, 12115.3},   // gatherable Default__GatherableActor
-    {156, -1058697.8, 499532.6, 12321.8},   // gatherable Default__GatherableActor
-    {157, -1058145.7, 489948.0, 12364.5},   // gatherable Default__GatherableActor
-    {158, -1057657.8, 518673.3, 11962.5},   // gatherable Default__GatherableActor
-    {159, -1056847.0, 529646.6, 12481.8},   // gatherable Default__GatherableActor
-    {160, -1056083.3, 495055.5, 12583.5},   // gatherable Default__GatherableActor
-    {161, -1054672.7, 527636.6, 12465.3},   // gatherable Default__GatherableActor
-    {162, -1053602.4, 497447.2, 12568.6},   // gatherable Default__GatherableActor
-    {163, -1052749.4, 530367.6, 12360.3},   // gatherable Default__GatherableActor
-    {164, -1052597.9, 465358.0, 13256.6},   // gatherable Default__GatherableActor
-    {165, -1050096.2, 477186.2, 12573.5},   // gatherable Default__GatherableActor
-    {166, -1050070.2, 475666.1, 12640.8},   // gatherable Default__GatherableActor
-    {167, -1049671.2, 474909.7, 12978.7},   // gatherable Default__GatherableActor
-    {168, -1049654.5, 472151.0, 13536.5},   // gatherable Default__GatherableActor
-    {169, -1049614.7, 471289.7, 13702.1},   // gatherable Default__GatherableActor
-    {170, -1048911.4, 474128.6, 13384.5},   // gatherable Default__GatherableActor
-    {171, -1047735.4, 469965.6, 14008.5},   // gatherable Default__GatherableActor
-    {172, -1047564.3, 473009.9, 13815.1},   // gatherable Default__GatherableActor
-    {173, -1046182.5, 471322.9, 14460.5},   // gatherable Default__GatherableActor
-    {174, -1045833.9, 474880.0, 14177.8},   // gatherable Default__GatherableActor
-    {175, -1045305.9, 480628.3, 12673.7},   // gatherable Default__GatherableActor
-    {176, -1045193.2, 473227.3, 14783.7},   // gatherable Default__GatherableActor
-    {177, -1045020.9, 482008.4, 12449.8},   // gatherable Default__GatherableActor
-    {178, -1041453.3, 456155.9, 12956.0},   // gatherable Default__GatherableActor
-    {179, -1038211.6, 556171.2, 12782.7},   // gatherable Default__GatherableActor
-    {180, -1035884.4, 495101.3, 12776.4},   // gatherable Default__GatherableActor
-    {181, -1035772.3, 492963.0, 12833.9},   // gatherable Default__GatherableActor
-    {182, -1035403.4, 457434.1, 14156.1},   // gatherable Default__GatherableActor
-    {183, -1034654.5, 479143.3, 15117.4},   // gatherable Default__GatherableActor
-    {184, -1034382.1, 498854.8, 12691.1},   // gatherable Default__GatherableActor
-    {185, -1034291.3, 458331.7, 14594.8},   // gatherable Default__GatherableActor
-    {186, -1033136.1, 458081.8, 14826.4},   // gatherable Default__GatherableActor
-    {187, -1032893.1, 458220.7, 14930.8},   // gatherable Default__GatherableActor
-    {188, -1030513.7, 539782.3, 12847.9},   // gatherable Default__GatherableActor
-    {189, -1030424.0, 455806.4, 14558.2},   // gatherable Default__GatherableActor
-    {190, -1030054.2, 452872.1, 13694.8},   // gatherable Default__GatherableActor
-    {191, -1029934.7, 529812.1, 11928.7},   // gatherable Default__GatherableActor
-    {192, -1029619.1, 529288.2, 11930.5},   // gatherable Default__GatherableActor
-    {193, -1029044.4, 528780.8, 11957.8},   // gatherable Default__GatherableActor
-    {194, -1028358.8, 452974.4, 13869.4},   // gatherable Default__GatherableActor
-    {195, -1027889.2, 569820.6, 12337.8},   // gatherable Default__GatherableActor
-    {196, -1025856.9, 455603.4, 14823.0},   // gatherable Default__GatherableActor
-    {197, -1025643.6, 526570.5, 12186.6},   // gatherable Default__GatherableActor
-    {198, -1025458.8, 456328.5, 15101.3},   // gatherable Default__GatherableActor
-    {199, -1022776.8, 453167.7, 14290.1},   // gatherable Default__GatherableActor
-    {200, -1022725.4, 442570.0, 12804.3},   // gatherable Default__GatherableActor
-    {201, -1022501.6, 442291.6, 12815.2},   // gatherable Default__GatherableActor
-    {202, -1022370.6, 442847.0, 12811.2},   // gatherable Default__GatherableActor
-    {203, -1022120.2, 444535.0, 12857.5},   // gatherable Default__GatherableActor
-    {204, -1021676.1, 443750.9, 12831.9},   // gatherable Default__GatherableActor
-    {205, -1021659.2, 544934.9, 12950.4},   // gatherable Default__GatherableActor
-    {206, -1021539.1, 444423.4, 12855.6},   // gatherable Default__GatherableActor
-    {207, -1020757.1, 521788.1, 12034.0},   // gatherable Default__GatherableActor
-    {208, -1020316.2, 523420.1, 12100.7},   // gatherable Default__GatherableActor
-    {209, -1020002.6, 448330.2, 13208.1},   // gatherable Default__GatherableActor
-    {210, -1019762.8, 492867.8, 12994.4},   // gatherable Default__GatherableActor
-    {211, -1019554.1, 457312.3, 15845.8},   // gatherable Default__GatherableActor
-    {212, -1019363.6, 495286.8, 12891.9},   // gatherable Default__GatherableActor
-    {213, -1019171.5, 491467.5, 13608.2},   // gatherable Default__GatherableActor
-    {214, -1019068.6, 529250.6, 12564.0},   // gatherable Default__GatherableActor
-    {215, -1018613.7, 459735.8, 16604.4},   // gatherable Default__GatherableActor
-    {216, -1018224.5, 445252.8, 12987.5},   // gatherable Default__GatherableActor
-    {217, -1017860.8, 470497.5, 18603.3},   // gatherable Default__GatherableActor
-    {218, -1017669.5, 474634.4, 18370.7},   // gatherable Default__GatherableActor
-    {219, -1017660.2, 487774.0, 14855.3},   // gatherable Default__GatherableActor
-    {220, -1017517.8, 470491.7, 18615.5},   // gatherable Default__GatherableActor
-    {221, -1017478.7, 470262.7, 18484.6},   // gatherable Default__GatherableActor
-    {222, -1017186.5, 485672.2, 15138.9},   // gatherable Default__GatherableActor
-    {223, -1017011.2, 455900.9, 15177.5},   // gatherable Default__GatherableActor
-    {224, -1016783.4, 488112.8, 15022.6},   // gatherable Default__GatherableActor
-    {225, -1016654.7, 457676.1, 16012.0},   // gatherable Default__GatherableActor
-    {226, -1016469.5, 467910.4, 18655.1},   // gatherable Default__GatherableActor
-    {227, -1016232.0, 481274.5, 17418.9},   // gatherable Default__GatherableActor
-    {228, -1015440.6, 474651.9, 18315.0},   // gatherable Default__GatherableActor
-    {229, -1015040.0, 495476.8, 14670.3},   // gatherable Default__GatherableActor
-    {230, -1014979.8, 545740.2, 12723.4},   // gatherable Default__GatherableActor
-    {231, -1014846.7, 487619.0, 15508.4},   // gatherable Default__GatherableActor
-    {232, -1014745.6, 488539.6, 15319.9},   // gatherable Default__GatherableActor
-    {233, -1014698.9, 452992.0, 14246.2},   // gatherable Default__GatherableActor
-    {234, -1014574.4, 529266.6, 12336.3},   // gatherable Default__GatherableActor
-    {235, -1014170.3, 530071.7, 12373.1},   // gatherable Default__GatherableActor
-    {236, -1014156.2, 481409.8, 18228.6},   // gatherable Default__GatherableActor
-    {237, -1014125.5, 515600.6, 12191.9},   // gatherable Default__GatherableActor
-    {238, -1013823.5, 492187.9, 15793.4},   // gatherable Default__GatherableActor
-    {239, -1013716.6, 528971.8, 12343.4},   // gatherable Default__GatherableActor
-    {240, -1013670.7, 480957.4, 18258.5},   // gatherable Default__GatherableActor
-    {241, -1013644.1, 528596.2, 12377.7},   // gatherable Default__GatherableActor
-    {242, -1013554.5, 497888.4, 15468.3},   // gatherable Default__GatherableActor
-    {243, -1013436.9, 496940.1, 15524.5},   // gatherable Default__GatherableActor
-    {244, -1013326.0, 491936.5, 15832.6},   // gatherable Default__GatherableActor
-    {245, -1013282.6, 453032.3, 14468.7},   // gatherable Default__GatherableActor
-    {246, -1013224.7, 545943.7, 12694.4},   // gatherable Default__GatherableActor
-    {247, -1012907.2, 461132.5, 18022.7},   // gatherable Default__GatherableActor
-    {248, -1012904.9, 497642.0, 15617.5},   // gatherable Default__GatherableActor
-    {249, -1012766.8, 529709.4, 12384.3},   // gatherable Default__GatherableActor
-    {250, -1012690.6, 496763.2, 15665.1},   // gatherable Default__GatherableActor
-    {251, -1012634.7, 496436.0, 15652.4},   // gatherable Default__GatherableActor
-    {252, -1012463.2, 527697.3, 12539.0},   // gatherable Default__GatherableActor
-    {253, -1012262.5, 471955.6, 18208.3},   // gatherable Default__GatherableActor
-    {254, -1012017.5, 527710.5, 12557.6},   // gatherable Default__GatherableActor
-    {255, -1011834.5, 485245.7, 17216.5},   // gatherable Default__GatherableActor
-    {256, -1011774.7, 469329.3, 18402.3},   // gatherable Default__GatherableActor
-    {257, -1011480.4, 499357.3, 15003.0},   // gatherable Default__GatherableActor
-    {258, -1011336.3, 522804.7, 12218.2},   // gatherable Default__GatherableActor
-    {259, -1010555.9, 464037.1, 18710.3},   // gatherable Default__GatherableActor
-    {260, -1009988.4, 485981.0, 17244.7},   // gatherable Default__GatherableActor
-    {261, -1009750.2, 464786.1, 18593.4},   // gatherable Default__GatherableActor
-    {262, -1009612.8, 467199.9, 18436.3},   // gatherable Default__GatherableActor
-    {263, -1009586.4, 462559.2, 18385.1},   // gatherable Default__GatherableActor
-    {264, -1009382.4, 466172.2, 18439.1},   // gatherable Default__GatherableActor
-    {265, -1009040.2, 463724.6, 18415.4},   // gatherable Default__GatherableActor
-    {266, -1008913.2, 489106.2, 17649.2},   // gatherable Default__GatherableActor
-    {267, -1008884.1, 491169.8, 17386.3},   // gatherable Default__GatherableActor
-    {268, -1008837.2, 464678.5, 18464.6},   // gatherable Default__GatherableActor
-    {269, -1008819.3, 462622.1, 18106.4},   // gatherable Default__GatherableActor
-    {270, -1008782.1, 474418.8, 18258.5},   // gatherable Default__GatherableActor
-    {271, -1008656.9, 455506.5, 17479.6},   // gatherable Default__GatherableActor
-    {272, -1008631.1, 548657.3, 12694.5},   // gatherable Default__GatherableActor
-    {273, -1008576.2, 548877.9, 12694.5},   // gatherable Default__GatherableActor
-    {274, -1008531.9, 489945.9, 17748.4},   // gatherable Default__GatherableActor
-    {275, -1008347.7, 490904.6, 17643.1},   // gatherable Default__GatherableActor
-    {276, -1008195.2, 455446.9, 17500.8},   // gatherable Default__GatherableActor
-    {277, -1008137.5, 488068.5, 17691.6},   // gatherable Default__GatherableActor
-    {278, -1007869.3, 528592.5, 12919.8},   // gatherable Default__GatherableActor
-    {279, -1007521.6, 549446.3, 12692.4},   // gatherable Default__GatherableActor
-    {280, -1007457.2, 549156.2, 12691.5},   // gatherable Default__GatherableActor
-    {281, -1007355.6, 539678.4, 13037.2},   // gatherable Default__GatherableActor
-    {282, -1007248.1, 549507.7, 12687.4},   // gatherable Default__GatherableActor
-    {283, -1007052.7, 548653.6, 12679.4},   // gatherable Default__GatherableActor
-    {284, -1006788.1, 548542.4, 12670.7},   // gatherable Default__GatherableActor
-    {285, -1006335.9, 529127.7, 13268.5},   // gatherable Default__GatherableActor
-    {286, -1006235.1, 525559.2, 13675.0},   // gatherable Default__GatherableActor
-    {287, -1006132.6, 529525.6, 13293.1},   // gatherable Default__GatherableActor
-    {288, -1006035.2, 529933.4, 13309.1},   // gatherable Default__GatherableActor
-    {289, -1006032.4, 525215.9, 13800.4},   // gatherable Default__GatherableActor
-    {290, -1005910.3, 529339.1, 13325.8},   // gatherable Default__GatherableActor
-    {291, -1005860.9, 525545.9, 13714.2},   // gatherable Default__GatherableActor
-    {292, -1004655.5, 549965.9, 12649.8},   // gatherable Default__GatherableActor
-    {293, -1003516.7, 522267.1, 14688.5},   // gatherable Default__GatherableActor
-    {294, -1003337.6, 524521.9, 14342.0},   // gatherable Default__GatherableActor
-    {295, -1002712.5, 534355.5, 13899.4},   // gatherable Default__GatherableActor
-    {296, -991850.1, 503578.8, 14714.3},   // gatherable Default__GatherableActor
-    {297, -991683.0, 503124.9, 14716.1},   // gatherable Default__GatherableActor
-    {298, -981550.3, 554805.6, 11313.7},   // gatherable Default__GatherableActor
-    {299, -977333.4, 500677.4, 12215.4},   // gatherable Default__GatherableActor
-    {300, -973749.2, 561427.9, 10562.8},   // gatherable Default__GatherableActor
-    {301, -971670.5, 562046.6, 10777.4},   // gatherable Default__GatherableActor
-    {302, -971369.3, 391966.4, 16123.3},   // gatherable Default__GatherableActor
-    {303, -969837.5, 408023.3, 15286.6},   // gatherable Default__GatherableActor
-    {304, -966963.3, 574835.7, 12295.3},   // gatherable Default__GatherableActor
-    {305, -966799.4, 404172.2, 15324.1},   // gatherable Default__GatherableActor
-    {306, -954333.2, 377790.6, 14950.5},   // gatherable Default__GatherableActor
-    {307, -954232.8, 377686.7, 14961.7},   // gatherable Default__GatherableActor
-    {308, -898066.7, 408560.3, 12915.5},   // gatherable Default__GatherableActor
-    {309, -895635.4, 407678.2, 12973.3},   // gatherable Default__GatherableActor
-    {310, -894213.4, 380161.0, 11952.8},   // gatherable Default__GatherableActor
-    {311, -894189.0, 396889.6, 11963.2},   // gatherable Default__GatherableActor
-    {312, -894100.9, 398393.3, 12687.2},   // gatherable Default__GatherableActor
-    {313, -894056.5, 380438.6, 11941.6},   // gatherable Default__GatherableActor
-    {314, -892958.7, 398275.0, 12743.9},   // gatherable Default__GatherableActor
-    {315, -891623.9, 395389.6, 11642.6},   // gatherable Default__GatherableActor
-    {316, -890007.9, 400118.0, 13089.7},   // gatherable Default__GatherableActor
-    {317, -889138.8, 386725.7, 11932.8},   // gatherable Default__GatherableActor
-    {318, -888333.2, 388952.3, 11926.6},   // gatherable Default__GatherableActor
-    {319, -888285.5, 385270.3, 11862.1},   // gatherable Default__GatherableActor
-    {320, -887974.2, 389143.3, 11960.8},   // gatherable Default__GatherableActor
-    {321, -887837.1, 401042.3, 12886.1},   // gatherable Default__GatherableActor
-    {322, -887572.3, 389451.5, 12004.1},   // gatherable Default__GatherableActor
-    {323, -886901.0, 388410.0, 12122.0},   // gatherable Default__GatherableActor
-    {324, -886696.1, 418893.1, 12648.3},   // gatherable Default__GatherableActor
-    {325, -885663.1, 387297.4, 11826.2},   // gatherable Default__GatherableActor
-    {326, -884788.2, 402175.5, 12778.3},   // gatherable Default__GatherableActor
-    {327, -884735.3, 405271.7, 12847.3},   // gatherable Default__GatherableActor
-    {328, -884600.3, 421389.6, 12557.5},   // gatherable Default__GatherableActor
-    {329, -884517.9, 390868.0, 11883.8},   // gatherable Default__GatherableActor
-    {330, -884497.5, 402165.1, 12742.3},   // gatherable Default__GatherableActor
-    {331, -883241.2, 421176.1, 12526.5},   // gatherable Default__GatherableActor
-    {332, -882108.9, 414184.9, 12693.1},   // gatherable Default__GatherableActor
-    {333, -881455.2, 415956.0, 12639.3},   // gatherable Default__GatherableActor
-    {334, -880315.9, 409101.0, 12636.3},   // gatherable Default__GatherableActor
-    {335, -879612.0, 418208.3, 12445.7},   // gatherable Default__GatherableActor
-    {336, -877582.0, 412469.7, 12516.6},   // gatherable Default__GatherableActor
-    {337, -877023.1, 376316.4, 11567.2},   // gatherable Default__GatherableActor
-    {338, -876991.7, 375933.8, 11613.9},   // gatherable Default__GatherableActor
-    {339, -876388.4, 410216.4, 12355.8},   // gatherable Default__GatherableActor
-    {340, -875872.3, 430997.6, 12509.3},   // gatherable Default__GatherableActor
-    {341, -875448.6, 417151.7, 12211.2},   // gatherable Default__GatherableActor
-    {342, -873410.2, 367228.2, 12687.7},   // gatherable Default__GatherableActor
-    {343, -872495.0, 429503.9, 12529.2},   // gatherable Default__GatherableActor
-    {344, -872252.0, 427466.6, 12516.4},   // gatherable Default__GatherableActor
-    {345, -870547.5, 430360.2, 12502.8},   // gatherable Default__GatherableActor
-    {346, -870444.1, 359157.5, 12462.4},   // gatherable Default__GatherableActor
-    {347, -870299.2, 380887.1, 11634.1},   // gatherable Default__GatherableActor
-    {348, -870193.7, 431240.9, 12420.2},   // gatherable Default__GatherableActor
-    {349, -870193.5, 426679.4, 12379.0},   // gatherable Default__GatherableActor
-    {350, -868632.0, 358603.1, 12351.8},   // gatherable Default__GatherableActor
-    {351, -868418.4, 429587.0, 12326.2},   // gatherable Default__GatherableActor
-    {352, -863265.4, 368851.0, 12263.1},   // gatherable Default__GatherableActor
-    {353, -861710.6, 361846.3, 12290.2},   // gatherable Default__GatherableActor
-    {354, -855531.8, 361589.6, 12831.6},   // gatherable Default__GatherableActor
-    {355, -854606.1, 365979.0, 12867.7},   // gatherable Default__GatherableActor
-    {356, -854488.6, 354915.5, 12312.3},   // gatherable Default__GatherableActor
-    {357, -853909.0, 370517.0, 12694.3},   // gatherable Default__GatherableActor
-    {358, -851367.8, 364456.9, 13123.4},   // gatherable Default__GatherableActor
-    {359, -850263.2, 362767.2, 13123.4},   // gatherable Default__GatherableActor
-    {360, -849885.5, 353945.0, 12299.2},   // gatherable Default__GatherableActor
-    {361, -846406.6, 594184.9, 13020.3},   // gatherable Default__GatherableActor
-    {362, -846358.2, 611746.2, 21315.9},   // gatherable Default__GatherableActor
-    {363, -844750.3, 587103.7, 12074.6},   // gatherable Default__GatherableActor
-    {364, -844455.1, 577243.8, 13079.9},   // gatherable Default__GatherableActor
-    {365, -844327.7, 611679.0, 21463.7},   // gatherable Default__GatherableActor
-    {366, -844177.1, 582582.8, 13108.8},   // gatherable Default__GatherableActor
-    {367, -844149.9, 401153.2, 10829.0},   // gatherable Default__GatherableActor
-    {368, -843627.7, 607329.3, 21503.0},   // gatherable Default__GatherableActor
-    {369, -843312.1, 395498.6, 10663.2},   // gatherable Default__GatherableActor
-    {370, -843244.8, 606387.7, 21454.7},   // gatherable Default__GatherableActor
-    {371, -842307.0, 582765.4, 12978.4},   // gatherable Default__GatherableActor
-    {372, -841890.6, 429798.5, 13173.0},   // gatherable Default__GatherableActor
-    {373, -841599.6, 604520.3, 21425.7},   // gatherable Default__GatherableActor
-    {374, -841343.4, 415557.0, 10729.6},   // gatherable Default__GatherableActor
-    {375, -841250.4, 363956.7, 13146.9},   // gatherable Default__GatherableActor
-    {376, -841088.2, 613811.4, 21372.3},   // gatherable Default__GatherableActor
-    {377, -841071.2, 354573.4, 11898.2},   // gatherable Default__GatherableActor
-    {378, -840790.2, 597564.7, 21655.5},   // gatherable Default__GatherableActor
-    {379, -839990.8, 590735.0, 12991.6},   // gatherable Default__GatherableActor
-    {380, -839695.2, 609728.1, 21612.6},   // gatherable Default__GatherableActor
-    {381, -839663.5, 607647.4, 21492.3},   // gatherable Default__GatherableActor
-    {382, -839428.9, 606323.5, 21519.5},   // gatherable Default__GatherableActor
-    {383, -839288.5, 369433.6, 12991.3},   // gatherable Default__GatherableActor
-    {384, -839027.5, 607365.1, 21631.8},   // gatherable Default__GatherableActor
-    {385, -838656.7, 590212.9, 12801.0},   // gatherable Default__GatherableActor
-    {386, -838654.9, 611302.6, 21497.8},   // gatherable Default__GatherableActor
-    {387, -838070.3, 603276.8, 21498.2},   // gatherable Default__GatherableActor
-    {388, -837837.9, 603957.3, 21536.7},   // gatherable Default__GatherableActor
-    {389, -837354.7, 387017.0, 11045.7},   // gatherable Default__GatherableActor
-    {390, -837217.6, 421061.1, 11103.3},   // gatherable Default__GatherableActor
-    {391, -837088.3, 613150.5, 21577.2},   // gatherable Default__GatherableActor
-    {392, -836823.4, 404250.6, 10604.2},   // gatherable Default__GatherableActor
-    {393, -836648.1, 426726.0, 12062.4},   // gatherable Default__GatherableActor
-    {394, -836309.0, 584044.4, 11979.4},   // gatherable Default__GatherableActor
-    {395, -836200.1, 582688.4, 12143.9},   // gatherable Default__GatherableActor
-    {396, -835488.7, 422045.1, 11330.5},   // gatherable Default__GatherableActor
-    {397, -835322.9, 400052.0, 10671.4},   // gatherable Default__GatherableActor
-    {398, -834203.8, 428995.6, 13032.6},   // gatherable Default__GatherableActor
-    {399, -833976.8, 418867.4, 10822.8},   // gatherable Default__GatherableActor
-    {400, -833744.4, 419856.7, 10976.1},   // gatherable Default__GatherableActor
-    {401, -833478.1, 413898.7, 10773.1},   // gatherable Default__GatherableActor
-    {402, -833378.5, 369266.9, 11809.2},   // gatherable Default__GatherableActor
-    {403, -832035.7, 424563.1, 11682.3},   // gatherable Default__GatherableActor
-    {404, -831885.1, 415518.0, 10547.6},   // gatherable Default__GatherableActor
-    {405, -830504.4, 366570.6, 11903.6},   // gatherable Default__GatherableActor
-    {406, -829924.4, 430536.2, 13547.9},   // gatherable Default__GatherableActor
-    {407, -804877.1, 570803.5, 13866.5},   // gatherable Default__GatherableActor
-    {408, -804660.9, 441493.4, 13293.0},   // gatherable Default__GatherableActor
-    {409, -804593.1, 570781.9, 13828.3},   // gatherable Default__GatherableActor
-    {410, -804403.9, 570569.9, 13834.5},   // gatherable Default__GatherableActor
-    {411, -803856.4, 571346.3, 13549.7},   // gatherable Default__GatherableActor
-    {412, -800278.8, 433220.6, 13380.2},   // gatherable Default__GatherableActor
-    {413, -797856.5, 438146.9, 13478.7},   // gatherable Default__GatherableActor
-    {414, -795613.3, 438610.1, 13438.9},   // gatherable Default__GatherableActor
-    {415, -792320.1, 429794.0, 13376.2},   // gatherable Default__GatherableActor
-    {416, -790430.2, 430636.4, 13408.8},   // gatherable Default__GatherableActor
-    {417, -783204.9, 398490.2, 15788.4},   // gatherable Default__GatherableActor
-    {418, -783137.3, 427402.2, 13356.1},   // gatherable Default__GatherableActor
-    {419, -780837.7, 399104.1, 16320.4},   // gatherable Default__GatherableActor
-    {420, -779664.3, 400175.6, 16303.8},   // gatherable Default__GatherableActor
-    {421, -779367.5, 399176.4, 16550.5},   // gatherable Default__GatherableActor
-    {422, -779036.2, 426637.1, 13507.0},   // gatherable Default__GatherableActor
-    {423, -775747.5, 430587.1, 13422.4},   // gatherable Default__GatherableActor
-    {424, -774926.9, 429832.9, 13537.7},   // gatherable Default__GatherableActor
-    {425, -769117.9, 439813.4, 13248.8},   // gatherable Default__GatherableActor
-    {426, -767827.1, 406430.8, 13742.5},   // gatherable Default__GatherableActor
-    {427, -766746.0, 434442.1, 13305.3},   // gatherable Default__GatherableActor
-    {428, -766512.1, 436358.2, 13242.2},   // gatherable Default__GatherableActor
-    {429, -765450.2, 408181.4, 13690.2},   // gatherable Default__GatherableActor
-    {430, -765310.8, 404746.1, 14965.0},   // gatherable Default__GatherableActor
-    {431, -765047.3, 411326.3, 13002.9},   // gatherable Default__GatherableActor
-    {432, -765036.9, 414612.6, 11167.5},   // gatherable Default__GatherableActor
-    {433, -764735.5, 408674.7, 13677.1},   // gatherable Default__GatherableActor
-    {434, -764706.5, 414231.2, 11373.6},   // gatherable Default__GatherableActor
-    {435, -764492.5, 404919.5, 14795.7},   // gatherable Default__GatherableActor
-    {436, -764482.2, 399475.0, 16555.1},   // gatherable Default__GatherableActor
-    {437, -764445.2, 409574.5, 13523.3},   // gatherable Default__GatherableActor
-    {438, -764444.7, 404736.7, 14926.7},   // gatherable Default__GatherableActor
-    {439, -764397.2, 405594.5, 14354.1},   // gatherable Default__GatherableActor
-    {440, -763908.1, 409319.6, 13583.8},   // gatherable Default__GatherableActor
-    {441, -763820.8, 404594.9, 14897.2},   // gatherable Default__GatherableActor
-    {442, -763809.2, 411362.1, 12974.5},   // gatherable Default__GatherableActor
-    {443, -763582.4, 407552.7, 13797.2},   // gatherable Default__GatherableActor
-    {444, -763471.2, 404911.1, 14635.7},   // gatherable Default__GatherableActor
-    {445, -763435.6, 400824.3, 16328.2},   // gatherable Default__GatherableActor
-    {446, -762849.7, 440797.9, 13348.0},   // gatherable Default__GatherableActor
-    {447, -762775.2, 407181.5, 13853.7},   // gatherable Default__GatherableActor
-    {448, -762663.4, 400373.2, 16245.0},   // gatherable Default__GatherableActor
-    {449, -762567.8, 404431.3, 14681.3},   // gatherable Default__GatherableActor
-    {450, -761876.2, 403496.2, 14865.7},   // gatherable Default__GatherableActor
-    {451, -761521.6, 438421.7, 13360.2},   // gatherable Default__GatherableActor
-    {452, -760420.9, 403867.0, 14146.8},   // gatherable Default__GatherableActor
-    {453, -759266.0, 402387.3, 13990.3},   // gatherable Default__GatherableActor
-    {454, -758429.5, 412107.2, 12365.0},   // gatherable Default__GatherableActor
-    {455, -758222.5, 412513.4, 12249.8},   // gatherable Default__GatherableActor
-    {456, -758168.0, 410706.6, 12565.9},   // gatherable Default__GatherableActor
-    {457, -758086.9, 401373.9, 13668.9},   // gatherable Default__GatherableActor
-    {458, -757699.5, 415575.3, 12101.5},   // gatherable Default__GatherableActor
-    {459, -757224.3, 420739.4, 12280.5},   // gatherable Default__GatherableActor
-    {460, -757108.4, 421199.7, 12312.1},   // gatherable Default__GatherableActor
-    {461, -756950.8, 420103.4, 12318.5},   // gatherable Default__GatherableActor
-    {462, -756780.5, 422202.7, 12180.0},   // gatherable Default__GatherableActor
-    {463, -756535.4, 422423.0, 12199.3},   // gatherable Default__GatherableActor
-    {464, -755858.4, 401315.9, 13220.4},   // gatherable Default__GatherableActor
-    {465, -755754.7, 408666.8, 12550.8},   // gatherable Default__GatherableActor
-    {466, -706502.8, 539085.5, 15861.3},   // gatherable Default__GatherableActor
-    {467, -706353.0, 538727.5, 15930.0},   // gatherable Default__GatherableActor
-    {468, -705815.7, 539492.1, 15985.5},   // gatherable Default__GatherableActor
-    {469, -705750.3, 538604.7, 16065.8},   // gatherable Default__GatherableActor
-    {470, -681965.4, 539096.5, 16449.7},   // gatherable Default__GatherableActor
-    {471, -680678.4, 575431.7, 13738.4},   // gatherable Default__GatherableActor
-    {472, -669579.4, 517071.4, 14622.3},   // gatherable Default__GatherableActor
-    {473, -667808.5, 643723.8, 23131.0},   // gatherable Default__GatherableActor
-    {474, -667256.5, 642221.6, 23216.9},   // gatherable Default__GatherableActor
-    {475, -666968.0, 640911.7, 23283.1},   // gatherable Default__GatherableActor
-    {476, -664661.7, 643773.3, 23094.3},   // gatherable Default__GatherableActor
-    {477, -663658.1, 529597.7, 16095.6},   // gatherable Default__GatherableActor
-    {478, -662689.6, 647311.0, 22115.8},   // gatherable Default__GatherableActor
-    {479, -661529.2, 640624.6, 22858.7},   // gatherable Default__GatherableActor
-    {480, -661501.0, 648287.1, 22164.6},   // gatherable Default__GatherableActor
-    {481, -660683.2, 644807.1, 22873.7},   // gatherable Default__GatherableActor
-    {482, -648795.9, 523637.3, 12790.9},   // gatherable Default__GatherableActor
-    {483, -605579.3, 371919.2, 12282.9},   // gatherable Default__GatherableActor
-    {484, -604010.4, 408923.9, 12748.5},   // gatherable Default__GatherableActor
-    {485, -599300.6, 401579.1, 12739.6},   // gatherable Default__GatherableActor
-    {486, -596822.9, 405131.3, 13628.4},   // gatherable Default__GatherableActor
-    {487, -591495.9, 405047.0, 14723.9},   // gatherable Default__GatherableActor
-    {488, -584814.7, 480418.8, 13102.1},   // gatherable Default__GatherableActor
-    {489, -584400.2, 482682.2, 12090.3},   // gatherable Default__GatherableActor
-    {490, -584160.5, 454319.5, 16372.8},   // gatherable Default__GatherableActor
-    {491, -584152.7, 449034.9, 11810.7},   // gatherable Default__GatherableActor
-    {492, -584061.1, 482287.5, 12076.3},   // gatherable Default__GatherableActor
-    {493, -583421.8, 462227.0, 10641.1},   // gatherable Default__GatherableActor
-    {494, -583218.4, 449202.1, 11905.3},   // gatherable Default__GatherableActor
-    {495, -583187.1, 450453.9, 12316.7},   // gatherable Default__GatherableActor
-    {496, -583014.1, 456781.3, 16161.3},   // gatherable Default__GatherableActor
-    {497, -582889.1, 449887.4, 12143.2},   // gatherable Default__GatherableActor
-    {498, -582852.0, 449358.2, 11990.9},   // gatherable Default__GatherableActor
-    {499, -582807.9, 457640.9, 16411.1},   // gatherable Default__GatherableActor
-    {500, -582772.3, 466351.8, 13406.1},   // gatherable Default__GatherableActor
-    {501, -582596.9, 447713.5, 11705.1},   // gatherable Default__GatherableActor
-    {502, -582303.0, 465517.2, 13342.0},   // gatherable Default__GatherableActor
-    {503, -582163.4, 448061.6, 11822.3},   // gatherable Default__GatherableActor
-    {504, -581960.8, 481236.4, 12661.2},   // gatherable Default__GatherableActor
-    {505, -581922.4, 476913.7, 14903.4},   // gatherable Default__GatherableActor
-    {506, -581711.2, 481592.5, 12638.9},   // gatherable Default__GatherableActor
-    {507, -581482.6, 474185.2, 15126.7},   // gatherable Default__GatherableActor
-    {508, -581470.4, 458305.2, 15257.5},   // gatherable Default__GatherableActor
-    {509, -581312.1, 458439.0, 15129.0},   // gatherable Default__GatherableActor
-    {510, -581142.9, 450970.1, 12646.7},   // gatherable Default__GatherableActor
-    {511, -580924.6, 454612.0, 15850.9},   // gatherable Default__GatherableActor
-    {512, -580855.1, 449223.9, 12329.7},   // gatherable Default__GatherableActor
-    {513, -580827.9, 451637.1, 12969.3},   // gatherable Default__GatherableActor
-    {514, -580740.8, 459429.1, 14828.7},   // gatherable Default__GatherableActor
-    {515, -580696.6, 480371.7, 12767.7},   // gatherable Default__GatherableActor
-    {516, -580672.2, 459257.5, 14853.6},   // gatherable Default__GatherableActor
-    {517, -580600.5, 455530.3, 15734.4},   // gatherable Default__GatherableActor
-    {518, -580441.8, 452240.7, 13354.5},   // gatherable Default__GatherableActor
-    {519, -580367.3, 463832.0, 13551.0},   // gatherable Default__GatherableActor
-    {520, -580351.4, 449811.4, 12525.0},   // gatherable Default__GatherableActor
-    {521, -580096.5, 452958.0, 13507.6},   // gatherable Default__GatherableActor
-    {522, -579942.9, 449607.3, 12614.0},   // gatherable Default__GatherableActor
-    {523, -579921.5, 459536.3, 14699.7},   // gatherable Default__GatherableActor
-    {524, -579344.9, 450979.7, 12799.3},   // gatherable Default__GatherableActor
-    {525, -578977.2, 453093.6, 13321.1},   // gatherable Default__GatherableActor
-    {526, -578770.9, 487718.3, 10811.2},   // gatherable Default__GatherableActor
-    {527, -578642.7, 482361.8, 12638.8},   // gatherable Default__GatherableActor
-    {528, -578411.5, 478085.4, 12908.6},   // gatherable Default__GatherableActor
-    {529, -577889.9, 451011.6, 13041.6},   // gatherable Default__GatherableActor
-    {530, -577774.1, 465253.7, 11989.1},   // gatherable Default__GatherableActor
-    {531, -577748.6, 463401.3, 11755.2},   // gatherable Default__GatherableActor
-    {532, -577627.4, 467226.1, 12221.6},   // gatherable Default__GatherableActor
-    {533, -576988.0, 468538.3, 12121.3},   // gatherable Default__GatherableActor
-    {534, -576404.6, 453106.7, 13191.4},   // gatherable Default__GatherableActor
-    {535, -575979.6, 453751.7, 13053.3},   // gatherable Default__GatherableActor
-    {536, -564592.8, 452324.3, 13427.7},   // gatherable Default__GatherableActor
-    {537, -563238.3, 452002.7, 13424.1},   // gatherable Default__GatherableActor
-    {538, -562048.9, 450008.9, 12997.4},   // gatherable Default__GatherableActor
-    {539, -561282.9, 450531.7, 13061.4},   // gatherable Default__GatherableActor
-    {540, -561187.7, 450199.5, 12852.8},   // gatherable Default__GatherableActor
-    {541, -533857.2, 418429.7, 11110.9},   // gatherable Default__GatherableActor
-    {542, -533225.6, 455895.1, 10601.5},   // gatherable Default__GatherableActor
-    {543, -532996.7, 482702.0, 10982.5},   // gatherable Default__GatherableActor
-    {544, -532282.5, 444715.4, 10529.4},   // gatherable Default__GatherableActor
-    {545, -531048.1, 456799.8, 10590.6},   // gatherable Default__GatherableActor
-    {546, -529971.4, 441734.7, 11428.3},   // gatherable Default__GatherableActor
-    {547, -528540.5, 460190.1, 10856.0},   // gatherable Default__GatherableActor
-    {548, -527853.2, 435319.1, 10602.5},   // gatherable Default__GatherableActor
+    {99, -814222.0, 570180.5, 13008.5},   // npc Default__Goblin_Bonebinder_C
+    {100, -715378.6, 546610.9, 12976.8},   // npc Default__Wolf_C
+    {101, -816819.1, 583969.8, 12558.8},   // npc Default__Goblin_Bonebinder_C
+    {102, -817251.2, 584006.5, 12622.6},   // npc Default__Goblin_Bonebinder_C
+    {103, -817125.5, 584753.1, 12739.7},   // npc Default__Goblin_Bonebinder_C
+    {104, -816116.3, 567997.7, 12788.1},   // npc Default__Goblin_Bonebinder_C
+    {105, -820352.6, 569472.8, 12687.5},   // npc Default__Goblin_Bonebinder_C
+    {106, -821907.8, 569540.7, 12682.4},   // npc Default__Goblin_Bonebinder_C
+    {107, -818376.0, 568709.2, 12770.7},   // npc Default__Goblin_Bonebinder_C
+    {108, -805032.1, 579300.8, 13088.2},   // npc Default__Goblin_Bonebinder_C
+    {109, -830425.3, 583234.6, 12034.3},   // npc Default__Goblin_Bonebinder_C
+    {110, -814195.9, 586696.9, 12739.8},   // npc Default__Goblin_Bonebinder_C
+    {111, -1214977.7, 564563.0, 11972.3},   // gatherable Default__GatherableActor
+    {112, -1127174.2, 491054.0, 12200.3},   // gatherable Default__GatherableActor
+    {113, -1106671.7, 558582.4, 12188.9},   // gatherable Default__GatherableActor
+    {114, -1105253.7, 484507.7, 12260.8},   // gatherable Default__GatherableActor
+    {115, -1104755.4, 553420.9, 13242.7},   // gatherable Default__GatherableActor
+    {116, -1104709.4, 484549.2, 12366.3},   // gatherable Default__GatherableActor
+    {117, -1101293.0, 471261.4, 12299.8},   // gatherable Default__GatherableActor
+    {118, -1100140.0, 472424.0, 12025.9},   // gatherable Default__GatherableActor
+    {119, -1098877.2, 554117.7, 12399.9},   // gatherable Default__GatherableActor
+    {120, -1098365.5, 554693.8, 12200.9},   // gatherable Default__GatherableActor
+    {121, -1095382.1, 467991.1, 12997.2},   // gatherable Default__GatherableActor
+    {122, -1093479.2, 480667.8, 12175.7},   // gatherable Default__GatherableActor
+    {123, -1087126.8, 477070.5, 12309.9},   // gatherable Default__GatherableActor
+    {124, -1080323.2, 523983.0, 13061.9},   // gatherable Default__GatherableActor
+    {125, -1077747.6, 534932.5, 13046.8},   // gatherable Default__GatherableActor
+    {126, -1074451.7, 524400.1, 12570.8},   // gatherable Default__GatherableActor
+    {127, -1072651.1, 523704.5, 12547.8},   // gatherable Default__GatherableActor
+    {128, -1070580.9, 523676.6, 12519.0},   // gatherable Default__GatherableActor
+    {129, -1067124.2, 488304.3, 12381.8},   // gatherable Default__GatherableActor
+    {130, -1066741.8, 531969.0, 12253.5},   // gatherable Default__GatherableActor
+    {131, -1066648.1, 459158.1, 12907.2},   // gatherable Default__GatherableActor
+    {132, -1066546.2, 457179.6, 12879.8},   // gatherable Default__GatherableActor
+    {133, -1066312.1, 459189.0, 12898.9},   // gatherable Default__GatherableActor
+    {134, -1065919.0, 457378.2, 12821.3},   // gatherable Default__GatherableActor
+    {135, -1065783.2, 459122.9, 12882.5},   // gatherable Default__GatherableActor
+    {136, -1065426.8, 457603.0, 12824.0},   // gatherable Default__GatherableActor
+    {137, -1065383.7, 458659.3, 12871.0},   // gatherable Default__GatherableActor
+    {138, -1065216.9, 458460.7, 12873.5},   // gatherable Default__GatherableActor
+    {139, -1065141.5, 520096.2, 12436.7},   // gatherable Default__GatherableActor
+    {140, -1064927.7, 520823.5, 12416.4},   // gatherable Default__GatherableActor
+    {141, -1064728.1, 489341.4, 12412.5},   // gatherable Default__GatherableActor
+    {142, -1064318.2, 520634.5, 12418.4},   // gatherable Default__GatherableActor
+    {143, -1064235.4, 455583.2, 12873.2},   // gatherable Default__GatherableActor
+    {144, -1064047.1, 520742.6, 12417.5},   // gatherable Default__GatherableActor
+    {145, -1063761.7, 535966.3, 12200.8},   // gatherable Default__GatherableActor
+    {146, -1063534.2, 455177.4, 12876.1},   // gatherable Default__GatherableActor
+    {147, -1063189.2, 496331.1, 12226.9},   // gatherable Default__GatherableActor
+    {148, -1062916.4, 452964.5, 12891.2},   // gatherable Default__GatherableActor
+    {149, -1062138.0, 488818.8, 12417.4},   // gatherable Default__GatherableActor
+    {150, -1060838.1, 492071.4, 12452.0},   // gatherable Default__GatherableActor
+    {151, -1060649.9, 488244.7, 12430.4},   // gatherable Default__GatherableActor
+    {152, -1060100.4, 497214.9, 12795.6},   // gatherable Default__GatherableActor
+    {153, -1059996.9, 534843.1, 12291.8},   // gatherable Default__GatherableActor
+    {154, -1059963.6, 487029.2, 12306.9},   // gatherable Default__GatherableActor
+    {155, -1059899.1, 496233.9, 12805.5},   // gatherable Default__GatherableActor
+    {156, -1058807.3, 536096.3, 12115.3},   // gatherable Default__GatherableActor
+    {157, -1058697.8, 499532.6, 12321.8},   // gatherable Default__GatherableActor
+    {158, -1058145.7, 489948.0, 12364.5},   // gatherable Default__GatherableActor
+    {159, -1057657.8, 518673.3, 11962.5},   // gatherable Default__GatherableActor
+    {160, -1056847.0, 529646.6, 12481.8},   // gatherable Default__GatherableActor
+    {161, -1056083.3, 495055.5, 12583.5},   // gatherable Default__GatherableActor
+    {162, -1054672.7, 527636.6, 12465.3},   // gatherable Default__GatherableActor
+    {163, -1053602.4, 497447.2, 12568.6},   // gatherable Default__GatherableActor
+    {164, -1052749.4, 530367.6, 12360.3},   // gatherable Default__GatherableActor
+    {165, -1052597.9, 465358.0, 13256.6},   // gatherable Default__GatherableActor
+    {166, -1050096.2, 477186.2, 12573.5},   // gatherable Default__GatherableActor
+    {167, -1050070.2, 475666.1, 12640.8},   // gatherable Default__GatherableActor
+    {168, -1049671.2, 474909.7, 12978.7},   // gatherable Default__GatherableActor
+    {169, -1049654.5, 472151.0, 13536.5},   // gatherable Default__GatherableActor
+    {170, -1049614.7, 471289.7, 13702.1},   // gatherable Default__GatherableActor
+    {171, -1048911.4, 474128.6, 13384.5},   // gatherable Default__GatherableActor
+    {172, -1047735.4, 469965.6, 14008.5},   // gatherable Default__GatherableActor
+    {173, -1047564.3, 473009.9, 13815.1},   // gatherable Default__GatherableActor
+    {174, -1046182.5, 471322.9, 14460.5},   // gatherable Default__GatherableActor
+    {175, -1045833.9, 474880.0, 14177.8},   // gatherable Default__GatherableActor
+    {176, -1045305.9, 480628.3, 12673.7},   // gatherable Default__GatherableActor
+    {177, -1045193.2, 473227.3, 14783.7},   // gatherable Default__GatherableActor
+    {178, -1045020.9, 482008.4, 12449.8},   // gatherable Default__GatherableActor
+    {179, -1041453.3, 456155.9, 12956.0},   // gatherable Default__GatherableActor
+    {180, -1038211.6, 556171.2, 12782.7},   // gatherable Default__GatherableActor
+    {181, -1035884.4, 495101.3, 12776.4},   // gatherable Default__GatherableActor
+    {182, -1035772.3, 492963.0, 12833.9},   // gatherable Default__GatherableActor
+    {183, -1035403.4, 457434.1, 14156.1},   // gatherable Default__GatherableActor
+    {184, -1034654.5, 479143.3, 15117.4},   // gatherable Default__GatherableActor
+    {185, -1034382.1, 498854.8, 12691.1},   // gatherable Default__GatherableActor
+    {186, -1034291.3, 458331.7, 14594.8},   // gatherable Default__GatherableActor
+    {187, -1033136.1, 458081.8, 14826.4},   // gatherable Default__GatherableActor
+    {188, -1032893.1, 458220.7, 14930.8},   // gatherable Default__GatherableActor
+    {189, -1030513.7, 539782.3, 12847.9},   // gatherable Default__GatherableActor
+    {190, -1030424.0, 455806.4, 14558.2},   // gatherable Default__GatherableActor
+    {191, -1030054.2, 452872.1, 13694.8},   // gatherable Default__GatherableActor
+    {192, -1029934.7, 529812.1, 11928.7},   // gatherable Default__GatherableActor
+    {193, -1029619.1, 529288.2, 11930.5},   // gatherable Default__GatherableActor
+    {194, -1029044.4, 528780.8, 11957.8},   // gatherable Default__GatherableActor
+    {195, -1028358.8, 452974.4, 13869.4},   // gatherable Default__GatherableActor
+    {196, -1027889.2, 569820.6, 12337.8},   // gatherable Default__GatherableActor
+    {197, -1025856.9, 455603.4, 14823.0},   // gatherable Default__GatherableActor
+    {198, -1025643.6, 526570.5, 12186.6},   // gatherable Default__GatherableActor
+    {199, -1025458.8, 456328.5, 15101.3},   // gatherable Default__GatherableActor
+    {200, -1022776.8, 453167.7, 14290.1},   // gatherable Default__GatherableActor
+    {201, -1022725.4, 442570.0, 12804.3},   // gatherable Default__GatherableActor
+    {202, -1022501.6, 442291.6, 12815.2},   // gatherable Default__GatherableActor
+    {203, -1022370.6, 442847.0, 12811.2},   // gatherable Default__GatherableActor
+    {204, -1022120.2, 444535.0, 12857.5},   // gatherable Default__GatherableActor
+    {205, -1021676.1, 443750.9, 12831.9},   // gatherable Default__GatherableActor
+    {206, -1021659.2, 544934.9, 12950.4},   // gatherable Default__GatherableActor
+    {207, -1021539.1, 444423.4, 12855.6},   // gatherable Default__GatherableActor
+    {208, -1020757.1, 521788.1, 12034.0},   // gatherable Default__GatherableActor
+    {209, -1020316.2, 523420.1, 12100.7},   // gatherable Default__GatherableActor
+    {210, -1020002.6, 448330.2, 13208.1},   // gatherable Default__GatherableActor
+    {211, -1019762.8, 492867.8, 12994.4},   // gatherable Default__GatherableActor
+    {212, -1019554.1, 457312.3, 15845.8},   // gatherable Default__GatherableActor
+    {213, -1019363.6, 495286.8, 12891.9},   // gatherable Default__GatherableActor
+    {214, -1019171.5, 491467.5, 13608.2},   // gatherable Default__GatherableActor
+    {215, -1019068.6, 529250.6, 12564.0},   // gatherable Default__GatherableActor
+    {216, -1018613.7, 459735.8, 16604.4},   // gatherable Default__GatherableActor
+    {217, -1018224.5, 445252.8, 12987.5},   // gatherable Default__GatherableActor
+    {218, -1017860.8, 470497.5, 18603.3},   // gatherable Default__GatherableActor
+    {219, -1017669.5, 474634.4, 18370.7},   // gatherable Default__GatherableActor
+    {220, -1017660.2, 487774.0, 14855.3},   // gatherable Default__GatherableActor
+    {221, -1017517.8, 470491.7, 18615.5},   // gatherable Default__GatherableActor
+    {222, -1017478.7, 470262.7, 18484.6},   // gatherable Default__GatherableActor
+    {223, -1017186.5, 485672.2, 15138.9},   // gatherable Default__GatherableActor
+    {224, -1017011.2, 455900.9, 15177.5},   // gatherable Default__GatherableActor
+    {225, -1016783.4, 488112.8, 15022.6},   // gatherable Default__GatherableActor
+    {226, -1016654.7, 457676.1, 16012.0},   // gatherable Default__GatherableActor
+    {227, -1016469.5, 467910.4, 18655.1},   // gatherable Default__GatherableActor
+    {228, -1016232.0, 481274.5, 17418.9},   // gatherable Default__GatherableActor
+    {229, -1015440.6, 474651.9, 18315.0},   // gatherable Default__GatherableActor
+    {230, -1015040.0, 495476.8, 14670.3},   // gatherable Default__GatherableActor
+    {231, -1014979.8, 545740.2, 12723.4},   // gatherable Default__GatherableActor
+    {232, -1014846.7, 487619.0, 15508.4},   // gatherable Default__GatherableActor
+    {233, -1014745.6, 488539.6, 15319.9},   // gatherable Default__GatherableActor
+    {234, -1014698.9, 452992.0, 14246.2},   // gatherable Default__GatherableActor
+    {235, -1014574.4, 529266.6, 12336.3},   // gatherable Default__GatherableActor
+    {236, -1014170.3, 530071.7, 12373.1},   // gatherable Default__GatherableActor
+    {237, -1014156.2, 481409.8, 18228.6},   // gatherable Default__GatherableActor
+    {238, -1014125.5, 515600.6, 12191.9},   // gatherable Default__GatherableActor
+    {239, -1013823.5, 492187.9, 15793.4},   // gatherable Default__GatherableActor
+    {240, -1013716.6, 528971.8, 12343.4},   // gatherable Default__GatherableActor
+    {241, -1013670.7, 480957.4, 18258.5},   // gatherable Default__GatherableActor
+    {242, -1013644.1, 528596.2, 12377.7},   // gatherable Default__GatherableActor
+    {243, -1013554.5, 497888.4, 15468.3},   // gatherable Default__GatherableActor
+    {244, -1013436.9, 496940.1, 15524.5},   // gatherable Default__GatherableActor
+    {245, -1013326.0, 491936.5, 15832.6},   // gatherable Default__GatherableActor
+    {246, -1013282.6, 453032.3, 14468.7},   // gatherable Default__GatherableActor
+    {247, -1013224.7, 545943.7, 12694.4},   // gatherable Default__GatherableActor
+    {248, -1012907.2, 461132.5, 18022.7},   // gatherable Default__GatherableActor
+    {249, -1012904.9, 497642.0, 15617.5},   // gatherable Default__GatherableActor
+    {250, -1012766.8, 529709.4, 12384.3},   // gatherable Default__GatherableActor
+    {251, -1012690.6, 496763.2, 15665.1},   // gatherable Default__GatherableActor
+    {252, -1012634.7, 496436.0, 15652.4},   // gatherable Default__GatherableActor
+    {253, -1012463.2, 527697.3, 12539.0},   // gatherable Default__GatherableActor
+    {254, -1012262.5, 471955.6, 18208.3},   // gatherable Default__GatherableActor
+    {255, -1012017.5, 527710.5, 12557.6},   // gatherable Default__GatherableActor
+    {256, -1011834.5, 485245.7, 17216.5},   // gatherable Default__GatherableActor
+    {257, -1011774.7, 469329.3, 18402.3},   // gatherable Default__GatherableActor
+    {258, -1011480.4, 499357.3, 15003.0},   // gatherable Default__GatherableActor
+    {259, -1011336.3, 522804.7, 12218.2},   // gatherable Default__GatherableActor
+    {260, -1010555.9, 464037.1, 18710.3},   // gatherable Default__GatherableActor
+    {261, -1009988.4, 485981.0, 17244.7},   // gatherable Default__GatherableActor
+    {262, -1009750.2, 464786.1, 18593.4},   // gatherable Default__GatherableActor
+    {263, -1009612.8, 467199.9, 18436.3},   // gatherable Default__GatherableActor
+    {264, -1009586.4, 462559.2, 18385.1},   // gatherable Default__GatherableActor
+    {265, -1009382.4, 466172.2, 18439.1},   // gatherable Default__GatherableActor
+    {266, -1009040.2, 463724.6, 18415.4},   // gatherable Default__GatherableActor
+    {267, -1008913.2, 489106.2, 17649.2},   // gatherable Default__GatherableActor
+    {268, -1008884.1, 491169.8, 17386.3},   // gatherable Default__GatherableActor
+    {269, -1008837.2, 464678.5, 18464.6},   // gatherable Default__GatherableActor
+    {270, -1008819.3, 462622.1, 18106.4},   // gatherable Default__GatherableActor
+    {271, -1008782.1, 474418.8, 18258.5},   // gatherable Default__GatherableActor
+    {272, -1008656.9, 455506.5, 17479.6},   // gatherable Default__GatherableActor
+    {273, -1008631.1, 548657.3, 12694.5},   // gatherable Default__GatherableActor
+    {274, -1008576.2, 548877.9, 12694.5},   // gatherable Default__GatherableActor
+    {275, -1008531.9, 489945.9, 17748.4},   // gatherable Default__GatherableActor
+    {276, -1008347.7, 490904.6, 17643.1},   // gatherable Default__GatherableActor
+    {277, -1008195.2, 455446.9, 17500.8},   // gatherable Default__GatherableActor
+    {278, -1008137.5, 488068.5, 17691.6},   // gatherable Default__GatherableActor
+    {279, -1007869.3, 528592.5, 12919.8},   // gatherable Default__GatherableActor
+    {280, -1007521.6, 549446.3, 12692.4},   // gatherable Default__GatherableActor
+    {281, -1007457.2, 549156.2, 12691.5},   // gatherable Default__GatherableActor
+    {282, -1007355.6, 539678.4, 13037.2},   // gatherable Default__GatherableActor
+    {283, -1007248.1, 549507.7, 12687.4},   // gatherable Default__GatherableActor
+    {284, -1007052.7, 548653.6, 12679.4},   // gatherable Default__GatherableActor
+    {285, -1006788.1, 548542.4, 12670.7},   // gatherable Default__GatherableActor
+    {286, -1006335.9, 529127.7, 13268.5},   // gatherable Default__GatherableActor
+    {287, -1006235.1, 525559.2, 13675.0},   // gatherable Default__GatherableActor
+    {288, -1006132.6, 529525.6, 13293.1},   // gatherable Default__GatherableActor
+    {289, -1006035.2, 529933.4, 13309.1},   // gatherable Default__GatherableActor
+    {290, -1006032.4, 525215.9, 13800.4},   // gatherable Default__GatherableActor
+    {291, -1005910.3, 529339.1, 13325.8},   // gatherable Default__GatherableActor
+    {292, -1005860.9, 525545.9, 13714.2},   // gatherable Default__GatherableActor
+    {293, -1004655.5, 549965.9, 12649.8},   // gatherable Default__GatherableActor
+    {294, -1003516.7, 522267.1, 14688.5},   // gatherable Default__GatherableActor
+    {295, -1003337.6, 524521.9, 14342.0},   // gatherable Default__GatherableActor
+    {296, -1002712.5, 534355.5, 13899.4},   // gatherable Default__GatherableActor
+    {297, -991850.1, 503578.8, 14714.3},   // gatherable Default__GatherableActor
+    {298, -991683.0, 503124.9, 14716.1},   // gatherable Default__GatherableActor
+    {299, -981550.3, 554805.6, 11313.7},   // gatherable Default__GatherableActor
+    {300, -977333.4, 500677.4, 12215.4},   // gatherable Default__GatherableActor
+    {301, -973749.2, 561427.9, 10562.8},   // gatherable Default__GatherableActor
+    {302, -971670.5, 562046.6, 10777.4},   // gatherable Default__GatherableActor
+    {303, -971369.3, 391966.4, 16123.3},   // gatherable Default__GatherableActor
+    {304, -969837.5, 408023.3, 15286.6},   // gatherable Default__GatherableActor
+    {305, -966963.3, 574835.7, 12295.3},   // gatherable Default__GatherableActor
+    {306, -966799.4, 404172.2, 15324.1},   // gatherable Default__GatherableActor
+    {307, -954333.2, 377790.6, 14950.5},   // gatherable Default__GatherableActor
+    {308, -954232.8, 377686.7, 14961.7},   // gatherable Default__GatherableActor
+    {309, -898066.7, 408560.3, 12915.5},   // gatherable Default__GatherableActor
+    {310, -895635.4, 407678.2, 12973.3},   // gatherable Default__GatherableActor
+    {311, -894213.4, 380161.0, 11952.8},   // gatherable Default__GatherableActor
+    {312, -894189.0, 396889.6, 11963.2},   // gatherable Default__GatherableActor
+    {313, -894100.9, 398393.3, 12687.2},   // gatherable Default__GatherableActor
+    {314, -894056.5, 380438.6, 11941.6},   // gatherable Default__GatherableActor
+    {315, -892958.7, 398275.0, 12743.9},   // gatherable Default__GatherableActor
+    {316, -891623.9, 395389.6, 11642.6},   // gatherable Default__GatherableActor
+    {317, -890007.9, 400118.0, 13089.7},   // gatherable Default__GatherableActor
+    {318, -889138.8, 386725.7, 11932.8},   // gatherable Default__GatherableActor
+    {319, -888333.2, 388952.3, 11926.6},   // gatherable Default__GatherableActor
+    {320, -888285.5, 385270.3, 11862.1},   // gatherable Default__GatherableActor
+    {321, -887974.2, 389143.3, 11960.8},   // gatherable Default__GatherableActor
+    {322, -887837.1, 401042.3, 12886.1},   // gatherable Default__GatherableActor
+    {323, -887572.3, 389451.5, 12004.1},   // gatherable Default__GatherableActor
+    {324, -886901.0, 388410.0, 12122.0},   // gatherable Default__GatherableActor
+    {325, -886696.1, 418893.1, 12648.3},   // gatherable Default__GatherableActor
+    {326, -885663.1, 387297.4, 11826.2},   // gatherable Default__GatherableActor
+    {327, -884788.2, 402175.5, 12778.3},   // gatherable Default__GatherableActor
+    {328, -884735.3, 405271.7, 12847.3},   // gatherable Default__GatherableActor
+    {329, -884600.3, 421389.6, 12557.5},   // gatherable Default__GatherableActor
+    {330, -884517.9, 390868.0, 11883.8},   // gatherable Default__GatherableActor
+    {331, -884497.5, 402165.1, 12742.3},   // gatherable Default__GatherableActor
+    {332, -883241.2, 421176.1, 12526.5},   // gatherable Default__GatherableActor
+    {333, -882108.9, 414184.9, 12693.1},   // gatherable Default__GatherableActor
+    {334, -881455.2, 415956.0, 12639.3},   // gatherable Default__GatherableActor
+    {335, -880315.9, 409101.0, 12636.3},   // gatherable Default__GatherableActor
+    {336, -879612.0, 418208.3, 12445.7},   // gatherable Default__GatherableActor
+    {337, -877582.0, 412469.7, 12516.6},   // gatherable Default__GatherableActor
+    {338, -877023.1, 376316.4, 11567.2},   // gatherable Default__GatherableActor
+    {339, -876991.7, 375933.8, 11613.9},   // gatherable Default__GatherableActor
+    {340, -876388.4, 410216.4, 12355.8},   // gatherable Default__GatherableActor
+    {341, -875872.3, 430997.6, 12509.3},   // gatherable Default__GatherableActor
+    {342, -875448.6, 417151.7, 12211.2},   // gatherable Default__GatherableActor
+    {343, -873410.2, 367228.2, 12687.7},   // gatherable Default__GatherableActor
+    {344, -872495.0, 429503.9, 12529.2},   // gatherable Default__GatherableActor
+    {345, -872252.0, 427466.6, 12516.4},   // gatherable Default__GatherableActor
+    {346, -870547.5, 430360.2, 12502.8},   // gatherable Default__GatherableActor
+    {347, -870444.1, 359157.5, 12462.4},   // gatherable Default__GatherableActor
+    {348, -870299.2, 380887.1, 11634.1},   // gatherable Default__GatherableActor
+    {349, -870193.7, 431240.9, 12420.2},   // gatherable Default__GatherableActor
+    {350, -870193.5, 426679.4, 12379.0},   // gatherable Default__GatherableActor
+    {351, -868632.0, 358603.1, 12351.8},   // gatherable Default__GatherableActor
+    {352, -868418.4, 429587.0, 12326.2},   // gatherable Default__GatherableActor
+    {353, -863265.4, 368851.0, 12263.1},   // gatherable Default__GatherableActor
+    {354, -861710.6, 361846.3, 12290.2},   // gatherable Default__GatherableActor
+    {355, -855531.8, 361589.6, 12831.6},   // gatherable Default__GatherableActor
+    {356, -854606.1, 365979.0, 12867.7},   // gatherable Default__GatherableActor
+    {357, -854488.6, 354915.5, 12312.3},   // gatherable Default__GatherableActor
+    {358, -853909.0, 370517.0, 12694.3},   // gatherable Default__GatherableActor
+    {359, -851367.8, 364456.9, 13123.4},   // gatherable Default__GatherableActor
+    {360, -850263.2, 362767.2, 13123.4},   // gatherable Default__GatherableActor
+    {361, -849885.5, 353945.0, 12299.2},   // gatherable Default__GatherableActor
+    {362, -846406.6, 594184.9, 13020.3},   // gatherable Default__GatherableActor
+    {363, -846358.2, 611746.2, 21315.9},   // gatherable Default__GatherableActor
+    {364, -844750.3, 587103.7, 12074.6},   // gatherable Default__GatherableActor
+    {365, -844455.1, 577243.8, 13079.9},   // gatherable Default__GatherableActor
+    {366, -844327.7, 611679.0, 21463.7},   // gatherable Default__GatherableActor
+    {367, -844177.1, 582582.8, 13108.8},   // gatherable Default__GatherableActor
+    {368, -844149.9, 401153.2, 10829.0},   // gatherable Default__GatherableActor
+    {369, -843627.7, 607329.3, 21503.0},   // gatherable Default__GatherableActor
+    {370, -843312.1, 395498.6, 10663.2},   // gatherable Default__GatherableActor
+    {371, -843244.8, 606387.7, 21454.7},   // gatherable Default__GatherableActor
+    {372, -842307.0, 582765.4, 12978.4},   // gatherable Default__GatherableActor
+    {373, -841890.6, 429798.5, 13173.0},   // gatherable Default__GatherableActor
+    {374, -841599.6, 604520.3, 21425.7},   // gatherable Default__GatherableActor
+    {375, -841343.4, 415557.0, 10729.6},   // gatherable Default__GatherableActor
+    {376, -841250.4, 363956.7, 13146.9},   // gatherable Default__GatherableActor
+    {377, -841088.2, 613811.4, 21372.3},   // gatherable Default__GatherableActor
+    {378, -841071.2, 354573.4, 11898.2},   // gatherable Default__GatherableActor
+    {379, -840790.2, 597564.7, 21655.5},   // gatherable Default__GatherableActor
+    {380, -839990.8, 590735.0, 12991.6},   // gatherable Default__GatherableActor
+    {381, -839695.2, 609728.1, 21612.6},   // gatherable Default__GatherableActor
+    {382, -839663.5, 607647.4, 21492.3},   // gatherable Default__GatherableActor
+    {383, -839428.9, 606323.5, 21519.5},   // gatherable Default__GatherableActor
+    {384, -839288.5, 369433.6, 12991.3},   // gatherable Default__GatherableActor
+    {385, -839027.5, 607365.1, 21631.8},   // gatherable Default__GatherableActor
+    {386, -838656.7, 590212.9, 12801.0},   // gatherable Default__GatherableActor
+    {387, -838654.9, 611302.6, 21497.8},   // gatherable Default__GatherableActor
+    {388, -838070.3, 603276.8, 21498.2},   // gatherable Default__GatherableActor
+    {389, -837837.9, 603957.3, 21536.7},   // gatherable Default__GatherableActor
+    {390, -837354.7, 387017.0, 11045.7},   // gatherable Default__GatherableActor
+    {391, -837217.6, 421061.1, 11103.3},   // gatherable Default__GatherableActor
+    {392, -837088.3, 613150.5, 21577.2},   // gatherable Default__GatherableActor
+    {393, -836823.4, 404250.6, 10604.2},   // gatherable Default__GatherableActor
+    {394, -836648.1, 426726.0, 12062.4},   // gatherable Default__GatherableActor
+    {395, -836309.0, 584044.4, 11979.4},   // gatherable Default__GatherableActor
+    {396, -836200.1, 582688.4, 12143.9},   // gatherable Default__GatherableActor
+    {397, -835488.7, 422045.1, 11330.5},   // gatherable Default__GatherableActor
+    {398, -835322.9, 400052.0, 10671.4},   // gatherable Default__GatherableActor
+    {399, -834203.8, 428995.6, 13032.6},   // gatherable Default__GatherableActor
+    {400, -833976.8, 418867.4, 10822.8},   // gatherable Default__GatherableActor
+    {401, -833744.4, 419856.7, 10976.1},   // gatherable Default__GatherableActor
+    {402, -833478.1, 413898.7, 10773.1},   // gatherable Default__GatherableActor
+    {403, -833378.5, 369266.9, 11809.2},   // gatherable Default__GatherableActor
+    {404, -832035.7, 424563.1, 11682.3},   // gatherable Default__GatherableActor
+    {405, -831885.1, 415518.0, 10547.6},   // gatherable Default__GatherableActor
+    {406, -830504.4, 366570.6, 11903.6},   // gatherable Default__GatherableActor
+    {407, -829924.4, 430536.2, 13547.9},   // gatherable Default__GatherableActor
+    {408, -804877.1, 570803.5, 13866.5},   // gatherable Default__GatherableActor
+    {409, -804660.9, 441493.4, 13293.0},   // gatherable Default__GatherableActor
+    {410, -804593.1, 570781.9, 13828.3},   // gatherable Default__GatherableActor
+    {411, -804403.9, 570569.9, 13834.5},   // gatherable Default__GatherableActor
+    {412, -803856.4, 571346.3, 13549.7},   // gatherable Default__GatherableActor
+    {413, -800278.8, 433220.6, 13380.2},   // gatherable Default__GatherableActor
+    {414, -797856.5, 438146.9, 13478.7},   // gatherable Default__GatherableActor
+    {415, -795613.3, 438610.1, 13438.9},   // gatherable Default__GatherableActor
+    {416, -792320.1, 429794.0, 13376.2},   // gatherable Default__GatherableActor
+    {417, -790430.2, 430636.4, 13408.8},   // gatherable Default__GatherableActor
+    {418, -783204.9, 398490.2, 15788.4},   // gatherable Default__GatherableActor
+    {419, -783137.3, 427402.2, 13356.1},   // gatherable Default__GatherableActor
+    {420, -780837.7, 399104.1, 16320.4},   // gatherable Default__GatherableActor
+    {421, -779664.3, 400175.6, 16303.8},   // gatherable Default__GatherableActor
+    {422, -779367.5, 399176.4, 16550.5},   // gatherable Default__GatherableActor
+    {423, -779036.2, 426637.1, 13507.0},   // gatherable Default__GatherableActor
+    {424, -775747.5, 430587.1, 13422.4},   // gatherable Default__GatherableActor
+    {425, -774926.9, 429832.9, 13537.7},   // gatherable Default__GatherableActor
+    {426, -769117.9, 439813.4, 13248.8},   // gatherable Default__GatherableActor
+    {427, -767827.1, 406430.8, 13742.5},   // gatherable Default__GatherableActor
+    {428, -766746.0, 434442.1, 13305.3},   // gatherable Default__GatherableActor
+    {429, -766512.1, 436358.2, 13242.2},   // gatherable Default__GatherableActor
+    {430, -765450.2, 408181.4, 13690.2},   // gatherable Default__GatherableActor
+    {431, -765310.8, 404746.1, 14965.0},   // gatherable Default__GatherableActor
+    {432, -765047.3, 411326.3, 13002.9},   // gatherable Default__GatherableActor
+    {433, -765036.9, 414612.6, 11167.5},   // gatherable Default__GatherableActor
+    {434, -764735.5, 408674.7, 13677.1},   // gatherable Default__GatherableActor
+    {435, -764706.5, 414231.2, 11373.6},   // gatherable Default__GatherableActor
+    {436, -764492.5, 404919.5, 14795.7},   // gatherable Default__GatherableActor
+    {437, -764482.2, 399475.0, 16555.1},   // gatherable Default__GatherableActor
+    {438, -764445.2, 409574.5, 13523.3},   // gatherable Default__GatherableActor
+    {439, -764444.7, 404736.7, 14926.7},   // gatherable Default__GatherableActor
+    {440, -764397.2, 405594.5, 14354.1},   // gatherable Default__GatherableActor
+    {441, -763908.1, 409319.6, 13583.8},   // gatherable Default__GatherableActor
+    {442, -763820.8, 404594.9, 14897.2},   // gatherable Default__GatherableActor
+    {443, -763809.2, 411362.1, 12974.5},   // gatherable Default__GatherableActor
+    {444, -763582.4, 407552.7, 13797.2},   // gatherable Default__GatherableActor
+    {445, -763471.2, 404911.1, 14635.7},   // gatherable Default__GatherableActor
+    {446, -763435.6, 400824.3, 16328.2},   // gatherable Default__GatherableActor
+    {447, -762849.7, 440797.9, 13348.0},   // gatherable Default__GatherableActor
+    {448, -762775.2, 407181.5, 13853.7},   // gatherable Default__GatherableActor
+    {449, -762663.4, 400373.2, 16245.0},   // gatherable Default__GatherableActor
+    {450, -762567.8, 404431.3, 14681.3},   // gatherable Default__GatherableActor
+    {451, -761876.2, 403496.2, 14865.7},   // gatherable Default__GatherableActor
+    {452, -761521.6, 438421.7, 13360.2},   // gatherable Default__GatherableActor
+    {453, -760420.9, 403867.0, 14146.8},   // gatherable Default__GatherableActor
+    {454, -759266.0, 402387.3, 13990.3},   // gatherable Default__GatherableActor
+    {455, -758429.5, 412107.2, 12365.0},   // gatherable Default__GatherableActor
+    {456, -758222.5, 412513.4, 12249.8},   // gatherable Default__GatherableActor
+    {457, -758168.0, 410706.6, 12565.9},   // gatherable Default__GatherableActor
+    {458, -758086.9, 401373.9, 13668.9},   // gatherable Default__GatherableActor
+    {459, -757699.5, 415575.3, 12101.5},   // gatherable Default__GatherableActor
+    {460, -757224.3, 420739.4, 12280.5},   // gatherable Default__GatherableActor
+    {461, -757108.4, 421199.7, 12312.1},   // gatherable Default__GatherableActor
+    {462, -756950.8, 420103.4, 12318.5},   // gatherable Default__GatherableActor
+    {463, -756780.5, 422202.7, 12180.0},   // gatherable Default__GatherableActor
+    {464, -756535.4, 422423.0, 12199.3},   // gatherable Default__GatherableActor
+    {465, -755858.4, 401315.9, 13220.4},   // gatherable Default__GatherableActor
+    {466, -755754.7, 408666.8, 12550.8},   // gatherable Default__GatherableActor
+    {467, -706502.8, 539085.5, 15861.3},   // gatherable Default__GatherableActor
+    {468, -706353.0, 538727.5, 15930.0},   // gatherable Default__GatherableActor
+    {469, -705815.7, 539492.1, 15985.5},   // gatherable Default__GatherableActor
+    {470, -705750.3, 538604.7, 16065.8},   // gatherable Default__GatherableActor
+    {471, -681965.4, 539096.5, 16449.7},   // gatherable Default__GatherableActor
+    {472, -680678.4, 575431.7, 13738.4},   // gatherable Default__GatherableActor
+    {473, -669579.4, 517071.4, 14622.3},   // gatherable Default__GatherableActor
+    {474, -667808.5, 643723.8, 23131.0},   // gatherable Default__GatherableActor
+    {475, -667256.5, 642221.6, 23216.9},   // gatherable Default__GatherableActor
+    {476, -666968.0, 640911.7, 23283.1},   // gatherable Default__GatherableActor
+    {477, -664661.7, 643773.3, 23094.3},   // gatherable Default__GatherableActor
+    {478, -663658.1, 529597.7, 16095.6},   // gatherable Default__GatherableActor
+    {479, -662689.6, 647311.0, 22115.8},   // gatherable Default__GatherableActor
+    {480, -661529.2, 640624.6, 22858.7},   // gatherable Default__GatherableActor
+    {481, -661501.0, 648287.1, 22164.6},   // gatherable Default__GatherableActor
+    {482, -660683.2, 644807.1, 22873.7},   // gatherable Default__GatherableActor
+    {483, -648795.9, 523637.3, 12790.9},   // gatherable Default__GatherableActor
+    {484, -605579.3, 371919.2, 12282.9},   // gatherable Default__GatherableActor
+    {485, -604010.4, 408923.9, 12748.5},   // gatherable Default__GatherableActor
+    {486, -599300.6, 401579.1, 12739.6},   // gatherable Default__GatherableActor
+    {487, -596822.9, 405131.3, 13628.4},   // gatherable Default__GatherableActor
+    {488, -591495.9, 405047.0, 14723.9},   // gatherable Default__GatherableActor
+    {489, -584814.7, 480418.8, 13102.1},   // gatherable Default__GatherableActor
+    {490, -584400.2, 482682.2, 12090.3},   // gatherable Default__GatherableActor
+    {491, -584160.5, 454319.5, 16372.8},   // gatherable Default__GatherableActor
+    {492, -584152.7, 449034.9, 11810.7},   // gatherable Default__GatherableActor
+    {493, -584061.1, 482287.5, 12076.3},   // gatherable Default__GatherableActor
+    {494, -583421.8, 462227.0, 10641.1},   // gatherable Default__GatherableActor
+    {495, -583218.4, 449202.1, 11905.3},   // gatherable Default__GatherableActor
+    {496, -583187.1, 450453.9, 12316.7},   // gatherable Default__GatherableActor
+    {497, -583014.1, 456781.3, 16161.3},   // gatherable Default__GatherableActor
+    {498, -582889.1, 449887.4, 12143.2},   // gatherable Default__GatherableActor
+    {499, -582852.0, 449358.2, 11990.9},   // gatherable Default__GatherableActor
+    {500, -582807.9, 457640.9, 16411.1},   // gatherable Default__GatherableActor
+    {501, -582772.3, 466351.8, 13406.1},   // gatherable Default__GatherableActor
+    {502, -582596.9, 447713.5, 11705.1},   // gatherable Default__GatherableActor
+    {503, -582303.0, 465517.2, 13342.0},   // gatherable Default__GatherableActor
+    {504, -582163.4, 448061.6, 11822.3},   // gatherable Default__GatherableActor
+    {505, -581960.8, 481236.4, 12661.2},   // gatherable Default__GatherableActor
+    {506, -581922.4, 476913.7, 14903.4},   // gatherable Default__GatherableActor
+    {507, -581711.2, 481592.5, 12638.9},   // gatherable Default__GatherableActor
+    {508, -581482.6, 474185.2, 15126.7},   // gatherable Default__GatherableActor
+    {509, -581470.4, 458305.2, 15257.5},   // gatherable Default__GatherableActor
+    {510, -581312.1, 458439.0, 15129.0},   // gatherable Default__GatherableActor
+    {511, -581142.9, 450970.1, 12646.7},   // gatherable Default__GatherableActor
+    {512, -580924.6, 454612.0, 15850.9},   // gatherable Default__GatherableActor
+    {513, -580855.1, 449223.9, 12329.7},   // gatherable Default__GatherableActor
+    {514, -580827.9, 451637.1, 12969.3},   // gatherable Default__GatherableActor
+    {515, -580740.8, 459429.1, 14828.7},   // gatherable Default__GatherableActor
+    {516, -580696.6, 480371.7, 12767.7},   // gatherable Default__GatherableActor
+    {517, -580672.2, 459257.5, 14853.6},   // gatherable Default__GatherableActor
+    {518, -580600.5, 455530.3, 15734.4},   // gatherable Default__GatherableActor
+    {519, -580441.8, 452240.7, 13354.5},   // gatherable Default__GatherableActor
+    {520, -580367.3, 463832.0, 13551.0},   // gatherable Default__GatherableActor
+    {521, -580351.4, 449811.4, 12525.0},   // gatherable Default__GatherableActor
+    {522, -580096.5, 452958.0, 13507.6},   // gatherable Default__GatherableActor
+    {523, -579942.9, 449607.3, 12614.0},   // gatherable Default__GatherableActor
+    {524, -579921.5, 459536.3, 14699.7},   // gatherable Default__GatherableActor
+    {525, -579344.9, 450979.7, 12799.3},   // gatherable Default__GatherableActor
+    {526, -578977.2, 453093.6, 13321.1},   // gatherable Default__GatherableActor
+    {527, -578770.9, 487718.3, 10811.2},   // gatherable Default__GatherableActor
+    {528, -578642.7, 482361.8, 12638.8},   // gatherable Default__GatherableActor
+    {529, -578411.5, 478085.4, 12908.6},   // gatherable Default__GatherableActor
+    {530, -577889.9, 451011.6, 13041.6},   // gatherable Default__GatherableActor
+    {531, -577774.1, 465253.7, 11989.1},   // gatherable Default__GatherableActor
+    {532, -577748.6, 463401.3, 11755.2},   // gatherable Default__GatherableActor
+    {533, -577627.4, 467226.1, 12221.6},   // gatherable Default__GatherableActor
+    {534, -576988.0, 468538.3, 12121.3},   // gatherable Default__GatherableActor
+    {535, -576404.6, 453106.7, 13191.4},   // gatherable Default__GatherableActor
+    {536, -575979.6, 453751.7, 13053.3},   // gatherable Default__GatherableActor
+    {537, -564592.8, 452324.3, 13427.7},   // gatherable Default__GatherableActor
+    {538, -563238.3, 452002.7, 13424.1},   // gatherable Default__GatherableActor
+    {539, -562048.9, 450008.9, 12997.4},   // gatherable Default__GatherableActor
+    {540, -561282.9, 450531.7, 13061.4},   // gatherable Default__GatherableActor
+    {541, -561187.7, 450199.5, 12852.8},   // gatherable Default__GatherableActor
+    {542, -533857.2, 418429.7, 11110.9},   // gatherable Default__GatherableActor
+    {543, -533225.6, 455895.1, 10601.5},   // gatherable Default__GatherableActor
+    {544, -532996.7, 482702.0, 10982.5},   // gatherable Default__GatherableActor
+    {545, -532282.5, 444715.4, 10529.4},   // gatherable Default__GatherableActor
+    {546, -531048.1, 456799.8, 10590.6},   // gatherable Default__GatherableActor
+    {547, -529971.4, 441734.7, 11428.3},   // gatherable Default__GatherableActor
+    {548, -528540.5, 460190.1, 10856.0},   // gatherable Default__GatherableActor
+    {549, -527853.2, 435319.1, 10602.5},   // gatherable Default__GatherableActor
 };
 
 }  // namespace aoc::worldd::spawns::captured

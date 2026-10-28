@@ -268,6 +268,7 @@
 #include "net/connection.h"
 #include "net/control_channel.h"
 #include "quest/quest_log.h"
+#include "respawn/embersprings.h"
 #include "quest/quest_service.h"
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/node_rpc.h"
@@ -638,6 +639,12 @@ public:
     bool     dead() const { return dead_; }
     size_t   deaths() const { return deaths_; }
     size_t   respawns() const { return respawns_; }
+    /// Embersprings: the character's places and what the session did with them (the log and the tests).
+    const respawn::Attunements& attunements() const { return attunements_; }
+    size_t   shrine_uses() const { return shrine_uses_; }
+    size_t   discoveries() const { return discoveries_; }
+    size_t   homes_set() const { return homes_set_; }
+    size_t   home_uses() const { return home_uses_; }
     uint64_t pile_actor() const { return pile_actor_; }
     /// The kills whose experience the session applied.
     size_t   kills_rewarded() const { return kills_rewarded_; }
@@ -1255,10 +1262,21 @@ private:
     /// Health reached 0: the death (the frame of the retail captures, the debt, the loss, the pile).
     void check_death(Connection& conn, Clock::time_point now);
     void die(Connection& conn, Clock::time_point now);
-    /// RequestServerRespawnChoices (the client asks 6 s after the death) is answered with SendClientRespawnChoices.
+    /// RequestServerRespawnChoices (the client asks 6 s after the death) is answered with SendClientRespawnChoices: the discovered Emberspring nearest the body and the home
+    /// (respawn/session_embersprings.inc; an area with no Emberspring keeps its one fixed choice).
     void on_respawn_choices_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
-    /// SendServerRespawnChoice(record): the player comes back at the nearest shrine or the login spot, alive, with full Health and Mana.
+    /// SendServerRespawnChoice(record): the player comes back at the Emberspring chosen (the home only outside its two-hour cooldown), alive, with full Health and Mana.
     void on_respawn_choice(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// Embersprings (respawn/session_embersprings.inc).
+    const respawn::ShrineBook* shrine_book() const;                                   // the area's Emberspring (null: none)
+    void init_attunements(const svc::Character& character);                           // the join: the saved places on the pawn
+    void send_attunements(Connection& conn, Clock::time_point now);                   // the places changed: the pawn's update, and saved with the progress
+    void run_embersprings(Connection& conn, Clock::time_point now);                   // discovery: a shrine whose radius holds the player
+    void on_shrine_interact(Connection& conn, const world::WorldActor& a, Clock::time_point now);   // using a shrine: the prompt to make it the home
+    void on_home_attunement(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);   // RequestServerSetHomeAttunement(bYes)
+    void send_respawn_choices(Connection& conn, bool previous_invalid, bool home_on_cooldown);
+    void on_plain_respawn(Connection& conn, Clock::time_point now);                   // the Respawn RPC: the window listed nothing
+    void finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now);
     /// Experience of a kill (the combat world's PlayerPort::receive_kill, queued by the CombatSide): the progress, the XPTracker, a level-up.
     void apply_kill(Connection& conn, const combat::KillReward& kill, Clock::time_point now);
     /// The vendor NPC the window is open on, when it is still held, a GM vendor, and within range of the last good position; else nullptr (the
@@ -1432,6 +1450,9 @@ private:
     uint64_t                                  loot_actor_ = 0;
     bool                                      dead_ = false;
     size_t                                    deaths_ = 0, respawns_ = 0, death_logged_ = 0;
+    respawn::Attunements                      attunements_;          // Embersprings: the character's discovered places, home and the last use of the home respawn
+    int64_t                                   pending_attune_ = 0;   // the place whose prompt waits for the player's yes or no
+    size_t                                    shrine_uses_ = 0, discoveries_ = 0, homes_set_ = 0, home_uses_ = 0, shrine_logged_ = 0;
     uint64_t                                  pile_actor_ = 0;
     double                                    death_x_ = 0, death_y_ = 0, death_z_ = 0;
     size_t loot_opens_ = 0, loot_taken_ = 0, loot_refused_ = 0, loot_logged_ = 0, kills_rewarded_ = 0;

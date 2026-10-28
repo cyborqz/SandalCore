@@ -80,6 +80,13 @@ type WarehouseStore interface {
 
 var _ WarehouseStore = (*character.Store)(nil)
 
+// AttunementStore is the part of character.Store that keeps the places a character discovered and its home (Embersprings). A store without it keeps none: GetCharacter sends none.
+type AttunementStore interface {
+	Attunements(ctx context.Context, id string) (character.Attunements, error)
+}
+
+var _ AttunementStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -278,6 +285,15 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			}
 			out.WarehouseItems = toProtoWarehouse(stored)
 		}
+		if as, ok := s.store.(AttunementStore); ok {
+			a, err := as.Attunements(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.Attunements = a.Discovered
+			out.HomeAttunement = a.Home
+			out.HomeLastUsedMs = a.HomeLastUsedMs
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -287,7 +303,8 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 // SaveProgress writes the level, the class and the XP rows (plan D1; worldd saves them as its player levels).
 func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRequest) (*characterv1.SaveProgressResponse, error) {
 	p := character.Progress{Level: r.GetLevel(), ClassID: r.GetClassId(), ReplaceSkillRanks: r.GetReplaceSkillRanks(), ReplaceActionBar: r.GetReplaceActionBar(),
-		ReplaceCompletedFTUEs: r.GetReplaceCompletedFtues(), CompletedFTUEs: r.GetCompletedFtues()}
+		ReplaceCompletedFTUEs: r.GetReplaceCompletedFtues(), CompletedFTUEs: r.GetCompletedFtues(),
+		ReplaceAttunements: r.GetReplaceAttunements(), Attunements: character.Attunements{Discovered: r.GetAttunements(), Home: r.GetHomeAttunement(), HomeLastUsedMs: r.GetHomeLastUsedMs()}}
 	for _, e := range r.GetExperience() {
 		p.Experience = append(p.Experience, character.Experience{LevelingTypeGuid: e.GetLevelingTypeGuid(), XP: e.GetXp(), Debt: e.GetDebt()})
 	}

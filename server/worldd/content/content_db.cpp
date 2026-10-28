@@ -3199,6 +3199,78 @@ std::optional<CraftStationData> ContentDb::craft_station_data(std::string& error
     return out;
 }
 
+std::optional<RespawnData> ContentDb::respawn_data(std::string& error) const {
+    RespawnData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the respawn tables are contentc version 23's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT guid, name, idx, x, y, z, radius, descriptor, level_name FROM attune_point");
+        if (!q.ok()) return failed("attune_point");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2)) {
+                error = "content.db attune_point has a column of the wrong storage class";
+                return std::nullopt;
+            }
+            AttunePoint p;
+            p.guid = sqlite3_column_int64(s, 0);
+            p.name = column_text(s, 1);
+            p.number = static_cast<int>(sqlite3_column_int64(s, 2));
+            p.x = sqlite3_column_double(s, 3);
+            p.y = sqlite3_column_double(s, 4);
+            p.z = sqlite3_column_double(s, 5);
+            p.radius = sqlite3_column_double(s, 6);
+            p.descriptor = column_text(s, 7);
+            p.level_name = column_text(s, 8);
+            out.places[p.guid] = std::move(p);
+        }
+        if (step != SQLITE_DONE) return failed("attune_point");
+    }
+    {
+        Stmt q(db_, "SELECT guid, name, kind, attune_guid, box_x, box_y, box_z, exclusion, max_range, descriptor FROM respawn_point");
+        if (!q.ok()) return failed("respawn_point");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 2) || !column_is_int(s, 3)) {
+                error = "content.db respawn_point has a column of the wrong storage class";
+                return std::nullopt;
+            }
+            RespawnDef d;
+            d.guid = sqlite3_column_int64(s, 0);
+            d.name = column_text(s, 1);
+            d.kind = static_cast<int>(sqlite3_column_int64(s, 2));
+            d.attune = sqlite3_column_int64(s, 3);
+            d.box_x = sqlite3_column_double(s, 4);
+            d.box_y = sqlite3_column_double(s, 5);
+            d.box_z = sqlite3_column_double(s, 6);
+            d.exclusion = sqlite3_column_double(s, 7);
+            d.max_range = sqlite3_column_double(s, 8);
+            d.descriptor = column_text(s, 9);
+            out.respawns[d.guid] = std::move(d);
+        }
+        if (step != SQLITE_DONE) return failed("respawn_point");
+    }
+    {
+        Stmt q(db_, "SELECT instance_guid, respawn_guid FROM npc_instance_respawn");
+        if (!q.ok()) return failed("npc_instance_respawn");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            if (!column_is_int(s, 0) || !column_is_int(s, 1)) {
+                error = "content.db npc_instance_respawn has a column of the wrong storage class";
+                return std::nullopt;
+            }
+            out.instance_respawn[sqlite3_column_int64(s, 0)] = sqlite3_column_int64(s, 1);
+        }
+        if (step != SQLITE_DONE) return failed("npc_instance_respawn");
+    }
+    return out;
+}
+
 namespace {
 
 /// The formula guids an experience reward's text names: every `$#<type>:<guid>$` of "EvalFormula($#4547065559311335368:6064632384103186687$) * EvalFormula(...)", in order.

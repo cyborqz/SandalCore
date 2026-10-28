@@ -299,8 +299,18 @@ public:
     std::optional<Send> death_location(double x, double y, double z);
     /// The PlayerController's ClientRestart(NewPawn) and ClientSetCameraMode, twice, as the death frame of the retail captures has them.
     std::optional<Send> death_restart();
-    /// The pawn's SendClientRespawnChoices(RespawnChoices {ClosestLegalRespawns, HomeRespawn}): where the player may come back.
-    std::optional<Send> respawn_choices(std::span<const int64_t> closest, int64_t home, bool previous_choice_invalid = false);
+    /// The pawn's SendClientRespawnChoices(RespawnChoices {ClosestLegalRespawns, HomeRespawn}): where the player may come back.  `home_on_cooldown` is the flag a refused home choice sends back.
+    std::optional<Send> respawn_choices(std::span<const int64_t> closest, int64_t home, bool previous_choice_invalid = false, bool home_on_cooldown = false);
+
+    /// Embersprings (respawn/bootstrap_embersprings.inc): the character's places on the pawn's BaseCharacterInfo (WorldAttunements as blocks of 256 numbers, HomeAttunement, and
+    /// HomeAttunementLastUsed on the synchronized clock); the caller sends pawn_state_update().  False when the pawn does not take them.
+    bool set_attunements(const std::vector<std::vector<uint8_t>>& blocks, int home, double home_last_used);
+    /// The pawn's SendClientPromptForHomeAttunement(place): the client asks yes or no.
+    std::optional<Send> attune_prompt(int64_t place);
+    /// The pawn's ClientNotifyHomeAttune(shrine) (only when `result`) and SendClientHomeAttuneResult(place, result), in one send.
+    std::optional<Send> home_attuned(const emit::FIntrepidNetworkGUID& shrine, int64_t place, bool result);
+    /// The PlayerController's ClientReceiveChatMessages with one line.
+    std::optional<Send> chat_line(const std::string& text, int category);
 
     /// Plan E1: ClientOpenVendor on the PlayerController (reliable): the client opens its window for the VendorDef `merch_set` (the vendor's
     /// stock and prices are the client's own tables'), `vendor` the NPC's actor. nullopt before the pawn's second state or when the RPC does
@@ -720,6 +730,7 @@ private:
     repl::ExportAcks  acks_;
     bool              ok_ = false;
     bool              second_state_added_ = false;   // the pawn has its second state's components and values
+    bool              home_in_state_ = false, home_used_in_state_ = false;   // Embersprings: HomeAttunement / HomeAttunementLastUsed were set (they stay out of the state while default)
     bool              second_state_sent_ = false;    // and the update that carries them was built
     std::set<int64_t> stat_layout_;                  // the stats the Int32 stat arrays have an item for (as the second state laid them out)
     std::string       error_;

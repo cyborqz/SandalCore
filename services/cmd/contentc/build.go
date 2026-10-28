@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "25"
+const Version = "26"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -250,6 +250,10 @@ var keep = map[string]bool{
 	// Glint tiers (version 24): the currencies and their tiers (currency.go)
 	"CurrencyTierDefRecordBase": true,
 	"CurrencyDefRecordBase":     true,
+	// Embersprings (version 26): the places, the respawn definitions and the master list of places (respawn.go; the population instances are kept above)
+	"AttuneRecordBase":       true,
+	"RespawnRecordBase":      true,
+	"MasterAttuneRecordBase": true,
 }
 
 // -- C Y B x C.O.A --
@@ -448,6 +452,9 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 		return nil, err
 	}
 	if err := buildCrafting(w, src, &opt, meta); err != nil {
+		return nil, err
+	}
+	if err := buildRespawn(w, src, &opt, meta); err != nil {
 		return nil, err
 	}
 	if err := buildQuests(w, src, &opt, meta); err != nil {

@@ -204,6 +204,8 @@ public:
     const npc::MotionTable& blueprints() const { return motion_; }
     const spawns::GenericNpcs* generic_npcs() const { return generic_ ? &*generic_ : nullptr; }
     const spawns::AreaReport*     area_report() const { return area_report_ ? &*area_report_ : nullptr; }
+    /// Embersprings: the area's Emberspring, the book the session asks (null before the area is loaded).
+    const respawn::ShrineBook*    shrines() const { return area_report_ ? &area_report_->shrines : nullptr; }
     const spawns::AreaConfig&     area() const { return area_; }
     const vendor::GmVendors*      gm_vendors() const { return gm_ ? &*gm_ : nullptr; }
     /// Quests, slice 0: the NPC conversations (dialogue/requirement.h), read with the area; null for a content.db older than contentc version 17 (the NPCs answer as before).
@@ -346,13 +348,14 @@ public:
     /// Makes the NPC of a spawn point again (the registry gets a new actor; the NPCs' world its life): the new actor id, 0 when it could not.
     uint64_t respawn_npc(uint32_t spawn_ref, double now);
     /// Where a dead player comes back (research/combat 5): the nearest respawn shrine of the area to `(from_x, from_y)`, else the login spot.  The height is the
-    /// ground's under the spot plus the player's capsule's half height (98 cm) when the world has ground, else the spot's own.
+    /// ground's under the spot plus the player's capsule's half height (98 cm) when the world has ground, else the spot's own.  `nearest_point` false: always the login spot (the
+    /// Embersprings' plain Respawn of a character that discovered none).
     struct RespawnSpot {
         double      x = 0, y = 0, z = 0, yaw = 0;
         bool        shrine = false;
         std::string name;
     };
-    RespawnSpot respawn_spot(double from_x, double from_y) const;
+    RespawnSpot respawn_spot(double from_x, double from_y, bool nearest_point = true) const;
     /// Review A I4: the height a player is put at over (x, y) when the data says `data_z`: the ground's under the spot plus the capsule's half height (98 cm) when the ground's
     /// chunk is here, the data's own height when it is not (a chunk that is not here has none of its navmesh floors: grounding on the terrain alone would put a shrine on a bridge, or
     /// a platform, under it).  `grounded` (optional) says which.  A world without ground gives the data's.

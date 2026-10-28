@@ -89,6 +89,7 @@ func TestCreateMakesTheDocumentedTables(t *testing.T) {
 	want = append(want, QuestTables...)      // quests, slice 1 (contentc version 21): the quests, their objectives, the NPCs' offers and the accept nodes
 	want = append(want, CurrencyTables...)   // Glint tiers (contentc version 24): the currencies and the bags' stack-size stats
 	want = append(want, WarehouseTables...)  // storage, step 0 (contentc version 25): the warehouse defs, tabs and item chunks
+	want = append(want, RespawnTables...)    // Embersprings (contentc version 26): the places, the respawn definitions and the instances that name one
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("tables = %v\nwant     %v", got, want)

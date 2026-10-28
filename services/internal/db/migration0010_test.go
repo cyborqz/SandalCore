@@ -42,7 +42,7 @@ func schemaOf(t *testing.T, pool *pgxpool.Pool) []string {
 	ctx := context.Background()
 	var out []string
 	cols, err := pool.Query(ctx, `SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
-		WHERE table_schema = current_schema() AND table_name NOT IN ('character_professions', 'character_resource_items', 'character_wallet', 'character_processing_jobs', 'character_known_recipes', 'character_completed_ftues', 'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items') ORDER BY 1`)
+		WHERE table_schema = current_schema() AND table_name NOT IN ('character_professions', 'character_resource_items', 'character_wallet', 'character_processing_jobs', 'character_known_recipes', 'character_completed_ftues', 'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement') ORDER BY 1`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func schemaOf(t *testing.T, pool *pgxpool.Pool) []string {
 	}
 	cols.Close()
 	cons, err := pool.Query(ctx, `SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
-		WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text NOT IN ('character_professions', 'character_resource_items', 'character_wallet', 'character_processing_jobs', 'character_known_recipes', 'character_completed_ftues', 'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items') ORDER BY 1`)
+		WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text NOT IN ('character_professions', 'character_resource_items', 'character_wallet', 'character_processing_jobs', 'character_known_recipes', 'character_completed_ftues', 'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement') ORDER BY 1`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func schemaOf(t *testing.T, pool *pgxpool.Pool) []string {
 		out = append(out, s)
 	}
 	cons.Close()
-	tables, err := pool.Query(ctx, `SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT IN ('character_professions', 'character_resource_items', 'character_wallet', 'character_processing_jobs', 'character_known_recipes', 'character_completed_ftues', 'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items') ORDER BY 1`)
+	tables, err := pool.Query(ctx, `SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT IN ('character_professions', 'character_resource_items', 'character_wallet', 'character_processing_jobs', 'character_known_recipes', 'character_completed_ftues', 'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement') ORDER BY 1`)
 	if err != nil {
 		t.Fatal(err)
 	}

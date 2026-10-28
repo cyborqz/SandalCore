@@ -555,6 +555,21 @@ DELETE FROM schema_migrations WHERE version = 17;
 COMMIT;
 ```
 
+**Rolling back migration 0018.** Migration 0018 (Embersprings, "respawn points a player discovers and attunes to") adds TWO tables, `character_attunements` (the places a character discovered, one row each
+with its place in the character's list) and `character_home_attunement` (the place it made its home and when its home respawn was last used); it writes nowhere else, backfills nothing and touches no
+existing table. worldd loads a character's places at login and saves them with the progress (`SaveProgress` with `replace_attunements`). The rollback drops the two tables with whatever they hold: every
+discovered place and every home is forgotten (a character discovers the places again by walking up to them). The characters, their items, their progress, their jobs, their tutorials and their quests are
+untouched. Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0018 (Embersprings: the discovered places and the home)
+BEGIN;
+DROP TABLE character_home_attunement;
+DROP TABLE character_attunements;
+DELETE FROM schema_migrations WHERE version = 18;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or

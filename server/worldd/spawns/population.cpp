@@ -69,6 +69,11 @@ const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool
     if (asset.archetype_path.empty()) return nullptr;
     if (captured) {
         if (const OpenTemplate* t = captured->template_for(asset.archetype_path)) {
+            // an Emberspring is no spawn of the population passes (the filter has no node for the towns' ones, and a shrine needs its place): respawn/make_shrines.h makes them from the respawn points
+            if (t->category == "shrine") {
+                if (why) *why = Verdict::NotPawn;
+                return nullptr;
+            }
             if (why) *why = Verdict::Generic;
             return t;
         }
@@ -135,7 +140,10 @@ std::vector<RespawnPoint> respawn_points(const content::PopulationData& data, co
     std::vector<RespawnPoint> out;
     for (const content::NpcPlacement& placement : data.placements) {
         const auto ws = data.world_spawns.find(placement.spawn);
-        if (ws == data.world_spawns.end() || ws->second.map_name != "Verra_World_Master") continue;
+        if (ws == data.world_spawns.end()) continue;
+        // the world map's own points, and the artisan points of interest' (Aven's End, Briarmoor Workshops): their points are world positions too; a town layout's are local to its town
+        const bool world_points = ws->second.map_name == "Verra_World_Master" || ws->second.name.rfind("NodeHelper_ArtisanPOI_", 0) == 0;
+        if (!world_points) continue;
         const auto set_it = data.sets.find(placement.set);
         if (set_it == data.sets.end() || set_it->second.area != 0) continue;
         for (const Point& pt : placement_points(placement, set_it->second)) {
@@ -152,7 +160,7 @@ std::vector<RespawnPoint> respawn_points(const content::PopulationData& data, co
                     const bool attuneable = path.find("AttuneableCharacterRespawn") != std::string::npos;
                     const bool plain = path.find("/CharacterRespawnBP") != std::string::npos;
                     if (!attuneable && !plain) continue;
-                    out.push_back({pt.x, pt.y, pt.z, pt.yaw, attuneable, a->second.name});
+                    out.push_back({pt.x, pt.y, pt.z, pt.yaw, attuneable, a->second.name, pt.instance});
                 }
             }
         }

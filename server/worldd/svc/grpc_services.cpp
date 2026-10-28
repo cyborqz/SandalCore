@@ -177,6 +177,9 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         wi.item.lock_expiration = w.lock_expiration();
         r.character.warehouse_items.push_back(std::move(wi));
     }
+    for (const int32_t n : c.attunements()) r.character.attunements.push_back(n);
+    r.character.home_attunement = c.home_attunement();
+    r.character.home_last_used_ms = c.home_last_used_ms();
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -273,6 +276,10 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
     }
     req.set_replace_completed_ftues(progress.replace_completed_ftues);
     for (const int64_t id : progress.completed_ftues) req.add_completed_ftues(id);
+    req.set_replace_attunements(progress.replace_attunements);
+    for (const int32_t n : progress.attunements) req.add_attunements(n);
+    req.set_home_attunement(progress.home_attunement);
+    req.set_home_last_used_ms(progress.home_last_used_ms);
     characterv1::SaveProgressResponse resp;
     return map_grpc_status(stubs_->character->SaveProgress(&ctx, req, &resp));
 }

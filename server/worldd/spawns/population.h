@@ -112,6 +112,7 @@ struct RespawnPoint {
     double      x = 0, y = 0, z = 0, yaw = 0;   // cm, degrees
     bool        attuneable = false;
     std::string name;                           // the asset's name ("Emberspring_Respawn_Shrine_Attuneable")
+    int64_t     instance = 0;                   // the PopulationInstance that places it (its RespawnDataId names the respawn definition: content::RespawnData::instance_respawn)
 };
 
 /// The respawn shrines of the data's open-world placements within `area`, nearest the area's centre first.

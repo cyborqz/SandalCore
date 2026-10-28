@@ -1233,7 +1233,7 @@ void PlayerWorld::start_aftermath() {
 }
 // built by C Y B with C-O-A
 
-PlayerWorld::RespawnSpot PlayerWorld::respawn_spot(double from_x, double from_y) const {
+PlayerWorld::RespawnSpot PlayerWorld::respawn_spot(double from_x, double from_y, bool nearest_point) const {
     RespawnSpot s;
     s.x = area_.center_x;
     s.y = area_.center_y;
@@ -1241,7 +1241,7 @@ PlayerWorld::RespawnSpot PlayerWorld::respawn_spot(double from_x, double from_y)
     s.yaw = spawns::kLoginSpotYaw;
     s.name = "the login spot";
     double best = 1e300;
-    if (area_report_) {
+    if (area_report_ && nearest_point) {
         for (const spawns::RespawnPoint& p : area_report_->respawn_points) {
             if (!p.attuneable) continue;
             const double d = std::hypot(p.x - from_x, p.y - from_y);

@@ -138,6 +138,7 @@ struct InstanceParams {
     std::string name;                      // "": the template's CreatureOwnerName
     uint64_t    seed = 0;                  // the new CharacterGuid / GatherableGuid words
     bool        full_health = true;
+    int64_t     attune_record = 0;         // an Emberspring: the place it stands for (its AttuneRecordId); its SpawnerGuid words come from `seed`
 };
 
 /// Mints the NetGUIDs of an actor: next() returns a fresh FIntrepidNetworkGUID of worldd's allocator.

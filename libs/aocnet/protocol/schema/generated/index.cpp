@@ -20,8 +20,10 @@
 #include "protocol/schema/generated/AActor.h"
 #include "protocol/schema/generated/AAoCAbilityLingeringEffect.h"
 #include "protocol/schema/generated/AAoCActor.h"
+#include "protocol/schema/generated/AAoCAttunablePlayerSpawner.h"
 #include "protocol/schema/generated/AAoCGameStateBase.h"
 #include "protocol/schema/generated/AAoCPlayerController.h"
+#include "protocol/schema/generated/AAoCPlayerSpawner.h"
 #include "protocol/schema/generated/AAoCPlayerState.h"
 #include "protocol/schema/generated/AAutonomousPlayerCharacter.h"
 #include "protocol/schema/generated/ABaseCharacter.h"
@@ -92,8 +94,10 @@ constexpr Entry kByName[] = {
     {"AActor", &kAActor},
     {"AAoCAbilityLingeringEffect", &kAAoCAbilityLingeringEffect},
     {"AAoCActor", &kAAoCActor},
+    {"AAoCAttunablePlayerSpawner", &kAAoCAttunablePlayerSpawner},
     {"AAoCGameStateBase", &kAAoCGameStateBase},
     {"AAoCPlayerController", &kAAoCPlayerController},
+    {"AAoCPlayerSpawner", &kAAoCPlayerSpawner},
     {"AAoCPlayerState", &kAAoCPlayerState},
     {"AAutonomousPlayerCharacter", &kAAutonomousPlayerCharacter},
     {"ABaseCharacter", &kABaseCharacter},
@@ -183,8 +187,10 @@ constexpr const ClassSchema* kAll[] = {
     &kAActor,
     &kAAoCAbilityLingeringEffect,
     &kAAoCActor,
+    &kAAoCAttunablePlayerSpawner,
     &kAAoCGameStateBase,
     &kAAoCPlayerController,
+    &kAAoCPlayerSpawner,
     &kAAoCPlayerState,
     &kAAutonomousPlayerCharacter,
     &kABaseCharacter,

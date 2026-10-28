@@ -207,6 +207,11 @@ type Character struct {
 	// Missing systems, step 0: the tutorials the character finished (migration 0015), the design database's FirstTimeEvent Guids in the order they were finished, with the items (include_items).
 	// A character that finished none has none.
 	CompletedFtues []int64 `protobuf:"varint,23,rep,packed,name=completed_ftues,json=completedFtues,proto3" json:"completed_ftues,omitempty"`
+	// Embersprings (migration 0018): the places the character discovered, as their numbers in the design database's master list of places (1 to 255), in the order they were discovered,
+	// the place that is its home (0: none) and when the home respawn was last used (Unix milliseconds on the server's wall clock; 0: never), with the items (include_items).
+	Attunements    []int32 `protobuf:"varint,24,rep,packed,name=attunements,proto3" json:"attunements,omitempty"`
+	HomeAttunement int32   `protobuf:"varint,25,opt,name=home_attunement,json=homeAttunement,proto3" json:"home_attunement,omitempty"`
+	HomeLastUsedMs int64   `protobuf:"varint,26,opt,name=home_last_used_ms,json=homeLastUsedMs,proto3" json:"home_last_used_ms,omitempty"`
 	// Storage clerks, step 0: the items the character keeps in the warehouse (migration 0017), with the items (include_items): the item chunks (the same in every town), the material tabs and
 	// the cargo tab of each town it stored in. A character that stored nothing has none.
 	WarehouseItems []*WarehouseItem `protobuf:"bytes,30,rep,name=warehouse_items,json=warehouseItems,proto3" json:"warehouse_items,omitempty"`
@@ -403,6 +408,27 @@ func (x *Character) GetCompletedFtues() []int64 {
 		return x.CompletedFtues
 	}
 	return nil
+}
+
+func (x *Character) GetAttunements() []int32 {
+	if x != nil {
+		return x.Attunements
+	}
+	return nil
+}
+
+func (x *Character) GetHomeAttunement() int32 {
+	if x != nil {
+		return x.HomeAttunement
+	}
+	return 0
+}
+
+func (x *Character) GetHomeLastUsedMs() int64 {
+	if x != nil {
+		return x.HomeLastUsedMs
+	}
+	return 0
 }
 
 func (x *Character) GetWarehouseItems() []*WarehouseItem {
@@ -2034,8 +2060,14 @@ type SaveProgressRequest struct {
 	// with nothing changed, for a Guid of 0 or less, one given twice, or more than 1,024.
 	ReplaceCompletedFtues bool    `protobuf:"varint,10,opt,name=replace_completed_ftues,json=replaceCompletedFtues,proto3" json:"replace_completed_ftues,omitempty"`
 	CompletedFtues        []int64 `protobuf:"varint,11,rep,packed,name=completed_ftues,json=completedFtues,proto3" json:"completed_ftues,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Embersprings: with replace_attunements the character's discovered places, home and last use of the home respawn become exactly `attunements` (in this order), `home_attunement` and
+	// `home_last_used_ms`; without it they are left alone. InvalidArgument, with nothing changed, for a number outside 1 to 255, one given twice, a home outside 0 to 255 or a negative time.
+	ReplaceAttunements bool    `protobuf:"varint,12,opt,name=replace_attunements,json=replaceAttunements,proto3" json:"replace_attunements,omitempty"`
+	Attunements        []int32 `protobuf:"varint,13,rep,packed,name=attunements,proto3" json:"attunements,omitempty"`
+	HomeAttunement     int32   `protobuf:"varint,14,opt,name=home_attunement,json=homeAttunement,proto3" json:"home_attunement,omitempty"`
+	HomeLastUsedMs     int64   `protobuf:"varint,15,opt,name=home_last_used_ms,json=homeLastUsedMs,proto3" json:"home_last_used_ms,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SaveProgressRequest) Reset() {
@@ -2145,6 +2177,34 @@ func (x *SaveProgressRequest) GetCompletedFtues() []int64 {
 	return nil
 }
 
+func (x *SaveProgressRequest) GetReplaceAttunements() bool {
+	if x != nil {
+		return x.ReplaceAttunements
+	}
+	return false
+}
+
+func (x *SaveProgressRequest) GetAttunements() []int32 {
+	if x != nil {
+		return x.Attunements
+	}
+	return nil
+}
+
+func (x *SaveProgressRequest) GetHomeAttunement() int32 {
+	if x != nil {
+		return x.HomeAttunement
+	}
+	return 0
+}
+
+func (x *SaveProgressRequest) GetHomeLastUsedMs() int64 {
+	if x != nil {
+		return x.HomeLastUsedMs
+	}
+	return 0
+}
+
 type SaveProgressResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     *Character             `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"` // with its experience rows
@@ -2198,7 +2258,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
 	"\x01z\x18\x03 \x01(\x01R\x01z\x12\x10\n" +
-	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\x86\b\n" +
+	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xfc\b\n" +
 	"\tCharacter\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2231,7 +2291,10 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x06wallet\x18\x14 \x03(\v2\x1d.aoc.character.v1.WalletEntryR\x06wallet\x12H\n" +
 	"\x0fprocessing_jobs\x18\x15 \x03(\v2\x1f.aoc.character.v1.ProcessingJobR\x0eprocessingJobs\x12#\n" +
 	"\rknown_recipes\x18\x16 \x03(\x03R\fknownRecipes\x12'\n" +
-	"\x0fcompleted_ftues\x18\x17 \x03(\x03R\x0ecompletedFtues\x12H\n" +
+	"\x0fcompleted_ftues\x18\x17 \x03(\x03R\x0ecompletedFtues\x12 \n" +
+	"\vattunements\x18\x18 \x03(\x05R\vattunements\x12'\n" +
+	"\x0fhome_attunement\x18\x19 \x01(\x05R\x0ehomeAttunement\x12)\n" +
+	"\x11home_last_used_ms\x18\x1a \x01(\x03R\x0ehomeLastUsedMs\x12H\n" +
 	"\x0fwarehouse_items\x18\x1e \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\"\xed\x03\n" +
 	"\rWarehouseItem\x12\x12\n" +
 	"\x04area\x18\x01 \x01(\tR\x04area\x12\x1b\n" +
@@ -2383,7 +2446,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x11replace_warehouse\x18\x14 \x01(\bR\x10replaceWarehouse\x12H\n" +
 	"\x0fwarehouse_items\x18\x15 \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\"-\n" +
 	"\x15SaveInventoryResponse\x12\x14\n" +
-	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\x96\x04\n" +
+	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xbd\x05\n" +
 	"\x13SaveProgressRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\x05R\x05level\x12\x19\n" +
@@ -2400,7 +2463,11 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\vprofessions\x18\t \x03(\v2!.aoc.character.v1.ProfessionStateR\vprofessions\x126\n" +
 	"\x17replace_completed_ftues\x18\n" +
 	" \x01(\bR\x15replaceCompletedFtues\x12'\n" +
-	"\x0fcompleted_ftues\x18\v \x03(\x03R\x0ecompletedFtues\"Q\n" +
+	"\x0fcompleted_ftues\x18\v \x03(\x03R\x0ecompletedFtues\x12/\n" +
+	"\x13replace_attunements\x18\f \x01(\bR\x12replaceAttunements\x12 \n" +
+	"\vattunements\x18\r \x03(\x05R\vattunements\x12'\n" +
+	"\x0fhome_attunement\x18\x0e \x01(\x05R\x0ehomeAttunement\x12)\n" +
+	"\x11home_last_used_ms\x18\x0f \x01(\x03R\x0ehomeLastUsedMs\"Q\n" +
 	"\x14SaveProgressResponse\x129\n" +
 	"\tcharacter\x18\x01 \x01(\v2\x1b.aoc.character.v1.CharacterR\tcharacter*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +

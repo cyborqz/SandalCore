@@ -1325,7 +1325,7 @@ std::optional<Send> PlayerBootstrap::death_restart() {
     return rpcs(Role::PlayerController, "ClientRestart and camera mode (death)", calls);
 }
 
-std::optional<Send> PlayerBootstrap::respawn_choices(std::span<const int64_t> closest, int64_t home, bool previous_choice_invalid) {
+std::optional<Send> PlayerBootstrap::respawn_choices(std::span<const int64_t> closest, int64_t home, bool previous_choice_invalid, bool home_on_cooldown) {
     if (!ok_ || !second_state_added_ || closest.size() > 64) return std::nullopt;
     const schema::RpcSchema* rpc = pawn_.obj.schema->rpc("SendClientRespawnChoices");
     if (!rpc) return std::nullopt;
@@ -1340,7 +1340,7 @@ std::optional<Send> PlayerBootstrap::respawn_choices(std::span<const int64_t> cl
         !repl::set_rpc_param(*rpc, params, "RespawnChoices.HomeRespawn", Value::i64(home)) ||
         !repl::set_rpc_param(*rpc, params, "RespawnChoices.Selection", Value::i64(0)) ||
         !repl::set_rpc_param(*rpc, params, "RespawnChoices.bPreviousChoiceInvalid", Value::boolean(previous_choice_invalid)) ||
-        !repl::set_rpc_param(*rpc, params, "RespawnChoices.bHomeAttuneOnCooldown", Value::boolean(false))) {
+        !repl::set_rpc_param(*rpc, params, "RespawnChoices.bHomeAttuneOnCooldown", Value::boolean(home_on_cooldown))) {
         return std::nullopt;
     }
     repl::RpcRequest call;
@@ -2773,5 +2773,7 @@ std::optional<Send> PlayerBootstrap::correction(float time_stamp, const repl::Ve
     }
     return finish(Role::Pawn, false, "ClientAdjustPosition", repl::call_rpc(pawn_, nullptr, "ClientAdjustPosition", params, {}, acks_));
 }
+
+#include "respawn/bootstrap_embersprings.inc"
 
 }  // namespace aoc::worldd::bootstrap

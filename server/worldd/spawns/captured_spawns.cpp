@@ -215,15 +215,16 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
     world::WorldActor w;
     const bool npc = open.category == "npc";
     const bool station = open.category == "station";
-    w.kind = npc ? world::ActorKind::Npc : (station ? world::ActorKind::Station : world::ActorKind::Gatherable);
+    const bool shrine = open.category == "shrine";
+    w.kind = npc ? world::ActorKind::Npc : (station ? world::ActorKind::Station : (shrine ? world::ActorKind::Shrine : world::ActorKind::Gatherable));
     repl::Actor& a = w.actor;
     a.guid = mint();
     // a station has no controller and no collision cylinder: its components follow the actor at +2, +4, +6 (retail's pattern for a station)
-    const FIntrepidNetworkGUID controller = station ? FIntrepidNetworkGUID{} : mint();   // the AI controller object (+2): Owner and Controller name it, it has no channel
+    const FIntrepidNetworkGUID controller = (station || shrine) ? FIntrepidNetworkGUID{} : mint();   // the AI controller object (+2): Owner and Controller name it, it has no channel
     // +4: the CollisionCylinder, retail's slot (the AlignmentComponent's GUID - 2 in 211 of 211 captured cylinder exports, +4 of the actor in 511 of
     // 634): the hit confirmations and the ability items name it and export it as the actor's "CollisionCylinder" (E1 stage 3 fix 3: the draft named
     // the actor's + 24, outside the block, which is the next-minted object's GUID: a NetGuidMismatch on the client, the user's disconnect)
-    const FIntrepidNetworkGUID cylinder = station ? FIntrepidNetworkGUID{} : mint();
+    const FIntrepidNetworkGUID cylinder = (station || shrine) ? FIntrepidNetworkGUID{} : mint();
     a.obj = open.actor_block().state;
     a.open.archetype = open.archetype;
     a.open.level = bootstrap::persistent_level_export();
@@ -231,7 +232,7 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
     w.id = a.guid.ObjectId;
     w.npc.archetype = open.archetype_path;
     w.npc.controller = npc ? controller.ObjectId : 0;
-    w.npc.collision_cylinder = station ? 0 : cylinder.ObjectId;
+    w.npc.collision_cylinder = (station || shrine) ? 0 : cylinder.ObjectId;
 
     std::string e;
     repl::ObjectState& actor = a.obj;
@@ -408,6 +409,37 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
                 }
             }
         }
+    } else if (shrine) {
+        // an Emberspring is a plain actor like a station: where it stands (the same writes), its own SpawnerGuid (made from the point's seed) and the place it stands for (AttuneRecordId)
+        repl::RepMovement m;
+        if (const repl::Value* v = actor.state.get(7)) {
+            if (const auto* old = v->get_if<repl::RepMovement>()) m = *old;
+        }
+        m.simulated_physic_sleep = false;
+        m.rep_physics = false;
+        m.location = repl::quantize_location(actor.opts, p.x, p.y, p.z);
+        m.linear_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
+        m.angular_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
+        m.acceleration.reset();
+        m.rotation = repl::Rot{0, actor.opts.rep_movement_short_rotation ? angle16(p.yaw_degrees) : angle8(p.yaw_degrees), 0};
+        if (!set_path(actor, "ReplicatedMovement", repl::Value(m), e)) { error = e; return std::nullopt; }
+        a.open.spawn.location = repl::quantize_vector(10, p.x, p.y, p.z);
+        a.open.spawn.rotation = repl::Rot{0, angle16(p.yaw_degrees), 0};
+        a.open.spawn.velocity.reset();
+        w.x = p.x;
+        w.y = p.y;
+        w.z = p.z;
+        w.yaw_degrees = p.yaw_degrees;
+        uint64_t seed = p.seed ? p.seed : w.id;
+        const char* const word_paths[4] = {"SpawnerGuid.A", "SpawnerGuid.B", "SpawnerGuid.C", "SpawnerGuid.D"};
+        for (const char* path : word_paths) {
+            if (!set_path(actor, path, repl::Value::i64(static_cast<int32_t>(splitmix(seed) >> 16)), e)) { error = e; return std::nullopt; }
+        }
+        if (p.attune_record != 0 && !set_path(actor, "AttuneRecordId.Guid", repl::Value::i64(p.attune_record), e)) { error = e; return std::nullopt; }
+        w.shrine.place = p.attune_record;
+        w.shrine.seed = p.seed;
+        w.npc.name = "Emberspring";
+        w.npc.source = world::Source::Data;
     } else if (station) {
         // where it stands: the same writes as an NPC's, without an owner, a controller or a timestamp (the station is a plain actor)
         repl::RepMovement m;

@@ -866,6 +866,28 @@ struct CraftStationData {
     }
 };
 
+/// Embersprings (contentc version 23): the places a player can be attuned to, the respawn definitions and which population instances name one.
+struct AttunePoint {
+    int64_t     guid = 0;
+    std::string name, descriptor, level_name;   // descriptor: the name the players see ("Flame and Formula")
+    int         number = 0;                     // the place's number in the master list (1 to 255); 0 when the list has none
+    double      x = 0, y = 0, z = 0;            // cm
+    double      radius = 0;                     // cm: how close a player has to come to discover it
+};
+struct RespawnDef {
+    int64_t     guid = 0;
+    std::string name, descriptor;
+    int         kind = 0;                       // EPlayerRespawnType: 1 player, 2 attuned, 3 corrupted, 4 node siege camp, 5 node siege safe house, 6 guild war, 7 node war, 8 forward base
+    int64_t     attune = 0;                     // AttunePoint guid; 0 for none
+    double      box_x = 0, box_y = 0, box_z = 0;   // cm, half sizes
+    double      exclusion = 0, max_range = 0;   // cm
+};
+struct RespawnData {
+    std::map<int64_t, AttunePoint> places;
+    std::map<int64_t, RespawnDef>  respawns;
+    std::map<int64_t, int64_t>     instance_respawn;   // PopulationInstance guid -> RespawnDef guid
+};
+
 /// Crafting, step 1 (contentc version 20): the recipes (craft_recipe with its inputs, predicates and cost records) and which recipes each station's recipe set lists.
 struct CraftInput {
     int64_t     item = 0;        // the resource record (0 when the input is named by a filter or by tags)
@@ -1399,6 +1421,8 @@ public:
     std::optional<QuestData> quest_data(std::string& error) const;
     /// Crafting, step 0 (contentc version 20): the station definitions and the assets that are their stations, read whole. nullopt, with `error` set, for a file of an older version.
     std::optional<CraftStationData> craft_station_data(std::string& error) const;
+    /// Embersprings (contentc version 23): the places, the respawn definitions and the instances that name one, read whole. nullopt, with `error` set, for a file of an older version.
+    std::optional<RespawnData> respawn_data(std::string& error) const;
     /// Crafting, step 1 (contentc version 20): the recipes, their inputs, predicates and cost records, and the recipe sets' lists, read whole. nullopt, with `error` set, for a file of an older version.
     std::optional<CraftRecipeData> craft_recipe_data(std::string& error) const;
     /// Vendors, step 0 (contentc version 18): the shops' links, tax tags, prices and predicates, read whole.  nullopt, with `error` set, for a file of an older version.

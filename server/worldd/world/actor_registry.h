@@ -49,6 +49,7 @@ enum class ActorKind : uint8_t {
     NodeLayout,  // a town's ANodeLayoutReplicator (Nodes 1, stage 3a): the scenery of a city node, awake within 1.45 km, never dormant
     Foliage,     // a foliage cell's AIntrepidStateIFA (Gathering stage 3, "Foliage gathering"): which instances of the cell are cut or growing; opened as a snapshot, never awake
     Station,     // a crafting or processing station (crafting, step 0): an ACraftingStationBase actor of a node's building, opened like any other actor, used for its window
+    Shrine,      // an Emberspring (AAoCAttunablePlayerSpawner): a respawn point a player discovers by coming close and attunes to by using it (respawn/embersprings.h)
 };
 // [C | Y | B ~ C-O-A]
 
@@ -131,6 +132,15 @@ struct StationInfo {
     uint64_t    seed = 0;         // the spawn point's seed (the data's: the same on every start; 0 when the point had none): the station's key and its StationGuid are made from it
 };
 
+/// What an Emberspring (ActorKind::Shrine) is to the server: the place it stands for, the respawn definition the death window names, and the place's number in the master list.
+struct ShrineInfo {
+    std::string name;             // the place's name ("Flame and Formula")
+    int64_t     place = 0;        // the attune_point it is the shrine of (its AttuneRecordId)
+    int64_t     respawn = 0;      // the respawn_point of its instance
+    int         number = 0;       // the place's number in the master list (1 to 255); 0 for none
+    uint64_t    seed = 0;         // the spawn point's seed: its SpawnerGuid is made from it
+};
+
 /// Gathering stage 2, "Harvesting": what the harvesting player's own connection sees of a resource node that the shared state cannot say (an object reference to a pawn that only that
 /// player's client has).  The node's InteractableComponent holds InteractingPlayer as none; the actor view of the player `player_id` shows `pawn` in it while `show` is set
 /// (gather/node_wire.h).  Every other connection sees none, as the retail captures' second observer does.
@@ -168,6 +178,7 @@ struct WorldActor {
     uint32_t   reliable_version = 1;      // the changes that must not be lost
     NpcInfo    npc;
     StationInfo station;                  // ActorKind::Station only
+    ShrineInfo  shrine;                   // ActorKind::Shrine only
     SceneryInfo scenery;                  // ActorKind::NodeLayout only
     GatherSeen gather;                    // ActorKind::Gatherable only (gather/node_wire.h)
 };

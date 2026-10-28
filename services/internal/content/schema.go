@@ -778,6 +778,9 @@ func Create(db *sql.DB) error {
 	if err := createCrafting(db); err != nil {
 		return err
 	}
+	if err := createRespawn(db); err != nil {
+		return err
+	}
 	if err := createQuests(db); err != nil {
 		return err
 	}

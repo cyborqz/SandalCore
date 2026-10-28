@@ -264,6 +264,11 @@ struct Character {
     std::vector<int64_t> known_recipes;
     /// Missing systems, step 0: the tutorials the character finished (FirstTimeEvent Guids, in the order they were finished; with the items).  A service of an older version sends none.
     std::vector<int64_t> completed_ftues;
+    /// Embersprings: the places the character discovered (their numbers in the master list, in the order they were discovered), the one that is its home (0: none) and when its home
+    /// respawn was last used (Unix milliseconds on the server's wall clock; 0: never).  A service of an older version sends none.
+    std::vector<int32_t> attunements;
+    int32_t              home_attunement = 0;
+    int64_t              home_last_used_ms = 0;
     /// Quests, slice 1: the character's saved quest log, read from the quest service at the login.  Empty (nullopt) when the world server has no quest service or it did not answer: the
     /// character then plays without quests, and nothing is saved over what the service holds.
     std::optional<SavedQuestLog> quest_log;
@@ -292,13 +297,20 @@ struct Progress {
     /// service refuses an id of 0 or less, one twice, and more than 1,024).
     bool                         replace_completed_ftues = false;
     std::vector<int64_t>         completed_ftues;
+    /// Embersprings: with replace_attunements the character's discovered places, home and last use of the home respawn become exactly these (the character service refuses a number outside
+    /// 1 to 255, one twice, a home outside 0 to 255 and a negative time).
+    bool                         replace_attunements = false;
+    std::vector<int32_t>         attunements;
+    int32_t                      home_attunement = 0;
+    int64_t                      home_last_used_ms = 0;
     bool operator==(const Progress& o) const {
         if (level != o.level || class_id != o.class_id || experience.size() != o.experience.size()) return false;
         for (size_t i = 0; i < experience.size(); ++i) {
             if (!(experience[i] == o.experience[i])) return false;
         }
         return replace_skill_ranks == o.replace_skill_ranks && skill_ranks == o.skill_ranks && replace_action_bar == o.replace_action_bar &&
-               action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues;
+               action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues &&
+               replace_attunements == o.replace_attunements && attunements == o.attunements && home_attunement == o.home_attunement && home_last_used_ms == o.home_last_used_ms;
     }
 };
 // [C:Y:B :: C O A]

@@ -102,6 +102,11 @@ message Character {
   // Missing systems, step 0: the tutorials the character finished (migration 0015), the design database's FirstTimeEvent Guids in the order they were finished, with the items (include_items).
   // A character that finished none has none.
   repeated int64 completed_ftues = 23;
+  // Embersprings (migration 0018): the places the character discovered, as their numbers in the design database's master list of places (1 to 255), in the order they were discovered,
+  // the place that is its home (0: none) and when the home respawn was last used (Unix milliseconds on the server's wall clock; 0: never), with the items (include_items).
+  repeated int32 attunements = 24;
+  int32 home_attunement = 25;
+  int64 home_last_used_ms = 26;
   // Storage clerks, step 0: the items the character keeps in the warehouse (migration 0017), with the items (include_items): the item chunks (the same in every town), the material tabs and
   // the cargo tab of each town it stored in. A character that stored nothing has none.
   repeated WarehouseItem warehouse_items = 30;
@@ -338,6 +343,12 @@ message SaveProgressRequest {
   // with nothing changed, for a Guid of 0 or less, one given twice, or more than 1,024.
   bool replace_completed_ftues = 10;
   repeated int64 completed_ftues = 11;
+  // Embersprings: with replace_attunements the character's discovered places, home and last use of the home respawn become exactly `attunements` (in this order), `home_attunement` and
+  // `home_last_used_ms`; without it they are left alone. InvalidArgument, with nothing changed, for a number outside 1 to 255, one given twice, a home outside 0 to 255 or a negative time.
+  bool replace_attunements = 12;
+  repeated int32 attunements = 13;
+  int32 home_attunement = 14;
+  int64 home_last_used_ms = 15;
 }
 
 message SaveProgressResponse {

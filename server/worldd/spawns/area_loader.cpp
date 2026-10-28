@@ -7,6 +7,7 @@
 //  See area_loader.h.
 // ============================================================================
 #include "spawns/area_loader.h"
+#include "respawn/make_shrines.h"
 
 #include "spawns/npc_looks.h"
 #include "world/interaction_state.h"
@@ -49,7 +50,7 @@ std::string AreaReport::describe() const {
       << population.area_sets << " area sets in the area: " << population.generic_spawned << " NPCs made from a generic Blueprint template, " << population.area_spawned
       << " from area points, " << population.no_template << " points without any template, " << population.blacklisted << " blacklisted, " << population.no_asset
       << " without an asset, " << population.filtered_total() << " dropped by the spawn filter), " << captured_npcs << " captured NPCs (" << duplicates << " dropped as the data's), " << gatherables << " resource nodes, " << gm_vendors
-      << " GM vendors";
+      << " GM vendors, " << shrines_made << " Embersprings (" << respawn_points.size() << " respawn points in the area, " << shrines_no_record << " without a respawn definition, " << shrines_refused << " refused)";
     return o.str();
 }
 // (Cyb) (C.O.A)
@@ -268,6 +269,21 @@ std::optional<AreaReport> load_area(world::ActorRegistry& registry, const AreaSo
                 }
                 ++report.gm_vendors;
             }
+        }
+    }
+
+    // Embersprings: the respawn points the data places become actors a player can discover and use
+    if (sources.db && sources.captured) {
+        std::string respawn_error;
+        if (const auto data = sources.db->respawn_data(respawn_error)) {
+            respawn::MadeShrines made = respawn::make_shrines(registry, *sources.captured, *data, report.respawn_points, mint, server_id, world_time, note);
+            report.shrines_made = made.made;
+            report.shrines_no_record = made.no_record;
+            report.shrines_refused = made.refused;
+            if (made.no_number > 0) note(std::to_string(made.no_number) + " Emberspring(s) stand for a place with no number in the master list: they can be seen and used, not discovered");
+            report.shrines = std::move(made.book);
+        } else {
+            note("no Embersprings: " + respawn_error);
         }
     }
     return report;

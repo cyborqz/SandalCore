@@ -34,9 +34,9 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - The first part of quests: quest givers offer their quests; accepting, the journal and the tracker, abandoning; quests are kept across logins; Welcome to Verra starts in the starting area.
 - Storage: the Storage Clerk's item and materials storage, kept across logins.
 - NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs.
+- Embersprings: discovering them, attuning to one, and choosing where to respawn.
 
 ### In progress
-- Embersprings: discovering them, attuning to one, and choosing where to respawn.
 - Node stages: building sites below Village, and the Wilderness camp.
 
 ### Left
@@ -45,6 +45,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Weapon line experience and the weapon trees.
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.
+- Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.
 - NPCs: face variety, names for rare creatures, and hostile humanoids such as bandits and cultists.
 - Creatures: the remaining creature families' own fights and abilities, pack aggro, damage matched to retail, and flying creatures.
 - The walking map: walls, fences, water and holes.

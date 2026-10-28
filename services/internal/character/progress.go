@@ -45,6 +45,9 @@ type Progress struct {
 	// Missing systems, step 0: with ReplaceCompletedFTUEs the character's finished tutorials become exactly CompletedFTUEs, in this order (completed_ftues.go); without it they are left alone.
 	ReplaceCompletedFTUEs bool
 	CompletedFTUEs        []int64
+	// Embersprings: with ReplaceAttunements the character's discovered places, home and last use of the home respawn become exactly Attunements (attunements.go); without it they are left alone.
+	ReplaceAttunements bool
+	Attunements        Attunements
 }
 
 // C-Y-B x C O A
@@ -106,6 +109,13 @@ func (p Progress) Validate() error {
 		}
 	} else if len(p.CompletedFTUEs) > 0 {
 		return fmt.Errorf("%w: completed tutorials are given without replace_completed_ftues", ErrInvalid)
+	}
+	if p.ReplaceAttunements {
+		if err := ValidateAttunements(p.Attunements); err != nil {
+			return err
+		}
+	} else if len(p.Attunements.Discovered) > 0 || p.Attunements.Home != 0 || p.Attunements.HomeLastUsedMs != 0 {
+		return fmt.Errorf("%w: attunements are given without replace_attunements", ErrInvalid)
 	}
 	return nil
 }
@@ -204,6 +214,11 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if p.ReplaceCompletedFTUEs {
 		if err := replaceCompletedFTUEs(ctx, tx, characterID, p.CompletedFTUEs); err != nil {
+			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplaceAttunements {
+		if err := replaceAttunements(ctx, tx, characterID, p.Attunements); err != nil {
 			return Character{}, itemsError(err)
 		}
 	}
