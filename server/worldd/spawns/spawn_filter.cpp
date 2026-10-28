@@ -145,7 +145,7 @@ Why SpawnFilter::visuals(const content::NpcAssetRow& asset) const {
     if (m->placeholder) return Why::Placeholder;
     if (m->mesh.empty()) return Why::NoMesh;
     if (m->anim.empty()) return Why::NoAnimation;
-    if (m->appearance_dependent() && !ctx_.humanoids && ctx_.shown_humanoids.count(archetype_leaf(asset.archetype_path)) == 0) return Why::Appearance;
+    if (m->appearance_dependent() && !ctx_.humanoids && ctx_.shown_humanoids.count(archetype_leaf(asset.archetype_path)) == 0 && !(ctx_.looks_ok && ctx_.looks_ok(asset))) return Why::Appearance;
     return Why::Spawns;
 }
 

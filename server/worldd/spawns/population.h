@@ -41,13 +41,17 @@
 
 namespace aoc::worldd::spawns {
 
-/// Where an asset's NPC opens come from: a captured template first, else a generic one (null: captured only).
+class NpcLooks;
+
+/// Where an asset's NPC opens come from: a captured template first, else a generic one (null: captured only).  `looks` (may be null) dresses and names the people made from a humanoid open.
 struct TemplateSource {
     const CapturedData* captured = nullptr;
     const GenericNpcs*  generic = nullptr;
+    const NpcLooks*     looks = nullptr;
 
-    /// The template for `asset`; nullptr, with `why` (Verdict::NoPath when the asset names no Blueprint) when there is none.  `is_generic` says which.
-    const OpenTemplate* find(const content::NpcAssetRow& asset, bool* is_generic = nullptr, Verdict* why = nullptr) const;
+    /// The template for `asset`; nullptr, with `why` (Verdict::NoPath when the asset names no Blueprint) when there is none.  `is_generic` says which.  `instance` (may be null) is the
+    /// point's instance: a generic humanoid that has something to say or sell opens with the interactable subobject.
+    const OpenTemplate* find(const content::NpcAssetRow& asset, bool* is_generic = nullptr, Verdict* why = nullptr, const content::NpcInstanceRow* instance = nullptr) const;
 };
 
 /// One NPC the data places inside the area, with what is needed to make it.
@@ -60,6 +64,8 @@ struct DataSpawn {
     bool                         generic = false; // made from the generic donor (no capture opened the Blueprint)
     bool                         from_area = false; // a PopulationArea's random point: `z` is the circle's, the ground decides
     int64_t                      placement = 0;   // the WorldSpawn
+    int64_t                      asset_set = 0;   // the AssetSet of the instance the asset was drawn from (a name may be listed there)
+    const NpcLooks*              looks = nullptr; // dresses and names the NPC when it is a humanoid (null: the open's recorded look and name)
     int64_t                      set = 0;
     int64_t                      key = 0;
     uint64_t                     seed = 0;        // the point's hash

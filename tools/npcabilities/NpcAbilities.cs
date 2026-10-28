@@ -146,6 +146,61 @@ public static partial class Reader
         return null;
     }
 
+    // ---- what a state tree has tasks for -------------------------------------------------------------------------------------------------------
+
+    /// <summary>The state tree a Blueprint plays (its asset's name) and whether it has a task that wanders and a task that patrols.</summary>
+    public sealed record TreeKind(string Tree, bool Wander, bool Patrol);
+
+    /// <summary>
+    /// What the state tree a Blueprint plays can do: its asset's name, and whether the tree (or a tree one of its states plays) has a wander task and a patrol task.  Null when the
+    /// Blueprint plays no tree or the tree cannot be read.  `cache` is kept by the tree's package.
+    /// </summary>
+    public static TreeKind? TreeKindOf(Game g, UObject cdo, Dictionary<string, TreeKind?> cache)
+    {
+        var tree = StateTreeOf(g, CdoChain(cdo), out _);
+        if (tree == null) return null;
+        if (cache.TryGetValue(tree.Name, out var hit)) return hit;
+        TreeKind? kind = null;
+        try
+        {
+            var found = TreeTasks(g, tree, new HashSet<string>(), 0);
+            if (found != null) kind = new TreeKind(tree.Name.Substring(tree.Name.LastIndexOf('/') + 1), found.Value.Wander, found.Value.Patrol);
+        }
+        catch { }
+        cache[tree.Name] = kind;
+        return kind;
+    }
+
+    static (bool Wander, bool Patrol)? TreeTasks(Game g, IPackage tree, HashSet<string> seen, int depth)
+    {
+        if (depth > 4 || !seen.Add(tree.Name)) return (false, false);
+        var treeObject = tree.GetExports().FirstOrDefault(x => x.ExportType == "StateTree");
+        if (treeObject == null) return null;
+        bool wander = false, patrol = false;
+        foreach (var node in Container(treeObject.Properties, "Nodes"))
+        {
+            var task = ClassOf(node, "TaskClass");
+            if (task.Length == 0) continue;
+            if (task.Contains("Wander", StringComparison.OrdinalIgnoreCase)) wander = true;
+            if (task.Contains("Patrol", StringComparison.OrdinalIgnoreCase)) patrol = true;
+        }
+        // a state may play another tree (a linked asset): its tasks count too
+        foreach (var state in StructsOf(treeObject, "States"))
+        {
+            if (!state.TryGetValue(out FPackageIndex linked, "LinkedAsset") || linked == null || linked.IsNull) continue;
+            var name = linked.ResolvedObject?.Package?.Name;
+            if (string.IsNullOrEmpty(name)) continue;
+            IPackage? other;
+            try { other = g.Provider.LoadPackage(name); } catch { return null; }
+            if (other == null) return null;
+            var sub = TreeTasks(g, other, seen, depth + 1);
+            if (sub == null) return null;
+            wander |= sub.Value.Wander;
+            patrol |= sub.Value.Patrol;
+        }
+        return (wander, patrol);
+    }
+
     /// <summary>
     /// The package whose state tree reference holds the parameters a Blueprint runs with: the nearest one on the class chain that sets a bag of its own (a Blueprint that only
     /// changes a few parameters keeps the tree its parent names, and the bag is the one it saved).

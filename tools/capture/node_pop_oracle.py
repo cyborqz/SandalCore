@@ -16,9 +16,10 @@ node RECORD's location and yaw, and 81 of the rest within 3 m of a building poin
                     (`building_level_spawn_pop`), each placed at the plot's transform in the node's frame (placement id = node ^ plot * 0x9E3779B97F4A7C15)
     the context     the node's id, type, level, biome and zone of influence, Kaelar, Summer, noon, the SiegeInactive tag; the spawn sources Layout and BuildingLevelSpawn are running; the
                     siege tags a filter requires are any-of; the humanoids whose body needs an NPCAppearanceComponent pass when a retail capture opened that Blueprint (its open carries one)
+                    or when the data dresses them (Looks below: not hostile to players, a look with a shared info and an outfit with items)
 
-It needs content.db (mode=ro), npc_motion.tsv and spawns/area_spawns.h (pop_oracle.Data); nothing is written.  Used by gen_node_pop_golden.py, which writes
-server/worldd/tests/node_pop_golden.h.
+It needs content.db (mode=ro), npc_motion.tsv and spawns/area_spawns.h (pop_oracle.Data), and npc_looks.tsv and npc_appearances.tsv (Looks); nothing is written.  Used by
+gen_node_pop_golden.py, which writes server/worldd/tests/node_pop_golden.h.
 """
 import collections
 import copy
@@ -208,3 +209,102 @@ def digest(spawned):
 def captured_leaves(d):
     """The Blueprint leaves of the NPCs a retail capture opened (their opens carry the appearance component)."""
     return {P.leaf(p) for p in d.captured_npc}
+
+
+PLAYER_ALIGNMENT = 6064629444695359488    # the alignment record a player carries
+HOSTILE = 1                               # a relationship's CombatPermissions: 1 hostile, 2 friendly, 3 neutral
+
+
+def _lines(path):
+    """The lines of a file as the server reads them: cut at LF, a CR before it dropped, no empty line after the last LF."""
+    with open(path, 'rb') as f:
+        lines = f.read().decode('utf-8').split('\n')
+    if lines and lines[-1] == '':
+        lines.pop()
+    return [line[:-1] if line.endswith('\r') else line for line in lines]
+
+
+def _i64(s):
+    """A whole field as a signed 64-bit integer (an optional minus and digits); None when it is not one."""
+    if not re.fullmatch(r'-?[0-9]+', s):
+        return None
+    v = int(s)
+    return v if -(1 << 63) <= v < (1 << 63) else None
+
+
+def _int_list(s):
+    return [v for v in (_i64(p) for p in s.split(',')) if v is not None] if s else []
+
+
+class Looks:
+    """Who the server dresses (spawns/npc_looks.cpp, NpcLooks::can_dress): the one question the spawn filter asks of the people's looks (SpawnContext::looks_ok).
+
+    A humanoid Blueprint (the player's master mesh) lets its points through when it is not hostile to players and its look resolves to an NPCAppearance record that has a shared
+    appearance info and at least one outfit with an item in some slot.  Read the way the server reads it:
+
+        the Blueprint   npc_motion.tsv: the mesh and the starting alignments (pop_oracle.Data.motion)
+        hostile         the combat tables of content.db: an alignment is the players' enemy when its relationship with the player's alignment, either way round, has the permission Hostile
+                        (`relationship`, `alignment_relation`); a Blueprint is hostile when one of its starting alignments is
+        the look        the asset's own record (npc_asset.appearance_guid) when it is one of npc_appearances.tsv, else the one the Blueprint's class defaults name (npc_looks.tsv)
+        the record      npc_appearances.tsv: an `A` line has the shared info and the outfit options, the `I` lines of an outfit the items of each slot
+    """
+
+    def __init__(self, db, motion, looks_dir):
+        self.motion = motion
+        self.blueprint = {}      # archetype path -> the record its class defaults name
+        self.appearance = {}     # record -> (shared info, [outfits])
+        self.outfit = {}         # outfit -> {slot: [item appearance records]}
+        for line in _lines(os.path.join(looks_dir, 'npc_looks.tsv'))[1:]:   # (the first line is the header)
+            f = line.split('\t')
+            record = _i64(f[1]) if len(f) >= 5 else None
+            if record is not None:
+                self.blueprint[f[0]] = record
+        for line in _lines(os.path.join(looks_dir, 'npc_appearances.tsv')):
+            if not line or line[0] == '#':
+                continue
+            f = line.split('\t')
+            guid = _i64(f[1]) if len(f) >= 2 else None
+            if guid is None:
+                continue
+            if f[0] == 'A' and len(f) >= 10:
+                self.appearance[guid] = (_i64(f[3]) or 0, _int_list(f[9]))
+            elif f[0] == 'O' and len(f) >= 5:
+                self.outfit[guid] = {}
+            elif f[0] == 'S' and len(f) >= 4:
+                if _i64(f[2]) is not None:
+                    self.outfit.setdefault(guid, {})
+            elif f[0] == 'I' and len(f) >= 4:
+                slot = _i64(f[2])
+                if slot is not None:
+                    self.outfit.setdefault(guid, {})[slot] = _int_list(f[3])
+        permission = {r[0]: r[1] for r in db.execute("SELECT guid, permissions FROM relationship")}
+        relation = collections.defaultdict(dict)       # alignment -> other alignment -> relationship record
+        for alignment, other, relationship in db.execute("SELECT alignment, other, relationship FROM alignment_relation"):
+            relation[alignment][other] = relationship
+
+        def hostile_between(x, y):
+            r = relation.get(x, {}).get(y)
+            return r is not None and permission.get(r) == HOSTILE
+        everyone = set(relation) | {o for others in relation.values() for o in others}
+        self.hostile_alignments = {a for a in everyone if hostile_between(a, PLAYER_ALIGNMENT) or hostile_between(PLAYER_ALIGNMENT, a)}
+
+    def appearance_of(self, asset):
+        """The NPCAppearance record a person of the asset is made from: its own when that is a record, else its Blueprint's default; 0 for none."""
+        if asset['appearance'] != 0 and asset['appearance'] in self.appearance:
+            return asset['appearance']
+        record = self.blueprint.get(asset['path'])
+        return record if record is not None and record in self.appearance else 0
+
+    def can_dress(self, asset):
+        if not asset['path']:
+            return False
+        m = self.motion.get(asset['path'])
+        if m is None or 'SK_PC_MASTER' not in m['mesh'] or any(a in self.hostile_alignments for a in m['alignments']):
+            return False
+        look = self.appearance.get(self.appearance_of(asset))
+        if look is None or look[0] == 0:
+            return False
+        return any(any(self.outfit[og].values()) for og in look[1] if og in self.outfit)
+
+    def describe(self):
+        return '%d Blueprint looks, %d appearance records, %d outfits, %d alignments hostile to players' % (len(self.blueprint), len(self.appearance), len(self.outfit), len(self.hostile_alignments))

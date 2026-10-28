@@ -109,8 +109,8 @@ class Data:
         self.db = sqlite3.connect('file:' + content_db.replace('\\', '/') + '?mode=ro', uri=True)
         Q = lambda s: self.db.execute(s).fetchall()
         self.assets = {}
-        for r in Q("SELECT guid,name,archetype_path,dev_only,filter,tags FROM npc_asset"):
-            self.assets[r[0]] = dict(guid=r[0], name=r[1], path=r[2], dev=bool(r[3]), filter=json.loads(r[4]), tags=json.loads(r[5]) if r[5] else [])
+        for r in Q("SELECT guid,name,archetype_path,dev_only,filter,tags,appearance_guid FROM npc_asset"):
+            self.assets[r[0]] = dict(guid=r[0], name=r[1], path=r[2], dev=bool(r[3]), filter=json.loads(r[4]), tags=json.loads(r[5]) if r[5] else [], appearance=r[6] or 0)
         self.asset_sets = collections.defaultdict(list)
         self.asset_set_tags = {}
         for r in Q("SELECT guid,tags FROM npc_asset_set"):
@@ -155,7 +155,9 @@ class Data:
                 c = line.rstrip('\n').split('\t')
                 if len(c) < 17:
                     continue
-                self.motion[c[0]] = dict(mesh=c[13], anim=c[14], placeholder=c[15] == '1', hidden=c[16] == '1')
+                # (the starting alignments are column 3, record guids; an unset slot is 0 and names nothing)
+                self.motion[c[0]] = dict(mesh=c[13], anim=c[14], placeholder=c[15] == '1', hidden=c[16] == '1',
+                                         alignments=[int(v) for v in c[3].split(',') if v and int(v) != 0])
         src = open(spawns_header, encoding='utf-8').read()
         self.captured_npc = set(re.findall(r'\{"npc", "ANPCCharacter", "([^"]+)"', src))
 
@@ -183,6 +185,7 @@ class Context:
         self.enabled = True
         self.zone = 0                      # Nodes 1, stage 3b: the context's own zone of influence, used when the point has none (a node's)
         self.active_gates = set()          # Nodes 1, stage 3b: the spawn sources that are running (a node's populations: Layout, BuildingLevelSpawn)
+        self.looks_ok = None               # People's looks: a function of an asset (node_pop_oracle.Looks.can_dress) that lets a humanoid through; None: only the shown ones pass
 # [C.O.A - Cyb]
 
 
@@ -255,7 +258,7 @@ def f_visuals(d, a, ctx):
         return 'NoMesh'
     if not m['anim']:
         return 'NoAnimation'
-    if 'SK_PC_MASTER' in m['mesh'] and not ctx.humanoids and leaf(a['path']) not in ctx.shown:
+    if 'SK_PC_MASTER' in m['mesh'] and not ctx.humanoids and leaf(a['path']) not in ctx.shown and not (ctx.looks_ok and ctx.looks_ok(a)):
         return 'Appearance'
     return 'Spawns'
 

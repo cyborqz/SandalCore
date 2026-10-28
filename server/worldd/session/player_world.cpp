@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <set>
@@ -313,11 +314,24 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
         }
     }
     generic_.emplace(*captured_, motion_loaded_ ? &motion_ : nullptr, generic_config_);
+    {   // the people's looks and names (spawns/npc_looks.h): without the tables the humanoids keep the recorded looks and names, and the ones no capture opened stay out
+        std::string le, ce;
+        const auto combat_rows = content_->combat_rows(ce);
+        if (!combat_rows) le = "the combat tables are missing, so it is not known who is hostile to players: " + ce;   // (fail closed: nobody is dressed)
+        looks_ = looks_dir_.empty() || !combat_rows ? nullptr : spawns::NpcLooks::load(looks_dir_, motion_loaded_ ? &motion_ : nullptr, &*combat_rows, &*captured_, le);
+        if (looks_) {
+            spdlog::info("[looks] {}", looks_->describe());
+            spawn_context_.looks_ok = [this](const content::NpcAssetRow& a) { return looks_ && looks_->can_dress(a); };
+        } else {
+            spdlog::warn("[looks] the humanoids keep their recorded looks and names, and those no capture opened stay out ({}): run scripts/extract_game_data.ps1", le);
+        }
+    }
     spawns::AreaSources sources;
     sources.db = content_;
     sources.captured = &*captured_;
     sources.gm = &*gm_;
     sources.generic = &*generic_;
+    sources.looks = looks_.get();
     spawn_filter_.emplace(spawn_context_, motion_loaded_ ? &motion_ : nullptr);
     sources.filter = &*spawn_filter_;
     area_ = area;
@@ -328,6 +342,11 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     }
     area_report_ = std::move(*report);
     spdlog::info("[area] {}", area_report_->describe());
+    if (looks_) {
+        const auto& lc = looks_->counts();
+        spdlog::info("[looks] the area's people: {} dressed ({} customizations from the recorded pool, {} plain), {} named by the data, {} by their Blueprint, {} with no name, {} left as recorded", lc.dressed, lc.from_pool,
+                     lc.plain_customization, lc.named, lc.blueprint_named, lc.unnamed, lc.no_record);
+    }
     for (const std::string& n : area_report_->notes) spdlog::warn("[area] {}", n);
     log_spawn_filter();
     log_npc_types();
@@ -385,7 +404,8 @@ void PlayerWorld::log_spawn_filter() const {
         return;
     }
     spdlog::info("[area] spawn filter: map {}, node level {}, culture {}, season {}, hour {:.1f}, {} gate source(s) running, humanoids {}: {} points dropped, {} spawned",
-                 ctx.map_name, ctx.node_level, ctx.culture, ctx.season, ctx.hour, ctx.active_gates.size(), ctx.humanoids ? "all" : "only Guard_Soldier", pop.filtered_total(), pop.spawned);
+                 ctx.map_name, ctx.node_level, ctx.culture, ctx.season, ctx.hour, ctx.active_gates.size(),
+                 ctx.humanoids ? "all" : (ctx.looks_ok ? "the ones not hostile to players, dressed from the data" : "only Guard_Soldier"), pop.filtered_total(), pop.spawned);
     std::vector<std::pair<spawns::Why, size_t>> reasons(pop.filtered.begin(), pop.filtered.end());
     std::sort(reasons.begin(), reasons.end(), [](const auto& a, const auto& b) { return a.second != b.second ? a.second > b.second : a.first < b.first; });
     for (const auto& [why, n] : reasons) {
@@ -481,7 +501,15 @@ bool PlayerWorld::load_blueprints(const std::string& motion_path, std::string& e
     if (!table.load(motion_path, error)) return false;
     motion_ = std::move(table);
     motion_loaded_ = true;
+    looks_dir_ = std::filesystem::path(motion_path).parent_path().string();   // (the people's look tables are beside it, spawns/npc_looks.h)
     spdlog::info("[nav] Blueprint table {}: {} pawn Blueprints", motion_path, motion_.size());
+    // what each Blueprint's state tree has tasks for: a tree with no wander and no patrol task leaves its NPCs at their post (the table is beside the Blueprint table)
+    std::string tree_error;
+    if (!npc::load_standing_archetypes((std::filesystem::path(looks_dir_) / "npc_trees.tsv").string(), &standing_archetypes_, tree_error)) {
+        spdlog::warn("[nav] no state tree table ({}): every NPC moves as its population instance says, even those whose tree cannot (run the extractor's npcabilities step)", tree_error);
+    } else {
+        spdlog::info("[nav] state tree table: {} Blueprints whose tree has no task to wander or patrol with (their NPCs stand at their post)", standing_archetypes_.size());
+    }
     return true;
 }
 
@@ -1124,10 +1152,15 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
     hooks.despawned = [this](uint64_t id) {
         if (combat_) combat_->forget(id);   // (the NPC world forgets it by itself: the registry's removal listener)
     };
-    const spawns::TemplateSource templates{&*captured_, &*generic_};
+    const spawns::TemplateSource templates{&*captured_, &*generic_, looks_.get()};
     node_pops_ = std::make_unique<spawns::NodePopulations>(registry_, *city_nodes_, *node_wire_, *node_pop_data_, area_report_->data, templates, spawn_context_,
                                                            motion_loaded_ ? &motion_ : nullptr, area_, [this] { return guids_.next(); }, server_id_, std::move(hooks), config);
-    return node_pops_->start(world_clock_);
+    const size_t made = node_pops_->start(world_clock_);
+    if (looks_) {
+        const auto& lc = looks_->counts();
+        spdlog::info("[looks] with the towns' people: {} dressed in all, {} named by the data, {} by their Blueprint, {} with no name, {} left as recorded", lc.dressed, lc.named, lc.blueprint_named, lc.unnamed, lc.no_record);
+    }
+    return made;
 }
 
 size_t PlayerWorld::start_scenery(const world::NodeScenery::Config& config) {
@@ -1486,6 +1519,7 @@ std::string PlayerWorld::item_name(int64_t item) const {
 npc::SpeedModel PlayerWorld::speeds() const {
     npc::SpeedModel s;
     if (generic_config_.hunting) s.standing_defs = &generic_config_.hunting_defs;   // (empty without --gathering: nothing stands)
+    if (!standing_archetypes_.empty()) s.standing_archetypes = &standing_archetypes_;
     return s;
 }
 
@@ -1504,6 +1538,11 @@ uint64_t PlayerWorld::respawn_npc(uint32_t spawn_ref, double now) {
         spdlog::warn("[loot] a respawn ({}) was refused: {}", r.info.name, why);
         return 0;
     }
+    if (r.spawn.looks) {   // a humanoid comes back dressed and named as it was
+        std::string look_error;
+        r.spawn.looks->dress(*w, r.spawn, look_error);
+    }
+    if (std::string idle_error; !spawns::apply_idle_animation(*w, r.spawn.instance, idle_error)) spdlog::debug("[looks] {}: {}", r.info.name, idle_error);
     // the recipe's data (level, name, tables, respawn, home, source, spawn_ref, vendor) over the fresh actor's own GUIDs: its controller, its
     // InteractableComponent and its CollisionCylinder are the new block's (E1 review A1: the first generation's cylinder here was refused by the
     // registry while the corpse still stood, and once it was gone the first hit exported that GUID under the new actor = the NetGuidMismatch)

@@ -47,6 +47,7 @@ struct AreaSources {
     const vendor::GmVendors*     gm = nullptr;     // null: no GM vendors
     const GenericNpcs*           generic = nullptr;   // null: only the Blueprints a capture opened
     const SpawnFilter*           filter = nullptr;    // null: stage 2's behaviour, every point whose Blueprint opens (plan E1, stage 3: spawns/spawn_filter.h)
+    const NpcLooks*              looks = nullptr;     // null: the humanoids keep the look and name of the open they are made from (spawns/npc_looks.h)
 };
 
 /// What a respawn makes a spawn point's NPC again from (plan E1, stage 3, part 2): the open its Blueprint came from, the instance parameters and the
@@ -55,6 +56,7 @@ struct SpawnRecipe {
     const OpenTemplate* open = nullptr;
     InstanceParams      params;
     world::NpcInfo      info;
+    DataSpawn           spawn;     // the point as the selection had it: a respawn dresses the NPC again (spawns/npc_looks.h)
 };
 // ~ C.Y.B & CoA ~
 

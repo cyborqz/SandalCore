@@ -66,6 +66,7 @@
 #include "spawns/mount_spawn.h"
 #include "spawns/node_population.h"
 #include "spawns/node_populations.h"
+#include "spawns/npc_looks.h"
 #include "stats/stat_program.h"
 #include "vendor/gm_vendor.h"
 #include "vendor/town_shops.h"
@@ -559,6 +560,9 @@ private:
     spawns::SpawnContext                 spawn_context_;
     std::optional<spawns::SpawnFilter>   spawn_filter_;
     std::optional<spawns::GenericNpcs>   generic_;
+    std::unique_ptr<spawns::NpcLooks>    looks_;       // how the people look and what they are called (spawns/npc_looks.h); null: the recorded looks only
+    std::set<std::string>                standing_archetypes_;   // the Blueprints whose state tree has no task to wander or patrol with (npc/area_npcs.h)
+    std::string                          looks_dir_;   // where npc_looks.tsv and its siblings are (the Blueprint table's folder)
     std::unique_ptr<npc::NpcWorld>       npcs_;
     std::optional<npc::GroundReport>     ground_report_;
     combat::CombatWorldConfig            combat_config_;

@@ -59,6 +59,16 @@ bool is_plain(const OpenTemplate& t) {
     return true;
 }
 
+/// A recorded person: the plain creature's seven blocks, the interactable subobject when `talks`, then the appearance component.
+bool is_person(const OpenTemplate& t, bool talks) {
+    if (t.category != "npc" || t.blocks.size() != std::size(kPlain) + (talks ? 2u : 1u)) return false;
+    for (size_t i = 0; i < std::size(kPlain); ++i) {
+        if (t.blocks[i].cls != kPlain[i]) return false;
+    }
+    if (talks && t.blocks[std::size(kPlain)].cls != "UInteractableComponent") return false;
+    return t.blocks.back().cls == "UNPCAppearanceComponent";
+}
+
 }  // namespace
 
 const char* verdict_name(Verdict v) {
@@ -106,6 +116,12 @@ GenericNpcs::GenericNpcs(const CapturedData& captured, const npc::MotionTable* b
     }
     donor_ = wolf ? wolf : first;
     if (donor_) donor_path_ = donor_->archetype_path;
+    // the people's donors: a villager's open and a citizen's (the first in path order when the preferred one is not there)
+    for (const OpenTemplate& t : captured.opens()) {
+        const bool villager = blueprint_leaf(t.archetype_path) == "Node_Villager_M", citizen = blueprint_leaf(t.archetype_path) == "Kaelar_Male_Citizen";
+        if (is_person(t, false) && (!person_ || villager || (person_->archetype_path.find("Node_Villager_M.") == std::string::npos && t.archetype_path < person_->archetype_path))) person_ = &t;
+        if (is_person(t, true) && (!talker_ || citizen || (talker_->archetype_path.find("Kaelar_Male_Citizen.") == std::string::npos && t.archetype_path < talker_->archetype_path))) talker_ = &t;
+    }
     // the living huntable's eighth block: the Hunting_Raven's open, whose interactable the other kinds' differ from in two ids only
     for (const OpenTemplate& t : captured.opens()) {
         if (t.category != "npc" || t.archetype_path.find("/Hunting_Raven.Default__Hunting_Raven_C") == std::string::npos) continue;
@@ -117,7 +133,7 @@ GenericNpcs::GenericNpcs(const CapturedData& captured, const npc::MotionTable* b
     }
 }
 
-const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset, Verdict* why) const {
+const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset, Verdict* why, bool talks) const {
     const auto fail = [&](Verdict v) -> const OpenTemplate* {
         if (why) *why = v;
         return nullptr;
@@ -133,8 +149,12 @@ const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset,
     if (!blueprints_ || blueprints_->empty()) return fail(Verdict::NoTable);
     if (!excluded_.empty() && (excluded_.count(lower(blueprint_leaf(path))) || excluded_.count(lower(path)))) return fail(Verdict::Excluded);
     const OpenTemplate* plain = nullptr;
-    if (const auto it = made_.find(path); it != made_.end()) plain = &it->second;
-    if (!plain) plain = make_plain(asset, why);
+    // a person who has something to say or sell has its own template (the one with the interactable subobject), kept beside the silent one
+    const auto motion_row = blueprints_->find(path);
+    const bool person_talks = talks && motion_row && motion_row->appearance_dependent();
+    const std::string plain_key = person_talks ? path + "#talks" : path;
+    if (const auto it = made_.find(plain_key); it != made_.end()) plain = &it->second;
+    if (!plain) plain = make_plain(asset, why, person_talks);
     if (!plain) return nullptr;
     // a huntable creature: the plain template with the eighth block (the template is kept per interaction: two assets may share one Blueprint, HuntingTest and Hunting_Wolf do)
     if (hunt_block_ && asset.interaction_def != 0 && asset.interact_component != 0 && config_.hunting_defs.count(asset.interaction_def)) {
@@ -167,6 +187,26 @@ const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset,
     return plain;
 }
 
+const repl::ExportChain* GenericNpcs::archetype_export(const std::string& path) const {
+    if (const auto it = exports_.find(path); it != exports_.end()) return &it->second;
+    const size_t dot = path.rfind('.');
+    if (dot == std::string::npos) return nullptr;
+    const std::string package = path.substr(0, dot), object = path.substr(dot + 1);
+    const auto taken = [&](uint64_t id) { return captured_->static_id_in_use(id) || minted_.count(id) != 0; };
+    repl::ExportLink obj, pkg;
+    obj.guid = FIntrepidNetworkGUID::from_u64(static_object_id(path, taken));
+    minted_.insert(obj.guid.ObjectId);
+    obj.name = object;
+    obj.has_checksum = true;
+    obj.checksum = config_.export_checksum;
+    pkg.guid = FIntrepidNetworkGUID::from_u64(static_object_id(package + "#package", taken));
+    minted_.insert(pkg.guid.ObjectId);
+    pkg.name = package;
+    pkg.has_checksum = true;
+    pkg.checksum = 0;
+    return &exports_.emplace(path, repl::ExportChain{obj, pkg}).first->second;
+}
+
 const OpenTemplate* GenericNpcs::station_template(const content::NpcAssetRow& asset, Verdict* why) const {
     const auto fail = [&](Verdict v) -> const OpenTemplate* {
         if (why) *why = v;
@@ -191,27 +231,14 @@ const OpenTemplate* GenericNpcs::station_template(const content::NpcAssetRow& as
     OpenTemplate t = *donor;
     t.archetype_path = path;
     t.capture = t.channel = t.packet = 0;   // made here: no capture opened it
-    const size_t dot = path.rfind('.');
-    if (dot == std::string::npos) return fail(Verdict::NoPath);
-    const std::string package = path.substr(0, dot), object = path.substr(dot + 1);
-    const auto taken = [&](uint64_t id) { return captured_->static_id_in_use(id) || minted_.count(id) != 0; };
-    repl::ExportLink obj, pkg;
-    obj.guid = FIntrepidNetworkGUID::from_u64(static_object_id(path, taken));
-    minted_.insert(obj.guid.ObjectId);
-    obj.name = object;
-    obj.has_checksum = true;
-    obj.checksum = config_.export_checksum;
-    pkg.guid = FIntrepidNetworkGUID::from_u64(static_object_id(package + "#package", taken));
-    minted_.insert(pkg.guid.ObjectId);
-    pkg.name = package;
-    pkg.has_checksum = true;
-    pkg.checksum = 0;
-    t.archetype = {obj, pkg};
+    const repl::ExportChain* exported = archetype_export(path);
+    if (!exported) return fail(Verdict::NoPath);
+    t.archetype = *exported;
     ++stations_made_;
     return &made_.emplace(path, std::move(t)).first->second;
 }
 
-const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, Verdict* why) const {
+const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, Verdict* why, bool talks) const {
     const auto fail = [&](Verdict v) -> const OpenTemplate* {
         if (why) *why = v;
         return nullptr;
@@ -219,29 +246,19 @@ const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, V
     const std::string& path = asset.archetype_path;
     const auto row = blueprints_->find(path);
     if (!row) return fail(Verdict::NotPawn);
-    if (!donor_) return fail(Verdict::NoDonor);
+    // a humanoid is made from a recorded person (its body is merged from the appearance component the Wolf's open does not carry), any other Blueprint from the plain donor
+    const bool person = row->appearance_dependent();
+    const OpenTemplate* donor = person ? (talks && talker_ ? talker_ : person_) : donor_;
+    if (!donor) return fail(Verdict::NoDonor);
 // [CoA ~ C:Y:B]
 
-    OpenTemplate t = *donor_;
+    OpenTemplate t = *donor;
     t.archetype_path = path;
     t.capture = t.channel = t.packet = 0;   // made here: no capture opened it
-    // the archetype's export: the class default object in its package, checksum 0 (see the header), static NetGUIDs of worldd's own
-    const size_t dot = path.rfind('.');
-    if (dot == std::string::npos) return fail(Verdict::NoPath);
-    const std::string package = path.substr(0, dot), object = path.substr(dot + 1);
-    const auto taken = [&](uint64_t id) { return captured_->static_id_in_use(id) || minted_.count(id) != 0; };
-    repl::ExportLink obj, pkg;
-    obj.guid = FIntrepidNetworkGUID::from_u64(static_object_id(path, taken));
-    minted_.insert(obj.guid.ObjectId);
-    obj.name = object;
-    obj.has_checksum = true;
-    obj.checksum = config_.export_checksum;
-    pkg.guid = FIntrepidNetworkGUID::from_u64(static_object_id(package + "#package", taken));
-    minted_.insert(pkg.guid.ObjectId);
-    pkg.name = package;
-    pkg.has_checksum = true;
-    pkg.checksum = 0;
-    t.archetype = {obj, pkg};
+    // the archetype's export: the class default object in its package, checksum 0 (see the header), static NetGUIDs of worldd's own, the same for each template of the path
+    const repl::ExportChain* exported = archetype_export(path);
+    if (!exported) return fail(Verdict::NoPath);
+    t.archetype = *exported;
     // the Blueprint's scale (an NPC carries it in SerializeNewActor; 1 is the absence of one)
     t.spawn.scale.reset();
     if (row->default_scale != 1.0) {
@@ -268,7 +285,10 @@ const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, V
         made.timers = c->timers;
         b.state.state.set(*b.schema, "Alignments", repl::Value(std::move(made)));
     }
-    return &made_.emplace(path, std::move(t)).first->second;
+    return &made_.emplace(person && talks ? path + "#talks" : path, std::move(t)).first->second;
 }
 
 }  // namespace aoc::worldd::spawns
+
+// the people's looks and names (spawns/npc_looks.h) are compiled here: see the note at the top of that file
+#include "spawns/npc_looks.cpp"

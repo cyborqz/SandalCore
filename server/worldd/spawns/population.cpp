@@ -8,6 +8,8 @@
 // ============================================================================
 #include "spawns/population.h"
 
+#include "spawns/npc_looks.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -61,7 +63,7 @@ std::vector<Point> placement_points(const content::NpcPlacement& placement, cons
     return out;
 }
 
-const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool* is_generic, Verdict* why) const {
+const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool* is_generic, Verdict* why, const content::NpcInstanceRow* instance) const {
     if (is_generic) *is_generic = false;
     if (why) *why = Verdict::NoPath;
     if (asset.archetype_path.empty()) return nullptr;
@@ -73,7 +75,7 @@ const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool
     }
     if (generic) {
         Verdict v = Verdict::NoTable;
-        const OpenTemplate* t = generic->template_for(asset, &v);
+        const OpenTemplate* t = generic->template_for(asset, &v, instance != nullptr && NpcLooks::talks(asset, instance));
         if (why) *why = v;
         if (t && is_generic) *is_generic = true;
         return t;
@@ -182,6 +184,7 @@ bool spawn_point(const content::PopulationData& data, const TemplateSource& temp
         bool                        generic;
         Verdict                     why;
         Why                         filtered = Why::Spawns;   // the spawn filter's verdict on the asset
+        int64_t                     asset_set = 0;            // the instance's AssetSet it is drawn from
     };
     std::vector<Candidate> all, shown;
     for (const int64_t set_guid : inst.asset_sets) {
@@ -199,8 +202,8 @@ bool spawn_point(const content::PopulationData& data, const TemplateSource& temp
             }
             bool is_generic = false;
             Verdict why = Verdict::Generic;
-            const OpenTemplate* open = templates.find(a->second, &is_generic, &why);
-            all.push_back({&a->second, weight > 0 ? weight : 1.0, open, is_generic, why});
+            const OpenTemplate* open = templates.find(a->second, &is_generic, &why, &inst);
+            all.push_back({&a->second, weight > 0 ? weight : 1.0, open, is_generic, why, Why::Spawns, set_guid});
             if (open) shown.push_back(all.back());
         }
     }
@@ -254,6 +257,8 @@ bool spawn_point(const content::PopulationData& data, const TemplateSource& temp
     if (hi < lo) hi = lo;
     s.level = lo > 0 ? lo + static_cast<int>(mix(h ^ 0x1E7E1ull) % static_cast<uint64_t>(hi - lo + 1)) : 0;
     s.asset = chosen->asset;
+    s.asset_set = chosen->asset_set;
+    s.looks = templates.looks;
     s.instance = &inst;
     s.open = chosen->open;
     s.generic = chosen->generic;

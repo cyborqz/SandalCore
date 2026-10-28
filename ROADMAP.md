@@ -33,9 +33,9 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Tutorials that stay done, and quiet confirmations (targets, the PvP flag, loot windows, map markers).
 - The first part of quests: quest givers offer their quests; accepting, the journal and the tracker, abandoning; quests are kept across logins; Welcome to Verra starts in the starting area.
 - Storage: the Storage Clerk's item and materials storage, kept across logins.
+- NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs.
 
 ### In progress
-- NPC looks and names: every human NPC dressed and named from the game's records, and the missing peaceful NPCs.
 - Embersprings: discovering them, attuning to one, and choosing where to respawn.
 - Node stages: building sites below Village, and the Wilderness camp.
 

@@ -60,4 +60,20 @@ world says where it is at every step), turns it to its target while the ability 
 the montage is over, and starts the next attack when the montage is over.  A creature chases its target by a walk that follows it at every step (it never runs to where the target was and waits there) and turns at
 its rotation rate: its facing never jumps, and it is never stopped only to turn.
 
+## The people's looks and names
+
+    dotnet tools/npcabilities/bin/Release/net8.0/npcabilities.dll looks [--out-dir dist/content] [--check]
+    python tools/npcabilities/looks.py --content-db dist/content/content.db --out-dir dist/content
+
+The same step (`-Only tools,npcabilities`) also writes four tables that dress and name the humanoid NPCs (about a minute more; worldd reads them from the folder of `npc_motion.tsv`):
+
+- `npc_looks.tsv` (`looks`, from the game's containers): one line per pawn Blueprint whose class defaults, or its parents', name an NPCAppearance record: the Blueprint (as `npc_motion.tsv`
+  names it), the `appearance` record guid, the `name` the Blueprint carries, and the `race` and `gender` its BaseCharacterInfo sets (empty: the defaults, Kaelar and Male).
+- `npc_appearances.tsv` (`looks.py`, from content.db): the NPCAppearance records (shared appearance info, the outfit options and the curve that weighs them), the outfits (the item
+  appearance records of each slot and the curve that weighs them) and the races and genders each shared appearance info may make. `looks.py` documents the lines.
+- `npc_names.tsv` (`looks.py`): the display names of the population instances, asset sets and assets; the game's server takes the NPC's name from the first non-empty list of them.
+- `npc_trees.tsv` (`looks`, from the game's containers): one line per pawn Blueprint that plays a state tree (its own reference, else the nearest parent's): the Blueprint, the `tree`, and whether
+  the tree, or a tree one of its states plays, has a task that wanders (`wander`) and one that patrols (`patrol`), 1 or 0. A creature can only do what its tree has states for: the quest
+  givers' tree only idles, so they stand at their post whatever their population instance says (worldd reads the Blueprints whose tree has neither task as `standing` NPCs).
+
 The tool is a project of its own (it builds on `tools/mapc`'s `Game` class) so that a change to it restamps only its own step.

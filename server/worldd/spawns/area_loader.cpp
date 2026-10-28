@@ -8,7 +8,10 @@
 // ============================================================================
 #include "spawns/area_loader.h"
 
+#include "spawns/npc_looks.h"
 #include "world/interaction_state.h"
+
+#include <spdlog/spdlog.h>
 
 #include <cmath>
 #include <sstream>
@@ -66,6 +69,12 @@ std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minte
     if (params) *params = p;
     auto w = instantiate(*s.open, mint, p, error);
     if (!w) return std::nullopt;
+    if (s.looks) {   // a humanoid is dressed and named by the data, not by the recording its open came from (a failure leaves the recorded look: the NPC still stands)
+        std::string look_error;
+        if (!s.looks->dress(*w, s, look_error)) spdlog::debug("[looks] {}: {}", s.asset ? s.asset->name : std::string("?"), look_error);
+    }
+    // its pose: the instance's idle animation, as the game's server sets it (a recorded open's own pose is the recording's)
+    if (std::string idle_error; !apply_idle_animation(*w, s.instance, idle_error)) spdlog::debug("[looks] {}: {}", s.asset ? s.asset->name : std::string("?"), idle_error);
     w->npc.source = world::Source::Data;
     w->npc.ground_by_terrain = s.from_area;
     w->npc.asset_guid = p.pop_asset;
@@ -115,7 +124,7 @@ std::optional<AreaReport> load_area(world::ActorRegistry& registry, const AreaSo
     const content::PopulationData* population = report.data.get();
 
     report.respawn_points = respawn_points(*population, area);
-    const TemplateSource templates{sources.captured, sources.generic};
+    const TemplateSource templates{sources.captured, sources.generic, sources.looks};
     const std::vector<DataSpawn> data = select_data_spawns(*population, templates, area, report.population, sources.filter);
     const auto note = [&](std::string n) {
         if (report.notes.size() < 20) report.notes.push_back(std::move(n));
@@ -138,7 +147,7 @@ std::optional<AreaReport> load_area(world::ActorRegistry& registry, const AreaSo
             if (s.instance->patrol_route != 0) {
                 if (const auto r = population->routes.find(s.instance->patrol_route); r != population->routes.end()) report.routes.emplace(r->first, r->second);
             }
-            report.recipes.push_back({s.open, p, w->npc});
+            report.recipes.push_back({s.open, p, w->npc, s});
             w->npc.spawn_ref = static_cast<uint32_t>(report.recipes.size());
             report.recipes.back().info.spawn_ref = w->npc.spawn_ref;
         }

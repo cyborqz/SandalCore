@@ -11,7 +11,8 @@
 //    standing     the NPC's origin is its feet's ground plus the capsule's half height times the actor's scale (a wolf 96 cm, a player 98).  A data NPC,
 //                 a captured one and a GM vendor all go through it: the nearest surface to the height they had within 15 m is the ground; where there
 //                 is none (outside the extracted terrain, over a hole) the NPC keeps its height and stands for good.
-//    behaviour    Stationary, Wander and Default (= Wander) and Patrol instances; a captured NPC and a GM vendor have no instance and stand.
+//    behaviour    Stationary, Wander and Default (= Wander) and Patrol instances; a captured NPC and a GM vendor have no instance and stand.  A Blueprint whose state tree has no wander
+//                 and no patrol task (npc_trees.tsv: the quest givers', the huntable animals', the female villagers') stands at its post whatever its instance says.
 //    speeds       (modelled, from the retail captures' ReplicatedMovement velocities of 16 captures' NPCs matched to their data points: a human
 //                 Wander walks at 126 to 162 cm/s of a Blueprint MaxWalkSpeed of 600 (0.21 to 0.27), a bear 216 of 800 (0.27), Patrol with a
 //                 SpeedMultiplierExpression of 0.15 walks 94 to 95 (0.15 x 600 x 1.05), a patrol without one 243 (0.4)):
@@ -81,7 +82,14 @@ struct SpeedModel {
     /// Gathering stage 3, "Hunting": the PlayerInteractionDefs of the creatures that always stand (the huntable ones, gather/gathering.h hunting_defs).  A huntable creature is interacted with while
     /// it stands still (the client refuses the hunt of one that walks: "can't tame right now"), so its instance's Wander or Patrol is not lived.  Null: none.
     const std::set<int64_t>* standing_defs = nullptr;
+    /// The Blueprints (archetype paths) whose state tree has neither a wander task nor a patrol task (load_standing_archetypes): their NPCs stand at their post whatever their instance
+    /// says, as the game's quest givers do.  Null: none.
+    const std::set<std::string>* standing_archetypes = nullptr;
 };
+
+/// Reads npc_trees.tsv (archetype, tree, wander, patrol: what the state tree each Blueprint plays has tasks for) and puts the archetypes whose tree has neither task into `out`.  False with
+/// `error` when the file is missing or malformed (`out` is then left as it was).
+bool load_standing_archetypes(const std::string& path, std::set<std::string>* out, std::string& error);
 
 struct RetailMotion;
 /// What the retail captures show of an archetype's walking (npc/retail_motion.h), null when no capture showed it.

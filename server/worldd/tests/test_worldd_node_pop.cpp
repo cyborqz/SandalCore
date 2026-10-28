@@ -4,7 +4,8 @@
 // ============================================================================
 //  test_worldd_node_pop.cpp  (Nodes 1, stage 3b: the towns' people and the roads by node level)
 //
-//  On the REAL content.db (contentc version 12, dist/content/content.db or AOC_CONTENT_DB), npc_motion.tsv and the retail templates (spawns/area_spawns.h):
+//  On the REAL content.db (contentc version 12, dist/content/content.db or AOC_CONTENT_DB), npc_motion.tsv, the people's look tables beside it (npc_looks.tsv, npc_appearances.tsv,
+//  npc_names.tsv) and the retail templates (spawns/area_spawns.h):
 //
 //    the filter      the siege tags a PopulationFilter requires are any-of (the 45 filters that require Declared, Inactive and Prep pass in a world that carries SiegeInactive; a filter
 //                    that requires Active does not; every other tag is all-of), a context's own zone stands in for a point that has none (the zone refusal is dropped for a node, kept for the
@@ -42,6 +43,7 @@
 #include "spawns/generic_npc.h"
 #include "spawns/node_population.h"
 #include "spawns/node_populations.h"
+#include "spawns/npc_looks.h"
 #include "spawns/population.h"
 #include "spawns/spawn_filter.h"
 #include "world/actor_registry.h"
@@ -125,6 +127,7 @@ struct Env {
     std::optional<spawns::CapturedData>      captured;
     npc::MotionTable                         table;
     std::optional<spawns::GenericNpcs>       generic;
+    std::unique_ptr<spawns::NpcLooks>        looks;   // who the data dresses (the people's look tables beside npc_motion.tsv)
     std::unique_ptr<world::CityNodes>        nodes;
     std::unique_ptr<world::NodeWire>         wire;
     std::unique_ptr<world::CityNodes>        shipped_nodes;   // the same nodes with the shipped seed's workshops
@@ -638,7 +641,7 @@ static void test_walkers() {
     }
     const Count& joeva = by_node[kJoeva];
     const Count& halcyon = by_node[kHalcyon];
-    CHECK(joeva.total == 624 && halcyon.total == 371, "Joeva (Town) has 603 NPCs and 21 crafting stations and Halcyon (Village) 350 and 21 with the workshops");
+    CHECK(joeva.total == 624 && halcyon.total == 375, "Joeva (Town) has 603 NPCs and 21 crafting stations and Halcyon (Village) 354 and 21 with the workshops");
     CHECK(joeva.patrol > 0 && joeva.guards_patrol > 0 && joeva.wander > 0 && joeva.stand > 0, "Joeva has people that walk a route, guards among them, people that wander and people that stand");
     CHECK(joeva.workers_walk == 16 && joeva.farmers_stand == 2 && halcyon.workers_walk == 4, "the workshops' people: 16 workers walk and 2 farmers stand at Joeva, 4 workers walk at Halcyon");
     CHECK(joeva.carriers_walk == 0 && joeva.guards_patrol == 1 && halcyon.carriers_walk == 2 && halcyon.guards_patrol == 2, "Joeva's carriers stand (its guard walks); Halcyon's 2 carriers and 2 guards walk their routes");
@@ -952,8 +955,17 @@ static void test_pending() {
     // a level change takes waiting NPCs away and brings new ones: the count follows
     set_level(synth, kJoeva, 3);
     rig.pops->tick(1.0);
-    CHECK(rig.pops->actors_of(kJoeva).size() == golden_npcs("Verra_RVR_Joeva", 3) && npcs->size() == rig.pops->actors_of(kJoeva).size() && npcs->pending_ground() == waiting_now(),
-          "Town -> Village: the NPC world holds exactly the town's people and its pending count follows (an NPC removed while it waits stops waiting)");
+    {
+        // the town's people are those a fresh start at Village makes in THIS world: it lies at the grid's origin and its area holds every point, while the real Joeva lies in the Riverlands, whose edge
+        // drops three of its layout's points (quest scribes the server dresses): the golden counts the real town's people
+        spawns::NodePopStats fresh;
+        const size_t village = select(synth, *wire, j, 3, fresh, everywhere).size();
+        const size_t town = rig.pops->actors_of(kJoeva).size(), held = npcs->size(), pending = npcs->pending_ground(), waits = waiting_now();
+        char msg[320];
+        std::snprintf(msg, sizeof(msg), "Town -> Village: the NPC world holds exactly the town's people (%zu held, %zu people; a fresh start at Village makes %zu here, the golden's %zu in the Riverlands) and its pending count follows (%zu pending, %zu wait) (an NPC removed while it waits stops waiting)",
+                      held, town, village, golden_npcs("Verra_RVR_Joeva", 3), pending, waits);
+        CHECK(town == village && held == town && pending == waits, msg);
+    }
     // the chunks around the town arrive: the NPCs of the chunks are grounded
     std::vector<nav::ChunkKey> arrived;
     nav->set_interest({{500.0, 500.0}});   // (one player at the town's centre: the window loads the chunks within 2 of it and keeps them)
@@ -2039,6 +2051,16 @@ int main() {
     }
     g_env.base.hour = 11.0;
     g_env.shown = g_env.captured->npc_leaves();
+    {   // who the world dresses (PlayerWorld::load_area sets up the same): a humanoid not hostile to players, with a look in the data, passes the filter, and the oracle's people are these
+        std::string looks_error;
+        const auto combat = g_env.db->combat_rows(looks_error);
+        if (combat) g_env.looks = spawns::NpcLooks::load(fs::path(motion_path()).parent_path().string(), &g_env.table, &*combat, &*g_env.captured, looks_error);
+        if (!g_env.looks) {
+            std::printf("  [FAIL] the people's looks do not load (%s): %s\n", motion_path().c_str(), looks_error.c_str());
+            return 2;
+        }
+        g_env.base.looks_ok = [](const content::NpcAssetRow& a) { return g_env.looks->can_dress(a); };
+    }
     test_filter();
     test_data();
     test_workshops();

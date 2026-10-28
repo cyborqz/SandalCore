@@ -46,6 +46,7 @@
 #include "npc/motion_table.h"
 
 #include <cstdint>
+#include <functional>
 #include <set>
 #include <string>
 // ~ C-O-A & C-Y-B ~
@@ -74,6 +75,9 @@ struct SpawnContext {
     bool        humanoids = false;
     /// The appearance-dependent Blueprints (their class names) that open with a valid look all the same.
     std::set<std::string> shown_humanoids{"Guard_Soldier"};
+    /// People's looks (spawns/npc_looks.h): true when a person of this asset is dressed from the data, so that its body is merged and it shows.  Unset: only `shown_humanoids` and `humanoids`
+    /// let a humanoid through.  A humanoid hostile to players is never dressed (its fights are not read yet), so it stays out.
+    std::function<bool(const content::NpcAssetRow&)> looks_ok;
 };
 
 /// Why a point or an asset does not spawn, in the order the filter asks.

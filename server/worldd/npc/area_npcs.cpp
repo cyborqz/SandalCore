@@ -10,6 +10,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -84,6 +85,39 @@ double numeric_expression(std::string e) {
 
 }  // namespace
 
+bool load_standing_archetypes(const std::string& path, std::set<std::string>* out, std::string& error) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        error = "cannot open " + path;
+        return false;
+    }
+    std::set<std::string> found;
+    std::string line;
+    size_t rows = 0, line_no = 0;
+    while (std::getline(f, line)) {
+        ++line_no;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#' || line.rfind("archetype\t", 0) == 0) continue;
+        std::vector<std::string> col;
+        size_t from = 0;
+        for (size_t tab; (tab = line.find('\t', from)) != std::string::npos; from = tab + 1) col.push_back(line.substr(from, tab - from));
+        col.push_back(line.substr(from));
+        const auto flag = [](const std::string& s) { return s == "0" || s == "1"; };
+        if (col.size() != 4 || col[0].empty() || !flag(col[2]) || !flag(col[3])) {
+            error = path + " line " + std::to_string(line_no) + ": expected archetype, tree, wander (0 or 1) and patrol (0 or 1)";
+            return false;
+        }
+        ++rows;
+        if (col[2] == "0" && col[3] == "0") found.insert(col[0]);
+    }
+    if (rows == 0) {
+        error = path + " holds no Blueprint";
+        return false;
+    }
+    *out = std::move(found);
+    return true;
+}
+
 bool stands_by_kind(const std::string& leaf) {
     for (const char* prefix : {"CraftingStation_", "ProcessingStation_", "CommissionBoard_", "Node_Warehouse_", "Node_Mayor", "Node_TownHall_", "ServiceBuilding_", "Commission_Board", "KAE_"}) {
         if (leaf.rfind(prefix, 0) == 0) return true;
@@ -152,6 +186,8 @@ NpcMotionSetup make_setup(const world::WorldActor& a, const MotionTable& table, 
     else if (amb.find("Patrol") != std::string::npos) s.ambient = Ambient::Patrol;
     else s.ambient = Ambient::Stationary;
     if (stands_by_kind(leaf)) s.ambient = Ambient::Stationary;   // a vendor, a clerk or a station stays at its post (by Blueprint)
+    // a Blueprint whose state tree has no task to wander or patrol with (the quest givers': their tree only idles) cannot do either, whatever its instance says
+    if (speeds.standing_archetypes && speeds.standing_archetypes->count(a.npc.archetype)) s.ambient = Ambient::Stationary;
     // a town person that sells (its instance or its template names a vendor) or has an interaction of its own, other than a guard, stays at its post too
     if (node && !is_guard_leaf(leaf) && (instance->vendor != 0 || a.npc.vendor_guid != 0 || a.npc.interact_def != 0)) s.ambient = Ambient::Stationary;
     if (s.ambient == Ambient::Patrol) {

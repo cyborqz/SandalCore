@@ -10,9 +10,8 @@ This document lists the known issues of the current SandalCore main in one place
 
 | Area | What Happens | Workaround | Status |
 |---|---|---|---|
-| **NPCs** | Human NPCs (guards, shopkeepers, quest givers) all show the same guard look and name, and some peaceful NPCs (villagers, merchants, scholars) are missing. | None. | In progress: NPC looks and names. |
 | **Quests** | A quest can be taken, tracked and abandoned, but its objectives do not count yet: it cannot be finished by play, pays no reward, and has no hand-in or map markers. | A game master can finish a quest with `questctl`. | Next: the second part of quests. |
-| **Quests / Givers** | Quest givers the world cannot draw yet, and quests that start from items, do not offer their quests. | None. | In progress with NPC looks and names; item quests later. |
+| **Quests / Givers** | Most quest givers are not in the world yet: of the 309 in the game's data only about 50 stand in the open world and the towns; the others are not placed there (quests and events spawn them, or they belong to other regions), so their quests are not offered. Quests that start from items are not offered either. | None. | Open: the givers that quests and events spawn; item quests later. |
 | **Glint / Shops** | Shops take only the Glint kind a price names, so paying with a bigger kind (for example a Dim for a Dull price) is refused. | Keep some Dull Glint. | Planned: paying with change. |
 | **Death / Respawn** | Dying always offers the same single respawn point. | None. | In progress: Embersprings. |
 | **Weapons / Talents** | Weapon lines earn no experience, so weapon-tree talents cannot be picked. | None. | Open: weapon line experience. |

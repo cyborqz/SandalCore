@@ -18,7 +18,10 @@
     dist\content\npc_abilities.tsv,          what the creatures that attack with their own animation do: their Blueprints' ability tasks with the conditions they are
       npc_montages.tsv, npc_targeting.tsv      used under, the animation montages' lengths, hit notifies and root motion, and where each ability's hit lands
                                                (tools\npcabilities, from the game's containers and content.db)
-    dist\content\town_platforms.bin            the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
+    dist\content\npc_looks.tsv,              how the people (humanoid NPCs) look and are called: each Blueprint's own look (the game's containers), the appearance records
+      npc_appearances.tsv, npc_names.tsv       with their outfits and the display names of the population data (tools\npcabilities, content.db)
+    dist\content\npc_trees.tsv                 what each Blueprint's state tree has tasks for (wander, patrol): an NPC whose tree has neither stands at its post (tools\npcabilities)
+    dist\content\town_platforms.bin           the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
     dist\content\town_layout_items.tsv,        the buildings, walls and terraces of the five towns' layouts at the level each town starts at (deploy\citynode_seed.json):
                                                what stands where (a python list from content.db),
       town_layouts.bin                         then their collision geometry (mapc, from the game's containers)
@@ -528,7 +531,7 @@ $steps = @(
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\capture\gen_town_layouts.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out', (Join-Path $outDir 'town_layout_items.tsv'))) 'gen_town_layouts'
         Invoke-Checked $dotnet @($mapcDll, 'town-layouts', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir, '--min-free-gb', '8') 'mapc_town_layouts'
     } },
-    @{ Name = 'npcabilities'; Title = 'Read the creature Blueprints and animation montages that give the creatures their attacks, and what every creature notices and how far it follows (tools/npcabilities; about a minute)'; Outputs = @('dist\content\npc_abilities.tsv', 'dist\content\npc_montages.tsv', 'dist\content\npc_targeting.tsv', 'dist\content\npc_senses.tsv', 'dist\content\npc_aggro_curves.tsv'); Run = {
+    @{ Name = 'npcabilities'; Title = 'Read the creature Blueprints and animation montages that give the creatures their attacks, what every creature notices and how far it follows, and the humanoid Blueprints and records that dress and name the people (tools/npcabilities; about two minutes)'; Outputs = @('dist\content\npc_abilities.tsv', 'dist\content\npc_montages.tsv', 'dist\content\npc_targeting.tsv', 'dist\content\npc_senses.tsv', 'dist\content\npc_aggro_curves.tsv', 'dist\content\npc_looks.tsv', 'dist\content\npc_appearances.tsv', 'dist\content\npc_names.tsv', 'dist\content\npc_trees.tsv'); Run = {
         Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll', 'dist\content\content.db') 'run the tools and database steps first'
         $npcArgs = @($npcAbilitiesDll, 'read', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir)
         foreach ($f in $NpcFolders) { $npcArgs += @('--dir', $f) }
@@ -538,6 +541,10 @@ $steps = @(
         try { Invoke-Checked $dotnet $npcArgs 'npcabilities_read' } finally { $env:DOTNET_GCHeapHardLimit = $savedHeap }
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\npcabilities\targeting.py'), '--content-db', (Join-Path $outDir 'content.db'),
             '--abilities', (Join-Path $outDir 'npc_abilities.tsv'), '--out', (Join-Path $outDir 'npc_targeting.tsv'))) 'npcabilities_targeting'
+        $savedHeap = $env:DOTNET_GCHeapHardLimit
+        if (-not $env:DOTNET_GCHeapHardLimit) { $env:DOTNET_GCHeapHardLimit = '0x100000000' }     # reading the people's looks peaks at 7.6 GB without this limit and at 4.0 GB with it, with the same tables
+        try { Invoke-Checked $dotnet @($npcAbilitiesDll, 'looks', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'npcabilities_looks' } finally { $env:DOTNET_GCHeapHardLimit = $savedHeap }
+        Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\npcabilities\looks.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out-dir', $outDir)) 'npcabilities_names'
     } },
     @{ Name = 'navmesh'; Title = 'Read the map and build the navigation mesh, the NPC motion table and the foliage (mapc; the longest step)'; Outputs = @('dist\content\npc_motion.tsv', 'dist\content\region_foliage.tsv', 'dist\content\area_geom.bin', 'dist\content\area_nav.bin'); Run = {
         Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll', 'dist\content\town_platforms.bin', 'dist\content\town_layouts.bin', 'dist\content\content.db') 'run the earlier steps first'

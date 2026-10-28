@@ -38,6 +38,10 @@
 //  the captured template when a capture opened it, whose component is kept) and 13 quest NPCs (Quest_NPC_Master and one named NPC), which show the
 //  Blueprint's default.  Unproven until a run.
 //
+//  People.  A humanoid Blueprint (the player's master mesh, whose body is merged from an NPCAppearanceComponent) is made from a recorded person, not the Wolf: a villager's open
+//  (its own stats, nothing to say) or, for a point whose instance or asset has a conversation, a shop or an interaction, a citizen's with the interactable subobject.  The
+//  component's content is the donor's until spawns/npc_looks.h dresses the NPC.
+//
 //  Huntable creatures (Gathering stage 3, "Hunting"): an asset whose PlayerInteractionDef is one of the Hunting_<kind> defs (GenericConfig::hunting_defs) gets an eighth block, a
 //  UInteractableComponent, as the living Hunting_Raven and Hunting_Spider of the captures have (the retail capture packet 1561, 758 packet 4538, and a Tidesnapper's in 1458): the Raven's own block
 //  with the asset's two ids put in (ComponentDefId = the asset's InteractComponent, InteractionInputData[0].PlayerInteractDefinition = its InteractionDef).  The three captured blocks differ
@@ -111,7 +115,8 @@ public:
 
     /// The open of an NPC of `asset`'s Blueprint (a captured template is the caller's first choice); nullptr with `why` when there is none.  A huntable creature's has the eighth
     /// block (above).  The pointer is valid as long as this object.
-    const OpenTemplate* template_for(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
+    /// `talks`: the point has something to say or sell (NpcLooks::talks), which a humanoid's open then carries the interactable subobject for.
+    const OpenTemplate* template_for(const content::NpcAssetRow& asset, Verdict* why = nullptr, bool talks = false) const;
     /// The open of a station (see above): nullptr with `why` when the captures hold no station of the asset's family.
     const OpenTemplate* station_template(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
 
@@ -128,7 +133,11 @@ public:
 
 private:
     /// The plain template of the asset's Blueprint (seven blocks), made and kept; nullptr with `why` when the Blueprint has none.
-    const OpenTemplate* make_plain(const content::NpcAssetRow& asset, Verdict* why) const;
+    const OpenTemplate* make_plain(const content::NpcAssetRow& asset, Verdict* why, bool talks) const;
+    /// The archetype's export of a Blueprint path (the class default object and its package, with NetGUIDs of worldd's own), minted on the first request and the same for every
+    /// template of that path: a humanoid has two (the silent one and the one with the interactable subobject), and one Blueprint must not be exported under two NetGUIDs.
+    /// nullptr when the path names no package.
+    const repl::ExportChain* archetype_export(const std::string& path) const;
 
     const CapturedData*      captured_;
     const npc::MotionTable*  blueprints_;
@@ -136,12 +145,15 @@ private:
     std::set<std::string>    excluded_;      // lower case
     const OpenTemplate*      donor_ = nullptr;
     std::string              donor_path_;
+    const OpenTemplate*      person_ = nullptr;       // a recorded humanoid with the appearance component and nothing to say (the donor of a humanoid Blueprint no capture opened)
+    const OpenTemplate*      talker_ = nullptr;       // ... and one with the interactable subobject as well
     const ParsedBlock*       hunt_block_ = nullptr;   // the living Hunting_Raven's UInteractableComponent
     const OpenTemplate*      living_ = nullptr;       // ... and its whole open (its CombatInfo and AbilityComponent are every huntable's)
     mutable size_t           hunting_made_ = 0;
     mutable size_t           stations_made_ = 0;
     mutable std::map<std::string, OpenTemplate> made_;     // by archetype path (stable addresses)
     mutable std::set<uint64_t>                  minted_;   // the static NetGUIDs handed out
+    mutable std::map<std::string, repl::ExportChain> exports_;   // the archetype exports, by archetype path (stable addresses)
 };
 
 /// A NetGUID ObjectId for the static object at `path`: a hash of it with the low bit set (retail's static ids are odd), moved on while `taken` says
