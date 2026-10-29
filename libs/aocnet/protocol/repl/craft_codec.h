@@ -26,6 +26,13 @@
 //
 //  A state with one resource of one rarity and nothing else is 856 bits; a Complete one with two experience rows and two plain products is 3,592 (856 + 32 + 2 x 192 + 32 + 2 x 1,096 + 96).
 //  The tag resources and the item list are written empty and read only when empty (a state with more is refused, not skipped).
+//
+//  FCraftingResourceTagCostSelection, the entries of ServerStartCraft's TagResources (one for each recipe input that is named by tags; a crate packing station's window sends them):
+//
+//      int32   n, then n resources as above (the stacks chosen, by record and rarity)
+//      int32   j, then j FStrings          the names of the gameplay tags the input asks for ("Item.Resource.Raw.Wood")
+//
+//  A selection of two stacks (one rarity each) for the tag "Item.Resource.Raw.Wood" is 616 bits.
 // ============================================================================
 #pragma once
 
@@ -210,6 +217,46 @@ inline bool write_craft_item_state(emit::BunchWriter& out, const CraftItemState&
     if (s.status == 3 && !craft_detail::write_complete_tail(out, s)) return false;
     out.write_uint32(s.flag ? 1u : 0u);
     out.write_uint8(s.extra);
+    return true;
+}
+
+/// The most tags one selection names.
+constexpr size_t kMaxCraftTags = 8;
+
+inline bool craft_tag_selection_fits(const CraftTagSelection& s) {
+    if (s.resources.size() > kMaxCraftResources || s.tags.size() > kMaxCraftTags) return false;
+    for (const CraftResource& r : s.resources) {
+        if (r.rarities.size() > kMaxCraftRarities) return false;
+        for (const CraftRarityCount& c : r.rarities) {
+            if (c.rarity > 6 || c.count < 0 || c.count > kMaxCraftCount) return false;
+        }
+    }
+    for (const std::string& t : s.tags) {
+        if (!fstring_fits(t)) return false;
+    }
+    return true;
+}
+
+inline std::optional<CraftTagSelection> read_craft_tag_selection(wire::PacketReader& r) {
+    CraftTagSelection s;
+    if (!craft_detail::read_resources(r, s.resources)) return std::nullopt;
+    const int32_t n = static_cast<int32_t>(r.read_uint32());
+    if (overran(r) || n < 0 || static_cast<size_t>(n) > kMaxCraftTags) return std::nullopt;
+    for (int32_t i = 0; i < n; ++i) {
+        auto tag = read_fstring(r);
+        if (!tag) return std::nullopt;
+        s.tags.push_back(std::move(*tag));
+    }
+    return s;
+}
+
+inline bool write_craft_tag_selection(emit::BunchWriter& out, const CraftTagSelection& s) {
+    if (!craft_tag_selection_fits(s)) return false;
+    craft_detail::write_resources(out, s.resources);
+    out.write_uint32(static_cast<uint32_t>(s.tags.size()));
+    for (const std::string& t : s.tags) {
+        if (!write_fstring(out, t)) return false;
+    }
     return true;
 }
 

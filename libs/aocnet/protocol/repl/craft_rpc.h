@@ -222,8 +222,8 @@ inline std::optional<RpcParams> processing_request_params(const schema::RpcSchem
     return params;
 }
 
-/// ServerStartCraft's parameters. The stacks the player chose to pay with are `general` (and `flexible`, which a processing station's window leaves empty); `has_tags` and `has_fuel` say a
-/// list this codec does not read was not empty (a crafting window sends tag selections).
+/// ServerStartCraft's parameters. The stacks the player chose to pay with are `general` (and `flexible`, which a processing station's window leaves empty); `tags` are the selections the
+/// player made for the recipe inputs that are named by gameplay tags (a crate packing station's window sends them); `has_fuel` says the fuel list, which this codec does not read, was not empty.
 struct StartCraft {
     emit::FIntrepidNetworkGUID station;
     GuidValue                  transaction;
@@ -231,7 +231,7 @@ struct StartCraft {
     int64_t                    sub_recipe = 0;
     int32_t                    quantity = 0;
     std::vector<CraftResource> general, flexible;
-    bool                       has_tags = false;
+    std::vector<CraftTagSelection> tags;
     bool                       has_fuel = false;
     uint8_t                    auto_select = 0;
     bool                       exact = false;
@@ -266,6 +266,31 @@ inline std::optional<std::vector<CraftResource>> resources_of(const Value* v) {
         out.push_back(std::move(r));
     }
     return out;
+}
+
+/// The selections of TagResources: each element is one FCraftingResourceTagCostSelection (its only command, local 1).
+inline std::optional<std::vector<CraftTagSelection>> tags_of(const Value* v) {
+    std::vector<CraftTagSelection> out;
+    if (!v) return out;
+    const ArrayValue* a = v->get_if<ArrayValue>();
+    if (!a || a->elements.size() > kMaxCraftResources) return std::nullopt;
+    for (const ElementState& e : a->elements) {
+        const auto it = e.values.find(1);
+        const CraftTagSelection* s = it == e.values.end() ? nullptr : it->second.get_if<CraftTagSelection>();
+        if (!s) return std::nullopt;
+        out.push_back(*s);
+    }
+    return out;
+}
+
+inline Value tags_value(const std::vector<CraftTagSelection>& list) {
+    ArrayValue a;
+    for (const CraftTagSelection& s : list) {
+        ElementState e;
+        e.values[1] = Value(s);
+        a.elements.push_back(std::move(e));
+    }
+    return Value(std::move(a));
 }
 
 inline Value resources_value(const std::vector<CraftResource>& list) {
@@ -312,8 +337,9 @@ inline std::optional<StartCraft> parse_start_craft(const RpcCall& call) {
     const auto exact = rpcf::bool_or(rpcf::value_of(rpc, call.params, "bUseExactItems"), false);
     auto general = craft_detail::resources_of(rpcf::value_of(rpc, call.params, "GeneralResources"));
     auto flexible = craft_detail::resources_of(rpcf::value_of(rpc, call.params, "FlexibleResources"));
+    auto tags = craft_detail::tags_of(rpcf::value_of(rpc, call.params, "TagResources"));
     if (!word("ClientTransactionId.A", s.transaction.a) || !word("ClientTransactionId.B", s.transaction.b) || !word("ClientTransactionId.C", s.transaction.c) ||
-        !word("ClientTransactionId.D", s.transaction.d) || !recipe || !sub || !quantity || !select || !exact || !general || !flexible || *quantity < INT32_MIN || *quantity > INT32_MAX) {
+        !word("ClientTransactionId.D", s.transaction.d) || !recipe || !sub || !quantity || !select || !exact || !general || !flexible || !tags || *quantity < INT32_MIN || *quantity > INT32_MAX) {
         return std::nullopt;
     }
     s.recipe = *recipe;
@@ -321,7 +347,7 @@ inline std::optional<StartCraft> parse_start_craft(const RpcCall& call) {
     s.quantity = static_cast<int32_t>(*quantity);
     s.general = std::move(*general);
     s.flexible = std::move(*flexible);
-    s.has_tags = rpcf::value_of(rpc, call.params, "TagResources") != nullptr;
+    s.tags = std::move(*tags);
     s.has_fuel = rpcf::value_of(rpc, call.params, "FuelItems") != nullptr;
     s.auto_select = static_cast<uint8_t>(*select);
     s.exact = *exact;
@@ -341,6 +367,7 @@ inline std::optional<RpcParams> start_craft_params(const schema::RpcSchema& rpc,
     }
     if (!s.general.empty() && !set_rpc_param(rpc, params, "GeneralResources", craft_detail::resources_value(s.general))) return std::nullopt;
     if (!s.flexible.empty() && !set_rpc_param(rpc, params, "FlexibleResources", craft_detail::resources_value(s.flexible))) return std::nullopt;
+    if (!s.tags.empty() && !set_rpc_param(rpc, params, "TagResources", craft_detail::tags_value(s.tags))) return std::nullopt;
     return params;
 }
 

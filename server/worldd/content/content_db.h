@@ -46,7 +46,9 @@
 #include "items/rarity.h"
 #include "stats/gear.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -971,6 +973,17 @@ struct CraftRecipeData {
     std::map<int64_t, std::vector<int64_t>>            set_lists;     // recipe set -> its lists, in order
     std::map<int64_t, std::vector<int64_t>>            list_recipes;  // list -> its recipes, in order
     std::map<int64_t, std::vector<CraftPred>>          list_preds;
+    /// Crate stations (contentc version 31): the items that satisfy each tag that names a recipe input, alone or with others (craft_tag_item), by the tag in lower case, the item records ascending.
+    /// `tags_read` is false for a file that has no such table.
+    std::map<std::string, std::vector<int64_t>>        tag_items;
+    bool                                               tags_read = false;
+    /// Whether `item` carries `tag` (any case): a recipe input named by that tag takes it.
+    bool tag_admits(const std::string& tag, int64_t item) const {
+        std::string lower;
+        for (const char c : tag) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const auto it = tag_items.find(lower);
+        return it != tag_items.end() && std::binary_search(it->second.begin(), it->second.end(), item);
+    }
     const CraftRecipe* recipe(int64_t guid) const {
         const auto it = recipes.find(guid);
         return it == recipes.end() ? nullptr : &it->second;

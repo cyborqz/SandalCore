@@ -3756,6 +3756,19 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
         }
         if (step != SQLITE_DONE) return failed("craft_recipe_list_member");
     }
+    {   // crate stations (contentc version 31): the items each tag that names a recipe input is satisfied by; a file of an older version has no such table (the tags then name no item)
+        Stmt q(db_, "SELECT tag, item_guid FROM craft_tag_item ORDER BY tag, item_guid");
+        if (q.ok()) {
+            int step;
+            while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+                sqlite3_stmt* s = q.get();
+                if (!column_is_int(s, 1)) return unread("craft_tag_item");
+                out.tag_items[column_text(s, 0)].push_back(sqlite3_column_int64(s, 1));
+            }
+            if (step != SQLITE_DONE) return failed("craft_tag_item");
+            out.tags_read = true;
+        }
+    }
     {   // crafting, step 2: what each recipe yields when it is done (the reward table, its sub-tables and the names of the experience formulas)
         std::map<int64_t, std::string> bodies;
         {

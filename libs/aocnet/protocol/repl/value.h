@@ -660,6 +660,14 @@ struct CraftExperience {
     bool operator==(const CraftExperience&) const = default;
 };
 
+/// FCraftingResourceTagCostSelection (an entry of ServerStartCraft's TagResources): the stacks the player chose for ONE recipe input that is named by gameplay tags, by record and rarity
+/// as the general resources are, and the names of the tags that input asks for.  NetSerialize; craft_codec.h has the layout.
+struct CraftTagSelection {
+    std::vector<CraftResource> resources;
+    std::vector<std::string>   tags;
+    bool operator==(const CraftTagSelection&) const = default;
+};
+
 /// FCraftItemState (ClientOpenCraftingStationUI's CraftItemStates, ClientUpdateCraftingStationUI's CraftStates): one crafting or processing job as the window shows it; NetSerialize,
 /// craft_codec.h has the layout.  `start_time` is whole seconds on the synchronized clock, `status` the job's state (Pending 1, InProgress 2, Complete 3, Claimed 4).  Only a finished job
 /// (status 3) carries `experience`, `products` and `level`; the tag resources and the item list are not held: the codec reads and writes them empty.
@@ -743,7 +751,7 @@ public:
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
-        RewardInstance, HashedVariable, WarehouseSummaryEntry>;
+        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

@@ -75,7 +75,8 @@ const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool
                 return nullptr;
             }
             if (why) *why = Verdict::Generic;
-            return t;
+            // an open recorded on a crate seller is worn only by the NPC whose data makes it that seller
+            return generic ? generic->without_crate_sale(*t, asset, instance) : t;
         }
     }
     if (generic) {

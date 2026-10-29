@@ -1361,6 +1361,28 @@ A craft ends with nothing taken, and `ClientInterruptCraft` to the client, when 
 craft stops. `PlayerKnownRecipeIds` (OwnerInfo) holds the recipes a game master taught a character (the client knows the others by the recipe's own flag); `worldctl craft teach|forget <character> <recipe>` and `craft taught
 <character>` (`WorldAdmin.TeachRecipe`, `ForgetRecipe`, `ListTaughtRecipes`) change it, and the list is saved with the items (`character_known_recipes`, migration 0014).
 
+**Crate stations (crates, step 1b).** Two kinds of tables make crates through the quick make. The Crate Packing stations (`CraftingStation_CratePacking_T0` and `_T1`: the artisan outposts of Aven's End and
+Briarmoor Workshops, the Construction House and the starting areas) make the 14 construction crates, one for each profession. Their Blueprints name their station definition in their own defaults and not in their
+asset reference, so contentc links them by a short table (`stationBlueprintDefs`); the crate definitions name no tier, so no tier limits what they make. The commodity tables of a node
+(`CraftingStation_Commodity_Node`, `_Market`, `_Citizen`, `_Guild`, `_Harbor`, `_Starter`) make the trade crates; each node's recipes are its own lists (the node predicate of the list). A crate recipe takes its
+material by TAGS instead of an item (30 units of anything that carries `Item.Resource.Raw.Wood`; 12 of anything that carries both `harvesting.type.ore` and `Riverlands`): the window sends `TagResources` (one
+`FCraftingResourceTagCostSelection` for each such input: the stacks picked, by record and rarity, and the names of its tags; libaocnet `craft_codec.h` has the layout), every picked record has to carry every tag of
+its input (the table `craft_tag_item`, contentc version 31: the items whose gameplay tags, recipe filter tags or profession tag hold the tag or a child of it) and the picks add up to the quantity the input takes.
+A trade crate also takes a commodity certificate: the request names it in the general resources, and it is taken from the item bag, where it lies (`Inventory::take_materials` looks in the material bags and the item bag).
+Like any quick make it takes nothing while the player stands still for the recipe's time (5 seconds for a construction crate, 3 for a trade crate), and at the end the picked stacks leave the bags in the order
+named, the price leaves and the crate arrives: copper from the purse for a construction crate and for a guild or starter crate, Glint T1 items of the bags for a market, node, harbor or smugglers crate (rounded
+down; the Remove events come first, then the callout in the Glint tier, then the crate), node currency from the purse for a citizen crate, each with the station's tax. **A crate goes to the cargo slot**
+(Equipment slot 53, `Inventory::grant_cargo`), never to the bag: the Add event carries the id of the start request as any craft's does and the crate shows on the character's back. **Not done:** the crate's stat block is among the worn stats, but carrying one
+does not slow the carrier yet; the Drop Crate ability is not put on the bar and does not drop the crate; the made crate is always the record's own quality (1) and does not follow the rarity of its
+materials. **Only one crate is carried**: a craft that would make a second is refused when it starts ("You are already carrying a crate.") and again when it ends, with nothing taken. A construction crate pays
+no experience; a trade crate pays the Adventuring experience its recipe says. The Animal Husbandry construction crate cannot be made yet (it takes a trained animal, which is not a material).
+
+**People who talk offer a conversation (`GenericNpcs`).** A humanoid Blueprint that no capture opened is made from a recorded citizen, which in the game is a Construction Crate Vendor: its interactable carries that
+vendor's one input, "sell a crate", which the client shows at all times. So the interactable of a person who talks is replaced by that of a plain conversation (a component whose only input opens the dialogue), taken
+from another recorded open; the log says which at the start (`the people who talk are given the interactable of a plain conversation`). The same holds for the recorded opens themselves: the citizen's and the
+merchant's Blueprints were recorded on crate buyers, so an NPC made from either whose data does not name that vendor's component (the market's and the town hall's vendors, the plain citizens) is given the same open
+with the interactable of a plain conversation (`GenericNpcs::without_crate_sale`, used by `TemplateSource::find`); the vendors' shops still open when they are talked to.
+
 ### Finished tutorials: the tutorial component (missing systems, step 0)
 
 The client keeps a running list of the tutorial hints it can start, and reports each one it starts to the server (`Server_RemoveLocaleFTUEs`, one id per call); it takes an id off that running list only when the

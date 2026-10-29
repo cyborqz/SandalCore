@@ -37,6 +37,9 @@ bool contains(const std::vector<T>& v, T x) { return std::find(v.begin(), v.end(
 
 bool valid_container(svc::ItemContainer c) { return static_cast<uint8_t>(c) <= static_cast<uint8_t>(svc::ItemContainer::Resource2); }
 
+/// Where a craft finds what a recipe takes: the material bags, and the item bag (an item that is no resource, such as a commodity certificate, lies there).
+bool is_craft_source(svc::ItemContainer c) { return is_resource(c) || c == svc::ItemContainer::Backpack; }
+
 /// The Equipment slot of the bag that gives resource container `index` its grid, and the container a bag slot belongs to (-1 for any other slot).
 int bag_slot_of(int index) { return equip::ResourceBag0 + index; }
 int bag_container_of(int equip_slot) { return equip_slot >= equip::ResourceBag0 && equip_slot <= equip::ResourceBag2 ? equip_slot - equip::ResourceBag0 : -1; }
@@ -566,7 +569,7 @@ Outcome Inventory::take(int64_t record, int64_t count) {
 int64_t Inventory::count_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi) const {
     int64_t held = 0;
     for (const auto& [key, it] : slots_) {
-        if (it.item_record_id != record || !is_resource(static_cast<svc::ItemContainer>(key.first))) continue;
+        if (it.item_record_id != record || !is_craft_source(static_cast<svc::ItemContainer>(key.first))) continue;
         const int rarity = facts.rarity_of(static_cast<double>(it.quality));   // (what the client shows for this stack)
         if (rarity >= rarity_lo && rarity <= rarity_hi) held += it.quantity;
     }
@@ -576,7 +579,7 @@ int64_t Inventory::count_materials(int64_t record, const ItemRarityFacts& facts,
 std::array<int64_t, kRarityCount> Inventory::materials_by_rarity(int64_t record, const ItemRarityFacts& facts) const {
     std::array<int64_t, kRarityCount> held{};
     for (const auto& [key, it] : slots_) {
-        if (it.item_record_id != record || !is_resource(static_cast<svc::ItemContainer>(key.first))) continue;
+        if (it.item_record_id != record || !is_craft_source(static_cast<svc::ItemContainer>(key.first))) continue;
         held[static_cast<size_t>(std::clamp(facts.rarity_of(static_cast<double>(it.quality)), 0, kRarityCount - 1))] += it.quantity;
     }
     return held;
@@ -590,12 +593,12 @@ Outcome Inventory::take_materials(int64_t record, const ItemRarityFacts& facts, 
     }
     const int64_t held = count_materials(record, facts, rarity_lo, rarity_hi);
     if (held < count) {
-        out.refusal = "the material bags hold " + std::to_string(held) + " of item " + std::to_string(record) + " of rarity " + rarity_range_text(rarity_lo, rarity_hi) + ", not " + std::to_string(count);
+        out.refusal = "the material bags and the item bag hold " + std::to_string(held) + " of item " + std::to_string(record) + " of rarity " + rarity_range_text(rarity_lo, rarity_hi) + ", not " + std::to_string(count);
         return out;
     }
     std::vector<Key> order;   // the stacks of that item and rarity range
     for (const auto& [key, it] : slots_) {
-        if (it.item_record_id != record || !is_resource(static_cast<svc::ItemContainer>(key.first))) continue;
+        if (it.item_record_id != record || !is_craft_source(static_cast<svc::ItemContainer>(key.first))) continue;
         const int rarity = facts.rarity_of(static_cast<double>(it.quality));
         if (rarity >= rarity_lo && rarity <= rarity_hi) order.push_back(key);
     }
@@ -1073,6 +1076,34 @@ Outcome Inventory::add_at(svc::ItemContainer container, int slot, svc::Inventory
     return out;
 }
 
+Outcome Inventory::grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog) {
+    Outcome out;
+    const auto refuse = [&](std::string why) {
+        out.refusal = std::move(why);
+        return out;
+    };
+    const auto info = catalog.info(item.item_record_id);
+    if (!info) return refuse("the item's record is not one this server knows");
+    if (!info->cargo_crate()) return refuse("the item is no crate: its record does not list the cargo slot alone");
+    if (item.quantity != 1) return refuse("a carried crate is one item, not " + std::to_string(item.quantity));
+    if (find(svc::ItemContainer::Equipment, equip::CargoHold)) return refuse("the cargo slot holds a crate already");
+    item.container = svc::ItemContainer::Equipment;
+    item.slot = equip::CargoHold;
+    if (const std::string problem = item_problem(item); !problem.empty()) return refuse(problem);
+    if (find_guid(item.instance_guid)) return refuse("the inventory holds an item with that instance guid already");
+    slots_[{static_cast<uint8_t>(item.container), item.slot}] = item;
+    Event add;
+    add.type = repl::StorageEventType::Add;
+    add.container = item.container;
+    add.slot = item.slot;
+    add.item = item;
+    add.instigated = true;
+    out.events.push_back(std::move(add));
+    out.equipment_changed = true;
+    out.ok = true;
+    return out;
+}
+
 Outcome Inventory::swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
                         const std::string& to_guid, int32_t to_count) {
     Outcome out;
@@ -1107,7 +1138,7 @@ Outcome Inventory::swap(svc::ItemContainer from, int from_slot, int32_t count, c
 
 // ---- the visible gear ----------------------------------------------------------------------------------------------------
 
-bool shows_in_appearance(int slot) { return (slot >= 1 && slot <= 9) || slot == equip::Costume || slot == equip::CloakCosmetic; }
+bool shows_in_appearance(int slot) { return (slot >= 1 && slot <= 9) || slot == equip::CargoHold || slot == equip::Costume || slot == equip::CloakCosmetic; }
 
 std::array<int64_t, 23> held_records(const Inventory& inventory) {
     std::array<int64_t, 23> out{};

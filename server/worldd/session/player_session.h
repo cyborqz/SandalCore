@@ -1124,6 +1124,10 @@ private:
     std::string fresh_guid();
     /// Tells the client what an applied request did (the events, then the visible gear) and marks the inventory dirty.
     void apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what);
+    /// Crates, slice 1: note_cargo_crate() looks at an applied outcome and calls construction_crate_equipped() (the quests' input, declared with the quest functions above) when a
+    /// construction crate (gameplay tag Item.Crate.Construction) now stands in the cargo slot: the one place that tells the quests a crate is carried.  construction_deposit() is the
+    /// deposit input that the construction site will call once a crate is put into it.
+    void note_cargo_crate(const items::Outcome& outcome);
     /// A resource bag was worn, replaced or taken off: its container opens (with the bag's grid) or closes on the client at once, and an opening one is sent its payload.
     void update_resource_container(Connection& conn, const items::BagChange& change);
     /// A refused request: the reason is logged, the inventory is as it was, and the client's storages are sent again (budget permitting).
@@ -1154,6 +1158,10 @@ private:
     bool cancel_quick_make(Connection* conn, const std::string& why);
     /// The materials leave the bags, the price the purse, the product arrives and the experience is paid, together.  false when the craft cannot be made now (nothing changed).
     bool complete_quick_make(Connection& conn, Clock::time_point now);
+    /// Crates, step 1b: whether what a recipe makes is ONE construction crate (an item whose record lists the cargo slot alone): it is put in the cargo slot, never in the bag, and only one is carried.
+    bool cargo_crate_made(const std::vector<crafting::Product>& made) const;
+    /// A short line on the player's screen that goes after three seconds (the refusal of a craft has no window of its own).
+    void say(Connection& conn, const char* text, Clock::time_point now);
     /// Crafting, step 2: sends the window the states of the jobs that changed since it was last told (a job ended, the next began) and updates the active stations; called every tick.
     void run_crafting(Connection& conn, Clock::time_point now);
     /// The earliest moment any job of the character changes status again (wall milliseconds; INT64_MAX when none will).

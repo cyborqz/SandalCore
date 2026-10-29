@@ -485,6 +485,11 @@ void PlayerWorld::log_npc_types() const {
         spdlog::info("[area] generic NPCs ({}): donor {}; {} Blueprint types made, {} NPCs; the exports carry checksum {} (the client does not compare 0); kill switch --npc-exclude: {} name(s)",
                      g->config().enabled ? "on" : "off", g->donor().empty() ? "none" : g->donor(), g->made(), pop.generic_spawned, g->config().export_checksum,
                      g->config().exclude.size());
+        if (g->talker_interactable().empty()) {
+            spdlog::warn("[area] the people who talk keep the recorded citizen's interactable (a crate vendor's: they offer to buy crates): the captures hold no plain conversation");
+        } else {
+            spdlog::info("[area] the people who talk are given the interactable of a plain conversation (recorded from {})", g->talker_interactable());
+        }
     }
     std::string lost;
     for (const auto& [why, n] : pop.lost_by_verdict) lost += (lost.empty() ? "" : ", ") + std::string(spawns::verdict_name(why)) + " " + std::to_string(n);

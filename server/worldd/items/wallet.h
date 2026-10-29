@@ -27,6 +27,8 @@ namespace aoc::worldd::items {
 inline constexpr int64_t kCopperCurrency = 6064629132706054144ll;
 inline constexpr int64_t kMoneyTier = 6064629127873626112ll;
 inline constexpr int64_t kNodeCurrency = 6064629879350493185ll;
+/// ... and the tier a price and a callout in it name.
+inline constexpr int64_t kNodeCurrencyTier = 6064629879355080706ll;
 /// The most copper a character can hold (1,000 gold).
 inline constexpr int64_t kMoneyCap = 10'000'000;
 /// Glint is held as items, not in the purse: the tier a price and a callout name, the item that is one unit of it (Glint T1), and the most a price may come to.
@@ -56,6 +58,12 @@ public:
     bool pay(int64_t copper_amount) {
         if (!can_pay(copper_amount)) return false;
         amounts_[kCopperCurrency] = copper() - copper_amount;
+        return true;
+    }
+    /// Takes `amount` of `currency` (a base def's Guid) out; false, changing nothing, when the purse holds less or the amount is negative.
+    bool pay_currency(int64_t currency, int64_t amount) {
+        if (amount < 0 || amount > balance(currency)) return false;
+        amounts_[currency] = balance(currency) - amount;
         return true;
     }
     /// How much of `copper_amount` fits below the cap.

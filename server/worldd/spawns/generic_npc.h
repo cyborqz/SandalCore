@@ -42,6 +42,15 @@
 //  (its own stats, nothing to say) or, for a point whose instance or asset has a conversation, a shop or an interaction, a citizen's with the interactable subobject.  The
 //  component's content is the donor's until spawns/npc_looks.h dresses the NPC.
 //
+//  What a person who talks offers.  The recorded citizen is, in the game, a Construction Crate Vendor: its interactable carries that vendor's component and its one input, "sell a crate"
+//  ("You must have a construction crate to sell to this vendor"), which the client always shows.  A person made from it would offer to buy crates whatever he is, so the interactable of
+//  a person who talks is replaced by that of a plain conversation, taken from another recorded open: the component whose one input opens the dialogue.  The rest of the open is the
+//  citizen's.
+//
+//  The same goes for a captured open itself.  A Blueprint a capture opened is used as it was recorded, and the Kaelar_Male_Citizen (the Construction Crate Vendor) and Kaelar_Male_Merchant (a
+//  Citizen Commodities vendor) opens were recorded on crate buyers: every other NPC made from either Blueprint (the market's and the town hall's vendors, the plain citizens) would offer to buy
+//  crates too.  `without_crate_sale` gives such an NPC the same open with the interactable of a plain conversation, unless the data names the very component the open was recorded from.
+//
 //  Huntable creatures (Gathering stage 3, "Hunting"): an asset whose PlayerInteractionDef is one of the Hunting_<kind> defs (GenericConfig::hunting_defs) gets an eighth block, a
 //  UInteractableComponent, as the living Hunting_Raven and Hunting_Spider of the captures have (the retail capture packet 1561, 758 packet 4538, and a Tidesnapper's in 1458): the Raven's own block
 //  with the asset's two ids put in (ComponentDefId = the asset's InteractComponent, InteractionInputData[0].PlayerInteractDefinition = its InteractionDef).  The three captured blocks differ
@@ -120,8 +129,17 @@ public:
     /// The open of a station (see above): nullptr with `why` when the captures hold no station of the asset's family.
     const OpenTemplate* station_template(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
 
+    /// A captured open for an NPC whose data does not make it the crate seller the open was recorded from: `open` itself when its interactable offers no crate sale, when the data names its
+    /// component (the instance's InteractComponentDefId, else the asset's), or when the captures hold no plain conversation; else a copy with the interactable of a plain conversation.
+    /// The copy is kept: the pointer is valid as long as this object.
+    const OpenTemplate* without_crate_sale(const OpenTemplate& open, const content::NpcAssetRow& asset, const content::NpcInstanceRow* instance) const;
+    /// How many such copies were made (Blueprints, not NPCs).
+    size_t conversations_made() const { return conversations_made_; }
+
     /// What the donor is (its archetype path), "" when the captures have none.
     const std::string& donor() const { return donor_path_; }
+    /// The archetype whose recorded interactable (a plain conversation) the people who talk are given; "" when the captures hold none.
+    const std::string& talker_interactable() const { return dialogue_path_; }
     const GenericConfig& config() const { return config_; }
     size_t made() const { return made_.size() - hunting_made_ - stations_made_; }   // the Blueprints' plain templates
     /// How many of the templates made are a station's (crafting, step 0).
@@ -147,9 +165,12 @@ private:
     std::string              donor_path_;
     const OpenTemplate*      person_ = nullptr;       // a recorded humanoid with the appearance component and nothing to say (the donor of a humanoid Blueprint no capture opened)
     const OpenTemplate*      talker_ = nullptr;       // ... and one with the interactable subobject as well
+    const ParsedBlock*       dialogue_ = nullptr;     // the UInteractableComponent of a plain conversation: its only input opens the dialogue (what a person who talks is given)
+    std::string              dialogue_path_;          // ... and the archetype it was recorded from
     const ParsedBlock*       hunt_block_ = nullptr;   // the living Hunting_Raven's UInteractableComponent
     const OpenTemplate*      living_ = nullptr;       // ... and its whole open (its CombatInfo and AbilityComponent are every huntable's)
     mutable size_t           hunting_made_ = 0;
+    mutable size_t           conversations_made_ = 0;
     mutable size_t           stations_made_ = 0;
     mutable std::map<std::string, OpenTemplate> made_;     // by archetype path (stable addresses)
     mutable std::set<uint64_t>                  minted_;   // the static NetGUIDs handed out

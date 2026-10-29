@@ -23,6 +23,7 @@ import (
 //	craft_recipe_input        what a recipe takes: kind 'general' (resources by record, by tag or by a gathered-item filter, with a minimum rarity) or 'primary' (the reagent)
 //	craft_cost                a money cost record (the currency tier and the amount)
 //	craft_reward              the reward tables the recipes name, and the sub-tables they reach, each as the JSON of its containers (what a finished recipe yields)
+//	craft_tag_item            (version 31) for each tag that names a recipe input, alone or with others: the items that satisfy it, so a pick of stacks can be checked
 //
 // A recipe's cost is its StandardCurrencyCost (std_cost, a number in text) or, when that is empty, the craft_cost its cost_guid names.
 const CraftingDDL = `
@@ -49,6 +50,11 @@ CREATE TABLE craft_station_asset (
     asset_guid INTEGER PRIMARY KEY,       -- npc_asset
     def_guid   INTEGER NOT NULL           -- craft_station_def
 );
+CREATE TABLE craft_tag_item (
+    tag       TEXT NOT NULL,              -- a gameplay tag that alone names a recipe input, in lower case
+    item_guid INTEGER NOT NULL,           -- an item that carries it: its GameplayTags, RecipeFilterTags or ProfessionTag hold the tag or a child of it
+    PRIMARY KEY (tag, item_guid)
+) WITHOUT ROWID;
 CREATE TABLE craft_recipe_set (
     guid            INTEGER PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -142,7 +148,7 @@ CREATE TABLE craft_reward (
 `
 
 // CraftingTables are the tables CraftingDDL creates, in the DDL's order.
-var CraftingTables = []string{"craft_station_def", "craft_station_asset", "craft_recipe_set", "craft_recipe_set_list", "craft_recipe_list", "craft_recipe_list_member", "craft_pred",
+var CraftingTables = []string{"craft_station_def", "craft_station_asset", "craft_tag_item", "craft_recipe_set", "craft_recipe_set_list", "craft_recipe_list", "craft_recipe_list_member", "craft_pred",
 	"craft_recipe", "craft_recipe_input", "craft_cost", "craft_reward"}
 
 func createCrafting(db *sql.DB) error {

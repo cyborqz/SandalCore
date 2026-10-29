@@ -17,7 +17,13 @@ import (
 // Crafting and processing (the crafting milestone, step 0; contentc version 20): craft_station_def, craft_station_asset, craft_recipe_set, craft_recipe_set_list,
 // craft_recipe_list, craft_recipe_list_member, craft_pred, craft_recipe, craft_recipe_input, craft_cost and craft_reward (internal/content/crafting.go says what each
 // holds). The records are copied as they are: a recipe's formulas stay text for the stat engine to run, and the reward tables stay the JSON of their containers. Nothing
-// here is evaluated.
+// here is evaluated. Version 31 adds craft_tag_item (the items every tag that names a recipe input is satisfied by) and the links of the Crate Packing stations.
+
+// stationBlueprintDefs link the Blueprints whose station definition is not named by the leaf of their asset reference: a Crate Packing station says its definition in its own defaults.
+var stationBlueprintDefs = map[string]string{
+	"CraftingStation_CratePacking_T0": "ProcessingStation_CratePacking_Construction_Gathering",
+	"CraftingStation_CratePacking_T1": "ProcessingStation_CratePacking_TestStation",
+}
 
 var craftingRecordTypes = []string{"CraftingStationDefRecordBase", "CraftingRecipeSetRecordBase", "CraftingRecipeListRecordBase", "CraftingRecipeDefRecordBase",
 	"CraftingCurrencyCostRecordBase", "CertificationLevelRecordBase", "RewardTableRecordBase", "PopulationAssetRecordBase"}
@@ -185,6 +191,11 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 			def, ok = defs[strings.Replace(leaf, "_Scribing_", "_Scribe_", 1)]
 		}
 		if !ok {
+			if name, named := stationBlueprintDefs[leaf]; named {
+				def, ok = defs[name]
+			}
+		}
+		if !ok {
 			continue
 		}
 		if err := w.exec(`INSERT INTO craft_station_asset (asset_guid, def_guid) VALUES (?, ?)`, r.Guid, def); err != nil {
@@ -248,6 +259,7 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 	// the recipes
 	rewardWanted := map[int64]bool{}
 	nInputs, nFuel := 0, 0
+	inputTags := map[string]bool{} // the tags that name a recipe input, alone or with others (lower case): craft_tag_item answers for each
 	for _, r := range src.rows["CraftingRecipeDefRecordBase"] {
 		f := newFields(fmt.Sprintf("CraftingRecipe %s (%d)", r.Name, r.Guid), r.Fields)
 		prof, _ := f.id("ProfessionId")
@@ -307,6 +319,11 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 			qty, minRarity, consume := gf.int("Quantity"), rarityIndex(enumValue(gf.str("MinRarity"))), gf.boolean("bConsumeInCrafting")
 			if gf.err != nil {
 				return gf.err
+			}
+			if item == 0 {
+				for _, t := range tags {
+					inputTags[strings.ToLower(strings.TrimSpace(t))] = true
+				}
 			}
 			if err := w.exec(`INSERT INTO craft_recipe_input (recipe_guid, kind, ord, item_guid, filter_guid, tags, quantity, min_rarity, consume) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				r.Guid, "general", i, item, filter, strings.Join(tags, ","), qty, minRarity, b2i(consume)); err != nil {
@@ -375,9 +392,59 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 		sort.Slice(queue, func(i, j int) bool { return queue[i] < queue[j] })
 	}
 
-	opt.logf("crafting: %d station definitions, %d assets linked to a station, %d recipes with %d inputs (%d need fuel), %d reward tables (%d missing)", len(defs), linked,
-		len(src.rows["CraftingRecipeDefRecordBase"]), nInputs, nFuel, len(written)-missing, missing)
+	// the items that satisfy each tag a recipe input is named by: an input that names no item but tags (a construction crate takes 30 units of anything tagged Item.Resource.Raw.Wood, a trade
+	// crate 12 units of anything tagged harvesting.type.ore and Riverlands) is paid with the stacks the player picks, and the server checks each pick against this table, once for every tag of
+	// the input. An item carries a tag when its GameplayTags, its RecipeFilterTags (the tags a recipe's inputs are filtered by) or its ProfessionTag hold the tag or a child of it.
+	wantedTags := make([]string, 0, len(inputTags))
+	for t := range inputTags {
+		wantedTags = append(wantedTags, t)
+	}
+	sort.Strings(wantedTags)
+	tagItems := 0
+	if len(wantedTags) > 0 {
+		for _, r := range src.rows["ItemRecordBase"] {
+			f := newFields(fmt.Sprintf("Item %s (%d)", r.Name, r.Guid), r.Fields)
+			carried := map[string]bool{}
+			for _, field := range []string{"GameplayTags", "RecipeFilterTags"} {
+				if _, has := f.get(field); !has {
+					continue
+				}
+				for t := range tagSet(f.tags(field)) {
+					carried[t] = true
+				}
+			}
+			if v, has := f.get("ProfessionTag"); has {
+				if ps, isStruct := v.(designdb.Struct); isStruct {
+					pf := newFields(f.where+": ProfessionTag", ps)
+					if _, named := pf.get("TagName"); named {
+						for t := range tagSet([]string{pf.str("TagName")}) {
+							carried[t] = true
+						}
+					}
+					if pf.err != nil {
+						return pf.err
+					}
+				}
+			}
+			if f.err != nil {
+				return f.err
+			}
+			for _, t := range wantedTags {
+				if !carried[t] {
+					continue
+				}
+				if err := w.exec(`INSERT INTO craft_tag_item (tag, item_guid) VALUES (?, ?)`, t, r.Guid); err != nil {
+					return err
+				}
+				tagItems++
+			}
+		}
+	}
+
+	opt.logf("crafting: %d station definitions, %d assets linked to a station, %d recipes with %d inputs (%d need fuel), %d reward tables (%d missing), %d item/tag pairs for %d tags", len(defs), linked,
+		len(src.rows["CraftingRecipeDefRecordBase"]), nInputs, nFuel, len(written)-missing, missing, tagItems, len(wantedTags))
 	meta["crafting.stations"] = strconv.Itoa(len(defs))
 	meta["crafting.recipes"] = strconv.Itoa(len(src.rows["CraftingRecipeDefRecordBase"]))
+	meta["crafting.tag_items"] = strconv.Itoa(tagItems)
 	return nil
 }

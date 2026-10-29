@@ -48,6 +48,45 @@ bool is_station_path(const std::string& path) {
     return leaf.rfind("CraftingStation_", 0) == 0 || leaf.rfind("ProcessingStation_", 0) == 0;
 }
 
+/// The stock interaction that opens a conversation, and the component definition whose only input it is.
+constexpr int64_t kOpenDialogueInteraction = 6064633690231341063ll;
+constexpr int64_t kConversationComponent = 6064633962143220744ll;
+
+/// The interactions that sell a crate to a vendor: a construction crate, a crate of each commodity kind (citizen, guild, harbor, market, node, smugglers, starter), a sport fishing crate, and
+/// the generic "sell a crate".
+constexpr int64_t kCrateSaleInteractions[] = {6064634121657450668ll, 6064634103382540406ll, 6064634103391256695ll, 6064634103400169592ll, 6064634103419175033ll,
+                                              6064634103422255226ll, 6064634103425269883ll, 6064634694382323005ll, 6064634522698383388ll, 6064633962275930123ll};
+
+/// Whether an interactable subobject has an input that sells a crate.
+bool offers_crate_sale(const ParsedBlock& b) {
+    if (!b.schema) return false;
+    const repl::Value* data = b.state.state.get(*b.schema, "InteractionInputData");
+    const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+    if (!arr) return false;
+    for (const auto& element : arr->elements) {
+        const auto g = element.values.find(6);   // InteractionInputData.PlayerInteractDefinition.Guid
+        const auto* guid = g == element.values.end() ? nullptr : g->second.get_if<int64_t>();
+        if (guid && std::find(std::begin(kCrateSaleInteractions), std::end(kCrateSaleInteractions), *guid) != std::end(kCrateSaleInteractions)) return true;
+    }
+    return false;
+}
+
+/// Whether an interactable subobject is a plain conversation: its first input is the stock open-dialogue interaction and no other input names an interaction.  A component with
+/// more inputs (a vendor's shop, the sale of a crate) is not.
+bool is_plain_conversation(const ParsedBlock& b) {
+    if (!b.schema) return false;
+    const repl::Value* data = b.state.state.get(*b.schema, "InteractionInputData");
+    const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+    if (!arr || arr->elements.empty()) return false;
+    for (size_t i = 0; i < arr->elements.size(); ++i) {
+        const auto g = arr->elements[i].values.find(6);   // InteractionInputData.PlayerInteractDefinition.Guid
+        const auto* guid = g == arr->elements[i].values.end() ? nullptr : g->second.get_if<int64_t>();
+        const int64_t value = guid ? *guid : 0;
+        if (i == 0 ? value != kOpenDialogueInteraction : value != 0) return false;
+    }
+    return true;
+}
+
 /// The block classes of a plain creature's open, in the order retail sends them.
 const char* const kPlain[] = {"ANPCCharacter", "UAlignmentComponent", "UNPCSecondaryInfo", "UNPCInfo", "UNPCCombatInfo", "UAoCAbilityComponent", "UAoCStatsComponent"};
 
@@ -122,6 +161,20 @@ GenericNpcs::GenericNpcs(const CapturedData& captured, const npc::MotionTable* b
         if (is_person(t, false) && (!person_ || villager || (person_->archetype_path.find("Node_Villager_M.") == std::string::npos && t.archetype_path < person_->archetype_path))) person_ = &t;
         if (is_person(t, true) && (!talker_ || citizen || (talker_->archetype_path.find("Kaelar_Male_Citizen.") == std::string::npos && t.archetype_path < talker_->archetype_path))) talker_ = &t;
     }
+    // the interactable of a plain conversation, for the people who talk: the component the data names for it first, else any recorded one whose only input opens the dialogue
+    for (const bool preferred : {true, false}) {
+        for (const OpenTemplate& t : captured.opens()) {
+            if (dialogue_ || t.category != "npc") continue;
+            const int i = t.find("UInteractableComponent");
+            if (i <= 0 || !is_plain_conversation(t.blocks[static_cast<size_t>(i)])) continue;
+            const ParsedBlock& b = t.blocks[static_cast<size_t>(i)];
+            const repl::Value* def = b.state.state.get(*b.schema, "ComponentDefId.Guid");
+            const auto* guid = def ? def->get_if<int64_t>() : nullptr;
+            if (preferred && !(guid && *guid == kConversationComponent)) continue;
+            dialogue_ = &b;
+            dialogue_path_ = t.archetype_path;
+        }
+    }
     // the living huntable's eighth block: the Hunting_Raven's open, whose interactable the other kinds' differ from in two ids only
     for (const OpenTemplate& t : captured.opens()) {
         if (t.category != "npc" || t.archetype_path.find("/Hunting_Raven.Default__Hunting_Raven_C") == std::string::npos) continue;
@@ -185,6 +238,25 @@ const OpenTemplate* GenericNpcs::template_for(const content::NpcAssetRow& asset,
         return &made_.emplace(key, std::move(t)).first->second;
     }
     return plain;
+}
+
+const OpenTemplate* GenericNpcs::without_crate_sale(const OpenTemplate& open, const content::NpcAssetRow& asset, const content::NpcInstanceRow* instance) const {
+    if (!dialogue_) return &open;
+    const int at = open.find("UInteractableComponent");
+    if (at <= 0) return &open;
+    const ParsedBlock& block = open.blocks[static_cast<size_t>(at)];
+    if (!offers_crate_sale(block)) return &open;
+    // the NPC is the seller the open was recorded from when its data names that very component
+    const repl::Value* def = block.state.state.get(*block.schema, "ComponentDefId.Guid");
+    const auto* guid = def ? def->get_if<int64_t>() : nullptr;
+    const int64_t own = instance && instance->interact_component != 0 ? instance->interact_component : asset.interact_component;
+    if (guid && *guid != 0 && own == *guid) return &open;
+    const std::string key = open.archetype_path + "#conversation";
+    if (const auto it = made_.find(key); it != made_.end()) return &it->second;
+    OpenTemplate t = open;
+    t.blocks[static_cast<size_t>(at)] = *dialogue_;
+    ++conversations_made_;
+    return &made_.emplace(key, std::move(t)).first->second;
 }
 
 const repl::ExportChain* GenericNpcs::archetype_export(const std::string& path) const {
@@ -255,6 +327,11 @@ const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, V
     OpenTemplate t = *donor;
     t.archetype_path = path;
     t.capture = t.channel = t.packet = 0;   // made here: no capture opened it
+    // a person who talks offers a conversation, not the sale of a crate (the recorded citizen was a Construction Crate Vendor: see the top of the header)
+    if (person && talks && talker_ && dialogue_) {
+        const int at = t.find("UInteractableComponent");
+        if (at > 0) t.blocks[static_cast<size_t>(at)] = *dialogue_;
+    }
     // the archetype's export: the class default object in its package, checksum 0 (see the header), static NetGUIDs of worldd's own, the same for each template of the path
     const repl::ExportChain* exported = archetype_export(path);
     if (!exported) return fail(Verdict::NoPath);

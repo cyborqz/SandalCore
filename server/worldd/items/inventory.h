@@ -96,6 +96,8 @@ inline constexpr uint8_t RingRight = 10, RingLeft = 11, Necklace = 12, EarRight 
 inline constexpr uint8_t Primary = 15, Secondary = 16, Ranged = 17, RangedOffHand = 18;
 inline constexpr uint8_t Shirt = 19, ResourceBag0 = 23, ResourceBag1 = 24, ResourceBag2 = 25, Pickaxe = 26, Axe = 29, Sickle = 33, FishingRod = 35, Bow = 38, Crowbar = 41;
 inline constexpr uint8_t Costume = 71, PrimaryCosmetic = 75, CloakCosmetic = 79;
+/// The slot a carried crate stands in (the construction, trade, relic and fishing crates list only this one).
+inline constexpr uint8_t CargoHold = 53;
 }  // namespace equip
 // Cyb.C.O.A
 
@@ -138,6 +140,8 @@ struct ItemInfo {
     /// The grid a resource bag gives its container, set for the items that are resource bags.
     std::optional<ResourceGrid> bag;
     bool wearable() const { return !equip_slots.empty(); }
+    /// A crate you carry: the record lists the cargo slot and no other.
+    bool cargo_crate() const { return equip_slots.size() == 1 && equip_slots[0] == equip::CargoHold; }
 };
 
 class ItemCatalog {
@@ -248,6 +252,10 @@ public:
     /// takes a material whose rectangle fits there.  Refused, changing nothing, for another container, an instance the inventory holds already, an unknown record, a material in the item bag, a
     /// non-material in a material bag, an occupied slot or a rectangle that does not fit.  The Add is the outcome's only event.
     Outcome add_at(svc::ItemContainer container, int slot, svc::InventoryItem item, const ItemCatalog& catalog);
+    /// Crates, slice 1: puts a crate (one item whose record lists the cargo slot and no other) in the Equipment's cargo slot, where the game puts a crate that is made or picked up:
+    /// one Add event, `equipment_changed`.  Refused, changing nothing, for an item that is no crate, a quantity other than 1, an instance the inventory holds already, an unknown
+    /// record or a cargo slot that holds a crate already.
+    Outcome grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog);
     /// ServerRequestStorageEvent, Swap: the two whole stacks of the Backpack change places; `to_guid` and `to_count` are what the
     /// client says is in the target slot.  A resource container's items are not swapped (refused).
     Outcome swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
@@ -273,12 +281,12 @@ public:
     Outcome take(int64_t record, int64_t count);
 
     /// Crafting, step 1; by rarity since item rarities, step 2: how many items of `record` whose rarity is `rarity_lo` to `rarity_hi` (Common 0 ... Artifact 6) the material bags (the resource containers)
-    /// hold.  A stack's rarity is the one the client shows for it (items/rarity.h): `facts.rarity_of(quality)`, the quality's band held inside the record's own RarityMin..RarityMax, so a Bee's Wax
+    /// and the item bag hold (the item bag is where an item that is no resource lies: a commodity certificate a crate recipe takes).  A stack's rarity is the one the client shows for it (items/rarity.h): `facts.rarity_of(quality)`, the quality's band held inside the record's own RarityMin..RarityMax, so a Bee's Wax
     /// bought at quality 1 is Rare and meets a minimum of Rare.
     int64_t count_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi) const;
     /// How many items of `record` the material bags hold at each rarity (Common ... Artifact), by the same rule: what a refusal says the bags hold.
     std::array<int64_t, kRarityCount> materials_by_rarity(int64_t record, const ItemRarityFacts& facts) const;
-    /// Takes `count` items of `record` of that rarity range from the stacks of the material bags (never the item bag), in the order of their container and slot, or the lowest quality first with
+    /// Takes `count` items of `record` of that rarity range from the stacks of the item bag and the material bags, in the order of their container and slot, or the lowest quality first with
     /// `lowest_first`.  Each stack that gives something is ONE Remove event that names the stack as it was and how many leave, as take() does.  Refused, changing nothing, when fewer are held.
     Outcome take_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi, int64_t count, bool lowest_first = false);
 
@@ -335,9 +343,9 @@ private:
 /// of a key is the record of the item worn in that slot, 0 when none.
 inline constexpr std::array<uint8_t, 23> kHeldSlots = {15, 16, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 75, 76, 77, 78};
 
-/// Whether the item worn in `slot` is part of Character Appearance.AppearanceIDs: Helmet to Belt (1-9), Costume and CloakCosmetic
-/// (71, 79). Rings, earrings, the necklace, the artisan shirt and trousers, the tool belt, the lure and the mounts never are
-/// (research A1: 309 retail pawn records).
+/// Whether the item worn in `slot` is part of Character Appearance.AppearanceIDs: Helmet to Belt (1-9), the cargo slot (53: a carried
+/// crate shows on the back), Costume and CloakCosmetic (71, 79). Rings, earrings, the necklace, the artisan shirt and trousers, the tool
+/// belt, the lure and the mounts never are (research A1: 309 retail pawn records).
 bool shows_in_appearance(int slot);
 
 /// The records worn in kHeldSlots, in that order (0: nothing in the slot).

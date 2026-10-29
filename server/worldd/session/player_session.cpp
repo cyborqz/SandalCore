@@ -2924,8 +2924,27 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     }
     spdlog::log(level_for(item_applied_logged_), "[session] {}: {}: {} storage event(s){}", name(), what, outcome.events.size(),
                 outcome.equipment_changed ? ", the visible gear is updated" : "");
+    note_cargo_crate(outcome);
     // a resource bag worn, replaced or taken off: its container opens or closes on the client now, after the events that moved the bag
     for (const items::BagChange& c : outcome.bags) update_resource_container(conn, c);
+}
+
+void PlayerSession::note_cargo_crate(const items::Outcome& outcome) {
+    for (const items::Event& e : outcome.events) {
+        if (e.type != repl::StorageEventType::Add || e.container != svc::ItemContainer::Equipment || e.slot != items::equip::CargoHold) continue;
+        const content::ContentDb* db = world_ ? world_->content() : nullptr;
+        std::string error;
+        const auto gear = db ? db->item_gear(e.item.item_record_id, error) : std::nullopt;
+        if (!gear) continue;
+        for (const std::string& tag : gear->tags) {
+            std::string lower;
+            for (const char c : tag) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower == "item.crate.construction") {
+                construction_crate_equipped(e.item.item_record_id);
+                break;
+            }
+        }
+    }
 }
 
 void PlayerSession::update_resource_container(Connection& conn, const items::BagChange& change) {
@@ -3483,6 +3502,9 @@ namespace {
 
 constexpr std::chrono::milliseconds kQuickTickAfterRemoves{40};   // the product's tick follows the Remove events by this (the Remove events go first)
 
+/// What a craft's price is counted in, for the log: copper, Glint T1 items (a trade crate of the market, node, harbor and smugglers tables) or the node currency (the citizen table).
+const char* price_unit(int64_t tier) { return tier == items::kGlintTier ? "Glint T1" : tier == items::kNodeCurrencyTier ? "node currency" : "copper"; }
+
 }  // namespace
 
 void PlayerSession::on_quick_start(Connection& conn, const repl::StartCraft& req, const world::WorldActor& a, Clock::time_point now) {
@@ -3514,11 +3536,17 @@ void PlayerSession::on_quick_start(Connection& conn, const repl::StartCraft& req
     facts.inventory = &inventory_;
     facts.rarity_facts = [this](int64_t item) { return world_->item_rarity_facts(item); };   // (the rarity the client shows for a stack: the inputs are found by it)
     facts.copper = wallet_.copper();
+    facts.node_currency = wallet_.balance(items::kNodeCurrency);
     const crafting::Plan plan = crafting::plan_start(req, facts);
     if (!plan.ok) return refuse(plan.refusal);
     // (the room for the product is looked at when the craft ends, with the materials already out of the bags)
     const content::CraftReward* reward = recipes->reward_of(*plan.recipe);
     if (!reward || reward->containers.empty()) return refuse(plan.recipe->name + " has no reward the server can give: it makes nothing");
+    // a crate is carried in the cargo slot, one at a time: a craft that makes one is refused while the slot is taken
+    if (cargo_crate_made(crafting::roll_products(*reward, 1, 0)) && inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold)) {
+        say(conn, "You are already carrying a crate.", now);
+        return refuse("the cargo slot holds a crate already, and " + plan.recipe->name + " makes another: a second crate cannot be carried");
+    }
     const GoodPosition at = checker_.good();
     quick_ = crafting::QuickMake{};
     quick_.active = true;
@@ -3532,8 +3560,8 @@ void PlayerSession::on_quick_start(Connection& conn, const repl::StartCraft& req
     quick_.y = at.y;
     quick_.z = at.z;
     ++quick_started_;
-    spdlog::log(level_for(quick_logged_, kQuickLogged), "[session] {}: begins to craft {} at {} ({:.1f} s; nothing is taken until it is made): {} copper ({} each with the tax of {:.2f}), {} stack(s) of materials", name(),
-                plan.recipe->name, a.station.name, plan.duration_ms / 1000.0, plan.cost, plan.unit_taxed, facts.tax.percent, plan.takes.size());
+    spdlog::log(level_for(quick_logged_, kQuickLogged), "[session] {}: begins to craft {} at {} ({:.1f} s; nothing is taken until it is made): {} {} ({} each with the tax of {:.2f}), {} stack(s) of materials", name(),
+                plan.recipe->name, a.station.name, plan.duration_ms / 1000.0, plan.cost, price_unit(plan.currency), plan.unit_taxed, facts.tax.percent, plan.takes.size());
 }
 
 bool PlayerSession::cancel_quick_make(Connection* conn, const std::string& why) {
@@ -3609,8 +3637,6 @@ void PlayerSession::run_quick_make(Connection& conn, Clock::time_point now) {
 bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now) {
     constexpr size_t kMadeLogged = 30;
     constexpr const char* kNoRoomText = "Not enough inventory space.";
-    constexpr int32_t kCalloutType = 1, kCalloutPointSize = 32;
-    constexpr std::chrono::seconds kCalloutLife{3};
     const auto fail = [&](const std::string& why) {
         const std::string recipe = quick_.recipe_name, station = quick_.station_name;
         quick_ = crafting::QuickMake{};
@@ -3643,6 +3669,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     facts.inventory = &inventory_;
     facts.rarity_facts = [this](int64_t item) { return world_->item_rarity_facts(item); };   // (the rarity the client shows for a stack: the inputs are found by it)
     facts.copper = wallet_.copper();
+    facts.node_currency = wallet_.balance(items::kNodeCurrency);
     const repl::StartCraft req = quick_.request;
     const crafting::Plan plan = crafting::plan_start(req, facts);
     if (!plan.ok) return fail(plan.refusal);
@@ -3670,7 +3697,26 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         return fail("the craft takes from " + std::to_string(taken.events.size()) + " stacks: more events than one answer holds");
     }
     const int64_t before = wallet_.copper();
-    if (plan.cost > 0) wallet_.pay(plan.cost);   // checked by the plan: it cannot be short
+    items::Outcome glint_paid;   // the Glint T1 stacks that pay a price in Glint (the Remove events of the answer)
+    if (plan.cost > 0) {   // (checked by the plan: none of them can be short)
+        if (plan.currency == items::kGlintTier) {
+            glint_paid = inventory_.take(items::kGlintT1Item, plan.cost);
+            if (!glint_paid.ok) {
+                inventory_ = kept_bags;
+                wallet_ = kept_purse;
+                return fail(glint_paid.refusal);
+            }
+            if (glint_paid.events.size() > 8 * bootstrap::kMaxEventsPerChain) {
+                inventory_ = kept_bags;
+                wallet_ = kept_purse;
+                return fail("the Glint comes from " + std::to_string(glint_paid.events.size()) + " stacks: more events than the answers hold");
+            }
+        } else if (plan.currency == items::kNodeCurrencyTier) {
+            wallet_.pay_currency(items::kNodeCurrency, plan.cost);
+        } else {
+            wallet_.pay(plan.cost);
+        }
+    }
 
     // 3. the product: its quality is the paid materials', its experience the recipe's reward table's
     const content::ContentDb* db = world_->content();
@@ -3689,6 +3735,14 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         return fail(recipe.name + " makes nothing the server knows");
     }
     const crafting::JobRewards& rewards = *made;
+    // a crate goes to the cargo slot, never to the bag, and only one is carried: the slot may have been filled since the craft began
+    const bool cargo = cargo_crate_made(rewards.products);
+    if (cargo && inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold)) {
+        inventory_ = kept_bags;
+        wallet_ = kept_purse;
+        say(conn, "You are already carrying a crate.", now);
+        return fail("the cargo slot holds a crate already, so " + recipe.name + " cannot be made (the player was told)");
+    }
     const int64_t created = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000;
     std::vector<svc::InventoryItem> fresh;                    // every stack, product after product
     std::vector<std::vector<svc::InventoryItem>> by_product;  // ... and each product's own
@@ -3715,7 +3769,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
                 if (other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();   // (fresh_guid looks at the inventory only)
             }
             it.quantity = static_cast<int32_t>(take);
-            it.quality = rewards.quality;
+            it.quality = cargo ? std::max(1, rec ? rec->default_quality : 1) : rewards.quality;   // (a crate is the record's own quality whatever the materials were)
             it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             by_product.back().push_back(it);
@@ -3724,27 +3778,33 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         }
     }
     // the room, all or nothing, with the materials already gone from the bags (their cells are free): with none nothing is taken and the player is told so
-    if (!inventory_.can_grant(fresh, item_catalog())) {
+    if (!cargo && !inventory_.can_grant(fresh, item_catalog())) {
         inventory_ = kept_bags;
         wallet_ = kept_purse;
-        const uint64_t key_of_callout = (static_cast<uint64_t>(pb_.setup().player_id) << 32) | (0x40000000u + gather_callout_seq_++);
-        const int64_t ticks = items::ticks_of_ms(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-        if (room_for(2)) {
-            queue("a callout", [ticks, key_of_callout, kNoRoomText](bootstrap::PlayerBootstrap& pb) { return pb.callout_add(kNoRoomText, kCalloutType, kCalloutPointSize, ticks, key_of_callout); }, conn);
-            gather_callouts_.push_back({now + kCalloutLife, key_of_callout});
-        }
+        say(conn, kNoRoomText, now);
         return fail("the bags have no room for the " + std::to_string(fresh.size()) + " stack(s) of " + recipe.name + " (the player was told)");
     }
     std::vector<items::Outcome> granted;
-    for (std::vector<svc::InventoryItem>& stacks : by_product) {
-        items::Outcome o = inventory_.grant(stacks, item_catalog());
+    if (cargo) {
+        items::Outcome o = inventory_.grant_cargo(fresh.front(), item_catalog());
         if (!o.ok) {
             const std::string why = o.refusal;
             inventory_ = kept_bags;
             wallet_ = kept_purse;
-            return fail("the product is not granted: " + why);
+            return fail("the crate is not put in the cargo slot: " + why);
         }
         granted.push_back(std::move(o));
+    } else {
+        for (std::vector<svc::InventoryItem>& stacks : by_product) {
+            items::Outcome o = inventory_.grant(stacks, item_catalog());
+            if (!o.ok) {
+                const std::string why = o.refusal;
+                inventory_ = kept_bags;
+                wallet_ = kept_purse;
+                return fail("the product is not granted: " + why);
+            }
+            granted.push_back(std::move(o));
+        }
     }
 
     // 4. the craft is made: the experience is paid once, the bags and the purse are saved
@@ -3755,6 +3815,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     inventory_changed_ = true;
     ++items_applied_;
     ++quick_made_;
+    if (cargo) apply_gear_stats("a crate was made");   // the worn stats (the crate's stat block is among them): before the replies are queued, which are built later and carry the stats' deltas
     professions::Professions after = professions_;
     if (professions_.valid() && rewards.profession_xp > 0 && rewards.profession != 0) after.add_xp(rewards.profession, rewards.profession_xp);
     const std::vector<professions::Change> changes = professions_.valid() ? set_professions(after) : std::vector<professions::Change>();
@@ -3791,23 +3852,54 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         }
     }
     const int64_t delta = -plan.cost;
+    const int64_t tier = plan.currency;
+    // a price in Glint: its Remove events come before the callout, with no toast; the answer holds the last of them (a send holds kMaxEventsPerChain events, the crate's Add among them), the ones
+    // before are sent ahead in chains of their own
+    std::vector<bootstrap::ItemEvent> glint_removes = item_events_for(glint_paid), glint_ahead;
+    if (!glint_removes.empty()) {
+        const size_t first_adds = std::min(adds.size(), bootstrap::kMaxEventsPerChain);
+        const size_t room = bootstrap::kMaxEventsPerChain > first_adds ? bootstrap::kMaxEventsPerChain - first_adds : 0;
+        if (glint_removes.size() > room) {
+            glint_ahead.assign(glint_removes.begin(), glint_removes.end() - static_cast<std::ptrdiff_t>(room));
+            glint_removes.erase(glint_removes.begin(), glint_removes.end() - static_cast<std::ptrdiff_t>(room));
+        }
+    }
     for (size_t at_event = 0; at_event < removes.size(); at_event += bootstrap::kMaxEventsPerChain) {
         const std::vector<bootstrap::ItemEvent> part(removes.begin() + static_cast<std::ptrdiff_t>(at_event),
                                                      removes.begin() + static_cast<std::ptrdiff_t>(std::min(removes.size(), at_event + bootstrap::kMaxEventsPerChain)));
         queue_later("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, now, /*must_build=*/true);
     }
     const Clock::time_point tick = now + kQuickTickAfterRemoves;
+    for (size_t at_event = 0; at_event < glint_ahead.size(); at_event += bootstrap::kMaxEventsPerChain) {
+        const std::vector<bootstrap::ItemEvent> part(glint_ahead.begin() + static_cast<std::ptrdiff_t>(at_event),
+                                                     glint_ahead.begin() + static_cast<std::ptrdiff_t>(std::min(glint_ahead.size(), at_event + bootstrap::kMaxEventsPerChain)));
+        queue_later("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, tick, /*must_build=*/true);
+    }
     for (size_t at_event = 0; at_event < adds.size(); at_event += bootstrap::kMaxEventsPerChain) {
         const std::vector<bootstrap::ItemEvent> part(adds.begin() + static_cast<std::ptrdiff_t>(at_event),
                                                      adds.begin() + static_cast<std::ptrdiff_t>(std::min(adds.size(), at_event + bootstrap::kMaxEventsPerChain)));
         if (at_event == 0) {
-            queue_later("craft made", [delta, part](bootstrap::PlayerBootstrap& pb) { return pb.purchase_answer(items::kMoneyTier, delta, part); }, conn, tick, /*must_build=*/true);
+            queue_later("craft made", [tier, delta, part, glint_removes](bootstrap::PlayerBootstrap& pb) {
+                return tier == items::kGlintTier ? pb.item_payment_answer(tier, delta, glint_removes, part) : pb.purchase_answer(tier, delta, part);
+            }, conn, tick, /*must_build=*/true);
         } else {
             queue_later("craft items", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, tick, /*must_build=*/true);
         }
     }
     pb_.set_currency(items::kCopperCurrency, wallet_.copper());
+    pb_.set_currency(items::kNodeCurrency, wallet_.balance(items::kNodeCurrency));
     queue_later("OwnerInfo", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, tick, /*must_build=*/true);
+    if (cargo) {   // the crate shows on the carrier's back: the pawn's held items and appearance follow the Add, as for any item put on
+        const std::vector<bootstrap::HeldItem> held = bootstrap::held_items_for(inventory_);
+        const std::vector<repl::AppearanceId> appearance = items::appearance_ids(inventory_);
+        queue_later("HeldItems and AppearanceIDs",
+                    [held, appearance](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+                        if (!pb.apply_equipment(held, appearance, 1)) return std::nullopt;
+                        return pb.equipment_update();
+                    },
+                    conn, tick, /*must_build=*/true);
+        for (const items::Outcome& o : granted) note_cargo_crate(o);   // the quest module is told a construction crate is carried now
+    }
     if (xp.changed() || leveled || !changes.empty()) {
         const int64_t total = progress_.xp, debt = progress_.debt;
         const std::vector<ProfessionWire> wire = profession_wire(changes);
@@ -3844,8 +3936,11 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         line += (i ? ", " : "") + (shown_name.count(rewards.products[i].item) ? shown_name[rewards.products[i].item] : std::to_string(rewards.products[i].item)) + " x" +
                 std::to_string(rewards.products[i].quantity);
     }
-    line += " at quality " + std::to_string(rewards.quality) + " (rarity " + std::to_string(rewards.rarity) + ") in " + std::to_string(fresh.size()) + " stack(s); " + std::to_string(plan.cost) +
-            " copper paid (" + std::to_string(before) + " -> " + std::to_string(wallet_.copper()) + "), " + std::to_string(taken.events.size()) + " stack(s) of materials taken";
+    line += (cargo ? std::string(" into the cargo slot")
+                   : " at quality " + std::to_string(rewards.quality) + " (rarity " + std::to_string(rewards.rarity) + ") in " + std::to_string(fresh.size()) + " stack(s)") +
+            "; " + std::to_string(plan.cost) + " " + price_unit(plan.currency) + " paid" +
+            (plan.currency == items::kMoneyTier ? " (" + std::to_string(before) + " -> " + std::to_string(wallet_.copper()) + ")" : std::string()) + ", " + std::to_string(taken.events.size()) +
+            " stack(s) of materials taken";
     for (const professions::Change& c : changes) {
         const professions::Profession* pf = professions_.book()->find(c.profession);
         if (pf) line += "; " + pf->name + " +" + std::to_string(c.after.xp - c.before.xp) + " XP (now " + std::to_string(c.after.xp) + ", level " + std::to_string(c.after.level) + ")";
@@ -3856,6 +3951,22 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     }
     spdlog::log(level_for(quick_made_logged_, kMadeLogged), "[session] {}: {}", name(), line);
     return true;
+}
+
+bool PlayerSession::cargo_crate_made(const std::vector<crafting::Product>& made) const {
+    if (made.size() != 1 || made.front().quantity != 1) return false;
+    const auto info = item_catalog().info(made.front().item);
+    return info && info->cargo_crate();
+}
+
+void PlayerSession::say(Connection& conn, const char* text, Clock::time_point now) {
+    constexpr int32_t kCalloutType = 1, kCalloutPointSize = 32;
+    constexpr std::chrono::seconds kCalloutLife{3};
+    if (!room_for(2)) return;
+    const uint64_t key_of_callout = (static_cast<uint64_t>(pb_.setup().player_id) << 32) | (0x40000000u + gather_callout_seq_++);
+    const int64_t ticks = items::ticks_of_ms(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    queue("a callout", [ticks, key_of_callout, text](bootstrap::PlayerBootstrap& pb) { return pb.callout_add(text, kCalloutType, kCalloutPointSize, ticks, key_of_callout); }, conn);
+    gather_callouts_.push_back({now + kCalloutLife, key_of_callout});
 }
 
 bool PlayerSession::gm_teach_recipe(Connection& conn, int64_t recipe, const std::string& by) {
@@ -5696,6 +5807,20 @@ PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_
         for (const svc::InventoryItem& other : fresh) {
             if (&other != &it && other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();
         }
+    }
+    // Crates, slice 1: a crate goes where the game puts one that is made or picked up, the Equipment's cargo slot (a second crate, or several, go to the bag as any item does)
+    if (const auto crate = item_catalog().info(item_record); crate && crate->cargo_crate() && count == 1 && fresh.size() == 1 && !inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold)) {
+        items::Outcome put = inventory_.grant_cargo(fresh.front(), item_catalog());
+        if (!put.ok) {
+            r.refusal = "the cargo slot does not take it: " + put.refusal;
+            return r;
+        }
+        r.ok = true;
+        r.count = 1;
+        r.container = items::container_name(svc::ItemContainer::Equipment);
+        apply_outcome(conn, put, "a crate was put in the cargo slot");   // the Add, the worn stats and the visible gear
+        spdlog::info("[gm] {}: {} given by {} into the cargo slot (quality {})", name(), r.item_name, by, r.quality);
+        return r;
     }
     const items::Outcome outcome = inventory_.grant(std::move(fresh), item_catalog());
     if (!outcome.ok) {
