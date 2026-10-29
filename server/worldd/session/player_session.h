@@ -1035,6 +1035,7 @@ private:
     /// `on_mount`: the trigger came on the mount's AbilityComponent (the controlled actor's while the player rides), not the pawn's.
     void on_ability_trigger(Connection& conn, const protocol::repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now, bool on_mount = false);
     void on_ability_cancel(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    void on_branch_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_hit_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_ability_end(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Advances the runtime to `now` and sends what it produced.

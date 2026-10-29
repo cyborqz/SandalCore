@@ -2320,7 +2320,7 @@ repl::ElementState ability_state(const PlayerSetup& s, const ActiveAbilityItem& 
     v[6] = Value::i64(0);               // ReplicatedProgressInfo.NumDisruptiveHits
     v[7] = Value::f32(0);               // .TotalDisruptionSeconds
     v[8] = Value::f32(0);               // .CastDuration
-    v[9] = Value::boolean(true);        // bBranchPredictedOnAutonomous
+    v[9] = Value::boolean(a.branch_predicted);   // bBranchPredictedOnAutonomous
     v[10] = Value(repl::NameValue::plain(a.montage_group));
     const std::optional<MontageRef> montage = a.montage_guid != 0 ? montage_for(a.montage_path, a.montage_guid) : montage_for(a.montage_path);
     v[11] = Value(montage ? montage->guid : FIntrepidNetworkGUID{});

@@ -50,6 +50,34 @@ constexpr Timing kTimings[] = {
     {"Bard_Song_Serenade", 0.303, 0.303, 0.307},    // item and cost +303, the Spirited buff +610
 };
 
+// Casts that end with a branch of their montage (see BranchedCast). Arcane Volley [R: the one recorded cast]: the ability item came 99 ms after the trigger; the client's
+// cast bar ran out and it asked for the branch 1,289 ms after the trigger; the server moved the montage to the section "CastComplete" (2.0004 s into it) 82 ms after the
+// request, took the cost (the mana, the cooldown) 69 ms after that (1,440 ms from the trigger), and cleared the item's montage 1,170 ms after the cost. The client's own cast bar
+// decides when it asks: 1.289 s after the trigger in the recording, 1.875 s in a first run of this code, so the cast waits for it. A request that is not heard (a replay, a client that
+// never asks) is taken to have come 2.4 s after the trigger; one that comes sooner moves the rest sooner by as much.
+constexpr BranchedCast kBranchedCasts[] = {
+    {"Mage_ArcaneVolley", 6064628901575655424ll, 2.0003722f, 0.099, 2.4, 0.082, 0.069, 1.170},
+};
+// When each missile of a volley lands, after the cost step [R: the same cast: its seven confirmations came 940 to 1,405 ms after the cost step, the seventh missile first]. The
+// order and the gaps are the recorded cast's (a flight takes the target's distance over the projectile's speed, which the capture does not give).
+struct MissileLanding {
+    const char* ability;
+    int         key;           // the key of the projectile in the ability's ProjectilesIds
+    double      after_cost;
+};
+constexpr MissileLanding kMissileLandings[] = {
+    {"Mage_ArcaneVolley", 1, 1.272}, {"Mage_ArcaneVolley", 2, 1.138}, {"Mage_ArcaneVolley", 3, 1.338}, {"Mage_ArcaneVolley", 4, 1.405},
+    {"Mage_ArcaneVolley", 5, 1.138}, {"Mage_ArcaneVolley", 6, 1.272}, {"Mage_ArcaneVolley", 7, 0.940},
+};
+
+// Casts that shoot again and again (see LoopedCast). The Ranger's Salvo [R: the two recorded casts; the montage's sections]: the ability item came 83 ms after the trigger and the first shot's
+// cost 184 ms after it; the next ones followed every 0.24 s (the montage's loop section, "StartLoop", is 0.2373 s long at a play rate of 1; the six costs of the clean cast came 238, 213, 315,
+// 169 and 310 ms apart, 249 ms on average); the loop ends by the server's own branch (no charge left, or less Mana than a shot costs): 139 and 166 ms after the last shot's cost the item moved
+// the montage to its section "EndLoop" (0.4384 s into the montage, the section's start; the item's bBranchPredictedOnAutonomous 0), and the montage ended 503 and 736 ms after that.
+constexpr LoopedCast kLoopedCasts[] = {
+    {"Ranger_Salvo", 0.43836784f, 0.083, 0.184, 0.2373, 0.150, 0.503},
+};
+
 // The speed (cm/s) the retail client's own moves reached while an ability played, for the abilities whose data has no NetworkingMaxSpeed:
 // Flourish's slide, 3,659 cm/s at its fastest in both casts of the retail capture (decaying to 0 in 0.6 s).
 struct Dash {
@@ -1362,9 +1390,10 @@ void AbilityPipeline::regenerate(double t) {
 double AbilityPipeline::next_due() const {
     double due = next_regen_;
     for (const Cast& c : casts_) {
-        for (const std::optional<double>* d : {&c.item_due, &c.cost_due, &c.hit_due, &c.projectile_due, &c.loop_due, &c.own_due}) {
+        for (const std::optional<double>* d : {&c.item_due, &c.cost_due, &c.hit_due, &c.projectile_due, &c.loop_due, &c.own_due, &c.branch_due, &c.end_due}) {
             if (*d) due = std::min(due, **d);
         }
+        for (const Cast::Missile& m : c.missiles) due = std::min(due, m.due);
     }
     for (const CastRecord& r : records_) {
         for (const HitSlot& s : r.slots) due = std::min(due, slot_due(r, s));
@@ -1427,6 +1456,35 @@ void AbilityPipeline::run_due(double t) {
             finish_cast_if_done(i);
             return;
         }
+        if (cast.branch_due && *cast.branch_due <= t) {
+            cast.branch_due.reset();
+            step_branch(cast, t);
+            finish_cast_if_done(i);
+            return;
+        }
+        if (!cast.missiles.empty()) {
+            size_t first = 0;
+            for (size_t k = 1; k < cast.missiles.size(); ++k) {
+                if (cast.missiles[k].due < cast.missiles[first].due) first = k;
+            }
+            if (cast.missiles[first].due <= t) {
+                // the missile that lands is the one projectile this step fires
+                const int64_t projectile = cast.missiles[first].projectile;
+                cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
+                const int64_t kept = cast.chain_owner;
+                cast.chain_owner = projectile;
+                step_hits(cast, t, "projectile");
+                cast.chain_owner = kept;
+                finish_cast_if_done(i);
+                return;
+            }
+        }
+        if (cast.end_due && *cast.end_due <= t) {
+            cast.end_due.reset();
+            step_end(cast, t);
+            finish_cast_if_done(i);
+            return;
+        }
         if (cast.loop_due && *cast.loop_due <= t) {
             cast.loop_due.reset();
             step_loop(cast, t);
@@ -1476,7 +1534,9 @@ void AbilityPipeline::run_due(double t) {
 
 void AbilityPipeline::finish_cast_if_done(size_t index) {
     const Cast& c = casts_[index];
-    if (!c.item_due && !c.cost_due && !c.hit_due && !c.projectile_due && !c.loop_due && !c.own_due) casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (!c.item_due && !c.cost_due && !c.hit_due && !c.projectile_due && !c.loop_due && !c.own_due && !c.branch_due && !c.end_due && c.missiles.empty()) {
+        casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
+    }
 }
 
 // ---- the cast ---------------------------------------------------------------------------------------------------------------------------
@@ -1658,6 +1718,34 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now) {
     return std::find(recent_ids_.begin(), recent_ids_.end(), client_instance_id) != recent_ids_.end();
 }
 
+bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_guid, double now) {
+    advance(now);
+    for (Cast& cast : casts_) {
+        if (cast.client_id != client_instance_id || !cast.branched || !cast.branch_due) continue;
+        if (cast.branched->branch != branch_guid) return false;
+        // the cast goes on from the request: what it still waits for comes sooner by as much as the request is earlier than the moment it was taken to come
+        const double made = std::max(now_, cast.trigger_at + kEarliestBranchRequest);
+        const double earlier = (made + cast.branched->answer) - *cast.branch_due;
+        spdlog::info("[abilities] the client asked for the branch of {} {:.3f} s after the trigger{}", cast.def->row.name, now_ - cast.trigger_at,
+                     earlier < 0 ? ": the cast goes on " + std::to_string(-earlier).substr(0, 5) + " s sooner" : std::string(": the cast goes on as planned"));
+        if (earlier >= 0) return true;
+        const auto move = [earlier](std::optional<double>& d) {
+            if (d) *d += earlier;
+        };
+        move(cast.branch_due);
+        move(cast.cost_due);
+        move(cast.end_due);
+        move(cast.projectile_due);
+        for (Cast::Missile& m : cast.missiles) m.due += earlier;
+        if (CastRecord* rec = record_of(cast.client_id)) {
+            rec->cost_due += earlier;
+            rec->window_end += earlier;
+        }
+        return true;
+    }
+    return false;
+}
+
 bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     advance(now);
     for (Instance& i : instances_) {
@@ -1814,6 +1902,10 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // a trigger during another's cast is taken (retail's weapon combos and channels re-trigger within a montage; no refusal is captured), up to a few
     // waiting at once: more is a client that floods
     if (casts_.size() >= kMaxCasts) return refused(Refusal::Busy);
+    // a cast that shoots again and again is not started twice at once: the charges it has left are the shots of the one that runs
+    for (const Cast& other : casts_) {
+        if (other.looped && other.def == def && (other.cost_due || other.branch_due)) return refused(Refusal::Busy);
+    }
     const content::AbilityRow& row = def->row;
 
     // the shape
@@ -1903,7 +1995,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             rows.push_back(&h);
             distinct.insert(h.hit_guid);
         }
-        if (rows.size() > 1 && distinct.size() == 1) {
+        // (an ability with one charge is no chain: its projectiles are the volley it fires, Arcane Volley's seven)
+        if (rows.size() > 1 && distinct.size() == 1 && cast.max_charges > 1) {
             const auto g = groups_.find(cast.group);
             const int left = g != groups_.end() ? g->second.charges : cast.max_charges;
             const int used = std::clamp(cast.max_charges - left, 0, static_cast<int>(rows.size()) - 1);
@@ -1950,6 +2043,27 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     for (const content::MontageRow& m : def->montages) has_montage = has_montage || !m.soft_path.empty();
     if (has_montage) cast.item_due = t + item_delay;
     cast.cost_due = t + cost_delay;
+    // A cast that ends with a branch of its montage goes on from the client's request for the branch (or from the moment it is taken to have come): the montage's jump,
+    // the cost, the hits and the montage's end are all counted from there
+    for (const BranchedCast& b : kBranchedCasts) {
+        if (row.name != b.ability || !has_montage || loop) continue;
+        cast.branched = &b;
+        cast.montage_branch = true;
+        cast.branch_position = b.position;
+        cast.item_due = t + b.item;
+        cast.branch_due = t + b.request + b.answer;
+        cast.cost_due = *cast.branch_due + b.cost;
+        cast.end_due = *cast.cost_due + b.end;
+    }
+    for (const LoopedCast& l : kLoopedCasts) {
+        if (row.name != l.ability || !has_montage || loop) continue;
+        cast.looped = &l;
+        cast.montage_branch = true;
+        cast.branch_position = l.position;
+        cast.branch_predicted = false;
+        cast.item_due = t + l.item;
+        cast.cost_due = t + l.first_shot;
+    }
     if (!loop) {
         bool direct = false, projectile = false;
         const bool aimed = !cast.target_actors.empty();
@@ -1962,7 +2076,27 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             if (h.source == "projectile" && ((cast.target && cast.self_reachable) || aimed)) projectile = true;
         }
         if (direct) cast.hit_due = *cast.cost_due + (hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0);
-        if (projectile) cast.projectile_due = *cast.cost_due + kProjectileDelay;
+        if (projectile) {
+            cast.projectile_due = *cast.cost_due + kProjectileDelay;
+            if (cast.branched) {   // a volley: each missile lands at its own time after the cost step
+                for (const content::AbilityHitRow& h : def->hits) {
+                    if (h.source != "projectile") continue;
+                    for (const MissileLanding& m : kMissileLandings) {
+                        if (row.name == m.ability && h.key == m.key) cast.missiles.push_back({*cast.cost_due + m.after_cost, h.owner_guid});
+                    }
+                }
+                if (!cast.missiles.empty()) cast.projectile_due.reset();
+            }
+            if (cast.looped) {   // every shot sends the ability's one projectile, whose hit lands kProjectileDelay after the shot's cost
+                for (const content::AbilityHitRow& h : def->hits) {
+                    if (h.source == "projectile") {
+                        cast.shot_projectile = h.owner_guid;
+                        break;
+                    }
+                }
+                cast.projectile_due.reset();
+            }
+        }
     }
     // a movement ability opens the move checker's window
     double speed = row.networking_max_speed;
@@ -2012,6 +2146,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // [R: the retail capture: Maddening +362 (item +328), Nimble +300 (+300), Mesmerizing +389 (+324), Shielding +462 (+331)]; what their overlap hits put on the
     // caster at the cost step belongs to them, and the cast's record takes the client's requests for their ticks while they live
     spawn_zones(cast, t + (zone_delay >= 0 ? zone_delay : (has_montage ? item_delay : cost_delay) + kZoneOpenDelay), zone_end >= 0 ? t + zone_end : -1.0);
+    // an ability's trigger ends the weapon swings under way: retail's server sent no hit of a swing that an ability followed within 0.45 s, and ended one that showed no item
+    if (!is_weapon_combo(row)) cancel_swings(t, name);
     casts_.push_back(std::move(cast));
     return Refusal::None;
 }
@@ -2044,6 +2180,7 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
     }
     item.montage_group = montage_group_of(def);
     item.animation_counter = ++animation_counter_;
+    cast.item = item;
     c.abilities_added.push_back(std::move(item));
     item_instance_ = cast.instance;
     last_item_at_ = t;
@@ -2052,6 +2189,60 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
     emit({std::move(c), std::nullopt, t, "the item of " + def.row.name});
 }
 // C:Y:B / C O A
+
+void AbilityPipeline::cancel_swings(double t, const std::string& by) {
+    for (size_t i = 0; i < casts_.size();) {
+        const Cast& p = casts_[i];
+        if (!is_weapon_combo(p.def->row)) {
+            ++i;
+            continue;
+        }
+        // a hit the client has asked for already is verified at its own time (a melee swing that connected); the rest of the swing is over
+        bool asked = false;
+        if (const CastRecord* rec = record_of(p.client_id)) {
+            for (const HitSlot& s : rec->slots) asked = asked || !s.due.empty();
+        }
+        if (!asked) drop_record(p.client_id);
+        if (p.item_due) {   // the swing never showed its item: its instance ends, in the update of the new ability's item [R: retail's reply to an ability that came within 50 ms of a swing]
+            AbilityEvent e;
+            e.at = t;
+            e.end_ability = p.client_id;
+            e.note = "the swing of " + p.def->row.name + " is ended: " + by + " came before its item";
+            events_.push_back(std::move(e));
+        }
+        casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+}
+
+void AbilityPipeline::step_branch(Cast& cast, double t) {
+    // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
+    if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
+    cast.item.montage_position = cast.branch_position;
+    cast.item.may_jump_to_position = true;
+    cast.item.branch_predicted = cast.branch_predicted;
+    cast.item.animation_counter = ++animation_counter_;
+    AbilityChange c;
+    c.abilities_changed.push_back(cast.item);
+    emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " moves to the end of its cast"});
+}
+
+void AbilityPipeline::step_end(Cast& cast, double t) {
+    // the montage is over: the effects the ability put on its caster itself end with it, and the item keeps its place and its targets with the montage cleared [R: retail's last update of the item]
+    AbilityChange c;
+    if (!cast.own_effects.empty()) {
+        end_loop(c, cast.def->row.guid, t);
+        recompute(c);
+    }
+    if (cast.montage_branch && item_instance_ && *item_instance_ == cast.instance) {
+        cast.item.montage_path.clear();
+        cast.item.montage_guid = 0;
+        cast.item.branch_predicted = cast.branch_predicted;
+        cast.item.animation_counter = ++animation_counter_;
+        c.abilities_changed.push_back(cast.item);
+    }
+    if (c.empty()) return;
+    emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " ends"});
+}
 
 void AbilityPipeline::step_cost(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
@@ -2062,6 +2253,12 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     for (const auto& [effect, n] : cast.effect_costs) affordable = affordable && stacks_of(effect) >= n;
     if (const auto g = groups_.find(cast.group); g != groups_.end() && cast.triggers_cooldown && g->second.charges < cast.charge_cost) affordable = false;   // a cast that waited behind another's
     if (CastRecord* rec = record_of(cast.client_id)) rec->cost_at = t;
+    if (!affordable && cast.looped && cast.shots > 0) {
+        // a later shot that cannot be paid is the branch's own trigger: the loop ends, and the missiles in flight still land
+        cast.branch_due = t + cast.looped->jump;
+        cast.end_due = *cast.branch_due + cast.looped->end;
+        return;
+    }
     if (!affordable) {
         drop_record(cast.client_id);
         // the zones the cast made go with it: one that did not open is dropped, one that did ends now
@@ -2088,6 +2285,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         ++refused_;
         cast.hit_due.reset();
         cast.projectile_due.reset();
+        cast.missiles.clear();
         cast.loop_due.reset();
         cast.own_due.reset();
         events_.push_back(std::move(e));
@@ -2125,6 +2323,20 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
             zone_owner_ = 0;
         }
     }
+    if (cast.looped) {
+        // a shot: its missile flies, and the loop goes on while a charge is left and the next shot can be paid (the branch's trigger: no charge left, or less Mana than a shot costs)
+        ++cast.shots;
+        if (cast.shot_projectile != 0) cast.missiles.push_back({t + kProjectileDelay, cast.shot_projectile});
+        bool more = true;
+        if (const auto g = groups_.find(cast.group); g == groups_.end() || g->second.charges < cast.charge_cost) more = false;
+        for (const auto& [stat, amount] : cast.stat_costs) more = more && stat_now(stat) >= amount;
+        if (more) {
+            cast.cost_due = t + cast.looped->period;
+        } else {
+            cast.branch_due = t + cast.looped->jump;
+            cast.end_due = *cast.branch_due + cast.looped->end;
+        }
+    }
     recompute(c);
     emit({std::move(c), std::nullopt, t, "the cost, cooldown and class resource of " + def.row.name});
 }
@@ -2133,7 +2345,13 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
 void AbilityPipeline::step_own(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
     AbilityChange c;
-    for (const EffectDef* e : cast.own_effects) apply_effect(c, *e, 1, std::nullopt, t, false, def.row.guid);
+    for (const EffectDef* e : cast.own_effects) {
+        // an effect the character's talents gate (the Salvo's Expeditious) starts only when its requirement holds
+        bool applies = true;
+        std::string why;
+        if (!eval_bool(e->row.requirement_expr, true, applies, why) || !applies) continue;
+        apply_effect(c, *e, 1, std::nullopt, t, false, def.row.guid);
+    }
     sync_engine_effects();
     // a held ability (the key stays down: Guard, Reflect) ends with the client's cancel
     if (def.row.hold_animation) {

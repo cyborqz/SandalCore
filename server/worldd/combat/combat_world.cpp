@@ -953,6 +953,7 @@ Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, co
     d.effective.assign(r.mods.size(), 0.0);
     n->attackers.insert(attacker);
     ++stats_.player_hits;
+    const double health_before = n->health();
     if (!r.miss()) {
         const CombatStatIds& id = data_.ids();
         for (size_t i = 0; i < r.mods.size(); ++i) {
@@ -976,6 +977,8 @@ Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, co
     if (threat <= 0 && !r.miss()) {
         for (const double e : d.effective) threat += e < 0 ? -e : 0;
     }
+    spdlog::info("[combat] player {} hit {} ({}, level {}): {}Health {:.1f} -> {:.1f}, threat {:.1f}", attacker, n->leaf, npc_actor, n->lvl, r.miss() ? "a miss, " : "", health_before, n->health(),
+                 std::max(threat, 1.0));
     if (!lethal) n->ai.notice(attacker, std::max(threat, 1.0), now);
     player_exchange(attacker, now);
     if (lethal) {

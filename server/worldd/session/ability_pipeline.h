@@ -34,6 +34,14 @@
 //                            (retail +34, +36, +32), with it for a zone's overlap hits (Nimble's Evasion arrives with the cost) and for an ability with no
 //                            montage, 340 ms after it for a projectile's hits (Jest's Glee, Pep and heal came +343 after the cost)
 //               The cost, the cooldown and the stat deltas are applied at the cost step, not at the trigger.
+//    branches   an ability whose cast ends with a branch of its montage (a cast bar: Arcane Volley) waits for the client to ask for the branch
+//               (ServerRequestBranchVerification) and goes on from the request: the montage jumps to the branch's section, the cost follows, the hits land and the
+//               montage ends (kBranchedCasts in ability_pipeline.cpp has the offsets). Without a request it goes on as if it came 2.4 s after the trigger.
+//    swings     a weapon combo's swing that another ability's trigger overtakes is over: none of its steps happens (a hit the client asked for already is still verified),
+//               and a swing that has shown no item gets ClientEndAbility, so that its late item cannot take the pawn's item from the ability.
+//    loops      an ability that shoots again and again (the Ranger's Salvo: one shot for each stored charge) takes its cost and sends its projectile at every shot, and
+//               when the charges or the mana are gone the SERVER moves the montage to the branch's section ("EndLoop"), which ends the animation; the montage's end takes the effects
+//               the ability put on its caster off (kLoopedCasts in ability_pipeline.cpp has the offsets).
 //    hits       a hit applies to the caster when its mask names Self (1) and its requirement holds: the ability's own hits (ab_ability_hit "hit"), the
 //               hits of the projectiles it fires when it has a target (the caster), the first overlap of the zones it spawns (the Initial and
 //               OnBeginOverlap hits; their ticks are the client's requests, and see "zones" below) and the Tick hits of an effect the caster has. An applied hit gives
@@ -125,6 +133,33 @@
 
 namespace aoc::worldd {
 
+/// An ability whose cast ends with a branch of its montage: the client's cast bar runs out and it asks the server to confirm (ServerRequestBranchVerification).
+/// The server answers by moving the montage to the branch's section, takes the cost, lands the hits and ends the montage, at these offsets
+/// (ability_pipeline.cpp has the table and the evidence).
+struct BranchedCast {
+    const char* ability;
+    int64_t     branch;     // the animation branch record the client names in its request
+    float       position;   // where the branch's section starts in the montage, seconds
+    double      item;       // the ability item comes this long after the trigger
+    double      request;    // the client's request comes this long after the trigger; when it is not heard the cast goes on as if it came then
+    double      answer;     // the montage jumps this long after the request
+    double      cost;       // the cost step comes this long after the jump
+    double      end;        // the montage ends this long after the cost step
+};
+
+/// An ability whose cast shoots again and again until its charges or its mana are gone, and then ends with a branch of its montage that the SERVER decides (the Ranger's Salvo: "fire all
+/// stored charges in rapid succession"). Each shot is a cost step (a charge, the mana) that sends the ability's projectile; after the last one the montage moves to the branch's
+/// section and ends (ability_pipeline.cpp has the table and the evidence).
+struct LoopedCast {
+    const char* ability;
+    float       position;     // where the branch's section starts in the montage, seconds
+    double      item;         // the ability item comes this long after the trigger
+    double      first_shot;   // the first shot's cost comes this long after the trigger
+    double      period;       // and each next one this long after the one before
+    double      jump;         // after the last shot the montage moves to the branch's section this long later
+    double      end;          // and ends this long after that
+};
+
 class AbilityPipeline {
 public:
     // ---- numbers that are not content.db's, each with its evidence (header) --------------------------------------------------------------
@@ -165,6 +200,9 @@ public:
     static constexpr double kHeldEndDelay = 0.059;
     /// The client's ServerEndAbility is answered this long after [R: 259 ms].
     static constexpr double kEndDelay = 0.259;
+    /// A branch request counts as made this long after the trigger at the soonest: a forged request cannot bring a cast forward past the shortest run of a cast bar
+    /// [modelled: the recorded cast bar ran 1.289 s at a cast speed of 0.888].
+    static constexpr double kEarliestBranchRequest = 0.6;
     /// How many effects deep an effect's Apply hit may apply further effects.
     static constexpr int kMaxApplyDepth = 4;
     /// A movement ability's window after its trigger and the factor on its measured or data speed.
@@ -242,6 +280,11 @@ public:
     Refusal trigger(int64_t ability, int32_t client_instance_id, double now, const TriggerInfo& info = {});
     /// ServerNotifyHeldAbilityCancelled: a pipeline instance's cast goes on (retail's reply was unchanged); true when the instance is one of ours.
     bool cancel(int32_t client_instance_id, double now);
+
+    /// ServerRequestBranchVerification: the client's cast bar ended and it asks the server to confirm the branch it took. A cast of an ability that waits for
+    /// its branch (kBranchedCasts) goes on from this moment: the montage's jump, the cost, the hits and the montage's end follow at the offsets the retail
+    /// capture shows. True when the request belongs to such a cast that was still waiting.
+    bool branch_request(int32_t client_instance_id, int64_t branch_guid, double now);
 
     /// ServerEndAbility: the client ends the instance with this ServerInstanceId (an ability of ours it started): kEndDelay later the item's montage is
     /// cleared and ClientEndAbility(its ClientInstanceId) is sent [R: Cleric_SoothingGlow, the retail capture: +259 ms]. False for an instance that is none of ours
@@ -422,6 +465,22 @@ private:
         const abilities::AbilityDef*          def = nullptr;
         double                                trigger_at = 0;
         std::optional<double>                 item_due, cost_due, hit_due, projectile_due, loop_due, own_due;
+        /// A cast that waits for the client's branch request (kBranchedCasts): when its montage jumps to the branch's section and ends, and the missiles of a volley
+        /// each with the time it lands (each its own step); the item as the cast made it (the jump and the end are changes of that item).
+        const BranchedCast*                   branched = nullptr;
+        const LoopedCast*                     looped = nullptr;           // a cast that shoots until its charges or its mana are gone (kLoopedCasts)
+        int                                   shots = 0;                  // the shots it has taken
+        int64_t                               shot_projectile = 0;        // the projectile record each shot sends (0: none: it is cast at the air)
+        bool                                  montage_branch = false;     // the montage moves to a section when the cast ends (the changes of `item` below)
+        float                                 branch_position = 0;        // where that section starts
+        bool                                  branch_predicted = true;    // the client took the branch itself (its cast bar); false when the server decided it
+        std::optional<double>                 branch_due, end_due;
+        struct Missile {
+            double  due = 0;
+            int64_t projectile = 0;   // the projectile record that lands
+        };
+        std::vector<Missile>                  missiles;
+        bootstrap::ActiveAbilityItem          item;
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires
@@ -518,6 +577,12 @@ private:
     void   step_item(Cast& cast, double t);
     void   step_cost(Cast& cast, double t);
     void   step_hits(Cast& cast, double t, const char* which);
+    /// A weapon combo's swing that another ability's trigger overtakes is over (the client cancels it with its own press): none of its steps happens, and one whose item has not shown yet is
+    /// ended with ClientEndAbility. Without this the swing's item, due later than the ability's, took the pawn's item from the ability: the ability's montage never got its jump or its end.
+    void   cancel_swings(double t, const std::string& by);
+    /// A branched cast's montage: it jumps to the section the branch names, and later it ends (the item keeps its place with the montage cleared).
+    void   step_branch(Cast& cast, double t);
+    void   step_end(Cast& cast, double t);
     void   finish_cast_if_done(size_t index);
     std::string montage_group_of(const abilities::AbilityDef& def) const;
 

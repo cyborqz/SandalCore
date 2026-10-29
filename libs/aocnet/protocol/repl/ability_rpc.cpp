@@ -102,6 +102,15 @@ std::optional<HeldAbilityCancelled> parse_held_ability_cancelled(const RpcCall& 
     return c;
 }
 
+std::optional<BranchVerification> parse_branch_verification(const RpcCall& call) {
+    if (!is_call(call, "ServerRequestBranchVerification")) return std::nullopt;
+    BranchVerification b;
+    b.client_instance_id = static_cast<int32_t>(int_param(call, "ClientInstanceId"));
+    b.branch_guid = int_param(call, "Request.Branch.BranchGuid");
+    b.montage_index = static_cast<int32_t>(int_param(call, "Request.Branch.MontageIndex"));
+    return b;
+}
+
 std::optional<int32_t> parse_end_ability(const RpcCall& call) {
     if (!is_call(call, "ServerEndAbility")) return std::nullopt;
     return static_cast<int32_t>(int_param(call, "ServerInstanceId"));

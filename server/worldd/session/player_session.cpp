@@ -1207,6 +1207,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
     } else if (!rpc.on_actor && role == Role::Pawn && rpc.object == pb_.setup().guids.ability) {
         if (name_of_rpc == "ServerTriggerAbility") return on_ability_trigger(conn, rpc, bunch, now);
         if (name_of_rpc == "ServerNotifyHeldAbilityCancelled") return on_ability_cancel(conn, rpc, now);
+        if (name_of_rpc == "ServerRequestBranchVerification") return on_branch_request(conn, rpc, now);
         if (name_of_rpc == "RequestHitVerification_Server") return on_hit_request(conn, rpc, now);
         if (name_of_rpc == "ServerEndAbility") return on_ability_end(conn, rpc, now);
     } else if (!rpc.on_actor && role == Role::PlayerController && rpc.object == pb_.setup().guids.ftue) {
@@ -1760,6 +1761,26 @@ void PlayerSession::on_ability_cancel(Connection& conn, const repl::ClientRpc& r
     if (!cancel) return;
     if (crate_drop_due_ && cancel->client_instance_id == crate_drop_instance_) crate_drop_due_.reset();   // the cast of Drop Crate was cancelled before its notify: the crate stays
     if (!runtime->cancel(cancel->client_instance_id, ability_seconds(now)) && pipeline_) pipeline_->cancel(cancel->client_instance_id, ability_seconds(now));
+    take_ability_events();
+    flush_abilities(conn);
+}
+
+void PlayerSession::on_branch_request(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    AbilityRuntime* runtime = ability_runtime(now);
+    if (!runtime || !pipeline_) return;
+    if (!within_budget(cancel_budget_, "ServerRequestBranchVerification", now)) {
+        ++cancels_dropped_;
+        return;
+    }
+    const auto request = repl::parse_branch_verification(rpc.call);
+    if (!request) return;
+    // the client's cast bar ended: a cast that waits for its branch goes on from here (the montage's jump, the cost and the hits follow)
+    if (!pipeline_->branch_request(request->client_instance_id, request->branch_guid, ability_seconds(now))) {
+        if (unhandled_logged_.insert("ServerRequestBranchVerification").second) {
+            spdlog::info("[session] {}: the client's ServerRequestBranchVerification belongs to no cast worldd waits for (it answers it for the casts it knows: Arcane Volley; told once)", name());
+        }
+        return;
+    }
     take_ability_events();
     flush_abilities(conn);
 }

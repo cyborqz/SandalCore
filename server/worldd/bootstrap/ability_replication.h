@@ -79,6 +79,7 @@ struct ActiveAbilityItem {
     std::string montage_group = "DefaultGroup";   // MontageGroup: the Rest's and the Dodge's are "DefaultGroup", the Sprint's "Sprint"
     float       montage_position = 0;
     bool        may_jump_to_position = false;
+    bool        branch_predicted = true;   // bBranchPredictedOnAutonomous: the client took the branch itself (its cast bar); false for a branch the server decided (a loop's end)
     int32_t     animation_counter = 0;
     uint16_t    mesh_yaw = 0;             // MeshYaw: a 16-bit angle (65536 = 360 degrees); the Dodge's direction when it is not the montage's
 };

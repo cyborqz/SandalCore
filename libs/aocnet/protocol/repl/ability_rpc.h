@@ -75,6 +75,13 @@ struct HeldAbilityCancelled {
     int32_t cancel_section_index = -1;
 };
 
+/// ServerRequestBranchVerification: the client asks the server to confirm a branch of an ability's montage it has taken (a cast bar that ended).
+struct BranchVerification {
+    int32_t client_instance_id = 0;   // the cast it belongs to
+    int64_t branch_guid = 0;          // the animation branch record
+    int32_t montage_index = 0;
+};
+
 /// ServerTriggerAbility from a decoded call; nullopt for another RPC or an undecoded one.
 std::optional<TriggerAbility> parse_trigger_ability(const RpcCall& call);
 
@@ -90,6 +97,9 @@ std::optional<TriggerPrefix> read_trigger_prefix(const uint8_t* data, size_t dat
 
 /// ServerNotifyHeldAbilityCancelled from a decoded call; nullopt for another RPC or an undecoded one.
 std::optional<HeldAbilityCancelled> parse_held_ability_cancelled(const RpcCall& call);
+
+/// ServerRequestBranchVerification from a decoded call; nullopt for another RPC or an undecoded one.
+std::optional<BranchVerification> parse_branch_verification(const RpcCall& call);
 
 /// ServerEndAbility(ServerInstanceId): the client ends the instance the server gave it (the ReplicatedActiveAbilities item's ServerInstanceId);
 /// nullopt for another RPC or an undecoded one.
