@@ -638,7 +638,7 @@ static void test_quest_offer_accept_abandon() {
     const auto q1 = quest_blocks_since(h, seen);
     const auto dlg = pc_blocks_since(h, seen);
     CHECK(h.s->quest_log().find(kCorruptedMemories) != nullptr && h.s->quests_taken() == 2, "Accept takes the quest");
-    CHECK(q1.size() == 1 && q1[0].fields.size() == 2, "one quest component block with two arrays: the cache and the variables (no markers in slice 1)");
+    CHECK(q1.size() == 1 && q1[0].fields.size() == 3, "one quest component block with three arrays: the cache, the map pin of the first objective (a place to go to) and the variables");
     CHECK(!h.s->talk().open() && has_handle(dlg, kQueue) && !has_handle(dlg, kExhaust), "the talk ends, the update carries the emptied queue (ExhaustBehavior is not sent again: its value did not change since the first answer)");
     for (const auto& b : dlg) client.apply(b.state);
     CHECK(client.lines.empty() && client.shown_node == 0 && client.source == emit::FIntrepidNetworkGUID{}, "K3: the talk is cleared on the client");

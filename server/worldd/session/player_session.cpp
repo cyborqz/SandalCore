@@ -29,6 +29,7 @@
 #include "vendor/node_tax.h"
 #include "vendor/sell_rules.h"
 #include "quest/quest_wire.h"
+#include "quest/registry_points.h"
 #include "world/zoi_surface.h"
 
 #include <spdlog/spdlog.h>
@@ -4794,11 +4795,17 @@ void PlayerSession::init_quests(PlayerWorld& world, const svc::Character& charac
     quests_on_ = true;
     std::string err;
     repl::FastArrays* arrays = pb_.quest_arrays();
-    if (!arrays || !quest::sync(*arrays, quest_log_, &err)) {
+    const spawns::AreaReport* area = world.area_report();
+    quest::RegistryPoints points(world.registry(), area ? area->data.get() : nullptr);   // (the map pins of the objectives that are active now: the client draws them from the join)
+    quest::MarkerContext markers;
+    markers.book = book;
+    markers.points = &points;
+    if (!arrays || !quest::sync(*arrays, quest_log_, &err, &markers)) {
         spdlog::warn("[session] {}: the quest log does not fit the quest component, so quests are off for this character: {}", pb_.setup().name, err);
         quests_on_ = false;
         return;
     }
+    log_quest_markers(markers);
     quest_worker_->watch(character_id_);
     spdlog::info("[session] {}: quest log: {} quest(s) taken, {} finished, {} variable(s){}", pb_.setup().name, quest_log_.instances().size(), quest_log_.completed().size(),
                  quest_log_.variables().size(), repaired ? " (" + std::to_string(repaired) + " repaired or dropped: the log is saved again)" : "");
@@ -4806,12 +4813,23 @@ void PlayerSession::init_quests(PlayerWorld& world, const svc::Character& charac
 
 void PlayerSession::quest_sync(Connection& conn, const char* why) {
     quests_touched_ = true;
+    givers_dirty_ = true;   // (what the NPCs around offer depends on the log)
     repl::FastArrays* arrays = pb_.quest_arrays();
     std::string err;
-    if (!arrays || !quest::sync(*arrays, quest_log_, &err)) {
+    const quest::QuestBook* qb = world_ ? world_->quests() : nullptr;
+    std::optional<quest::RegistryPoints> points;
+    quest::MarkerContext markers;
+    if (qb && registry_) {   // the map pins of the objectives that became active
+        const spawns::AreaReport* area = world_ ? world_->area_report() : nullptr;
+        points.emplace(*registry_, area ? area->data.get() : nullptr);
+        markers.book = qb;
+        markers.points = &*points;
+    }
+    if (!arrays || !quest::sync(*arrays, quest_log_, &err, markers.points ? &markers : nullptr)) {
         spdlog::warn("[session] {}: the quest component is not brought in line with the log ({}): {}", name(), why, err);
         return;
     }
+    log_quest_markers(markers);
     queue("QuestConsumerComponent", [](bootstrap::PlayerBootstrap& pb) { return pb.quest_update(); }, conn, /*must_build=*/false);
 }
 
@@ -6921,5 +6939,6 @@ void PlayerSession::on_gm_node_rpc(const repl::ClientRpc& rpc, Clock::time_point
 #include "warehouse/player_warehouse.inc"
 #include "respawn/session_embersprings.inc"
 #include "quest/session_quests2.inc"
+#include "quest/session_givers.inc"
 
 }}  // namespace aoc::worldd

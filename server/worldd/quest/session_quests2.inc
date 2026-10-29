@@ -310,6 +310,7 @@ void PlayerSession::tick_quests(Connection& conn, Clock::time_point now) {
     }
     if (now - quest_checked_ < kQuestTick) return;
     quest_checked_ = now;
+    tick_quest_givers(conn, now);   // (also for a character with an empty log: the NPCs around it have quests to give)
     if (quest_log_.instances().empty()) return;
     quest_engine(conn, now, "a quest tick", [&](quest::Engine& eng) {
         eng.settle();   // the items carried (Collect), the rules (Custom), the objectives that wake up

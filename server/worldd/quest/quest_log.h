@@ -72,6 +72,9 @@ struct ObjectiveState {
     bool    active = false, awake = false, hidden = false, completed = false, succeeded = false, failed = false;
     int32_t count = 0;
     double  start_time = 0;
+    /// Map markers: the replication id of the objective's item in the quest component's marker array (-1: the client has none).  The client never redraws a drawn objective, so an item
+    /// is made once, when the objective is active with places to mark, and never changed or taken out (not saved: the next login makes the items of the active objectives again).
+    int32_t marker_id = -1;
 };
 
 struct QuestInstance {

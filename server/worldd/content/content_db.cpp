@@ -3128,6 +3128,29 @@ bool parse_quest_detail(const std::string& text, QuestRow& q) {
     if (!json_actions(j, "ok", q.on_success) || !json_actions(j, "fail", q.on_fail) || !json_actions(j, "tick", q.on_tick)) return false;
     q.timeout = json_num(j, "to");
     q.succeed_on_timeout = json_flag(j, "so");
+    q.giver_registration = json_int(j, "gr");
+    return true;
+}
+
+/// A list of places ([{"x", "y", "z", "r", "done", "dt", "hid", "id"}]) as a GoTo objective and a marker override hold them.
+bool json_locations(const nlohmann::json& o, const char* key, std::vector<QuestLocation>& out) {
+    out.clear();
+    const auto it = o.find(key);
+    if (it == o.end()) return true;
+    if (!it->is_array()) return false;
+    for (const auto& l : *it) {
+        if (!l.is_object()) return false;
+        QuestLocation q;
+        q.x = json_num(l, "x");
+        q.y = json_num(l, "y");
+        q.z = json_num(l, "z");
+        q.radius = json_num(l, "r");
+        q.completes = json_flag(l, "done");
+        q.hidden = json_flag(l, "hid");
+        q.display = json_str(l, "dt");
+        q.id = json_int(l, "id");
+        out.push_back(q);
+    }
     return true;
 }
 
@@ -3158,6 +3181,26 @@ bool parse_objective_detail(const std::string& text, QuestObjectiveRow& o) {
             o.item_rewards.push_back(std::move(r));
         }
     }
+    if (const auto mk = j.find("mk"); mk != j.end()) {   // map markers (contentc version 30)
+        if (!mk->is_object()) return false;
+        if (const auto ov = mk->find("ov"); ov != mk->end()) {
+            if (!ov->is_object() || !json_locations(*ov, "l", o.override_locations)) return false;
+            o.override_markers = true;
+        }
+        if (!json_ints(*mk, "pt", o.trackers)) return false;
+        o.no_dynamic_markers = json_flag(*mk, "nd");
+        if (const auto cl = mk->find("cl"); cl != mk->end()) {
+            if (!cl->is_object()) return false;
+            o.cluster.epsilon = json_num(*cl, "e");
+            o.cluster.min_radius = json_num(*cl, "r0");
+            o.cluster.max_radius = json_num(*cl, "r1");
+            o.cluster.merge = json_num(*cl, "m");
+            o.cluster.min_points = static_cast<int>(json_int(*cl, "n"));
+            o.cluster.max_clusters = static_cast<int>(json_int(*cl, "c"));
+            o.cluster.default_type = json_str(*cl, "d");
+            o.cluster.weighted = json_flag(*cl, "w");
+        }
+    }
     const auto d = j.find("d");
     if (d == j.end()) return true;
     if (!d->is_object()) return false;
@@ -3172,22 +3215,7 @@ bool parse_objective_detail(const std::string& text, QuestObjectiveRow& o) {
     if (!json_ints(*d, "comp", o.components) || !json_ints(*d, "actor", o.actors)) return false;
     o.collect_type = json_str(*d, "cty");
     if (!json_ints(*d, "items", o.items) || !json_strings(*d, "tags", o.tags) || !json_strings(*d, "rar", o.rarities)) return false;
-    if (const auto locs = d->find("loc"); locs != d->end()) {
-        if (!locs->is_array()) return false;
-        for (const auto& l : *locs) {
-            if (!l.is_object()) return false;
-            QuestLocation q;
-            q.x = json_num(l, "x");
-            q.y = json_num(l, "y");
-            q.z = json_num(l, "z");
-            q.radius = json_num(l, "r");
-            q.completes = json_flag(l, "done");
-            q.hidden = json_flag(l, "hid");
-            q.display = json_str(l, "dt");
-            q.id = json_int(l, "id");
-            o.locations.push_back(q);
-        }
-    }
+    if (!json_locations(*d, "loc", o.locations)) return false;
     o.area_map = json_flag(*d, "area");
     o.crate = json_flag(*d, "crate");
     if (!json_ints(*d, "ct", o.crate_types) || !json_ints(*d, "ci", o.crate_items)) return false;

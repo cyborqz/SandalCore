@@ -121,7 +121,57 @@ std::optional<ElementState> variables_item(const repl::FastArrayLayout& layout, 
     return es;
 }
 
-bool sync(repl::FastArrays& arrays, QuestLog& log, std::string* error) {
+std::optional<ElementState> marker_item(const repl::FastArrayLayout& layout, int64_t objective_record, const Guid128& objective_instance, const std::vector<MarkerLocation>& locations) {
+    const Layout top(layout.element, layout.table);
+    ElementState es;
+    if (!top.zeroed(es)) return std::nullopt;
+    // ContextGuid stays zero: it names the quest instance of a quest shared by many characters (an event); a character's own quest has none
+    bool ok = top.set(es, "Items.ObjectiveId", Value::i64(objective_record));
+    ok = top.set_guid(es, "Items.RequesterContextGuid", objective_instance) && ok;
+    const auto places = top.sub("Items.Locations");
+    if (!places) return std::nullopt;
+    repl::ArrayValue list;
+    for (const MarkerLocation& l : locations) {
+        ElementState le;
+        if (!places->zeroed(le)) return std::nullopt;
+        ok = places->set(le, "Locations.DisplayType", Value::u64(static_cast<uint64_t>(l.display))) && ok;
+        ok = places->set(le, "Locations.Center", Value(repl::quantize_vector(1, l.x, l.y, l.z))) && ok;   // whole centimetres
+        ok = places->set(le, "Locations.Radius", Value::f32(static_cast<float>(l.radius))) && ok;
+        ok = places->set(le, "Locations.bCompletesGoToObjective", Value::boolean(l.completes)) && ok;
+        ok = places->set(le, "Locations.QuestLocationId", Value::i64(l.id)) && ok;
+        list.elements.push_back(std::move(le));   // (MapMarkerOverride stays unset)
+    }
+    es.values[top.handle("Items.Locations")] = Value(std::move(list));
+    if (!ok) return std::nullopt;
+    return es;
+}
+
+uint8_t giver_flavor(const std::string& data_flavor) {
+    // EQuestFlavor: Quest, Commission, TreasureMap, Event, Collection, Module, Destiny, None, HiddenEvent
+    static const char* const kNames[] = {"Quest", "Commission", "TreasureMap", "Event", "Collection", "Module", "Destiny", "None", "HiddenEvent"};
+    for (uint8_t i = 0; i < 9; ++i) {
+        if (data_flavor == kNames[i]) return i;
+    }
+    return 0;
+}
+
+std::optional<ElementState> giver_item(const repl::FastArrayLayout& layout, int64_t instance, uint8_t flavor, int64_t registration) {
+    const Layout top(layout.element, layout.table);
+    ElementState es;
+    if (!top.zeroed(es)) return std::nullopt;
+    // the giver is the NPC itself (its id is also the map's key); every id carries its record type, the zero registration too; the names stay None
+    bool ok = top.set(es, "Items.Value.QuestGiverId.Guid", Value::i64(instance));
+    ok = top.set(es, "Items.Value.QuestGiverId.TypeId", Value::i64(kPopulationInstanceTypeId)) && ok;
+    ok = top.set(es, "Items.Value.QuestFlavor", Value::u64(flavor)) && ok;
+    ok = top.set(es, "Items.Value.MapRegistrationId.Guid", Value::i64(registration)) && ok;
+    ok = top.set(es, "Items.Value.MapRegistrationId.TypeId", Value::i64(kMapRegistrationTypeId)) && ok;
+    ok = top.set(es, "Items.Key.Guid", Value::i64(instance)) && ok;
+    ok = top.set(es, "Items.Key.TypeId", Value::i64(kPopulationInstanceTypeId)) && ok;
+    if (!ok) return std::nullopt;
+    return es;
+}
+
+bool sync(repl::FastArrays& arrays, QuestLog& log, std::string* error, MarkerContext* markers) {
     const auto fail = [&](const char* why) {
         if (error) *error = why;
         return false;
@@ -155,6 +205,30 @@ bool sync(repl::FastArrays& arrays, QuestLog& log, std::string* error) {
             return fail("the quest variables refused a changed item");
         }
         q.wire_dirty = false;
+    }
+    // the map pins: an active objective with places to mark and no item yet gets one, in the update that makes it active (the client matches the item to the objective by their ids)
+    // (a pin that cannot be made is counted and left out: the quests do not depend on it)
+    if (markers && markers->book && markers->points) {
+        repl::FastArrayState* marks = arrays.get(*cls, "ObjectiveMarkerCache");
+        for (QuestInstance& q : log.instances_for_wire()) {
+            if (q.status != Status::Active) continue;
+            const content::QuestRow* def = markers->book->quest(q.record);
+            if (!def) continue;
+            for (size_t i = 0; i < q.objectives.size() && i < def->objectives.size(); ++i) {
+                ObjectiveState& o = q.objectives[i];
+                if (!o.active || o.completed || o.failed || o.marker_id != repl::kIndexNone) continue;
+                const std::vector<MarkerLocation> places = compute_locations(def->objectives[i], *markers->points);
+                if (places.empty()) continue;
+                const auto item = marks ? marker_item(marks->layout(), o.record, o.guid, places) : std::nullopt;
+                const auto id = item ? marks->add(*item) : std::nullopt;
+                if (!id) {
+                    ++markers->refused;
+                    continue;
+                }
+                o.marker_id = *id;
+                markers->made.push_back({o.record, q.record, places.size(), places.front().x, places.front().y, places.front().radius, places.front().display == MarkerLocation::Display::Area});
+            }
+        }
     }
     return true;
 }

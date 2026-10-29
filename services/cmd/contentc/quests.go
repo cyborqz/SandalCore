@@ -177,6 +177,7 @@ type questDetailJSON struct {
 	OnTick    []startActionJSON `json:"tick,omitempty"`
 	Timeout   float64           `json:"to,omitempty"`
 	TimeoutOK int               `json:"so,omitempty"`
+	Giver     int64             `json:"gr,omitempty"` // map markers (version 30): the map registration the NPC that offers the quest shows while the quest is on offer (QuestGiverMapRegistrationId)
 }
 
 // objectiveActionsJSON are the four action lists of an objective.
@@ -197,6 +198,111 @@ type objectiveDetailJSON struct {
 	Actions      *objectiveActionsJSON `json:"on,omitempty"`
 	QuestItems   []map[string]any      `json:"qi,omitempty"`
 	Data         map[string]any        `json:"d,omitempty"`
+	Markers      *markerJSON           `json:"mk,omitempty"`
+}
+
+// markerJSON is what the map pins of an objective need besides the data of its kind (version 30; see objectiveMarkers).
+type markerJSON struct {
+	Override  *overrideJSON  `json:"ov,omitempty"` // the record's own list of places: present when the record switches its base markers off (an empty list: no pin)
+	Trackers  []int64        `json:"pt,omitempty"` // the population instances the objective tracks (Interact, Collect, TurnIn, EventNotification)
+	NoDynamic int            `json:"nd,omitempty"` // the record switches the markers made from the population off (Dialogue, Kill)
+	Cluster   map[string]any `json:"cl,omitempty"` // the clustering of the creatures' places (Kill), only when it is not the default
+}
+
+type overrideJSON struct {
+	Locs []map[string]any `json:"l"`
+}
+
+// defaultCluster is the clustering every objective record has but 19 of 10,762 (ObjectiveTrackingClusteringParameters): objectiveMarkers writes the parameters only when they differ.
+var defaultCluster = map[string]any{"e": 20000.0, "r0": 5000.0, "r1": 500000.0, "n": int64(2), "m": 6000.0, "c": int64(50), "d": "SpecificLocations", "w": int64(1)}
+
+// markerLocations reads a list of FObjectiveIndicatorCluster (the places of a marker) into the form worldd reads: x, y, z, r, done, dt, hid, id.
+func markerLocations(v designdb.Value) []map[string]any {
+	out := []map[string]any{}
+	ml, _ := v.([]designdb.Value)
+	for _, e := range ml {
+		s, ok := e.(designdb.Struct)
+		if !ok {
+			continue
+		}
+		c := structOf(s["Center"])
+		m := map[string]any{"x": floatOf(c["X"]), "y": floatOf(c["Y"]), "z": floatOf(c["Z"]), "r": floatOf(s["Radius"])}
+		if boolOf(s["bCompletesGoToObjective"]) {
+			m["done"] = 1
+		}
+		if dt := enumValue(strOf(s["DisplayType"])); dt != "" && dt != "None" {
+			m["dt"] = dt
+			if dt == "Hidden" {
+				m["hid"] = 1
+			}
+		}
+		if id := intOf(s["QuestLocationId"]); id != 0 {
+			m["id"] = id
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// objectiveMarkers reads what the client's map pins of an objective come from, besides the places of a GoTo objective (version 30).  The client draws a pin for every active
+// objective that has a place; the places are the record's own list when the record overrides its base markers, else they come from the kind: the places of a GoTo record,
+// the people of a Dialogue / TurnIn record, the tracked instances of an Interact / Collect / TurnIn / EventNotification record, the creatures' spawn points of a Kill record.
+func objectiveMarkers(f designdb.Struct, typ string) *markerJSON {
+	m := &markerJSON{}
+	if ov := structOf(f["OverrideObjectiveMarkerData"]); boolOf(ov["bOverrideBaseMarkerBehavior"]) {
+		m.Override = &overrideJSON{Locs: markerLocations(structOf(ov["OverrideMapMarkerData"])["Locations"])}
+	}
+	switch typ {
+	case "Interact":
+		m.Trackers = idsOf(structOf(f["InteractData"])["PopInstanceTrackers"])
+	case "Collect":
+		m.Trackers = idsOf(structOf(f["CollectData"])["PopInstanceTrackers"])
+	case "TurnIn":
+		m.Trackers = idsOf(structOf(f["TurnInData"])["PopInstanceTrackers"])
+	case "EventNotification":
+		m.Trackers = idsOf(structOf(f["NotificationData"])["PopInstanceTrackers"])
+	case "Dialogue":
+		if boolOf(structOf(f["DialogueData"])["bDisableDynamicMarkers"]) {
+			m.NoDynamic = 1
+		}
+	case "Kill":
+		if boolOf(structOf(f["KillObjectiveData"])["bDisableDynamicMarkers"]) {
+			m.NoDynamic = 1
+		}
+		c := structOf(f["ObjectiveTrackingClusteringParameters"])
+		if len(c) > 0 {
+			cl := map[string]any{
+				"e":  floatOf(c["EpsilonBetweenNeighbors"]),
+				"r0": floatOf(c["MinRadius"]),
+				"r1": floatOf(c["MaxRadius"]),
+				"n":  intOf(c["MinPointsPerCluster"]),
+				"m":  floatOf(c["MergeDistance"]),
+				"c":  intOf(c["MaxClustersOrPoints"]),
+				"d":  enumValue(strOf(c["DefaultMarkerType"])),
+				"w":  b2i64(boolOf(c["bUseWeightedCenter"])),
+			}
+			same := true
+			for k, v := range defaultCluster {
+				if cl[k] != v {
+					same = false
+				}
+			}
+			if !same {
+				m.Cluster = cl
+			}
+		}
+	}
+	if m.Override == nil && len(m.Trackers) == 0 && m.NoDynamic == 0 && m.Cluster == nil {
+		return nil
+	}
+	return m
+}
+
+func b2i64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // sourceJSON is the DialogueSources list of a Dialogue or TurnIn objective.
@@ -417,30 +523,7 @@ func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
 		}
 	case "GoTo":
 		g := structOf(f["GoToData"])
-		var locs []map[string]any
-		ml, _ := structOf(g["MapMarkerData"])["Locations"].([]designdb.Value)
-		for _, e := range ml {
-			s, ok := e.(designdb.Struct)
-			if !ok {
-				continue
-			}
-			c := structOf(s["Center"])
-			m := map[string]any{"x": floatOf(c["X"]), "y": floatOf(c["Y"]), "z": floatOf(c["Z"]), "r": floatOf(s["Radius"])}
-			if boolOf(s["bCompletesGoToObjective"]) {
-				m["done"] = 1
-			}
-			if dt := enumValue(strOf(s["DisplayType"])); dt != "" && dt != "None" {
-				m["dt"] = dt
-				if dt == "Hidden" {
-					m["hid"] = 1
-				}
-			}
-			if id := intOf(s["QuestLocationId"]); id != 0 {
-				m["id"] = id
-			}
-			locs = append(locs, m)
-		}
-		if len(locs) > 0 {
+		if locs := markerLocations(structOf(g["MapMarkerData"])["Locations"]); len(locs) > 0 {
 			data["loc"] = locs
 		}
 		if boolOf(g["bUseAreaMap"]) {
@@ -502,6 +585,7 @@ func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
 	if len(data) > 0 {
 		d.Data = data
 	}
+	d.Markers = objectiveMarkers(f, typ)
 	b, err := json.Marshal(d)
 	return string(b), err
 }
@@ -544,6 +628,7 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 		if boolOf(r.Fields["bSucceedOnTimeout"]) {
 			qd.TimeoutOK = 1
 		}
+		qd.Giver = idGuid(r.Fields["QuestGiverMapRegistrationId"])
 		detail, err := json.Marshal(qd)
 		if err != nil {
 			return err

@@ -1072,6 +1072,18 @@ struct QuestObjectiveRow {
     std::vector<std::string> tags;         // ... or tags
     std::vector<std::string> rarities;     // ... and rarities
     std::vector<QuestLocation> locations;  // GoTo
+    // Map markers (contentc version 30): what the client's map pins of the objective come from besides `locations`.
+    bool        override_markers = false;  // the record switches its base markers off: `override_locations` are its pins (an empty list: no pin)
+    std::vector<QuestLocation> override_locations;
+    std::vector<int64_t> trackers;         // Interact / Collect / TurnIn / EventNotification: the population instances the objective tracks
+    bool        no_dynamic_markers = false;   // the record switches the markers made from the population off (Dialogue, Kill)
+    /// The clustering of the creatures' places of a Kill objective (the record's, the same in all but 19 of the data's 10,762 objectives).
+    struct Cluster {
+        double      epsilon = 20000, min_radius = 5000, max_radius = 500000, merge = 6000;
+        int         min_points = 2, max_clusters = 50;
+        std::string default_type = "SpecificLocations";
+        bool        weighted = true;
+    } cluster;
     bool        area_map = false;
     bool        crate = false;             // TurnIn: crates put into a construction project
     std::vector<int64_t> crate_types, crate_items;
@@ -1088,6 +1100,7 @@ struct QuestRow {
     std::string name, flavor, locality;
     int         level = 0;
     bool        can_abandon = true, repeatable = false, disabled = false, default_activate = true;
+    int64_t     giver_registration = 0;          // map markers (contentc version 30): the map registration the NPC that offers the quest shows while the quest is on offer
     DialogueRequirement            activation;
     std::vector<QuestStartAction>  start_actions;
     std::vector<int64_t>           rewards;      // the reward tables

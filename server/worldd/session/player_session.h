@@ -271,6 +271,7 @@
 #include "quest/quest_log.h"
 #include "respawn/embersprings.h"
 #include "quest/quest_service.h"
+#include "quest/quest_wire.h"
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/node_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
@@ -964,6 +965,12 @@ private:
     void quest_shrine(Connection& conn, int64_t place, Clock::time_point now);
     /// Once a second: the places (GoTo), the items carried (Collect), the rules (Custom); and the rewards that waited for room.
     void tick_quests(Connection& conn, Clock::time_point now);
+    // ---- quests, map markers (quest/session_givers.inc) ------------------------------------------------------------------------------------------------
+    /// Tells the client which NPCs around the character have a quest it can take (the quest component's QuestGiverInfos): the client puts the quest-available mark on them and on the
+    /// map.  Looks again when the log changed, else every few seconds.
+    void tick_quest_givers(Connection& conn, Clock::time_point now);
+    /// The map markers sync() made items for, into the log.
+    void log_quest_markers(const quest::MarkerContext& markers);
     /// A quest-bound crate a reward gives (1100 and 1101 hand one out) is CARRIED, not stored: this is the ONE place that puts it in the character's hands.  False: it was not placed here
     /// (this build keeps the crate in the bag like any item; the construction crates' carry code takes it over).
     bool carry_quest_crate(Connection& conn, const combat::RolledItem& crate, Clock::time_point now);
@@ -1622,6 +1629,18 @@ private:
         int32_t count = 0;
     };
     std::deque<CrateEvent> quest_crate_events_;
+    // quests, map markers: the quest givers the client was told of (by the NPC's population instance), and when they were last looked at
+    struct GiverEntry {
+        int32_t id = -1;                                    // the item's replication id in the quest giver array
+        int64_t registration = 0;                           // the map registration it shows (0: none)
+        uint8_t flavor = 7;                                 // EQuestFlavor (7: none)
+        int64_t asset = 0;                                  // the NPC's population asset (its offers when the instance has none of its own)
+        std::string name;                                   // the NPC's name, for the log
+    };
+    std::map<int64_t, GiverEntry> givers_;
+    bool              givers_dirty_ = true;                 // the log changed since the last look
+    Clock::time_point givers_checked_{};
+    bool              givers_told_ = false;                 // the "too many givers" warning was written
     Clock::time_point last_save_{};
     bool save_clock_started_ = false;
     bool finished_ = false;
