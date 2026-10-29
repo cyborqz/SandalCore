@@ -40,7 +40,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
-- Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot (first iteration). Next: the crate's quality following the rarity of its materials, the slowdown while carrying one, the Drop Crate ability, then putting crates into building sites and selling them. The other crate types stay under Left.
+- Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot, which slows the carrier; a trade crate's rarity follows its materials, a quest can give a crate, and the Drop Crate ability takes the crate off the back. Next: the crate lying on the ground for others to pick up, then putting crates into building sites and selling them. The other crate types stay under Left.
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; the rest of the beginner chains (objects placed in the level, such as bodies, carts and crates), item hand-ins; the Destiny window, group quests, events and boards.

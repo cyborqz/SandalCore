@@ -264,8 +264,38 @@ void PlayerSession::construction_deposit(int64_t node, int64_t building_or_proje
     quest_crate_events_.push_back(e);
 }
 
-bool PlayerSession::carry_quest_crate(Connection& /*conn*/, const combat::RolledItem& /*crate*/, Clock::time_point /*now*/) {
-    return false;   // (the cargo slot is the construction crates' work: until it is part of this build the crate goes into the bag with the other rewards)
+bool PlayerSession::carry_quest_crate(Connection& conn, const combat::RolledItem& crate, Clock::time_point now) {
+    // A crate a quest gives goes to the back like a made one (the cargo slot holds ONE crate).  With the slot taken, or for an item that is no carried crate, the caller keeps it among the other
+    // rewards (the bag): the reward is not lost.
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!db || crate.quantity != 1) return false;
+    std::string error;
+    const auto rec = db->item(crate.item, error);
+    if (!rec) return false;
+    const auto info = item_catalog().info(crate.item);
+    if (!info || !info->cargo_crate()) return false;
+    if (inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold)) {
+        say(conn, "You are already carrying a crate.", now);
+        spdlog::info("[session] {}: a quest gives the crate {}: a crate is carried already, so it goes into the bag", name(), rec->name);
+        return false;
+    }
+    svc::InventoryItem it;
+    it.container = svc::ItemContainer::Equipment;
+    it.slot = items::equip::CargoHold;
+    it.item_record_id = crate.item;
+    it.instance_guid = fresh_guid();
+    it.quantity = 1;
+    it.quality = crate.quality > 0 ? crate.quality : std::max(1, rec->default_quality);
+    it.durability = rec->max_durability_at(it.quality);
+    it.created_at_ms = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000;
+    const items::Outcome o = inventory_.grant_cargo(it, item_catalog());
+    if (!o.ok) {
+        spdlog::info("[session] {}: a quest gives the crate {}: it cannot be carried ({}), so it goes into the bag", name(), rec->name, o.refusal);
+        return false;
+    }
+    apply_outcome(conn, o, "a quest crate was given");
+    spdlog::info("[session] {}: a quest gives the crate {}: it is carried on the back", name(), rec->name);
+    return true;
 }
 
 void PlayerSession::tick_quests(Connection& conn, Clock::time_point now) {

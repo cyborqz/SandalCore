@@ -64,7 +64,7 @@ func statRow(guid int64, name string, rep int64, f st) designdb.Row {
 		"base": "", "ValueMin": "0", "ValueMax": "", "RegenRate": "",
 		"OnSpawn": "EStatResetBehavior::Reset_None", "OnDeath": "EStatResetBehavior::Reset_None", "OnRevive": "EStatResetBehavior::Reset_None",
 		"bPersistValue": false, "bHidden": false, "bClampStatFinalValue": false, "bMultiplyStatMods": false,
-		"bRegenWhileDead": false, "bRecalculateOnCombatState": false,
+		"bRegenWhileDead": false, "bRecalculateOnCombatState": false, "bDisplayAsPercentage": false,
 	}, f))
 }
 

@@ -72,7 +72,7 @@ func tableMods(db *content.DB, items []Item, rd Rounding) ([]Mod, error) {
 				} else {
 					val = s.Values[0].Min
 				}
-				if rd == RoundHalfUp {
+				if sd, err := db.StatDef(s.Stat); rd == RoundHalfUp && !(err == nil && sd.DisplayPct) {
 					val = math.Floor(val + 0.5)
 				}
 				sum[s.Stat] += val

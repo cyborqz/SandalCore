@@ -145,7 +145,8 @@ CREATE TABLE stat_def (
     clamp_final_value      INTEGER NOT NULL,
     multiply_mods          INTEGER NOT NULL,
     regen_while_dead       INTEGER NOT NULL,
-    recalc_on_combat_state INTEGER NOT NULL
+    recalc_on_combat_state INTEGER NOT NULL,
+    display_pct            INTEGER NOT NULL DEFAULT 0   -- bDisplayAsPercentage (contentc version 33): the client shows the stat as a percentage and does not round an item's value of it to a whole number
 );
 CREATE INDEX stat_def_by_name ON stat_def (name);
 

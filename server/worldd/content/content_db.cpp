@@ -94,6 +94,9 @@ constexpr const char* kStatBlockSql =
     "SELECT stat_guid, common_min, common_max, uncommon_min, uncommon_max, rare_min, rare_max, heroic_min, heroic_max, epic_min, epic_max, "
     "legendary_min, legendary_max, artifact_min, artifact_max FROM stat_block_stat WHERE block_guid = ?1 ORDER BY stat_guid";
 constexpr const char* kItemSetSql = "SELECT set_guid FROM item_set WHERE item_guid = ?1 ORDER BY ord";
+// Crates, round 2 (contentc version 33): stat_def.display_pct and item_equipped_effect.  Not among the statements every file must answer: an older file has neither, and no stat is a percentage then.
+constexpr const char* kPercentStatsSql = "SELECT guid FROM stat_def WHERE display_pct = 1";
+constexpr const char* kEquippedEffectSql = "SELECT effect_guid, min_rarity, max_rarity, stacks FROM item_equipped_effect WHERE item_guid = ?1 ORDER BY ord";
 constexpr const char* kItemTagSql = "SELECT tag FROM item_tag WHERE item_guid = ?1 ORDER BY ord";
 constexpr const char* kSetBonusSql =
     "SELECT tier_ord, pieces, stat_guid, common, uncommon, rare, heroic, epic, legendary, artifact FROM set_bonus WHERE set_guid = ?1 "
@@ -231,7 +234,7 @@ void read_item_rarity(sqlite3* db, int64_t guid, ItemRecord& rec) {
 }  // namespace
 
 ContentDb::ContentDb(ContentDb&& other) noexcept
-    : db_(std::exchange(other.db_, nullptr)), path_(std::move(other.path_)), meta_(std::move(other.meta_)) {}
+    : db_(std::exchange(other.db_, nullptr)), path_(std::move(other.path_)), meta_(std::move(other.meta_)), percent_stats_(std::move(other.percent_stats_)) {}
 
 ContentDb& ContentDb::operator=(ContentDb&& other) noexcept {
     if (this != &other) {
@@ -239,6 +242,7 @@ ContentDb& ContentDb::operator=(ContentDb&& other) noexcept {
         db_ = std::exchange(other.db_, nullptr);
         path_ = std::move(other.path_);
         meta_ = std::move(other.meta_);
+        percent_stats_ = std::move(other.percent_stats_);
     }
     return *this;
 }
@@ -332,6 +336,7 @@ std::optional<ContentDb> ContentDb::open(const std::string& path, std::string& e
         }
     }
 
+    c.load_percent_stats();
     spdlog::info("[content] {}: contentc version {}, built from the design database sha256 {}{}", path, c.meta_.contentc_version,
                  c.meta_.source_dbc_sha256, c.meta_.built_at.empty() ? "" : (", built " + c.meta_.built_at));
     return std::optional<ContentDb>(std::move(c));
@@ -800,6 +805,7 @@ std::optional<stats::ItemGear> ContentDb::item_gear(int64_t guid, std::string& e
                 return std::nullopt;
             }
             s.stat = sqlite3_column_int64(q.get(), 0);
+            s.whole = percent_stats_.count(s.stat) == 0;
             for (int r = 0; r < stats::kRarities; ++r) {
                 if (!column_is_real(q.get(), 1 + 2 * r) || !column_is_real(q.get(), 2 + 2 * r)) {
                     error = "content.db's stat block " + std::to_string(block) + " has a value of stat " + std::to_string(s.stat) + " that is not a number";
@@ -4081,6 +4087,43 @@ std::optional<VendorData> ContentDb::vendor_data(std::string& error) const {
             (chain.modifiers ? def->second.modifiers : def->second.sell_filters).push_back(sqlite3_column_int64(s, 1));
         }
         if (step != SQLITE_DONE) return failed(chain.table);
+    }
+    return out;
+}
+
+void ContentDb::load_percent_stats() {
+    percent_stats_.clear();
+    Stmt q(db_, kPercentStatsSql);
+    if (!q.ok()) return;   // a file of an older version has no such column: no stat is a percentage
+    while (sqlite3_step(q.get()) == SQLITE_ROW) {
+        if (column_is_int(q.get(), 0)) percent_stats_.insert(sqlite3_column_int64(q.get(), 0));
+    }
+}
+
+std::optional<std::vector<EquippedEffect>> ContentDb::item_equipped_effects(int64_t item, std::string& error) const {
+    error.clear();
+    std::vector<EquippedEffect> out;
+    Stmt q(db_, kEquippedEffectSql);
+    if (!q.ok()) return out;   // a file of an older version has no such table: no item has an equipped effect
+    sqlite3_bind_int64(q.get(), 1, item);
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        for (int c = 0; c < 4; ++c) {
+            if (!column_is_int(q.get(), c)) {
+                error = "content.db item_equipped_effect of item " + std::to_string(item) + " has a column of the wrong storage class";
+                return std::nullopt;
+            }
+        }
+        EquippedEffect e;
+        e.effect = sqlite3_column_int64(q.get(), 0);
+        e.min_rarity = static_cast<int>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 1), 0, 6));
+        e.max_rarity = static_cast<int>(std::clamp<int64_t>(sqlite3_column_int64(q.get(), 2), 0, 6));
+        e.stacks = static_cast<int>(std::max<int64_t>(1, sqlite3_column_int64(q.get(), 3)));
+        out.push_back(e);
+    }
+    if (step != SQLITE_DONE) {
+        error = "content.db item_equipped_effect query failed: " + db_message(db_);
+        return std::nullopt;
     }
     return out;
 }

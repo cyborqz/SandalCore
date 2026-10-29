@@ -201,18 +201,20 @@ type StatDef struct {
 	MultiplyMods        bool
 	RegenWhileDead      bool
 	RecalcOnCombatState bool
+	// DisplayPct is bDisplayAsPercentage (contentc version 33): the client shows the stat as a percentage, and does not round an item's value of it to a whole number.
+	DisplayPct bool
 }
 
 const statDefColumns = `guid, name, gameplay_type, stat_type, replication, audience, rep_field, base_expr, min_expr,
 	max_expr, regen_expr, on_spawn, on_death, on_revive, persist_value, hidden, clamp_final_value, multiply_mods,
-	regen_while_dead, recalc_on_combat_state`
+	regen_while_dead, recalc_on_combat_state, display_pct`
 
 func scanStatDef(sc interface{ Scan(...any) error }) (StatDef, error) {
 	var s StatDef
 	var rep sql.NullString
 	err := sc.Scan(&s.Guid, &s.Name, &s.GameplayType, &s.StatType, &s.Replication, &s.Audience, &rep, &s.BaseExpr,
 		&s.MinExpr, &s.MaxExpr, &s.RegenExpr, &s.OnSpawn, &s.OnDeath, &s.OnRevive, &s.PersistValue, &s.Hidden,
-		&s.ClampFinalValue, &s.MultiplyMods, &s.RegenWhileDead, &s.RecalcOnCombatState)
+		&s.ClampFinalValue, &s.MultiplyMods, &s.RegenWhileDead, &s.RecalcOnCombatState, &s.DisplayPct)
 	s.RepField = rep.String
 	return s, err
 }

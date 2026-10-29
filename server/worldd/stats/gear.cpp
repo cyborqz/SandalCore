@@ -25,7 +25,7 @@ GearInputs gear_inputs(const GearCatalog& catalog, std::span<const WornItem> wor
         }
         const double q = static_cast<double>(w.quality);
         const int rarity = item->rarity_of(q);   // the rarity the item shows: its band held inside its RarityMin..RarityMax
-        for (const BlockStat& s : item->stats) sum[s.stat] += item->stat_at(s, q, rounding == Rounding::HalfUp);
+        for (const BlockStat& s : item->stats) sum[s.stat] += item->stat_at(s, q, rounding == Rounding::HalfUp && s.whole);
         for (const int64_t set : item->sets) set_rarities[set].push_back(rarity);
         for (const std::string& tag : item->tags) out.equipped.push_back({catalog.slot_name(w.slot), tag});
     }

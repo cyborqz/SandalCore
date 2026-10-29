@@ -15,7 +15,7 @@
 //      QualityCurve, Common 1-5, Uncommon 6-15, Rare 16-30, Heroic 31-50, Epic 51-70, Legendary 71-100, Artifact
 //      101-200, held inside the record's own RarityMin..RarityMax) and the value is Min + (Max - Min) * (q - X) / (Y - X)
 //      at THAT rarity, the share (q - X) / (Y - X) never outside 0 to 1; an item with no curve reads the Min of its
-//      RarityMin. With Rounding::HalfUp each value is made floor(v + 0.5) first (the game client rounds a stat half up).
+//      RarityMin. With Rounding::HalfUp each value is made floor(v + 0.5) first (the game client rounds a stat half up), except the value of a stat the client shows as a percentage.
 //    - A SetBonus adds, for each tier (the pieces of the set that must be worn), stat bonuses by rarity:
 //      every tier up to the worn count applies, at the lowest rarity among the worn pieces of the set.
 //    - Every gameplay tag of an item is given under the name of the slot it is worn in.
@@ -42,9 +42,12 @@ inline constexpr int kRarities = items::kRarityCount;   // Common, Uncommon, Rar
 
 using QualityBand = items::QualityBand;   // Quality x..y is this rarity
 
-/// One stat of an item stat block: its Min and Max at each rarity (min and max, from the base).
+/// One stat of an item stat block: its Min and Max at each rarity (min and max, from the base).  `whole`: the client rounds the stat's value to a whole number (Rounding::HalfUp); a stat
+/// it shows as a percentage (StatTypeDef.bDisplayAsPercentage: MoveSpeedMult, a crowbar's CrateLootPercent) keeps its fraction, as the retail Ranger's own stats and a carried crate's
+/// MoveSpeedMult of 0.5 show.
 struct BlockStat : items::RarityRange {
     int64_t stat = 0;
+    bool    whole = true;
 };
 
 /// One bonus of a set tier: the stat and its value at each rarity (has[r] false: none, adds 0).

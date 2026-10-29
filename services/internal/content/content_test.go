@@ -221,10 +221,10 @@ func TestQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec(t, raw, `INSERT INTO stat_def VALUES (10, 'Stamina', 'Type_Combat', 'Type_Float', 1, 'Rep_Autonomous', 'StatRepInt32Owner',
-		'', '0', 'GetStat(1)', 'GetStat(2)', 'SetMax', 'SetMax', 'SetMax', 0, 0, 0, 0, 0, 0)`)
+		'', '0', 'GetStat(1)', 'GetStat(2)', 'SetMax', 'SetMax', 'SetMax', 0, 0, 0, 0, 0, 0, 0)`)
 	exec(t, raw, `INSERT INTO stat_def VALUES (11, 'Dup', 'Type_Combat', 'Type_Float', 0, 'none', NULL,
-		'', '', '', '', 'None', 'None', 'None', 1, 1, 1, 1, 1, 1), (12, 'Dup', 'Type_Combat', 'Type_Float', 0, 'none', NULL,
-		'', '', '', '', 'None', 'None', 'None', 0, 0, 0, 0, 0, 0)`)
+		'', '', '', '', 'None', 'None', 'None', 1, 1, 1, 1, 1, 1, 0), (12, 'Dup', 'Type_Combat', 'Type_Float', 0, 'none', NULL,
+		'', '', '', '', 'None', 'None', 'None', 0, 0, 0, 0, 0, 0, 0)`)
 	exec(t, raw, `INSERT INTO stat_init VALUES (1, 'List', 1, 10, 'Stamina', '100'), (1, 'List', 0, 11, 'Dup', '')`)
 	exec(t, raw, `INSERT INTO stat_curve VALUES (5, 'C', 0, 1, 10, 'Linear', 0, 0), (5, 'C', 1, 3, 30, 'Linear', 0, 0), (5, 'C', 2, 5, 30, 'Constant', 0, 0)`)
 	exec(t, raw, `INSERT INTO class VALUES (7, 'Bard', 'ECharacterClass::Bard', 17747, 1, 'Adventuring', 2, 'Tree', 0, 1, 'List'),

@@ -129,7 +129,7 @@ func TestGoldenRangerWithoutEffects(t *testing.T) {
 	for _, tt := range []struct {
 		rd    Rounding
 		exact int
-	}{{RoundNone, 358}, {RoundHalfUp, 376}} {
+	}{{RoundNone, 358}, {RoundHalfUp, 378}} { // 376 before the stats the client shows as a percentage were left unrounded: the capture holds a crowbar's CrateLootPercent 0.25 and a rod's hook rate 0.05 as they are
 		res, _ := goldenRun(t, b, c, tt.rd)
 		got := map[int64]StatOut{}
 		for _, s := range res.Stats {

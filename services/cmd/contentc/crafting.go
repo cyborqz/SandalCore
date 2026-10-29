@@ -17,7 +17,7 @@ import (
 // Crafting and processing (the crafting milestone, step 0; contentc version 20): craft_station_def, craft_station_asset, craft_recipe_set, craft_recipe_set_list,
 // craft_recipe_list, craft_recipe_list_member, craft_pred, craft_recipe, craft_recipe_input, craft_cost and craft_reward (internal/content/crafting.go says what each
 // holds). The records are copied as they are: a recipe's formulas stay text for the stat engine to run, and the reward tables stay the JSON of their containers. Nothing
-// here is evaluated. Version 31 adds craft_tag_item (the items every tag that names a recipe input is satisfied by) and the links of the Crate Packing stations.
+// here is evaluated. Version 31 adds craft_tag_item (the items every tag that names a recipe input is satisfied by) and the links of the Crate Packing stations; version 33 adds item_equipped_effect.
 
 // stationBlueprintDefs link the Blueprints whose station definition is not named by the leaf of their asset reference: a Crate Packing station says its definition in its own defaults.
 var stationBlueprintDefs = map[string]string{
@@ -441,10 +441,45 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 		}
 	}
 
-	opt.logf("crafting: %d station definitions, %d assets linked to a station, %d recipes with %d inputs (%d need fuel), %d reward tables (%d missing), %d item/tag pairs for %d tags", len(defs), linked,
-		len(src.rows["CraftingRecipeDefRecordBase"]), nInputs, nFuel, len(written)-missing, missing, tagItems, len(wantedTags))
+	// the effects an item puts on its wearer while it is worn (ItemRecordBase.EquippedEffects), each for the item rarities MinimumRarity to MaximumRarity (a carried crate's Encumbered effect:
+	// every crate lists it for Common alone, so a crate of a better rarity slows its carrier by its stat block and shows no Encumbered effect)
+	equippedEffects := 0
+	for _, r := range src.rows["ItemRecordBase"] {
+		list, has := r.Fields["EquippedEffects"]
+		if !has {
+			continue
+		}
+		entries, isList := list.([]designdb.Value)
+		if !isList {
+			return fmt.Errorf("Item %s (%d): field EquippedEffects is %T, want array", r.Name, r.Guid, list)
+		}
+		for i, v := range entries {
+			s, isStruct := v.(designdb.Struct)
+			if !isStruct {
+				return fmt.Errorf("Item %s (%d): EquippedEffects[%d] is %T, want struct", r.Name, r.Guid, i, v)
+			}
+			ef := newFields(fmt.Sprintf("Item %s (%d): EquippedEffects[%d]", r.Name, r.Guid, i), s)
+			effect, _ := ef.id("Effect")
+			lo, hi := rarityIndex(enumValue(ef.str("MinimumRarity"))), rarityIndex(enumValue(ef.str("MaximumRarity")))
+			stacks := ef.int("Stacks")
+			if ef.err != nil {
+				return ef.err
+			}
+			if effect == 0 {
+				continue
+			}
+			if err := w.exec(`INSERT INTO item_equipped_effect (item_guid, ord, effect_guid, min_rarity, max_rarity, stacks) VALUES (?, ?, ?, ?, ?, ?)`, r.Guid, i, effect, lo, hi, stacks); err != nil {
+				return err
+			}
+			equippedEffects++
+		}
+	}
+
+	opt.logf("crafting: %d station definitions, %d assets linked to a station, %d recipes with %d inputs (%d need fuel), %d reward tables (%d missing), %d item/tag pairs for %d tags, %d equipped effects of items", len(defs), linked,
+		len(src.rows["CraftingRecipeDefRecordBase"]), nInputs, nFuel, len(written)-missing, missing, tagItems, len(wantedTags), equippedEffects)
 	meta["crafting.stations"] = strconv.Itoa(len(defs))
 	meta["crafting.recipes"] = strconv.Itoa(len(src.rows["CraftingRecipeDefRecordBase"]))
 	meta["crafting.tag_items"] = strconv.Itoa(tagItems)
+	meta["crafting.equipped_effects"] = strconv.Itoa(equippedEffects)
 	return nil
 }

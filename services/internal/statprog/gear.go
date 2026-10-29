@@ -30,7 +30,11 @@ import (
 //
 // Both rules were fitted to two captured characters (the Bard exactly; the
 // Ranger with effects excluded): the weaker evidence is the interpolation's
-// rounding, see Rounding.
+// rounding, see Rounding. The retail Ranger's own stats say which stats it
+// rounds: not the ones the client shows as a percentage (StatTypeDef
+// bDisplayAsPercentage: a crowbar's CrateLootPercent 0.25 and a rod's hook rate
+// 0.05 are in the capture as they are), and a carried crate's MoveSpeedMult -0.5
+// leaves the 0.5 the capture shows.
 
 // Rounding is how an item's interpolated stat value is made a whole number.
 type Rounding int
@@ -89,6 +93,7 @@ type Gear struct {
 	itemType  uint64
 	startType uint64
 	items     map[int64]*itemRec
+	pct       map[int64]bool // stat guid -> the client shows the stat as a percentage (its item values are not rounded)
 }
 
 type idRef struct {
@@ -111,7 +116,7 @@ func OpenGear(path string) (*Gear, error) {
 	if err != nil {
 		return nil, err
 	}
-	g := &Gear{db: db, items: map[int64]*itemRec{}}
+	g := &Gear{db: db, items: map[int64]*itemRec{}, pct: map[int64]bool{}}
 	for schema, dst := range map[string]*uint64{"ItemRecordBase": &g.itemType, "StartingEquipmentRecordBase": &g.startType} {
 		var tid int64
 		if err := db.SQL().QueryRow(`SELECT type_id FROM record_table WHERE schema = ?`, schema).Scan(&tid); err != nil {
@@ -125,6 +130,16 @@ func OpenGear(path string) (*Gear, error) {
 
 // Close closes the database.
 func (g *Gear) Close() error { return g.db.Close() }
+
+// percent says whether the client shows a stat as a percentage: an item's value of it is not rounded.
+func (g *Gear) percent(stat int64) bool {
+	if v, ok := g.pct[stat]; ok {
+		return v
+	}
+	s, err := g.db.StatDef(stat)
+	g.pct[stat] = err == nil && s.DisplayPct
+	return g.pct[stat]
+}
 
 func (g *Gear) item(guid int64) (*itemRec, error) {
 	if r, ok := g.items[guid]; ok {
@@ -255,7 +270,7 @@ func (g *Gear) Mods(items []Item, rounding Rounding) ([]Mod, error) {
 				} else {
 					val = s.Value["CommonMin"]
 				}
-				if rounding == RoundHalfUp {
+				if rounding == RoundHalfUp && !g.percent(s.Key) {
 					val = math.Floor(val + 0.5)
 				}
 				sum[s.Key] += val

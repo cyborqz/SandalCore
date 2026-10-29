@@ -141,6 +141,9 @@ var StatFloatFuncs = map[string]bool{
 	"GetNpcStatDistribution":  true,
 }
 
+// HasValidEquipmentTag is the tag HasValidEquipment asks the state for: the root of the item tags.
+const HasValidEquipmentTag = "Item"
+
 // StatFuncNames lists the host functions StatEnv supplies (for a compiler that
 // must know the same set).
 func StatFuncNames() []string {
@@ -148,7 +151,7 @@ func StatFuncNames() []string {
 		"GetOwner", "GetInstigator", "GetSource", "GetSelf",
 		"GetCharacterLevel", "GetNPCLevel", "GetStat", "GetStatInitRunningTotal", "EvalE", "EvalEquation", "EvalFormula", "EvalF", "GetTerm",
 		"GetEffectCount", "GetEffectCountByTag", "GetSkillPurchased", "IsInCombat", "IsMoving", "IsUnkillable",
-		"EquippedItemInSlotHasTag", "GetActorGuid", "GetPlayerProfessionLevel", "GetConsumedItemStat", "GetNpcEliteRank", "GetNpcStatDistribution",
+		"EquippedItemInSlotHasTag", "HasValidEquipment", "GetActorGuid", "GetPlayerProfessionLevel", "GetConsumedItemStat", "GetNpcEliteRank", "GetNpcStatDistribution",
 	}
 }
 
@@ -308,6 +311,11 @@ func StatEnv(ctx StatContext, curves CurveSource) *Env {
 			"IsUnkillable": roleBool(func(c StatContext) bool { return c.Unkillable() }),
 			"EquippedItemInSlotHasTag": boolean("es", func(a []Value) bool {
 				return ctx.EquippedItemInSlotHasTag(a[0].(Enum), a[1].(string))
+			}),
+			// HasValidEquipment(actor, slot): the actor wears an item in the slot. Every item record carries at least one gameplay tag under Item, which the state answers to, so the
+			// slot holds an item when it holds one with the tag Item (a tag matches itself and its descendants): the Drop Crate ability's activation requirement.
+			"HasValidEquipment": boolean("oe", func(a []Value) bool {
+				return of(a[0].(Object)).EquippedItemInSlotHasTag(a[1].(Enum), HasValidEquipmentTag)
 			}),
 			"GetActorGuid": num(func(a []Value) (float64, error) {
 				if err := argsOf(a, "o"); err != nil {

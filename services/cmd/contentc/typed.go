@@ -108,6 +108,7 @@ func buildStatDefs(w *writer, rows []designdb.Row) (map[int64]string, error) {
 			f.str("OnSpawn"), f.str("OnDeath"), f.str("OnRevive"),
 			b2i(f.boolean("bPersistValue")), b2i(f.boolean("bHidden")), b2i(f.boolean("bClampStatFinalValue")),
 			b2i(f.boolean("bMultiplyStatMods")), b2i(f.boolean("bRegenWhileDead")), b2i(f.boolean("bRecalculateOnCombatState")),
+			b2i(f.boolean("bDisplayAsPercentage")),
 		}
 		if f.err != nil {
 			return nil, f.err
@@ -118,8 +119,8 @@ func buildStatDefs(w *writer, rows []designdb.Row) (map[int64]string, error) {
 		names[r.Guid] = r.Name
 		if err := w.exec(`INSERT INTO stat_def (guid, name, gameplay_type, stat_type, replication, audience, rep_field,
 			base_expr, min_expr, max_expr, regen_expr, on_spawn, on_death, on_revive, persist_value, hidden,
-			clamp_final_value, multiply_mods, regen_while_dead, recalc_on_combat_state)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...); err != nil {
+			clamp_final_value, multiply_mods, regen_while_dead, recalc_on_combat_state, display_pct)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...); err != nil {
 			return nil, err
 		}
 	}

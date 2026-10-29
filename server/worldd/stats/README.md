@@ -46,7 +46,8 @@ if (run_stats(bundle, in, StatState{}, out, err)) {
 
 `gear_inputs(catalog, worn, rounding)` makes the engine's equipment input from the worn items (record, Quality, EEquipSlot): the rules of `statprog`'s `gear.go` over the tables of content.db (an item's stat block at its rarity band,
 interpolated `Min + (Max - Min) * (q - X) / (Y - X)`, an item with no curve reads CommonMin; the sets' tiers up to the worn count at the lowest rarity of the worn pieces; the gameplay tags under the slot's name). The catalog is an interface
-(`GearCatalog`): `content::ContentGearCatalog` reads content.db and keeps what it read, a test uses a table. `Rounding::HalfUp` is what worldd uses (the research's best fit on the retail Ranger: 376 of 442 against 358; not proven); the Go
+(`GearCatalog`): `content::ContentGearCatalog` reads content.db and keeps what it read, a test uses a table. `Rounding::HalfUp` is what worldd uses (the research's best fit on the retail Ranger: 376 of 442 against 358; not proven), except for a stat the client shows as a percentage (`StatTypeDef.bDisplayAsPercentage`,
+`stat_def.display_pct` from contentc version 33): the Ranger's capture holds a crowbar's CrateLootPercent 0.25 and a rod's hook rate 0.05 as they are, and a carried crate's MoveSpeedMult -0.5 leaves the 0.5 the capture of a pick-up shows; the Go
 corpus's kit cases are `None`, which is the same for them (the kits' stat values are whole). The C++ equals Go's on the real tables for the captured Bard, the retail Ranger and the sixteen kit cases: mods, tags and the digest of
 every stat, bit for bit (`test_worldd_character_setup` with `AOC_CONTENT_DB`; the cases carry their items in the corpus: `rounding` and `item RECORD QUALITY SLOT` lines).
 

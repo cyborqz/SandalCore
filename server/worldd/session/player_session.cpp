@@ -657,6 +657,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_warehouse(conn, now);
     run_crafting(conn, now);
     run_quick_make(conn, now);
+    run_cargo(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
@@ -1721,7 +1722,12 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
     if (pipeline_ && pipeline_->handles(ability)) {
-        pipeline_->trigger(ability, instance, ability_seconds(now), info);
+        const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
+        // Drop Crate: the cast plays its montage and the crate leaves the back at the montage's notify, whatever the place (the original drops nothing at a place a crate cannot lie)
+        if (ability == content::kGuidDropCrate && accepted == Refusal::None) {
+            crate_drop_due_ = now + kCrateDropDelay;
+            crate_drop_instance_ = instance;
+        }
     } else {
         runtime->trigger(ability, instance, ability_seconds(now), info);
     }
@@ -1740,6 +1746,7 @@ void PlayerSession::on_ability_cancel(Connection& conn, const repl::ClientRpc& r
     ++cancels_;
     const auto cancel = repl::parse_held_ability_cancelled(rpc.call);
     if (!cancel) return;
+    if (crate_drop_due_ && cancel->client_instance_id == crate_drop_instance_) crate_drop_due_.reset();   // the cast of Drop Crate was cancelled before its notify: the crate stays
     if (!runtime->cancel(cancel->client_instance_id, ability_seconds(now)) && pipeline_) pipeline_->cancel(cancel->client_instance_id, ability_seconds(now));
     take_ability_events();
     flush_abilities(conn);
@@ -1759,6 +1766,7 @@ void PlayerSession::on_ability_end(Connection& conn, const repl::ClientRpc& rpc,
     }
     const auto id = repl::parse_end_ability(rpc.call);
     if (!id) return;
+    if (crate_drop_due_ && *id == crate_drop_instance_) crate_drop_due_.reset();   // (the same for an end request of that cast)
     pipeline_->end_request(*id, ability_seconds(now));
     take_ability_events();
     flush_abilities(conn);
@@ -2925,6 +2933,7 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     spdlog::log(level_for(item_applied_logged_), "[session] {}: {}: {} storage event(s){}", name(), what, outcome.events.size(),
                 outcome.equipment_changed ? ", the visible gear is updated" : "");
     note_cargo_crate(outcome);
+    if (outcome.equipment_changed) sync_cargo(conn, last_now_);
     // a resource bag worn, replaced or taken off: its container opens or closes on the client now, after the events that moved the bag
     for (const items::BagChange& c : outcome.bags) update_resource_container(conn, c);
 }
@@ -2945,6 +2954,121 @@ void PlayerSession::note_cargo_crate(const items::Outcome& outcome) {
             }
         }
     }
+}
+
+void PlayerSession::sync_cargo(Connection& conn, Clock::time_point when) {
+    const svc::InventoryItem* crate = inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold);
+    if (!crate && cargo_effects_.empty()) return;
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!db || !phase_in_done_) return;
+    // the effects the crate's record lists for the rarity the crate shows (item_equipped_effect: the Encumbered effect lists Common alone, so a crate of a better rarity slows by its
+    // stat block and shows no icon: the original's craft of an Uncommon crate puts no effect on the pawn)
+    std::map<int64_t, int> wanted;
+    if (crate) {
+        std::string error;
+        const auto listed = db->item_equipped_effects(crate->item_record_id, error);
+        if (!listed) spdlog::warn("[session] {}: the effects of the crate cannot be read: {}", name(), error);
+        const int rarity = world_->item_rarity_facts(crate->item_record_id).rarity_of(crate->quality);
+        for (const content::EquippedEffect& e : listed ? *listed : std::vector<content::EquippedEffect>{}) {
+            if (rarity >= e.min_rarity && rarity <= e.max_rarity) wanted[e.effect] = e.stacks;
+        }
+    }
+    bootstrap::AbilityChange change;
+    std::vector<std::pair<int64_t, int64_t>> removed, added;   // (effect record, key)
+    for (auto it = cargo_effects_.begin(); it != cargo_effects_.end();) {
+        if (wanted.count(it->first)) {
+            ++it;
+            continue;
+        }
+        change.effects_removed.push_back(it->second);
+        removed.emplace_back(it->first, it->second);
+        it = cargo_effects_.erase(it);
+    }
+    for (const auto& [effect, stacks] : wanted) {
+        if (cargo_effects_.count(effect)) continue;
+        bootstrap::EffectItem e;
+        e.effect_id = next_passive_effect_id_++;
+        e.effect_guid = effect;
+        e.start_time = bootstrap::effect_clock(pb_.setup().world_time + session_seconds(when));
+        e.duration = std::numeric_limits<float>::max();   // (the effects an item lists are infinite: they last while the item is worn)
+        e.tick_time = 0;
+        e.stacks = stacks;
+        change.effects_added.push_back(e);
+        added.emplace_back(effect, e.effect_id);
+        cargo_effects_[effect] = e.effect_id;
+    }
+    if (!change.empty()) {
+        if (pb_.apply_ability_change(change)) {
+            queue_later("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("the crate"); }, conn, when);
+            spdlog::info("[session] {}: the crate on the back {}: {} effect item(s) added, {} removed", name(), crate ? "puts its effects on the pawn" : "is gone", added.size(), removed.size());
+        } else {
+            spdlog::warn("[session] {}: the pawn does not take the crate's effect items ({}): the crate is carried without them", name(),
+                         pb_.error().empty() ? "keys disagree" : pb_.error());
+            for (const auto& a : added) cargo_effects_.erase(a.first);
+            for (const auto& r : removed) cargo_effects_[r.first] = r.second;
+        }
+    }
+    // Drop Crate goes on the bar when a crate is carried and the ability is on no slot yet (the original sends a ClientReceiveActionbarSlotPayload with bank 2, slot 11 and bAutoGranted around
+    // the crate's Add, and none in a craft that followed, with the ability on the bar already).  A slot someone else holds is not taken: the first free class slot then.
+    if (crate && book_ && std::find(known_.begin(), known_.end(), content::kGuidDropCrate) != known_.end()) {
+        bool on_bar = false;
+        for (const repl::ActionbarSlot& s : bar_.slots()) on_bar = on_bar || (s.use.use_type == repl::ActionbarUseType::Ability && s.use.ability_id == content::kGuidDropCrate);
+        if (!on_bar) {
+            repl::ActionbarSlot slot;
+            slot.bank_index = kDropCrateBank;
+            slot.slot_index = kDropCrateSlot;
+            slot.use.use_type = repl::ActionbarUseType::Ability;
+            slot.use.ability_id = content::kGuidDropCrate;
+            if (bar_.at(slot.bank_index, slot.slot_index)) {
+                const auto spare = bar_.first_free();
+                if (spare) {
+                    slot.bank_index = spare->first;
+                    slot.slot_index = spare->second;
+                }
+            }
+            std::string why;
+            if (!bar_.at(slot.bank_index, slot.slot_index) && bar_.set(slot, &why)) {
+                repl::ActionbarPayload payload;
+                payload.slots.push_back(slot);
+                payload.auto_granted = true;
+                queue_later("ClientReceiveActionbarSlotPayload", [payload](bootstrap::PlayerBootstrap& pb) { return pb.action_bar(payload); }, conn, when, /*must_build=*/true);
+                progress_changed_ = true;
+                hand_over_progress("the action bar");
+                spdlog::info("[session] {}: Drop Crate is put on the action bar (bank {}, slot {}): a crate is carried", name(), slot.bank_index, slot.slot_index);
+            }
+        }
+    }
+}
+
+void PlayerSession::run_cargo(Connection& conn, Clock::time_point now) {
+    if (finished_ || failed_ || !phase_in_done_ || !join_.empty()) return;
+    if (!cargo_synced_ && room_for(4)) {
+        cargo_synced_ = true;
+        sync_cargo(conn, now);
+    }
+    if (crate_drop_due_ && now >= *crate_drop_due_) {
+        crate_drop_due_.reset();
+        drop_crate(conn, now);
+    }
+}
+
+void PlayerSession::drop_crate(Connection& conn, Clock::time_point now) {
+    const svc::InventoryItem* crate = inventory_.at(svc::ItemContainer::Equipment, items::equip::CargoHold);
+    if (!crate || dead_ || !room_for(8)) return;
+    const GoodPosition at = checker_.good();
+    if (mounted() || at.movement_mode != repl::kMoveWalking) {   // [M] retail refuses a drop at a place the crate cannot lie, with no event: the ground under the character is the model
+        spdlog::info("[session] {}: General_DropCrate: the crate stays on the back ({})", name(), mounted() ? "the character is mounted" : "the character is not on the ground");
+        return;
+    }
+    const std::string guid = crate->instance_guid;
+    items::Outcome o = inventory_.use(svc::ItemContainer::Equipment, items::equip::CargoHold, guid, 0xFFFFFFFFu, item_catalog());
+    if (!o.ok) {
+        say(conn, "There is no room in your bags for the crate.", now);
+        spdlog::info("[session] {}: General_DropCrate: the crate stays on the back: {}", name(), o.refusal);
+        return;
+    }
+    apply_outcome(conn, o, "a crate was dropped");
+    spdlog::info("[session] {}: General_DropCrate: the crate left the back (into the item bag: the ground crates are not built yet)", name());
 }
 
 void PlayerSession::update_resource_container(Connection& conn, const items::BagChange& change) {
@@ -3502,6 +3626,22 @@ namespace {
 
 constexpr std::chrono::milliseconds kQuickTickAfterRemoves{40};   // the product's tick follows the Remove events by this (the Remove events go first)
 
+/// Whether the rarity of a crate follows the materials it was made of: a trade crate's does (the original's recorded Market crate, made of Common stacks, is Common; its recorded Citizen crate, made of three Common stacks and a
+/// certificate of quality 51, is Uncommon at quality 6, the first quality of its band), a construction crate's does not (4 of 4 recorded are quality 0, from Common and from Uncommon materials alike, and the crate
+/// is worth the same at every rarity).
+bool crate_follows_materials(const content::ContentDb* db, int64_t record) {
+    if (!db) return false;
+    std::string error;
+    const auto gear = db->item_gear(record, error);
+    if (!gear) return false;
+    for (const std::string& tag : gear->tags) {
+        std::string lower;
+        for (const char c : tag) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lower == "item.crate.commodity" || lower.rfind("item.crate.commodity.", 0) == 0) return true;
+    }
+    return false;
+}
+
 /// What a craft's price is counted in, for the log: copper, Glint T1 items (a trade crate of the market, node, harbor and smugglers tables) or the node currency (the citizen table).
 const char* price_unit(int64_t tier) { return tier == items::kGlintTier ? "Glint T1" : tier == items::kNodeCurrencyTier ? "node currency" : "copper"; }
 
@@ -3769,7 +3909,13 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
                 if (other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();   // (fresh_guid looks at the inventory only)
             }
             it.quantity = static_cast<int32_t>(take);
-            it.quality = cargo ? std::max(1, rec ? rec->default_quality : 1) : rewards.quality;   // (a crate is the record's own quality whatever the materials were)
+            it.quality = rewards.quality;
+            if (cargo) {
+                // a crate has no quality numbers of its own to add up: a trade crate is the first quality of the rarity the materials give (the mean quality of the paid stacks, as a crafted piece of gear has it),
+                // a construction crate the record's own
+                it.quality = std::max(1, rec ? rec->default_quality : 1);
+                if (crate_follows_materials(db, p.item)) it.quality = items::first_quality_of(world_->item_rarity_facts(p.item).rarity_of(quality));
+            }
             it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             by_product.back().push_back(it);
@@ -3899,6 +4045,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
                     },
                     conn, tick, /*must_build=*/true);
         for (const items::Outcome& o : granted) note_cargo_crate(o);   // the quest module is told a construction crate is carried now
+        sync_cargo(conn, tick);   // the crate's effects and the Drop Crate slot of the bar follow the Add
     }
     if (xp.changed() || leveled || !changes.empty()) {
         const int64_t total = progress_.xp, debt = progress_.debt;
@@ -3936,7 +4083,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         line += (i ? ", " : "") + (shown_name.count(rewards.products[i].item) ? shown_name[rewards.products[i].item] : std::to_string(rewards.products[i].item)) + " x" +
                 std::to_string(rewards.products[i].quantity);
     }
-    line += (cargo ? std::string(" into the cargo slot")
+    line += (cargo ? " into the cargo slot at quality " + std::to_string(fresh.front().quality) + " (rarity " + std::string(items::rarity_name(world_->item_rarity_facts(fresh.front().item_record_id).rarity_of(fresh.front().quality))) + ")"
                    : " at quality " + std::to_string(rewards.quality) + " (rarity " + std::to_string(rewards.rarity) + ") in " + std::to_string(fresh.size()) + " stack(s)") +
             "; " + std::to_string(plan.cost) + " " + price_unit(plan.currency) + " paid" +
             (plan.currency == items::kMoneyTier ? " (" + std::to_string(before) + " -> " + std::to_string(wallet_.copper()) + ")" : std::string()) + ", " + std::to_string(taken.events.size()) +

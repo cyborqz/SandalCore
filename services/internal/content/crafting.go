@@ -24,6 +24,8 @@ import (
 //	craft_cost                a money cost record (the currency tier and the amount)
 //	craft_reward              the reward tables the recipes name, and the sub-tables they reach, each as the JSON of its containers (what a finished recipe yields)
 //	craft_tag_item            (version 31) for each tag that names a recipe input, alone or with others: the items that satisfy it, so a pick of stacks can be checked
+//	item_equipped_effect      (version 33) the effects an item puts on its wearer while it is worn (ItemRecordBase.EquippedEffects), each for the item rarities MinimumRarity to
+//	                          MaximumRarity: a carried crate's Encumbered effect, for crates of Common rarity
 //
 // A recipe's cost is its StandardCurrencyCost (std_cost, a number in text) or, when that is empty, the craft_cost its cost_guid names.
 const CraftingDDL = `
@@ -54,6 +56,15 @@ CREATE TABLE craft_tag_item (
     tag       TEXT NOT NULL,              -- a gameplay tag that alone names a recipe input, in lower case
     item_guid INTEGER NOT NULL,           -- an item that carries it: its GameplayTags, RecipeFilterTags or ProfessionTag hold the tag or a child of it
     PRIMARY KEY (tag, item_guid)
+) WITHOUT ROWID;
+CREATE TABLE item_equipped_effect (
+    item_guid   INTEGER NOT NULL,
+    ord         INTEGER NOT NULL,
+    effect_guid INTEGER NOT NULL,         -- the EffectRecord put on the wearer
+    min_rarity  INTEGER NOT NULL,         -- MinimumRarity as the rarity ordinal (Common 0 ... Artifact 6): the effect applies while the item's rarity is min_rarity to max_rarity
+    max_rarity  INTEGER NOT NULL,
+    stacks      INTEGER NOT NULL,
+    PRIMARY KEY (item_guid, ord)
 ) WITHOUT ROWID;
 CREATE TABLE craft_recipe_set (
     guid            INTEGER PRIMARY KEY,
@@ -148,7 +159,7 @@ CREATE TABLE craft_reward (
 `
 
 // CraftingTables are the tables CraftingDDL creates, in the DDL's order.
-var CraftingTables = []string{"craft_station_def", "craft_station_asset", "craft_tag_item", "craft_recipe_set", "craft_recipe_set_list", "craft_recipe_list", "craft_recipe_list_member", "craft_pred",
+var CraftingTables = []string{"craft_station_def", "craft_station_asset", "craft_tag_item", "item_equipped_effect", "craft_recipe_set", "craft_recipe_set_list", "craft_recipe_list", "craft_recipe_list_member", "craft_pred",
 	"craft_recipe", "craft_recipe_input", "craft_cost", "craft_reward"}
 
 func createCrafting(db *sql.DB) error {

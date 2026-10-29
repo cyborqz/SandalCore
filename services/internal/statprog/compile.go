@@ -1773,6 +1773,24 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 			return val{}, errAt(e.At, "%v", err)
 		}
 		return ctx(OpEquipTag, tBool, a, b)
+	case "HasValidEquipment":
+		// the slot holds an item: the compiled form of EquippedItemInSlotHasTag(slot, "Item") on that actor (aocexpr.HasValidEquipmentTag)
+		if err := check(tObj, tEnum); err != nil {
+			return val{}, err
+		}
+		if args[1].enum.Type != "EEquipSlot" {
+			return val{}, errAt(e.Args[1].Pos(), "HasValidEquipment: %v is not an EEquipSlot", args[1].enum)
+		}
+		a, err := f.c.strOperand(args[1].enum.Value)
+		if err != nil {
+			return val{}, errAt(e.At, "%v", err)
+		}
+		b, err := f.c.strOperand(aocexpr.HasValidEquipmentTag)
+		if err != nil {
+			return val{}, errAt(e.At, "%v", err)
+		}
+		v, _ := ctx(OpEquipTag, tBool, a, b)
+		return f.actor(args[0].role, v), nil
 	case "GetActorGuid":
 		if err := check(tObj); err != nil {
 			return val{}, err

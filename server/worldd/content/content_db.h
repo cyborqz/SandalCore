@@ -257,6 +257,7 @@ struct ResourceBagRecord {
 inline constexpr int64_t kGuidAdventuring = 108651085518458ll;              // the LevelingTypeDef of the character's own level
 inline constexpr int64_t kGuidUniversalTree = 6064631673604472832ll;        // the SkillTree whose nodes a level grants by itself
 inline constexpr int64_t kGuidAdventuringXPAddMult = 6064630809541214212ll; // the stat the level scrolls' formula adds to 1
+inline constexpr int64_t kGuidDropCrate = 6064633774740275540ll;            // General_DropCrate: the ability that takes the crate off the back
 /// Gathering stage 3, "Hunting": the Hunting profession (CharacterProfession; its leveling type is LevelingTypeDef_Hunter 109460722964090).  A gathering interaction of this profession is
 /// the hunt of a creature's corpse with a Bow (the 53 Hunting_<kind> interactions); every other gathering interaction is a node's or a tree's.
 inline constexpr int64_t kProfessionHunting = 108752770061965ll;
@@ -1268,6 +1269,14 @@ struct VendorData {
 
 /// What a sale or a repair needs of an item (contentc version 19: item_vendor, item_sell_value, item_tag, quality_curve), read for one item by ContentDb::item_sale.  The item's
 /// quality curve and RarityMin..RarityMax come from the rarity rule's facts (items/rarity.h): rarity_of(quality) is the rarity a price is looked up at.
+/// One effect an item puts on its wearer while it is worn, for the item rarities `min_rarity` to `max_rarity` (Common 0 ... Artifact 6).
+struct EquippedEffect {
+    int64_t effect = 0;
+    int     min_rarity = 0;
+    int     max_rarity = 6;
+    int     stacks = 1;
+};
+
 struct ItemSaleFacts : items::ItemRarityFacts {
     bool                  known = false;          // item_vendor has a row for the item
     bool                  vendorable = false;     // a shop may buy it at all
@@ -1455,6 +1464,10 @@ public:
     /// Plan B3: a set bonus's tiers; nullopt with `error` empty for a set that is none, with `error` set when the query failed.
     std::optional<stats::SetBonus> set_bonus(int64_t guid, std::string& error) const;
 
+    /// Crates, round 2 (contentc version 33): the effects an item puts on its wearer while it is worn (ItemRecordBase.EquippedEffects), each for the item rarities `min_rarity` to
+    /// `max_rarity`.  Empty for an item with none and for a file of an older version (it has no such table); nullopt with `error` set when a query failed.
+    std::optional<std::vector<EquippedEffect>> item_equipped_effects(int64_t item, std::string& error) const;
+
     /// Plan B3: the EEquipSlot enumerator names by value ("Chest" for 2).
     std::optional<std::map<int, std::string>> equip_slot_names(std::string& error) const;
 
@@ -1543,9 +1556,13 @@ public:
 private:
     ContentDb() = default;
 
+    /// The stats the client shows as a percentage (stat_def.display_pct, contentc version 33; none in an older file): the values of an item's stat block for them are not rounded.
+    void load_percent_stats();
+
     sqlite3*    db_ = nullptr;
     std::string path_;
     ContentMeta meta_;
+    std::set<int64_t> percent_stats_;
 };
 
 /// The stat engine's view of content.db's items (stats::GearCatalog), read when first asked and kept: an item's data is a handful of rows,

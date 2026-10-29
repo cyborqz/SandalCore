@@ -442,6 +442,10 @@ public:
     /// Plan D1: the EffectId keys of the passives a level grants (an infinite CurrentEffects item each), apart from the ability
     /// runtime's own counter (which starts at 0).
     static constexpr int64_t kFirstPassiveEffectId = 1000000;
+    /// General_DropCrate's montage drops the crate at its notify: 739 ms and 649 ms after the trigger in the original's two recordings; the mean.
+    static constexpr std::chrono::milliseconds kCrateDropDelay{694};
+    /// Where the original puts Drop Crate on the action bar: bank 2, slot 11.
+    static constexpr int kDropCrateBank = 2, kDropCrateSlot = 11;
 
     /// Sends what is queued and can go (the join first, then the replies).
     void tick(Connection& conn);
@@ -1128,6 +1132,15 @@ private:
     /// construction crate (gameplay tag Item.Crate.Construction) now stands in the cargo slot: the one place that tells the quests a crate is carried.  construction_deposit() is the
     /// deposit input that the construction site will call once a crate is put into it.
     void note_cargo_crate(const items::Outcome& outcome);
+    /// Crates, round 2: what follows a crate on the back, worked out from the cargo slot as it is now.  The effects the crate's record lists for its rarity (item_equipped_effect: the Encumbered
+    /// icon, for a crate of Common rarity) stand on the pawn while the crate is carried and go with it; the Drop Crate ability is put on the action bar once a crate is carried (retail: bank 2,
+    /// slot 11, auto-granted).  The pawn's update follows at `when`.  Cheap when nothing is carried and nothing was added.
+    void sync_cargo(Connection& conn, Clock::time_point when);
+    /// Called every tick: the first sync after the join (a crate may stand in the cargo slot from the last session) and the drop that waits for its montage's notify.
+    void run_cargo(Connection& conn, Clock::time_point now);
+    /// General_DropCrate's notify: the crate leaves the cargo slot.  Nothing when none is carried, the character is dead, mounted or not on the ground.  The ground crate (a world actor others can
+    /// pick up) is not built yet: the crate goes into the item bag, as a crate taken off does, and the character is told when there is no room.
+    void drop_crate(Connection& conn, Clock::time_point now);
     /// A resource bag was worn, replaced or taken off: its container opens (with the bag's grid) or closes on the client at once, and an opening one is sent its payload.
     void update_resource_container(Connection& conn, const items::BagChange& change);
     /// A refused request: the reason is logged, the inventory is as it was, and the client's storages are sent again (budget permitting).
@@ -1434,6 +1447,10 @@ private:
     bool                         use_ranged_ = false;
     int64_t                      wielded_line_ = 0;         // the weapon skill line of the weapon in hand (0: none)
     std::map<int64_t, int64_t>   rank_effects_;             // rank guid -> the CurrentEffects key of the item the session added for it
+    std::map<int64_t, int64_t>   cargo_effects_;            // effect record -> the CurrentEffects key of the item the session added for the crate on the back
+    bool                         cargo_synced_ = false;     // sync_cargo ran once for the crate (or the empty slot) the character joined with
+    std::optional<Clock::time_point> crate_drop_due_;       // General_DropCrate was accepted: the crate leaves the back at this time
+    int32_t                      crate_drop_instance_ = 0;  // ... and the ClientInstanceId of that cast: a cancel of it (Esc, bMayEscCancel) keeps the crate
     struct Marker {
         Clock::time_point due;
         int64_t           key = 0;
