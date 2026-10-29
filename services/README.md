@@ -298,7 +298,9 @@ worldd's side (the inventory at the join, equip, unequip and move, saving) is in
 **The table.** A character's XP is the rows of `character_experience` (migration 0005: one row per character and leveling type, the design database's
 `LevelingTypeDef` Guid, Adventuring 108651085518458; `xp` and `debt` are 0 or more; the rows go with the character). The level stays in `characters.level`
 (the character list shows it, worldd joins with it) and worldd keeps it consistent with the Adventuring row when it saves. A character with no row has the XP
-of its level's threshold and no debt. The same migration adds `characters.gm_starter_set_granted_at`, NULL until the GM starter set was put into the bag.
+of its level's threshold and no debt. The same migration adds `characters.gm_starter_set_granted_at`, NULL until the GM starter set was put into the bag. The weapon lines' totals are
+rows of the same table too, one per line that has XP, under the line's own leveling type (`Weapon_1H_Axe` ... `Weapon_Ranged_Wand`, 21 in all; no debt): worldd saves them with the rest of the
+progress, no migration was needed.
 Nothing else is touched.
 
 **Who writes.** worldd saves a level, class or XP change at once with `SaveProgress(id, level, class_id, experience)`: one transaction under the character's row

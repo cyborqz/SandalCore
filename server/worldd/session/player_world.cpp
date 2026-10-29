@@ -186,6 +186,19 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
                     spdlog::warn("[content] content.db has no profession tables: characters have no professions (rebuild content.db with this checkout's contentc)");
                 }
             }
+            // weapon XP: the 21 weapon lines on their one curve (a content.db without them runs without weapon levels and says so; a damaged one does not stop the world either)
+            if (problem.empty()) {
+                std::string why;
+                if (auto lines = weaponxp::Lines::from(*content_, why)) {
+                    weapon_lines_ = std::move(*lines);
+                    spdlog::info("[content] weapon lines: {} lines on one curve of {} levels (the last level at {} XP)", weapon_lines_->size(), weapon_lines_->max_level(),
+                                 weapon_lines_->max_xp());
+                } else if (!why.empty()) {
+                    spdlog::warn("[content] the weapon lines are not usable ({}): weapon XP is not tracked and a weapon tree is judged at the character's level", why);
+                } else {
+                    spdlog::warn("[content] content.db has no weapon lines: weapon XP is not tracked and a weapon tree is judged at the character's level (rebuild content.db with this checkout's contentc)");
+                }
+            }
             // Glint tiers: the currency tiers (a content.db without them runs without tier changes and says so; a damaged one does not stop the world)
             if (problem.empty()) {
                 std::string why;
@@ -229,6 +242,7 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
             if (!problem.empty()) {
                 ability_catalog_.reset();
                 professions_.reset();
+                weapon_lines_.reset();
                 currencies_.reset();
                 talents_.reset();
                 bundle_.reset();

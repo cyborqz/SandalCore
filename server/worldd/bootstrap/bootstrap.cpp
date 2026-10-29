@@ -785,6 +785,18 @@ bool PlayerBootstrap::set_profession(int64_t leveling_type, int64_t xp, int64_t 
     return true;
 }
 
+bool PlayerBootstrap::set_weapon_line(int64_t leveling_type, int64_t xp) {
+    if (!ok_ || leveling_type == 0 || xp < 0) return false;
+    repl::DesignDataId key;   // a weapon line is keyed as the retail join keys a profession: the line's leveling type with the hardcoded name 0
+    key.guid = leveling_type;
+    key.type_id = content::kTypeLevelingTypeDef;
+    if (xp > 0 || leveling_.experience(key)) {   // a line with no XP is not listed; one that had some keeps its item, now at 0
+        if (!leveling_.set_experience(key, xp)) return false;
+    }
+    if (xp_tracker_added_) sync_xp_tracker();
+    return true;
+}
+
 bool PlayerBootstrap::set_tree_ranks(int64_t tree, const std::vector<int64_t>& ranks) {
     if (!ok_ || tree == 0) return false;
     if (ranks.empty()) {
@@ -824,6 +836,9 @@ std::optional<Send> PlayerBootstrap::xp_tracker_open() {
         }
         for (const ProgressSetup::Profession& pr : p.professions) {
             if (!set_profession(pr.leveling_type, pr.xp, pr.certification)) return std::nullopt;
+        }
+        for (const ProgressSetup::WeaponLine& w : p.weapon_lines) {
+            if (!set_weapon_line(w.leveling_type, w.xp)) return std::nullopt;
         }
         repl::Subobject tracker = make_component(setup_.guids.xp_tracker, "XPTracker", kChecksumXPTracker);
         if (!tracker.obj.schema) {

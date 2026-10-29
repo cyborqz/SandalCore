@@ -288,6 +288,7 @@
 #include "session/position_saver.h"
 #include "session/professions.h"
 #include "session/talents.h"
+#include "session/weapon_lines.h"
 #include "stats/character_stats.h"
 #include "svc/services.h"
 #include "warehouse/warehouse.h"
@@ -525,6 +526,8 @@ public:
     /// the profession levels gained by items.
     const professions::Professions& professions() const { return professions_; }
     size_t profession_levels_gained() const { return profession_levels_gained_; }
+    /// Weapon XP: what the character holds in the 21 weapon lines (one XP total each; not valid() when the world has no weapon lines).
+    const weaponxp::State& weapon_lines() const { return weapon_; }
 
     // ---- Gathering stage 2, part "Harvesting" (session/player_gather.cpp; gather/gathering.h has the rules and the data) ----------------------------------------
     /// The resource node this player is harvesting (its actor id in the registry; 0: none).
@@ -810,6 +813,21 @@ public:
     /// Adds `copper` to the purse (never past the cap), shows the +amount and the new balance, and saves with the next inventory hand-over.  Refused for an amount below 1, a full purse, or
     /// a reply queue that has no room.
     GmMoneyResult gm_give_money(Connection& conn, int64_t copper, Clock::time_point now, const std::string& by);
+
+    // ---- weapon XP (the test command of the admin API; session/gm_travel.h) --------------------------------------------------------------------
+    /// What a GM set of a weapon line's XP did.
+    struct GmWeaponResult {
+        bool        ok = false;
+        std::string refusal;
+        std::string line;                       // the line's name
+        int64_t     xp_before = 0, xp_after = 0;
+        int         level_before = 1, level_after = 1;
+        int64_t     points_earned = 0, points_left = 0;   // the Weapon points the line's level gives, and what the ranks bought in its tree leave
+    };
+    /// Sets a weapon line's XP total (held at the most a line holds): the client is sent the line's new total, the weapon tree's list with the ranks the new level grants by itself, the
+    /// level-up effect when the level rose, and the character is saved.  Refused, changing nothing, for a type that is no weapon line, and for a lower level than the ranks bought in the
+    /// line's tree need (they have to be refunded first).
+    GmWeaponResult gm_set_weapon_xp(Connection& conn, int64_t leveling_type, int64_t xp, Clock::time_point now, const std::string& by);
     /// What a GM grant of an item did.
     struct GmItemResult {
         bool        ok = false;
@@ -1105,6 +1123,15 @@ private:
     std::vector<ProfessionWire> profession_wire(const std::vector<professions::Change>& changes) const;
     /// BroadcastPlayLevelUpEffects(the profession's leveling type, the level) for each change that gained a level (unreliable, as the Adventuring level-up's).
     void queue_profession_level_ups(Connection& conn, const std::vector<professions::Change>& changes);
+    /// Weapon XP: the leveling types of the weapon lines of what is worn (each line once, whichever hand or set holds it, in the lines' order): the lines a kill pays.  Empty without the world's
+    /// weapon lines and with no weapon worn.
+    std::vector<int64_t> equipped_weapon_lines() const;
+    /// Weapon XP: a weapon line's weapon tree (null for a line no item names yet, or without the talents catalog).
+    const talents::Tree* weapon_tree_of(int64_t leveling_type) const;
+    /// Weapon XP: what the new levels of weapon lines do (their totals are in weapon_ already): each line's level in the book, the ranks its weapon tree grants by itself or takes back (their
+    /// abilities, the effect items of the passives of the line in hand, the tree's list in the XPTracker) and the stats.  Nothing is queued: the caller sends the XPTracker block and the
+    /// rest.  True when the pawn took an effect item or the stats may have changed, so that the pawn's update is due.
+    bool apply_weapon_levels(const std::vector<weaponxp::Change>& changes, Clock::time_point now);
     /// Hands the progress (level, class, XP, debt) to the sink; `why` is for the log.
     void hand_over_progress(const char* why);
     /// Missing systems, step 0: the tutorial component's call Server_RemoveLocaleFTUEs(FTUEsToRemove): the client says these tutorials are finished.  Each id not on the list yet joins it,
@@ -1384,6 +1411,7 @@ private:
     bool                 progress_changed_ = false;  // at all this session
     professions::Professions professions_;           // Gathering stage 2: the 22 professions (not valid() without the world's book)
     size_t               profession_levels_gained_ = 0;
+    weaponxp::State      weapon_;                    // weapon XP: the XP total of each weapon line (not valid() without the world's lines)
     // Gathering stage 2, part "Harvesting"
     struct GatherRun {
         uint64_t                     node = 0;          // the registry actor being harvested (0: none)

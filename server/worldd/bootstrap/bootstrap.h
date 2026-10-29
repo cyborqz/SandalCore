@@ -219,8 +219,8 @@ public:
     std::optional<Send> pawn_second_state();      // call after pawn_open()
     std::optional<Send> player_state_open();
     /// Plan D1: the PlayerController's XPTracker (ULevelingComponent), a stably named subobject with the setup's progress
-    /// (ExperienceFastMap and ExperienceDebtFastMap's Adventuring items, SkillTreePurchasesFastMap's Universal entry when the
-    /// level has granted a rank): a PlayerController update that adds the component, the join's last chain. The original
+    /// (ExperienceFastMap and ExperienceDebtFastMap's Adventuring items, the professions' and the weapon lines' that have XP,
+    /// SkillTreePurchasesFastMap's Universal entry when the level has granted a rank): a PlayerController update that adds the component, the join's last chain. The original
     /// sent it in pkt#103 with the possession update (8,051 bits of a level-20 tester's maps); it is its own chain here so
     /// that the PlayerController's pkt#103 golden holds.
     std::optional<Send> xp_tracker_open();
@@ -558,6 +558,9 @@ public:
     /// Gathering stage 2: a profession's certification (LevelingCertificationsFastMap, keyed by its leveling type, the value the CertificationLevel's guid) and, once it has
     /// any, its XP total (ExperienceFastMap, the same key). Nothing goes out until leveling_update(). False, nothing changed, when a value does not fit or the tracker is not built yet.
     bool set_profession(int64_t leveling_type, int64_t xp, int64_t certification);
+    /// Weapon XP: a weapon line's XP total (ExperienceFastMap, keyed by the line's leveling type like a profession's).  Nothing goes out until leveling_update(). False, nothing changed,
+    /// when a value does not fit or the tracker is not built yet.
+    bool set_weapon_line(int64_t leveling_type, int64_t xp);
     /// Plan D1, stage 2: the rank list of one skill tree (the whole list, as retail sends it each time the tree changes; no ranks erase the
     /// tree's item). Every tree's key is the tree's Guid and TypeId with the hardcoded name 0, as the retail server's replies key it. Nothing
     /// goes out until leveling_update(). False, nothing changed, when the list does not fit.

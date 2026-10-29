@@ -370,6 +370,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         p->inventory_changed_ = true;
     }
     p->professions_ = std::move(built.professions);
+    p->weapon_ = std::move(built.weapon);   // weapon XP: the totals of the weapon lines (the join already lists the ones with XP)
     if (p->stats_ && p->professions_.valid()) p->stats_->set_profession_levels(p->professions_.levels_by_name());
     p->node_maps_version_ = nodes_version;
     // the purchase reply's delay (a probe of the D1 draft's bar animation): the default is retail's, the variable changes it
@@ -489,6 +490,14 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         }
         spdlog::info("[session] {}: {} professions, {} beyond Novice level 1 with no XP{}", setup.name, p->professions_.book()->size(), beyond,
                      highest.empty() || best <= 1 ? std::string() : "; the highest is " + highest);
+    }
+    if (p->weapon_.valid()) {
+        std::string lines;
+        for (const auto& [type, xp] : p->weapon_.with_xp()) {
+            const weaponxp::Line* line = p->weapon_.lines()->find(type);
+            lines += (lines.empty() ? "" : ", ") + (line ? line->name : std::to_string(type)) + " level " + std::to_string(p->weapon_.level(type)) + " (" + std::to_string(xp) + " XP)";
+        }
+        spdlog::info("[session] {}: {} weapon lines, {} with XP{}", setup.name, p->weapon_.lines()->size(), p->weapon_.with_xp().size(), lines.empty() ? std::string() : ": " + lines);
     }
     p->list_item_chunk(conn);   // storage clerks, step 0: the base item chunk is on the pawn from the join, listed in OwnerInfo (queued behind the join)
     p->pump(conn);
@@ -844,6 +853,7 @@ void PlayerSession::hand_over_progress(const char* why) {
     p.level = progress_.level;
     p.class_id = class_id_;
     p.experience.push_back({content::kGuidAdventuring, progress_.xp, progress_.debt});
+    for (const svc::Experience& e : weapon_.to_svc()) p.experience.push_back(e);   // weapon XP: the weapon lines' totals (a line with no row is not written)
     p.professions = professions_.to_svc();   // Gathering stage 2: all 22 whole, as the session holds them (empty without the world's book)
     if (book_) {
         // plan D1, stage 2: the ranks and the bar go whole with every hand-over (what the session holds is what the character has)
@@ -5905,6 +5915,150 @@ PlayerSession::GmMoneyResult PlayerSession::gm_give_money(Connection& conn, int6
     return r;
 }
 
+// ============================================================================================================================
+//  weapon XP: the weapon lines of what is worn, and what a weapon line's new level does (a kill and the test command both end here)
+// ============================================================================================================================
+
+std::vector<int64_t> PlayerSession::equipped_weapon_lines() const {
+    std::vector<int64_t> found;
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!weapon_.valid() || !db) return found;
+    // every weapon in the Equipment storage names its weapon line (armor, shields and tools name none); a line counts once, whichever slot or weapon set holds it
+    for (const svc::InventoryItem& it : inventory_.items()) {
+        if (it.container != svc::ItemContainer::Equipment) continue;
+        std::string error;
+        const auto w = db->item_weapon(it.item_record_id, error);
+        if (!w || w->skill_line == 0 || w->skill_line_name.empty()) continue;
+        const weaponxp::Line* line = weapon_.lines()->find_named(w->skill_line_name);
+        if (line && std::find(found.begin(), found.end(), line->leveling_type) == found.end()) found.push_back(line->leveling_type);
+    }
+    std::vector<int64_t> ordered;   // in the lines' order, whatever the order of the slots
+    for (const weaponxp::Line& l : weapon_.lines()->all()) {
+        if (std::find(found.begin(), found.end(), l.leveling_type) != found.end()) ordered.push_back(l.leveling_type);
+    }
+    return ordered;
+}
+
+const talents::Tree* PlayerSession::weapon_tree_of(int64_t leveling_type) const {
+    if (!book_) return nullptr;
+    for (const talents::Tree& t : book_->catalog().trees()) {
+        if (t.kind == talents::Kind::Weapon && t.leveling_type == leveling_type) return &t;
+    }
+    return nullptr;
+}
+
+bool PlayerSession::apply_weapon_levels(const std::vector<weaponxp::Change>& changes, Clock::time_point now) {
+    if (!book_) return false;
+    const auto holds = [](const std::vector<talents::RankRef>& v, const talents::RankRef& x) {
+        return std::any_of(v.begin(), v.end(), [&](const talents::RankRef& y) { return y.rank->guid == x.rank->guid; });
+    };
+    bootstrap::AbilityChange effects;
+    bool lists_changed = false, level_moved = false;
+    for (const weaponxp::Change& c : changes) {
+        if (c.line == 0 || c.level_before == c.level_after) continue;
+        level_moved = true;
+        const talents::Tree* tree = weapon_tree_of(c.line);
+        const std::vector<talents::RankRef> had = tree ? book_->auto_ranks_of(*tree) : std::vector<talents::RankRef>();
+        book_->set_line_level(c.line, c.level_after);
+        if (!tree) continue;   // a line no item names has no weapon tree yet: its level is all there is
+        const std::vector<talents::RankRef> has = book_->auto_ranks_of(*tree);
+        for (const talents::RankRef& gone : had) {
+            if (holds(has, gone)) continue;
+            remove_rank_effect(gone.rank->guid, effects);
+            if (gone.rank->ability != 0) {
+                known_.erase(std::remove(known_.begin(), known_.end(), gone.rank->ability), known_.end());
+                records_.erase(std::remove(records_.begin(), records_.end(), gone.rank->ability), records_.end());
+                lists_changed = true;
+            }
+        }
+        for (const talents::RankRef& granted : has) {
+            if (holds(had, granted)) continue;
+            if (granted.rank->ability != 0) {
+                if (std::find(known_.begin(), known_.end(), granted.rank->ability) == known_.end()) known_.push_back(granted.rank->ability);
+                if (std::find(records_.begin(), records_.end(), granted.rank->ability) == records_.end()) records_.push_back(granted.rank->ability);
+                lists_changed = true;
+            }
+            add_rank_effect(granted, now, effects);   // a weapon rank's passive is on the pawn while the weapon of its line is in hand
+        }
+        if (!pb_.set_tree_ranks(tree->guid, book_->list(*tree))) spdlog::warn("[session] {}: the XPTracker does not take the list of tree {}", name(), tree->name);
+    }
+    if (lists_changed) push_abilities();
+    if (!effects.empty() && !pb_.apply_ability_change(effects)) {
+        spdlog::warn("[session] {}: the pawn does not take the weapon ranks' effect items ({}): the ranks stand without them", name(), pb_.error().empty() ? "keys disagree" : pb_.error());
+        for (const bootstrap::EffectItem& e : effects.effects_added) {
+            for (auto it = rank_effects_.begin(); it != rank_effects_.end();) it = it->second == e.effect_id ? rank_effects_.erase(it) : std::next(it);
+            markers_.erase(std::remove_if(markers_.begin(), markers_.end(), [&](const Marker& m) { return m.key == e.effect_id; }), markers_.end());
+        }
+    }
+    if (!effects.empty()) abilities_dirty_ = true;
+    if (level_moved) apply_gear_stats("a weapon line's level");   // the ranks held are an input of the stats, and so are the passives of the line in hand
+    return level_moved || !effects.empty();
+}
+
+PlayerSession::GmWeaponResult PlayerSession::gm_set_weapon_xp(Connection& conn, int64_t leveling_type, int64_t xp, Clock::time_point now, const std::string& by) {
+    GmWeaponResult r;
+    const weaponxp::Lines* lines = weapon_.lines();
+    const weaponxp::Line* line = lines ? lines->find(leveling_type) : nullptr;
+    if (!line) {
+        r.refusal = weapon_.valid() ? "no weapon line has the leveling type " + std::to_string(leveling_type) : "this world has no weapon lines (its content.db lacks their leveling types)";
+        return r;
+    }
+    r.line = line->name;
+    r.xp_before = weapon_.xp(leveling_type);
+    r.level_before = weapon_.level(leveling_type);
+    if (xp < 0) {
+        r.refusal = "an XP total cannot be negative";
+        return r;
+    }
+    r.xp_after = std::min(xp, lines->max_xp());
+    r.level_after = lines->level_of(r.xp_after);
+    // the line's weapon tree (a line no item names has none yet)
+    const talents::Tree* tree = weapon_tree_of(leveling_type);
+    if (tree && r.level_after < r.level_before) {
+        const std::string why = book_->line_shortfall(*tree, r.level_after);
+        if (!why.empty()) {
+            r.refusal = name() + "'s " + line->name + " cannot go down to level " + std::to_string(r.level_after) + ": " + why + " (refund them in the Skill Tree first)";
+            return r;
+        }
+    }
+    if (!room_for(4)) {
+        r.refusal = name() + "'s connection is busy: try again in a moment";
+        return r;
+    }
+
+    // ---- the state: the total, and what the new level grants by itself in the line's weapon tree
+    const weaponxp::Change change = weapon_.set_xp(leveling_type, r.xp_after);
+    progress_changed_ = true;
+    const bool pawn_changed = apply_weapon_levels({change}, now);
+    if (book_ && tree) {
+        const int64_t point = book_->catalog().point_type(talents::Point::Weapon);
+        r.points_earned = book_->catalog().earned(tree->leveling_type, r.level_after, point);
+        r.points_left = book_->points_left(*tree, point);
+    } else if (book_) {
+        r.points_earned = book_->catalog().earned(leveling_type, r.level_after, book_->catalog().point_type(talents::Point::Weapon));
+        r.points_left = r.points_earned;
+    }
+
+    // ---- what the client is told: the line's total (and the weapon tree's list), the level-up effect, the pawn's changed state
+    const int64_t total = r.xp_after;
+    queue("XPTracker (a weapon line)", [leveling_type, total](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+        if (!pb.set_weapon_line(leveling_type, total)) return std::nullopt;
+        return pb.leveling_update();
+    }, conn, /*must_build=*/true);
+    if (change.leveled()) {
+        const int level = r.level_after;
+        queue("BroadcastPlayLevelUpEffects", [leveling_type, level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(leveling_type, level); }, conn);
+    }
+    if (pawn_changed) {
+        queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("a weapon line"); }, conn, /*must_build=*/false);
+    }
+    r.ok = true;
+    spdlog::info("[gm] {}: {} set by {}: {} XP, level {} -> {} XP, level {}; {} Weapon point(s) earned, {} left", name(), line->name, by, r.xp_before, r.level_before, r.xp_after, r.level_after,
+                 r.points_earned, r.points_left);
+    hand_over_progress("a game master set a weapon line");
+    return r;
+}
+
 PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_t item_record, int32_t count, Clock::time_point now, const std::string& by, const std::string& rarity,
                                                          int32_t quality) {
     (void)now;
@@ -6151,25 +6305,64 @@ void PlayerSession::apply_kill(Connection& conn, const combat::KillReward& k, Cl
     bootstrap::AbilityChange rank_effects;
     std::vector<repl::SkillOnActionbar> skill_updates;
     if (leveled) finish_level_up(xp, false, now, rank_effects, skill_updates);
-    if (xp.changed() || leveled) {
+    // weapon XP: the kill's Weapon experience goes to every weapon line of what is worn, each line once; a line has no debt to pay first and stops at its top
+    const std::vector<int64_t> worn_lines = k.weapon_xp > 0 ? equipped_weapon_lines() : std::vector<int64_t>();
+    std::vector<weaponxp::Change> weapon_changes;
+    for (const int64_t type : worn_lines) {
+        const weaponxp::Change c = weapon_.add_xp(type, k.weapon_xp);
+        if (c.changed()) weapon_changes.push_back(c);
+    }
+    bool weapons_leveled = false;
+    for (const weaponxp::Change& c : weapon_changes) weapons_leveled = weapons_leveled || c.leveled();
+    if (!weapon_changes.empty()) progress_changed_ = true;
+    const bool weapon_pawn = apply_weapon_levels(weapon_changes, now);   // the new levels' ranks, effect items and stats, before any reply is built
+    if (xp.changed() || leveled || !weapon_changes.empty()) {
+        // one XPTracker block with everything that moved: Adventuring when its total or debt did (a kill at the Adventuring cap moves only the lines) and each paid line, with the lists of
+        // the weapon trees that gained a rank
+        const bool adventuring = xp.changed() || leveled;
         const int64_t total = progress_.xp, debt = progress_.debt;
-        queue("XPTracker", [total, debt](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
-            if (!pb.set_progress(total, debt)) return std::nullopt;
+        std::vector<std::pair<int64_t, int64_t>> lines;
+        for (const weaponxp::Change& c : weapon_changes) lines.emplace_back(c.line, c.xp_after);
+        queue("XPTracker", [adventuring, total, debt, lines](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+            if (adventuring && !pb.set_progress(total, debt)) return std::nullopt;
+            for (const auto& [type, line_total] : lines) {
+                if (!pb.set_weapon_line(type, line_total)) return std::nullopt;
+            }
             return pb.leveling_update();
         }, conn, /*must_build=*/true);
     }
     if (leveled) {
         const int level = progress_.level;
         queue("BroadcastPlayLevelUpEffects", [level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(content::kGuidAdventuring, level); }, conn);
+    }
+    for (const weaponxp::Change& c : weapon_changes) {
+        if (!c.leveled()) continue;
+        const int64_t type = c.line;
+        const int level = c.level_after;
+        queue("BroadcastPlayLevelUpEffects", [type, level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(type, level); }, conn);
+    }
+    if (leveled) {
         queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("level and stats"); }, conn, /*must_build=*/true);
+    } else if (weapon_pawn) {
+        queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("a weapon line"); }, conn, /*must_build=*/false);
     }
     for (const repl::SkillOnActionbar& u : skill_updates) {
         queue("ClientUpdateSkillOnActionbar", [u](bootstrap::PlayerBootstrap& pb) { return pb.skill_on_actionbar(u); }, conn, /*must_build=*/true);
     }
+    std::string weapon_text;   // the log: what each worn line holds now
+    if (k.weapon_xp > 0) {
+        weapon_text = ", weapon lines +" + std::to_string(k.weapon_xp) + " each";
+        if (!weapon_.valid()) weapon_text += " (this world has no weapon lines)";
+        else if (worn_lines.empty()) weapon_text += " (no weapon is worn)";
+        for (const int64_t type : worn_lines) {
+            const weaponxp::Line* line = weapon_.lines()->find(type);
+            const bool up = std::any_of(weapon_changes.begin(), weapon_changes.end(), [&](const weaponxp::Change& c) { return c.line == type && c.leveled(); });
+            weapon_text += ", " + (line ? line->name : std::to_string(type)) + " " + std::to_string(weapon_.xp(type)) + " XP (level " + std::to_string(weapon_.level(type)) + (up ? ", level-up" : "") + ")";
+        }
+    }
     spdlog::log(level_for(use_logged_), "[session] {}: killed {} (level {}): Adventuring +{} XP{}{} (now {} XP, debt {}){}", name(), k.name.empty() ? k.blueprint : k.name, k.level,
-                k.adventuring_xp, k.weapon_xp > 0 ? ", weapon lines +" + std::to_string(k.weapon_xp) + " (not modelled)" : "", leveled ? ", level " + std::to_string(xp.after.level) : "",
-                progress_.xp, progress_.debt, k.loot ? "; there is loot" : "");
-    if (xp.changed()) hand_over_progress(leveled ? "a level-up" : "XP earned");
+                k.adventuring_xp, weapon_text, leveled ? ", level " + std::to_string(xp.after.level) : "", progress_.xp, progress_.debt, k.loot ? "; there is loot" : "");
+    if (xp.changed() || !weapon_changes.empty()) hand_over_progress(leveled || weapons_leveled ? "a level-up" : "XP earned");
     quest_kill(conn, k, now);   // quests, slice 2: the Kill objectives
 }
 // -- Cyb x C | O | A --

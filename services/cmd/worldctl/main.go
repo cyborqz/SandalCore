@@ -24,6 +24,9 @@
 //	worldctl craft forget <character> <recipe>        takes a taught recipe away again
 //	worldctl craft taught <character>                 lists the recipes the character was taught
 //	worldctl tutorials reset <character>              puts the character's finished tutorials back: its tutorial hints can start again (a test command)
+//	worldctl weapon-xp <character> <line> <level|xp=N>  sets a weapon line's experience (a test command): a level, 1 to 25 ("5"), puts the line at the XP total that reaches it; xp=N sets the
+//	                                                  total itself (0 to 5718160). The line is its name (Weapon_Ranged_Wand), the same without Weapon_ (Ranged_Wand) or a word that ends it
+//	                                                  (wand); a word that fits several lines is refused with the list. The client is told at once and the character is saved
 //	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one creature, named by its actor id (npc.go says what each does)
 //	worldctl npc move <id> <x> <y> [<z>]              stands a creature at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
 //	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
@@ -84,6 +87,7 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   craft teach|forget <character> <recipe>   teach a recipe the game makes a player learn (name or Guid), or take it away again (a test command)
   craft taught <character>          list the recipes the character was taught
   tutorials reset <character>       put the character's finished tutorials back, so its hints can start again (a test command)
+  weapon-xp <character> <line> <level|xp=N>   set a weapon line's experience: a level (1 to 25) or an XP total (xp=12000); the line is its name or a word that ends it, such as wand (a test command)
   npc kill|respawn|reset|heal|despawn <id>   a game master's action on one creature, by its actor id
   npc move <id> <x> <y> [<z>]       stand a creature at a point (cm); its leash is centred there, its spawn point stays
   watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
@@ -141,6 +145,50 @@ func parseGiveWords(words []string) (count int64, rarity string, quality int64, 
 	return count, rarity, quality, nil
 }
 
+// parseWeaponXp reads the amount of weapon-xp: a whole number from 1 to 25 is a level; xp=N (or xp:N) is an experience total, and level=N (or level:N) a level written out. A plain number
+// past 25 is not guessed at: it could be a mistyped level or a total, so the answer says how to write a total.
+func parseWeaponXp(character, line, amount string) (*worldadminv1.SetWeaponXpRequest, error) {
+	w := strings.ToLower(strings.TrimSpace(amount))
+	num := func(s string) (int64, bool) {
+		s = strings.NewReplacer(",", "", "_", "").Replace(strings.TrimSpace(s))
+		if s == "" {
+			return 0, false
+		}
+		for _, c := range s {
+			if c < '0' || c > '9' {
+				return 0, false
+			}
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
+		return n, err == nil
+	}
+	req := &worldadminv1.SetWeaponXpRequest{Character: character, Line: line}
+	switch {
+	case strings.HasPrefix(w, "xp=") || strings.HasPrefix(w, "xp:"):
+		n, ok := num(w[3:])
+		if !ok {
+			return nil, usageError(fmt.Sprintf("the XP total %q is not a whole number (worldd says how much a line holds)", amount))
+		}
+		req.Amount = &worldadminv1.SetWeaponXpRequest_Xp{Xp: n}
+	case strings.HasPrefix(w, "level=") || strings.HasPrefix(w, "level:"):
+		n, ok := num(w[6:])
+		if !ok || n < 1 || n > 25 {
+			return nil, usageError(fmt.Sprintf("the level %q is not a whole number from 1 to 25", amount))
+		}
+		req.Amount = &worldadminv1.SetWeaponXpRequest_Level{Level: int32(n)}
+	default:
+		n, ok := num(w)
+		if !ok {
+			return nil, usageError(fmt.Sprintf("the amount %q is not a level (1 to 25) or xp=<total>", amount))
+		}
+		if n < 1 || n > 25 {
+			return nil, usageError(fmt.Sprintf("%d is not a level (1 to 25); to set an XP total write xp=%d", n, n))
+		}
+		req.Amount = &worldadminv1.SetWeaponXpRequest_Level{Level: int32(n)}
+	}
+	return req, nil
+}
+
 func (u usageError) Error() string { return string(u) }
 
 // run is worldctl: it returns the exit status.
@@ -151,7 +199,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "tutorials", "npc":
+	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "tutorials", "weapon-xp", "npc":
 	case "watch":
 		return runWatch(ctx, rest, out, errw)
 	case "help", "-h", "--help":
@@ -314,6 +362,23 @@ func parse(cmd string, pos []string) (call, error) {
 				return err
 			}
 			fmt.Fprintf(out, "%s: %d finished tutorial(s) put back; the hints can start again\n", r.GetCharacter(), r.GetCleared())
+			return nil
+		}, nil
+	case "weapon-xp":
+		if len(pos) != 3 {
+			return nil, usageError("needs a character, a weapon line and a level or an XP total: worldctl weapon-xp <character> <line> <level|xp=N>, such as: worldctl weapon-xp cyb wand 5, or worldctl weapon-xp cyb Ranged_Wand xp=12000")
+		}
+		req, err := parseWeaponXp(pos[0], pos[1], pos[2])
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context, c worldadminv1.WorldAdminServiceClient, out io.Writer) error {
+			r, err := c.SetWeaponXp(ctx, req)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s: %s is at level %d with %d XP (was level %d, %d XP); %d Weapon talent point(s) earned, %d left to spend\n", r.GetCharacter(), r.GetLine(), r.GetLevel(), r.GetXp(),
+				r.GetPreviousLevel(), r.GetPreviousXp(), r.GetPointsEarned(), r.GetPointsLeft())
 			return nil
 		}, nil
 	case "speed":

@@ -143,6 +143,7 @@ constexpr const char* kGatherInteractionDefSql =
     "SELECT interaction_guid, name, gather_guid, interact_radius, interact_tolerance, discovery_distance, allow_in_combat FROM gather_interaction_def ORDER BY interaction_guid";
 constexpr const char* kLevelingTypeSql = "SELECT guid, name, experience_type, level_cap, uses_debt, xp_mult_stat_guid FROM leveling_type WHERE name = ?1";
 constexpr const char* kLevelingCurveSql = "SELECT level, xp FROM leveling_curve WHERE type_guid = ?1 ORDER BY level";
+constexpr const char* kLevelingNamesSql = "SELECT name FROM leveling_type WHERE experience_type = ?1 AND substr(name, 1, length(?2)) = ?2 ORDER BY guid";
 constexpr const char* kAutoGrantSql =
     "SELECT tree_guid, tree_name, leveling_type_guid, node_guid, node_name, level_requirement, skill_guid, skill_name, rank_guid, effect_guid "
     "FROM skill_auto_grant WHERE leveling_type_guid = ?1 ORDER BY level_requirement, node_guid";
@@ -1186,6 +1187,31 @@ std::optional<LevelingType> ContentDb::leveling_type_named(const std::string& na
         return std::nullopt;
     }
     return t;
+}
+
+std::vector<std::string> ContentDb::leveling_type_names(const std::string& experience_type, const std::string& prefix, std::string& error) const {
+    error.clear();
+    std::vector<std::string> out;
+    Stmt q(db_, kLevelingNamesSql);
+    if (!q.ok()) {
+        error = "content.db leveling type query failed: " + db_message(db_);
+        return out;
+    }
+    sqlite3_bind_text(q.get(), 1, experience_type.c_str(), static_cast<int>(experience_type.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(q.get(), 2, prefix.c_str(), static_cast<int>(prefix.size()), SQLITE_TRANSIENT);
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        if (!column_is_text(q.get(), 0)) {
+            error = "content.db leveling_type has a name that is not text";
+            return {};
+        }
+        out.push_back(column_text(q.get(), 0));
+    }
+    if (step != SQLITE_DONE) {
+        error = "content.db leveling type query failed: " + db_message(db_);
+        return {};
+    }
+    return out;
 }
 // [CoA - C | Y | B]
 

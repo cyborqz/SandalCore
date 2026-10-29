@@ -18,8 +18,9 @@
 //    - a node can offer a choice (a SkillTreeSlot, the talents of a class tree and the picks of a weapon tree): each skill the slot offers is a
 //      Node of the tree with the node's guid, and the character owns one of a node's options at a time (buying another option is refused until
 //      the first is refunded; the captures never show two options of one node owned);
-//    - the gates are the records' own: LevelRequirement (the character's level; a weapon line is treated as being at the character's level,
-//      as weapon XP is not tracked), PointRequirement (points of any type spent in the tree before the rank), SkillsRequired (any of them,
+//    - the gates are the records' own: LevelRequirement (the character's level; a weapon tree's is its line's level, worked out from the line's
+//      XP total, and a world without weapon lines treats the line as being at the character's level), PointRequirement (points of any type spent
+//      in the tree before the rank), SkillsRequired (any of them,
 //      or all with bAllAreRequired; a requirement that names nothing is met), MutuallyExclusiveSkills (either way round), the ranks of one
 //      skill in order, and the points of each type the rank costs;
 //    - a request is judged whole: its refunds first, then its purchases as a set (a rank whose prerequisite is bought later in the same request
@@ -176,6 +177,31 @@ public:
     void    set_class(int64_t class_guid) { class_guid_ = class_guid; }
     const Tree* class_tree() const { return catalog_->class_tree(class_guid_); }
 
+    /// Weapon lines: the level of each weapon line, by the line's leveling type (a weapon tree's `leveling_type`).  Once the levels are given, even for no line at all, a weapon tree is judged
+    /// at ITS line's level (1 for a line with no level given), earns the Weapon points of that level and lists the auto-granted ranks it reaches; before that a weapon tree is judged at the
+    /// character's own level and lists none (a world without weapon lines).
+    void set_line_levels(std::map<int64_t, int> levels) {
+        line_levels_ = std::move(levels);
+        lines_on_ = true;
+    }
+    void set_line_level(int64_t leveling_type, int level) {
+        line_levels_[leveling_type] = level < 1 ? 1 : level;
+        lines_on_ = true;
+    }
+    bool has_line_levels() const { return lines_on_; }
+    int  line_level(int64_t leveling_type) const {
+        const auto it = line_levels_.find(leveling_type);
+        return it == line_levels_.end() ? 1 : it->second;
+    }
+    /// The level `tree` is judged at: the character's, or its line's for a weapon tree once the lines' levels are known.
+    int level_for(const Tree& tree) const { return tree.kind == Kind::Weapon && lines_on_ ? line_level(tree.leveling_type) : level_; }
+    /// The ranks a tree grants by itself now.  A weapon line grants its auto-granted ranks (the Accuracy passives at 5, 10, 15, 20 and 25; a Mace's and a Scepter's combo hits) with its first
+    /// level, 2, and not before; any other tree grants those of the character's level.
+    std::vector<RankRef> auto_ranks_of(const Tree& tree) const;
+    /// Whether the ranks bought in a weapon tree still stand when its line is at `level`: the level each needs, and the points they cost against the points that level earns.  Empty when they
+    /// do; else why not.
+    std::string line_shortfall(const Tree& tree, int level) const;
+
     /// The bought ranks per tree; a tree with none is absent.
     const std::map<int64_t, std::vector<int64_t>>& purchased() const { return purchased_; }
     const std::vector<int64_t>& purchased(int64_t tree) const;
@@ -183,12 +209,12 @@ public:
     /// counted in `dropped` when it is given. An empty list removes the tree's entry.
     void load(int64_t tree, const std::vector<int64_t>& ranks, size_t* dropped = nullptr);
 
-    /// The tree list the XPTracker shows: the auto-granted ranks of the level, then the bought ranks. Empty for a tree that is none.
+    /// The tree list the XPTracker shows: the auto-granted ranks of the level (a weapon tree's: of its line's level), then the bought ranks. Empty for a tree that is none.
     std::vector<int64_t> list(const Tree& tree) const;
     /// The same, as ranks.
     std::vector<RankRef> listed(const Tree& tree) const;
     /// The trees the XPTracker lists at the join, in order: the class tree, the professions with a rank, the Universal tree, then the weapon
-    /// trees with a bought rank (by guid). A tree whose list is empty is left out.
+    /// trees with a rank, bought or granted by the line's level (by guid). A tree whose list is empty is left out.
     std::vector<const Tree*> listed_trees() const;
     /// The abilities of a tree's listed ranks, in list order.
     std::vector<int64_t> abilities(const Tree& tree) const;
@@ -218,6 +244,8 @@ private:
     int64_t                                 class_guid_;
     int                                     level_;
     std::map<int64_t, std::vector<int64_t>> purchased_;
+    std::map<int64_t, int>                  line_levels_;   // weapon lines: the level of each line by leveling type (see set_line_levels)
+    bool                                    lines_on_ = false;
 };
 
 // ---- KnownAbilities ------------------------------------------------------------------------------------------------------------

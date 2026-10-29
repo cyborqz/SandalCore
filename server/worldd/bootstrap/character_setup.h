@@ -83,6 +83,7 @@
 #include "session/leveling.h"
 #include "session/professions.h"
 #include "session/talents.h"
+#include "session/weapon_lines.h"
 #include "stats/character_stats.h"
 #include "svc/services.h"
 // (Cyb ~ C.O.A)
@@ -191,6 +192,9 @@ struct StatContext {
     /// Gathering stage 2: the professions' book. With it the character holds its 22 professions (the record's rows, Novice level 1 for a missing one) and the XPTracker lists
     /// their certifications at the join; without it (a test's context, an older content.db) there are none.
     const professions::Book*               professions = nullptr;
+    /// Weapon XP: the 21 weapon lines and their one curve. With them the character holds the XP of each line (the record's rows), the XPTracker lists the lines that have XP at the join, and
+    /// the talents judge a weapon tree at its line's level; without them (a test's context, an older content.db) a weapon tree is judged at the character's level and no line is listed.
+    const weaponxp::Lines*                 weapon_lines = nullptr;
 };
 
 /// Plan D1 (effects since plan D2): the passives of the ranks `granted` (the Universal tree's auto grants a level reached) that have constant
@@ -221,6 +225,8 @@ struct CharacterSetupResult {
     leveling::Progress                   progress;
     /// Gathering stage 2: what the character holds in the 22 professions (valid() only with the book).
     professions::Professions             professions;
+    /// Weapon XP: what the character holds in the weapon lines (valid() only with the context's lines).
+    weaponxp::State                      weapon;
     /// Plan D1, stage 2: the character's ranks (the catalog's rules over what the record stored) and its action bar (the stored one, or the
     /// default: the weapon bank and the class's auto-granted skills). Set when the context has the catalog.
     std::optional<talents::Book>         book;

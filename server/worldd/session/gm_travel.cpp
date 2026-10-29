@@ -329,6 +329,63 @@ GmTutorialResult GmTravel::reset_tutorials(const std::string& character, const s
     return out;
 }
 
+GmWeaponXpResult GmTravel::set_weapon_xp(const std::string& character, const std::string& line, bool by_level, int64_t amount, const std::string& by) {
+    GmWeaponXpResult out;
+    const PlayerHandle handle = find_player(character);
+    if (!handle) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = handle.player->name();
+    const weaponxp::Lines* lines = world_.weapon_lines();
+    if (!lines) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "this world has no weapon lines (its content.db lacks their leveling types)";
+        return out;
+    }
+    const std::vector<const weaponxp::Line*> found = lines->match(line);
+    if (found.empty()) {
+        out.status = GmStatus::NotFound;
+        out.message = "no weapon line is called \"" + log_text(line) + "\"; the lines are:";
+        for (const weaponxp::Line& l : lines->all()) out.message += " " + l.name;
+        return out;
+    }
+    if (found.size() > 1) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "\"" + log_text(line) + "\" fits more than one weapon line; give the whole name:";
+        for (const weaponxp::Line* l : found) out.message += " " + l->name;
+        return out;
+    }
+    int64_t xp = amount;
+    if (by_level) {
+        if (amount < 1 || amount > lines->max_level()) {
+            out.status = GmStatus::InvalidArgument;
+            out.message = "a weapon line's level is 1 to " + std::to_string(lines->max_level()) + " (the XP total that reaches level " + std::to_string(lines->max_level()) + " is " +
+                          std::to_string(lines->max_xp()) + ")";
+            return out;
+        }
+        xp = lines->xp_for(static_cast<int>(amount));
+    } else if (amount < 0 || amount > lines->max_xp()) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "a weapon line's XP is 0 to " + std::to_string(lines->max_xp()) + " (the total that reaches level " + std::to_string(lines->max_level()) + ")";
+        return out;
+    }
+    const PlayerSession::GmWeaponResult r = handle.player->gm_set_weapon_xp(*handle.connection, found.front()->leveling_type, xp, now_(), by);
+    out.line = r.line.empty() ? found.front()->name : r.line;
+    out.xp_before = r.xp_before;
+    out.xp = r.xp_after;
+    out.level_before = r.level_before;
+    out.level = r.level_after;
+    out.points_earned = r.points_earned;
+    out.points_left = r.points_left;
+    if (!r.ok) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = r.refusal;
+    }
+    return out;
+}
+
 GmTaughtList GmTravel::list_taught(const std::string& character) {
     GmTaughtList out;
     const PlayerHandle handle = find_player(character);

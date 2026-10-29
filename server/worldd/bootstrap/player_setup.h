@@ -203,7 +203,7 @@ struct TreeSetup {
 };
 
 /// What the XPTracker says at the join: the Adventuring XP total and debt, and the trees the character has ranks in (SkillTreePurchasesFastMap:
-/// the class tree, the professions', the Universal tree, the weapon trees with a bought rank; a tree with no rank is not sent).
+/// the class tree, the professions', the Universal tree, the weapon trees with a rank, bought or granted by the line's level; a tree with no rank is not sent).
 struct ProgressSetup {
     int64_t                xp = 0;
     int64_t                debt = 0;
@@ -217,6 +217,12 @@ struct ProgressSetup {
         int64_t certification = 0;
     };
     std::vector<Profession> professions;
+    /// Weapon XP: one weapon line that has XP, its leveling type (the maps' key) and its absolute total.  Only the lines with XP are listed, after the professions, in the lines' order.
+    struct WeaponLine {
+        int64_t leveling_type = 0;
+        int64_t xp = 0;
+    };
+    std::vector<WeaponLine> weapon_lines;
 };
 
 /// Mints every GUID of a joining player but the GameState's, in the capture's order (PlayerState, PlayerController,

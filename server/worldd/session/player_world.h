@@ -58,6 +58,7 @@
 #include "session/professions.h"
 #include "session/actor_view.h"
 #include "session/talents.h"
+#include "session/weapon_lines.h"
 #include "spawns/area.h"
 #include "spawns/area_loader.h"
 #include "spawns/captured_spawns.h"
@@ -123,7 +124,7 @@ public:
     /// `stat_rounding` is how an item's interpolated value is made whole (the research's best fit, half up).
     bootstrap::StatContext stat_context() const {
         return {bundle_ ? &*bundle_ : nullptr, gear_ ? &*gear_ : nullptr, stats::Rounding::HalfUp, curve_ ? &*curve_ : nullptr, curve_ ? &grants_ : nullptr,
-                talents_ ? &*talents_ : nullptr, mounts_ ? &mounts_->data() : nullptr, professions_ ? &*professions_ : nullptr};
+                talents_ ? &*talents_ : nullptr, mounts_ ? &mounts_->data() : nullptr, professions_ ? &*professions_ : nullptr, weapon_lines_ ? &*weapon_lines_ : nullptr};
     }
     /// Plan D1: the Adventuring level curve (content.db's leveling_type and leveling_curve) and the Universal tree's auto-granted nodes, read once
     /// at startup; a content.db without them is not ready. Null when the world is not ready.
@@ -137,6 +138,9 @@ public:
     /// Gathering stage 2: the 22 professions with their level-up curves and the five certification levels (content.db's profession, certification_level and
     /// action_certification, read once at startup). Null when the file has none of those tables (an older fixture): characters then have no professions.
     const professions::Book* professions() const { return professions_ ? &*professions_ : nullptr; }
+    /// Weapon XP: the 21 weapon lines (content.db's leveling types named Weapon_<line>) and the one curve they share, read once at startup. Null when the file has none (an older fixture):
+    /// characters then hold no weapon XP and a weapon tree is judged at the character's level.
+    const weaponxp::Lines* weapon_lines() const { return weapon_lines_ ? &*weapon_lines_ : nullptr; }
     /// Glint tiers (contentc version 24): the currency tiers and their kinds (content.db's currency_tier and currency_def, read once at startup): which item is the next kind of a Glint
     /// certificate, and how a reward of Glint is split into kinds.  Null when the file has none of those tables (an older file or fixture): no stack of Glint changes kind and a reward
     /// is paid as it is rolled.
@@ -532,6 +536,7 @@ private:
     std::vector<content::AutoGrant>          grants_;          // the Universal tree's, by level
     std::optional<talents::Catalog>          talents_;         // plan D1, stage 2
     std::optional<professions::Book>         professions_;     // Gathering stage 2
+    std::optional<weaponxp::Lines>           weapon_lines_;    // weapon XP: the 21 weapon lines and their one curve
     std::optional<items::CurrencyTable>      currencies_;      // Glint tiers
     std::optional<abilities::Catalog>        ability_catalog_;  // plan D2
     std::optional<spawns::MountBook>         mounts_;           // the mounts milestone

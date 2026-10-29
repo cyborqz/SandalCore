@@ -972,10 +972,19 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
         }
     }
 
+    // the weapon lines (weapon XP): the record's rows of the 21 lines, and what the XPTracker says of the ones that have XP (a line with none is not listed)
+    if (stat_context.weapon_lines) {
+        std::vector<std::string> corrected;
+        out.weapon = weaponxp::State::load(*stat_context.weapon_lines, ch.experience, &corrected);
+        for (std::string& n : corrected) out.notes.push_back(std::move(n));
+        for (const auto& [type, xp] : out.weapon.with_xp()) s.progress.weapon_lines.push_back({type, xp});
+    }
+
     // the talents (plan D1, stage 2): the ranks the record stored under the catalog's rules, what the XPTracker lists, the abilities the ranks and
     // the weapon in hand make, and the action bar
     if (stat_context.talents) {
         talents::Book book(*stat_context.talents, cls->guid, out.progress.level);
+        if (out.weapon.valid()) book.set_line_levels(out.weapon.levels());   // a weapon tree is judged at its line's level, and lists the ranks that level grants
         size_t dropped = 0;
         for (const svc::TreeRanks& t : ch.skill_ranks) book.load(t.tree_guid, t.rank_guids, &dropped);
         if (dropped > 0) {

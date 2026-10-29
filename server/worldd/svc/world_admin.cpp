@@ -321,6 +321,26 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         return grpc::Status::OK;
     }
 
+    grpc::Status SetWeaponXp(grpc::ServerContext* ctx, const adminv1::SetWeaponXpRequest* req, adminv1::SetWeaponXpResponse* resp) override {
+        if (auto s = authorize(ctx, "SetWeaponXp"); !s.ok()) return s;
+        if (req->amount_case() == adminv1::SetWeaponXpRequest::AMOUNT_NOT_SET) return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "give a level or an XP total");
+        const bool by_level = req->amount_case() == adminv1::SetWeaponXpRequest::kLevel;
+        const int64_t amount = by_level ? static_cast<int64_t>(req->level()) : req->xp();
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmWeaponXpResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.set_weapon_xp(req->character(), req->line(), by_level, amount, by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_character(out.character);
+        resp->set_line(out.line);
+        resp->set_previous_xp(out.xp_before);
+        resp->set_xp(out.xp);
+        resp->set_previous_level(out.level_before);
+        resp->set_level(out.level);
+        resp->set_points_earned(out.points_earned);
+        resp->set_points_left(out.points_left);
+        return grpc::Status::OK;
+    }
+
     grpc::Status ListTaughtRecipes(grpc::ServerContext* ctx, const adminv1::ListTaughtRecipesRequest* req, adminv1::ListTaughtRecipesResponse* resp) override {
         if (auto s = authorize(ctx, "ListTaughtRecipes"); !s.ok()) return s;
         GmTaughtList out;

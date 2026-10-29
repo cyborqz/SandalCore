@@ -159,6 +159,17 @@ struct GmTutorialResult {
     uint32_t    cleared = 0;   // the finished tutorials put back
 };
 
+/// Weapon XP: the test command that sets a weapon line's experience (by level or by total).
+struct GmWeaponXpResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    std::string line;                          // the weapon line's name ("Weapon_Ranged_Wand")
+    int64_t     xp_before = 0, xp = 0;
+    int32_t     level_before = 1, level = 1;
+    int64_t     points_earned = 0, points_left = 0;   // the Weapon talent points the line's level gives, and what the ranks bought in its tree leave
+};
+
 /// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
 struct GmNpcResult {
     GmStatus    status = GmStatus::Ok;
@@ -204,6 +215,9 @@ public:
     GmTaughtList     list_taught(const std::string& character);
     /// Puts a player's finished tutorials back: the list is emptied, the client is told (its hints can start again) and the empty list is saved.
     GmTutorialResult reset_tutorials(const std::string& character, const std::string& by);
+    /// Sets a weapon line's experience: `line` is the line's name ("Weapon_Ranged_Wand", "Ranged_Wand" or "wand"; a word that fits several lines is refused with the list), and the amount is a level
+    /// (`by_level`: 1 to the cap, the line is put at the XP total that reaches it) or an XP total (0 to the most a line holds).  The client is told at once and the character is saved.
+    GmWeaponXpResult set_weapon_xp(const std::string& character, const std::string& line, bool by_level, int64_t amount, const std::string& by);
 
     // ---- the NPC actions (a creature is named by its actor id, as the world stream and Inspect give it)
     /// Kills it as a blow would: the same death and corpse, the loot a kill gives (rolled as for a player of the creature's own level, open to every player in the world, no experience), and its

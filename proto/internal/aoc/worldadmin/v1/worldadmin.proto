@@ -60,6 +60,11 @@ service WorldAdminService {
   // Missing systems, step 0. Puts a player's tutorials back: the list of tutorials the character finished is emptied, the client is told (its tutorial hints can start again, as for a character that
   // never saw them) and the empty list is saved. NotFound for a character that is not in the world; FailedPrecondition for a character that has finished none.
   rpc ResetTutorials(ResetTutorialsRequest) returns (ResetTutorialsResponse);
+  // Weapon XP. Sets a weapon line's experience total, by level (the total that reaches it) or by the total itself, for the character's line of that name: the client is told at once (the line's
+  // level, its bar and its Weapon talent points follow from the total) and the character is saved. A level that is lower than the ranks bought in the line's weapon tree need is refused
+  // (refund them first). NotFound for a character that is not in the world or a line that is none; InvalidArgument for a name that fits several lines (the answer lists them) and for an amount outside
+  // 1 to 25 (a level) or 0 to 5,718,160 (a total); FailedPrecondition for a refusal of the line's tree.
+  rpc SetWeaponXp(SetWeaponXpRequest) returns (SetWeaponXpResponse);
 
   // ---- NPC actions: a game master's tools on one creature. Each takes the creature's actor id, as the world stream and Inspect give it, and is applied on the network thread like the
   // calls above. NotFound for an id that is not in the world; InvalidArgument for an actor that is not a creature (a player, a resource node, a mount, a station) and for a point
@@ -248,6 +253,26 @@ message ResetTutorialsRequest {
 message ResetTutorialsResponse {
   string character = 1; // the name worldd has it under
   int32 cleared = 2;    // how many finished tutorials were put back
+}
+
+message SetWeaponXpRequest {
+  string character = 1;
+  string line = 2; // the weapon line: its name ("Weapon_Ranged_Wand"), the same without Weapon_ ("Ranged_Wand") or a word that ends it ("wand"); case does not count
+  oneof amount {
+    int32 level = 3; // 1 to 25: the line is put at the XP total that reaches the level
+    int64 xp = 4;    // 0 to 5,718,160: the line's experience total
+  }
+}
+
+message SetWeaponXpResponse {
+  string character = 1;       // the name worldd has it under
+  string line = 2;            // the line's record name
+  int64 previous_xp = 3;
+  int64 xp = 4;
+  int32 previous_level = 5;
+  int32 level = 6;
+  int64 points_earned = 7;    // the Weapon talent points the line's level gives (1 for each level from 2)
+  int64 points_left = 8;      // ... and what the ranks bought in the line's tree leave
 }
 
 message GiveItemRequest {

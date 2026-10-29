@@ -36,6 +36,7 @@ const (
 	WorldAdminService_ForgetRecipe_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ForgetRecipe"
 	WorldAdminService_ListTaughtRecipes_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/ListTaughtRecipes"
 	WorldAdminService_ResetTutorials_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/ResetTutorials"
+	WorldAdminService_SetWeaponXp_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/SetWeaponXp"
 	WorldAdminService_KillNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
 	WorldAdminService_RespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
 	WorldAdminService_ResetNpc_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
@@ -101,6 +102,11 @@ type WorldAdminServiceClient interface {
 	// Missing systems, step 0. Puts a player's tutorials back: the list of tutorials the character finished is emptied, the client is told (its tutorial hints can start again, as for a character that
 	// never saw them) and the empty list is saved. NotFound for a character that is not in the world; FailedPrecondition for a character that has finished none.
 	ResetTutorials(ctx context.Context, in *ResetTutorialsRequest, opts ...grpc.CallOption) (*ResetTutorialsResponse, error)
+	// Weapon XP. Sets a weapon line's experience total, by level (the total that reaches it) or by the total itself, for the character's line of that name: the client is told at once (the line's
+	// level, its bar and its Weapon talent points follow from the total) and the character is saved. A level that is lower than the ranks bought in the line's weapon tree need is refused
+	// (refund them first). NotFound for a character that is not in the world or a line that is none; InvalidArgument for a name that fits several lines (the answer lists them) and for an amount outside
+	// 1 to 25 (a level) or 0 to 5,718,160 (a total); FailedPrecondition for a refusal of the line's tree.
+	SetWeaponXp(ctx context.Context, in *SetWeaponXpRequest, opts ...grpc.CallOption) (*SetWeaponXpResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -257,6 +263,16 @@ func (c *worldAdminServiceClient) ResetTutorials(ctx context.Context, in *ResetT
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) SetWeaponXp(ctx context.Context, in *SetWeaponXpRequest, opts ...grpc.CallOption) (*SetWeaponXpResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetWeaponXpResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_SetWeaponXp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldAdminServiceClient) KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillNpcResponse)
@@ -374,6 +390,11 @@ type WorldAdminServiceServer interface {
 	// Missing systems, step 0. Puts a player's tutorials back: the list of tutorials the character finished is emptied, the client is told (its tutorial hints can start again, as for a character that
 	// never saw them) and the empty list is saved. NotFound for a character that is not in the world; FailedPrecondition for a character that has finished none.
 	ResetTutorials(context.Context, *ResetTutorialsRequest) (*ResetTutorialsResponse, error)
+	// Weapon XP. Sets a weapon line's experience total, by level (the total that reaches it) or by the total itself, for the character's line of that name: the client is told at once (the line's
+	// level, its bar and its Weapon talent points follow from the total) and the character is saved. A level that is lower than the ranks bought in the line's weapon tree need is refused
+	// (refund them first). NotFound for a character that is not in the world or a line that is none; InvalidArgument for a name that fits several lines (the answer lists them) and for an amount outside
+	// 1 to 25 (a level) or 0 to 5,718,160 (a total); FailedPrecondition for a refusal of the line's tree.
+	SetWeaponXp(context.Context, *SetWeaponXpRequest) (*SetWeaponXpResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -438,6 +459,9 @@ func (UnimplementedWorldAdminServiceServer) ListTaughtRecipes(context.Context, *
 }
 func (UnimplementedWorldAdminServiceServer) ResetTutorials(context.Context, *ResetTutorialsRequest) (*ResetTutorialsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetTutorials not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) SetWeaponXp(context.Context, *SetWeaponXpRequest) (*SetWeaponXpResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetWeaponXp not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
@@ -712,6 +736,24 @@ func _WorldAdminService_ResetTutorials_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_SetWeaponXp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetWeaponXpRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).SetWeaponXp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_SetWeaponXp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).SetWeaponXp(ctx, req.(*SetWeaponXpRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillNpcRequest)
 	if err := dec(in); err != nil {
@@ -878,6 +920,10 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetTutorials",
 			Handler:    _WorldAdminService_ResetTutorials_Handler,
+		},
+		{
+			MethodName: "SetWeaponXp",
+			Handler:    _WorldAdminService_SetWeaponXp_Handler,
 		},
 		{
 			MethodName: "KillNpc",

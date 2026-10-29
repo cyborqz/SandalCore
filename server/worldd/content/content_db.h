@@ -1484,6 +1484,9 @@ public:
     /// Plan D1: the leveling type named ("Adventuring") with its curve; nullopt with `error` set when there is none or a key is not a
     /// whole level at a whole XP total ascending.
     std::optional<LevelingType> leveling_type_named(const std::string& name, std::string& error) const;
+    /// Weapon XP: the names of the leveling types of one experience type whose names start with `prefix`, in guid order (the weapon lines: "Weapon" and "Weapon_"). Empty with `error` empty for a file with
+    /// none; empty with `error` set when a query failed.
+    std::vector<std::string> leveling_type_names(const std::string& experience_type, const std::string& prefix, std::string& error) const;
     /// Gathering stage 2, "Professions and GM items": the 22 professions with their curves, the five certification levels and the certification actions. nullopt with
     /// `error` empty when the file has none of these tables (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
     std::optional<ProfessionData> profession_data(std::string& error) const;

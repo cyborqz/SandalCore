@@ -3336,6 +3336,10 @@ static std::vector<std::string> sequence_since(const Harness& h, size_t from) { 
 
 /// The Bard's Instrument talent (a slot of three: Flute, Fiddle, Drum; it costs no point) that the instrument songs need.
 static constexpr int64_t kBardTree = 6064629885900499588ll, kInstrumentFlute = 6064630871707615237ll, kInstrumentFiddle = 6064630871711875083ll;
+/// Weapon XP: a weapon tree is judged at its own line's level now (the XP of the line's leveling type), no longer at the character's: the Scepter's and the two-handed Axe's lines.  The
+/// fixture's weapon lines have a curve of two levels, so 400 XP is the top: level 2, one Weapon point (the ranks the tests below buy cost one).
+static constexpr int64_t kScepterLine = 6064632150851584017ll, kAxe2HLine = 6064632150845227015ll;
+static constexpr int64_t kLineXpLevel2 = 400;
 
 /// A level-`level` Bard that has picked the Flute (the Music_* songs of the tests below need an Instrument picked, as in the game).
 static svc::Character bard_at(int level) {
@@ -3526,7 +3530,10 @@ static void test_d1s2_purchase() {
 
 static void test_d1s2_passives() {
     std::printf("plan D1, stage 2: a passive's effect item, a marker's end\n");
-    Harness h(bard_at(3));
+    svc::Character bard = bard_at(3);
+    bard.experience.push_back({kScepterLine, kLineXpLevel2, 0});   // the weapon ranks below are bought at their lines' levels (weapon XP): both lines at level 2
+    bard.experience.push_back({kAxe2HLine, kLineXpLevel2, 0});
+    Harness h(bard);
     const int64_t universal = content::kGuidUniversalTree;
     // a Universal rank: a 1 s marker; a weapon rank of the line in hand (the Scepter): 0.1 s or infinite as its record says
     const tl::Node* un = node_where(h, "Universal", [](const tl::Node& n) {
@@ -4214,7 +4221,9 @@ static void test_d1s2_shapes() {
         return out;
     };
     using V = std::vector<std::string>;
-    Harness h(bard_at(25));
+    svc::Character level25 = bard_at(25);
+    level25.experience.push_back({kScepterLine, kLineXpLevel2, 0});   // the weapon ranks bought below are bought at their line's level (weapon XP): the Scepter's line at level 2
+    Harness h(level25);
     const int64_t bard = tree_guid(h, "Bard");
     const auto rank = [&](const char* name) { return rank_named(h, "Bard", name); };
     // S5: several ranks in one call: one abilities update, one list, a skill update for each

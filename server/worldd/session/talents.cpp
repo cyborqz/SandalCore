@@ -197,11 +197,37 @@ void Book::load(int64_t tree_guid, const std::vector<int64_t>& ranks, size_t* dr
 }
 // ~ C_Y_B & CoA ~
 
+std::vector<RankRef> Book::auto_ranks_of(const Tree& tree) const {
+    if (tree.kind != Kind::Weapon) return catalog_->auto_ranks(tree, level_);
+    // a weapon line grants its auto-granted ranks with its first level (2): a line with no XP has none, and neither has a world without weapon lines
+    if (!lines_on_) return {};
+    const int level = line_level(tree.leveling_type);
+    if (level < 2) return {};
+    return catalog_->auto_ranks(tree, level);
+}
+
+std::string Book::line_shortfall(const Tree& tree, int level) const {
+    const std::vector<int64_t>& bought = purchased(tree.guid);
+    for (const int64_t r : bought) {
+        const RankRef ref = catalog_->find(tree.guid, r);
+        if (ref.ok() && ref.node->level_requirement > level) {
+            return "the rank " + ref.rank->name + " bought in " + tree.name + " needs the line at level " + std::to_string(ref.node->level_requirement);
+        }
+    }
+    const int64_t point = catalog_->point_type(Point::Weapon);
+    const int64_t earned = catalog_->earned(tree.leveling_type, level, point);
+    const int64_t used = spent(tree, bought, point);
+    if (used > earned) {
+        return "the ranks bought in " + tree.name + " cost " + std::to_string(used) + " Weapon point(s) and level " + std::to_string(level) + " earns " + std::to_string(earned);
+    }
+    return {};
+}
+
 std::vector<RankRef> Book::listed(const Tree& tree) const {
     std::vector<RankRef> out;
     if (tree.kind == Kind::Class && tree.class_guid != class_guid_) return out;   // another class's tree is not on the character
     if (tree.kind == Kind::Other) return out;
-    if (tree.kind != Kind::Weapon) out = catalog_->auto_ranks(tree, level_);
+    out = auto_ranks_of(tree);
     if (tree.kind == Kind::Profession && std::find(catalog_->professions().begin(), catalog_->professions().end(), &tree) == catalog_->professions().end()) out.clear();
     for (const int64_t r : purchased(tree.guid)) {
         const RankRef ref = catalog_->find(tree.guid, r);
@@ -223,10 +249,20 @@ std::vector<const Tree*> Book::listed_trees() const {
         if (!listed(*p).empty()) out.push_back(p);
     }
     if (const Tree* u = catalog_->universal(); u && !listed(*u).empty()) out.push_back(u);
-    for (const auto& [guid, ranks] : purchased_) {   // by tree guid
+    // the weapon trees that hold a rank, bought or granted by the line's level, by tree guid
+    std::vector<const Tree*> weapons;
+    for (const auto& [guid, ranks] : purchased_) {
         const Tree* t = catalog_->tree(guid);
-        if (t && t->kind == Kind::Weapon && !ranks.empty()) out.push_back(t);
+        if (t && t->kind == Kind::Weapon && !ranks.empty()) weapons.push_back(t);
     }
+    if (lines_on_) {
+        for (const Tree& t : catalog_->trees()) {
+            if (t.kind != Kind::Weapon || std::find(weapons.begin(), weapons.end(), &t) != weapons.end()) continue;
+            if (!auto_ranks_of(t).empty()) weapons.push_back(&t);
+        }
+        std::sort(weapons.begin(), weapons.end(), [](const Tree* a, const Tree* b) { return a->guid < b->guid; });
+    }
+    out.insert(out.end(), weapons.begin(), weapons.end());
     return out;
 }
 
@@ -269,9 +305,7 @@ std::vector<stats::SkillRank> Book::held_ranks() const {
 
 std::set<int64_t> Book::owned_skills(const Tree& tree, const std::vector<int64_t>& bought) const {
     std::set<int64_t> out;
-    if (tree.kind != Kind::Weapon) {
-        for (const RankRef& r : catalog_->auto_ranks(tree, level_)) out.insert(r.node->skill);
-    }
+    for (const RankRef& r : auto_ranks_of(tree)) out.insert(r.node->skill);
     for (const int64_t r : bought) {
         const RankRef ref = catalog_->find(tree.guid, r);
         if (ref.ok()) out.insert(ref.node->skill);
@@ -292,7 +326,7 @@ int64_t Book::spent(const Tree& tree, const std::vector<int64_t>& bought, int64_
 }
 
 int64_t Book::points_left(const Tree& tree, int64_t point_type) const {
-    return catalog_->earned(tree.leveling_type, level_, point_type) - spent(tree, purchased(tree.guid), point_type);
+    return catalog_->earned(tree.leveling_type, level_for(tree), point_type) - spent(tree, purchased(tree.guid), point_type);
 }
 
 namespace {
@@ -331,8 +365,9 @@ bool requirements_met(const Tree& tree, const Node& n, const std::set<int64_t>& 
 std::string Book::gate(const RankRef& ref, const std::vector<int64_t>& bought) const {
     const Node& n = *ref.node;
     const Tree& tree = *ref.tree;
-    if (level_ < n.level_requirement) {
-        return "needs level " + std::to_string(n.level_requirement) + " (the character is level " + std::to_string(level_) + ")";
+    const int level = level_for(tree);
+    if (level < n.level_requirement) {
+        return "needs level " + std::to_string(n.level_requirement) + (tree.kind == Kind::Weapon && lines_on_ ? " (the line is level " : " (the character is level ") + std::to_string(level) + ")";
     }
     if (const int64_t in_tree = spent(tree, bought, 0); in_tree < n.point_requirement) {
         return "needs " + std::to_string(n.point_requirement) + " point(s) spent in the tree (" + std::to_string(in_tree) + " are)";
@@ -366,7 +401,7 @@ std::string Book::gate(const RankRef& ref, const std::vector<int64_t>& bought) c
         if (!before || (!granted && std::find(bought.begin(), bought.end(), before->guid) == bought.end())) return "the skill's earlier rank is not bought";
     }
     for (const content::SkillCost& c : ref.rank->costs) {
-        const int64_t left = catalog_->earned(tree.leveling_type, level_, c.point_type) - spent(tree, bought, c.point_type);
+        const int64_t left = catalog_->earned(tree.leveling_type, level, c.point_type) - spent(tree, bought, c.point_type);
         if (left < c.quantity) {
             return "costs " + std::to_string(c.quantity) + " point(s) and the character has " + std::to_string(left < 0 ? 0 : left) + " left of that type";
         }
