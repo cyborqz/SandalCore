@@ -319,6 +319,17 @@ struct RewardTable {
     std::vector<RewardXp>   experience;
 };
 
+/// A curve record of the design data (stat_curve: the Weapon_LevelUpCurve of the level scrolls' Weapon experience is one): its keys in order.
+struct CurveKeyRow {
+    double      level = 0, value = 0;
+    std::string interp;   // Linear, Constant or Cubic: how the curve goes on from this key
+};
+struct CurveRow {
+    int64_t                  guid = 0;
+    std::string              name;
+    std::vector<CurveKeyRow> keys;
+};
+
 /// A row of `leveling_type` with its curve: the XP total at which each level is reached, ascending by level.
 struct LevelingType {
     int64_t                                   guid = 0;
@@ -1487,6 +1498,9 @@ public:
     /// Weapon XP: the names of the leveling types of one experience type whose names start with `prefix`, in guid order (the weapon lines: "Weapon" and "Weapon_"). Empty with `error` empty for a file with
     /// none; empty with `error` set when a query failed.
     std::vector<std::string> leveling_type_names(const std::string& experience_type, const std::string& prefix, std::string& error) const;
+    /// Weapon XP: a curve record (stat_curve) with its keys in order.  nullopt with `error` empty for a curve that has no rows; nullopt with `error` set when the file has no curve table
+    /// (an older file or fixture) or a query failed or a row is not what contentc writes.
+    std::optional<CurveRow> stat_curve(int64_t guid, std::string& error) const;
     /// Gathering stage 2, "Professions and GM items": the 22 professions with their curves, the five certification levels and the certification actions. nullopt with
     /// `error` empty when the file has none of these tables (an older fixture); nullopt with `error` set when a query failed or a row is not what contentc writes.
     std::optional<ProfessionData> profession_data(std::string& error) const;

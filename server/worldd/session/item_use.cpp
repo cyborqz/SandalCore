@@ -9,7 +9,10 @@
 #include "bootstrap/character_setup.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
+#include <regex>
 #include <set>
 
 namespace aoc::worldd::use {
@@ -30,6 +33,62 @@ std::string with_commas(int64_t v) {
     std::string s = std::to_string(v);
     for (int i = static_cast<int>(s.size()) - 3; i > (v < 0 ? 1 : 0); i -= 3) s.insert(static_cast<size_t>(i), ",");
     return s;
+}
+
+/// Weapon XP: the Weapon experience reward of a level scroll is `Weapon_LevelUpCurve(N) - Weapon_LevelUpCurve(the character's level) + a margin`, written in the design data as
+///     const xp = EvalCurve($#<type>:<curve>$, N);
+///     const cur= EvalCurve($#<type>:<curve>$, float(GetPlayerLevel()));
+///     xp - cur + <margin>
+/// (comment lines and spaces do not count).  Any other text is no formula this reads.
+struct WeaponScrollFormula {
+    int64_t curve = 0;
+    double  target = 0, margin = 0;
+};
+
+std::optional<WeaponScrollFormula> read_weapon_scroll_formula(const std::string& text) {
+    std::string flat;   // the text without its comment lines and its spaces, so that it is compared in one piece
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string::npos) end = text.size();
+        const std::string line = text.substr(at, end - at);
+        const size_t first = line.find_first_not_of(" \t\r");
+        const bool comment = first != std::string::npos && line.compare(first, 2, "//") == 0;
+        if (!comment) {
+            for (const char c : line) {
+                if (c != ' ' && c != '\t' && c != '\r') flat += c;
+            }
+        }
+        at = end + 1;
+    }
+    static const std::regex shape(R"(^constxp=EvalCurve\(\$#(\d+):(\d+)\$,(\d+(?:\.\d+)?)\);constcur=EvalCurve\(\$#\1:\2\$,float\(GetPlayerLevel\(\)\)\);xp-cur\+(\d+(?:\.\d+)?)$)");
+    std::smatch m;
+    if (!std::regex_match(flat, m, shape)) return std::nullopt;
+    errno = 0;
+    const long long curve = std::strtoll(m[2].str().c_str(), nullptr, 10);
+    if (errno != 0 || curve <= 0) return std::nullopt;
+    WeaponScrollFormula out;
+    out.curve = curve;
+    out.target = std::strtod(m[3].str().c_str(), nullptr);
+    out.margin = std::strtod(m[4].str().c_str(), nullptr);
+    if (!std::isfinite(out.target) || !std::isfinite(out.margin)) return std::nullopt;
+    return out;
+}
+
+/// A design-data curve at `x`: straight lines between its keys, its first value before the first key and its last after the last (a curve of Linear keys, which the level curves are).
+/// nullopt for a curve with no key and for a segment that is not Linear.
+std::optional<double> eval_linear_curve(const content::CurveRow& curve, double x) {
+    const std::vector<content::CurveKeyRow>& k = curve.keys;
+    if (k.empty() || !std::isfinite(x)) return std::nullopt;
+    if (x <= k.front().level) return k.front().value;
+    if (x >= k.back().level) return k.back().value;
+    for (size_t i = 0; i + 1 < k.size(); ++i) {
+        if (x < k[i].level || x > k[i + 1].level) continue;
+        const double span = k[i + 1].level - k[i].level;
+        if (k[i].interp != "Linear" || !(span > 0)) return std::nullopt;
+        return k[i].value + (k[i + 1].value - k[i].value) * ((x - k[i].level) / span);
+    }
+    return std::nullopt;
 }
 
 /// Glint tiers: the Glint lines of the use's rewards are summed per currency tier and paid in kinds, the biggest first, each under its rate; every other line stays where it is.
@@ -72,6 +131,7 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
         plan.refusal = std::move(why);
         plan.items.clear();
         plan.adventuring_xp = 0;
+        plan.weapon_xp = 0;
         plan.set_class.reset();
         plan.professions_after = professions::Professions();
         plan.profession_changes.clear();
@@ -209,6 +269,26 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
                     xp_lines.push_back({prof, x.expr});
                     continue;
                 }
+                if (x.experience_type == "Weapon") {
+                    // Weapon XP: the level scrolls' Weapon reward, in the data's own text; each weapon line of what is worn gets it (the session pays it)
+                    const auto formula = read_weapon_scroll_formula(x.expression);
+                    if (!formula) {
+                        plan.notes.push_back("the Weapon experience reward of " + table->name + " is not the level scrolls' formula: not granted");
+                        continue;
+                    }
+                    std::string curve_error;
+                    const auto curve = db.stat_curve(formula->curve, curve_error);
+                    const auto at_target = curve ? eval_linear_curve(*curve, formula->target) : std::nullopt;
+                    const auto at_level = curve ? eval_linear_curve(*curve, static_cast<double>(ctx.progress.level)) : std::nullopt;
+                    if (!at_target || !at_level) {
+                        plan.notes.push_back("the Weapon experience reward of " + table->name + " needs the curve " + std::to_string(formula->curve) + ", which content.db does not give in a form this reads" +
+                                             (curve_error.empty() ? std::string() : " (" + curve_error + ")") + ": not granted");
+                        continue;
+                    }
+                    const double v = *at_target - *at_level + formula->margin;
+                    if (std::isfinite(v) && v >= 1.0) plan.weapon_xp += static_cast<int64_t>(std::min(std::floor(v), 1.0e12));
+                    continue;
+                }
                 if (x.experience_type != "Adventuring") {
                     plan.notes.push_back("the " + x.experience_type + " experience reward of " + table->name + " is not granted (stage 1 levels Adventuring only)");
                     continue;
@@ -275,7 +355,7 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
     }
     if (ctx.currencies && !plan.items.empty()) compress_granted(db, *ctx.currencies, plan);
     const bool professions_moved = !plan.profession_changes.empty();
-    if (plan.items.empty() && plan.adventuring_xp == 0 && !plan.set_class && !professions_moved) {
+    if (plan.items.empty() && plan.adventuring_xp == 0 && plan.weapon_xp == 0 && !plan.set_class && !professions_moved) {
         if (!xp_lines.empty()) {
             std::string who;
             for (const XpLine& line : xp_lines) {
@@ -301,6 +381,7 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
         plan.summary += (plan.summary.empty() ? "" : ", ") + line;
     }
     if (plan.adventuring_xp > 0) plan.summary += (plan.summary.empty() ? "" : ", ") + std::string("+") + with_commas(plan.adventuring_xp) + " XP";
+    if (plan.weapon_xp > 0) plan.summary += (plan.summary.empty() ? "" : ", ") + std::string("weapon lines +") + with_commas(plan.weapon_xp) + " XP each";
     if (!plan.items.empty()) {
         plan.summary += (plan.summary.empty() ? "" : ", ") + std::to_string(plan.items.size()) + " item(s)" +
                         (plan.items.size() != items_granted ? " in " + std::to_string(items_granted) + " reward(s)" : "");

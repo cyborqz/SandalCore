@@ -552,9 +552,13 @@ makes the character the action's class. A use consumes one of the stack when the
 some is left; the GM scrolls are single items). Refused, changing nothing, and answered like a refused equip (the Backpack's and the Equipment's payloads under the resync
 budget): an item that is not where the client says, an item that is neither worn nor used, an activation other than `ActivateActionResponses`, a response type stage 1 does
 not run (a Callout, a quest grant ...), a reward table that does not grant always and select all, a table whose predicate (`GetPlayerLevel() < N`) the level fails (the
-level-10 scroll at level 12: the scroll stays), a bag with too few free slots for the grants, one's own class scroll. A Weapon XP reward (the level scrolls carry one for the
-weapon line) and an XP expression that is not the formula are notes in the log, and the rest of the use goes on. A use takes a token of the item budget (`kItemBurst`, 8,
-then ten a second), as an equip does.
+level-10 scroll at level 12: the scroll stays), a bag with too few free slots for the grants, one's own class scroll. An XP reward whose expression is not the formula this reads is a
+note in the log, and the rest of the use goes on. The level scrolls' **Weapon XP reward** is read in the data's own text (`Weapon_LevelUpCurve(N) - Weapon_LevelUpCurve(the character's level) + 10`,
+the curve read from content.db's `stat_curve`: 51 Linear keys, level 2 at 360 XP, 15 at 741,440, 20 at 2,280,360, 25 at 5,788,840) and paid to every weapon line of what is worn, on top of the
+line's total: for a level-1 character the level-10 scroll puts a line at 146,970 XP (level 9: the scrolls' curve is a little under the lines' own, whose level 10 is at 167,360), the level-15 scroll
+at 741,450 (level 15), the level-20 scroll at 2,280,370 (level 19; the lines' level 20 is at 2,458,560), the level-25 scroll at the top (5,718,160, level 25), and the level-1 scroll gives 10; the
+amount does not depend on the line's own level and is cut at 0 for a character already above the scroll's curve. The reply is the kill's: one XPTracker update with the Adventuring item and each paid line, a level-up effect for each line that crossed a level,
+the ranks the new levels grant and their stats. A use takes a token of the item budget (`kItemBurst`, 8, then ten a second), as an equip does.
 
 **The XP.** The level scrolls' `ExperienceValue` is `(curve(target) - curve(level) + GetXPDebtRatio * GetPlayerXPForCurrentLevel) / max(0.001, 1 + AdventuringXPAddMult) + 10`
 (contentc checked it with aocexpr over the real curve and wrote its parameters): worldd reads `GetPlayerXPForCurrentLevel` as the XP span of the current level and the ratio
@@ -585,7 +589,7 @@ one line; a Bard's Scepter and Book are two lines). A line has no debt to pay fi
 Adventuring total (when it moved: a kill at the Adventuring cap moves only the lines), each paid line's new total, and the weapon trees whose lists gained a rank. A line that crossed a level
 gets `BroadcastPlayLevelUpEffects(the line's leveling type, level)` (once, with the final level, when a kill crosses several), its tree's new auto-granted ranks (the Accuracy passives at 5, 10, 15,
 20 and 25, with an infinite `CurrentEffects` item when the weapon of that line is in hand) and the stats of the new level; the client adds the new Weapon talent point by itself. The kill's log
-line names each worn line with its total and level. A test command and the kills share one code path (`PlayerSession::apply_weapon_levels`).
+line names each worn line with its total and level. The test command, the kills and the level scrolls (above, the use of the GM items) share one code path (`PlayerSession::apply_weapon_levels`).
 
 **A level-up** sends, in this order and as close to one packet as the chains allow: the storage events of the use, the XPTracker update, `BroadcastPlayLevelUpEffects(Adventuring,
 level)` on the pawn (unreliable, as its flags say), the pawn's update with `BaseCharacterInfo.Level`, the `TempHealth` float-array item marked (every captured level-up has it)

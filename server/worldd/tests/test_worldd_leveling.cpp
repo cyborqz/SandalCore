@@ -185,7 +185,7 @@ static void test_uses(const content::ContentDb& db) {
 
     use::Plan p = use::plan_use(db, gm::kLevel10, bard);
     CHECK(p.ok && p.consume && p.adventuring_xp == 418410 && p.items.empty() && !p.set_class, "the level-10 scroll at level 1: consumed, +418,410 XP, nothing else");
-    CHECK(p.notes.size() == 1 && contains(p.notes[0], "Weapon"), "its Weapon XP reward is a note (stage 1 levels Adventuring only)");
+    CHECK(p.notes.size() == 1 && contains(p.notes[0], "Weapon"), "its Weapon XP reward is a note (the fixture's text is not the level scrolls' formula, so nothing is granted)");
     CHECK(contains(p.summary, "418,410 XP"), "the summary says the XP");
     use::Context at12 = bard;
     at12.progress = {12, 800000, 0};

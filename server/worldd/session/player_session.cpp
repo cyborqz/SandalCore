@@ -2748,8 +2748,10 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
         }
     }
     const std::span<const content::AutoGrant> grants = world_->auto_grants();
+    // weapon XP: a scroll's Weapon experience goes to every weapon line of what is worn, as a kill's does
+    const std::vector<int64_t> worn_lines = plan.weapon_xp > 0 ? equipped_weapon_lines() : std::vector<int64_t>();
     // the steps: the events, the XPTracker, the broadcast, the pawn's state, the class bar, and a skill update for each rank a level or a class grants
-    const size_t steps = 1 + (plan.items.size() + 1) / bootstrap::kMaxEventsPerChain + 1 + 1 + 1 + 1 + grants.size() + 8 + plan.profession_changes.size();
+    const size_t steps = 1 + (plan.items.size() + 1) / bootstrap::kMaxEventsPerChain + 1 + 1 + 1 + 1 + grants.size() + 8 + plan.profession_changes.size() + worn_lines.size();
     if (!room_for(steps)) return;
 // (Cyb : C.O.A)
 
@@ -2818,6 +2820,16 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     std::vector<std::pair<int, int>> cleared_slots;
     if (class_changed && book_) switch_class(*new_class, now, rank_effects, skill_updates, cleared_slots);
     finish_level_up(xp, class_changed, now, rank_effects, skill_updates);
+    // weapon XP: each worn line takes the scroll's Weapon experience on top of its total (it stops at the top); the levels it crosses are applied before any reply is built
+    std::vector<weaponxp::Change> weapon_changes;
+    for (const int64_t type : worn_lines) {
+        const weaponxp::Change c = weapon_.add_xp(type, plan.weapon_xp);
+        if (c.changed()) weapon_changes.push_back(c);
+    }
+    bool weapons_leveled = false;
+    for (const weaponxp::Change& c : weapon_changes) weapons_leveled = weapons_leveled || c.leveled();
+    if (!weapon_changes.empty()) progress_changed_ = true;
+    const bool weapon_pawn = apply_weapon_levels(weapon_changes, now);
 
     // what the client is told, in order: the storage events, the XPTracker, the level-up, the pawn's state, the granted skills
     ++uses_applied_;
@@ -2830,13 +2842,18 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
             queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
         }
     }
-    if (xp.changed() || leveled || class_changed || professions_changed) {
+    if (xp.changed() || leveled || class_changed || professions_changed || !weapon_changes.empty()) {
         const int64_t total = progress_.xp, debt = progress_.debt;
         const std::vector<ProfessionWire> wire = profession_wire(profession_changes);   // the professions that changed, in profession order
-        queue("XPTracker", [total, debt, wire](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+        std::vector<std::pair<int64_t, int64_t>> lines;   // weapon XP: each paid line's new total, in the same update
+        for (const weaponxp::Change& c : weapon_changes) lines.emplace_back(c.line, c.xp_after);
+        queue("XPTracker", [total, debt, wire, lines](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
             if (!pb.set_progress(total, debt)) return std::nullopt;
             for (const ProfessionWire& w : wire) {
                 if (!pb.set_profession(w.leveling_type, w.xp, w.certification)) return std::nullopt;
+            }
+            for (const auto& [type, line_total] : lines) {
+                if (!pb.set_weapon_line(type, line_total)) return std::nullopt;
             }
             return pb.leveling_update();
         }, conn, /*must_build=*/true);
@@ -2845,9 +2862,17 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
         const int level = progress_.level;
         queue("BroadcastPlayLevelUpEffects", [level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(content::kGuidAdventuring, level); }, conn);
     }
+    for (const weaponxp::Change& c : weapon_changes) {
+        if (!c.leveled()) continue;
+        const int64_t type = c.line;
+        const int level = c.level_after;
+        queue("BroadcastPlayLevelUpEffects", [type, level](bootstrap::PlayerBootstrap& pb) { return pb.level_up_broadcast(type, level); }, conn);
+    }
     if (professions_changed) queue_profession_level_ups(conn, profession_changes);
     if (leveled || class_changed) {
         queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("level and stats"); }, conn, /*must_build=*/true);
+    } else if (weapon_pawn) {
+        queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("a weapon line"); }, conn, /*must_build=*/false);
     }
     if (class_changed && book_) {
         // the old class's slots are sent cleared and the new class's skills placed: the whole bar as it is now, in one payload (a slot of UseType
@@ -2889,12 +2914,23 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
                 pbook.tier(c.after.tier).name + ", " + std::to_string(c.after.xp) + " XP";
     }
     if (!granted_names.empty()) line += ", granted " + granted_names;
+    if (plan.weapon_xp > 0) {   // weapon XP (the summary above says the amount): what each worn line holds now
+        if (!weapon_.valid()) line += "; this world has no weapon lines";
+        else if (worn_lines.empty()) line += "; no weapon is worn, so no line gets it";
+        bool first = true;
+        for (const int64_t type : worn_lines) {
+            const weaponxp::Line* wl = weapon_.lines()->find(type);
+            const bool up = std::any_of(weapon_changes.begin(), weapon_changes.end(), [&](const weaponxp::Change& c) { return c.line == type && c.leveled(); });
+            line += (first ? "; " : ", ") + (wl ? wl->name : std::to_string(type)) + " " + std::to_string(weapon_.xp(type)) + " XP (level " + std::to_string(weapon_.level(type)) + (up ? ", level-up" : "") + ")";
+            first = false;
+        }
+    }
     if (class_changed) line += "; the class is " + class_name + " now (its tree, abilities and bar are sent live)";
     line += "; " + std::to_string(all.events.size()) + " storage event(s)";
     for (const std::string& n : plan.notes) line += "; " + n;
     spdlog::log(level_for(use_logged_), "[session] {}: {}", name(), line);
-    if (xp.changed() || class_changed || professions_changed) {
-        hand_over_progress(leveled ? "a level-up" : class_changed ? "a class change" : professions_changed && !xp.changed() ? "a profession changed" : "XP earned");
+    if (xp.changed() || class_changed || professions_changed || !weapon_changes.empty()) {
+        hand_over_progress(leveled || weapons_leveled ? "a level-up" : class_changed ? "a class change" : professions_changed && !xp.changed() ? "a profession changed" : "XP earned");
     }
 }
 // C | O | A and Cyb

@@ -144,6 +144,7 @@ constexpr const char* kGatherInteractionDefSql =
 constexpr const char* kLevelingTypeSql = "SELECT guid, name, experience_type, level_cap, uses_debt, xp_mult_stat_guid FROM leveling_type WHERE name = ?1";
 constexpr const char* kLevelingCurveSql = "SELECT level, xp FROM leveling_curve WHERE type_guid = ?1 ORDER BY level";
 constexpr const char* kLevelingNamesSql = "SELECT name FROM leveling_type WHERE experience_type = ?1 AND substr(name, 1, length(?2)) = ?2 ORDER BY guid";
+constexpr const char* kStatCurveSql = "SELECT name, level, value, interp FROM stat_curve WHERE guid = ?1 ORDER BY ord";
 constexpr const char* kAutoGrantSql =
     "SELECT tree_guid, tree_name, leveling_type_guid, node_guid, node_name, level_requirement, skill_guid, skill_name, rank_guid, effect_guid "
     "FROM skill_auto_grant WHERE leveling_type_guid = ?1 ORDER BY level_requirement, node_guid";
@@ -1211,6 +1212,38 @@ std::vector<std::string> ContentDb::leveling_type_names(const std::string& exper
         error = "content.db leveling type query failed: " + db_message(db_);
         return {};
     }
+    return out;
+}
+
+std::optional<CurveRow> ContentDb::stat_curve(int64_t guid, std::string& error) const {
+    error.clear();
+    Stmt q(db_, kStatCurveSql);
+    if (!q.ok()) {
+        error = "content.db stat curve query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    sqlite3_bind_int64(q.get(), 1, guid);
+    CurveRow out;
+    out.guid = guid;
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        sqlite3_stmt* s = q.get();
+        if (!column_is_text(s, 0) || !column_is_real(s, 1) || !column_is_real(s, 2) || !column_is_text(s, 3)) {
+            error = "content.db stat_curve " + std::to_string(guid) + " has a column of the wrong storage class";
+            return std::nullopt;
+        }
+        out.name = column_text(s, 0);
+        CurveKeyRow k;
+        k.level = sqlite3_column_double(s, 1);
+        k.value = sqlite3_column_double(s, 2);
+        k.interp = column_text(s, 3);
+        out.keys.push_back(std::move(k));
+    }
+    if (step != SQLITE_DONE) {
+        error = "content.db stat curve query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    if (out.keys.empty()) return std::nullopt;
     return out;
 }
 // [CoA - C | Y | B]

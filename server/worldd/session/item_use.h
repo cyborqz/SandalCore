@@ -11,7 +11,10 @@
 //    GiveItem                 the action's RewardTables: every ItemRewards entry is granted into the bag as fresh instances
 //                             (quantity split into stacks of the record's MaxStackSize), every ExperienceRewards entry of type
 //                             Adventuring that contentc resolved to the level scrolls' formula grants that XP
-//                             (leveling::scroll_xp); a table whose predicate GetPlayerLevel() < N the level fails refuses the
+//                             (leveling::scroll_xp); every ExperienceRewards entry of type Weapon whose text is the level scrolls' formula
+//                             (Weapon_LevelUpCurve(N) - Weapon_LevelUpCurve(the character's level) + 10, the curve read from content.db's
+//                             stat_curve) grants that XP to each weapon line of what is worn (Plan::weapon_xp; the session pays it);
+//                             a table whose predicate GetPlayerLevel() < N the level fails refuses the
 //                             use (nothing is consumed: the scroll stays for a character it is meant for)
 //    SetPrimaryArchetype      the class of the action's CharacterClassId; the character's own class refuses the use
 //
@@ -20,8 +23,8 @@
 //    a Profession XP reward   (Gathering stage 2) the reward's compiled expression, run with the live profession levels, is the XP the profession earns
 //
 //  The actions run IN ORDER, each seeing what the one before left (the XP of a scroll's second line depends on the tier its Promote reached). Everything else
-//  refuses the use and says what was asked (the response type, an unmodelled table, an unmodelled predicate), and a reward stage 1 does not run (a Weapon XP
-//  reward, an expression that is not the formula) is a note: the rest of the use goes on. Nothing here changes anything: the session applies a Plan (the
+//  refuses the use and says what was asked (the response type, an unmodelled table, an unmodelled predicate), and a reward stage 1 does not run (an XP
+//  reward of another kind, an expression that is not the formula) is a note: the rest of the use goes on. Nothing here changes anything: the session applies a Plan (the
 //  inventory, the XP, the professions, the class) and tells the client.
 //
 //  Evidence: the GM items' records in content.db (the research of 2026-10-02 and contentc's tables); no retail capture holds a
@@ -57,6 +60,8 @@ struct Plan {
     bool                     consume = false; // one of the stack goes
     std::vector<Granted>     items;           // into the bag, in the records' order
     int64_t                  adventuring_xp = 0;
+    /// Weapon XP: what each weapon line of what is worn gets (the level scrolls' Weapon experience reward: 0 when the use has none or its formula was not read).
+    int64_t                  weapon_xp = 0;
     std::optional<int>       set_class;       // ECharacterClass (1 Ranger ... 8 Mage)
     /// Gathering stage 2: what the character holds in its professions after the use (valid() only when the context had professions), and each profession that
     /// differs from before (before and after, in profession order). A use that moves no level and no tier leaves the professions as they were.

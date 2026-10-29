@@ -39,7 +39,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Bandit raiders and captains: dressed, named and armed in the Riverlands' camps, and fighting with their own attacks (strikes, cleaves, heavy slashes and whirlwinds).
 - Goblins and other creatures that were built from their Blueprint alone play their own attack animations, with the lunges and rolls that carry them (the Languid Goblins, the Flayers, the Warlord, the Diggers and the Skinwalkers among them).
 - Embersprings: discovering them, attuning to one, and choosing where to respawn.
-- Weapon line experience: kills pay every weapon you wear, each of the 21 weapon lines levels up to 25 on its own, the Skill Tree shows a line's level, bar and talent points, the weapon talents are bought with them, and the free Accuracy passives arrive at levels 5, 10, 15, 20 and 25.
+- Weapon line experience: kills and the game master level scrolls pay every weapon you wear, each of the 21 weapon lines levels up to 25 on its own, the Skill Tree shows a line's level, bar and talent points, the weapon talents are bought with them, and the free Accuracy passives arrive at levels 5, 10, 15, 20 and 25.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
