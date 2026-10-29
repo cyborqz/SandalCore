@@ -138,12 +138,17 @@ constexpr const char* kZoneHitsSql = "SELECT role, hit_guid FROM ab_zone_hit WHE
 constexpr const char* kAllExprsSql = "SELECT id, text, terms, program, uses_target, error FROM ab_expr ORDER BY id";
 constexpr const char* kGuidListSql[] = {"SELECT guid FROM ab_ability ORDER BY guid", "SELECT guid FROM ab_hit ORDER BY guid",
                                         "SELECT guid FROM ab_effect ORDER BY guid", "SELECT guid FROM ab_projectile ORDER BY guid",
-                                        "SELECT guid FROM ab_zone ORDER BY guid"};
+                                        "SELECT guid FROM ab_zone ORDER BY guid", "SELECT guid FROM ab_reaction ORDER BY guid"};
+// contentc version 35: the reaction tables (a file without them has no reactions, and every other statement still prepares)
+constexpr const char* kReactionSql = "SELECT guid, name, instigator, targets_mask, bind_hit, bind_effect, bind_ability, bind_projectile, bind_zone, bind_movement, "
+                                     "bind_fishing, bind_stat, global_limit, instigator_limit, eval_applying_hit, proc_on_apply, trigger_expr FROM ab_reaction WHERE guid = ?1";
+constexpr const char* kReactionHitsSql = "SELECT hit_guid FROM ab_reaction_hit WHERE reaction_guid = ?1 ORDER BY ord";
+constexpr const char* kHitRecursiveSql = "SELECT ord, child_hit_guid, targeting_guid FROM ab_hit_recursive WHERE hit_guid = ?1 ORDER BY ord";
 
 }  // namespace
 
 AbilityContent::AbilityContent(AbilityContent&& other) noexcept
-    : db_(std::exchange(other.db_, nullptr)), path_(std::move(other.path_)), contentc_version_(other.contentc_version_) {}
+    : db_(std::exchange(other.db_, nullptr)), path_(std::move(other.path_)), contentc_version_(other.contentc_version_), reactions_(other.reactions_) {}
 
 AbilityContent& AbilityContent::operator=(AbilityContent&& other) noexcept {
     if (this != &other) {
@@ -151,6 +156,7 @@ AbilityContent& AbilityContent::operator=(AbilityContent&& other) noexcept {
         db_ = std::exchange(other.db_, nullptr);
         path_ = std::move(other.path_);
         contentc_version_ = other.contentc_version_;
+        reactions_ = other.reactions_;
     }
     return *this;
 }
@@ -205,6 +211,11 @@ std::optional<AbilityContent> AbilityContent::open(const std::string& path, std:
             error = path + " lacks a table or column the ability reader uses: " + db_message(c.db_);
             return std::nullopt;
         }
+    }
+    // the reaction tables came with contentc version 35; all of them or none
+    {
+        Stmt a(c.db_, kReactionSql), b(c.db_, kReactionHitsSql), h(c.db_, kHitRecursiveSql), g(c.db_, kGuidListSql[5]);
+        c.reactions_ = a.ok() && b.ok() && h.ok() && g.ok();
     }
     return c;
 }
@@ -620,8 +631,63 @@ std::optional<ZoneRow> AbilityContent::zone(int64_t guid, std::string& error) co
     return out;
 }
 
+std::optional<ReactionRow> AbilityContent::reaction(int64_t guid, std::string& error) const {
+    if (!reactions_) {
+        error = "content.db has no reaction tables";
+        return std::nullopt;
+    }
+    std::optional<ReactionRow> out;
+    if (!run(db_, kReactionSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            ReactionRow r;
+            r.guid = col_i64(s, 0);
+            r.name = col_text(s, 1);
+            r.instigator = col_text(s, 2);
+            r.targets_mask = col_int(s, 3);
+            r.bind_hit = col_int(s, 4);
+            r.bind_effect = col_int(s, 5);
+            r.bind_ability = col_int(s, 6);
+            r.bind_projectile = col_int(s, 7);
+            r.bind_zone = col_int(s, 8);
+            r.bind_movement = col_int(s, 9);
+            r.bind_fishing = col_int(s, 10);
+            r.bind_stat = col_int(s, 11);
+            r.global_limit = col_int(s, 12);
+            r.instigator_limit = col_int(s, 13);
+            r.eval_applying_hit = col_bool(s, 14);
+            r.proc_on_apply = col_bool(s, 15);
+            r.trigger_expr = col_i64(s, 16);
+            out = std::move(r);
+            return true;
+        }, error))
+        return std::nullopt;
+    if (!out) {
+        error = "content.db has no reaction " + std::to_string(guid);
+        return std::nullopt;
+    }
+    if (!run(db_, kReactionHitsSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            out->hits.push_back(col_i64(s, 0));
+            return true;
+        }, error))
+        return std::nullopt;
+    return out;
+}
+
+bool AbilityContent::hit_recursive(int64_t hit, std::vector<RecursiveHitRow>& out, std::string& error) const {
+    out.clear();
+    if (!reactions_) return true;
+    return run(db_, kHitRecursiveSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, hit); }, [&](sqlite3_stmt* s) {
+        RecursiveHitRow r;
+        r.ord = col_int(s, 0);
+        r.child_hit = col_i64(s, 1);
+        r.targeting = col_i64(s, 2);
+        out.push_back(r);
+        return true;
+    }, error);
+}
+
 bool AbilityContent::guids(Table table, std::vector<int64_t>& out, std::string& error) const {
     out.clear();
+    if (table == Table::Reaction && !reactions_) return true;
     return run(db_, kGuidListSql[static_cast<size_t>(table)], nullptr, [&](sqlite3_stmt* s) {
         out.push_back(col_i64(s, 0));
         return true;

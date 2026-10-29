@@ -1376,6 +1376,8 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             pipeline_.emplace(world_ ? world_->ability_catalog() : nullptr, *stats_, *abilities_,
                               [this] { return bootstrap::worn_items_of(inventory_); }, pb_.setup().world_time, static_cast<uint64_t>(pb_.setup().player_id) * 7919u + 1u);
             pipeline_->set_known(known_);
+            if (book_) pipeline_->set_reaction_carriers(book_->reaction_carriers(wielded_line_));
+            if (world_) pipeline_->set_reactions_enabled(world_->reactions_enabled());
             pipeline_->set_weapon_tags([this] { return weapon_tags(); });
             pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
             sync_ability_values();
@@ -2509,6 +2511,7 @@ void PlayerSession::refresh_rank_mods() {
         stats_->set_passives(book_->passives(wielded_line_));
         stats_->set_ranks(book_->held_ranks());
     }
+    if (pipeline_ && book_) pipeline_->set_reaction_carriers(book_->reaction_carriers(wielded_line_));   // the reactions the ranks' effects carry
     sync_ability_values();   // (the ranks changed what the formulas give Sprint's speed)
 }
 // CoA with C_Y_B

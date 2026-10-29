@@ -274,6 +274,17 @@ std::vector<int64_t> Book::abilities(const Tree& tree) const {
     return out;
 }
 
+std::vector<int64_t> Book::reaction_carriers(int64_t wielded_line) const {
+    std::vector<int64_t> out;
+    for (const Tree* t : listed_trees()) {
+        if (t->kind == Kind::Weapon && t->weapon_line != wielded_line) continue;
+        for (const RankRef& r : listed(*t)) {
+            if (r.rank->effect != 0 && std::find(out.begin(), out.end(), r.rank->effect) == out.end()) out.push_back(r.rank->effect);
+        }
+    }
+    return out;
+}
+
 std::vector<stats::ActiveEffect> Book::passives(int64_t wielded_line) const {
     std::vector<stats::ActiveEffect> out;
     for (const Tree* t : listed_trees()) {

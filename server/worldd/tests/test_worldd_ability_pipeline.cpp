@@ -222,7 +222,8 @@ void test_resonance_and_fortissimo() {
     CHECK(r.pawn.effect(r.effect("Bard_Fortissimo")) != nullptr && r.pawn.effect(r.effect("Bard_Fortissimo"))->duration == 8.0f &&
               find_event(seen, [&](const Seen& s) { return effect_added(s, r.effect("Bard_Fortissimo")) && near(s.at, 4.3, 1e-9); }),
           "Fortissimo's own effect lasts 8 s and comes in the same packet (no montage, no hit delay)");
-    // Resonance climbs one a cast to 10 and stays there
+    // Resonance climbs to 10 and stays there: one a cast (the Resonant Weapon's reaction, at the cost step), and one more for the dances and songs that list a hit
+    // that adds it (Bard_AddResonance) when that hit lands [R: the recorded Maddening and Nimble casts: 5 -> 6 in the cost packet, 7 when the next cast starts; 8 -> 9, then 10]
     double t = 10.0;
     const char* casts[] = {"Bard_Dance_Maddening", "Bard_Misc_Misdirection", "Bard_Dance_Nimble", "Bard_Dance_Shielding", "Bard_Dance_Mesmerizing", "Bard_Misc_Flourish", "Bard_Misc_Flourish",
                            "Bard_Misc_QuickWit_Jest", "Bard_Story_Joy", "Bard_Misc_GetOffTheStage"};
@@ -232,7 +233,14 @@ void test_resonance_and_fortissimo() {
         const Refusal rf = r.trigger(name, t, name == std::string("Bard_Dance_Nimble") || name == std::string("Bard_Misc_QuickWit_Jest") || name == std::string("Bard_Story_Joy"));
         CHECKF(rf == Refusal::None, "%s accepted (%s)", name, refusal_name(rf));
         r.run_to(t + 3.0);
-        expect = std::min(10, expect + 1);
+        int gain = 1;
+        if (const abilities::AbilityDef* def = r.catalog->ability_named(name)) {
+            for (const content::AbilityHitRow& h : def->hits) {
+                const abilities::HitDef* hd = r.catalog->hit(h.hit_guid);
+                if (hd && hd->row.name == "Bard_AddResonance") gain = 2;
+            }
+        }
+        expect = std::min(10, expect + gain);
         CHECKF(r.pawn.stat(kResonanceStat) == static_cast<float>(expect), "after %s Resonance is %d", name, expect);
         t += 4.0;
         r.run_to(t);

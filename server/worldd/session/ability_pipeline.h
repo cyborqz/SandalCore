@@ -297,6 +297,20 @@ public:
     /// event. False for an effect the catalog does not have.
     bool grant_effect(int64_t effect_guid, int stacks, double now);
 
+    /// Reactions (contentc version 35, session/ability_reactions.cpp). The effects the character's ranks grant (its passives) that carry reactions are the
+    /// session's, not pipeline effects: the session tells the pipeline which it holds, whenever its ranks, level, class or weapon in hand change. The effects
+    /// the pipeline holds (a melody's, a buff's) carry theirs by themselves.
+    void set_reaction_carriers(std::vector<int64_t> effect_guids);
+    /// The game's AbilitySystem.ReactionsEnabled (default on): off, no reaction fires, and the class resource is the modelled rule again (resolve_resource).
+    void set_reactions_enabled(bool on) {
+        if (on == reactions_enabled_) return;
+        reactions_enabled_ = on;
+        resolve_resource();
+    }
+    bool reactions_enabled() const { return reactions_enabled_; }
+    /// How many times a reaction has fired.
+    size_t reactions_fired() const { return reactions_fired_; }
+
     /// Whether the item and cost steps come at the times the retail captures show for the ability (session/ability_timings.h, the default), or all at the
     /// montage's first notify of 300 ms (what the runtime's own tests of its mechanics use).
     void set_data_timings(bool on) { data_timings_ = on; }
@@ -355,6 +369,22 @@ private:
         /// E1 stage 3 fix 3: the confirmation's Source is the target actor itself, one confirmation per target (the hits fired where a projectile
         /// landed: the book's Split hits; retail: Source = the target in 1,289 of 1,289, one target each)
         bool    source_is_target = false;
+    };
+    /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
+    struct HitEvent {
+        const abilities::HitDef*     hit = nullptr;
+        const abilities::AbilityDef* ability = nullptr;   // the ability it belongs to (null for an effect's, a zone's or a reaction's hit)
+        HitSource                    src;
+        std::vector<uint64_t>        targets;             // the other actors it reached (NPCs)
+        bool                         on_self = false;     // the caster is among the targets
+        std::map<int64_t, double>    mods;                // the stat mods it resolved, by stat guid, summed over its targets (a loss is negative)
+        std::map<int64_t, double>    effective;           // ... and the part of them that took effect
+        uint8_t                      flags = 0;           // the flags rolled on its targets (Crit, Block, Miss, ORed)
+    };
+    /// What a reaction's expression asks of the event in progress.
+    struct ReactionContext {
+        const HitEvent*              hit = nullptr;        // an event of kind Hit
+        const abilities::AbilityDef* consumed = nullptr;   // an event of kind Ability: the ability whose cost was paid
     };
     /// One of an open cast's hits the client may ask for.
     struct Pending {
@@ -523,6 +553,16 @@ private:
     /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation.
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
                                 const abilities::AbilityDef* ability);
+    // reactions (session/ability_reactions.cpp)
+    /// An expression of the reaction tables run for the event: the hit's tags and flags, the stat mods it resolved, the ability whose cost was paid.
+    bool   eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why);
+    /// The hit event (kind Hit, OwnerHits), raised once a hit of the caster has landed and its confirmation is queued.
+    void   raise_hit_event(bootstrap::AbilityChange& c, const HitEvent& ev, double t);
+    /// The ability event (kind Ability, Consume), raised once the cost of a cast was paid.
+    void   raise_ability_event(bootstrap::AbilityChange& c, const abilities::AbilityDef& ability, double t);
+    /// The carriers' reactions bound to the event, in the order the game runs them: each carrier in the order the character got it, its reactions as listed.
+    void   run_reactions(bootstrap::AbilityChange& c, int kind, int bit, const ReactionContext& rc, double t);
+    void   fire_reaction(bootstrap::AbilityChange& c, const abilities::ReactionDef& r, const ReactionContext& rc, double t);
     /// The caster's evaluation, made when it is not (the same one `eval` uses).
     bool   ensure_evaluation(std::string& why);
     double slot_due(const CastRecord& rec, const HitSlot& s) const;
@@ -604,6 +644,15 @@ private:
     combat::HitPort*          combat_ = nullptr;                    // plan E1, stage 3: the world's port (not owned)
     const abilities::EffectDef* resource_ = nullptr;                // the class's resource effect (Bard_Resonance)
     int                       resource_class_ = 0;
+    // reactions
+    std::vector<int64_t>      reaction_carriers_;                   // the effects the ranks grant (the session's passives) that may carry reactions
+    bool                      reactions_enabled_ = true;
+    int                       reaction_depth_ = 0;                  // > 0 while a reaction's hits are applied: they raise no events (a reaction does not chain)
+    size_t                    reactions_fired_ = 0;
+    std::map<int64_t, int>    reaction_procs_;                      // reaction guid -> how often it fired (its proc limits)
+    std::set<int64_t>         reaction_noted_;                      // reactions whose inert state or unserved shape was logged
+    std::set<int64_t>         reaction_recursive_noted_;            // reactions whose hits fire further hits (not followed) that were logged
+    std::set<int>             unserved_host_;                       // host functions an expression asked for and the runtime does not answer yet
 };
 
 }  // namespace aoc::worldd

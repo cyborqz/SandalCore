@@ -34,7 +34,7 @@ constexpr uint16_t kBundleVersion = 3;
 constexpr int kNpcClassBase = 32;
 // The actors of a hit an expression can read (aocexpr's Role...): the caster, the target, the caster's selected enemy and friend, the two owners and the
 // target of the hit nearest the caster.
-constexpr size_t kMaxRoles = 7;
+constexpr size_t kMaxRoles = 9;
 
 // Limits: a bundle past any of them is refused (the same as Go's statprog).
 constexpr size_t kMaxBundleBytes = 4u << 20;
@@ -187,6 +187,18 @@ constexpr int kHostRolledItemQuality = 181;  // GetRolledItemQuality(): the qual
 constexpr int kHostItemRarity = 182;         // GetItemRarity(): the EItemRarity ordinal of the harvest's item (Common 0 ... Artifact 6)
 constexpr int kHostSourceCertTier = 183;     // GetSourceCertificationTier(): the CertificationTier of the harvested interaction (Novice 0 ... GrandMaster 4)
 constexpr int kHostGatherBaseSecs = 184;     // GetGatheringInteractionBaseDuration(): the interaction's BaseGatheringDuration, seconds
+// Reactions (contentc version 35; aocexpr/hostfn.go has the same numbers): what a reaction's expression asks of the event in progress.
+constexpr int kHostConsumedAbilityHasTag = 190;   // AbilityHasTag(GetConsumedAbility(), tag): name: the tag
+constexpr int kHostConsumedAbilityNameHas = 191;  // RecordNameContains(GetConsumedAbility(), text): name: the text
+constexpr int kHostConsumedAbilityIs = 192;       // GetConsumedAbility() == <ability>: name: the ability's guid
+constexpr int kHostHitRecordNameIs = 193;         // RecordNameIs(GetHitRecord(GetHitEvent()), name): name: the record's name
+constexpr int kHostEffectHasTag = 194;            // EffectHasTag(GetEffect(), tag): name: the tag
+constexpr int kHostEffectIs = 195;                // GetEffect() == <effect>: name: the effect's guid
+constexpr int kHostEffectDuration = 196;          // CalcEffectDuration(<effect>): name: the effect's guid: its duration in seconds
+constexpr int kHostBlackboardFloat = 197;         // GetBlackboardFloat(actor, key): name: the key; args[0]: the role of the actor
+constexpr int kHostStatBase = 198;                // GetStatBase(actor, stat): name: the stat's guid; args[0]: the role of the actor
+constexpr int kHostHitHasHitMod = 199;            // HitHasHitMod(hit, actor, mod): name: the hit mod's guid; args[0]: the role of the actor
+constexpr int kHostHitRecordIs = 200;             // GetHitRecord(GetHitEvent()) == <hit>: name: the hit record's guid
 constexpr int kHostGatherFirst = 180;
 constexpr int kHostGatherLast = 184;
 constexpr int kActorPlayer = 100;              // the actor code of GetPlayer() in the args of kHostCurrentNode (the roles of a hit are 0 to 6)
@@ -206,6 +218,7 @@ constexpr int kRoleActiveSupport = 3;
 constexpr int kRoleCasterOwner = 4;
 constexpr int kRoleTargetOwner = 5;
 constexpr int kRoleClosestInHit = 6;
+constexpr int kRoleEffectInstigator = 8;   // GetEffectInstigator() (a reaction's expression); the VM reads it as the caster until the host supplies it
 
 // Stat flags.
 constexpr uint8_t kStatMulMods = 1 << 0;

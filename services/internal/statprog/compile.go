@@ -1057,7 +1057,14 @@ func (f *fnc) equality(e aocexpr.Binary, op byte, l, r val) (val, error) {
 	case l.t == tEnum && r.t == tEnum:
 		return val{t: tBool, n: nConst{b2f((l.enum == r.enum) == want)}}, nil
 	case l.t == tRef && r.t == tRef:
+		if v, ok, err := f.markerEquality(e, l, r, want); ok {
+			return v, err
+		}
 		return val{t: tBool, n: nConst{b2f((l.ref == r.ref) == want)}}, nil
+	case (l.t == tObj && r.t == tRef) || (l.t == tRef && r.t == tObj):
+		if v, ok, err := f.hitRecordEquality(e, l, r, want); ok {
+			return v, err
+		}
 	case l.t == tObj && r.t == tObj:
 		if l.role == r.role {
 			return val{t: tBool, n: nConst{b2f(want)}}, nil // the same role is the same actor
@@ -1147,6 +1154,9 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 	if v, ok, err := f.gatherCall(e, args); ok {
 		return v, err
 	}
+	if v, ok, err := f.reactionCall(e, args); ok {
+		return v, err
+	}
 	switch e.Name {
 	case "Round", "Floor", "Ceil":
 		if err := check(tNum); err != nil {
@@ -1163,12 +1173,12 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 		}
 		args[0].float = true
 		return args[0], nil
-	case "Min", "Max":
+	case "Min", "Max", "min", "max":
 		if err := check(tNum, tNum); err != nil {
 			return val{}, err
 		}
 		op := OpMin
-		if e.Name == "Max" {
+		if e.Name == "Max" || e.Name == "max" {
 			op = OpMax
 		}
 		fl := args[0].float || args[1].float
@@ -1178,11 +1188,11 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 			return val{t: tNum, n: nConst{minmax(op, a, b)}, float: fl}, nil
 		}
 		return val{t: tNum, n: nFn2{op, args[0].n, args[1].n}, float: fl}, nil
-	case "SelectFloat", "SelectInt":
+	case "SelectFloat", "SelectInt", "selectfloat", "selectint":
 		if err := check(tBool, tNum, tNum); err != nil {
 			return val{}, err
 		}
-		fl := e.Name == "SelectFloat"
+		fl := e.Name == "SelectFloat" || e.Name == "selectfloat"
 		cc, cok := args[0].constant()
 		a, aok := args[1].constant()
 		b, bok := args[2].constant()
@@ -1288,7 +1298,7 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 		if err := check(tObj); err != nil {
 			return val{}, err
 		}
-		return val{t: tObj}, nil
+		return val{t: tObj, etype: etypeHitRecord}, nil
 	case "GetHitSourceRecord":
 		if f.kind != unitExpr {
 			return val{}, unsupportedAt(e.At, "function %q (a stat formula has no hit)", e.Name)
@@ -1566,6 +1576,12 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 	case "GetHitFlags":
 		if f.kind != unitExpr {
 			return val{}, unsupportedAt(e.At, "function %q (a stat formula has no hit)", e.Name)
+		}
+		if len(e.Args) == 1 { // the flags of the hit as a whole (the event has one target in the context)
+			if err := check(tObj); err != nil {
+				return val{}, err
+			}
+			return val{t: tFlags}, nil
 		}
 		if err := check(tObj, tObj); err != nil {
 			return val{}, err

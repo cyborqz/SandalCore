@@ -27,6 +27,11 @@ package content
 //	ab_effect,
 //	ab_effect_hit        an effect: duration, ticks, stacking, persistence, its hits per phase
 //	ab_mod               the stat mods of effects and hits: the stat and the value as an expression
+//	ab_reaction,
+//	ab_reaction_hit      the reactions the effects and hits carry, their triggers and the hits they apply (version 35)
+//	ab_hit_recursive,
+//	ab_targeting_def     a hit's RecursiveHit children and the targeting records that aim them
+//	ab_modify_cooldown   the cooldown modifiers hits list
 //	ab_expr              every expression of the tables above once (the same text and terms share a row): the text and, after
 //	                     contentc has compiled the stat program, the program (an index in the bundle of stat_program, listed in
 //	                     its Exprs) or the reason it does not compile
@@ -258,4 +263,63 @@ CREATE TABLE ab_mod (
     shield_absorb INTEGER NOT NULL,   -- bUseShieldAbsorb
     PRIMARY KEY (owner_kind, owner_guid, ord)
 ) WITHOUT ROWID;
+-- Reactions (contentc version 35): the game's reactions that an effect or a hit the tables hold carries (their ids are in the owner's
+-- extra.ReactionsIds, in listed order), with the hits they apply, and the hits and records those reach (all in the tables above).
+-- bind_*: EventBindings, one byte of bits per event kind. bind_hit: OwnerIsHit 2, OwnerHits 4. bind_ability: Trigger 2, Consume 4, Branch 8, Tick 16,
+-- Hit 32, Interrupt 64, Complete 128. bind_movement: Walk 2. bind_stat: OwnerDies 2. instigator: the EReactionTarget that casts the reaction's hits;
+-- targets_mask: the EReactionTarget bits they land on (Owner 1, Instigator 2, HitSource 4, Targets 8, HitInstigator 16 ...).
+CREATE TABLE ab_reaction (
+    guid              INTEGER PRIMARY KEY,
+    name              TEXT NOT NULL,
+    instigator        TEXT NOT NULL,
+    targets_mask      INTEGER NOT NULL,
+    bind_hit          INTEGER NOT NULL,
+    bind_effect       INTEGER NOT NULL,
+    bind_ability      INTEGER NOT NULL,
+    bind_projectile   INTEGER NOT NULL,
+    bind_zone         INTEGER NOT NULL,
+    bind_movement     INTEGER NOT NULL,
+    bind_fishing      INTEGER NOT NULL,
+    bind_stat         INTEGER NOT NULL,
+    global_limit      INTEGER NOT NULL,    -- GlobalProcLimit: 0 none
+    instigator_limit  INTEGER NOT NULL,    -- InstigatorProcLimit: 0 none
+    eval_applying_hit INTEGER NOT NULL,    -- bEvaluateApplyingHit
+    proc_on_apply     INTEGER NOT NULL,    -- ProcReactOnApply
+    trigger_expr      INTEGER NOT NULL     -- ReactTrigger (an ab_expr id, 0 none: the reaction always fires)
+);
+CREATE TABLE ab_reaction_hit (
+    reaction_guid INTEGER NOT NULL,
+    ord           INTEGER NOT NULL,
+    hit_guid      INTEGER NOT NULL,
+    PRIMARY KEY (reaction_guid, ord)
+) WITHOUT ROWID;
+-- A hit's RecursiveHit: the hits it fires when it lands, each aimed by a targeting record (Default_Self: the caster; an area with sorting ...).
+CREATE TABLE ab_hit_recursive (
+    hit_guid       INTEGER NOT NULL,
+    ord            INTEGER NOT NULL,
+    child_hit_guid INTEGER NOT NULL,
+    targeting_guid INTEGER NOT NULL,
+    PRIMARY KEY (hit_guid, ord)
+) WITHOUT ROWID;
+-- A targeting record of a recursive hit. volumes: the HurtBoxInfo's TargetingVolumes (shape id, radii, angle ...) as JSON; lock_on: LockOnInfo; sorting:
+-- JSON [{"filter": ab_expr id, "method": "...", "score": ab_expr id}, ...]; contextual: ContextualTargets.
+CREATE TABLE ab_targeting_def (
+    guid       INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    shape      TEXT NOT NULL,      -- the first volume's shape id (EHitboxShape::SHAPE_Sphere ...), '' for none
+    radius     REAL NOT NULL,      -- its SphereRadius
+    angle      REAL NOT NULL,      -- its Angle
+    volumes    TEXT NOT NULL,
+    lock_on    TEXT NOT NULL,
+    sorting    TEXT NOT NULL,
+    contextual TEXT NOT NULL
+);
+-- A ModifyCooldownRecord a hit lists: the cooldowns of the abilities (guids; resolved from GetAbilityRecordByName) change by delta_expr seconds.
+CREATE TABLE ab_modify_cooldown (
+    guid         INTEGER PRIMARY KEY,
+    name         TEXT NOT NULL,
+    delta_expr   INTEGER NOT NULL,
+    trigger_expr INTEGER NOT NULL,     -- ShouldTriggerCooldown
+    abilities    TEXT NOT NULL         -- JSON array of ability guids (0 for a name no ability has)
+);
 `

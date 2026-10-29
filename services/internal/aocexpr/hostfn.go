@@ -53,7 +53,7 @@ const (
 	HostPlayerLevel  = 161 // GetPlayerLevel(): the level of the player the reward or the experience is for
 	// Quests, slice 2: the formulas of a quest's rewards (the experience and the Glint of a quest) read the level of the quest they are rolled for.
 	HostNarrativeLevel = 162 // GetNarrativeContentLevel(): the Level of the quest whose reward is evaluated (0 for a reward that belongs to no quest)
-	HostNpcTag       = 160 // DoesNPCContainTag(tag): 1 when the NPC (the owner) carries the gameplay tag (name: the tag); past the role reads (HostRoleBase + 7*16 + 16 = 160)
+	HostNpcTag         = 160 // DoesNPCContainTag(tag): 1 when the NPC (the owner) carries the gameplay tag (name: the tag); past the role reads (HostRoleBase + 7*16 + 16 = 160)
 
 	// HostRoleBase + role*16 + op: a read of an actor that only the host knows (the alignments, the effects an actor applied), by role.
 	HostRoleBase = 32
@@ -119,7 +119,10 @@ const (
 	RoleCasterOwner   = 4 // GetCreatureOwner(caster): the owner of a pet
 	RoleTargetOwner   = 5 // GetCreatureOwner(target)
 	RoleClosestInHit  = 6 // GetClosestTargetToActorInHit(hit, caster): the target of the hit nearest the caster
-	RoleCount         = 7
+	// RoleEffectInstigator is GetEffectInstigator() (a reaction's expression): the actor that applied the effect that carries the reaction. The VM reads it as
+	// the caster until the host supplies its context (a role past 7 has no role-op host function: RoleFn).
+	RoleEffectInstigator = 8
+	RoleCount            = 9
 	// RolePlayer is GetPlayer(): the character the expression is for (Nodes 1). It is no actor of a hit and has no role reads: only the city node
 	// reads take it (an unknown role reads as the caster).
 	RolePlayer = 7
@@ -134,7 +137,12 @@ const (
 )
 
 // RoleFn is the host function number of a read of an actor by role.
-func RoleFn(role, op int) int { return HostRoleBase + role*16 + op }
+func RoleFn(role, op int) int {
+	if role > RolePlayer {
+		return 256 + (role-RolePlayer-1)*16 + op // clear of the other host functions (the roles 0 to 7 fill 32 to 159)
+	}
+	return HostRoleBase + role*16 + op
+}
 
 // RoleOf is the role of an object value (0 for every object that is no actor of a hit).
 func RoleOf(o Object) int { return o.Role }
@@ -166,6 +174,36 @@ type HostCaller interface {
 
 // TypeProjectile is GetProjectileTypeId(): the record type id of a projectile (the type a hit's source has when a projectile fired it).
 const TypeProjectile = 979581256175327151
+
+// Reactions (contentc version 35): the record type ids GetReactionTypeId(), GetEffectTypeId() and GetAbilityTypeId() give, the type a hit's source has when
+// a reaction, an effect or an ability made it.
+const (
+	TypeReaction = 6091248426050982904
+	TypeEffect   = 3377240744094973029
+	TypeAbility  = 1841048597116038327
+	TypeHit      = 3672506661632452365 // AbilityHitRecordBase: GetHitRecord(GetHitEvent()) == <hit>
+)
+
+// ConsumedAbilityRef is what GetConsumedAbility() gives: no record, a marker (AbilityHasTag and RecordNameContains of it ask the host for the ability of the event).
+var ConsumedAbilityRef = Ref{TypeID: 0, Guid: -3}
+
+// EffectInFilterRef is what GetEffect() gives: no record, a marker (EffectHasTag of it asks the host for the effect a filter is being asked about).
+var EffectInFilterRef = Ref{TypeID: 0, Guid: -4}
+
+// The reactions' host functions: what a reaction's expression asks of the event in progress. The C++ engine has the same numbers.
+const (
+	HostConsumedAbilityHasTag  = 190 // AbilityHasTag(GetConsumedAbility(), tag): name: the tag
+	HostConsumedAbilityNameHas = 191 // RecordNameContains(GetConsumedAbility(), text): name: the text
+	HostConsumedAbilityIs      = 192 // GetConsumedAbility() == <ability>: name: the ability's guid
+	HostHitRecordNameIs        = 193 // RecordNameIs(GetHitRecord(GetHitEvent()), name): name: the record's name
+	HostEffectHasTag           = 194 // EffectHasTag(GetEffect(), tag): name: the tag
+	HostEffectIs               = 195 // GetEffect() == <effect>: name: the effect's guid
+	HostEffectDuration         = 196 // CalcEffectDuration(<effect>): name: the effect's guid: its duration in seconds
+	HostBlackboardFloat        = 197 // GetBlackboardFloat(actor, key): name: the key; args[0]: the role of the actor
+	HostStatBase               = 198 // GetStatBase(actor, stat): name: the stat's guid; args[0]: the role of the actor
+	HostHitHasHitMod           = 199 // HitHasHitMod(hit, actor, mod): name: the hit mod's guid; args[0]: the role of the actor
+	HostHitRecordIs            = 200 // GetHitRecord(GetHitEvent()) == <hit>: name: the hit record's guid
+)
 
 // HitSourceRef is what GetHitSourceRecord gives: no record, a marker (GetRecordTypeId of it asks the host for the source's type).
 var HitSourceRef = Ref{TypeID: 0, Guid: -2}

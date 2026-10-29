@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
     app.add_flag("--no-citynode", no_citynode, "do not call the citynode service: the nodes stay at the seed's levels")->envname("AOC_NO_CITYNODE");
     // the GM travel tools (session/gm_travel.h): the admin API worldctl and the admin app to come call, and the switch for the client's own GM teleport commands
     std::string world_admin = "127.0.0.1:50056";
-    bool no_world_admin = false, gm_commands = false;
+    bool no_world_admin = false, gm_commands = false, no_reactions = false;
     app.add_option("--world-admin", world_admin, "the address worldd's admin API (WorldAdminService: list players and places, teleport, run speed; services/cmd/worldctl) listens on; calls need the service token")
         ->envname("AOC_WORLD_ADMIN_ADDR")
         ->capture_default_str();
@@ -117,6 +117,8 @@ int main(int argc, char** argv) {
     app.add_flag("--gm-commands", gm_commands,
                  "answer the game client's own GM teleport commands (ServerTeleportXYZ, ServerTeleport, ServerTeleportPlayer on the PlayerController); off by default. Each one the client sends is logged either way")
         ->envname("AOC_GM_COMMANDS");
+    app.add_flag("--no-reactions", no_reactions, "the game's reactions do not run (the extra effects of a weapon's finisher, the Bard's Resonance and melodies): abilities and hits land as before reactions were built")
+        ->envname("AOC_NO_REACTIONS");
     app.add_option("--service-token-file", token_file, "the internal services' shared token");
     app.add_option("--log-file", log_file, "also write the log to this file");
     app.add_option("--content-db", content_db_path,
@@ -404,6 +406,8 @@ int main(int argc, char** argv) {
     players.set_movement(movement);
     players.set_position_sink(&saver);
     players.set_gm_commands(gm_commands);
+    players.set_reactions_enabled(!no_reactions);
+    if (no_reactions) spdlog::info("[abilities] the game's reactions are OFF (--no-reactions)");
     players.set_quest_worker(&quest_worker);
     spdlog::info("[gm] the client's own GM teleport commands are {}", gm_commands ? "ON (--gm-commands)" : "off (--gm-commands, or AOC_GM_COMMANDS=1, turns them on); each one the client sends is logged");
     // Nodes 1, stage 1: the registry from content.db, the seed's levels at once (login never waits for the service), then the stream.  The feed is declared

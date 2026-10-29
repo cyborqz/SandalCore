@@ -223,6 +223,9 @@ public:
     /// Universal tree's and the professions', and the weapon trees' of the line `wielded_line` (a weapon passive applies only for the weapon
     /// in hand).
     std::vector<stats::ActiveEffect> passives(int64_t wielded_line) const;
+    /// The effects of the ranks the character holds (the same trees and the same weapon rule as passives()), whatever they do: the reactions an effect carries
+    /// work while it is on the character (the pipeline's carriers).
+    std::vector<int64_t> reaction_carriers(int64_t wielded_line) const;
     /// Every skill the character holds, as GetSkillPurchased reads them (the tree and the skill): the listed ranks of every tree it has, the
     /// auto-granted ranks of its level and the bought ones, whichever weapon is in hand.
     std::vector<stats::SkillRank> held_ranks() const;

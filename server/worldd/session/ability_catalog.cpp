@@ -8,9 +8,25 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <set>
 
 namespace aoc::worldd::abilities {
+
+namespace {
+
+/// extra's ReactionsIds (the guids, in the listed order).
+void reaction_ids_of(const std::string& extra_json, std::vector<int64_t>& out) {
+    const nlohmann::json extra = nlohmann::json::parse(extra_json, nullptr, false);
+    if (!extra.is_object()) return;
+    const auto it = extra.find("ReactionsIds");
+    if (it == extra.end() || !it->is_array()) return;
+    for (const auto& v : *it) {
+        if (v.is_number_integer() && v.get<int64_t>() != 0) out.push_back(v.get<int64_t>());
+    }
+}
+
+}  // namespace
 
 std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatBundle& bundle, std::string& error) {
     auto db = content::AbilityContent::open(path, error);
@@ -50,6 +66,7 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         std::vector<content::EffectHitRow> hits;
         if (!db->effect_hits(g, hits, error)) return std::nullopt;
         for (const content::EffectHitRow& h : hits) d.hits.emplace_back(h.phase, h.hit_guid);
+        if (db->has_reactions()) reaction_ids_of(d.row.extra, d.reactions);
         c.effect_names_[d.row.name] = g;
         c.effects_.emplace(g, std::move(d));
     }
@@ -103,6 +120,10 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
             d.force_roll_miss = flag("bForceRollMiss");
             d.use_item_tags = flag("bShouldUseItemTags");
         }
+        if (db->has_reactions()) {
+            reaction_ids_of(d.row.extra, d.reactions);
+            if (!db->hit_recursive(g, d.recursive, error)) return std::nullopt;
+        }
         c.hit_names_[d.row.name] = g;
         c.hits_.emplace(g, std::move(d));
     }
@@ -138,6 +159,31 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         auto row = db->zone(g, error);
         if (!row) return std::nullopt;
         c.zones_.emplace(g, std::move(*row));
+    }
+    // the reactions (contentc version 35); a file without their tables has none, and the effects and hits then list none
+    if (!db->guids(content::AbilityContent::Table::Reaction, guids, error)) return std::nullopt;
+    for (const int64_t g : guids) {
+        auto row = db->reaction(g, error);
+        if (!row) return std::nullopt;
+        ReactionDef d;
+        d.row = std::move(*row);
+        c.reactions_.emplace(g, std::move(d));
+    }
+    for (const auto& [g, r] : c.reactions_) {
+        for (const int64_t h : r.row.hits) {
+            if (!c.hits_.count(h)) {
+                error = "reaction " + r.row.name + " applies hit " + std::to_string(h) + ", which the tables do not have";
+                return std::nullopt;
+            }
+        }
+    }
+    // a carrier lists only reactions the tables have
+    for (auto& [g, e] : c.effects_) {
+        e.reactions.erase(std::remove_if(e.reactions.begin(), e.reactions.end(), [&](int64_t r) { return !c.reactions_.count(r); }), e.reactions.end());
+    }
+    for (auto& [g, h] : c.hits_) {
+        h.reactions.erase(std::remove_if(h.reactions.begin(), h.reactions.end(), [&](int64_t r) { return !c.reactions_.count(r); }), h.reactions.end());
+        h.recursive.erase(std::remove_if(h.recursive.begin(), h.recursive.end(), [&](const content::RecursiveHitRow& r) { return !c.hits_.count(r.child_hit); }), h.recursive.end());
     }
     // every row a row names is in the catalog: a hit of an effect, an effect of a hit, a hit of an ability (a dangling guid would be found at a cast)
     for (const auto& [g, e] : c.effects_) {
@@ -190,6 +236,11 @@ const EffectDef* Catalog::effect_named(std::string_view name) const {
 const HitDef* Catalog::hit(int64_t guid) const {
     const auto it = hits_.find(guid);
     return it == hits_.end() ? nullptr : &it->second;
+}
+
+const ReactionDef* Catalog::reaction(int64_t guid) const {
+    const auto it = reactions_.find(guid);
+    return it == reactions_.end() ? nullptr : &it->second;
 }
 // C Y B + CoA
 

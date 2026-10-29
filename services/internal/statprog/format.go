@@ -57,7 +57,7 @@ const (
 	MaxStats       = 4096
 	MaxSteps       = 65535
 	MaxClasses     = 16
-	MaxRoles       = 7 // aocexpr.RoleCount: the actors of a hit an expression can read
+	MaxRoles       = 9 // aocexpr.RoleCount: the actors of a hit an expression can read
 	MaxLevel       = 255
 	MaxExprs       = MaxPrograms
 	// MaxEffectStacks is the most stacks one active effect may have, and MaxActiveEffects the most the inputs of a

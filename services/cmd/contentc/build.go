@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "34"
+const Version = "35"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -164,6 +164,9 @@ var keep = map[string]bool{
 	"ProjectileRecordBase":       true,
 	"LingeringEffectRecordBase":  true,
 	"AbilityTargetingRecordBase": true,
+	// reactions (version 35): the combo finishers' effects and every other reaction an effect or a hit carries; the cooldown modifiers hits list
+	"ReactionRecordBase":       true,
+	"ModifyCooldownRecordBase": true,
 	// plan E1: the NPC population chain and the vendors
 	"PopulationAssetRecordBase":    true,
 	"AssetSetRecordBase":           true,

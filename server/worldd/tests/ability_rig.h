@@ -271,6 +271,7 @@ struct Rig {
         }
         pipe.emplace(catalog ? &*catalog : nullptr, *cs, *a7, [] { return std::vector<stats::WornItem>(); }, kWorldTime, seed);
         pipe->set_data_timings(false);   // (a test of the runtime's mechanics runs on the default 300 ms; the retail tests turn the captures' times on)
+        pipe->set_reaction_carriers(book->reaction_carriers(0));   // the production path's: the effects of the ranks the character holds carry their reactions (the Bard's Resonant Weapon from level 5)
         // the pawn as the join leaves it
         for (const stats::StatValue& v : cs->values()) {
             if (v.float_array() || (v.replication != 1 && v.replication != 5 && v.replication != 7)) continue;

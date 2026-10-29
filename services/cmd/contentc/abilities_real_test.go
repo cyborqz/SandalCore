@@ -23,14 +23,17 @@ func TestRealAbilityTables(t *testing.T) {
 		// plan E1 stage 3: ability_names.tsv names the 540 NPC abilities too (ab_ability 249 -> 789 with their hits, effects, projectiles and zones), and 38 more that the creature tables'
 		// fight trees use (789 -> 827: ab_hit 1,296 -> 1,341, ab_effect 1,145 -> 1,152, ab_projectile 195 -> 206, ab_zone 58 -> 59),
 		// and ab_expr holds the reward tables' 537 expressions besides the abilities' 1,308 (meta ab.exprs counts the abilities' alone; loot.exprs the rest), and since version 13
-		// the gathering tables' 30 (35 since version 15, whose foliage interactions bring 5 more) (meta gather.exprs): the duration, durability and Quality formulas the data had not yet registered (the Profession rewards' were)
-		"ab_ability": 827, "ab_hit": 1341, "ab_projectile": 206, "ab_zone": 59, "ab_effect": 1152, "ab_expr": 1894,
+		// the gathering tables' 30 (35 since version 15, whose foliage interactions bring 5 more) (meta gather.exprs): the duration, durability and Quality formulas the data had not yet registered (the Profession rewards' were);
+		// version 35: the hits, effects, projectiles and zones that the 183 reactions the abilities' effects and hits carry apply and reach come into the tables (ab_hit 1,341 -> 1,631, ab_effect 1,152 -> 1,213,
+		// ab_projectile 206 -> 215, ab_zone 59 -> 62) with 336 more expressions of the abilities' (ab.exprs 1,322 -> 1,658; ab_expr 1,894 -> 2,229), and the reward tables add one expression fewer (loot.exprs 537 -> 536:
+		// one of their texts is met among the reactions' first)
+		"ab_ability": 827, "ab_hit": 1631, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1213, "ab_expr": 2229,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "827", "ab.hits": "1341", "ab.effects": "1152", "ab.projectiles": "206", "ab.zones": "59", "ab.exprs": "1322", "loot.exprs": "537", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "827", "ab.hits": "1631", "ab.effects": "1213", "ab.projectiles": "215", "ab.zones": "62", "ab.exprs": "1658", "loot.exprs": "536", "gather.exprs": "35"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
 		}
@@ -71,9 +74,11 @@ func TestRealAbilityTables(t *testing.T) {
 		`SELECT count(*) FROM ab_hit_zone x WHERE NOT EXISTS (SELECT 1 FROM ab_zone z WHERE z.guid = x.zone_guid)`,
 		`SELECT count(*) FROM ab_projectile_hit x WHERE NOT EXISTS (SELECT 1 FROM ab_hit h WHERE h.guid = x.hit_guid)`,
 		`SELECT count(*) FROM ab_zone_hit x WHERE NOT EXISTS (SELECT 1 FROM ab_hit h WHERE h.guid = x.hit_guid)`,
+		// every hit is named by an ability, an effect, a projectile, a zone, a reaction or another hit's RecursiveHit (version 35)
 		`SELECT count(*) FROM ab_hit x WHERE NOT EXISTS (SELECT 1 FROM ab_ability_hit a WHERE a.hit_guid = x.guid)
 			AND NOT EXISTS (SELECT 1 FROM ab_effect_hit e WHERE e.hit_guid = x.guid) AND NOT EXISTS (SELECT 1 FROM ab_projectile_hit p WHERE p.hit_guid = x.guid)
-			AND NOT EXISTS (SELECT 1 FROM ab_zone_hit z WHERE z.hit_guid = x.guid)`,
+			AND NOT EXISTS (SELECT 1 FROM ab_zone_hit z WHERE z.hit_guid = x.guid)
+			AND NOT EXISTS (SELECT 1 FROM ab_reaction_hit r WHERE r.hit_guid = x.guid) AND NOT EXISTS (SELECT 1 FROM ab_hit_recursive c WHERE c.child_hit_guid = x.guid)`,
 		`SELECT count(*) FROM ab_cost c WHERE amount_expr <> 0 AND NOT EXISTS (SELECT 1 FROM ab_expr e WHERE e.id = c.amount_expr)`,
 		`SELECT count(*) FROM ab_mod m WHERE value_expr <> 0 AND NOT EXISTS (SELECT 1 FROM ab_expr e WHERE e.id = m.value_expr)`,
 	} {

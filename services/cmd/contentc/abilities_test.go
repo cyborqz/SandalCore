@@ -88,7 +88,7 @@ func completeFields(src *source) {
 	missing(src.rows["AbilityHitRecordBase"], st{
 		"ApplicableTargets": int64(1), "ApplicableTypes": int64(0), "NetworkType": "EAttackNetworkType::NET_ServerVerify",
 		"DefaultFallbackTargetType": "EDefaultFallbackTargetType::SelfOnly", "HitDelay": "", "ThreatToTarget": "", "MaxTargetsPerHit": "",
-		"ProjectilesToFire": list{}, "ProjectilesToSpawn": list{}, "LingeringZonesIds": list{},
+		"ProjectilesToFire": list{}, "ProjectilesToSpawn": list{}, "LingeringZonesIds": list{}, "RecursiveHit": list{},
 		"TeleportId": idv(0, 1, "None"), "ResurrectId": idv(0, 2, "None"),
 		"ModifyCooldownsIds": list{}, "ModifyEffectsIds": list{}, "EffectsToRemoveIds": list{}, "ReactionsIds": list{},
 		// plan E1, stage 3: what the damage rules read
@@ -110,7 +110,7 @@ func targetID(g int64) st     { return idv(g, 3999912890578843546, "None") }
 func abilitySource() *source {
 	src := syntheticSource()
 	for _, schema := range []string{"ProjectileRecordBase", "LingeringEffectRecordBase", "SkillTreeRecordBase", "SkillTreeNodeRecordBase", "SkillRecordBase",
-		"SkillRankRecordBase", "AbilityTargetingRecordBase"} {
+		"SkillRankRecordBase", "AbilityTargetingRecordBase", "ReactionRecordBase", "ModifyCooldownRecordBase"} {
 		src.typeIDs[schema] = 1
 		src.rows[schema] = nil
 	}
@@ -135,6 +135,8 @@ func abilitySource() *source {
 		"AbilityIdId": idv(abNimble, content.TypeAbility, "None"), "EffectIdId": idv(abEffPassive, content.TypeEffect, "None"),
 	})}
 	src.rows["AbilityTargetingRecordBase"] = []designdb.Row{mkRow(abTarget, "Bard_Dance_Nimble_Targeting", st{})}
+	// the cooldown change the Nimble ability lists (abBase+99)
+	src.rows["ModifyCooldownRecordBase"] = []designdb.Row{mkRow(abBase+99, "Bard_Nimble_Cooldown", st{"DeltaSeconds": "", "ShouldTriggerCooldown": "", "TargetCooldownAbility": list{}})}
 
 	src.rows["StatModRecordBase"] = append(src.rows["StatModRecordBase"],
 		mkRow(abModPep, "Bard_Pep_Mod", st{"StatRefId": statID(statMoveSp), "Value": "GetTerm($#6137747221710071900:11$) * 2.0", "ValueInputTerms": list{

@@ -30,6 +30,8 @@ struct EffectDef {
     content::EffectRow                          row;
     std::vector<content::ModRow>                mods;   // the effect's stat mods
     std::vector<std::pair<std::string, int64_t>> hits;   // (phase, hit guid): PreApply, Apply, Tick, Consume, Remove, Expire, End
+    /// The reactions the effect carries while it is on its holder (extra's ReactionsIds, in the listed order; contentc version 35).
+    std::vector<int64_t>                        reactions;
 };
 // [C Y B x CoA]
 
@@ -48,6 +50,14 @@ struct HitDef {
     bool                               force_roll_crit = false, force_roll_block = false, force_roll_miss = false;
     /// bShouldUseItemTags: the hit of a player also carries the tags of the weapon it holds (a bow made for casters says ability.MagicalScalingOverride).
     bool                               use_item_tags = false;
+    /// contentc version 35: the reactions this hit carries on its own (extra's ReactionsIds) and the hits it fires when it lands (RecursiveHit).
+    std::vector<int64_t>               reactions;
+    std::vector<content::RecursiveHitRow> recursive;
+};
+
+/// A reaction (contentc version 35): when an event of the kinds it is bound to happens to its holder and its trigger is true, it applies its hits.
+struct ReactionDef {
+    content::ReactionRow row;
 };
 
 struct AbilityDef {
@@ -80,6 +90,8 @@ public:
     const EffectDef*  effect(int64_t guid) const;
     const EffectDef*  effect_named(std::string_view name) const;
     const HitDef*     hit(int64_t guid) const;
+    /// A reaction by its guid; null for one the tables do not have (and for any guid in a file without the reaction tables).
+    const ReactionDef* reaction(int64_t guid) const;
     /// A hit by its record name (the tooltip's `hit:Name` tokens name hits so; plan E1, stage 3 fix, Part C).
     const HitDef*     hit_named(std::string_view name) const;
     /// A lingering zone (ab_zone: its lifetime and tick rate; the hits are the ones the abilities list).
@@ -93,6 +105,7 @@ public:
     size_t abilities() const { return abilities_.size(); }
     size_t effects() const { return effects_.size(); }
     size_t hits() const { return hits_.size(); }
+    size_t reactions() const { return reactions_.size(); }
     size_t exprs() const { return exprs_.size(); }
 
 private:
@@ -102,6 +115,7 @@ private:
     std::map<std::string, int64_t, std::less<>> ability_names_, effect_names_, hit_names_;
     std::map<int64_t, EffectDef>          effects_;
     std::map<int64_t, HitDef>             hits_;
+    std::map<int64_t, ReactionDef>        reactions_;
     std::map<int64_t, content::ZoneRow>   zones_;
     std::map<int64_t, content::ExprRow>   exprs_;
 };

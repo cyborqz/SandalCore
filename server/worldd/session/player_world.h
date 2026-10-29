@@ -381,6 +381,9 @@ public:
     /// default).  The admin API (worldctl) does not depend on it: it is the operator's, behind the service token.
     void set_gm_commands(bool on) { gm_commands_ = on; }
     bool gm_commands() const { return gm_commands_; }
+    /// The game's reactions (a weapon's finisher effects, the Bard's Resonance and melodies) run unless this is turned off (--no-reactions / AOC_NO_REACTIONS=1).
+    void set_reactions_enabled(bool on) { reactions_enabled_ = on; }
+    bool reactions_enabled() const { return reactions_enabled_; }
     /// What a session asks of the rest of the world for a GM command that names other characters (ServerTeleportPlayer); null: only the session itself can be moved.  Not owned.
     void   set_gm_port(GmPort* port) { gm_port_ = port; }
     GmPort* gm_port() const { return gm_port_; }
@@ -607,6 +610,7 @@ private:
     mutable world::TownFloor             town_floor_;           // the towns in a bowl (town_floor())
     mutable uint64_t                     town_floor_stamp_ = ~0ull;   // the node people it was built from (their made + removed counts)
     bool                                 gm_commands_ = false;
+    bool                                 reactions_enabled_ = true;
     GmPort*                              gm_port_ = nullptr;
     uint64_t                             respawns_made_ = 0;
     mutable std::map<int64_t, int>       quality_cache_;

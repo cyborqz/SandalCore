@@ -231,6 +231,7 @@ add_library(worldd_core STATIC
     session/ability_catalog.h
     session/ability_pipeline.cpp
     session/ability_pipeline.h
+    session/ability_reactions.cpp
     session/action_bar.cpp
     session/action_bar.h
     session/gm_travel.cpp

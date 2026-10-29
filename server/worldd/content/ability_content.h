@@ -202,6 +202,32 @@ struct ZoneRow {
     std::map<std::string, std::vector<int64_t>> hits;
 };
 
+/// ab_reaction (contentc version 35): a reaction an effect or a hit carries (their extra's ReactionsIds list it), with the hits it applies.
+struct ReactionRow {
+    int64_t     guid = 0;
+    std::string name;
+    std::string instigator;           // the EReactionTarget that casts its hits: Owner, Instigator, HitInstigator, HitSource, Targets ...
+    int         targets_mask = 0;     // the EReactionTarget bits they land on: Owner 1, Instigator 2, HitSource 4, Targets 8, HitInstigator 16 ...
+    // EventBindings, one byte of bits per event kind
+    int         bind_hit = 0;         // OwnerIsHit 2, OwnerHits 4
+    int         bind_effect = 0;
+    int         bind_ability = 0;     // Trigger 2, Consume 4, Branch 8, Tick 16, Hit 32, Interrupt 64, Complete 128
+    int         bind_projectile = 0, bind_zone = 0;
+    int         bind_movement = 0;    // Walk 2
+    int         bind_fishing = 0;
+    int         bind_stat = 0;        // OwnerDies 2
+    int         global_limit = 0, instigator_limit = 0;   // 0: none
+    bool        eval_applying_hit = false, proc_on_apply = false;
+    int64_t     trigger_expr = 0;     // an ab_expr id; 0: the reaction always fires
+    std::vector<int64_t> hits;        // ab_reaction_hit, in order
+};
+
+/// ab_hit_recursive: a hit a hit fires when it lands, and the targeting record (ab_targeting_def) that aims it.
+struct RecursiveHitRow {
+    int     ord = 0;
+    int64_t child_hit = 0, targeting = 0;
+};
+
 class AbilityContent {
 public:
     /// Opens `path` read-only. nullopt, with `error`, when the file is missing, is no content.db of this schema version, was built
@@ -251,8 +277,15 @@ public:
     std::optional<ProjectileRow> projectile(int64_t guid, std::string& error) const;
     std::optional<ZoneRow> zone(int64_t guid, std::string& error) const;
 
+    /// Whether the file has the reaction tables (contentc version 35 or later). A file without them has no reactions.
+    bool has_reactions() const { return reactions_; }
+    std::optional<ReactionRow> reaction(int64_t guid, std::string& error) const;
+    /// ab_hit_recursive: the hits a hit fires when it lands, in order (empty without the reaction tables).
+    bool hit_recursive(int64_t hit, std::vector<RecursiveHitRow>& out, std::string& error) const;
+
     /// The guids of every ability, hit, effect, projectile or zone of the tables, in guid order (what a catalog that holds them all loads).
-    enum class Table { Ability, Hit, Effect, Projectile, Zone };
+    /// Reaction lists the reactions (empty without the reaction tables).
+    enum class Table { Ability, Hit, Effect, Projectile, Zone, Reaction };
     bool guids(Table table, std::vector<int64_t>& out, std::string& error) const;
     /// Every expression of ab_expr by id.
     bool all_exprs(std::map<int64_t, ExprRow>& out, std::string& error) const;
@@ -263,6 +296,7 @@ private:
     sqlite3*    db_ = nullptr;
     std::string path_;
     int         contentc_version_ = 0;
+    bool        reactions_ = false;
 };
 
 }  // namespace aoc::worldd::content

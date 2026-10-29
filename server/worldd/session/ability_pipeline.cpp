@@ -177,6 +177,8 @@ public:
     double effect_count_by_instigator(const stats::RecordRef& r) override { return p_.stacks_of(r.guid); }
     double rand_double() override { return p_.rng_.rand_double(); }
     double ability_progress(const std::string& group) override { return p_.progress_of(group); }
+    /// The event a reaction's expression runs for.
+    void set_reaction(const ReactionContext* rc) { rc_ = rc; }
 
 protected:
     // the named host functions (statprog's Host... constants) the hit in progress does not answer (combat/hit_context.h does the damage functions, the
@@ -202,12 +204,39 @@ protected:
                 const double lo = std::floor(args[0]), hi = std::floor(args[1]);
                 return hi < lo ? lo : lo + std::floor(p_.rng_.rand_double() * (hi - lo + 1.0));
             }
-            default: return 0.0;   // the hit event's stat mods, an angle: nothing is there
+            // reactions (contentc version 35): the event in progress
+            case stats::kHostHitStatMod:
+            case stats::kHostHitStatEffective: {
+                if (!rc_ || !rc_->hit) return 0.0;
+                const std::map<int64_t, double>& m = fn == stats::kHostHitStatMod ? rc_->hit->mods : rc_->hit->effective;
+                const auto it = m.find(std::strtoll(name.c_str(), nullptr, 10));
+                return it == m.end() ? 0.0 : it->second;
+            }
+            case stats::kHostConsumedAbilityHasTag: {
+                if (!rc_ || !rc_->consumed) return 0.0;
+                for (const std::string& t : rc_->consumed->row.tags) {
+                    if (combat::tag_matches(t, name)) return 1.0;
+                }
+                return 0.0;
+            }
+            case stats::kHostConsumedAbilityNameHas: return rc_ && rc_->consumed && rc_->consumed->row.name.find(name) != std::string::npos ? 1.0 : 0.0;
+            case stats::kHostConsumedAbilityIs: return rc_ && rc_->consumed && rc_->consumed->row.guid == std::strtoll(name.c_str(), nullptr, 10) ? 1.0 : 0.0;
+            case stats::kHostHitRecordNameIs: return rc_ && rc_->hit && rc_->hit->hit && rc_->hit->hit->row.name == name ? 1.0 : 0.0;
+            case stats::kHostHitRecordIs: return rc_ && rc_->hit && rc_->hit->hit && rc_->hit->hit->row.guid == std::strtoll(name.c_str(), nullptr, 10) ? 1.0 : 0.0;
+            case stats::kHostEffectHasTag: case stats::kHostEffectIs: case stats::kHostEffectDuration: case stats::kHostBlackboardFloat:
+            case stats::kHostStatBase: case stats::kHostHitHasHitMod:
+                // compiled (contentc version 35) and not answered yet: the reaction that asks gets a 0, said once
+                if (p_.unserved_host_.insert(fn).second) {
+                    spdlog::info("[abilities] the host function {} ({}) is asked by an expression of a reaction and is not served yet: it answers 0", fn, name);
+                }
+                return 0.0;
+            default: return 0.0;   // an angle: nothing is there
         }
     }
 
 private:
-    AbilityPipeline& p_;
+    AbilityPipeline&       p_;
+    const ReactionContext* rc_ = nullptr;
 };
 // -- C-Y-B & C-O-A --
 
@@ -223,6 +252,9 @@ void AbilityPipeline::resolve_resource() {
     resource_ = nullptr;
     resource_class_ = stats_.class_enum();
     if (!catalog_) return;
+    // contentc version 35: with the game's reactions in the tables the class resource is the passive's reaction (the Bard's Resonance); the modelled rule below
+    // is for a content.db without them, or with the reactions switched off
+    if (catalog_->reactions() != 0 && reactions_enabled_) return;
     for (const ClassResource& r : kClassResources) {
         if (r.class_enum == stats_.class_enum()) resource_ = catalog_->effect_named(r.effect);
     }
@@ -344,6 +376,48 @@ bool AbilityPipeline::eval_requirement(int64_t expr, const std::vector<uint64_t>
         return false;
     }
     out = v != 0;
+    return true;
+}
+
+bool AbilityPipeline::eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why) {
+    if (!catalog_) {
+        why = "no ability tables";
+        return false;
+    }
+    const content::ExprRow* e = catalog_->expr(expr);
+    if (!e || e->program < 0) {
+        why = expr_problem(expr);
+        return false;
+    }
+    if (!ensure_evaluation(why)) return false;
+    // the hit event: the tags the damage rules read (the held weapon's when the hit asks for them, the record's own, the ability's), where the hit comes from,
+    // how many targets it has and the flags it rolled
+    combat::HitContext ctx;
+    if (rc.hit && rc.hit->hit) {
+        const HitDef& hd = *rc.hit->hit;
+        if (hd.use_item_tags && weapon_tags_) ctx.tags = weapon_tags_();
+        ctx.tags.insert(ctx.tags.end(), hd.tags.begin(), hd.tags.end());
+        if (rc.hit->ability) ctx.tags.insert(ctx.tags.end(), rc.hit->ability->row.tags.begin(), rc.hit->ability->row.tags.end());
+        ctx.source_type = rc.hit->src.type;
+        ctx.targets = static_cast<double>(rc.hit->targets.size() + (rc.hit->on_self ? 1 : 0));
+        ctx.hit.flags = rc.hit->flags;
+    }
+    Host host(*this);
+    host.set_context(&ctx);
+    host.set_reaction(&rc);
+    std::string err;
+    double v = 0;
+    const bool ran = evaluation_->eval(e->program, host, v, err);
+    drop_evaluation();   // the character as it is when the next event looks (a reaction's hits change it)
+    if (!ran) {
+        why = err;
+        return false;
+    }
+    if (!std::isfinite(v)) {
+        why = "expression " + std::to_string(expr) + " is not a finite number";
+        return false;
+    }
+    out = v;
     return true;
 }
 
@@ -737,8 +811,16 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
                 ++i;
                 continue;
             }
-            remove_instance(c, i);
-            --left;
+            // "up to N effects" counts the stacks of a stacking effect: the recorded finisher left the Resonance item on the pawn with fewer stacks, not gone
+            const int take = std::min(left, effects_[i].stacks);
+            left -= take;
+            if (take >= effects_[i].stacks) {
+                remove_instance(c, i);   // (the next instance, if any, is at i now)
+            } else {
+                effects_[i].stacks -= take;
+                c.effects_changed.push_back(effect_item(effects_[i]));
+                ++i;
+            }
         }
     }
     sync_engine_effects();
@@ -882,6 +964,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         }
     }
     std::vector<bootstrap::HitTargetOut> outs;
+    HitEvent event;   // reactions: what this hit did to the targets it reached
     for (const uint64_t id : targets) {
         if (static_cast<double>(outs.size()) >= max_targets) break;
         const combat::TargetInfo ti = combat_->inspect(id);
@@ -909,6 +992,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         }
         const combat::Delivery d = combat_->deliver(id, r, t);
         if (!d.applied) continue;
+        event.targets.push_back(id);
+        event.flags = static_cast<uint8_t>(event.flags | d.flags);
+        for (size_t i = 0; i < r.mods.size(); ++i) {
+            event.mods[r.mods[i].stat_guid] += r.mods[i].value;
+            if (i < d.effective.size()) event.effective[r.mods[i].stat_guid] += d.effective[i];
+        }
         bootstrap::HitTargetOut out;
         out.component = combat_->guid_of(id);          // the HitComp is the target actor [R: research/hitfx 1]
         out.cylinder = combat_->hit_component_of(id);  // exported with the confirmation when the client has no GUID for it yet
@@ -987,16 +1076,21 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     };
     if (!src.source_is_target) {
         confirm(std::move(outs), std::nullopt);
-        return;
+    } else {
+        // E1 stage 3 fix 3: a hit fired where a projectile landed names that target actor as its Source (the origin the client spawns the next projectile
+        // from), one confirmation per target [R: the book's Split hits, 1,289 of 1,289: Source = the target, one target each]
+        for (bootstrap::HitTargetOut& o : outs) {
+            std::vector<bootstrap::HitTargetOut> one;
+            const protocol::emit::FIntrepidNetworkGUID actor = o.component;
+            one.push_back(std::move(o));
+            confirm(std::move(one), actor);
+        }
     }
-    // E1 stage 3 fix 3: a hit fired where a projectile landed names that target actor as its Source (the origin the client spawns the next projectile
-    // from), one confirmation per target [R: the book's Split hits, 1,289 of 1,289: Source = the target, one target each]
-    for (bootstrap::HitTargetOut& o : outs) {
-        std::vector<bootstrap::HitTargetOut> one;
-        const protocol::emit::FIntrepidNetworkGUID actor = o.component;
-        one.push_back(std::move(o));
-        confirm(std::move(one), actor);
-    }
+    // reactions: the hit landed (after its confirmations are queued, so a reaction's follow them)
+    event.hit = &hit;
+    event.ability = ability;
+    event.src = src;
+    raise_hit_event(c, event, t);
 }
 
 void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
@@ -1086,12 +1180,15 @@ void AbilityPipeline::apply_hit(AbilityChange& c, const HitDef& hit, double t, b
     // the hit's own stat mods: the formula's value moves the stat at once (a heal clamped at the maximum, a loss through the shields); the
     // confirmation carries the value and the part that took effect, which is where the client draws its floating number
     std::vector<bootstrap::HitStatModOut> outs;
+    HitEvent event;   // reactions: what this hit resolved
     for (const content::ModRow& m : hit.mods) {
         if (m.shield_absorb || m.value_expr == 0) continue;
         double amount = 0;
         if (!eval(m.value_expr, amount, why) || !std::isfinite(amount)) continue;
         const double effective = apply_delta(c, m.stat_guid, amount);
         outs.push_back({m.stat_mod_guid, static_cast<float>(amount), static_cast<float>(effective)});
+        event.mods[m.stat_guid] += amount;
+        event.effective[m.stat_guid] += effective;
     }
     drop_evaluation();
     // [R: 6,955 requests of the retail captures] a hit the client asked for is confirmed when it has stat mods (the client draws their numbers), an
@@ -1109,6 +1206,11 @@ void AbilityPipeline::apply_hit(AbilityChange& c, const HitDef& hit, double t, b
         h.response = src.response;
         confirmations_.push_back(std::move(h));
     }
+    // reactions: the hit landed on the caster (after its confirmation is queued, so a reaction's follows it)
+    event.hit = &hit;
+    event.src = src;
+    event.on_self = true;
+    raise_hit_event(c, event, t);
 }
 
 void AbilityPipeline::effect_expires(size_t index, double t) {
@@ -1999,6 +2101,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     for (const auto& [effect, n] : cast.effect_costs) remove_stacks(c, effect, n);
     drop_evaluation();
     if (resource_ && spent_mana) apply_effect(c, *resource_, 1, std::nullopt, t);   // the class's resource: one stack per cast that spends Mana
+    if (!cast.toggle_off) raise_ability_event(c, def, t);   // reactions: the ability was consumed (the Bard's Resonance gain)
     use_charge(c, cast, t);
     if (cast.toggle_off) {
         end_loop(c, def.row.guid, t);

@@ -43,11 +43,12 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
+- Reactions (first iteration): the game's reactions run for your own hits and for paying an ability's cost. The Bard's Resonance follows the game's rule (the Resonant Weapon passive from level 5) and its Menacing and Cathartic melodies add their damage at a combo finisher and spend up to 3 Resonance. The other classes' reactions run from the game's data and are not checked against the game yet.
 - Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot, which slows the carrier; a trade crate's rarity follows its materials, a quest can give a crate, and the Drop Crate ability takes the crate off the back. Next: the crate lying on the ground for others to pick up, then putting crates into building sites and selling them. The other crate types stay under Left.
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; the rest of the beginner chains (objects placed in the level, such as bodies, carts and crates), item hand-ins; the Destiny window, group quests, events and boards.
-- Reactions: the extra effects of combo finishers (class resources, weapon-tree finisher procs, the Bard's melody).
+- Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the statuses of its damage melodies, checking the other classes' finisher effects and the weapon-tree finisher procs against the game, and the reactions that wait for you being hit or for other events.
 - Summoner pets.
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.

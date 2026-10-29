@@ -64,6 +64,8 @@ func TestCreateMakesTheDocumentedTables(t *testing.T) {
 	want := []string{"ab_ability", "ab_ability_effect", "ab_ability_hit", "ab_cost", "ab_effect", "ab_effect_cost", "ab_effect_hit", "ab_expr", "ab_hit",
 		"ab_hit_effect", "ab_hit_projectile", "ab_hit_zone", "ab_mod", "ab_montage", "ab_projectile", "ab_projectile_hit", "ab_targeting", "ab_zone",
 		"ab_zone_hit",
+		// reactions (contentc version 35): the reactions, the hits they apply, the recursive hits and their targeting, the cooldown modifiers
+		"ab_reaction", "ab_reaction_hit", "ab_hit_recursive", "ab_targeting_def", "ab_modify_cooldown",
 		"ability", "ability_cost", "ability_effect", "ability_hit", "ability_runtime", "class", "class_stat_base", "combat_config", "combat_element", "combat_profile", "relationship", "alignment_relation",
 		"effect", "effect_hit", "effect_runtime", "effect_stat_runtime", "equip_slot", "hit", "hit_effect", "item", "item_equip_slot",
 		"item_set", "item_tag", "meta", "owner_stat_mod", "quality_curve", "record", "record_table", "set_bonus", "stamina_regen_disable",
