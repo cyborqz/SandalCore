@@ -20,16 +20,17 @@ func TestRealAbilityTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	for table, want := range map[string]int64{
-		// plan E1 stage 3: ability_names.tsv names the 540 NPC abilities too (ab_ability 249 -> 789 with their hits, effects, projectiles and zones),
+		// plan E1 stage 3: ability_names.tsv names the 540 NPC abilities too (ab_ability 249 -> 789 with their hits, effects, projectiles and zones), and 38 more that the creature tables'
+		// fight trees use (789 -> 827: ab_hit 1,296 -> 1,341, ab_effect 1,145 -> 1,152, ab_projectile 195 -> 206, ab_zone 58 -> 59),
 		// and ab_expr holds the reward tables' 537 expressions besides the abilities' 1,308 (meta ab.exprs counts the abilities' alone; loot.exprs the rest), and since version 13
 		// the gathering tables' 30 (35 since version 15, whose foliage interactions bring 5 more) (meta gather.exprs): the duration, durability and Quality formulas the data had not yet registered (the Profession rewards' were)
-		"ab_ability": 789, "ab_hit": 1296, "ab_projectile": 195, "ab_zone": 58, "ab_effect": 1145, "ab_expr": 1880,
+		"ab_ability": 827, "ab_hit": 1341, "ab_projectile": 206, "ab_zone": 59, "ab_effect": 1152, "ab_expr": 1894,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "789", "ab.hits": "1296", "ab.effects": "1145", "ab.projectiles": "195", "ab.zones": "58", "ab.exprs": "1308", "loot.exprs": "537", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "827", "ab.hits": "1341", "ab.effects": "1152", "ab.projectiles": "206", "ab.zones": "59", "ab.exprs": "1322", "loot.exprs": "537", "gather.exprs": "35"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
 		}

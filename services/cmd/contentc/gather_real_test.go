@@ -450,8 +450,8 @@ func TestRealGatherCurves(t *testing.T) {
 func TestRealGatherExpressions(t *testing.T) {
 	db := builtDB(t)
 	// None of the 24 expressions that failed on the five gathering reads fails now (ab_expr ids are the order the build met the texts in; the gathering
-	// ones are appended after the reward tables', so the older ids did not move)
-	for _, id := range []int{1312, 1313, 1314, 1315, 1321, 1355, 1356, 1357, 1358, 1359, 1360, 1561, 1562, 1564, 1565, 1630, 1632, 1633, 1634, 1635, 1636, 1649, 1650, 1656} {
+	// ones are appended after the reward tables', so the older ids did not move; the ids are 14 higher since the creature tables' 38 abilities brought 14 expressions of the abilities')
+	for _, id := range []int{1326, 1327, 1328, 1329, 1335, 1369, 1370, 1371, 1372, 1373, 1374, 1575, 1576, 1578, 1579, 1644, 1646, 1647, 1648, 1649, 1650, 1663, 1664, 1670} {
 		var program int
 		var errText string
 		if err := db.SQL().QueryRow(`SELECT program, error FROM ab_expr WHERE id = ?`, id).Scan(&program, &errText); err != nil || program < 0 || errText != "" {

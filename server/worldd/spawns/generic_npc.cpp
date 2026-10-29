@@ -108,7 +108,45 @@ bool is_person(const OpenTemplate& t, bool talks) {
     return t.blocks.back().cls == "UNPCAppearanceComponent";
 }
 
+/// The hostile humanoids whose fights are built, by the Blueprint's class name: the bandit raiders (a two-handed sword: strikes, a cleave, a heavy slash, a whirlwind, a leap) and the bandit
+/// captains (a sword and shield).  The camps they stand in are mixed with archers, mages and healers whose arrows, bolts and heals are not built yet: those stay out of the world.
+constexpr const char* kFightingHumanoids[] = {
+    "Bandit_Raider", "Bandit_Raider1", "Bandit_Raider2", "Bandit_Raider3", "CSB_Bandit_Raider_StateTree",
+    "Bandit_Raider_RareSpawn_BigBrother", "Bandit_Raider_RareSpawn_RiverRunnerRiggs", "BanditRaider_RareSpawn_VanguardRowan",
+    "Bandit_Captain", "Bandit_Captain1", "Bandit_Captain2", "CSB_Forsaken_Blades_Sergeant",
+    "Bandit_Captain_Clang", "Bandit_Captain_Capn_Knuckles", "Bandit_Captain_RareSpawn_TheShotcaller", "Bandit_Captain_RareSpawn_ChiefArmorerJannus"};
+
+/// Gives the template the ability component of the recorded guard `guard` (a component with a list of records, which a villager's lacks) and puts `kit` into it as the records it loads
+/// (ReplicatedRecordsToLoad), each element made like the first of the guard's own list.  Everything else of the template stays: only this component comes from the guard.  False when
+/// either has no ability component or the guard's list is empty (there is no element to copy the shape of).
+bool adopt_ability_records(OpenTemplate& t, const OpenTemplate& guard, const std::vector<int64_t>& kit) {
+    const int to = t.find("UAoCAbilityComponent"), from = guard.find("UAoCAbilityComponent");
+    if (to <= 0 || from <= 0) return false;
+    ParsedBlock& block = t.blocks[static_cast<size_t>(to)];
+    const ParsedBlock& donor = guard.blocks[static_cast<size_t>(from)];
+    if (!block.schema || block.schema != donor.schema) return false;
+    block.state = donor.state;
+    const repl::Value* v = block.state.state.get(*block.schema, "ReplicatedRecordsToLoad");
+    const auto* list = v ? v->get_if<repl::ArrayValue>() : nullptr;
+    if (!list || list->elements.empty()) return false;
+    repl::ArrayValue made;
+    for (const int64_t guid : kit) {
+        repl::ElementState e = list->elements.front();
+        e.values[1] = repl::Value::i64(guid);
+        made.elements.push_back(std::move(e));
+    }
+    return block.state.state.set(*block.schema, "ReplicatedRecordsToLoad", repl::Value(std::move(made)));
+}
+
 }  // namespace
+
+bool fighting_humanoid(const std::string& archetype_or_class) {
+    const std::string leaf = blueprint_leaf(archetype_or_class);
+    for (const char* name : kFightingHumanoids) {
+        if (leaf == name) return true;
+    }
+    return false;
+}
 
 const char* verdict_name(Verdict v) {
     switch (v) {
@@ -174,6 +212,12 @@ GenericNpcs::GenericNpcs(const CapturedData& captured, const npc::MotionTable* b
             dialogue_ = &b;
             dialogue_path_ = t.archetype_path;
         }
+    }
+    // the donor of a humanoid that fights: a recorded guard (a person whose ability component carries records), the Soldier when the captures have it
+    for (const OpenTemplate& t : captured.opens()) {
+        const std::string leaf = blueprint_leaf(t.archetype_path);
+        if (leaf.rfind("Guard_", 0) != 0 || !is_person(t, false)) continue;
+        if (!fighter_ || leaf == "Guard_Soldier" || (blueprint_leaf(fighter_->archetype_path) != "Guard_Soldier" && t.archetype_path < fighter_->archetype_path)) fighter_ = &t;
     }
     // the living huntable's eighth block: the Hunting_Raven's open, whose interactable the other kinds' differ from in two ids only
     for (const OpenTemplate& t : captured.opens()) {
@@ -318,8 +362,16 @@ const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, V
     const std::string& path = asset.archetype_path;
     const auto row = blueprints_->find(path);
     if (!row) return fail(Verdict::NotPawn);
-    // a humanoid is made from a recorded person (its body is merged from the appearance component the Wolf's open does not carry), any other Blueprint from the plain donor
+    // a humanoid is made from a recorded person (its body is merged from the appearance component the Wolf's open does not carry), any other Blueprint from the plain donor; a hostile humanoid
+    // whose fights are built has the ability component of a recorded guard besides, with the abilities of its tree in the list of records that component carries
     const bool person = row->appearance_dependent();
+    std::vector<int64_t> kit;
+    if (person && fighter_ && config_.abilities_of && fighting_humanoid(path)) kit = config_.abilities_of(path);
+    const bool fights = !kit.empty();
+    // a creature whose fights are built (the creature tables list the abilities of its tree) lists them in the plain donor's ability component, as the game's server does for each Blueprint: with the
+    // donor's own list the client has no record of the abilities the creature is told to play, and the creature keeps its single swing
+    std::vector<int64_t> creature_kit;
+    if (!person && donor_ && config_.abilities_of) creature_kit = config_.abilities_of(path);
     const OpenTemplate* donor = person ? (talks && talker_ ? talker_ : person_) : donor_;
     if (!donor) return fail(Verdict::NoDonor);
 // [CoA ~ C:Y:B]
@@ -361,6 +413,14 @@ const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, V
         }
         made.timers = c->timers;
         b.state.state.set(*b.schema, "Alignments", repl::Value(std::move(made)));
+    }
+    if (fights && !adopt_ability_records(t, *fighter_, kit)) return fail(Verdict::NoDonor);   // (the guard's ability component is not what it was read as: the humanoid is not made at all)
+    if (!creature_kit.empty()) adopt_ability_records(t, *donor_, creature_kit);   // (a donor whose list is empty, or another component, keeps its own list: the creature then fights with its single swing)
+    if (fights) {
+        // the villager's emote is not a bandit's: the game's open for a raider sets only the look, the population ids and the pose in its secondary info
+        const int si = t.find("UNPCSecondaryInfo");
+        const auto* emote = si > 0 && t.blocks[static_cast<size_t>(si)].schema ? t.blocks[static_cast<size_t>(si)].schema->command("EmoteAnimationInfoGuid") : nullptr;
+        if (emote) t.blocks[static_cast<size_t>(si)].state.state.erase(emote->handle);
     }
     return &made_.emplace(person && talks ? path + "#talks" : path, std::move(t)).first->second;
 }

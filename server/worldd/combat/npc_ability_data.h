@@ -11,11 +11,12 @@
 //                        attacks of the creature's fight, `conds` the other conditions (a roll, its health, the seconds into the fight, line of sight ...) and `why` what the table
 //                        could not say (`unknown`) or "off" for a task a parameter of the tree switches off for the creature, and `starts` the other cooldowns the creature starts
 //                        when it takes the task, and `rotate` ("speed:duration") the turning towards its target that runs with the ability
-//    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable
+//    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end
 //                        every animation montage beside the Blueprints: its object path, the ids the network layer knows it by, how long it
 //                        plays at a play rate of 1, the hit notifies ("time:key") that tell when each of the ability's hits lands, and how far the
 //                        montage carries the creature ("time:x:y:z": its root bone's travel, in cm ahead, to the right and up from where the creature
-//                        stood when the montage began; empty for a montage that stays in place, or for one whose animation the tables could not read: `root_unreadable`)
+//                        stood when the montage began; empty for a montage that stays in place, or for one whose animation the tables could not read: `root_unreadable`); `anim_end` is the time
+//                        of its animation-end notify, where the creature's ability task is done and the cooldowns it starts begin to run (empty: they begin with the cast)
 //    npc_targeting.tsv   ability  key  distance  min_distance  angle  angle_center  cone_check  freeze  freeze_distance  freeze_scale  ignore_non_target  discovery  check_validity  los_check  distance_center  volumes  shapes
 //                        where an ability's hit lands (see combat/bite_area.h): how the record finds its target (`discovery`), whether it measures anything at all (`check_validity`, with the
 //                        cone's distance and angle behind `cone_check` and the line of sight behind `los_check`), and the volumes it sweeps (`volumes` of them, `shapes` places the ones that can be
@@ -43,12 +44,13 @@ namespace aoc::worldd::combat {
 
 /// One condition of a task, as the creature table says it (tools/npcabilities writes these as text; see its Conditions.cs for the grammar).
 struct CondAtom {
-    enum class Kind : uint8_t { True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, Sees, NotSees };
+    enum class Kind : uint8_t { True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, FightRoll, Sees, NotSees };
     enum Op : int { Eq, Ne, Lt, Le, Gt, Ge };
     Kind        kind = Kind::True;
-    double      value = 0;   // the distance (cm), angle (degrees), probability, health fraction or seconds
-    int         op = Eq;     // FightTime: how the seconds compare with `value`
-    std::string name;        // Cooldown: the cooldown's name
+    double      value = 0;   // the distance (cm), angle (degrees), probability, health fraction or seconds; FightRoll: the number it is when the chance does not come up
+    int         op = Eq;     // FightTime and FightRoll: how the seconds compare with `value` / the creature's number
+    std::string name;        // Cooldown: the cooldown's name; FightRoll: the tree's variable
+    double      chance = 0, low = 0, high = 0;   // FightRoll: with this chance the number is a fresh one between `low` and `high`
 };
 
 /// A condition with how it joins the ones before it: `operand` 'c' (the first of a list), 'a' (and) or 'o' (or), and `delta` the brackets it opens before itself (> 0) or closes after itself (< 0).
@@ -71,7 +73,22 @@ struct CondContext {
     double fight_seconds = 0;           // since its fight began
     std::function<bool(const std::string&)> cooldown_over;
     std::function<double()> roll;       // a fresh number in [0, 1)
+    /// The number a FightRoll condition compares the fight's seconds with: rolled the first time it is asked in a fight and the same for the rest of that fight.  Null: the condition's own `value`.
+    std::function<double(const CondAtom&)> fight_roll;
 };
+
+/// Whether `x` compares as `op` with `y`.
+inline bool compare_values(int op, double x, double y) {
+    switch (op) {
+        case CondAtom::Eq: return std::abs(x - y) < 1e-9;
+        case CondAtom::Ne: return std::abs(x - y) >= 1e-9;
+        case CondAtom::Lt: return x < y;
+        case CondAtom::Le: return x <= y;
+        case CondAtom::Gt: return x > y;
+        case CondAtom::Ge: return x >= y;
+    }
+    return false;
+}
 
 /// Whether one condition holds.
 inline bool eval_atom(const CondAtom& a, const CondContext& c) {
@@ -88,19 +105,8 @@ inline bool eval_atom(const CondAtom& a, const CondContext& c) {
         case K::Random: return c.preview || !c.roll || c.roll() < a.value;
         case K::HealthUnder: return c.preview || c.health_fraction < a.value;
         case K::HealthNotUnder: return c.preview || !(c.health_fraction < a.value);
-        case K::FightTime: {
-            if (c.preview) return true;
-            const double x = c.fight_seconds;
-            switch (a.op) {
-                case CondAtom::Eq: return std::abs(x - a.value) < 1e-9;
-                case CondAtom::Ne: return std::abs(x - a.value) >= 1e-9;
-                case CondAtom::Lt: return x < a.value;
-                case CondAtom::Le: return x <= a.value;
-                case CondAtom::Gt: return x > a.value;
-                case CondAtom::Ge: return x >= a.value;
-            }
-            return false;
-        }
+        case K::FightTime: return c.preview || compare_values(a.op, c.fight_seconds, a.value);
+        case K::FightRoll: return c.preview || compare_values(a.op, c.fight_seconds, c.fight_roll ? c.fight_roll(a) : a.value);
         case K::Sees: return !c.has_target || !c.sees || c.sees();
         case K::NotSees: return !c.has_target || (c.sees && !c.sees());
     }
@@ -196,6 +202,7 @@ struct MontageData {
     double           length = 0;   // seconds at a play rate of 1
     double           rate_scale = 1;
     bool             root_unreadable = false;   // the animation moves the creature in a form the tables could not read: root_motion is empty then and does not mean "stays in place"
+    double           anim_end = -1;             // seconds at a play rate of 1 at which the animation ends (its animation-end notify; the rest of the montage is its blend out); -1: the tables do not say
     std::vector<Hit> hits;         // in time order
     /// How far the montage carries the creature: where its root bone is (cm ahead and to the right of where the creature faces, from where it stood when the montage began) at each
     /// time (seconds into the montage at a play rate of 1), in time order from 0.  Empty: the montage stays in place.
@@ -233,6 +240,11 @@ struct MontageData {
     double seconds(double play_rate) const {
         const double rate = rate_scale * play_rate;
         return rate > 0 ? length / rate : length;
+    }
+    /// Seconds after a cast begins at which the creature's ability task is done and the cooldowns it starts begin to run: the animation-end notify when the tables have it, else 0 (they run from the cast's start).
+    double task_done_after(double play_rate) const {
+        const double rate = rate_scale * play_rate;
+        return anim_end >= 0 && rate > 0 ? anim_end / rate : 0.0;
     }
 };
 
@@ -277,12 +289,13 @@ public:
         for (auto& [archetype, tasks] : abilities) {
             std::stable_sort(tasks.begin(), tasks.end(), [](const CreatureAbility& x, const CreatureAbility& y) { return x.order < y.order; });
         }
-        if (!read_table(montages_path, "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable", rows, error)) return false;
+        if (!read_table(montages_path, "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end", rows, error)) return false;
         for (const auto& r : rows) {
             MontageData m;
             m.path = r[0];
             m.package = r[2];
             m.root_unreadable = r[9] == "1";
+            if (!r[10].empty() && (!number(r[10], m.anim_end) || !(m.anim_end >= 0))) return bad(montages_path, r[0], error);
             if (!number(r[1], m.guid) || !number(r[3], m.package_guid) || !number(r[4], m.length) || !number(r[5], m.rate_scale)) return bad(montages_path, r[0], error);
             for (const std::string& h : split(r[7], ';')) {
                 if (h.empty()) continue;
@@ -495,13 +508,17 @@ private:
                         if (args.size() != 1) return false;
                         t.atom.kind = K::Cooldown;
                         t.atom.name = percent_decoded(args[0]);
-                    } else if (name == "fc") {
-                        if (args.size() != 2 || !number(args[1], t.atom.value)) return false;
+                    } else if (name == "fc" || name == "fcr") {
+                        // fc(OP,V): the fight's seconds against V.  fcr(OP,BASE,CHANCE,LOW,HIGH,NAME): against the creature's number for the tree's variable NAME, rolled once per fight: BASE, or with the chance a fresh one in [LOW, HIGH]
+                        const bool rolled = name == "fcr";
+                        if (args.size() != (rolled ? 6u : 2u) || !number(args[1], t.atom.value)) return false;
+                        if (rolled && (!number(args[2], t.atom.chance) || !number(args[3], t.atom.low) || !number(args[4], t.atom.high) || t.atom.chance < 0 || t.atom.chance > 1 || t.atom.low > t.atom.high || args[5].empty())) return false;
                         static const std::map<std::string, int> ops = {{"eq", CondAtom::Eq}, {"ne", CondAtom::Ne}, {"lt", CondAtom::Lt}, {"le", CondAtom::Le}, {"gt", CondAtom::Gt}, {"ge", CondAtom::Ge}};
                         const auto it = ops.find(args[0]);
                         if (it == ops.end()) return false;
-                        t.atom.kind = K::FightTime;
+                        t.atom.kind = rolled ? K::FightRoll : K::FightTime;
                         t.atom.op = it->second;
+                        if (rolled) t.atom.name = percent_decoded(args[5]);
                     } else {
                         static const std::map<std::string, K> by_name = {{"in", K::In},   {"out", K::Out},   {"cin", K::CentreIn},          {"cout", K::CentreOut},
                                                                        {"ang", K::Angle}, {"rand", K::Random}, {"hp", K::HealthUnder}, {"nhp", K::HealthNotUnder}};

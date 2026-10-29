@@ -11,6 +11,7 @@
 #include "combat/npc_kits.h"
 #include "combat/npc_replicator.h"
 #include "content/content_db.h"
+#include "npc/area_npcs.h"
 #include "spawns/generic_npc.h"
 
 #include <spdlog/spdlog.h>
@@ -104,6 +105,7 @@ public:
     std::map<std::string, double>          cooldown_until;   // the name of a task's cooldown -> when it is over
     double                                 hold_until = 0;   // the creature stands still, facing as it does, until then (the montage of an attack it stands for)
     double                                 fight_began = 0;  // when its fight began (the tree asks how long it has gone on)
+    std::map<std::string, double>          fight_rolls;      // the numbers its tree rolled when this fight began, by the tree's variable (a first special attack comes only after one of them)
     uint64_t                               killer = 0;
     std::set<uint64_t>                     attackers;
     struct Shield {
@@ -484,6 +486,15 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         return until == n.cooldown_until.end() || now_ >= until->second;
     };
     ctx.roll = [this]() { return rng_.rand_double(); };
+    // a number the tree rolls once when a fight begins (its first special attack waits for it): rolled the first time it is asked, the same until the fight is over
+    ctx.fight_roll = [&n, this](const CondAtom& a) {
+        const auto known = n.fight_rolls.find(a.name);
+        if (known != n.fight_rolls.end()) return known->second;
+        double v = a.value;
+        if (rng_.rand_double() < a.chance) v = a.low + (a.high - a.low) * rng_.rand_double();
+        n.fight_rolls.emplace(a.name, v);
+        return v;
+    };
     // the tree is tried in order and the first task whose conditions hold is used
     for (const CreatureAbility& t : *n.anim) {
         if (t.unknown || t.off || !t.fight) continue;
@@ -582,7 +593,7 @@ bool CombatWorld::montages_readable(const abilities::AbilityDef& def) const {
         if (m.soft_path.empty()) continue;
         const MontageData* md = anim_->montage(m.soft_path);
         if (!md) return false;
-        if (md->root_unreadable) return false;   // its animation moves the creature in a way the tables could not read: the creature keeps its single swing
+        if (md->root_unreadable) continue;   // its animation moves the creature in a way the tables could not read: it is not played (plan_cast leaves it out); an ability with no other keeps the single swing
         data = true;
     }
     return data;
@@ -662,6 +673,8 @@ bool CombatWorld::plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& 
     SelectHost host(rng_);
     for (const content::MontageRow& m : def.montages) {
         if (m.soft_path.empty()) continue;
+        const MontageData* playable = anim_->montage(m.soft_path);
+        if (!playable || playable->root_unreadable) continue;   // (a variation whose travel the tables could not read is not played: the client would carry its copy of the creature along it and the server would not)
         chosen = &m;
         if (m.select_expr == 0) break;
         const content::ExprRow* row = catalog_.expr(m.select_expr);
@@ -725,8 +738,13 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
                     play.montage = plan.montage->guid;
                     play.length = plan.montage->length;
                     play.rate = plan.montage->rate_scale;
-                    for (const MontageData::Step& s : plan.montage->root_motion) play.steps.push_back({s.time, s.x, s.y});
-                    const double own_radius = n.radius_cm();
+                    // The client turns the animation's root translation into the world's by the mesh component's world transform, scale included (USkeletalMeshComponent::ConvertLocalRootMotionToWorld
+                    // multiplies the translation by the component's Scale3D), and puts its copy of the creature a capsule as big as that scale.  A goblin of scale 1.5 lunges 1.5 times what its montage
+                    // says, and our copy of it has to cover the same ground, or the client's copy runs ahead of ours between two updates and is put back at every one of them.
+                    const world::WorldActor* me = registry_.find(n.actor_id);
+                    const double scale = me ? npc::actor_scale_z(*me) : 1.0;
+                    for (const MontageData::Step& s : plan.montage->root_motion) play.steps.push_back({s.time, s.x * scale, s.y * scale});
+                    const double own_radius = n.radius_cm() * scale;
                     play.own_radius = own_radius;
                     if (const RootMotionFreezeRule* rule = anim_ ? anim_->freeze_of(a.ability->row.guid) : nullptr) {
                         play.freeze_stop = rule->kind == RootMotionFreezeRule::Kind::Stop;
@@ -752,9 +770,11 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         }
     }
     if (animated) {
-        if (a.task && !a.task->task.empty() && a.task->cooldown > 0) n.cooldown_until[a.task->task] = now + a.task->cooldown;
+        // where the tables have the montage's animation-end notify (a bandit's), the creature's task is done there and the cooldowns it starts run from there; else they run from the cast's start
+        const double done = plan.montage ? plan.montage->task_done_after(1.0) : 0.0;
+        if (a.task && !a.task->task.empty() && a.task->cooldown > 0) n.cooldown_until[a.task->task] = now + done + a.task->cooldown;
         if (a.task) {
-            for (const auto& [name, seconds] : a.task->starts) n.cooldown_until[name] = now + seconds;
+            for (const auto& [name, seconds] : a.task->starts) n.cooldown_until[name] = now + done + seconds;
         }
         if (a.task) n.hold_until = now + plan.seconds;   // (no chase runs in the state of an attack: the creature stands, and turns, until the montage is over)
         n.next_attack_at = now + plan.seconds;
@@ -1127,6 +1147,7 @@ void CombatWorld::think(Npc& n, double now) {
     if (o.began_fight) {
         ++stats_.aggros;
         n.fight_began = now;
+        n.fight_rolls.clear();
         if (n.ai.params().senses.enabled) {
             const npc::ai::Params& pr = n.ai.params();
             PlayerPort* who = player(o.target);

@@ -316,6 +316,16 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             generic_config_.hunting_names = gather::hunting_names(*foliage);
         }
     }
+    // the abilities of each creature Blueprint's state tree: a humanoid that fights lists them as the records its ability component loads (spawns/generic_npc.h)
+    generic_config_.abilities_of = [this](const std::string& archetype) {
+        std::vector<int64_t> kit;
+        if (const std::vector<combat::CreatureAbility>* tasks = npc_abilities_.abilities_of(archetype)) {
+            for (const combat::CreatureAbility& t : *tasks) {
+                if (std::find(kit.begin(), kit.end(), t.ability) == kit.end()) kit.push_back(t.ability);
+            }
+        }
+        return kit;
+    };
     generic_.emplace(*captured_, motion_loaded_ ? &motion_ : nullptr, generic_config_);
     {   // the people's looks and names (spawns/npc_looks.h): without the tables the humanoids keep the recorded looks and names, and the ones no capture opened stay out
         std::string le, ce;
@@ -702,6 +712,13 @@ void PlayerWorld::drive_window(double now_seconds) {
     if (w.load_failures > window_failures_logged_) {
         spdlog::warn("[nav] {} chunk(s) of the ground could not be loaded or added (damaged or missing file, or no room in the mesh): the NPCs there stay on the terrain", w.load_failures - window_failures_logged_);
         window_failures_logged_ = w.load_failures;
+    }
+    // a polygon with no detail edge marked on its border makes Detour dereference null when a point near it is asked for: the loader marks them (nav/tile_repair.h); the log names how many it had to
+    if (w.tile_repair.polys_repaired > window_repairs_logged_.polys_repaired || w.tile_repair.polys_hidden > window_repairs_logged_.polys_hidden) {
+        spdlog::warn("[nav] ground: {} polygon(s) of the tiles that came in had no detail edge marked on their border (Recast's float test loses it far from the origin; Detour's closest-point query would "
+                     "dereference null) and have one now; {} cannot answer a closest-point query and are hidden from queries; {} edges marked in all so far",
+                     w.tile_repair.polys_repaired - window_repairs_logged_.polys_repaired, w.tile_repair.polys_hidden - window_repairs_logged_.polys_hidden, w.tile_repair.edges_flagged);
+        window_repairs_logged_ = w.tile_repair;
     }
     if (now_seconds - last_window_log_ >= kWindowLogSeconds) {
         last_window_log_ = now_seconds;

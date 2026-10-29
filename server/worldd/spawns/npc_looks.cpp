@@ -350,7 +350,8 @@ bool NpcLooks::is_humanoid(const content::NpcAssetRow& asset) const {
 bool NpcLooks::can_dress(const content::NpcAssetRow& asset) const {
     if (!motion_ || asset.archetype_path.empty()) return false;
     const auto m = motion_->find(asset.archetype_path);
-    if (!m || !m->appearance_dependent() || hostile(m->alignments)) return false;
+    if (!m || !m->appearance_dependent()) return false;
+    if (hostile(m->alignments) && !fighting_humanoid(asset.archetype_path)) return false;   // (an enemy of the players is dressed only when its fights are built)
     const Appearance* a = appearance(appearance_of(asset));
     if (!a || a->shared_info == 0) return false;
     for (const int64_t og : a->outfits) {
@@ -361,6 +362,12 @@ bool NpcLooks::can_dress(const content::NpcAssetRow& asset) const {
         }
     }
     return false;
+}
+
+bool NpcLooks::waits_for_its_fights(const content::NpcAssetRow& asset) const {
+    if (!motion_ || asset.archetype_path.empty()) return false;
+    const auto m = motion_->find(asset.archetype_path);
+    return m && m->appearance_dependent() && hostile(m->alignments) && !fighting_humanoid(asset.archetype_path);
 }
 
 bool NpcLooks::talks(const content::NpcAssetRow& asset, const content::NpcInstanceRow* i) {

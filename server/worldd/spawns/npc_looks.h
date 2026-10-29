@@ -29,7 +29,8 @@
 //  pose is the recording's and goes.  Quest givers, whose state tree only idles, stand where they are put (npc/area_npcs.h, load_standing_archetypes).
 //
 //  Who is dressed.  A humanoid Blueprint (master mesh) that is not hostile to players (its starting alignments, against the player's, by the combat tables) and whose look
-//  resolves to a record with a shared info and an outfit.  The hostile ones (bandits, cultists) stay out of the world until their fights are read.
+//  resolves to a record with a shared info and an outfit.  The hostile ones are dressed only where their fights are built (the bandit raiders and captains, fighting_humanoid in
+//  spawns/generic_npc.h); the other bandits and the cultists stay out of the world until theirs are.
 // ============================================================================
 #pragma once
 
@@ -93,8 +94,11 @@ public:
     int64_t appearance_of(const content::NpcAssetRow& asset) const;
     /// Whether the asset's Blueprint is a humanoid (its body is merged), hostile to players or not.
     bool is_humanoid(const content::NpcAssetRow& asset) const;
-    /// Whether a person of `asset` can be dressed and named: a humanoid that is not hostile to players, with a look that resolves.
+    /// Whether a person of `asset` can be dressed and named: a humanoid that is not hostile to players (or is one whose fights are built), with a look that resolves.
     bool can_dress(const content::NpcAssetRow& asset) const;
+    /// Whether the asset's Blueprint is a humanoid hostile to players whose fights are not built yet (the bandit archers, mages and healers, the cultists): it is not in the world, but a point that
+    /// could be it keeps its share of the draw and stays empty when the draw comes up with it, so that a camp is thinner than the game's instead of full of the kinds that do fight.
+    bool waits_for_its_fights(const content::NpcAssetRow& asset) const;
     /// Whether the open of a person of this instance and asset needs the interactable subobject (it has something to say or sell).
     static bool talks(const content::NpcAssetRow& asset, const content::NpcInstanceRow* instance);
 

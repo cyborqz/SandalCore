@@ -13,15 +13,20 @@
 //                  the navmesh gets (partial), a point far outside has no path
 //    rays          a ray along the ground stops at the wall, goes through open ground
 //    hostile       NaN and enormous coordinates, a missing file, a geometry file cut short or with a wrong index, a tile of the wrong size
+//    border marks  every polygon the builder makes has a detail edge marked on its border (near the origin and 300,000 cm out), a file whose polygons have none is repaired as it
+//                  loads and answers questions next to them, a polygon without a detail triangle is hidden (nav/tile_repair.h)
 //    the real area (dist/content/area_nav.bin, or AOC_AREA_NAV): the answer key of the extraction (tests/ground_key.h: the captured ground
 //                  positions of the area) lies on the heightfield or the navmesh; the navmesh is one piece around the login spot
 // ============================================================================
 #include "nav/area_nav.h"
 #include "nav/nav_build.h"
+#include "nav/tile_repair.h"
 #include "nav_fixture.h"
 #include "ground_key.h"
 #include "ground_key_region.h"
 #include "spawns/region_data.h"
+
+#include <DetourNavMesh.h>
 
 #include <algorithm>
 #include <chrono>
@@ -29,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <set>
 #include <string>
@@ -425,6 +431,225 @@ static void test_real_area() {
     CHECK(npcs.pairs > 5 && npcs.found >= npcs.pairs * 0.80, "a path joins 80 % of the pairs of NPC places of one capture");
 
     if (n->has_region()) test_region_key(*n);
+
+    // A polygon of the Riverlands' file whose triangles had no marked border edge (Recast's float test, nav/tile_repair.h): a question beside it, from a wandering NPC at (-622,437, 594,734), killed
+    // worldd.exe with a null dereference in Detour.  The chunk comes in repaired (or, in a file made after the fix, needed nothing) and the question is answered.
+    if (n->windowed() && n->has_region()) {
+        const bool in = n->load_around(-622436.6, 594733.7, 0, 60);
+        nav::Vec3 np;
+        const bool found = in && n->nearest_point({-622436.6, 594733.7, 10545.9}, 300, 500, &np);
+        CHECK(in && found, "the question that once killed worldd.exe (beside a polygon without a marked border edge) is answered");
+        const nav::TileRepair tr = n->window_stats().tile_repair;
+        std::printf("    the chunks that came in needed %llu border edges marked, %llu polygons had none, %llu hidden\n", static_cast<unsigned long long>(tr.edges_flagged),
+                    static_cast<unsigned long long>(tr.polys_repaired), static_cast<unsigned long long>(tr.polys_hidden));
+        CHECK(tr.polys_hidden == 0, "and no polygon of them is hidden");
+    }
+}
+
+// ---- the detail meshes' border edges (nav/tile_repair.h) -------------------------------------------------------------------------------------------------
+//  Detour finds the point of a polygon nearest to a point outside it from the detail triangle edges marked as on the polygon's border, and dereferences null for a polygon with none
+//  (worldd.exe died of it when an NPC began to wander next to one).  Recast's float test for the mark loses edges in centimetres far from the origin.
+
+namespace {
+
+/// The arrays of a Detour tile that the checks read and damage (dtCreateNavMeshData's layout).
+struct TileView {
+    dtMeshHeader h{};
+    dtPoly* polys = nullptr;
+    dtPolyDetail* dmeshes = nullptr;
+    unsigned char* dtris = nullptr;
+};
+
+TileView view_of(std::vector<uint8_t>& t) {
+    TileView v;
+    std::memcpy(&v.h, t.data(), sizeof v.h);
+    const auto al4 = [](size_t x) { return (x + 3) & ~static_cast<size_t>(3); };
+    const size_t o_polys = al4(sizeof(dtMeshHeader)) + al4(sizeof(float) * 3 * static_cast<size_t>(v.h.vertCount));
+    const size_t o_dm = o_polys + al4(sizeof(dtPoly) * static_cast<size_t>(v.h.polyCount)) + al4(sizeof(dtLink) * static_cast<size_t>(v.h.maxLinkCount));
+    const size_t o_dt = o_dm + al4(sizeof(dtPolyDetail) * static_cast<size_t>(v.h.detailMeshCount)) + al4(sizeof(float) * 3 * static_cast<size_t>(v.h.detailVertCount));
+    v.polys = reinterpret_cast<dtPoly*>(t.data() + o_polys);
+    v.dmeshes = reinterpret_cast<dtPolyDetail*>(t.data() + o_dm);
+    v.dtris = t.data() + o_dt;
+    return v;
+}
+
+constexpr unsigned char kAnyBorder = 0x01 | 0x04 | 0x10;   // DT_DETAIL_EDGE_BOUNDARY in each of a triangle's three edges
+
+/// Ground polygons of a tile, and how many of them have no border mark in any triangle.
+void count_unmarked(std::vector<uint8_t>& t, int* ground, int* unmarked) {
+    const TileView v = view_of(t);
+    for (int i = 0; i < v.h.polyCount && i < v.h.detailMeshCount; ++i) {
+        if (v.polys[i].getType() != DT_POLYTYPE_GROUND) continue;
+        ++*ground;
+        bool any = false;
+        for (int k = 0; k < v.dmeshes[i].triCount; ++k) any = any || (v.dtris[(v.dmeshes[i].triBase + k) * 4 + 3] & kAnyBorder) != 0;
+        if (!any) ++*unmarked;
+    }
+}
+
+/// Takes every border mark off every ground polygon of a tile: what the float test did to 27 polygons of the Riverlands.  Returns the marks taken off.
+int clear_marks(std::vector<uint8_t>& t) {
+    const TileView v = view_of(t);
+    int cleared = 0;
+    for (int i = 0; i < v.h.polyCount && i < v.h.detailMeshCount; ++i) {
+        if (v.polys[i].getType() != DT_POLYTYPE_GROUND) continue;
+        for (int k = 0; k < v.dmeshes[i].triCount; ++k) {
+            unsigned char& f = v.dtris[(v.dmeshes[i].triBase + k) * 4 + 3];
+            for (int e = 0; e < 3; ++e) if (f & (1 << (e * 2))) ++cleared;
+            f = static_cast<unsigned char>(f & ~kAnyBorder);
+        }
+    }
+    return cleared;
+}
+
+size_t tile_with_most_polys(const nav::NavFile& f) {
+    size_t best = 0;
+    int most = -1;
+    for (size_t i = 0; i < f.tiles.size(); ++i) {
+        dtMeshHeader h;
+        std::memcpy(&h, f.tiles[i].data.data(), sizeof h);
+        if (h.polyCount > most) { most = h.polyCount; best = i; }
+    }
+    return best;
+}
+
+/// A grid of questions over the test world (the wall's and the pen's footprints included: points next to polygons, over none): nothing may take the process down.
+void ask_the_grid(nav::AreaNav& n, int* asked, int* answered) {
+    for (double x = -4000; x <= 11000; x += 250)
+        for (double y = -9000; y <= 9000; y += 250)
+            for (double z : {1000.0, 1300.0}) {
+                nav::Vec3 np;
+                double h = 0;
+                ++*asked;
+                if (n.nearest_point({x, y, z}, 300, 500, &np)) ++*answered;
+                n.ground_height(x, y, z, &h);
+                n.on_navmesh({x, y, z});
+            }
+}
+
+/// Opt-in (AOC_NAV_SWEEP=1; dist/content/area_nav.bin or AOC_AREA_NAV): every tile of the real file, read and repaired on a copy: how many polygons had no mark, how many edges the repair
+/// marks (none, in a file made by a builder that marks them), and that no polygon has to be hidden.  About twenty seconds for the Riverlands' 31,000 tiles.
+void sweep_real_file() {
+    const char* env = std::getenv("AOC_AREA_NAV");
+    const std::string path = env && *env ? env : "dist/content/area_nav.bin";
+    nav::NavFile idx;
+    std::string err;
+    if (!nav::read_nav_index(path, &idx, &err)) { std::printf("  [skip] sweep of %s: %s\n", path.c_str(), err.c_str()); return; }
+    std::ifstream in(path, std::ios::binary);
+    nav::TileRepair total;
+    size_t tiles = 0;
+    int ground = 0, unmarked = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (const nav::NavChunkEntry& e : idx.chunks) {
+        std::vector<nav::NavTileBlob> blobs;
+        if (!nav::read_nav_chunk(in, e, &blobs, &err, idx.chunk_tiles)) { std::printf("  [FAIL] chunk (%d, %d): %s\n", e.cx, e.cy, err.c_str()); ++g_fail; return; }
+        for (nav::NavTileBlob& b : blobs) {
+            count_unmarked(b.data, &ground, &unmarked);
+            total += nav::repair_detail_boundaries(b.data.data(), b.data.size());
+            ++tiles;
+        }
+    }
+    std::printf("    sweep: %zu tiles, %d ground polygons, %d without a marked border edge; the repair marked %llu edges (%llu polygons had none), hid %llu; %.1f s\n", tiles, ground, unmarked,
+                static_cast<unsigned long long>(total.edges_flagged), static_cast<unsigned long long>(total.polys_repaired), static_cast<unsigned long long>(total.polys_hidden),
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    CHECK(tiles == static_cast<size_t>(idx.tile_count_v2) && total.polys_hidden == 0 && total.polys_repaired == static_cast<uint64_t>(unmarked), "the whole real file: no polygon is hidden, and every polygon without a mark was given one");
+}
+
+}  // namespace
+
+static void test_border_marks() {
+    std::printf("detail edges on polygon borders\n");
+    nav::BuildOptions opt;
+    opt.threads = 2;
+    opt.nav_margin_cm = 3000;
+    std::string err;
+
+    // the builder leaves every ground polygon marked, near the origin and 300,000 cm out
+    nav::NavFile near_file, far_file;
+    nav::BuildStats near_stats, far_stats;
+    CHECK(nav::build_nav(navfix::geometry(), 7, opt, &near_file, &near_stats, &err), "the test world builds");
+    CHECK(nav::build_nav(navfix::shifted_geometry(300000.0), 7, opt, &far_file, &far_stats, &err), "the same world 300,000 cm out builds");
+    for (nav::NavFile* f : {&near_file, &far_file}) {
+        int ground = 0, unmarked = 0;
+        nav::TileRepair again;
+        for (auto& t : f->tiles) {
+            count_unmarked(t.data, &ground, &unmarked);
+            std::vector<uint8_t> copy = t.data;
+            again += nav::repair_detail_boundaries(copy.data(), copy.size());
+            if (copy != t.data) again.edges_flagged += 1;   // (it must not change a finished tile)
+        }
+        std::printf("    %s: %d ground polygons, %d without a mark\n", f == &near_file ? "near" : "far ", ground, unmarked);
+        CHECK(ground > 100 && unmarked == 0, f == &near_file ? "near the origin: every ground polygon has a marked border edge" : "300,000 cm out: every ground polygon has a marked border edge");
+        CHECK(again.edges_flagged == 0 && again.polys_repaired == 0 && again.polys_hidden == 0, "a built tile needs nothing more, and a second pass changes no byte");
+    }
+    std::printf("    the builder marked %llu edges (%llu polygons had none) near the origin, %llu edges (%llu polygons had none) 300,000 cm out\n",
+                static_cast<unsigned long long>(near_stats.repair.edges_flagged), static_cast<unsigned long long>(near_stats.repair.polys_repaired),
+                static_cast<unsigned long long>(far_stats.repair.edges_flagged), static_cast<unsigned long long>(far_stats.repair.polys_repaired));
+    CHECK(far_stats.repair.polys_hidden == 0 && near_stats.repair.polys_hidden == 0, "no polygon of either world is hidden");
+
+    // a file damaged the way Recast's test damaged 27 polygons of the Riverlands: one tile without a single mark
+    nav::NavFile damaged = near_file;
+    const size_t big = tile_with_most_polys(damaged);
+    int ground = 0, unmarked = 0;
+    const int cleared = clear_marks(damaged.tiles[big].data);
+    count_unmarked(damaged.tiles[big].data, &ground, &unmarked);
+    std::printf("    the busiest tile has %d ground polygons; the damage took off %d marks\n", ground, cleared);
+    CHECK(cleared > 0 && ground >= 3 && unmarked == ground, "the damage takes every mark off every ground polygon of the busiest tile");
+    // (the repair, tile by tile: every mark that was there comes back, and no polygon is hidden)
+    {
+        std::vector<uint8_t> fixed = damaged.tiles[big].data;
+        const nav::TileRepair r = nav::repair_detail_boundaries(fixed.data(), fixed.size());
+        int g2 = 0, u2 = 0;
+        count_unmarked(fixed, &g2, &u2);
+        CHECK(r.polys_repaired == static_cast<uint64_t>(ground) && r.polys_hidden == 0 && u2 == 0, "the repair gives every one of them a marked edge, and hides none");
+        CHECK(r.edges_flagged >= static_cast<uint64_t>(cleared), "and marks at least the edges that were marked before");
+        std::vector<uint8_t> orig = near_file.tiles[big].data;
+        const TileView vo = view_of(orig), vf = view_of(fixed);
+        bool superset = true;
+        for (int k = 0; k < vo.h.detailTriCount; ++k) superset = superset && (vo.dtris[k * 4 + 3] & ~vf.dtris[k * 4 + 3] & kAnyBorder) == 0;
+        CHECK(superset, "no mark of the built tile is missing from the repaired one");
+    }
+    // the same file loaded: the loader repairs it, and the questions next to the polygons' borders are answered
+    nav::NavFile damaged_copy = damaged;
+    auto n = nav::AreaNav::from_file(std::move(damaged_copy), &err);
+    CHECK(n != nullptr, "the damaged file loads");
+    if (n) {
+        CHECK(n->window_stats().tile_repair.polys_repaired == static_cast<uint64_t>(ground), "the loader repaired the polygons that had no mark");
+        int asked = 0, answered = 0;
+        ask_the_grid(*n, &asked, &answered);
+        CHECK(asked > 5000 && answered > asked / 2, "thousands of questions around the damaged tile (points over no polygon among them) are answered, and the process is still here");
+        nav::Vec3 np;
+        CHECK(n->nearest_point({-3050, 0, 1300}, 300, 500, &np) && (std::fabs(np.z - 1000) < 60 || std::fabs(np.z - 1600) < 60), "a point beside the wall: its nearest navmesh point is the ground or the wall's top");
+    }
+
+    // a polygon with no detail triangle cannot give a closest point at all: it is hidden from the queries
+    nav::NavFile holed = near_file;
+    {
+        const TileView v = view_of(holed.tiles[big].data);
+        int hole = -1;
+        for (int i = 0; i < v.h.polyCount && i < v.h.detailMeshCount && hole < 0; ++i)
+            if (v.polys[i].getType() == DT_POLYTYPE_GROUND && v.dmeshes[i].triCount > 0) hole = i;
+        if (hole >= 0) v.dmeshes[hole].triCount = 0;
+        auto m = nav::AreaNav::from_file(std::move(holed), &err);
+        CHECK(hole >= 0 && m != nullptr && m->window_stats().tile_repair.polys_hidden == 1, "a polygon without a detail triangle is hidden, once");
+        if (m) {
+            int asked = 0, answered = 0;
+            ask_the_grid(*m, &asked, &answered);
+            CHECK(answered > asked / 2, "and the questions around it are answered");
+        }
+    }
+
+    // buffers that are not tiles are left alone
+    std::vector<uint8_t> junk(300, 0xAB), cut = near_file.tiles[big].data;
+    cut.resize(cut.size() - 7);
+    const std::vector<uint8_t> junk0 = junk, cut0 = cut;
+    const nav::TileRepair a = nav::repair_detail_boundaries(junk.data(), junk.size());
+    const nav::TileRepair b = nav::repair_detail_boundaries(cut.data(), cut.size());
+    const nav::TileRepair c = nav::repair_detail_boundaries(nullptr, 0);
+    CHECK(a.edges_flagged + a.polys_repaired + a.polys_hidden + b.edges_flagged + b.polys_repaired + b.polys_hidden + c.edges_flagged + c.polys_repaired + c.polys_hidden == 0 && junk == junk0 && cut == cut0,
+          "a buffer of junk, a tile cut short and a null pointer are left alone");
+
+    if (const char* sweep = std::getenv("AOC_NAV_SWEEP")) if (*sweep && *sweep != '0') sweep_real_file();
 }
 
 int main() {
@@ -434,6 +659,7 @@ int main() {
     test_ground();
     test_floor_stack();
     test_paths();
+    test_border_marks();
     test_real_area();
     std::printf("test_worldd_nav: %d passed, %d failed (%.1f s)\n", g_pass, g_fail, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     return g_fail == 0 ? 0 : 1;

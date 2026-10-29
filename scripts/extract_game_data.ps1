@@ -86,7 +86,12 @@ $lastLog   = Join-Path $stampDir 'last_run.log'
 # The creature kinds that attack with their own animation: one container folder of the game's files per kind (its Blueprints and the animation montages beside them).
 # worldd animates exactly the Blueprints this reads; a kind that is not listed keeps its single swing.
 $NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Content/DesignAssets/Population/NPC/Beast/Canine', 'AOC/Content/DesignAssets/Population/NPC/Beast/Bear',
-               'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin')
+               'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin',
+               # the bandits (raiders, captains, archers, mages, healers: their Blueprints, trees and animation montages) and the one raider montage that lives beside the raider's animations
+               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider')
+# The folders whose montages also export the time of their animation end notify (the montage table's anim_end): where an ability's task is done and its cooldowns start (the bandits').
+# The other creatures' abilities are done when their montage is over.
+$NpcAnimEndFolders = @('AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider')
 # The folders whose creature Blueprints are read for what they notice and how far they follow (their intelligence component): every creature of the population, animated or not.
 $NpcSensesFolders = @('AOC/Content/DesignAssets/Population')
 # The string tables that an item's name points at in the design data (an ItemName that is a table entry, not a text of its own): read into item_names.tsv, which contentc puts into the item records.
@@ -415,7 +420,7 @@ function Get-Id([string]$step) {
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
         'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-CodeLayouts) + (Get-Id 'database')) }
-        'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + ($NpcSensesFolders -join ';') + (Get-Id 'database')) }
+        'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + ($NpcAnimEndFolders -join ';') + ($NpcSensesFolders -join ';') + (Get-Id 'database')) }
         'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'region') + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-Id 'townlayouts') + (Get-Id 'database')) }
     }
     $ids[$step] = $v
@@ -535,6 +540,7 @@ $steps = @(
         Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll', 'dist\content\content.db') 'run the tools and database steps first'
         $npcArgs = @($npcAbilitiesDll, 'read', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir)
         foreach ($f in $NpcFolders) { $npcArgs += @('--dir', $f) }
+        foreach ($f in $NpcAnimEndFolders) { $npcArgs += @('--anim-end-dir', $f) }
         foreach ($f in $NpcSensesFolders) { $npcArgs += @('--senses-dir', $f) }
         $savedHeap = $env:DOTNET_GCHeapHardLimit
         if (-not $env:DOTNET_GCHeapHardLimit) { $env:DOTNET_GCHeapHardLimit = '0x100000000' }     # reading every creature Blueprint peaks at 7.7 GB without this limit

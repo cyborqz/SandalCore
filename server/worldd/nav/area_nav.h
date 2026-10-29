@@ -25,7 +25,8 @@
 //      to its own player takes that chunk's place, so every player keeps at least its own chunk and the outer rings of every window give way together (the mesh holds about 70
 //      chunks: about 70 players are covered; for more, more meshes);
 //    * `set_interest` does nothing when the players' chunks are the same as at the last call and nothing is waiting for room (review A I2), so it is cheap to call at every tick;
-//    * a worker thread reads a chunk's tiles off the disk (and checks them: hash, Detour's header); the net thread adds them with `pump` (Detour's addTile / removeTile), a
+//    * a worker thread reads a chunk's tiles off the disk (and checks them: hash, Detour's header; it marks the detail edges on polygon borders that the builder's float test lost, so
+//      that no polygon is left without one: nav/tile_repair.h); the net thread adds them with `pump` (Detour's addTile / removeTile), a
 //      few tiles at a time under a time budget (a chunk takes about a millisecond);
 //    * Detour joins a new tile to its loaded neighbours: a path and a ray cross a chunk border that both sides have loaded, and an unloaded border is a wall;
 //    * a poly reference held by the caller across a pump may be stale (a removed tile's salt changes): AreaNav's queries never keep one between calls, and `Mover` keeps world
@@ -36,6 +37,7 @@
 #pragma once
 
 #include "nav/nav_file.h"
+#include "nav/tile_repair.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -86,6 +88,7 @@ struct WindowStats {
     double max_tile_add_ms = 0, max_tile_remove_ms = 0;   // the longest single addTile / removeTile (a pump cannot be shorter than one tile)
     double max_chunk_read_ms = 0;     // the worker's: read and check one chunk
     double total_add_ms = 0;
+    TileRepair tile_repair;           // what the tiles that came in needed (nav/tile_repair.h): detail edges marked, polygons that had none, polygons hidden from queries
 };
 
 class AreaNav {
@@ -200,6 +203,7 @@ private:
         std::vector<LoadedTile> tiles;
         std::string error;
         double read_ms = 0;
+        TileRepair repair;   // what the worker marked in these tiles before handing them over
     };
     enum class State : uint8_t { Absent, Requested, Arrived, Resident, Unloading };
     struct Slot {

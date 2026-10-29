@@ -6,6 +6,7 @@ using System.Text;
 using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Animation;
+using CUE4Parse.UE4.Assets.Exports.Animation.ACL;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Readers;
@@ -41,13 +42,16 @@ namespace NpcAbilities;
 /// tree's own defaults (Params.cs).
 ///
 /// The montages are the animation assets of the Blueprint's folder.  `npc_montages.tsv` has one line per montage:
-///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable
+///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end
+/// `anim_end` is the time of the montage's "animation end" notify in seconds at a play rate of 1 (the animation is over there and the rest of the montage is its blend out; an ability's task
+/// is done at that notify, and the cooldowns it starts run from there), empty for a montage of a folder that `--anim-end-dir` does not list.
 /// `montage` is the asset's object path as an ability record names it ("/Game/.../Name.Name"), `length` the montage's length in seconds at a play rate of 1
 /// (the time a montage runs is length / rate_scale / the play rate), `sections` "name:start:next" separated by ';' and `hits` "time:key" separated by
 /// ';' for every hit notify of the montage, in time order.  `key` picks the hit record of the ability the notify fires (the ability's hits are keyed the
 /// same way); a montage with one hit and no key uses key 0.  `root_motion` is how far the montage carries the creature (the animation's root bone
 /// moves, and the creature moves with it): "time:x:y:z" separated by ';', centimetres from where the creature stood when the montage began, x ahead and y
-/// to the right of where it faces, in montage seconds at a play rate of 1; empty for a montage that stays in place.  `root_unreadable` is 1 for a montage whose
+/// to the right of where it faces, in montage seconds at a play rate of 1 (the root bone of the animations the first slot track plays, segment after segment); empty for a montage that
+/// stays in place.  `root_unreadable` is 1 for a montage whose
 /// animation moves the creature in a form this tool cannot read: its `root_motion` is empty then, and it does not mean "stays in place".  `guid` and `package_guid` are the ids
 /// the network layer gives the montage object and its package: a static object's id is the 64-bit CityHash of "Class ObjectPath" with the lowest bit set.
 ///
@@ -58,7 +62,7 @@ public static partial class Reader
     public const string AbilitiesFile = "npc_abilities.tsv";
     public const string MontagesFile = "npc_montages.tsv";
     public const string AbilitiesHeader = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate";
-    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable";
+    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end";
 
     public sealed class AbilityRow
     {
@@ -75,6 +79,7 @@ public static partial class Reader
         public string Montage = "", Package = "";
         public ulong Guid, PackageGuid;
         public float Length, RateScale = 1f;
+        public float AnimEnd = -1f;   // the time of the montage's "animation end" notify (seconds at a play rate of 1), -1 when the montage has none or its folder does not export it
         public bool RootUnreadable;
         public List<(string Name, float Start, string Next)> Sections = new();
         public List<(float Time, int Key)> Hits = new();
@@ -235,6 +240,8 @@ public static partial class Reader
     {
         why = "";
         if (!(seq.TryGetValue(out bool enabled, "bEnableRootMotion") && enabled)) return null;
+        if (seq.CompressedDataStructure is FACLCompressedAnimData acl) return AclRootTranslation(seq, acl, out why);
+        if (seq.CompressedDataStructure is FUECompressedAnimData lerp && lerp.KeyEncodingFormat == AnimationKeyFormat.AKF_VariableKeyLerp) return KeyLerpRootTranslation(seq, lerp, out why);
         if (seq.CompressedDataStructure is not FUECompressedAnimData cd || cd.KeyEncodingFormat != AnimationKeyFormat.AKF_PerTrackCompression) { why = "the animation is stored in a form this tool does not read"; return null; }
         int track = -1;
         var map = seq.CompressedTrackToSkeletonMapTable;
@@ -296,6 +303,47 @@ public static partial class Reader
         return list;
     }
 
+    /// <summary>The root bone's translation of an animation stored with the Animation Compression Library (Acl.cs): one key for every sample of the stream, at the stream's own rate.</summary>
+    static List<(float Time, FVector Pos)>? AclRootTranslation(UAnimSequence seq, FACLCompressedAnimData acl, out string why)
+    {
+        why = "";
+        int track = -1;
+        var map = seq.CompressedTrackToSkeletonMapTable;
+        for (int i = 0; i < map.Length; i++) if (map[i].BoneTreeIndex == 0) { track = i; break; }
+        if (track < 0) { why = "no root bone track"; return null; }
+        var samples = Acl.ReadTranslation(acl.CompressedByteStream, track, out float rate, out why);
+        if (samples == null) return null;   // (the root keeps its pose when `why` is empty)
+        var list = new List<(float, FVector)>(samples.Length);
+        for (int k = 0; k < samples.Length; k++) list.Add((k / rate, new FVector(samples[k].X, samples[k].Y, samples[k].Z)));
+        return list;
+    }
+
+    /// <summary>
+    /// The root bone's translation keys of an animation stored as variable key lerp (an older form of the engine): four numbers a track say where its translation keys are, how many
+    /// there are, and the same for its rotation keys; the keys are raw floats here, followed by the frame each belongs to (a byte, or two when the animation has 256 frames or more).
+    /// Other key formats are not read.
+    /// </summary>
+    static List<(float Time, FVector Pos)>? KeyLerpRootTranslation(UAnimSequence seq, FUECompressedAnimData cd, out string why)
+    {
+        why = "";
+        int track = -1;
+        var map = seq.CompressedTrackToSkeletonMapTable;
+        for (int i = 0; i < map.Length; i++) if (map[i].BoneTreeIndex == 0) { track = i; break; }
+        if (track < 0 || track * 4 + 3 >= cd.CompressedTrackOffsets.Length) { why = "no root bone track"; return null; }
+        int offset = cd.CompressedTrackOffsets[track * 4], count = cd.CompressedTrackOffsets[track * 4 + 1];
+        if (offset < 0 || count <= 1) return null;   // the root keeps its pose, or has the one key of a constant: no motion
+        if (cd.TranslationCompressionFormat != AnimationCompressionFormat.ACF_None && cd.TranslationCompressionFormat != AnimationCompressionFormat.ACF_Float96NoW) { why = "translation keys in format " + cd.TranslationCompressionFormat; return null; }
+        var ar = new FByteArchive("animation", cd.CompressedByteStream);
+        ar.Position = offset;
+        var keys = new FVector[count];
+        for (int k = 0; k < count; k++) keys[k] = new FVector(ar.Read<float>(), ar.Read<float>(), ar.Read<float>());
+        ar.Position = (ar.Position + 3) & ~3L;
+        double perFrame = seq.NumFrames > 1 ? seq.SequenceLength / (double)(seq.NumFrames - 1) : 0;
+        var list = new List<(float, FVector)>(count);
+        for (int k = 0; k < count; k++) list.Add(((float)((seq.NumFrames < 256 ? ar.Read<byte>() : ar.Read<ushort>()) * perFrame), keys[k]));
+        return list;
+    }
+
     static FVector Interpolate(List<(float Time, FVector Pos)> keys, float time)
     {
         if (time <= keys[0].Time) return keys[0].Pos;
@@ -310,41 +358,48 @@ public static partial class Reader
     }
 
     /// <summary>
-    /// How far a montage moves the creature: the root bone's translation of the animation its first segment plays, from the segment's start, in montage time.  `unreadable` is set
-    /// when the montage moves the creature in a way this reads wrong or not at all (an animation stored in a form it does not know, a looping or composite segment, a second segment
-    /// that moves the root too): the result is empty then and does not mean that the montage stays in place.
+    /// How far a montage moves the creature: the root bone's translation of the animations its first slot track plays, segment after segment, from where the creature stood
+    /// when the montage began, in montage time.  A segment travels the animation's root translation between its first and its last animation time (the other way round when its
+    /// play rate is negative), and the next segment goes on from where the creature then stands, as the engine adds the root motion of the segments up; a segment whose
+    /// animation keeps the root in place adds nothing.  `unreadable` is set when the montage moves the creature in a way this reads wrong or not at all (an animation stored in a
+    /// form it does not know, a looping or composite segment, a further slot track that moves the root): the result is empty then and does not mean that the montage stays in place.
     /// </summary>
     static List<(float Time, float X, float Y, float Z)> ReadRootMotion(UObject montage, string name, out bool unreadable)
     {
         unreadable = false;
         var result = new List<(float, float, float, float)>();
-        bool first = true;
+        var travelled = FVector.ZeroVector;   // how far the creature has gone from where it began, when the next segment begins
+        bool moved = false;                   // an earlier segment has moved it
+        bool firstSlot = true;
         foreach (var slot in StructsOf(montage, "SlotAnimTracks"))
         {
             if (!slot.TryGetValue(out FStructFallback track, "AnimTrack") || track == null) continue;
+            bool carries = firstSlot;   // the engine takes a montage's root motion from its first slot track only
+            firstSlot = false;
             foreach (var seg in StructsIn(track, "AnimSegments"))
             {
-                if (!seg.TryGetValue(out FPackageIndex reference, "AnimReference") || reference == null || reference.IsNull) { first = false; continue; }
+                if (!seg.TryGetValue(out FPackageIndex reference, "AnimReference") || reference == null || reference.IsNull) continue;
                 var resolved = Lv.Resolve(reference);
-                if (!first)
+                if (!carries)
                 {
-                    // a further segment: it must not move the root, or its travel is missing
+                    // a further slot track: nothing of it is read, but one that moves the root would leave a travel missing
                     if (resolved is UAnimSequence further && further.TryGetValue(out bool furtherMoves, "bEnableRootMotion") && furtherMoves) unreadable = true;
                     else if (resolved != null && resolved is not UAnimSequence) unreadable = true;
                     continue;
                 }
-                first = false;
                 float start = seg.TryGetValue(out float s, "AnimStartTime") ? s : 0f, end = seg.TryGetValue(out float en, "AnimEndTime") ? en : 0f;
-                float rate = seg.TryGetValue(out float r, "AnimPlayRate") && r > 0f ? r : 1f;
+                float signedRate = seg.TryGetValue(out float r, "AnimPlayRate") && r != 0f ? r : 1f;
+                float rate = Math.Abs(signedRate);
+                float begins = seg.TryGetValue(out float sp, "StartPos") ? sp : 0f;   // where the segment begins in the montage
                 int loops = IntOf(seg, "LoopingCount", 1);
                 if (resolved is not UAnimSequence sequence)
                 {
-                    unreadable = resolved != null;   // (an animation of another kind)
+                    if (resolved != null) unreadable = true;   // (an animation of another kind)
                     continue;
                 }
                 if (loops != 1)
                 {
-                    unreadable = sequence.TryGetValue(out bool loopMoves, "bEnableRootMotion") && loopMoves;
+                    if (sequence.TryGetValue(out bool loopMoves, "bEnableRootMotion") && loopMoves) unreadable = true;
                     continue;
                 }
                 var keys = RootTranslation(sequence, out string why);
@@ -357,18 +412,36 @@ public static partial class Reader
                     }
                     continue;
                 }
-                var origin = Interpolate(keys, start);
-                var samples = new List<(float, float, float, float)>();
-                void Add(float seqTime)
+                if (!(end > start)) continue;
+                // the animation times the segment plays, in the order it plays them: the keys between its first and its last time
+                var times = new List<float> { start };
+                foreach (var k in keys) if (k.Time > start && k.Time < end) times.Add(k.Time);
+                times.Add(end);
+                if (signedRate < 0f) times.Reverse();
+                float from = times[0];
+                var origin = Interpolate(keys, from);
+                var samples = new List<(float Time, FVector Pos)>();
+                foreach (float at in times)
                 {
-                    var d = Interpolate(keys, seqTime) - origin;
-                    samples.Add(((seqTime - start) / rate, d.X, d.Y, d.Z));
+                    var d = Interpolate(keys, at) - origin;
+                    float elapsed = signedRate < 0f ? (from - at) / rate : (at - from) / rate;
+                    samples.Add((begins + elapsed, d));
                 }
-                Add(start);
-                foreach (var k in keys) if (k.Time > start && k.Time < end) Add(k.Time);
-                Add(end);
-                float most = samples.Max(x => Math.Max(Math.Abs(x.Item2), Math.Max(Math.Abs(x.Item3), Math.Abs(x.Item4))));
-                if (most >= 1f) result = samples;
+                float most = samples.Max(x => Math.Max(Math.Abs(x.Pos.X), Math.Max(Math.Abs(x.Pos.Y), Math.Abs(x.Pos.Z))));
+                if (most < 1f) continue;
+                foreach (var (time, d) in samples)
+                {
+                    var p = moved ? travelled + d : d;
+                    if (result.Count > 0)
+                    {
+                        var last = result[^1];
+                        if (time < last.Item1) { unreadable = true; break; }   // (segments that overlap in the montage)
+                        if (time == last.Item1 && p.X == last.Item2 && p.Y == last.Item3 && p.Z == last.Item4) continue;   // (where the segment before ended)
+                    }
+                    result.Add((time, p.X, p.Y, p.Z));
+                }
+                travelled = moved ? travelled + samples[^1].Pos : samples[^1].Pos;
+                moved = true;
             }
         }
         if (unreadable) return new List<(float, float, float, float)>();
@@ -534,7 +607,7 @@ public static partial class Reader
         return rows;
     }
 
-    static void ReadMontage(UObject e, string containerPath, List<MontageRow> rows)
+    static void ReadMontage(UObject e, string containerPath, List<MontageRow> rows, bool exportAnimEnd)
     {
         var pkgPath = PackagePathOf(containerPath);
         var r = new MontageRow { Package = pkgPath };
@@ -554,9 +627,16 @@ public static partial class Reader
         {
             if (!nt.TryGetValue(out FPackageIndex idx, "Notify") || idx == null || idx.IsNull) continue;
             var obj = Lv.Resolve(idx);
-            if (obj == null || obj.ExportType != "AoCAnimNotify_AbilityHit") continue;
+            if (obj == null) continue;
             float time = nt.TryGetValue(out float lv, "LinkValue") ? lv : 0f;
             if (nt.TryGetValue(out float off, "TriggerTimeOffset")) time += off;
+            if (obj.ExportType == "AoCAnimNotify_AnimEnd")
+            {
+                // the montage's animation is over here (the rest is the blend out): the ability's task is done at this notify
+                if (exportAnimEnd && (r.AnimEnd < 0f || time < r.AnimEnd)) r.AnimEnd = time;
+                continue;
+            }
+            if (obj.ExportType != "AoCAnimNotify_AbilityHit") continue;
             int key = obj.TryGetValue(out int hk, "HitKey") ? hk : 0;
             r.Hits.Add((time, key));
         }
@@ -567,12 +647,13 @@ public static partial class Reader
     }
 
     /// <summary>Reads every package under the container folders: the creature Blueprints (their state trees' ability tasks) and the montages.</summary>
-    public static void Collect(Game g, IEnumerable<string> folders, out List<AbilityRow> abilities, out List<MontageRow> montages, out int packages, out int failed)
+    public static void Collect(Game g, IEnumerable<string> folders, IEnumerable<string> animEndFolders, out List<AbilityRow> abilities, out List<MontageRow> montages, out int packages, out int failed)
     {
         abilities = new List<AbilityRow>();
         montages = new List<MontageRow>();
         packages = 0; failed = 0;
         var dirs = folders.Select(f => f.Replace('\\', '/').TrimEnd('/') + "/").ToList();
+        var endDirs = animEndFolders.Select(f => f.Replace('\\', '/').TrimEnd('/') + "/").ToList();
         var paths = g.Provider.Files.Keys.Where(k => k.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) && dirs.Any(d => k.StartsWith(d, StringComparison.OrdinalIgnoreCase)))
                                           .OrderBy(k => k, StringComparer.Ordinal).ToList();
         var treeCache = new Dictionary<string, List<AbilityRow>>();
@@ -590,7 +671,8 @@ public static partial class Reader
             try { pkg = g.Provider.LoadPackage(path); } catch { failed++; continue; }
             if (pkg == null) { failed++; continue; }
             var exports = pkg.GetExports().ToList();
-            foreach (var e in exports.Where(x => x.ExportType == "AnimMontage")) ReadMontage(e, path, montages);
+            bool endHere = endDirs.Any(d => path.StartsWith(d, StringComparison.OrdinalIgnoreCase));
+            foreach (var e in exports.Where(x => x.ExportType == "AnimMontage")) ReadMontage(e, path, montages, endHere);
             var cdo = exports.FirstOrDefault(x => x.Name.StartsWith("Default__", StringComparison.Ordinal) && x.Name.EndsWith("_C", StringComparison.Ordinal));
             if (cdo == null) continue;
             var chain = CdoChain(cdo);
@@ -642,7 +724,8 @@ public static partial class Reader
               .Append(string.Join(";", r.Sections.Select(s => s.Name + ":" + F(s.Start) + ":" + s.Next))).Append('\t')
               .Append(string.Join(";", r.Hits.Select(h => F(h.Time) + ":" + h.Key.ToString(CultureInfo.InvariantCulture)))).Append('\t')
               .Append(string.Join(";", r.RootMotion.Select(m => F(m.Time) + ":" + F(m.X) + ":" + F(m.Y) + ":" + F(m.Z)))).Append('\t')
-              .Append(r.RootUnreadable ? "1" : "0").Append('\n');
+              .Append(r.RootUnreadable ? "1" : "0").Append('\t')
+              .Append(r.AnimEnd >= 0f ? F(r.AnimEnd) : "").Append('\n');
         }
         return sb.ToString();
     }

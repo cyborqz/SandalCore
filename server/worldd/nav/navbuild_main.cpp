@@ -215,6 +215,8 @@ int main(int argc, char** argv) {
     std::printf("navmesh: %d tiles (%d empty), %lld polygons, %lld triangles in, tiles %lld bytes, file %lld bytes, %.1f s\n", st.tiles, st.empty_tiles, st.polys, st.input_triangles, st.bytes,
                 file_bytes, st.seconds);
     std::printf("navmesh: the largest tile has %d polygons (the limit is %d)%s%d tiles needed a coarser simplification to fit\n", st.max_tile_polys, f.settings.max_polys, ", ", st.retried_tiles);
+    std::printf("navmesh: %llu detail edges on polygon borders marked after the build (Recast's float test misses them far from the origin), %llu polygons had none at all, %llu polygons hidden from queries\n",
+                static_cast<unsigned long long>(st.repair.edges_flagged), static_cast<unsigned long long>(st.repair.polys_repaired), static_cast<unsigned long long>(st.repair.polys_hidden));
     if (f.chunked()) {
         NavFile idx;
         if (read_nav_index(out, &idx, &err)) {

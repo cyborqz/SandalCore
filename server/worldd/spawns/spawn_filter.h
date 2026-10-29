@@ -76,7 +76,7 @@ struct SpawnContext {
     /// The appearance-dependent Blueprints (their class names) that open with a valid look all the same.
     std::set<std::string> shown_humanoids{"Guard_Soldier"};
     /// People's looks (spawns/npc_looks.h): true when a person of this asset is dressed from the data, so that its body is merged and it shows.  Unset: only `shown_humanoids` and `humanoids`
-    /// let a humanoid through.  A humanoid hostile to players is never dressed (its fights are not read yet), so it stays out.
+    /// let a humanoid through.  A humanoid hostile to players is dressed only where its fights are built (fighting_humanoid in spawns/generic_npc.h); the others stay out.
     std::function<bool(const content::NpcAssetRow&)> looks_ok;
 };
 

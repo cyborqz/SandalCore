@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 28 October 2026
+**Last updated:** 29 October 2026
 
 ---
 
@@ -36,6 +36,8 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Quest map markers: a pin or an area on the map for every active objective that has a place (the people a talk objective names, the places of a "go to" objective, what a collect, use or hand-in objective tracks, the camps of creatures to kill), and the quest-available mark on the NPCs that have a quest to take, over the NPC and on the map.
 - Storage: the Storage Clerk's item and materials storage, kept across logins.
 - NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs.
+- Bandit raiders and captains: dressed, named and armed in the Riverlands' camps, and fighting with their own attacks (strikes, cleaves, heavy slashes and whirlwinds).
+- Goblins and other creatures that were built from their Blueprint alone play their own attack animations, with the lunges and rolls that carry them (the Languid Goblins, the Flayers, the Warlord, the Diggers and the Skinwalkers among them).
 - Embersprings: discovering them, attuning to one, and choosing where to respawn.
 
 ### In progress
@@ -50,8 +52,8 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.
-- NPCs: face variety, names for rare creatures, and hostile humanoids such as bandits and cultists.
-- Creatures: the remaining creature families' own fights and abilities, pack aggro, damage matched to retail, and flying creatures.
+- NPCs: face variety, names for rare creatures, and the other hostile humanoids (the bandit archers, mages and healers, and the cultists).
+- Creatures: the remaining creature families' own fights and abilities (the Goblin Flayers' spinning attack and the Goblin Assassins' and Flamewatchers' abilities among them), smooth movement and turning for goblins and bandits, pack aggro, damage matched to retail, and flying creatures.
 - The walking map: walls, fences, water and holes.
 - The world: spawns that follow node levels, a world clock with day and night spawns, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.

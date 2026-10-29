@@ -51,6 +51,15 @@
 //  Citizen Commodities vendor) opens were recorded on crate buyers: every other NPC made from either Blueprint (the market's and the town hall's vendors, the plain citizens) would offer to buy
 //  crates too.  `without_crate_sale` gives such an NPC the same open with the interactable of a plain conversation, unless the data names the very component the open was recorded from.
 //
+//  Humanoids that fight.  A hostile humanoid whose fights are built (fighting_humanoid: the bandit raiders and captains) is made like any person, but with the ability component of a recorded
+//  guard: a villager's ability component carries no list of records, so the client would have no record of the abilities the creature is told to play, and a guard's does.  The guard's list is
+//  replaced by the abilities of the Blueprint's own state tree (GenericConfig::abilities_of), which is what the game's server lists; nothing else of the guard's open is taken (its emotes and
+//  targets are the guard's own).
+//
+//  Creatures that fight.  A creature whose Blueprint the creature tables list (the abilities of its state tree: GenericConfig::abilities_of) has those abilities as the records of the
+//  plain donor's ability component, in place of the donor's own: the client plays a montage of an ability only when it holds the record, so a goblin made from the Wolf's open with
+//  the Wolf's records would never animate its attacks.
+//
 //  Huntable creatures (Gathering stage 3, "Hunting"): an asset whose PlayerInteractionDef is one of the Hunting_<kind> defs (GenericConfig::hunting_defs) gets an eighth block, a
 //  UInteractableComponent, as the living Hunting_Raven and Hunting_Spider of the captures have (the retail capture packet 1561, 758 packet 4538, and a Tidesnapper's in 1458): the Raven's own block
 //  with the asset's two ids put in (ComponentDefId = the asset's InteractComponent, InteractionInputData[0].PlayerInteractDefinition = its InteractionDef).  The three captured blocks differ
@@ -100,6 +109,9 @@ struct GenericConfig {
     std::map<int64_t, std::string> hunting_names;
     /// false (worldd --no-gathering): the world does not look the defs up and no creature is huntable.
     bool                     hunting = true;
+    /// The ability records of the Blueprint with this archetype path: the abilities of its state tree, which its open lists as the ones its AbilityComponent loads (the client plays only the
+    /// abilities it has the record of).  Empty (or null): the Blueprint has none of its own to list, and a hostile humanoid is then not made from a guard's open (see fighting_humanoid).
+    std::function<std::vector<int64_t>(const std::string& archetype_path)> abilities_of;
 };
 
 enum class Verdict : uint8_t {
@@ -116,6 +128,10 @@ const char* verdict_name(Verdict v);
 
 /// The leaf of an archetype path or class name: "Wolf" of ".../Wolf.Default__Wolf_C", of "Wolf_C" and of "Wolf" alike.
 std::string blueprint_leaf(const std::string& archetype_or_class);
+
+/// Whether the Blueprint is a hostile humanoid whose fights are built: the bandit raiders and captains.  They are dressed (spawns/npc_looks.h) and opened with the ability component of a recorded
+/// guard, whose list of records holds the abilities of their own state tree; every other hostile humanoid stays out of the world until its fights are built.
+bool fighting_humanoid(const std::string& archetype_or_class);
 
 class GenericNpcs {
 public:
@@ -167,6 +183,7 @@ private:
     const OpenTemplate*      talker_ = nullptr;       // ... and one with the interactable subobject as well
     const ParsedBlock*       dialogue_ = nullptr;     // the UInteractableComponent of a plain conversation: its only input opens the dialogue (what a person who talks is given)
     std::string              dialogue_path_;          // ... and the archetype it was recorded from
+    const OpenTemplate*      fighter_ = nullptr;      // a recorded guard: a person whose ability component carries records (the donor of that component for a humanoid that fights)
     const ParsedBlock*       hunt_block_ = nullptr;   // the living Hunting_Raven's UInteractableComponent
     const OpenTemplate*      living_ = nullptr;       // ... and its whole open (its CombatInfo and AbilityComponent are every huntable's)
     mutable size_t           hunting_made_ = 0;

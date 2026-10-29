@@ -242,16 +242,29 @@ bool spawn_point(const content::PopulationData& data, const TemplateSource& temp
         if (pick.why == Verdict::Excluded) ++stats.lost_excluded[leaf_of(pick.asset->archetype_path)];
         return false;
     }
+    // A hostile humanoid whose fights are not built yet is not in the world, but a point that could be one keeps that share of its draw and stays empty when the draw comes up with it: a camp
+    // that mixes kinds that fight with kinds that do not is thinner than the game's, instead of full of the kinds that fight.
+    const auto waits = [&](const Candidate& c) { return c.filtered == Why::Appearance && templates.looks && templates.looks->waits_for_its_fights(*c.asset); };
     double total = 0;
-    for (const Candidate& c : shown) total += c.weight;
+    for (const Candidate& c : all) {
+        if (waits(c) || (c.filtered == Why::Spawns && c.open)) total += c.weight;
+    }
     double r = unit(mix(h ^ 0xA55E7ull)) * total;
     const Candidate* chosen = &shown.back();
-    for (const Candidate& c : shown) {
+    const Candidate* held = nullptr;
+    for (const Candidate& c : all) {
+        const bool holds = waits(c);
+        if (!holds && !(c.filtered == Why::Spawns && c.open)) continue;
         if (r < c.weight) {
-            chosen = &c;
+            (holds ? held : chosen) = &c;
             break;
         }
         r -= c.weight;
+    }
+    if (held) {
+        ++stats.filtered[Why::Appearance];
+        ++stats.filtered_by_blueprint[Why::Appearance][leaf_of(held->asset->archetype_path)];
+        return false;
     }
     DataSpawn s;
     s.x = pt.x;

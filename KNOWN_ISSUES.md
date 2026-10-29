@@ -22,7 +22,13 @@ This document lists the known issues of the current SandalCore main in one place
 | **Combat / Dice** | The hit, block and critical rolls repeat the same sequence after every server start. | None. | Open. |
 | **Creatures / Packs** | Creatures next to one that noticed you do not join the fight until they notice you themselves. | None. | Open: pack aggro. |
 | **Creatures / Damage** | Some creatures hit harder or softer than in retail (deer and rams about three times as hard, bears almost twice). | None. | Open: their stats are compared with retail first. |
-| **Creatures / Fights** | About half of the hostile creatures (undead, Minotaurs, constructs, spiders and others) use a generic attack list instead of their own. Bandits and cultists do not spawn yet. | None. | Open. |
+| **Creatures / Fights** | About half of the hostile creatures (undead, Minotaurs, constructs, spiders and others) use a generic attack list instead of their own, and the goblin shamans' bombs have no animation or flying projectile (the flame shamans' fire bombs are not thrown) and the goblins do not rally yet. | None. | Open. |
+| **Creatures / Movement** | Goblins and bandits stutter while they move (while their animations play) and turn slowly. | None. | Open. |
+| **Creatures / Standing still** | Some goblins and bandits stand still when they notice a player, as if their path were blocked. | None. | Open. |
+| **Goblins / Flayers** | Goblin Flayers repeat Cleave and Overhead Slash far too often, and their spinning attack is missing. | None. | Open. |
+| **Goblins / Abilities** | Goblin Assassins and Flamewatchers do not have their own abilities yet. | None. | Open. |
+| **Bandits / Camps** | Only the bandit raiders and captains are in the world. The archers, mages and healers of their camps, and the cultists, are not, so the camps are thinner than in the game (the starting-area camp has 54 of its 95 bandits). | None. | Planned: their fights. |
+| **Bandits / Fights** | A raider does not leap onto a player from a distance or walk while it whirls. A captain does not throw its tomahawk, boost its friends, taunt or raise its shield. The bandits of a camp do not join a fight together. | None. | Open. |
 | **World / Day and night** | Day and night creatures follow the clock of the server's PC at start, not the sky. | None. | Open: one world clock. |
 | **World / Walls and water** | Creatures can walk through fences and walls and along lake beds, and lava does no damage. | None. | Open. |
 | **World / Biomes** | `GetNodeBiome()` returns undefined on certain boundary cells at the edge of the Riverlands, preventing regional reagent drops on edge spawns. | Stay within central Riverlands zone coordinates for node harvesting. | Adding boundary cell interpolation in region mapping. |

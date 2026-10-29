@@ -113,6 +113,8 @@ add_library(worldd_nav STATIC
     nav/nav_build.h
     nav/nav_file.cpp
     nav/nav_file.h
+    nav/tile_repair.cpp
+    nav/tile_repair.h
     nav/town_geometry.cpp
     nav/town_geometry.h
     world/town_platform.cpp

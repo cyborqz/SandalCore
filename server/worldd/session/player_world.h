@@ -614,6 +614,7 @@ private:
     static constexpr double kRegionLogSeconds = 30.0;
     uint64_t                             region_exits_ = 0;
     uint64_t                             window_failures_logged_ = 0;
+    nav::TileRepair                      window_repairs_logged_;   // the tile repairs already named in the log (nav/tile_repair.h)
 };
 
 }}  // namespace aoc::worldd

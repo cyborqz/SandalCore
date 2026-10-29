@@ -153,6 +153,7 @@ std::unique_ptr<AreaNav> AreaNav::from_file(NavFile file, std::string* err) {
         auto* data = static_cast<unsigned char*>(dtAlloc(t.data.size(), DT_ALLOC_PERM));
         if (!data) { if (err) *err = "out of memory"; return nullptr; }
         std::memcpy(data, t.data.data(), t.data.size());
+        n->stats_.tile_repair += repair_detail_boundaries(data, t.data.size());
         dtTileRef ref = 0;
         if (dtStatusFailed(n->mesh_->addTile(data, static_cast<int>(t.data.size()), DT_TILE_FREE_DATA, 0, &ref))) {
             dtFree(data);
@@ -578,6 +579,7 @@ std::vector<ChunkKey> AreaNav::pump(double budget_ms) {
             replan_ = true;
             continue;
         }
+        stats_.tile_repair += lc.repair;
         if (!s.keep) {
             for (auto& t : lc.tiles) if (t.data) dtFree(t.data);
             s.state = State::Absent;
@@ -721,6 +723,7 @@ void AreaNav::worker_main() {
                 auto* data = static_cast<unsigned char*>(dtAlloc(b.data.size(), DT_ALLOC_PERM));
                 if (!data) { lc.error = "out of memory"; break; }
                 std::memcpy(data, b.data.data(), b.data.size());
+                lc.repair += repair_detail_boundaries(data, b.data.size());
                 LoadedTile t;
                 t.tx = b.tx; t.ty = b.ty; t.data = data; t.size = static_cast<int>(b.data.size());
                 lc.tiles.push_back(t);

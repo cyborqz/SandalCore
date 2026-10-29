@@ -970,7 +970,8 @@ void NpcWorld::advance_root_motion(Npc& n, double t) {
     n.mover.shift(to.x, to.y, to.z);
     const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
     registry_.move(n.id, to.x, to.y, z, yaw);
-    const nav::Vec3 vel = last ? nav::Vec3{} : nav::Vec3{(to.x - g.x) / dt, (to.y - g.y) / dt, (to.z - g.z) / dt};
+    // (the velocity of a lunge has no vertical part: the retail server's is 0.0 in every recorded update of every lunge, on a slope too, where its place moves with the ground)
+    const nav::Vec3 vel = last ? nav::Vec3{} : nav::Vec3{(to.x - g.x) / dt, (to.y - g.y) / dt, 0.0};
     write_replicated(*a, to.x, to.y, z, yaw, vel, false, t);
     write_root_motion(*a, !last, p.montage, at, to.x, to.y, z, yaw, vel, obstructed && !last);
     n.reported_moving = false;

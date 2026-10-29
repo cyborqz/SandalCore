@@ -84,6 +84,16 @@ inline const nav::Geometry& geometry() {
     return g;
 }
 
+/// The test world moved `dx` cm along x while the navmesh's centre stays at (0, 0): every nav-local x is about `dx`, as in the far corners of the Riverlands (a float's step is 0.03 cm at
+/// 300,000), where Recast's test for a detail edge on a polygon's border loses edges in the real map (this world's polygons are axis-aligned and exact in any unit: it loses none).
+inline nav::Geometry shifted_geometry(double dx) {
+    nav::Geometry g = test_geometry();
+    g.radius += dx;   // the navmesh covers the tiles within radius + margin of the centre
+    for (auto& t : g.terrain) t.x0 += dx;
+    for (auto& p : g.placements) p.t[0] += dx;
+    return g;
+}
+
 inline nav::NavFile build_file(int threads = 2) {
     nav::BuildOptions opt;
     opt.threads = threads;

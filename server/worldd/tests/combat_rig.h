@@ -89,8 +89,9 @@ private:
 /// An NPC of the Blueprint made from a retail open (the Wolf's when no capture opened the Blueprint: the stat arrays and CombatInfo are the same shape), put
 /// in `registry` at (x, y, origin_z) and given to `npcs` (standing).  0 when it cannot be made.
 inline uint64_t spawn_npc(world::ActorRegistry& registry, npc::NpcWorld* npcs, const spawns::CapturedData& captured, uint64_t& next_id, const std::string& archetype_path, double x,
-                          double y, double origin_z, int level, double aggro_cm = 0, double half_height = 88.0) {
-    const spawns::OpenTemplate* t = captured.template_for(archetype_path);
+                          double y, double origin_z, int level, double aggro_cm = 0, double half_height = 88.0, const spawns::OpenTemplate* made = nullptr) {
+    // `made`: the open the world itself makes for the Blueprint (spawns::GenericNpcs::template_for), when the test is about that one
+    const spawns::OpenTemplate* t = made ? made : captured.template_for(archetype_path);
     if (!t) {
         for (const spawns::OpenTemplate& o : captured.opens()) {
             if (o.category == "npc" && o.archetype_path.find("/Wolf.Default__Wolf_C") != std::string::npos) t = &o;
@@ -149,9 +150,9 @@ struct World {
 
     /// An NPC of the Blueprint (archetype path) standing at (x, y) of the plain, at `level`; its aggro radius and home as the data would say.  0 when it
     /// cannot be made.
-    uint64_t spawn(const std::string& archetype_path, double x, double y, int level, double aggro_cm = 0, double half_height = 88.0) {
+    uint64_t spawn(const std::string& archetype_path, double x, double y, int level, double aggro_cm = 0, double half_height = 88.0, const spawns::OpenTemplate* made = nullptr) {
         if (!captured) return 0;
-        return spawn_npc(registry, npcs.get(), *captured, next_id, archetype_path, x, y, 1000.0 + half_height, level, aggro_cm, half_height);
+        return spawn_npc(registry, npcs.get(), *captured, next_id, archetype_path, x, y, 1000.0 + half_height, level, aggro_cm, half_height, made);
     }
 };
 

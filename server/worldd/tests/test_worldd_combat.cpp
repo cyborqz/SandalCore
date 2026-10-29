@@ -302,6 +302,9 @@ int main() {
     test_chase_of_a_player_who_walks_away(f);
     test_swing_faces_its_target(f);
     test_turn_to_a_player_behind(f);
+    test_bandit_raider_fights_a_standing_player(f);
+    test_goblin_flayer_animates_its_attacks(f);
+    test_languid_goblin_animates_its_swing(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

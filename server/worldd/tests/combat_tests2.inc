@@ -1223,6 +1223,8 @@ struct LungeWire {
     double  position = -1;     // RepRootMotion.Position
     bool    has_mv_yaw = false, has_rrm_yaw = false;
     double  mv_yaw = 0, rrm_yaw = 0;   // the facing ReplicatedMovement (8 or 16 bits) and RepRootMotion.Rotation (16 bits) say, in degrees, as a client reads them
+    bool    has_rrm_vz = false, has_rrm_z = false;
+    double  rrm_vz = 0, rrm_z = 0;     // RepRootMotion.LinearVelocity's vertical part (cm/s) and RepRootMotion.Location's height (cm)
 };
 
 void read_lunge_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow& shadow, double now, std::vector<LungeWire>& out) {
@@ -1256,6 +1258,18 @@ void read_lunge_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow&
                 w.rrm_yaw = r->yaw * 360.0 / 65536.0;
             }
         }
+        if (const auto* v = st->state.get(sc, "RepRootMotion.LinearVelocity")) {
+            if (const auto* q = v->get_if<aoc::protocol::repl::QuantVec>()) {
+                w.has_rrm_vz = true;
+                w.rrm_vz = aoc::protocol::repl::dequantize_vector(*q, 10).z;
+            }
+        }
+        if (const auto* v = st->state.get(sc, "RepRootMotion.Location")) {
+            if (const auto* q = v->get_if<aoc::protocol::repl::QuantVec>()) {
+                w.has_rrm_z = true;
+                w.rrm_z = aoc::protocol::repl::dequantize_vector(*q, 100).z;
+            }
+        }
         out.push_back(w);
     }
 }
@@ -1271,6 +1285,9 @@ struct LungeSample {
     double   yaw = 0;          // the facing the server has
     double   mv_yaw = 0, rrm_yaw = 0;   // the facing a client holds by this tick: the last ReplicatedMovement and RepRootMotion.Rotation it was sent
     bool     has_mv_yaw = false, has_rrm_yaw = false;
+    double   wz = 0;                    // the creature's height (its origin) on the server
+    bool     has_rrm_vz = false;        // this tick's update names RepRootMotion.LinearVelocity ...
+    double   rrm_vz = 0;                // ... and its vertical part (cm/s)
 };
 
 static std::string creature_path(Fixture& f, const char* leaf) {
@@ -1287,7 +1304,7 @@ static std::string creature_path(Fixture& f, const char* leaf) {
 using LungeSteer = std::function<bool(double now, const LungeSample* prev, double& px, double& py, const world::WorldActor& creature)>;
 static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, const std::string& path, double seconds, double player_x, double player_y, const LungeSteer& steer,
                             std::vector<LungeSample>& out, std::vector<combat::IncomingHit>* hits = nullptr, bool timid = false, double provoke_at = -1, combat::CombatWorld::Stats* stats = nullptr,
-                            double leash_cm = 0) {
+                            double leash_cm = 0, const spawns::OpenTemplate* made = nullptr, double creature_x = 0, double creature_y = 0) {
     Rig rig(4, 20, {});
     if (!rig.ok()) return false;
     combat_rig::World w;
@@ -1299,7 +1316,7 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
     cfg.seed = 5;
     combat::CombatWorld world(w.registry, w.npcs.get(), &navfix::shared_nav(), *f.data, *f.catalog, book, f.motion, cfg);
     world.set_ability_data(&tables);
-    const uint64_t creature = w.spawn(path, 0, 0, 7, 900, bp->half_height);
+    const uint64_t creature = w.spawn(path, creature_x, creature_y, 7, 900, bp->half_height, made);
     if (creature == 0) return false;
     world::WorldActor* actor = w.registry.find(creature);
     if (timid) actor->npc.aggro_off = true;
@@ -1335,13 +1352,15 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
         world.tick(now);
         std::vector<LungeWire> wire;
         read_lunge_wire(*actor, shadow, now, wire);
-        double position = -1;
+        double position = -1, tick_vz = 0;
+        bool tick_has_vz = false;
         for (const LungeWire& u : wire) {
             if (u.active >= 0) active = u.active;
             if (u.obstructed >= 0) obstructed = u.obstructed;
             if (u.position >= 0) position = u.position;
             if (u.has_mv_yaw) mv_yaw = u.mv_yaw, has_mv_yaw = true;
             if (u.has_rrm_yaw) rrm_yaw = u.rrm_yaw, has_rrm_yaw = true;
+            if (u.has_rrm_vz) tick_vz = u.rrm_vz, tick_has_vz = true;
         }
         const GremCastView view = grem_cast_view(w.registry, creature);
         const world::WorldActor* g = w.registry.find(creature);
@@ -1362,6 +1381,9 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
         s.rrm_yaw = rrm_yaw;
         s.has_mv_yaw = has_mv_yaw;
         s.has_rrm_yaw = has_rrm_yaw;
+        s.wz = g->z;
+        s.has_rrm_vz = tick_has_vz;
+        s.rrm_vz = tick_vz;
         last = view;
         out.push_back(s);
         prev = s;
@@ -2037,4 +2059,502 @@ void test_fury_lands_only_inside_its_cone(Fixture& f) {
         // the Snap's record states 500 cm and 120 degrees but does not measure: it lands wherever he is put
         CHECKF(snap_casts == 0 || snap_landed >= snap_due, "every bite of its Snap lands on a player put %s (%zu of %zu)", place.name, snap_landed, snap_due);
     }
+}
+
+// ---- hostile humanoids, slice 1: a bandit raider against a player who stands still ---------------------------------------------------------------------------------------------
+
+/// The open the world makes for a bandit Blueprint (spawns::GenericNpcs, as worldd builds it): a recorded guard's open with the abilities of the Blueprint's tree in its list of records.
+struct BanditOpen {
+    std::optional<spawns::CapturedData> captured;
+    std::optional<spawns::GenericNpcs>  generic;
+    const spawns::OpenTemplate*         open = nullptr;
+    spawns::Verdict                     why = spawns::Verdict::Generic;
+};
+
+static bool make_bandit_open(Fixture& f, const combat::NpcAbilityData& tables, const std::string& path, BanditOpen& out, bool with_tree_abilities = true) {
+    std::string err;
+    out.captured = spawns::CapturedData::load(err);
+    if (!out.captured) return false;
+    spawns::GenericConfig config;
+    if (with_tree_abilities) config.abilities_of = [&tables](const std::string& archetype) {
+        std::vector<int64_t> kit;
+        if (const std::vector<combat::CreatureAbility>* tasks = tables.abilities_of(archetype)) {
+            for (const combat::CreatureAbility& t : *tasks) {
+                if (std::find(kit.begin(), kit.end(), t.ability) == kit.end()) kit.push_back(t.ability);
+            }
+        }
+        return kit;
+    };
+    out.generic.emplace(*out.captured, &f.motion, config);
+    content::NpcAssetRow asset;
+    asset.archetype_path = path;
+    out.open = out.generic->template_for(asset, &out.why);
+    return out.open != nullptr;
+}
+
+void test_bandit_raider_fights_a_standing_player(Fixture& f) {
+    std::printf("a bandit raider against a player who stands still: made from a guard's open with its tree's abilities, it strikes within reach, lands each hit at its montage's notify, "
+                "holds its specials back by the tree's timers and does not drift\n");
+    constexpr double kDt = 1.0 / 15.0, kSeconds = 60.0;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    struct Kind {
+        const char* leaf;
+        bool        specials;   // its tree switches the cleave and the whirlwind on
+    };
+    for (const Kind kind : {Kind{"/Bandit_Raider/CSB_Bandit_Raider_StateTree.Default__CSB_Bandit_Raider_StateTree_C", true}, Kind{"/Bandit_Raider/Bandit_Raider.Default__Bandit_Raider_C", false}}) {
+        const std::string path = creature_path(f, kind.leaf);
+        const auto bp = f.motion.find(path);
+        const std::string name = spawns::blueprint_leaf(path);
+        CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the %s and the creature tables list its abilities", name.c_str());
+        if (path.empty() || !bp || !tables.abilities_of(path)) return;
+        CHECKF(spawns::fighting_humanoid(path), "%s is a hostile humanoid whose fights are built", name.c_str());
+        BanditOpen made;
+        CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the %s (verdict: %s)", name.c_str(), spawns::verdict_name(made.why));
+        if (!made.open) return;
+        // its open lists every ability of its tree (the client plays only the abilities it has the record of)
+        {
+            combat_rig::World probe;
+            if (!probe.problem.empty()) return;
+            const uint64_t id = probe.spawn(path, 0, 0, 7, 900, bp->half_height, made.open);
+            const world::WorldActor* a = probe.registry.find(id);
+            size_t listed = 0, wanted = 0;
+            std::set<int64_t> seen;
+            for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+                if (!seen.insert(t.ability).second) continue;
+                ++wanted;
+                if (a && combat::npc_knows_ability(*a, t.ability)) ++listed;
+            }
+            CHECKF(a && wanted >= 5 && listed == wanted, "the %s's open lists the %zu abilities of its tree (%zu listed)", name.c_str(), wanted, listed);
+            CHECKF(a && a->npc.collision_cylinder != 0, "a hit on the %s is confirmed against its collision cylinder, which its open names", name.c_str());
+        }
+        std::vector<LungeSample> samples;
+        std::vector<combat::IncomingHit> hits;
+        combat::CombatWorld::Stats stats;
+        CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 800, nullptr, samples, &hits, false, -1, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 8 m away runs", kSeconds);
+        if (samples.empty()) return;
+
+        // the casts as the client sees them: the start of each montage element, its ability and its montage
+        struct Cast {
+            double      t;
+            int64_t     ability;
+            uint64_t    montage;
+            std::string label;
+        };
+        std::vector<Cast> casts;
+        double chase_began = -1;
+        for (const LungeSample& s : samples) {
+            if (chase_began < 0 && std::hypot(s.wx, s.wy) > 1.0) chase_began = s.t;
+            if (!s.cast_began) continue;
+            const abilities::AbilityDef* def = f.catalog->ability(s.ability);
+            casts.push_back({s.t, s.ability, s.montage, def ? def->row.name : std::string("?")});
+        }
+        std::map<std::string, std::vector<double>> by_name;
+        for (const Cast& c : casts) by_name[c.label].push_back(c.t);
+        std::string summary;
+        for (const auto& [label, times] : by_name) summary += (summary.empty() ? "" : ", ") + label + " " + std::to_string(times.size());
+        std::printf("  %s, %.0f s: %zu casts (%s); the chase began at %.2f s\n", name.c_str(), kSeconds, casts.size(), summary.c_str(), chase_began);
+        {
+            std::string line;   // the first casts in order, for reading the fight
+            for (size_t i = 0; i < casts.size() && i < 24; ++i) {
+                std::string label = casts[i].label;
+                if (label.rfind("Bandit_Raider_", 0) == 0) label.erase(0, 14);
+                line += (line.empty() ? "" : " ") + label + "@" + std::to_string(casts[i].t - std::max(0.0, chase_began)).substr(0, 5);
+            }
+            std::printf("  casts, seconds after the chase began: %s\n", line.c_str());
+            std::vector<double> gaps;   // from the start of one strike to the start of the next one (nothing between)
+            for (size_t i = 1; i < casts.size(); ++i) {
+                if (casts[i].label == "Bandit_Raider_Strike" && casts[i - 1].label == "Bandit_Raider_Strike") gaps.push_back(casts[i].t - casts[i - 1].t);
+            }
+            std::sort(gaps.begin(), gaps.end());
+            if (!gaps.empty()) std::printf("  strike to strike: %zu gaps, %.2f s at least, %.2f s in the middle, %.2f s at most\n", gaps.size(), gaps.front(), gaps[gaps.size() / 2], gaps.back());
+            // a strike is over at its montage's animation-end notify (1.0 s in) and the 1 s global cooldown runs from there: 2.0 s from strike to strike, plus the 0.2 s the creature looks at
+            CHECKF(gaps.size() >= 5 && gaps.front() >= 2.0 - 1e-6 && gaps.back() <= 2.4, "strikes come 2.0 to 2.4 s apart, not at the montage's length (%.2f to %.2f s)", gaps.empty() ? 0.0 : gaps.front(), gaps.empty() ? 0.0 : gaps.back());
+        }
+        const auto count = [&](const char* label) { return by_name.count(label) ? by_name[label].size() : size_t{0}; };
+        CHECKF(casts.size() >= 12, "it plays its own animations (%zu casts in %.0f s; with the single swing it would play none)", casts.size(), kSeconds);
+        CHECKF(count("Bandit_Raider_Strike") >= 8, "it strikes over and over (%zu strikes)", count("Bandit_Raider_Strike"));
+        CHECKF(count("Bandit_Raider_HeavySlash") + count("Bandit_Raider_Whirlwind") >= 1, "it uses a special attack once the tree's timer for it has run (%zu heavy slashes, %zu whirlwinds)", count("Bandit_Raider_HeavySlash"),
+               count("Bandit_Raider_Whirlwind"));
+        if (kind.specials) {
+            // the cleave waits for the fight's 8th second, as the tree's Float Compare says (Combat Timer > 8)
+            const std::vector<double>& cleaves = by_name["Bandit_Raider_BrutalCleave"];
+            CHECKF(cleaves.size() >= 3, "it cleaves several times in %.0f s (%zu)", kSeconds, cleaves.size());
+            if (!cleaves.empty()) {
+                std::printf("  the first cleave came %.2f s into the chase; the cleaves came %.2f s apart on average\n", cleaves.front() - chase_began,
+                            cleaves.size() > 1 ? (cleaves.back() - cleaves.front()) / static_cast<double>(cleaves.size() - 1) : 0.0);
+                CHECKF(cleaves.front() - chase_began >= 8.0 - 2 * kDt && cleaves.front() - chase_began <= 14.0, "the first cleave comes after the fight's 8th second (%.2f s into the chase)", cleaves.front() - chase_began);
+                for (size_t i = 1; i < cleaves.size(); ++i) {
+                    CHECKF(cleaves[i] - cleaves[i - 1] >= 8.0, "the cleave's own cooldown of 8 s holds (%.2f s between two)", cleaves[i] - cleaves[i - 1]);
+                }
+            }
+        } else {
+            CHECKF(count("Bandit_Raider_BrutalCleave") == 0 && count("Bandit_Raider_Whirlwind") == 0, "its tree switches the cleave and the whirlwind off (%zu, %zu)", count("Bandit_Raider_BrutalCleave"),
+                   count("Bandit_Raider_Whirlwind"));
+        }
+        // the special attacks wait for the tree's number rolled when the fight began (35 % none, else 6 to 9 s), and share a cooldown of 8 s
+        std::vector<double> specials;
+        for (const Cast& c : casts) {
+            if (c.label == "Bandit_Raider_HeavySlash" || c.label == "Bandit_Raider_Whirlwind") specials.push_back(c.t);
+        }
+        for (size_t i = 1; i < specials.size(); ++i) CHECKF(specials[i] - specials[i - 1] >= 8.0, "two special attacks are at least the shared cooldown of 8 s apart (%.2f s)", specials[i] - specials[i - 1]);
+
+        // every hit of a cast lands at its montage's notify, once, and no hit lands outside a cast
+        size_t due = 0, landed = 0, stray = 0;
+        double worst_delay = 0;
+        std::vector<bool> used(hits.size(), false);
+        for (const Cast& c : casts) {
+            const combat::MontageData* md = montage_of_cast(f, tables, c.ability, c.montage);
+            if (!md) continue;
+            const std::vector<double> bites = cast_bites(f, tables, c.ability, c.montage);
+            if (c.t + md->seconds(1.0) > kSeconds - 0.3) continue;   // (a cast the fight ended in)
+            for (const double at : bites) {
+                ++due;
+                bool found = false;
+                for (size_t i = 0; i < hits.size() && !found; ++i) {
+                    if (used[i] || hits[i].source_guid != c.ability) continue;
+                    const double delay = hits[i].at - (c.t + at);
+                    if (delay < -1e-6 || delay > 2 * kDt + 1e-6) continue;   // (the hit is delivered at the first tick on or after its notify)
+                    used[i] = true;
+                    found = true;
+                    ++landed;
+                    worst_delay = std::max(worst_delay, delay);
+                }
+            }
+        }
+        for (size_t i = 0; i < hits.size(); ++i) {
+            if (used[i]) continue;
+            bool in_cast = false;
+            for (const Cast& c : casts) {
+                const combat::MontageData* md = montage_of_cast(f, tables, c.ability, c.montage);
+                if (md && hits[i].source_guid == c.ability && hits[i].at >= c.t - 1e-6 && hits[i].at <= c.t + md->seconds(1.0) + 2 * kDt) in_cast = true;
+            }
+            if (!in_cast) ++stray;
+        }
+        std::printf("  %zu hits were due at their notifies, %zu landed (the latest %.3f s after its notify); %zu hits outside a cast\n", due, landed, worst_delay, stray);
+        CHECKF(due >= 8 && landed == due, "every hit of every cast lands at its montage's notify (%zu of %zu)", landed, due);
+        CHECKF(stray == 0, "no hit lands outside a cast (%zu)", stray);
+
+        // in reach and no drift: it starts its attacks within the tree's reach of the player's surface, and once at him it stays about him
+        const double r_creature = bp->radius, r_player = 34.0;
+        double reach = 0;
+        for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+            if (!t.unknown && !t.off && t.fight && t.min_distance <= 0 && t.max_distance > reach) reach = t.max_distance;
+        }
+        double travel = 0;   // the farthest any readable montage of the tree carries it
+        for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+            const abilities::AbilityDef* def = f.catalog->ability(t.ability);
+            if (!def) continue;
+            for (const content::MontageRow& m : def->montages) {
+                const combat::MontageData* md = m.soft_path.empty() ? nullptr : tables.montage(m.soft_path);
+                if (md && !md->root_unreadable && !md->root_motion.empty()) travel = std::max(travel, std::hypot(md->root_motion.back().x, md->root_motion.back().y));
+            }
+        }
+        double worst_start = 0, worst_gap = 0;
+        size_t drift_ticks = 0;
+        for (const LungeSample& s : samples) {
+            const double gap = std::hypot(s.wx - s.px, s.wy - s.py) - r_creature - r_player;
+            if (s.cast_began) worst_start = std::max(worst_start, gap);
+            if (chase_began >= 0 && s.t > chase_began + 3.0) {
+                worst_gap = std::max(worst_gap, gap);
+                if (gap > reach + travel + 60.0) ++drift_ticks;
+            }
+        }
+        std::printf("  reach %.0f cm, the farthest travel of a montage %.0f cm; the surface gap was at most %.0f cm when a cast began and %.0f cm at any time after the chase\n", reach, travel, worst_start, worst_gap);
+        CHECKF(worst_start <= reach + 5.0, "it begins its casts within the tree's reach (%.0f of %.0f cm)", worst_start, reach);
+        CHECKF(drift_ticks == 0, "it never drifts away from a player who stands still (%zu ticks farther than reach + travel)", drift_ticks);
+        // it ends the fight where it started it: standing about the player, not walking off
+        const LungeSample& last = samples.back();
+        const double end_gap = std::hypot(last.wx - last.px, last.wy - last.py) - r_creature - r_player;
+        CHECKF(end_gap <= reach + travel + 60.0, "at the end of the fight it is still about the player (%.0f cm from his surface)", end_gap);
+    }
+}
+
+// ---- creatures made from a generic Blueprint: their own attacks play ---------------------------------------------------------------------------------------------------------------
+
+/// What a fight of a creature made from a generic Blueprint has to show (check_generic_creature_animates).
+struct GenericFightPlan {
+    const char* leaf;         // the tail of the Blueprint's path (creature_path)
+    const char* name;         // for the messages
+    double      seconds;      // the length of the fight
+    bool        timid;        // it notices nobody: the player hits it a second in to begin the fight
+    size_t      montages;     // at least so many montages among the tasks the world can use, all of them readable
+    double      travel;       // at least one of them carries the creature this far (cm)
+    size_t      casts;        // at least so many casts in the fight
+    size_t      due;          // at least so many hits due at montage notifies
+};
+
+/// A fight of 'plan.seconds' against a player who stands 8 m away, with the creature's open as the world makes it (its tree's abilities in the list of records) and then with the donor's own list:
+/// every usable ability is in the ability data, its montages read, the creature plays them, each hit lands at its notify, the lunges stay inside what the montages carry and it does not drift.
+static void check_generic_creature_animates(Fixture& f, const GenericFightPlan& plan, const std::function<void(const std::map<std::string, size_t>&)>& more = nullptr) {
+    constexpr double kDt = 1.0 / 15.0;
+    const double seconds = plan.seconds;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    const std::string path = creature_path(f, plan.leaf);
+    const auto bp = f.motion.find(path);
+    CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the %s and the creature tables list its abilities", plan.name);
+    if (path.empty() || !bp || !tables.abilities_of(path)) return;
+    CHECKF(!spawns::fighting_humanoid(path), "the %s is a creature, not one of the humanoids whose fights are built by name", plan.name);
+    // the client carries a creature by its montage's root translation times the scale of its mesh (USkeletalMeshComponent::ConvertLocalRootMotionToWorld), and the world does the same
+    const double scale = bp->default_scale;
+
+    // the abilities of the tasks the world can use are in the ability data, and their montages read (the ones that carry the creature too)
+    double travel = 0;
+    size_t montages = 0, unreadable = 0, absent = 0;
+    for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+        if (t.unknown || t.off || !t.fight) continue;
+        const abilities::AbilityDef* def = f.catalog->ability(t.ability);
+        if (!def) {
+            ++absent;
+            continue;
+        }
+        for (const content::MontageRow& m : def->montages) {
+            const combat::MontageData* md = m.soft_path.empty() ? nullptr : tables.montage(m.soft_path);
+            if (!md) continue;
+            ++montages;
+            if (md->root_unreadable) ++unreadable;
+            else if (!md->root_motion.empty()) travel = std::max(travel, std::hypot(md->root_motion.back().x, md->root_motion.back().y));
+        }
+    }
+    std::printf("  %zu montages, %zu unreadable, %zu usable abilities missing from the ability data; the farthest montage carries it %.0f cm\n", montages, unreadable, absent, travel);
+    CHECKF(absent == 0, "every ability of its usable tasks is in the ability data (%zu missing)", absent);
+    CHECKF(montages >= plan.montages && unreadable == 0 && travel >= plan.travel, "its montages read and one carries the creature forward (%zu montages, %zu unreadable, %.0f cm)", montages, unreadable, travel);
+
+    // the open the world makes: the tree's abilities are the records its ability component loads
+    BanditOpen made;
+    CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the %s (verdict: %s)", plan.name, spawns::verdict_name(made.why));
+    if (!made.open) return;
+    {
+        combat_rig::World probe;
+        if (!probe.problem.empty()) return;
+        const uint64_t id = probe.spawn(path, 0, 0, 7, 900, bp->half_height, made.open);
+        const world::WorldActor* a = probe.registry.find(id);
+        size_t listed = 0, wanted = 0;
+        std::set<int64_t> seen;
+        for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+            if (!seen.insert(t.ability).second) continue;
+            ++wanted;
+            if (a && combat::npc_knows_ability(*a, t.ability)) ++listed;
+        }
+        CHECKF(a && wanted >= 1 && listed == wanted, "its open lists the %zu abilities of its tree (%zu listed)", wanted, listed);
+    }
+
+    // a fight against a player who stands 8 m away (a creature that notices nobody is hit a second in)
+    std::vector<LungeSample> samples;
+    std::vector<combat::IncomingHit> hits;
+    combat::CombatWorld::Stats stats;
+    const double provoke = plan.timid ? 1.0 : -1.0;
+    CHECKF(run_lunge_fight(f, tables, path, seconds, 0, 800, nullptr, samples, &hits, plan.timid, provoke, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 8 m away runs", seconds);
+    if (samples.empty()) return;
+    struct Cast {
+        double      t;
+        int64_t     ability;
+        uint64_t    montage;
+        std::string label;
+    };
+    std::vector<Cast> casts;
+    double chase_began = -1;
+    for (const LungeSample& s : samples) {
+        if (chase_began < 0 && std::hypot(s.wx, s.wy) > 1.0) chase_began = s.t;
+        if (!s.cast_began) continue;
+        const abilities::AbilityDef* def = f.catalog->ability(s.ability);
+        casts.push_back({s.t, s.ability, s.montage, def ? def->row.name : std::string("?")});
+    }
+    std::map<std::string, size_t> by_name;
+    for (const Cast& c : casts) ++by_name[c.label];
+    std::string summary;
+    for (const auto& [label, n] : by_name) summary += (summary.empty() ? "" : ", ") + label + " " + std::to_string(n);
+    std::printf("  %zu casts in %.0f s (%s); %llu attacks; the chase began at %.2f s\n", casts.size(), seconds, summary.c_str(), static_cast<unsigned long long>(stats.npc_attacks), chase_began);
+    CHECKF(casts.size() >= plan.casts, "it plays its own animations (%zu casts in %.0f s; with the single swing it would play none)", casts.size(), seconds);
+    if (more) more(by_name);
+
+    // every hit of a cast lands at its montage's notify, once, and no hit lands outside a cast
+    size_t due = 0, landed = 0, stray = 0;
+    double worst_delay = 0;
+    std::vector<bool> used(hits.size(), false);
+    for (const Cast& c : casts) {
+        const combat::MontageData* md = montage_of_cast(f, tables, c.ability, c.montage);
+        if (!md) continue;
+        if (c.t + md->seconds(1.0) > seconds - 0.3) continue;   // (a cast the fight ended in)
+        for (const double at : cast_bites(f, tables, c.ability, c.montage)) {
+            ++due;
+            for (size_t i = 0; i < hits.size(); ++i) {
+                if (used[i] || hits[i].source_guid != c.ability) continue;
+                const double delay = hits[i].at - (c.t + at);
+                if (delay < -1e-6 || delay > 2 * kDt + 1e-6) continue;
+                used[i] = true;
+                ++landed;
+                worst_delay = std::max(worst_delay, delay);
+                break;
+            }
+        }
+    }
+    for (size_t i = 0; i < hits.size(); ++i) {
+        if (used[i]) continue;
+        bool in_cast = false;
+        for (const Cast& c : casts) {
+            const combat::MontageData* md = montage_of_cast(f, tables, c.ability, c.montage);
+            if (md && hits[i].source_guid == c.ability && hits[i].at >= c.t - 1e-6 && hits[i].at <= c.t + md->seconds(1.0) + 2 * kDt) in_cast = true;
+        }
+        if (!in_cast) ++stray;
+    }
+    std::printf("  %zu hits were due at their notifies, %zu landed (the latest %.3f s after its notify); %zu hits outside a cast\n", due, landed, worst_delay, stray);
+    CHECKF(due >= plan.due && landed == due, "every hit of every cast lands at its montage's notify (%zu of %zu)", landed, due);
+    CHECKF(stray == 0, "no hit lands outside a cast (%zu)", stray);
+
+    // the lunge: each time a montage carries it, it goes no farther than the montage does, and some lunges carry it a metre or more
+    size_t far = 0, over = 0;
+    double most = 0;
+    const std::vector<LungeRun> runs = lunge_runs(samples);
+    for (const LungeRun& r : runs) {
+        const LungeSample& from = samples[r.first > 0 ? r.first - 1 : r.first];
+        const LungeSample& to = samples[r.last + 1];
+        const double went = std::hypot(to.wx - from.wx, to.wy - from.wy);
+        most = std::max(most, went);
+        if (went >= 100.0) ++far;
+        if (went > travel * scale + 30.0) ++over;   // (the tick before the carry may still be a step of its chase: 300 cm/s is 20 cm a tick)
+    }
+    std::printf("  %zu lunges, %zu of a metre or more, the longest %.0f cm\n", runs.size(), far, most);
+    CHECKF(runs.size() >= 3 && far >= 1, "the montages carry it along their root motion (%zu lunges, %zu of a metre or more)", runs.size(), far);
+    CHECKF(over == 0, "no lunge carries it farther than its montage does at its scale %.2f (%zu lunges over %.0f cm)", scale, over, travel * scale + 30.0);
+
+    // in reach, and no drift once it is at him
+    const double r_creature = bp->radius * scale, r_player = 34.0;
+    double reach = 0;
+    for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+        if (!t.unknown && !t.off && t.fight && t.min_distance <= 0 && t.max_distance > reach) reach = t.max_distance;
+    }
+    double worst_gap = 0;
+    size_t drift_ticks = 0;
+    for (const LungeSample& s : samples) {
+        const double gap = std::hypot(s.wx - s.px, s.wy - s.py) - r_creature - r_player;
+        if (chase_began >= 0 && s.t > chase_began + 12.0) {
+            worst_gap = std::max(worst_gap, gap);
+            if (gap > reach + travel * scale + 60.0) ++drift_ticks;
+        }
+    }
+    std::printf("  reach %.0f cm; the surface gap was at most %.0f cm at any time twelve seconds after the chase began\n", reach, worst_gap);
+    CHECKF(drift_ticks == 0, "once it is at him it never drifts away from a player who stands still (%zu ticks farther than reach + travel)", drift_ticks);
+
+    // the lunge is smooth and stays on the ground: no step is longer than the fastest the montages carry it, the creature's height follows the ground (the plain here, the hill's flank below) and
+    // never the montage, and every update of a lunge says its velocity has no vertical part (the retail server's is 0.0 in every recorded update of every lunge, on a slope too)
+    {
+        double v_max = 0;   // cm/s, at the creature's scale
+        for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+            if (t.unknown || t.off || !t.fight) continue;
+            const abilities::AbilityDef* def = f.catalog->ability(t.ability);
+            if (!def) continue;
+            for (const content::MontageRow& m : def->montages) {
+                const combat::MontageData* md = m.soft_path.empty() ? nullptr : tables.montage(m.soft_path);
+                if (!md) continue;
+                for (size_t i = 1; i < md->root_motion.size(); ++i) {
+                    const double dt = md->root_motion[i].time - md->root_motion[i - 1].time;
+                    if (dt >= 0.01) v_max = std::max(v_max, std::hypot(md->root_motion[i].x - md->root_motion[i - 1].x, md->root_motion[i].y - md->root_motion[i - 1].y) / dt * scale);
+                }
+            }
+        }
+        struct Smooth {
+            size_t ticks = 0;
+            double step = 0, dz = 0, vz = 0, zspan = 0;
+            size_t vz_seen = 0;
+        };
+        const auto measure = [&](const std::vector<LungeSample>& s) {
+            Smooth m;
+            double zlo = 1e18, zhi = -1e18;
+            for (size_t i = 1; i < s.size(); ++i) {
+                if (s[i].active != 1 || s[i - 1].active != 1) continue;
+                ++m.ticks;
+                const double step = std::hypot(s[i].wx - s[i - 1].wx, s[i].wy - s[i - 1].wy);
+                m.step = std::max(m.step, step);
+                m.dz = std::max(m.dz, std::fabs(s[i].wz - s[i - 1].wz));
+                zlo = std::min(zlo, s[i].wz);
+                zhi = std::max(zhi, s[i].wz);
+                if (s[i].has_rrm_vz) {
+                    ++m.vz_seen;
+                    m.vz = std::max(m.vz, std::fabs(s[i].rrm_vz));
+                }
+            }
+            m.zspan = zhi >= zlo ? zhi - zlo : 0;
+            return m;
+        };
+        const double step_limit = v_max * kDt * 1.05 + 1.0;
+        const Smooth flat = measure(samples);
+        std::printf("  on the plain: %zu ticks carried, the longest step %.1f cm (at most %.1f), the height moves at most %.2f cm a tick, the velocity's vertical part at most %.2f cm/s over %zu updates\n", flat.ticks, flat.step,
+                    step_limit, flat.dz, flat.vz, flat.vz_seen);
+        CHECKF(flat.ticks >= 8 && flat.step <= step_limit, "its steps along the montage stay smooth: none is longer than the fastest the montages carry it (%.1f of %.1f cm)", flat.step, step_limit);
+        CHECKF(flat.dz < 0.5 && flat.vz < 0.5 && flat.vz_seen >= 4, "on the plain its height stays where the ground is, and the updates say the velocity has no vertical part (%.2f cm a tick, %.2f cm/s)", flat.dz, flat.vz);
+        // the same fight on the hill's flank (a slope of 400 cm over 3,000, going up towards the player)
+        std::vector<LungeSample> hill;
+        if (run_lunge_fight(f, tables, path, seconds, 4300, 0, nullptr, hill, nullptr, plan.timid, provoke, nullptr, 40000.0, made.open, 3500, 0)) {
+            const Smooth up = measure(hill);
+            const double slope = 400.0 / 3000.0;
+            std::printf("  on the hill: %zu ticks carried, the longest step %.1f cm, the height moves at most %.2f cm a tick (slope %.3f: at most %.2f), %.1f cm in all, the velocity's vertical part at most %.2f cm/s\n", up.ticks, up.step, up.dz,
+                        slope, slope * up.step + 1.0, up.zspan, up.vz);
+            CHECKF(up.ticks >= 8 && up.step <= step_limit, "on the hill its steps stay smooth too (%.1f of %.1f cm)", up.step, step_limit);
+            CHECKF(up.dz <= slope * up.step + 1.0 && up.zspan > 5.0, "its height follows the ground's slope and nothing else (%.2f cm a tick at most for steps of %.1f cm, %.1f cm in all)", up.dz, up.step, up.zspan);
+            CHECKF(up.vz < 0.5 && up.vz_seen >= 4, "and the updates of a lunge up the hill still say the velocity has no vertical part (%.2f cm/s over %zu updates)", up.vz, up.vz_seen);
+        } else {
+            CHECK(false, "the fight on the hill's flank runs");
+        }
+        // a lunge nobody stands in the way of: the player is put 7 m ahead of the creature for as long as a montage carries it, so that the freeze box stays empty, and the creature goes the
+        // montage's whole travel at its scale (a goblin of scale 1.5 goes 1.5 times what its montage says, as the client's copy does)
+        if (scale > 1.05) {
+            constexpr double kPiFree = 3.14159265358979323846;
+            const LungeSteer away = [&](double, const LungeSample* prev, double& px, double& py, const world::WorldActor& c) {
+                if (!prev || prev->active != 1) return false;
+                px = c.x + std::cos(c.yaw_degrees * kPiFree / 180.0) * 700.0;
+                py = c.y + std::sin(c.yaw_degrees * kPiFree / 180.0) * 700.0;
+                return true;
+            };
+            std::vector<LungeSample> free_run;
+            if (run_lunge_fight(f, tables, path, seconds, 0, 800, away, free_run, nullptr, plan.timid, provoke, nullptr, 40000.0, made.open)) {
+                double longest = 0;
+                for (const LungeRun& r : lunge_runs(free_run)) {
+                    const LungeSample& from = free_run[r.first > 0 ? r.first - 1 : r.first];
+                    const LungeSample& to = free_run[r.last + 1];
+                    longest = std::max(longest, std::hypot(to.wx - from.wx, to.wy - from.wy));
+                }
+                std::printf("  with nobody in the way the longest lunge goes %.0f cm: the farthest montage's %.0f cm at scale %.2f is %.0f\n", longest, travel, scale, travel * scale);
+                CHECKF(longest >= 0.9 * travel * scale && longest <= travel * scale + 30.0, "a lunge nobody stands in the way of goes its montage's travel at the creature's scale (%.0f cm of %.0f)", longest, travel * scale);
+            } else {
+                CHECK(false, "the fight with nobody in the way runs");
+            }
+        }
+    }
+
+    // the donor's own list of records: the client would hold no record of the creature's abilities, so the world keeps the single swing
+    BanditOpen donor;
+    CHECKF(make_bandit_open(f, tables, path, donor, false), "the world makes an open for the %s without its tree's abilities (verdict: %s)", plan.name, spawns::verdict_name(donor.why));
+    if (!donor.open) return;
+    std::vector<LungeSample> plain;
+    combat::CombatWorld::Stats plain_stats;
+    CHECK(run_lunge_fight(f, tables, path, seconds, 0, 800, nullptr, plain, nullptr, plan.timid, provoke, &plain_stats, 40000.0, donor.open), "the same fight with the donor's own list of records runs");
+    size_t plain_casts = 0;
+    for (const LungeSample& s : plain) plain_casts += s.cast_began ? 1 : 0;
+    std::printf("  with the donor's own records: %zu casts, %llu single swings\n", plain_casts, static_cast<unsigned long long>(plain_stats.npc_attacks));
+    CHECKF(plain_casts == 0 && plain_stats.npc_attacks >= 3, "with the donor's own list it plays no montage and keeps the single swing (%zu casts, %llu swings)", plain_casts, static_cast<unsigned long long>(plain_stats.npc_attacks));
+}
+
+void test_goblin_flayer_animates_its_attacks(Fixture& f) {
+    std::printf("a Goblin Flayer (made from a generic Blueprint) against a player who stands still: with its tree's abilities in its open it plays its overhead slashes and its cleave, lunges at him along "
+                "their root motion (unreadable before), lands each hit at its notify and stays about him; with the donor's own list of records it keeps the single swing\n");
+    check_generic_creature_animates(f, {"/GoblinFlayer/Goblin_Flayer_Gravehide.Default__Goblin_Flayer_Gravehide_C", "Gravehide Flayer", 60.0, false, 3, 100.0, 8, 6}, [](const std::map<std::string, size_t>& by_name) {
+        const auto count = [&](const char* name) { const auto it = by_name.find(name); return it == by_name.end() ? size_t{0} : it->second; };
+        CHECKF(count("GoblinFlayer_OverheadSlash") + count("GoblinFlayer_OverheadSlash2") >= 4, "it plays the overhead slashes, whose root motion could not be read before (%zu + %zu)", count("GoblinFlayer_OverheadSlash"),
+               count("GoblinFlayer_OverheadSlash2"));
+    });
+}
+
+void test_languid_goblin_animates_its_swing(Fixture& f) {
+    std::printf("a Languid Goblin (made from a generic Blueprint, whose only ability was missing from the ability data) that a player hits: it plays its melee swing, lunges at him along the montage's root motion, lands each "
+                "hit at its notify and stays about him; with the donor's own list of records it keeps the single swing\n");
+    check_generic_creature_animates(f, {"/Goblin/Goblin_LanguidGoblin.Default__Goblin_LanguidGoblin_C", "Languid Goblin", 40.0, true, 2, 150.0, 6, 6}, [](const std::map<std::string, size_t>& by_name) {
+        size_t all = 0, swings = 0;
+        for (const auto& [label, n] : by_name) {
+            all += n;
+            if (label == "Goblin_Languid_Swing") swings = n;
+        }
+        CHECKF(swings >= 6 && swings == all, "every cast is its swing (%zu of %zu casts)", swings, all);
+    });
 }

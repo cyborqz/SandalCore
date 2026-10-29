@@ -16,6 +16,7 @@
 #pragma once
 
 #include "nav/nav_file.h"
+#include "nav/tile_repair.h"
 
 #include <cstdint>
 #include <string>
@@ -69,6 +70,7 @@ struct BuildStats {
     int failed_tiles = 0;
     int retried_tiles = 0;      // tiles whose first build had more polygons than a Detour tile may hold and that were rebuilt with a coarser simplification
     int max_tile_polys = 0;
+    TileRepair repair;          // the detail edges on polygon borders that Recast's float test missed, marked after the build (nav/tile_repair.h)
     double seconds = 0;
 };
 

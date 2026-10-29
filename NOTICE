@@ -23,6 +23,8 @@ the recipients' exercise of the rights granted.
 
 Third-party components
 - third_party/recastnavigation: Recast & Detour, zlib license (see its own License.txt).
+- tools/npcabilities/Acl.cs: reads the stream layout of the Animation Compression Library 2.1 (Nicholas Frechette and contributors, MIT license, github.com/nfrechette/acl),
+  written from the library's public source; none of its code is included.
 
 Disclaimer
 Not affiliated with, sponsored by or endorsed by Intrepid Studios, Inc. Ashes of Creation is a trademark of

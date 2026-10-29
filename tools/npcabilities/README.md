@@ -14,7 +14,8 @@ It writes three tables (five with `--senses-dir`):
   the seconds the creature waits before it uses the ability again, whether it stands still to use it, the task's place in the tree (`order`) and the conditions the tree puts on it:
   `min_distance`, `max_distance` and `max_angle` the target must satisfy (-1: none), `gates` the cooldown names that must be over, and `unknown` = 1 when a condition is of a kind the
   tool does not say (`why` names it). `fight` is 1 for a task of the state the creature fights in (the openings, idle and ambient abilities are 0). `conds` holds the other conditions as
-  short atoms, one group per state of the task's way down (a roll, the creature's own health, the seconds into the fight, line of sight, the distance between the centres; a state whose
+  short atoms, one group per state of the task's way down (a roll, the creature's own health, the seconds into the fight - also against a number the tree rolls once when a fight begins, for the
+  first special attack of the bandits - line of sight, the distance between the centres; a state whose
   list uses `or` or brackets is kept whole, in the order the tree has it). `starts` are the cooldowns the creature starts when it takes the task besides its own: the tasks of the states
   above it may start some. A Blueprint without a tree of its own plays its parent's, and a task below a state the designers switched off is left out.
   `rotate` is "speed:duration" of the Rotate To task (turn towards the target) that runs with the ability, in its state or one above it: while the ability plays the creature keeps turning to its
@@ -25,9 +26,15 @@ It writes three tables (five with `--senses-dir`):
 - `npc_montages.tsv`: one line per animation montage: its object path as an ability record names it, the ids the network layer knows the montage and its package by,
   its length in seconds at a play rate of 1, its rate scale, its sections (`name:start:next`), its hit notifies (`time:key`; the key picks which hit of the ability lands) and
   its root motion (`time:x:y:z`, in cm from where the creature stood when the montage began, x ahead of it and y to its right: how far the animation carries the creature,
-  read from the root bone of the animation the montage plays; empty for a montage that stays in place) and `root_unreadable`: 1 for a montage whose animation moves the creature in a
-  form the tool cannot read (an animation stored with the ACL codec, a looping or composite segment); its root motion is empty then, and a creature does not play an ability whose
-  montage is unreadable. The client moves a creature along that travel by itself while the montage plays.
+  read from the root bone of the animations the montage's first slot track plays, segment after segment (a segment travels what its animation travels between the segment's first and last
+  time, the other way round at a negative play rate, and the next segment goes on from where the creature then stands; empty for a montage that stays in place) and `root_unreadable`: 1 for a
+  montage whose animation moves the creature in a form the tool cannot read (an animation stored in a form other than the three it reads, a looping or composite segment, a further slot track
+  that moves the root); its root motion is empty then, and a creature does not play an ability whose
+  montages are all unreadable (one that has other montages plays those; the unreadable one is left out of its choice). The three forms are the engine's per-track and variable-key forms and the
+  Animation Compression Library's (`Acl.cs`: the translation of the root bone's track, read the way the client's own decompression reads it). The client moves a creature along that travel by itself while the
+  montage plays. `anim_end` is the time of the montage's animation-end notify (the animation is over there and the rest of the montage is its blend out): the creature's ability task is
+  done at that time, and the cooldowns the task starts run from there. It is filled for the folders the extractor lists as `$NpcAnimEndFolders` (the bandits) and empty for the others,
+  whose cooldowns run from the start of the cast.
 - `npc_targeting.tsv` (`targeting.py`, from content.db): where each listed ability's hit lands, one line per targeting record of the ability (`key`):
   - `discovery` is how the record finds its target: `none`, `prefers_active` (what the creature fights now, else the one the cast was aimed at), `only_locked` (the one the cast was aimed at),
     `only_active` or `prefers_locked`.

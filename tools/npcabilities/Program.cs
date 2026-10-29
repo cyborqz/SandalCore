@@ -5,15 +5,17 @@ using System.Text;
 using Mapc;
 using NpcAbilities;
 
-// npcabilities read [--dir CONTAINERFOLDER]... [--senses-dir CONTAINERFOLDER]... [--out-dir DIR] [--paks DIR] [--usmap FILE] [--check]
+// npcabilities read [--dir CONTAINERFOLDER]... [--anim-end-dir CONTAINERFOLDER]... [--senses-dir CONTAINERFOLDER]... [--out-dir DIR] [--paks DIR] [--usmap FILE] [--check]
 //   Reads the creature Blueprints and the animation montages under the given container folders (for example AOC/Content/DesignAssets/Population/NPC/Beast/Rabid)
 //   and writes DIR/npc_abilities.tsv and DIR/npc_montages.tsv.  With --senses-dir it also reads what every creature Blueprint under those folders notices and how far it
 //   follows (the intelligence component's settings) and writes DIR/npc_senses.tsv and DIR/npc_aggro_curves.tsv.
+//   --anim-end-dir names the folders whose montages export the time of their animation end notify (the montage table's anim_end column).
 //   With --check it writes nothing and exits 1 when DIR's files differ from a fresh read.
 string paks = Game.DefaultPaks, usmap = Game.DefaultUsmap, outDir = Path.Combine("dist", "content");
 bool check = false, any = false;
 string cmd = "help";
 var dirs = new List<string>();
+var animEndDirs = new List<string>();
 var sensesDirs = new List<string>();
 try
 {
@@ -27,6 +29,7 @@ try
             case "--usmap": usmap = Val(); break;
             case "--out-dir": outDir = Val(); break;
             case "--dir": dirs.Add(Val()); break;
+            case "--anim-end-dir": animEndDirs.Add(Val()); break;
             case "--senses-dir": sensesDirs.Add(Val()); break;
             case "--check": check = true; break;
             default:
@@ -36,7 +39,7 @@ try
         }
     }
     if (cmd == "looks") { any = true; }
-    else if (cmd != "read" || dirs.Count == 0) throw new ArgumentException("usage: npcabilities read --dir CONTAINERFOLDER [--dir ...] [--senses-dir CONTAINERFOLDER ...] [--out-dir DIR] [--paks DIR] [--usmap FILE] [--check]\n       npcabilities looks [--out-dir DIR] [--paks DIR] [--usmap FILE] [--check]");
+    else if (cmd != "read" || dirs.Count == 0) throw new ArgumentException("usage: npcabilities read --dir CONTAINERFOLDER [--dir ...] [--anim-end-dir CONTAINERFOLDER ...] [--senses-dir CONTAINERFOLDER ...] [--out-dir DIR] [--paks DIR] [--usmap FILE] [--check]\n       npcabilities looks [--out-dir DIR] [--paks DIR] [--usmap FILE] [--check]");
     any = true;
 }
 catch (ArgumentException ex)
@@ -75,7 +78,7 @@ if (cmd == "looks")
     }
     return 0;
 }
-Reader.Collect(game, dirs, out var abilities, out var montages, out int packages, out int failed);
+Reader.Collect(game, dirs, animEndDirs, out var abilities, out var montages, out int packages, out int failed);
 if (failed > 0) { Console.Error.WriteLine($"{failed} of {packages} packages could not be read"); return 1; }
 string abilitiesText = Reader.AbilitiesTsv(abilities), montagesText = Reader.MontagesTsv(montages);
 Console.WriteLine($"npcabilities: {packages} packages, {abilities.Count} ability tasks of {abilities.Select(a => a.Archetype).Distinct().Count()} Blueprints, {montages.Count} montages");

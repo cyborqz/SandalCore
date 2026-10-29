@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 using System.Globalization;
+using System.Text.RegularExpressions;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.UObject;
@@ -24,6 +25,7 @@ namespace NpcAbilities;
 ///   rand(P)          a fresh roll under P
 ///   hp(V) / nhp(V)   the creature's own health is under V of its maximum / is not
 ///   fc(OP,V)         the seconds since the creature's fight began compare as OP (eq ne lt le gt ge) to V
+///   fcr(OP,B,P,L,H,N) the same against a number the creature rolls once when its fight begins (the tree's variable N): B, or with the chance P a fresh number between L and H
 ///   los / nlos       the creature sees its target / does not
 ///   ?NAME            a condition this tool cannot say (the task is left out)
 /// </summary>
@@ -42,6 +44,7 @@ public static partial class Reader
         public string Kind = "", Class = "", Name = "", Path = "";   // Context / Parameter / Evaluator / Task / PropertyFunction ...; the struct's class and name; the property inside it
         public bool Global;
         public int State = -1;
+        public FStructFallback? Handle;   // the data handle of the source in the tree's list of sources (source, index and state)
         public override string ToString() => Kind + ":" + (Class.Length > 0 ? Class + ":" : "") + Name + (Path.Length > 0 ? "." + Path : "");
     }
 
@@ -108,21 +111,32 @@ public static partial class Reader
 
     static FStructFallback? StructOf(FStructFallback s, string name) => s.Properties.FirstOrDefault(p => p.Name.Text == name)?.Tag?.GenericValue is FScriptStruct ss ? ss.StructType as FStructFallback : null;
 
+    /// <summary>The state a data handle belongs to (the index of its state handle); -1 when it names none.</summary>
+    static int StateIndexOf(FStructFallback? handle)
+    {
+        var state = handle != null ? StructOf(handle, "StateHandle") : null;
+        return state != null ? IntOf(state, "Index") : -1;
+    }
+
+    /// <summary>Whether two data handles name the same data: the same kind of source, the same index and the same state.</summary>
+    static bool SameHandle(FStructFallback a, FStructFallback b) => TextOf(a, "Source") == TextOf(b, "Source") && TextOf(a, "Index") == TextOf(b, "Index") && StateIndexOf(a) == StateIndexOf(b);
+
     static Source SourceOf(TreeInfo t, FStructFallback? handle, string path)
     {
         var src = new Source { Path = path };
         if (handle == null) return src;
-        string source = TextOf(handle, "Source"), index = TextOf(handle, "Index");
+        string source = TextOf(handle, "Source");
         foreach (var s in t.Sources)
         {
+            // (the same source kind and index name a task in each of several states: the state tells them apart)
             var dh = StructOf(s, "DataHandle");
-            if (dh == null || TextOf(dh, "Source") != source || TextOf(dh, "Index") != index) continue;
+            if (dh == null || !SameHandle(dh, handle)) continue;
             src.Kind = TextOf(s, "DataSource");
             src.Class = TextOf(s, "Struct");
             src.Name = TextOf(s, "Name");
             src.Global = source.Contains("Global", StringComparison.Ordinal);
-            var state = StructOf(dh, "StateHandle");
-            src.State = state != null ? IntOf(state, "Index") : -1;
+            src.State = StateIndexOf(dh);
+            src.Handle = dh;
             return src;
         }
         return src;
@@ -335,15 +349,65 @@ public static partial class Reader
             string op = OpOf(TextOf(node, "Operator"));
             if (op.Length == 0) return Unsaid("Compare(operator)");
             if (invert) op = Negate(op);
+            // the fight's clock: the elapsed time of the "Combat Timer" task of a state on the way down to this condition
+            bool clock = binds.TryGetValue("Left", out var l) && l.Kind == "Task" && !l.Global && l.Name == "Combat Timer" && l.Path == "TaskElapsedTime" && path.Contains(l.State);
             var right = Setting(null, str, binds, prm, "Right");
-            if (right == null) return Unsaid("Compare(right:" + (binds.TryGetValue("Right", out var s1) ? s1.ToString() : "") + ")");
-            if (binds.TryGetValue("Left", out var l) && l.Kind == "Task" && !l.Global && l.Name == "Combat Timer" && l.Path == "TaskElapsedTime" && path.Contains(l.State))
-                return new Atom { Text = "fc(" + op + "," + Num(right.Value) + ")" };
+            if (right == null)
+            {
+                // ... against a number the tree rolled when the fight began
+                if (clock && binds.TryGetValue("Right", out var rolled) && FightRoll(t, rolled, path) is { } roll) return new Atom { Text = "fcr(" + op + "," + roll + ")" };
+                return Unsaid("Compare(right:" + (binds.TryGetValue("Right", out var s1) ? s1.ToString() : "") + ")");
+            }
+            if (clock) return new Atom { Text = "fc(" + op + "," + Num(right.Value) + ")" };
             var leftValue = Setting(null, str, binds, prm, "Left");
             if (leftValue == null) return Unsaid("Compare(left:" + (binds.TryGetValue("Left", out var s2) ? s2.ToString() : "") + ")");
             return Constant(Compare(op, leftValue.Value, right.Value));
         }
         return Unsaid("struct:" + TextOf(node, "Name"));
+    }
+
+    const string NumberText = @"(?:-?[0-9]+\.?[0-9]*|-?\.[0-9]+)";
+    static readonly Regex PlainNumber = new(@"^\s*(" + NumberText + @")\s*;?\s*$", RegexOptions.CultureInvariant);
+    static readonly Regex RangeOnly = new(@"^\s*RandDoubleRange\(\s*(" + NumberText + @")\s*,\s*(" + NumberText + @")\s*\)\s*;?\s*$", RegexOptions.CultureInvariant);
+    static readonly Regex ChanceOfRange = new(@"^\s*var\s+(\w+)\s*=\s*(" + NumberText + @")\s*;\s*if\s*\(\s*RandDouble\(\)\s*<\s*(" + NumberText + @")\s*\)\s*\{\s*set\s+\1\s*=\s*(?:RandDoubleRange\(\s*(" + NumberText + @")\s*,\s*(" + NumberText + @")\s*\)|(" + NumberText + @"))\s*;\s*\}\s*\1\s*;?\s*$", RegexOptions.CultureInvariant);
+
+    static double Parsed(Group g) => double.Parse(g.Value, NumberStyles.Float, CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// A number the tree rolls when the fight begins and then compares the fight's clock with: the "Stored Value" of a "Set BBFloat" task in a state the fight began in.  The task's expression is a number, a range
+    /// ("RandDoubleRange(6.0, 9.0)") or a chance of one ("var Result = 0.; if (RandDouble() < 0.65) { set Result = RandDoubleRange(6.0, 9.0); } Result").  Said as "base,chance,low,high,name": the number is
+    /// `base`, or with that chance a fresh one between `low` and `high`.  Null when the binding is anything else or the expression is of another form.
+    /// </summary>
+    static string? FightRoll(TreeInfo t, Source src, HashSet<int> path)
+    {
+        if (src.Kind != "Task" || src.Global || src.Class != "STT_SetBBFloat_C" || src.Path != "Stored Value" || src.Handle == null || !path.Contains(src.State)) return null;
+        foreach (var node in t.Nodes)
+        {
+            if (node == null || ClassOf(node, "TaskClass") != "STT_SetBBFloat_C") continue;
+            var handle = StructOf(node, "InstanceDataHandle");
+            if (handle == null || !SameHandle(handle, src.Handle)) continue;
+            if (node.TryGetValue(out bool enabled, "bTaskEnabled") && !enabled) return null;
+            var task = InstanceOf(node, t.Defaults);
+            if (task == null) return null;
+            string name = NameOf(task, "Variable Name");
+            var expression = task.Properties.FirstOrDefault(p => p.Name.Text == "Value Expression")?.Tag?.GenericValue is FScriptStruct ss ? ss.StructType as FStructFallback : null;
+            if (name.Length == 0 || expression == null || !expression.TryGetValue(out string text, "Expression")) return null;
+            double basis, chance, low, high;
+            Match m;
+            if ((m = PlainNumber.Match(text)).Success) { basis = Parsed(m.Groups[1]); chance = 0; low = high = basis; }
+            else if ((m = RangeOnly.Match(text)).Success) { basis = 0; chance = 1; low = Parsed(m.Groups[1]); high = Parsed(m.Groups[2]); }
+            else if ((m = ChanceOfRange.Match(text)).Success)
+            {
+                basis = Parsed(m.Groups[2]);
+                chance = Parsed(m.Groups[3]);
+                low = m.Groups[4].Success ? Parsed(m.Groups[4]) : Parsed(m.Groups[6]);
+                high = m.Groups[5].Success ? Parsed(m.Groups[5]) : low;
+            }
+            else return null;
+            if (!(chance >= 0 && chance <= 1) || !(low <= high)) return null;
+            return Num(basis) + "," + Num(chance) + "," + Num(low) + "," + Num(high) + "," + Escape(name);
+        }
+        return null;
     }
 
     /// <summary>The names of the states on a task's way down, root first.</summary>

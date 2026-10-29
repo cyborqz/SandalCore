@@ -3,6 +3,8 @@
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 #include "nav/nav_build.h"
 
+#include "nav/tile_repair.h"
+
 #include <DetourNavMesh.h>
 #include <DetourNavMeshBuilder.h>
 #include <Recast.h>
@@ -338,7 +340,7 @@ struct Builder {
 // -- CoA & C:Y:B --
 
     // returns 1 built, 0 empty, -1 failed; `retried` counts a tile that had to be simplified more to fit Detour's polygon limit
-    int build_tile(int tx, int ty, std::vector<uint8_t>* blob, long long* polys, long long* tris, std::string* err, int* retried = nullptr, int* tile_polys = nullptr) const {
+    int build_tile(int tx, int ty, std::vector<uint8_t>* blob, long long* polys, long long* tris, std::string* err, int* retried = nullptr, int* tile_polys = nullptr, TileRepair* repair = nullptr) const {
         TileTris tt;
         gather(tx, ty, &tt);
         if (tt.t.empty()) return 0;
@@ -446,6 +448,10 @@ struct Builder {
         if (!dtCreateNavMeshData(&params, &data, &size)) { *err = "dtCreateNavMeshData"; return -1; }
         blob->assign(data, data + size);
         dtFree(data);
+        // Recast marks a detail edge as on a polygon's border only when both ends are within 0.001 of it in float; in centimetres, far from the origin, rounding alone defeats that
+        // (nav/tile_repair.h), and Detour dereferences null for a polygon with no marked edge.  Every tile leaves here with its border edges marked.
+        const TileRepair fixed = repair_detail_boundaries(blob->data(), blob->size());
+        if (repair) *repair += fixed;
         *polys += pmesh.p->npolys;
         return 1;
     }
@@ -473,7 +479,7 @@ bool build_nav(const Geometry& g, uint64_t geometry_hash, const BuildOptions& op
         for (int tx = b.tx0; tx < b.tx0 + b.ntx; ++tx)
             if (b.tile_wanted(tx, ty)) jobs.push_back({tx, ty});
 
-    struct Result { int status = 0; std::vector<uint8_t> blob; long long polys = 0, tris = 0; std::string err; int retried = 0, tile_polys = 0; };
+    struct Result { int status = 0; std::vector<uint8_t> blob; long long polys = 0, tris = 0; std::string err; int retried = 0, tile_polys = 0; TileRepair repair; };
     std::vector<Result> results(jobs.size());
     std::atomic<size_t> next{0};
     int nthreads = opt.threads > 0 ? opt.threads : static_cast<int>(std::thread::hardware_concurrency());
@@ -483,7 +489,7 @@ bool build_nav(const Geometry& g, uint64_t geometry_hash, const BuildOptions& op
             const size_t i = next.fetch_add(1);
             if (i >= jobs.size()) return;
             Result& r = results[i];
-            r.status = b.build_tile(jobs[i].tx, jobs[i].ty, &r.blob, &r.polys, &r.tris, &r.err, &r.retried, &r.tile_polys);
+            r.status = b.build_tile(jobs[i].tx, jobs[i].ty, &r.blob, &r.polys, &r.tris, &r.err, &r.retried, &r.tile_polys, &r.repair);
         }
     };
     std::vector<std::thread> pool;
@@ -507,6 +513,7 @@ bool build_nav(const Geometry& g, uint64_t geometry_hash, const BuildOptions& op
         st.input_triangles += r.tris;
         st.retried_tiles += r.retried;
         st.max_tile_polys = std::max(st.max_tile_polys, r.tile_polys);
+        st.repair += r.repair;
         if (r.status < 0) {
             ++st.failed_tiles;
             if (first_err.empty()) first_err = "tile (" + std::to_string(jobs[i].tx) + ", " + std::to_string(jobs[i].ty) + "): " + r.err;
