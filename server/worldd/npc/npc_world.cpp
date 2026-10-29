@@ -694,6 +694,13 @@ bool NpcWorld::order_move(uint64_t id, const nav::Vec3& dest, double speed_cm_s,
     return true;
 }
 
+bool NpcWorld::set_yaw_rate(uint64_t id, double degrees_per_second) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    it->second.mover.set_yaw_rate(degrees_per_second);
+    return true;
+}
+
 bool NpcWorld::release(uint64_t id) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end() || it->second.mode != Mode::Ordered) return false;

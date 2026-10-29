@@ -317,6 +317,18 @@ public static partial class Reader
                 bool inverse = Inv(cls == "STC_HealthPercentage_C" ? "Inverse" : "bInverse");
                 return new Atom { Text = (inverse ? "nhp(" : "hp(") + Num(thr.Value) + ")" };
             }
+            case "AoCSTC_EvaluateExpression":
+            case "STC_ExpressionBool_C":
+            {
+                // "GetEffectCount(GetSelf(), <effect>) > 0": the effects another creature's ability puts on a creature (a rally) are not in our world, so every creature carries none and the count is 0
+                var holder = obj?.Properties.FirstOrDefault(x => x.Name.Text == (cls == "AoCSTC_EvaluateExpression" ? "ExpressionToEvaluate" : "ExpressionValue"))?.Tag?.GenericValue is FScriptStruct es ? es.StructType as FStructFallback : null;
+                if (holder == null || !holder.TryGetValue(out string expression, "Expression")) return Unsaid(cls + "(expression)");
+                var counted = EffectCount.Match(expression);
+                if (!counted.Success) return Unsaid(cls);
+                string op = counted.Groups[1].Value switch { ">" => "gt", ">=" => "ge", "<" => "lt", "<=" => "le", "==" => "eq", "!=" => "ne", _ => "" };
+                if (op.Length == 0) return Unsaid(cls + "(operator)");
+                return Constant(Compare(op, 0, Parsed(counted.Groups[2])));
+            }
             case "STC_Random_C":
             {
                 var p = Setting(obj, str, binds, prm, "Probability");
@@ -350,7 +362,7 @@ public static partial class Reader
             if (op.Length == 0) return Unsaid("Compare(operator)");
             if (invert) op = Negate(op);
             // the fight's clock: the elapsed time of the "Combat Timer" task of a state on the way down to this condition
-            bool clock = binds.TryGetValue("Left", out var l) && l.Kind == "Task" && !l.Global && l.Name == "Combat Timer" && l.Path == "TaskElapsedTime" && path.Contains(l.State);
+            bool clock = binds.TryGetValue("Left", out var l) && l.Kind == "Task" && !l.Global && (l.Name == "Combat Timer" || l.Name == "CombatStartTime") && l.Path == "TaskElapsedTime" && path.Contains(l.State);
             var right = Setting(null, str, binds, prm, "Right");
             if (right == null)
             {
@@ -372,6 +384,9 @@ public static partial class Reader
     static readonly Regex ChanceOfRange = new(@"^\s*var\s+(\w+)\s*=\s*(" + NumberText + @")\s*;\s*if\s*\(\s*RandDouble\(\)\s*<\s*(" + NumberText + @")\s*\)\s*\{\s*set\s+\1\s*=\s*(?:RandDoubleRange\(\s*(" + NumberText + @")\s*,\s*(" + NumberText + @")\s*\)|(" + NumberText + @"))\s*;\s*\}\s*\1\s*;?\s*$", RegexOptions.CultureInvariant);
 
     static double Parsed(Group g) => double.Parse(g.Value, NumberStyles.Float, CultureInfo.InvariantCulture);
+
+    /// <summary>An expression that compares how many of an effect the creature itself (or the condition's source, the creature) carries with a number.</summary>
+    static readonly Regex EffectCount = new(@"^\s*GetEffectCount\(\s*Get(?:Self|Source)\(\)\s*,\s*\$#\d+:\d+\$\s*\)\s*(>=|<=|==|!=|>|<)\s*(" + NumberText + @")\s*$", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// A number the tree rolls when the fight begins and then compares the fight's clock with: the "Stored Value" of a "Set BBFloat" task in a state the fight began in.  The task's expression is a number, a range

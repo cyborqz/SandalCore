@@ -2558,3 +2558,176 @@ void test_languid_goblin_animates_its_swing(Fixture& f) {
         CHECKF(swings >= 6 && swings == all, "every cast is its swing (%zu of %zu casts)", swings, all);
     });
 }
+
+// ---- humanoid creatures walk up to a player who stands far away, at their speed, and do not stand and stare -----------------------------------------------------------------------------
+
+/// A chase in numbers: when the creature first moved, when and from how far it first cast, how fast it went while the player was far and nothing was playing.
+struct ChaseNumbers {
+    double first_move = -1, first_cast = -1, gap_at_cast = -1, speed = 0, end_gap = -1;
+    size_t far_ticks = 0;
+};
+
+static ChaseNumbers chase_numbers(const std::vector<LungeSample>& s, double dt) {
+    ChaseNumbers n;
+    std::vector<double> speeds;
+    for (size_t i = 1; i < s.size(); ++i) {
+        const double step = std::hypot(s[i].wx - s[i - 1].wx, s[i].wy - s[i - 1].wy) / dt;
+        const double gap = std::hypot(s[i].wx - s[i].px, s[i].wy - s[i].py);
+        if (n.first_move < 0 && step > 20.0) n.first_move = s[i].t;
+        if (n.first_cast < 0 && s[i].cast_began) n.first_cast = s[i].t, n.gap_at_cast = gap;
+        if (s[i].montage == 0 && gap > 700.0 && s[i].t > 1.0) speeds.push_back(step);
+    }
+    std::sort(speeds.begin(), speeds.end());
+    n.far_ticks = speeds.size();
+    n.speed = speeds.empty() ? 0.0 : speeds[speeds.size() / 2];
+    if (!s.empty()) n.end_gap = std::hypot(s.back().wx - s.back().px, s.back().wy - s.back().py);
+    return n;
+}
+
+/// What the world should make of one chase: the creature goes at `speed`, and from the moment it sets off it is at the player (or has cast) within the time the walk takes and two seconds.
+static void check_chase(const char* name, const ChaseNumbers& n, double start_gap, double speed, bool stat_speed) {
+    CHECKF(n.first_move >= 0 && n.far_ticks >= 10, "%s sets off after the player and walks (first move at %.2f s, %zu ticks far from him)", name, n.first_move, n.far_ticks);
+    CHECKF(std::fabs(n.speed - speed) <= 0.02 * speed, "%s walks at %.0f cm/s: its Blueprint's run speed%s (%.0f)", name, speed, stat_speed ? " times its MoveSpeedMult" : "", n.speed);
+    const double walk = n.first_cast >= 0 ? (start_gap - n.gap_at_cast) / speed : 1e9;
+    CHECKF(n.first_cast >= 0 && n.first_cast - n.first_move <= walk + 2.0,
+           "%s attacks within %.1f s of setting off: the walk to where it cast (%.0f cm away) takes %.1f s, it did not stop to wait (first cast %.2f s after it set off)", name, walk + 2.0, n.gap_at_cast, walk,
+           n.first_cast - n.first_move);
+}
+
+void test_humanoids_walk_up_to_a_far_player(Fixture& f) {
+    std::printf("a goblin, a bandit raider and a bandit captain against a player 25 m away: they run at their Blueprint's run speed times their MoveSpeedMult and walk up to the nearest reach of the attacks they can use "
+                "(a special that waits for a timer does not park them), a wolf and a bear keep their Blueprint's speed\n");
+    constexpr double kDt = 1.0 / 15.0, kStartGap = 2500.0;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    combat::NpcStatBook book(*f.ctx->bundle, *f.ctx->gear);
+    struct Kind {
+        const char* leaf;
+        bool        humanoid;
+    };
+    for (const Kind kind : {Kind{"/Bandit_Raider/CSB_Bandit_Raider_StateTree.Default__CSB_Bandit_Raider_StateTree_C", true}, Kind{"/Bandit_Raider/Bandit_Raider.Default__Bandit_Raider_C", true},
+                            Kind{"/BanditCaptain/Bandit_Captain.Default__Bandit_Captain_C", true}, Kind{"/Goblin/Goblin_Gravehide.Default__Goblin_Gravehide_C", true},
+                            Kind{"/Canine/Wolf.Default__Wolf_C", false}, Kind{"/Bear/Bear.Default__Bear_C", false}}) {
+        const std::string path = creature_path(f, kind.leaf);
+        const auto bp = f.motion.find(path);
+        const std::string name = spawns::blueprint_leaf(path);
+        CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the %s and the creature tables list its abilities", name.c_str());
+        if (path.empty() || !bp || !tables.abilities_of(path)) return;
+        BanditOpen made;
+        if (kind.humanoid) {
+            CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the %s", name.c_str());
+            if (!made.open) return;
+        }
+        std::string err;
+        auto cs = book.make(*bp, 7, err);
+        const stats::StatValue* mult = cs ? cs->find(f.data->ids().move_speed_mult) : nullptr;
+        CHECKF(mult && mult->value >= 1.0, "the %s has a MoveSpeedMult of its own at level 7 (%.2f)", name.c_str(), mult ? mult->value : 0.0);
+        if (!mult) return;
+        const double speed = kind.humanoid ? bp->max_run_speed * mult->value : bp->max_run_speed;
+        std::vector<LungeSample> samples;
+        CHECKF(run_lunge_fight(f, tables, path, 25.0, 0, kStartGap, nullptr, samples, nullptr, false, 0.5, nullptr, 60000.0, made.open), "a fight of 25 s against a player 25 m away runs for the %s", name.c_str());
+        if (samples.empty()) return;
+        const ChaseNumbers n = chase_numbers(samples, kDt);
+        std::printf("  %-34s set off %.2f s, speed %.0f cm/s (Blueprint run %.0f x MoveSpeedMult %.2f), first cast %.2f s from %.0f cm\n", name.c_str(), n.first_move, n.speed, bp->max_run_speed, mult->value, n.first_cast,
+                    n.gap_at_cast);
+        check_chase(name.c_str(), n, kStartGap, speed, kind.humanoid);
+    }
+}
+
+/// The same on the real ground: opt-in (AOC_REAL_GROUND=1 reads dist/content/area_nav.bin and loads the chunks round the camps).
+void test_humanoids_walk_up_on_the_real_ground(Fixture& f) {
+    const char* env = std::getenv("AOC_REAL_GROUND");
+    if (!env || std::string(env) != "1") {
+        std::printf("humanoid creatures walking up to a player on the real ground: opt-in (AOC_REAL_GROUND=1 reads dist/content/area_nav.bin)\n");
+        return;
+    }
+    std::printf("goblins, a bandit raider and a bandit captain on the real ground: each reaches a player standing 20 m away along a real path, at its speed, without standing and staring\n");
+    constexpr double kDt = 1.0 / 15.0, kPi = 3.14159265358979323846;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    std::string err;
+    auto nav = nav::AreaNav::load(dir + "area_nav.bin", &err);
+    if (!nav) {
+        std::printf("  [skip] the real ground: %s\n", err.c_str());
+        return;
+    }
+    combat::NpcStatBook book(*f.ctx->bundle, *f.ctx->gear);
+    struct Camp {
+        const char* leaf;
+        double      x, y;
+    };
+    for (const Camp camp : {Camp{"/Goblin/Goblin_Gravehide.Default__Goblin_Gravehide_C", -796495, 569503}, Camp{"/Bandit_Raider/Bandit_Raider.Default__Bandit_Raider_C", -837337, 640605},
+                            Camp{"/BanditCaptain/Bandit_Captain.Default__Bandit_Captain_C", -837337, 640605}}) {
+        const std::string path = creature_path(f, camp.leaf);
+        const auto bp = f.motion.find(path);
+        const std::string name = spawns::blueprint_leaf(path);
+        if (path.empty() || !bp || !tables.abilities_of(path)) return;
+        if (!nav->load_around(camp.x, camp.y, 2, 180)) {
+            std::printf("  [skip] the ground round the %s's camp did not load\n", name.c_str());
+            continue;
+        }
+        nav::Vec3 home;
+        if (!nav->nearest_point({camp.x, camp.y, 12000.0}, 3000, 100000, &home)) continue;
+        BanditOpen made;
+        if (!make_bandit_open(f, tables, path, made)) return;
+        std::string e2;
+        auto cs = book.make(*bp, 7, e2);
+        const stats::StatValue* mult = cs ? cs->find(f.data->ids().move_speed_mult) : nullptr;
+        if (!mult) return;
+        const double speed = bp->max_run_speed * mult->value;
+        size_t runs = 0;
+        for (int d = 0; d < 8 && runs < 3; ++d) {
+            const double a = d * kPi / 4.0;
+            const nav::Vec3 want{home.x + 2000.0 * std::cos(a), home.y + 2000.0 * std::sin(a), home.z};
+            nav::Vec3 target;
+            if (!nav->nearest_point(want, 400, 600, &target) || std::hypot(target.x - want.x, target.y - want.y) > 250.0) continue;
+            const nav::PathResult route = nav->find_path(home, target, 200, 400, 20000);
+            if (!route.found || !route.complete || route.length > 2300.0) continue;   // (a spot the creature can reach by a path about as long as the straight line)
+            Rig rig(4, 20, {});
+            if (!rig.ok()) return;
+            combat_rig::World w;
+            if (!w.problem.empty()) return;
+            w.npcs = std::make_unique<npc::NpcWorld>(w.registry, nav.get());
+            combat::CombatWorldConfig cfg;
+            cfg.seed = 5;
+            combat::CombatWorld world(w.registry, w.npcs.get(), nav.get(), *f.data, *f.catalog, book, f.motion, cfg);
+            world.set_ability_data(&tables);
+            const uint64_t creature = combat_rig::spawn_npc(w.registry, w.npcs.get(), *w.captured, w.next_id, path, home.x, home.y, home.z + bp->half_height * bp->default_scale, 7, 900, bp->half_height, made.open);
+            if (creature == 0) return;
+            world::WorldActor* actor = w.registry.find(creature);
+            actor->npc.leash_radius_cm = 60000.0;
+            combat_rig::FakePlayer player(rig, 77, {target.x, target.y, target.z + 98.0});
+            world.add_player(&player);
+            std::vector<LungeSample> samples;
+            GremCastView last;
+            double now = 0, next_hit = 0.5;
+            while (now < 25.0) {
+                now += kDt;
+                if (now >= next_hit) {
+                    next_hit = now + 1.0;
+                    world.add_threat(creature, 77, 100.0, now);
+                }
+                if (const stats::StatValue* max_hp = rig.cs->find(content::kGuidMaxHealth)) rig.cs->set_current(content::kGuidHealth, max_hp->value);
+                nav->pump(50.0);
+                w.npcs->note_player(77, target.x, target.y, now);
+                w.npcs->tick(now);
+                world.tick(now);
+                const world::WorldActor* g = w.registry.find(creature);
+                const GremCastView view = grem_cast_view(w.registry, creature);
+                LungeSample s;
+                s.t = now, s.wx = g->x, s.wy = g->y, s.px = target.x, s.py = target.y, s.montage = view.montage;
+                s.cast_began = view.montage != 0 && (view.element != last.element || last.montage == 0);
+                last = view;
+                samples.push_back(s);
+            }
+            ++runs;
+            const ChaseNumbers n = chase_numbers(samples, kDt);
+            const double start_gap = std::hypot(samples.front().wx - target.x, samples.front().wy - target.y);
+            std::printf("  %-26s direction %d: path %.0f cm, set off %.2f s, speed %.0f cm/s, first cast %.2f s from %.0f cm\n", name.c_str(), d, route.length, n.first_move, n.speed, n.first_cast, n.gap_at_cast);
+            check_chase((name + " on the real ground").c_str(), n, start_gap, speed, true);
+        }
+        CHECKF(runs >= 1, "the %s has a real spot 20 m from its camp that it can walk to (%zu found)", name.c_str(), runs);
+    }
+}

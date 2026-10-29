@@ -305,6 +305,8 @@ int main() {
     test_bandit_raider_fights_a_standing_player(f);
     test_goblin_flayer_animates_its_attacks(f);
     test_languid_goblin_animates_its_swing(f);
+    test_humanoids_walk_up_to_a_far_player(f);
+    test_humanoids_walk_up_on_the_real_ground(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

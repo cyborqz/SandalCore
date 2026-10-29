@@ -282,8 +282,10 @@ private:
         std::vector<BiteArea> timed_areas;   // where each of those hits lands (the targeting record of the hit's key): a hit that reaches nobody sends nothing
     };
     /// Why the tree allowed none of a creature's attacks from where it stands: its target is farther than the attacks reach, or the right distance but not within the angle of its facing.
+    /// `reach_cm` is the shortest reach of the ready attacks that stopped for the distance (an attack that needs the target a minimum distance away, a gap closer, does not count): the creature walks up to it.
     struct TreeWhy {
-        bool too_far = false, off_angle = false;
+        bool   too_far = false, off_angle = false;
+        double reach_cm = -1;
     };
     /// How an attack with its own animation plays: the montage, how long it runs and the hits it lands (seconds after it starts, hit record).
     struct PlannedHit {
@@ -309,6 +311,9 @@ private:
     bool  line_clear(const Vec3& from, const Vec3& to) const;
     /// Whether every hit of the ability that hurts an enemy has a targeting record the world can decide by; an ability with one it cannot decide by is not animated.
     bool  areas_usable(const abilities::AbilityDef& def) const;
+    /// Whether a hit of the ability trips its target (a bear's grab throws a player down while the two play a paired animation): the world has no tripping of a player and no animation for the target
+    /// yet, so such an ability is not animated and the creature keeps its other attacks.
+    bool  grabs_target(const abilities::AbilityDef& def) const;
     /// Whether the ability's montages are read, with their hit notifies and a root motion the tables could read (what any creature needs to play it).
     bool  montages_readable(const abilities::AbilityDef& def) const;
     void  think(Npc& n, double now);

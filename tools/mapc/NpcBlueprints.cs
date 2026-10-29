@@ -33,7 +33,7 @@ public static class NpcBlueprints
         public string Parents = "";              // the Blueprint's parent classes up to NPCPawn_C, nearest first, comma separated
         public double Scale = 1.0;
         public List<long> Alignments = new();
-        public double HalfHeight = 88, Radius = 34, Walk = 600, Run = 600, Accel = 2048, Yaw = 360;
+        public double HalfHeight = 96, Radius = 22, Walk = 600, Run = 600, Accel = 2048, Yaw = 360;   // (a pawn's capsule unless a Blueprint on its chain sets one: the character base class makes it 22 by 96)
         public string MoveMode = "";             // DefaultCharacterMovementMode / DefaultLandMovementMode, the last the Blueprints set
         public double FlySpeed = 0;
         public string Tags = "";
@@ -110,8 +110,8 @@ public static class NpcBlueprints
                 else if (e.ExportType == "AoCCharacterMovement" || e.ExportType == "CharacterMovementComponent") move = e;
                 else if (e.Name == "CharacterMesh0" && e.ExportType.Contains("SkeletalMeshComponent", StringComparison.Ordinal)) skel = e;
             }
-            r.HalfHeight = Lv.TryProp<float>(capsule, "CapsuleHalfHeight", out var h) ? h : 88.0;
-            r.Radius = Lv.TryProp<float>(capsule, "CapsuleRadius", out var rad) ? rad : 34.0;
+            r.HalfHeight = Lv.TryProp<float>(capsule, "CapsuleHalfHeight", out var h) ? h : 96.0;
+            r.Radius = Lv.TryProp<float>(capsule, "CapsuleRadius", out var rad) ? rad : 22.0;
             r.Walk = Lv.TryProp<float>(move, "MaxWalkSpeed", out var w) ? w : 600.0;
             r.Run = Lv.TryProp<float>(move, "MaxRunSpeed", out var ru) ? ru : r.Walk;
             r.Accel = Lv.TryProp<float>(move, "MaxAcceleration", out var a2) ? a2 : 2048.0;

@@ -170,6 +170,8 @@ public:
     // ---- the movement service (stage 3's AI) ------------------------------------------------------------------------------
     /// Takes the NPC's feet: it walks to `dest` and stands there until released (or ordered again).  False when no path.
     bool order_move(uint64_t actor_id, const nav::Vec3& dest, double speed_cm_s, double stop_distance = 0);
+    /// Changes the rate at which the NPC turns, in degrees a second (a creature that turns faster than its Blueprint says).  False for an NPC the world does not hold.
+    bool set_yaw_rate(uint64_t actor_id, double degrees_per_second);
     /// Gives the feet back to the NPC's own behaviour.
     bool release(uint64_t actor_id);
     /// Stops the NPC where it stands and writes that it is still (a zero velocity); the NPC then stands for good (stage 3: it died).

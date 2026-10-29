@@ -38,6 +38,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs.
 - Bandit raiders and captains: dressed, named and armed in the Riverlands' camps, and fighting with their own attacks (strikes, cleaves, heavy slashes and whirlwinds).
 - Goblins and other creatures that were built from their Blueprint alone play their own attack animations, with the lunges and rolls that carry them (the Languid Goblins, the Flayers, the Warlord, the Diggers and the Skinwalkers among them).
+- Goblins and bandits chase at the game's own speed (faster with the creature's rank) and turn a fifth faster, walk straight up to a player instead of waiting where a special attack would reach, and the Goblin Flayers spin and the Goblin Assassins backstab and kickflip.
 - Embersprings: discovering them, attuning to one, and choosing where to respawn.
 - Weapon line experience: kills and the game master level scrolls pay every weapon you wear, each of the 21 weapon lines levels up to 25 on its own, the Skill Tree shows a line's level, bar and talent points, the weapon talents are bought with them, and the free Accuracy passives arrive at levels 5, 10, 15, 20 and 25.
 
@@ -54,7 +55,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Storage: buying more room, tab jobs, crates and guild storage.
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.
 - NPCs: face variety, names for rare creatures, and the other hostile humanoids (the bandit archers, mages and healers, and the cultists).
-- Creatures: the remaining creature families' own fights and abilities (the Goblin Flayers' spinning attack and the Goblin Assassins' and Flamewatchers' abilities among them), smooth movement and turning for goblins and bandits, pack aggro, damage matched to retail, and flying creatures.
+- Creatures: the remaining creature families' own fights and abilities (the Goblin Flame Shamans' fire bombs among them), smooth movement for goblins and bandits while their attack animations play, pack aggro, damage matched to retail, and flying creatures.
 - The walking map: walls, fences, water and holes.
 - The world: spawns that follow node levels, a world clock with day and night spawns, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.

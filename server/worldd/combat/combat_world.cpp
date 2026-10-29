@@ -33,6 +33,14 @@ constexpr double kBlueprintSightConeDefaultDeg = 45.0;   // the half angle eithe
 constexpr double kBlueprintHearingDefaultCm = 2000.0;
 constexpr double kBlueprintPlayerLookSeconds = 2.0;      // how often a creature looks for players
 
+constexpr double kHumanoidTurnGain = 1.2;   // how much faster than their Blueprint's rotation rate the goblins and bandits turn
+
+/// Whether a creature chases at its Blueprint's run speed times its own MoveSpeedMult stat (1.05 plus 0.1 for each rank of its elite scalar), as the game's creatures do: the humanoids, goblins
+/// and bandits.  The other families keep the Blueprint's run speed as it is.
+bool runs_at_stat_speed(const std::string& archetype) {
+    return archetype.find("/Population/NPC/Humanoid/") != std::string::npos || archetype.find("/Population/NPC/PCRaces/") != std::string::npos;
+}
+
 /// The kit of a creature kind: by the Blueprint's leaf without "_C"; else the kit whose name is the longest prefix of the leaf (or the leaf of it).
 const npc_kits::Kit* kit_of(const std::string& leaf_in) {
     std::string leaf = leaf_in;
@@ -203,8 +211,14 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
         if (a.npc.leash_radius_cm <= 0 && row->leash_distance >= 0) p.leash_radius_cm = row->leash_distance;
     }
     const double run = std::max({bp.max_run_speed, bp.max_walk_speed, 300.0});
-    p.chase_speed_cm_s = run;
+    double chase = run;
+    if (runs_at_stat_speed(a.npc.archetype)) {
+        if (const stats::StatValue* mult = n->cs->find(data_.ids().move_speed_mult); mult && mult->value > 1.0) chase = run * mult->value;
+    }
+    p.chase_speed_cm_s = chase;
     p.run_home_speed_cm_s = run;
+    // the goblins and bandits turn a fifth faster than their Blueprint's rotation rate
+    if (npcs_world_ && runs_at_stat_speed(a.npc.archetype)) npcs_world_->set_yaw_rate(a.id, bp.rotation_rate_yaw * kHumanoidTurnGain);
     n->archetype = a.npc.archetype;
     n->anim = anim_ ? anim_->abilities_of(a.npc.archetype) : nullptr;
     // a creature whose tree has no attack it can play (a Blueprint with no open of its own, whose generic open lists none of the tree's abilities) keeps the single swing every creature had: the tree
@@ -508,7 +522,10 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         if (!ready) continue;
         if (target) {
             if (t.max_distance >= 0 && distance > t.max_distance) {
-                if (why) why->too_far = true;
+                if (why) {
+                    why->too_far = true;
+                    if (t.min_distance <= 0 && (why->reach_cm < 0 || t.max_distance < why->reach_cm)) why->reach_cm = t.max_distance;
+                }
                 continue;
             }
             if (t.min_distance >= 0 && distance < t.min_distance) continue;
@@ -611,6 +628,20 @@ bool CombatWorld::areas_usable(const abilities::AbilityDef& def) const {
     return true;
 }
 
+bool CombatWorld::grabs_target(const abilities::AbilityDef& def) const {
+    for (const content::AbilityHitRow& r : def.hits) {
+        if (r.source != "hit") continue;
+        const abilities::HitDef* hit = catalog_.hit(r.hit_guid);
+        if (!hit) continue;
+        for (const content::HitEffectRow& applied : hit->effects) {
+            if (applied.kind != "apply") continue;
+            const abilities::EffectDef* effect = catalog_.effect(applied.effect_guid);
+            if (effect && std::find(effect->row.tags.begin(), effect->row.tags.end(), "Debuff.Tripped") != effect->row.tags.end()) return true;
+        }
+    }
+    return false;
+}
+
 bool CombatWorld::animates(const Npc& n, const abilities::AbilityDef& def) const {
     if (!anim_ || !n.anim) return false;
     bool listed = false;
@@ -618,7 +649,7 @@ bool CombatWorld::animates(const Npc& n, const abilities::AbilityDef& def) const
     if (!listed) return false;
     const world::WorldActor* a = registry_.find(n.actor_id);
     if (!a || !npc_knows_ability(*a, def.row.guid)) return false;
-    return montages_readable(def) && areas_usable(def);   // (an ability whose hit lands by a volume the world cannot place keeps the creature's single swing)
+    return montages_readable(def) && areas_usable(def) && !grabs_target(def);   // (an ability whose hit lands by a volume the world cannot place, or that grabs its target, keeps the creature's single swing)
 }
 
 std::string CombatWorld::GateCensus::text() const {
@@ -1205,7 +1236,10 @@ void CombatWorld::think(Npc& n, double now) {
                 if (why.off_angle) {
                     npcs_world_->turn_toward(n.actor_id, at.x, at.y);
                 } else if (why.too_far) {
-                    const double stop = std::max(0.0, n.next.range_cm * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm();
+                    // it walks up to the reach of the nearest-reaching attack that is ready, not of the attack it stands ready with: a long-reaching special that waits for a timer (a captain's Bash, a
+                    // raider's heavy slash) would otherwise park the creature at its reach until the timer ran out, looking at its target
+                    const double reach = why.reach_cm >= 0 ? why.reach_cm : static_cast<double>(n.next.range_cm);
+                    const double stop = std::max(0.0, reach * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm();
                     pursue(n, o.target, n.ai.params().chase_speed_cm_s, stop);
                 }
             } else if (port && have_pick && picked.task && picked.task->stop_movement && !picked.task->rotates && !faces(n, port->fighter().position(), 2.0)) {

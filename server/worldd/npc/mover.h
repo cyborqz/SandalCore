@@ -39,6 +39,10 @@ public:
 
     /// `nav` may be null (every order is then Blocked).
     void init(const nav::AreaNav* nav, double foot_offset_cm, double yaw_rate_degrees_per_second);
+    /// Changes the rate at which the NPC turns (degrees a second; <= 0 or not a number: unchanged).
+    void set_yaw_rate(double degrees_per_second) {
+        if (degrees_per_second > 0 && degrees_per_second < 100000.0) yaw_rate_ = degrees_per_second;
+    }
     /// Puts the NPC on the ground at (x, y) with its feet at `ground_z`.
     void place(double x, double y, double ground_z, double yaw_degrees);
     /// Turns the NPC where it stands to face `yaw_degrees` at once (a creature that turns to its target before it attacks).

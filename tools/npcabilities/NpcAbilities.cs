@@ -490,6 +490,13 @@ public static partial class Reader
 
     static string NameOf(UObject o, string property) => o.TryGetValue(out FName n, property) ? n.Text : o.TryGetValue(out string s, property) ? s : "";
 
+    /// <summary>A task's cooldown in seconds: the value of the tree parameter it is bound to when it is bound to one that has a value, else its own setting (0 when it has none).</summary>
+    static float CooldownOf(TreeInfo info, FStructFallback node, UObject task, Dictionary<string, object> prm)
+    {
+        if (BindingsOf(info, node).TryGetValue("Cooldown", out var source) && source.Kind == "Parameter" && prm.TryGetValue(source.Path, out var value) && NumberOf(value) is { } seconds) return (float)seconds;
+        return task.TryGetValue(out float own, "Cooldown") ? own : 0f;
+    }
+
     /// <summary>
     /// The use-ability tasks of a state tree with the conditions of the states they sit in (the state's own and every parent's, as the creature checks them on the way down).
     /// `prm` holds the values of the tree's parameters for the creature the rows are made for.
@@ -511,7 +518,8 @@ public static partial class Reader
                 var t = InstanceOf(nodes[k], taskData);
                 if (t == null || !t.TryGetValue(out FStructFallback id, "AbilityId") || id == null || GuidOf(id) == 0) continue;
                 var row = new AbilityRow { Ability = GuidOf(id), Order = si, Task = NameOf(t, "TaskIdentifier") };
-                row.Cooldown = t.TryGetValue(out float cd, "Cooldown") ? cd : 0f;
+                // (a cooldown the tree binds to one of its parameters is that parameter's value for this creature)
+                row.Cooldown = CooldownOf(info, nodes[k], t, prm);
                 row.StopMovement = t.TryGetValue(out bool sm, "bShouldStopMovement") && sm;
                 // the state and every state above it, from the root down
                 var path = new List<int>();
@@ -543,7 +551,7 @@ public static partial class Reader
                             row.Rotate = F(speed) + ":" + F(duration);
                         }
                         string identifier = NameOf(other, "TaskIdentifier");
-                        float seconds = other.TryGetValue(out float otherCooldown, "Cooldown") ? otherCooldown : 0f;
+                        float seconds = CooldownOf(info, nodes[j], other, prm);
                         if (identifier.Length > 0 && seconds > 0f && identifier != row.Task && !identifier.Contains(';') && !identifier.Contains('=')) starts.Add(identifier + "=" + F(seconds));
                     }
                 }
