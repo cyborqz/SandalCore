@@ -96,8 +96,7 @@ try {
         'up' {
             & docker compose -f $compose up -d --wait
             if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed (is Docker Desktop running?)' }
-            # The init script creates aoc_test only on a fresh volume; make sure it exists.
-            $exists = & docker compose -f $compose exec -T postgres psql -U aoc -d aoc -tAc "SELECT 1 FROM pg_database WHERE datname = 'aoc_test'"
+            $exists = & docker compose -f $compose exec -T postgres psql -U aoc -d aoc -tAc "SELECT 1 FROM pg_database WHERE datname = 'aoc_test'" 2>&1 | Out-String
             if ("$exists".Trim() -ne '1') {
                 & docker compose -f $compose exec -T postgres psql -U aoc -d aoc -c 'CREATE DATABASE aoc_test'
                 if ($LASTEXITCODE -ne 0) { throw 'could not create the aoc_test database' }
