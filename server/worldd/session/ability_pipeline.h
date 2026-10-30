@@ -49,6 +49,8 @@
 //    loops      an ability that shoots again and again (the Ranger's Salvo: one shot for each stored charge) takes its cost and sends its projectile at every shot, and
 //               when the charges or the mana are gone the SERVER moves the montage to the branch's section ("EndLoop"), which ends the animation; the montage's end takes the effects
 //               the ability put on its caster off (kLoopedCasts in ability_pipeline.cpp has the offsets).
+//    launches   an ability whose montage launches projectiles at moments of its own (the Ranger's Air Strike, Raining Death and Barrage) is played by the SERVER: every launch is a step of the cast at the
+//               time of the montage's notify and what it launches lands after its flight (kTimedCasts in ability_pipeline.cpp has the table). A hit the client asks for that fires projectiles (Maim's wave) sends them.
 //    hits       a hit applies to the caster when its mask names Self (1) and its requirement holds: the ability's own hits (ab_ability_hit "hit"), the
 //               hits of the projectiles it fires when it has a target (the caster), the first overlap of the zones it spawns (the Initial and
 //               OnBeginOverlap hits; their ticks are the client's requests, and see "zones" below) and the Tick hits of an effect the caster has. An applied hit gives
@@ -192,6 +194,32 @@ struct GatheredCast {
     double      charged_speed = 0;
     const char* charged_montage = "";      // the soft path of the montage the cast jumps into
     uint64_t    charged_montage_guid = 0;
+};
+
+/// An ability whose montage launches its projectiles at moments of its own: the SERVER plays those launches (the montage's FireProjectile notifies, counted from the trigger) and lands what they
+/// hit when they arrive, whether the call named a target or not (ability_pipeline.cpp has the table and the evidence).
+struct TimedCast {
+    enum class Kind : uint8_t {
+        Volley,    // every launch gathers the enemies a cone ahead of the caster holds and sends the ability's homing projectile at each (the Ranger's Raining Death)
+        Strike,    // every launch is an arrow shot at an angle of its own from where the caster is; it lands on the ground and its area hurts the enemies there (the Ranger's Air Strike)
+        Barrage,   // every launch is an arrow of the ability's homing projectile at the cast's target (the Ranger's Barrage)
+    };
+    const char* ability;
+    Kind        kind;
+    int         projectile;   // the key (in the ability's ProjectilesIds) of the projectile that flies; a Strike's arrows have this key and the next ones
+    double      first;        // the first launch comes this long after the trigger (the notify's time in the montage over the montage's rate, at a PlayRate of 1)
+    double      gap;          // and each next one this long after the one before
+    int         count;        // how many launches
+    double      speed;        // the projectile's speed, cm per second
+    double      angle = 0;    // Volley: the cone, as GatheredCast has it (the whole angle, how far it reaches, how far behind the caster it starts), cm and degrees
+    double      length = 0;
+    double      behind = 0;
+    double      radius = 0;   // Strike: how far from where an arrow lands its area reaches, cm
+    double      pitch[3] = {0, 0, 0};   // Strike: the angle of each arrow from the way the caster faces, degrees (negative: down)
+    // Barrage: when the montage moves to the section that ends the loop and when it ends, after the trigger (0: neither)
+    float       jump_position = 0;
+    double      jump_at = 0;
+    double      end_at = 0;
 };
 
 class AbilityPipeline {
@@ -521,8 +549,15 @@ private:
             double   due = 0;
             int64_t  projectile = 0;   // the projectile record that lands
             uint64_t target = 0;       // the one enemy it flies at (0: the cast's own targets)
+            // A timed cast (kTimedCasts) has two more kinds of step in this list: a launch (launch `index` leaves) and, for a Strike, the landing of arrow `index` at (x, y, z)
+            enum class Kind : uint8_t { Land, Launch, Strike };
+            Kind     kind = Kind::Land;
+            int      index = 0;
+            double   x = 0, y = 0, z = 0;
         };
         std::vector<Missile>                  missiles;
+        const TimedCast*                      timed = nullptr;            // a cast whose montage launches its projectiles at moments of its own (kTimedCasts)
+        std::set<uint64_t>                    struck;                     // a Strike: the enemies its areas hurt already (the area hit lets none of them be hurt again by the same cast)
         bootstrap::ActiveAbilityItem          item;
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
@@ -627,6 +662,16 @@ private:
     void   step_branch(Cast& cast, double t);
     /// A gathering cast's montage has jumped: the enemies the cone holds (the line of the charged shot) each get a projectile that lands after its flight.
     void   launch_gathered(Cast& cast, double t);
+    /// A timed cast (TimedCast) starts: its launches are steps of the cast, and a Barrage's montage jumps to its end section and ends at moments of its own.
+    void   start_timed(Cast& cast, const TimedCast& timed, double t);
+    /// One step of a timed cast's list: a launch leaves (a Volley gathers its cone, a Strike's arrow flies down to the ground, a Barrage's arrow flies at the target) or a Strike's arrow lands.
+    void   step_timed(Cast& cast, const Cast::Missile& m, double t);
+    void   launch_timed(Cast& cast, const Cast::Missile& launch, double t);
+    void   land_strike(Cast& cast, const Cast::Missile& m, double t);
+    /// The key of a held cast released early: a Barrage's arrows that have not left stay in the quiver and its montage moves to the end of the loop.
+    void   cancel_timed(int32_t client_instance_id, double now);
+    /// A hit the client asked for lands and fires projectiles (ab_hit_projectile "fire": Maim's Slicing hit): a straight one flies the line ahead of the caster and lands on every enemy in its way.
+    void   fire_from_hit(const CastRecord& rec, const abilities::HitDef& hit, double t);
     /// Whether the character holds the skill (purchased, or granted by its level).
     bool   holds_skill(int64_t skill) const;
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.

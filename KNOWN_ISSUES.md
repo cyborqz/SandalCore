@@ -37,6 +37,9 @@ This document lists the known issues of the current SandalCore main in one place
 | **Combat / Falling** | A fall does no damage, however far. | None. | Planned: fall damage. |
 | **Abilities** | Chilling Laminate shows a placeholder blue circle on the ground below the player. | None. | Investigating which visual effect is sent for it. |
 | **Ranger / Scatter Shot** | Scatter Shot can miss an enemy across a stream, a ledge or a bank: the server's line-of-sight check fails on such ground, so that enemy takes no damage. | Shoot from the same ground as the enemy. | Open. |
+| **Ranger / Air Strike** | Air Strike hurts the enemies where its arrows land, but does not root one that a slow is on (creatures take none of a hit's effects yet). | None. | Open. |
+| **Mage / Ball Lightning** | Ball Lightning plays and takes its cost, but does no damage: its slow ball, which hurts what it passes over, is not moved. | None. | Planned: the ball's path. |
+| **Bard / Saga** | The Saga's projectiles (the heals and buffs of its stories that fly to allies) are not sent. | None. | Open. |
 | **Summoner / Pets** | Summoner pets are not implemented yet: summoning does not bring out a pet. | None. | Planned: Summoner pets. |
 | **Gathering / Speed** | Gathering takes longer than on retail. | None. | Investigating how the gathering speed ratings (skills, talents, tools and gear) apply. |
 | **Gathering / Full bag** | When the resource bag is full, the extra items drop in an ash pile, the look used for death piles. | Make room in the resource bag before gathering. | Open: dropped items need a look of their own. |

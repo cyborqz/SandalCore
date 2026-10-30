@@ -40,6 +40,10 @@ public:
     virtual std::vector<GatheredTarget> enemies_in_cone(double /*angle_degrees*/, double /*length_cm*/, double /*behind_cm*/, size_t /*max*/) { return {}; }
     /// ... and the ones a projectile flying straight ahead of it would pierce (see CombatWorld::enemies_in_line).
     virtual std::vector<GatheredTarget> enemies_in_line(double /*length_cm*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
+    /// ... the ones whose bodies touch a sphere around a point (see CombatWorld::enemies_around), nearest to the point first.
+    virtual std::vector<GatheredTarget> enemies_around(const Vec3& /*centre*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
+    /// The height of the ground under (x, y), nearest to `z_hint` (see CombatWorld::ground_height); false where the world has none.
+    virtual bool ground_height(double /*x*/, double /*y*/, double /*z_hint*/, double* /*z*/) const { return false; }
 };
 // (C O A ~ C-Y-B)
 
@@ -80,6 +84,8 @@ public:
         return world_.enemies_in_cone(self_, angle_degrees, length_cm, behind_cm, max);
     }
     std::vector<GatheredTarget> enemies_in_line(double length_cm, double radius_cm, size_t max) override { return world_.enemies_in_line(self_, length_cm, radius_cm, max); }
+    std::vector<GatheredTarget> enemies_around(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_around(self_, centre, radius_cm, max); }
+    bool ground_height(double x, double y, double z_hint, double* z) const override { return world_.ground_height(x, y, z_hint, z); }
 
 private:
     CombatWorld&          world_;

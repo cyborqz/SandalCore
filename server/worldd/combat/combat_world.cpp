@@ -336,6 +336,31 @@ std::vector<GatheredTarget> CombatWorld::enemies_in_line(const Fighter& from, do
     return out;
 }
 
+std::vector<GatheredTarget> CombatWorld::enemies_around(const Fighter& from, const Vec3& centre, double radius_cm, size_t max) {
+    std::vector<GatheredTarget> out;
+    if (max == 0 || radius_cm <= 0) return out;
+    constexpr double kBodyMargin = 600.0;   // (the registry is asked a little wider than the sphere: a body is measured from its centre)
+    std::vector<uint64_t> ids;
+    registry_.query(centre.x, centre.y, radius_cm + kBodyMargin, ids);
+    for (const uint64_t id : ids) {
+        const TargetInfo ti = inspect(id, from);
+        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile) continue;
+        const double d = distance_xy_cm(centre, ti.position);
+        if (d - ti.radius_cm > radius_cm) continue;
+        // a sphere reaches up and down by its radius as well (the centre is on the ground: a body on a ledge far above it is out)
+        if (std::fabs(ti.position.z - centre.z) - ti.radius_cm > radius_cm + 200.0) continue;
+        if (!line_clear(centre, ti.position)) continue;
+        out.push_back({id, d});
+    }
+    std::sort(out.begin(), out.end(), [](const GatheredTarget& a, const GatheredTarget& b) { return a.distance_cm != b.distance_cm ? a.distance_cm < b.distance_cm : a.actor < b.actor; });
+    if (out.size() > max) out.resize(max);
+    return out;
+}
+
+bool CombatWorld::ground_height(double x, double y, double z_hint, double* z) const {
+    return nav_ != nullptr && nav_->ground_height(x, y, z_hint, z, 1500.0, 1500.0);
+}
+
 std::optional<npc::ai::State> CombatWorld::ai_state(uint64_t actor_id) const {
     const auto it = npcs_.find(actor_id);
     if (it == npcs_.end()) return std::nullopt;

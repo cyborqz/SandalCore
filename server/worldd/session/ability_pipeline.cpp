@@ -77,6 +77,29 @@ constexpr GatheredCast kGatheredCasts[] = {
     {"Ranger_ScatterShot", 10, 50.0, 2500.0, 250.0, 6000.0, 9, 3500.0, 150.0, 7000.0,
      "/Game/Characters/Animations/00_ABLT/Ranger/ABLT_Scattershot_FullCharge_Montage.ABLT_Scattershot_FullCharge_Montage", 10550296575633473351ull},
 };
+// Casts whose montage launches projectiles at moments of its own (see TimedCast). The times are the montage's FireProjectile notifies over the montage's rate scale, at the PlayRate of 1.0 that the
+// ability item carries; the retail client's PlayRate ran 0.92 to 1.01 in the recorded casts, which moves a launch by up to 0.1 s.
+//  - The Ranger's Air Strike [R: three recorded casts, two with an enemy near the leap; the montage CM_M_RNG_BOW_AirStrike_Montage1, 0.5833 s long at a rate scale of 0.25, so 2.33 s]: the call names no
+//    target. Its three arrows leave at the notifies 0.2574, 0.2795 and 0.3015 s (1.030, 1.118 and 1.206 s after the trigger), from where the caster is in the air, at 4,000 cm/s, each at an angle of its
+//    own from the way the caster faces: -130, -90 and -50 degrees (the pitch of each projectile record's fire rotation: behind and down, straight down, ahead and down). An arrow ends on the ground and
+//    its hit (Ranger_AirStrike, on the caster, the one that shows the blast) fires the area hit Ranger_AirStrike_AoE (a RecursiveHit) at that spot: everything within 400 cm (the targeting record's
+//    sphere). The area hit puts an effect of 0.5 s (Ranger_AirStrike_ICD) on whoever it hurts and does not hurt one that has it: an enemy near two spots is hurt once. In the recorded leaps the arrows
+//    ended 6 to 8 m apart along the path (the caster was 6.1 to 6.5 m up), and the one enemy near the path was in the area of the second arrow only (168 and 57 cm from its spot; the first and third
+//    arrows ended 771 and 491, 679 and 605 cm from it): the same ground spots as this table gives from the client's own moves. The server confirmed the three landings 1.260/1.325/1.426, 1.373/1.402/1.573 and
+//    1.283/1.349/1.450 s after the trigger (PlayRate 1.01, 0.92 and 0.99); the arrow's flight and the notify give 1.216/1.262/1.404 and 1.324/1.375/1.527 for the first two.
+//  - The Ranger's Raining Death [R: three recorded casts]: no target either. Two volleys, at the notifies 0.6522 and 0.9278 s (the FireProjectile with targeting key 2, projectile key 3: the homing
+//    projectile of 6,000 cm/s, fifty at most). Each volley sends one projectile at every enemy the ability's gather record holds (a cone of 70 degrees, 3,000 cm long, starting 500 cm behind the caster) and
+//    its hit (Ranger_RainingDeath_Hit) does the damage when it arrives: an enemy was hurt twice in each of the casts with one (+1.039 and +1.378 s, +0.989 and +1.321 s; the model gives +0.995 and +1.269 s
+//    for the second, whose enemy stood 20 m away). The other projectile of the ability (key 1, arcing) only shows arrows landing (Ranger_RainingDeath_ProxyFXImpactHit, no damage): not sent.
+//  - The Ranger's Barrage [R: three recorded casts]: aimed at a target. The montage loops a section 0.2373 s long that launches three arrows (the notifies 0.2335, 0.3114 and 0.3898 s) until the
+//    ability's held time is over 1.5 s; the retail server then moved the montage to "EndLoop" (0.4384 s into it) 1.628 to 1.795 s after the trigger and cleared it 2.58 to 2.63 s after. Each arrow is the
+//    homing projectile of 7,000 cm/s and its hit (Ranger_Barrage) did damage when it arrived; the confirmations came about every 67 ms (landings are counted on a 33 ms tick), 21, 14 and 15 of them
+//    (16, 14 and 15 with a damage number). 22 arrows over the 1.5 s of the tooltip is modelled: at the recordings' 67 ms they leave from 0.23 s to 1.64 s.
+constexpr TimedCast kTimedCasts[] = {
+    {"Ranger_AirStrike", TimedCast::Kind::Strike, 1, 1.0296, 0.0882, 3, 4000.0, 0.0, 0.0, 0.0, 400.0, {-130.0, -90.0, -50.0}},
+    {"Ranger_RainingDeath", TimedCast::Kind::Volley, 3, 0.6522, 0.2756, 2, 6000.0, 70.0, 3000.0, 500.0},
+    {"Ranger_Barrage", TimedCast::Kind::Barrage, 1, 0.2335, 0.067, 22, 7000.0, 0.0, 0.0, 0.0, 0.0, {0.0, 0.0, 0.0}, 0.43836784f, 1.70, 2.55},
+};
 // When each missile of a volley lands, after the cost step [R: the same cast: its seven confirmations came 940 to 1,405 ms after the cost step, the seventh missile first]. The
 // order and the gaps are the recorded cast's (a flight takes the target's distance over the projectile's speed, which the capture does not give).
 struct MissileLanding {
@@ -1267,8 +1290,8 @@ void AbilityPipeline::apply_hit(AbilityChange& c, const HitDef& hit, double t, b
     drop_evaluation();
     // [R: 6,955 requests of the retail captures] a hit the client asked for is confirmed when it has stat mods (the client draws their numbers), an
     // effect to show (OnHitFXId, OnActivateFXId) or Party in its mask: 664 of 674 with mods and an FX, 66 of 66 with an FX only, 11 of 11 with an
-    // activation FX only, 6 of 74 with none of them; never a Default_Self hit
-    if (src.confirm && (!outs.empty() || hit.row.has_fx || (hit.row.applicable_targets & 8) != 0)) {
+    // activation FX only, 6 of 74 with none of them; never a Default_Self hit. One that fires a projectile is confirmed as well (Maim's Slicing hit has no mod and no FX: 4 of 4)
+    if (src.confirm && (!outs.empty() || hit.row.has_fx || (hit.row.applicable_targets & 8) != 0 || !hit.fires.empty())) {
         bootstrap::HitConfirm h;
         h.record_guid = hit.row.guid;
         h.source_type = src.type;
@@ -1514,6 +1537,13 @@ void AbilityPipeline::run_due(double t) {
                 if (cast.missiles[k].due < cast.missiles[first].due) first = k;
             }
             if (cast.missiles[first].due <= t) {
+                if (cast.missiles[first].kind != Cast::Missile::Kind::Land) {   // a timed cast's launch, or the landing of a Strike's arrow
+                    const Cast::Missile step = cast.missiles[first];
+                    cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
+                    step_timed(cast, step, t);
+                    finish_cast_if_done(i);
+                    return;
+                }
                 // the missile that lands is the one projectile this step fires
                 const int64_t projectile = cast.missiles[first].projectile;
                 const uint64_t target = cast.missiles[first].target;
@@ -1756,6 +1786,7 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
         if (!slot.hit->mods.empty() || slot.hit->row.has_fx || (slot.hit->row.applicable_targets & 8) != 0) confirmations_.push_back(std::move(h));
     } else {
         apply_hit(c, *slot.hit, t, true, src);
+        if (!slot.hit->fires.empty()) fire_from_hit(rec, *slot.hit, t);
     }
     recompute(c);
     emit({std::move(c), std::nullopt, t,
@@ -1765,6 +1796,7 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
 
 bool AbilityPipeline::cancel(int32_t client_instance_id, double now) {
     advance(now);
+    cancel_timed(client_instance_id, now);
     // a held ability (Guard, Reflect) ends with the key's release: its effects go kHeldEndDelay later
     for (Held& h : held_) {
         if (h.client_id == client_instance_id && !h.end_due) h.end_due = now_ + kHeldEndDelay;
@@ -2159,6 +2191,11 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
         if (cast.gathered_projectile != 0) cast.gathered = &g;
     }
+    // a cast whose montage launches its projectiles at moments of its own: the launches are steps of the cast (start_timed). A press that only ends a toggle (the Barrage with the Salvo's
+    // Expeditious on the caster: toggle_off, free) launches nothing
+    for (const TimedCast& tc : kTimedCasts) {
+        if (row.name == tc.ability && has_montage && !loop && !cast.toggle_off) start_timed(cast, tc, t);
+    }
     for (const LoopedCast& l : kLoopedCasts) {
         if (row.name != l.ability || !has_montage || loop) continue;
         cast.looped = &l;
@@ -2208,7 +2245,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                 }
                 cast.projectile_due.reset();
             }
-            if (cast.gathered) cast.projectile_due.reset();   // (its projectiles fly at the enemies it finds, not at a named target: step_branch)
+            if (cast.gathered || cast.timed || cast.toggle_off) cast.projectile_due.reset();   // (its projectiles fly at the enemies it finds, not at a named target: step_branch, start_timed; a press that only ends a toggle fires none)
         }
     }
     // a movement ability opens the move checker's window
@@ -2756,5 +2793,234 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which) {
     recompute(c);
     emit({std::move(c), std::nullopt, t, std::string("the ") + (std::string_view(which) == "hit" ? "hits" : "projectile hits") + " of " + def.row.name});
 }
+
+// ---- casts whose montage launches projectiles at moments of its own (kTimedCasts) ----------------------------------------------------------
+
+namespace {
+
+constexpr double kPiRadians = 3.14159265358979323846;
+// The capsule's centre is this high above the ground the character stands on: a Strike's arrows leave from the centre and end on the ground.
+constexpr double kStandingCentreCm = 90.0;
+
+// The record of the projectile the ability lists under `key` in its ProjectilesIds; 0 when it lists none.
+int64_t projectile_of(const AbilityDef& def, int key) {
+    for (const content::AbilityHitRow& h : def.hits) {
+        if (h.source == "projectile" && h.key == key) return h.owner_guid;
+    }
+    return 0;
+}
+
+}  // namespace
+
+void AbilityPipeline::start_timed(Cast& cast, const TimedCast& timed, double t) {
+    cast.timed = &timed;
+    if (projectile_of(*cast.def, timed.projectile) == 0 && no_formula_.insert(cast.def->row.guid).second) {
+        spdlog::warn("[abilities] {} lists no projectile with key {}: its launches do nothing", cast.def->row.name, timed.projectile);
+    }
+    // where the caster stands as the cast starts: the ground a Strike's arrows come down on where the world knows none
+    combat::Vec3 at;
+    if (combat_) at = combat_->self().position();
+    for (int i = 0; i < timed.count; ++i) {
+        Cast::Missile launch;
+        launch.due = t + timed.first + timed.gap * i;
+        launch.kind = Cast::Missile::Kind::Launch;
+        launch.index = i;
+        launch.x = at.x;
+        launch.y = at.y;
+        launch.z = at.z;
+        cast.missiles.push_back(launch);
+    }
+    if (timed.jump_at > 0 && timed.end_at > timed.jump_at) {   // a loop that ends by itself: the montage moves to its end section and ends
+        cast.montage_branch = true;
+        cast.branch_position = timed.jump_position;
+        cast.branch_predicted = true;   // [R: the retail item named bBranchPredictedOnAutonomous 1: the client's own condition had taken the branch]
+        cast.branch_due = t + timed.jump_at;
+        cast.end_due = t + timed.end_at;
+    }
+}
+
+void AbilityPipeline::step_timed(Cast& cast, const Cast::Missile& m, double t) {
+    if (!combat_ || !cast.timed) return;
+    if (m.kind == Cast::Missile::Kind::Launch) launch_timed(cast, m, t);
+    else if (m.kind == Cast::Missile::Kind::Strike) land_strike(cast, m, t);
+}
+
+void AbilityPipeline::launch_timed(Cast& cast, const Cast::Missile& launch, double t) {
+    const TimedCast& tc = *cast.timed;
+    // the montage that plays the launches is the one the pawn shows: when another ability's item has taken its place nothing more leaves
+    if (cast.instance >= 0 && (!item_instance_ || *item_instance_ != cast.instance)) return;
+    const combat::Fighter& me = combat_->self();
+    switch (tc.kind) {
+        case TimedCast::Kind::Volley: {
+            const int64_t projectile = projectile_of(*cast.def, tc.projectile);
+            if (projectile == 0) return;
+            const std::vector<combat::GatheredTarget> found = combat_->enemies_in_cone(tc.angle, tc.length, tc.behind, kMaxGathered);
+            for (const combat::GatheredTarget& e : found) {
+                Cast::Missile land;
+                land.due = t + e.distance_cm / tc.speed;
+                land.projectile = projectile;
+                land.target = e.actor;
+                cast.missiles.push_back(land);
+            }
+            spdlog::info("[abilities] {} (volley {} of {}): {} enem{} in the cone{}", cast.def->row.name, launch.index + 1, tc.count, found.size(), found.size() == 1 ? "y" : "ies",
+                         found.empty() ? ", nothing is hit" : found.size() == 1 ? ", a projectile flies at it" : ", a projectile flies at each");
+            break;
+        }
+        case TimedCast::Kind::Barrage: {
+            const int64_t projectile = projectile_of(*cast.def, tc.projectile);
+            if (projectile == 0 || cast.target_actors.empty()) return;
+            const uint64_t target = cast.target_actors.front();
+            const combat::TargetInfo ti = combat_->inspect(target);
+            if (!ti.exists || !ti.alive) return;   // (a target that is gone takes no more arrows)
+            Cast::Missile land;
+            land.due = t + std::max(0.0, ti.surface_distance_cm) / tc.speed;
+            land.projectile = projectile;
+            land.target = target;
+            cast.missiles.push_back(land);
+            if (launch.index == 0) spdlog::info("[abilities] {}: {} arrows, one every {:.0f} ms, fly at the target {:.1f} m away", cast.def->row.name, tc.count, tc.gap * 1000.0, ti.surface_distance_cm / 100.0);
+            break;
+        }
+        case TimedCast::Kind::Strike: {
+            // the arrow leaves from where the caster is now, along the line the record's fire rotation gives (counted from the way the caster faces), and ends on the ground
+            const combat::Vec3 from = me.position();
+            const double yaw = me.facing_degrees() * kPiRadians / 180.0;
+            const double pitch = tc.pitch[std::clamp(launch.index, 0, 2)] * kPiRadians / 180.0;
+            const double along = std::cos(pitch), down = -std::sin(pitch);   // per cm of the arrow's way: the share along the facing and the share downwards
+            if (down <= 1e-6) return;   // (an arrow that does not come down never lands)
+            double x = from.x, y = from.y;
+            double ground = launch.z - kStandingCentreCm;   // where the world knows no ground, the ground is the one the caster stood on
+            for (int pass = 0; pass < 4; ++pass) {   // the ground where the arrow ends depends on how far it flies, which depends on that ground: a few passes settle it
+                double g = 0;
+                if (combat_->ground_height(x, y, ground, &g)) ground = g;
+                const double way = std::clamp((from.z - ground) / down, 0.0, 10000.0);   // the projectile record's range
+                x = from.x + std::cos(yaw) * along * way;
+                y = from.y + std::sin(yaw) * along * way;
+            }
+            double g = 0;
+            if (combat_->ground_height(x, y, ground, &g)) ground = g;
+            const double way = std::clamp((from.z - ground) / down, 0.0, 10000.0);
+            Cast::Missile land;
+            land.due = t + way / tc.speed;
+            land.kind = Cast::Missile::Kind::Strike;
+            land.index = launch.index;
+            land.x = x;
+            land.y = y;
+            land.z = ground;
+            cast.missiles.push_back(land);
+            spdlog::info("[abilities] {} (arrow {} of {}): it leaves {:.1f} m up and lands {:.1f} m {} the caster after {:.0f} ms", cast.def->row.name, launch.index + 1, tc.count,
+                         (from.z - ground) / 100.0, std::hypot(x - from.x, y - from.y) / 100.0, along < -1e-6 ? "behind" : "ahead of", way / tc.speed * 1000.0);
+            break;
+        }
+    }
+}
+
+void AbilityPipeline::land_strike(Cast& cast, const Cast::Missile& m, double t) {
+    const TimedCast& tc = *cast.timed;
+    const AbilityDef& def = *cast.def;
+    const int64_t projectile = projectile_of(def, tc.projectile + m.index);
+    if (projectile == 0) return;
+    AbilityChange c;
+    size_t hurt = 0;
+    for (const content::AbilityHitRow& h : def.hits) {
+        if (h.source != "projectile" || h.owner_guid != projectile) continue;
+        const HitDef* hit = catalog_->hit(h.hit_guid);
+        if (!hit) continue;
+        HitSource src;   // the arrow's own hit: on the caster, who sees the blast [R: pa 1, ps 1 in the three recorded casts]
+        src.type = content::kSourceTypeProjectile;
+        src.guid = projectile;
+        src.actor = false;
+        src.confirm = true;
+        src.simulated = true;
+        apply_hit(c, *hit, t, true, src);
+        // ... and the hits it fires where it landed (RecursiveHit): the area hit, on everyone the area holds who was not hurt by this cast already [R: pa 0, ps 0]
+        for (const content::RecursiveHitRow& r : hit->recursive) {
+            const HitDef* area = catalog_->hit(r.child_hit);
+            if (!area) continue;
+            HitSource around = src;
+            around.simulated = false;
+            around.autonomous = false;
+            std::vector<uint64_t> ids;
+            for (const combat::GatheredTarget& e : combat_->enemies_around(combat::Vec3{m.x, m.y, m.z}, tc.radius, kMaxGathered)) {
+                if (cast.struck.insert(e.actor).second) ids.push_back(e.actor);
+            }
+            if (ids.empty()) {
+                // an area that holds nobody is confirmed all the same, with no target [R: 6 of the 9 recorded confirmations]
+                if (!area->mods.empty() || area->row.has_fx) {
+                    bootstrap::HitConfirm none;
+                    none.record_guid = area->row.guid;
+                    none.source_type = around.type;
+                    none.source_guid = around.guid;
+                    none.source_is_actor = false;
+                    none.no_target = true;
+                    none.predicted_autonomous = false;
+                    none.predicted_simulated = false;
+                    confirmations_.push_back(std::move(none));
+                }
+                continue;
+            }
+            hurt += ids.size();
+            apply_hit_on_targets(c, *area, ids, t, around, &def);
+        }
+    }
+    spdlog::info("[abilities] {} (arrow {} of {}) lands at {:.1f} m from the caster: {} enem{} hurt", def.row.name, m.index + 1, tc.count,
+                 std::hypot(m.x - combat_->self().position().x, m.y - combat_->self().position().y) / 100.0, hurt, hurt == 1 ? "y" : "ies");
+    recompute(c);
+    emit({std::move(c), std::nullopt, t, "arrow " + std::to_string(m.index + 1) + " of " + def.row.name + " lands"});
+}
+
+void AbilityPipeline::cancel_timed(int32_t client_instance_id, double now) {
+    for (Cast& cast : casts_) {
+        if (cast.client_id != client_instance_id || !cast.timed || cast.timed->kind != TimedCast::Kind::Barrage) continue;
+        // The key went up: the arrows that have not left stay in the quiver, and the montage moves on to the end of its loop [modelled: no recording holds a Barrage let go early].
+        size_t kept = 0;
+        for (const Cast::Missile& m : cast.missiles) {
+            if (m.kind != Cast::Missile::Kind::Launch) cast.missiles[kept++] = m;
+        }
+        const size_t dropped = cast.missiles.size() - kept;
+        cast.missiles.resize(kept);
+        const TimedCast& tc = *cast.timed;
+        if (cast.branch_due && now_ + kHeldEndDelay < *cast.branch_due) {
+            cast.branch_due = now_ + kHeldEndDelay;
+            cast.end_due = *cast.branch_due + (tc.end_at - tc.jump_at);
+        }
+        if (dropped > 0) spdlog::info("[abilities] the key of {} went up {:.3f} s after the trigger: {} arrows stay in the quiver", cast.def->row.name, now - cast.trigger_at, dropped);
+    }
+}
+
+void AbilityPipeline::fire_from_hit(const CastRecord& rec, const HitDef& hit, double t) {
+    if (!combat_ || hit.fires.empty()) return;
+    // the hit's own requirement decides whether it fires at all (Maim's Slicing hit asks for the talent that makes the blow throw a wave)
+    std::string why;
+    bool ok = true;
+    const bool allowed = eval_bool(hit.row.requirement_expr, true, ok, why) && ok;
+    drop_evaluation();
+    if (!allowed) return;
+    const AbilityDef* def = catalog_->ability(rec.ability);
+    if (!def) return;
+    Cast wave;   // a cast with nothing to do but land what it fired: it ends with its last missile
+    wave.client_id = rec.client_id;
+    wave.def = def;
+    wave.trigger_at = rec.trigger_at;
+    for (const int64_t guid : hit.fires) {
+        const content::ProjectileRow* p = catalog_->projectile(guid);
+        if (!p || p->speed <= 0) continue;
+        if (p->projectile_type.find("Straight") == std::string::npos) {   // (a homing or an arcing one needs its target: not made)
+            if (no_formula_.insert(guid).second) spdlog::info("[abilities] the hit {} fires {}, a {} projectile: only straight ones are made", hit.row.name, p->name, p->projectile_type);
+            continue;
+        }
+        // a straight projectile flies the line ahead of the caster and lands on every enemy its width meets, when it gets there
+        const std::vector<combat::GatheredTarget> found = combat_->enemies_in_line(p->range, p->sphere_radius, kMaxGathered);
+        for (const combat::GatheredTarget& e : found) {
+            Cast::Missile land;
+            land.due = t + e.distance_cm / p->speed;
+            land.projectile = guid;
+            land.target = e.actor;
+            wave.missiles.push_back(land);
+        }
+        spdlog::info("[abilities] {} ({}): a straight projectile of {:.0f} cm/s flies {:.0f} m ahead: {} enem{} in its way", def->row.name, hit.row.name, p->speed, p->range / 100.0, found.size(), found.size() == 1 ? "y" : "ies");
+    }
+    if (!wave.missiles.empty()) casts_.push_back(std::move(wave));
+}
+
 
 }  // namespace aoc::worldd
