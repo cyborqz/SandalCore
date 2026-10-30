@@ -112,6 +112,8 @@ public:
     NpcCastState                           cast;             // the attack the client is shown (combat/npc_ability_replicator.h)
     std::map<std::string, double>          cooldown_until;   // the name of a task's cooldown -> when it is over
     double                                 hold_until = 0;   // the creature stands still, facing as it does, until then (the montage of an attack it stands for)
+    double                                 stand_off_cm = -1;   // a creature whose attacks launch projectiles closes in on its target to this distance (its tree's arrival distance) between two casts; -1: it does not
+    double                                 shot_reach_cm = -1;  // ... and starts casting once its target is within this reach (the distance its tree lets it cast from)
     double                                 fight_began = 0;  // when its fight began (the tree asks how long it has gone on)
     std::map<std::string, double>          fight_rolls;      // the numbers its tree rolled when this fight began, by the tree's variable (a first special attack comes only after one of them)
     uint64_t                               killer = 0;
@@ -224,6 +226,7 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     // a creature whose tree has no attack it can play (a Blueprint with no open of its own, whose generic open lists none of the tree's abilities) keeps the single swing every creature had: the tree
     // would otherwise find nothing to use and the creature would stand and stare.  A tree that merely allows none right now (range, angle, cooldown, a roll) is not this: that creature waits.
     if (n->anim && !can_animate(*n)) n->anim = nullptr;
+    stand_off_of(*n, n->stand_off_cm, n->shot_reach_cm);
     if (n->anim) {   // its attacks start only where its tree's conditions hold: the reach is not stretched once a fight begins, and it walks up to just inside it (a chase ends at 96 % of the reach)
         p.attack_hysteresis = 1.0;
         p.chase_stop_fraction = 0.96;
@@ -391,6 +394,7 @@ void CombatWorld::stop_cast(Npc& n) {
 
 void CombatWorld::forget(uint64_t actor_id) {
     if (const auto it = npcs_.find(actor_id); it != npcs_.end()) stop_cast(*it->second);
+    flights_.erase(std::remove_if(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.npc == actor_id; }), flights_.end());
     npcs_.erase(actor_id);
     stats_filled_.erase(actor_id);
 }
@@ -655,6 +659,30 @@ bool CombatWorld::can_animate(const Npc& n) const {
     return false;
 }
 
+bool CombatWorld::launches_projectiles(const abilities::AbilityDef& def) const {
+    if (!anim_) return false;
+    bool rows = false;
+    for (const content::AbilityHitRow& r : def.hits) rows = rows || r.source == "projectile";
+    if (!rows) return false;
+    for (const content::MontageRow& m : def.montages) {
+        const MontageData* md = m.soft_path.empty() ? nullptr : anim_->montage(m.soft_path);
+        if (md && !md->fires.empty()) return true;
+    }
+    return false;
+}
+
+void CombatWorld::stand_off_of(const Npc& n, double& arrival, double& reach) const {
+    arrival = reach = -1;
+    if (!n.anim) return;
+    for (const CreatureAbility& t : *n.anim) {
+        if (t.unknown || t.off || !t.fight || !(t.arrival_cm > 0)) continue;
+        const abilities::AbilityDef* d = catalog_.ability(t.ability);
+        if (!d || !is_attack(*d, catalog_, data_.ids().health) || !animates(n, *d) || !launches_projectiles(*d)) continue;
+        arrival = t.arrival_cm;
+        reach = std::max(reach, t.max_distance > 0 ? t.max_distance : t.arrival_cm);   // (the farthest any of its shots may be cast from)
+    }
+}
+
 bool CombatWorld::montages_readable(const abilities::AbilityDef& def) const {
     if (!anim_) return false;
     bool data = false;
@@ -778,7 +806,18 @@ bool CombatWorld::plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& 
             break;
         }
     }
-    if (out.hits.empty()) return false;
+    // every notify that launches a projectile flies the projectile of the ability that carries the notify's key; what it lands on arrival is the hits its record lists
+    for (const MontageData::Fire& f : montage->fires) {
+        PlannedFire fire;
+        fire.delay = f.time / montage->rate_scale;
+        for (const content::AbilityHitRow& r : def.hits) {
+            if (r.source != "projectile" || r.key != f.key) continue;
+            fire.projectile = r.owner_guid;
+            if (std::find(fire.hits.begin(), fire.hits.end(), r.hit_guid) == fire.hits.end()) fire.hits.push_back(r.hit_guid);
+        }
+        if (fire.projectile != 0 && catalog_.projectile(fire.projectile)) out.fires.push_back(std::move(fire));
+    }
+    if (out.hits.empty() && out.fires.empty()) return false;
     out.montage = montage;
     out.seconds = montage->seconds(1.0);
     return true;
@@ -803,6 +842,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
             NpcCast cast;
             cast.ability = a.ability->row.guid;
             cast.target = target;
+            cast.target_guid = port->cylinder_guid();   // (the client's targeting finds the player by his collision cylinder's NetGUID, in full)
             at = port->fighter().position();
             cast.tx = at.x;
             cast.ty = at.y;
@@ -856,8 +896,8 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         // where the tables have the montage's animation-end notify (a bandit's), the creature's task is done there and the cooldowns it starts run from there; else they run from the cast's start
         const double done = plan.montage ? plan.montage->task_done_after(1.0) : 0.0;
         if (a.task && !a.task->task.empty() && a.task->cooldown > 0) n.cooldown_until[a.task->task] = now + done + a.task->cooldown;
-        if (a.task) {
-            for (const auto& [name, seconds] : a.task->starts) n.cooldown_until[name] = now + done + seconds;
+        if (a.task) {   // (a timer the tree rolls anew each time takes a fresh number of seconds between its low and its high)
+            for (const CooldownStart& c : a.task->starts) n.cooldown_until[c.name] = now + done + (c.high > c.low ? c.low + (c.high - c.low) * rng_.rand_double() : c.low);
         }
         if (a.task) n.hold_until = now + plan.seconds;   // (no chase runs in the state of an attack: the creature stands, and turns, until the montage is over)
         n.next_attack_at = now + plan.seconds;
@@ -891,7 +931,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         if (npc_casts_logged_ < kLoggedNpcCasts) {
             ++npc_casts_logged_;
             p.logged = true;
-            spdlog::info("[combat] {} ({}) plays {}: {} hit(s) over {:.2f} s{}", n.actor_id, n.leaf, a.ability->row.name, plan.hits.size(), plan.seconds,
+            spdlog::info("[combat] {} ({}) plays {}: {} hit(s) and {} projectile(s) over {:.2f} s{}", n.actor_id, n.leaf, a.ability->row.name, plan.hits.size(), plan.fires.size(), plan.seconds,
                          a.task && a.task->stop_movement ? ", standing still" : "");
         }
         p.animated = true;
@@ -903,8 +943,12 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         for (size_t i = 1; i < p.timed_hits.size(); ++i) {   // the notifies are in time order; the lower bound keeps them so
             p.timed_hits[i].first = std::max(p.timed_hits[i].first, p.timed_hits[i - 1].first);
         }
+        for (const PlannedFire& fire : plan.fires) p.timed_fires.emplace_back(now + std::max(fire.delay, kMinHitDelay), fire);
+        for (size_t i = 1; i < p.timed_fires.size(); ++i) p.timed_fires[i].first = std::max(p.timed_fires[i].first, p.timed_fires[i - 1].first);
         p.end_at = now + plan.seconds;
-        p.due = p.timed_hits.empty() ? p.end_at : p.timed_hits.front().first;
+        p.due = p.end_at;
+        if (!p.timed_hits.empty()) p.due = std::min(p.due, p.timed_hits.front().first);
+        if (!p.timed_fires.empty()) p.due = std::min(p.due, p.timed_fires.front().first);
     } else {
         p.due = now + a.windup_ms / 1000.0;
         std::set<int64_t> seen;
@@ -916,12 +960,13 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
     ++stats_.npc_attacks;
 }
 
-void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t guid, double now) {
+void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t guid, double now, int64_t projectile) {
     const abilities::HitDef* hit = catalog_.hit(guid);
     if (!hit || (hit->row.applicable_targets & 2) == 0 || hit->mods.empty()) return;
     HitMeta meta;
-    meta.source_type = content::kSourceTypeAbility;
-    meta.source_guid = ability.row.guid;
+    // a hit a projectile carries names the projectile's record as its source, as the game confirms it
+    meta.source_type = projectile != 0 ? content::kSourceTypeProjectile : content::kSourceTypeAbility;
+    meta.source_guid = projectile != 0 ? projectile : ability.row.guid;
     meta.ability_tags = ability.row.tags;
     Resolved r;
     std::string why;
@@ -989,7 +1034,11 @@ void CombatWorld::resolve_pending(double now) {
                     deliver_hit(n, *q, *p.ability, guid, now);
                 }
             }
-            if (p.next_hit >= p.timed_hits.size() && now >= p.end_at) {
+            while (p.next_fire < p.timed_fires.size() && p.timed_fires[p.next_fire].first <= now) {
+                const PlannedFire fire = p.timed_fires[p.next_fire++].second;
+                launch(n, p.target, *p.ability, fire, now);
+            }
+            if (p.next_hit >= p.timed_hits.size() && p.next_fire >= p.timed_fires.size() && now >= p.end_at) {
                 if (p.logged && port) {   // where the lunge left the creature, as the server has it (what the client draws is for the client's log)
                     const world::WorldActor* w = registry_.find(n.actor_id);
                     const Vec3 at = port->fighter().position();
@@ -1001,7 +1050,9 @@ void CombatWorld::resolve_pending(double now) {
                 stop_cast(n);
                 continue;
             }
-            p.due = p.next_hit < p.timed_hits.size() ? std::min(p.timed_hits[p.next_hit].first, p.end_at) : p.end_at;
+            p.due = p.end_at;
+            if (p.next_hit < p.timed_hits.size()) p.due = std::min(p.due, p.timed_hits[p.next_hit].first);
+            if (p.next_fire < p.timed_fires.size()) p.due = std::min(p.due, p.timed_fires[p.next_fire].first);
             keep.push_back(std::move(p));
             continue;
         }
@@ -1021,6 +1072,121 @@ void CombatWorld::resolve_pending(double now) {
         for (const int64_t guid : p.hits) deliver_hit(n, *port, *p.ability, guid, now);
     }
     for (Pending& p : keep) pending_.push_back(std::move(p));
+}
+
+// ---- projectiles ----------------------------------------------------------------------------------------------------------------------
+
+void CombatWorld::launch(Npc& n, uint64_t target, const abilities::AbilityDef& ability, const PlannedFire& fire, double now) {
+    const content::ProjectileRow* record = catalog_.projectile(fire.projectile);
+    const world::WorldActor* w = registry_.find(n.actor_id);
+    PlayerPort* port = player(target);
+    if (!record || !w || !port || !port->fighter().alive() || !(record->speed > 0)) return;
+    Flight f;
+    f.npc = n.actor_id;
+    f.target = target;
+    f.ability = &ability;
+    f.projectile = fire.projectile;
+    f.hits = fire.hits;
+    // A projectile whose own hit hurts nobody only starts a ground zone (the oozing bomb of the goblin shamans).  The world has no ground zones of a creature yet, so the damage the target
+    // takes where the bomb lands is the zone's first hit, which the ability lists among its own hits.
+    const auto hurts = [&](int64_t guid) {
+        const abilities::HitDef* h = catalog_.hit(guid);
+        return h && (h->row.applicable_targets & 2) != 0 && !h->mods.empty();
+    };
+    if (std::none_of(f.hits.begin(), f.hits.end(), hurts)) {
+        for (const content::AbilityHitRow& r : ability.hits) {
+            if (r.source == "hit" && hurts(r.hit_guid) && std::find(f.hits.begin(), f.hits.end(), r.hit_guid) == f.hits.end()) f.hits.push_back(r.hit_guid);
+        }
+    }
+    f.speed = record->speed;
+    f.radius = std::max(0.0, record->sphere_radius);
+    f.range = record->range > 0 ? record->range : 1e9;
+    f.life = std::max(0.0, record->life_time);
+    f.homing = record->projectile_type.find("Homing") != std::string::npos;
+    f.stops_at_aim = record->projectile_type.find("ToTarget") != std::string::npos;
+    f.hits_left = std::max(1, record->max_hits);
+    f.at = {w->x, w->y, w->z};
+    const Vec3 aim = port->fighter().position();
+    f.aim_distance = distance_cm(f.at, aim);
+    if (f.aim_distance > 1e-6) {
+        f.dir = {(aim.x - f.at.x) / f.aim_distance, (aim.y - f.at.y) / f.aim_distance, (aim.z - f.at.z) / f.aim_distance};
+    } else {
+        const double yaw = w->yaw_degrees * 3.14159265358979323846 / 180.0;
+        f.dir = {std::cos(yaw), std::sin(yaw), 0.0};
+    }
+    f.launched = f.last = now;
+    flights_.push_back(std::move(f));
+}
+
+void CombatWorld::advance_flights(double now) {
+    struct Landing {
+        Flight   flight;
+        uint64_t player = 0;
+    };
+    std::vector<Landing> landings;
+    for (size_t i = 0; i < flights_.size();) {
+        Flight& f = flights_[i];
+        const double dt = now - f.last;
+        if (dt <= 0) {
+            ++i;
+            continue;
+        }
+        f.last = now;
+        bool gone = npcs_.find(f.npc) == npcs_.end();   // (its creature was forgotten)
+        const double step = f.speed * dt;
+        if (!gone && f.homing) {
+            PlayerPort* port = player(f.target);
+            if (!port || !port->fighter().alive()) {
+                gone = true;   // nobody is left to reach
+            } else {
+                const Vec3 at = port->fighter().position();
+                const double dx = at.x - f.at.x, dy = at.y - f.at.y, dz = at.z - f.at.z;
+                const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+                const double reach = f.radius + port->fighter().radius_cm();
+                if (dist - reach <= step) {
+                    landings.push_back({f, f.target});
+                    gone = true;
+                } else {
+                    f.at.x += dx / dist * step;
+                    f.at.y += dy / dist * step;
+                    f.at.z += dz / dist * step;
+                    f.travelled += step;
+                }
+            }
+        } else if (!gone) {
+            // a straight one: the line it was launched on, and whoever's body the piece flown in this tick touches
+            const Vec3 from = f.at;
+            const double length = f.stops_at_aim ? std::min(step, std::max(0.0, f.aim_distance + 200.0 - f.travelled)) : step;
+            f.at = {from.x + f.dir.x * length, from.y + f.dir.y * length, from.z + f.dir.z * length};
+            f.travelled += length;
+            for (PlayerPort* q : players_) {
+                if (!q->fighter().alive() || f.struck.count(q->actor_id()) || f.hits_left <= 0) continue;
+                const Vec3 p = q->fighter().position();
+                const double along = std::clamp((p.x - from.x) * f.dir.x + (p.y - from.y) * f.dir.y + (p.z - from.z) * f.dir.z, 0.0, length);
+                const Vec3 closest{from.x + f.dir.x * along, from.y + f.dir.y * along, from.z + f.dir.z * along};
+                if (distance_cm(closest, p) > f.radius + q->fighter().radius_cm()) continue;
+                landings.push_back({f, q->actor_id()});
+                f.struck.insert(q->actor_id());
+                --f.hits_left;
+            }
+            if (f.hits_left <= 0 || (f.stops_at_aim && f.travelled >= f.aim_distance + 200.0)) gone = true;
+        }
+        if (!gone && ((f.life > 0 && now - f.launched > f.life) || f.travelled > f.range)) gone = true;
+        if (gone) flights_.erase(flights_.begin() + static_cast<std::ptrdiff_t>(i));
+        else ++i;
+    }
+    // what arrived lands after the flights are sorted out, so a hit that reaches into the world cannot disturb the list
+    for (const Landing& l : landings) {
+        const auto it = npcs_.find(l.flight.npc);
+        PlayerPort* port = player(l.player);
+        if (it == npcs_.end() || !port || !port->fighter().alive()) continue;
+        if (projectiles_logged_ < kLoggedProjectiles) {
+            ++projectiles_logged_;
+            spdlog::info("[combat] {} ({}) projectile of {} reached player {} after {:.2f} s and {:.1f} m", it->second->actor_id, it->second->leaf, l.flight.ability->row.name, l.player, now - l.flight.launched,
+                         l.flight.travelled / 100.0);
+        }
+        for (const int64_t hit : l.flight.hits) deliver_hit(*it->second, *port, *l.flight.ability, hit, now, l.flight.projectile);
+    }
 }
 
 // ---- hits from a player -------------------------------------------------------------------------------------------------------------
@@ -1159,7 +1325,9 @@ void CombatWorld::set_flags(Npc& n, bool in_combat, uint64_t target_actor) {
     n.flags_in_combat = in_combat;
     n.flags_target = object;
     n.cs->set_in_combat(in_combat);
-    write_combat(registry_, n.actor_id, in_combat, false, object);
+    // the one it fights is named as the client knows his pawn: the NetGUID in full, with the session's ServerId and Randomizer
+    const PlayerPort* who = object != 0 ? player(object) : nullptr;
+    write_combat(registry_, n.actor_id, in_combat, false, who ? who->pawn_guid() : ::aoc::protocol::emit::FIntrepidNetworkGUID::from_u64(object));
 }
 
 void CombatWorld::begin_reset(Npc& n, double now) {
@@ -1209,6 +1377,7 @@ void CombatWorld::think(Npc& n, double now) {
     s.home = {a->npc.home_x, a->npc.home_y, a->npc.home_z};
     s.self_yaw_degrees = a->yaw_degrees;
     s.attack_range_cm = n.next.range_cm;
+    if (n.shot_reach_cm > 0) s.attack_range_cm = n.shot_reach_cm;   // a creature that shoots starts casting once its target is within the reach of its shots, whichever attack the preview pick is (right after a cast it is on its timer)
     const double far = n.ai.params().leash_radius_cm * 2.0 + n.ai.params().aggro_radius_cm;
     for (PlayerPort* p : players_) {
         const Fighter& f = p->fighter();
@@ -1293,6 +1462,9 @@ void CombatWorld::think(Npc& n, double now) {
                     const double reach = why.reach_cm >= 0 ? why.reach_cm : static_cast<double>(n.next.range_cm);
                     const double stop = std::max(0.0, reach * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm();
                     pursue(n, o.target, n.ai.params().chase_speed_cm_s, stop);
+                } else if (n.stand_off_cm > 0 && distance_xy_cm(Vec3{a->x, a->y, a->z}, at) - n.radius_cm() - port->fighter().radius_cm() > n.stand_off_cm + 5.0) {
+                    // a creature that shoots closes in on its target between two casts, up to the arrival distance of its tree's approach (it does not back away when it is nearer)
+                    pursue(n, o.target, n.ai.params().chase_speed_cm_s, n.stand_off_cm + n.radius_cm() + port->fighter().radius_cm());
                 }
             } else if (port && have_pick && picked.task && picked.task->stop_movement && !picked.task->rotates && !faces(n, port->fighter().position(), 2.0)) {
                 // a task that stands for its montage and does not turn the creature during it begins with the creature facing its target: it turns first, at its rate, and begins at a later look
@@ -1310,6 +1482,7 @@ void CombatWorld::tick(double now) {
     now_ = now;
     if (!cfg_.enabled) return;
     resolve_pending(now);
+    advance_flights(now);
     if (now < next_think_) return;
     next_think_ = now + cfg_.think_seconds;
 

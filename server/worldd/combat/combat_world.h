@@ -29,6 +29,7 @@
 #include "npc/ai/npc_ai.h"
 #include "npc/motion_table.h"
 #include "npc/npc_world.h"
+#include "protocol/emit/intrepid_netguid.h"
 #include "session/ability_catalog.h"
 #include "world/actor_registry.h"
 
@@ -88,6 +89,10 @@ public:
     virtual void set_in_combat(bool in_combat, double now) = 0;
     /// The player's CharacterGuid (its four words): the guid the loot's interaction is offered to.
     virtual std::array<uint32_t, 4> character_guid() const { return {}; }
+    /// The NetGUIDs the client knows the player by, each with the ServerId and Randomizer of the session: his pawn (a creature's CombatInfo.ActiveTargets names it) and the pawn's collision cylinder (the
+    /// ability item of a creature's cast names it in its Targets, and the client's targeting finds the target by it).  The defaults name the pawn by its ObjectId alone and the cylinder by none.
+    virtual protocol::emit::FIntrepidNetworkGUID pawn_guid() const { return protocol::emit::FIntrepidNetworkGUID::from_u64(actor_id()); }
+    virtual protocol::emit::FIntrepidNetworkGUID cylinder_guid() const { return {}; }
     /// The player killed a creature or helped to: the experience it is worth (the session applies it to its progress).
     virtual void receive_kill(const KillReward& /*kill*/, double /*now*/) {}
 };
@@ -286,6 +291,12 @@ private:
         int    range_cm = 220;
         const CreatureAbility* task = nullptr;   // the Blueprint's task that picked it (a creature with its own animation)
     };
+    /// A projectile an attack launches: when (seconds after the attack begins), the projectile record that flies and the hits it lands where it arrives.
+    struct PlannedFire {
+        double               delay = 0;
+        int64_t              projectile = 0;
+        std::vector<int64_t> hits;
+    };
     struct Pending {
         double   due = 0;
         uint64_t npc = 0, target = 0;
@@ -298,6 +309,22 @@ private:
         double   end_at = 0;
         bool     logged = false;    // the log has the line of its beginning, so it gets the line of its end
         std::vector<BiteArea> timed_areas;   // where each of those hits lands (the targeting record of the hit's key): a hit that reaches nobody sends nothing
+        std::vector<std::pair<double, PlannedFire>> timed_fires;   // (when, the projectile) for every notify of the montage that launches one, in time order
+        size_t   next_fire = 0;
+    };
+    /// A projectile in the air.  A homing one follows its target until it reaches it; a straight one flies the line it was launched on and lands on the players whose bodies it meets.  What it
+    /// lands is the hits of its record, through the same hit rules as every other hit of a creature.
+    struct Flight {
+        uint64_t             npc = 0, target = 0;
+        const abilities::AbilityDef* ability = nullptr;
+        int64_t              projectile = 0;
+        std::vector<int64_t> hits;
+        double               speed = 0, radius = 0, range = 0, life = 0;   // cm/s, cm, cm, seconds (0: no limit)
+        bool                 homing = true, stops_at_aim = false;
+        Vec3                 at, dir;
+        double               aim_distance = 0, launched = 0, last = 0, travelled = 0;
+        int                  hits_left = 1;
+        std::set<uint64_t>   struck;   // the players a straight one has landed on
     };
     /// Why the tree allowed none of a creature's attacks from where it stands: its target is farther than the attacks reach, or the right distance but not within the angle of its facing.
     /// `reach_cm` is the shortest reach of the ready attacks that stopped for the distance (an attack that needs the target a minimum distance away, a gap closer, does not count): the creature walks up to it.
@@ -315,6 +342,7 @@ private:
         const MontageData* montage = nullptr;
         double             seconds = 0;
         std::vector<PlannedHit> hits;
+        std::vector<PlannedFire> fires;   // the projectiles its montage launches
     };
     class Npc;
     Npc*  combatant(uint64_t actor_id);
@@ -349,7 +377,16 @@ private:
     /// single swing every creature had before the trees.
     bool  can_animate(const Npc& n) const;
     bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
-    void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now);
+    /// `projectile`: the record of the projectile that carried the hit (0: the ability itself made it), which the confirmation names as its source.
+    void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now, int64_t projectile = 0);
+    /// Whether the ability launches projectiles at all: it lists projectile records and a montage of it has a notify that launches one.
+    bool  launches_projectiles(const abilities::AbilityDef& def) const;
+    /// For a creature whose attacks launch projectiles: the arrival distance of its tree's approach (it closes in to it between two casts) and the farthest its tree lets it cast from; both -1 for a
+    /// creature that does not shoot.
+    void  stand_off_of(const Npc& n, double& arrival, double& reach) const;
+    /// A projectile leaves the creature at the notify of its montage; `advance_flights` moves every projectile in the air and lands the ones that arrive.
+    void  launch(Npc& n, uint64_t target, const abilities::AbilityDef& ability, const PlannedFire& fire, double now);
+    void  advance_flights(double now);
     void  kill(Npc& n, uint64_t killer, double now, bool gm = false);
     void  begin_reset(Npc& n, double now);
     void  set_flags(Npc& n, bool in_combat, uint64_t target_actor);
@@ -373,6 +410,7 @@ private:
     std::vector<PlayerPort*> players_;
     std::map<uint64_t, double> player_combat_until_;   // actor id -> when its combat flag ends
     std::vector<Pending>   pending_;
+    std::vector<Flight>    flights_;
     const NpcAbilityData*  anim_ = nullptr;
     const npc::SensesTable* senses_ = nullptr;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
@@ -387,6 +425,8 @@ private:
     static constexpr size_t kLoggedNpcHits = 400;
     size_t                 npc_casts_logged_ = 0;                // the attacks with their own animation written to the log so far (the first kLoggedNpcCasts)
     static constexpr size_t kLoggedNpcCasts = 200;
+    size_t                 projectiles_logged_ = 0;              // the projectiles that arrived, written to the log so far (the first kLoggedProjectiles)
+    static constexpr size_t kLoggedProjectiles = 200;
 };
 
 }  // namespace aoc::worldd::combat

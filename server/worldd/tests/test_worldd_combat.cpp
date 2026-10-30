@@ -303,6 +303,8 @@ int main() {
     test_swing_faces_its_target(f);
     test_turn_to_a_player_behind(f);
     test_bandit_raider_fights_a_standing_player(f);
+    test_arsonist_fires_at_a_standing_player(f);
+    test_plain_goblin_shaman_throws_its_bomb(f);
     test_goblin_flayer_animates_its_attacks(f);
     test_languid_goblin_animates_its_swing(f);
     test_humanoids_walk_up_to_a_far_player(f);

@@ -175,6 +175,8 @@ public:
     }
     void set_in_combat(bool in_combat, double) override { wants_in_combat = in_combat; }
     std::array<uint32_t, 4> character_guid() const override { return s_.pb_.setup().character_guid; }
+    FIntrepidNetworkGUID pawn_guid() const override { return s_.pb_.setup().guids.pawn; }
+    FIntrepidNetworkGUID cylinder_guid() const override { return s_.pb_.setup().guids.collision_cylinder; }
     void receive_kill(const combat::KillReward& kill, double) override {
         if (kills.size() < 64) kills.push_back(kill);
     }

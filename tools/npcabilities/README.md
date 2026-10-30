@@ -21,6 +21,11 @@ It writes three tables (five with `--senses-dir`):
   `rotate` is "speed:duration" of the Rotate To task (turn towards the target) that runs with the ability, in its state or one above it: while the ability plays the creature keeps turning to its
   target at `speed` degrees a second (-1: the task names none, so the creature's own rotation rate) for `duration` seconds (0: until the ability is over); empty when no such task runs with it (the Grem's
   Snap and Fury do not turn it; the wolf's bite, the bear's swings and the goblin's swings do).
+  `arrival` is how near its target the creature's approach brings it: the arrival distance of the move-to-target task in a state directly below the Combat state (-1: none). A creature whose attacks
+  launch projectiles casts from as far as its tree allows (the largest `max_distance` of those tasks) and closes in to that distance between two casts. A timer of the tree that holds a charge once its seconds have passed since it was emptied (the accumulator tasks: a global cooldown, a special
+  attack's) is said as a cooldown named `acc.<identifier>`: the task's `gates` hold it, and `starts` has it as `acc.<identifier>=seconds` (or `=low~high` when the tree rolls the seconds anew each
+  time) for the task whose completion empties it; a task that compares the fight's clock with a number the tree generates at the start of the fight is said with `fcr`. A few abilities the world
+  cannot play yet are left out whatever their conditions say: their rows are `unknown`, and `why` says what they wait for.
   A tree takes some settings from its parameters (the distance of a bite, whether the creature may pounce); the tool reads them from the Blueprint's reference to the tree and the tree's
   own defaults and folds them in: a condition that compares parameters is decided when the table is made, and a task a parameter switches off for the creature has `why` = `off`.
   A cooldown a task takes from a parameter (the Goblin Flayer's Overhead Slash waits as long as its Blueprint's parameter says) is that parameter's value for the creature. The time into the fight is
@@ -37,7 +42,8 @@ It writes three tables (five with `--senses-dir`):
   Animation Compression Library's (`Acl.cs`: the translation of the root bone's track, read the way the client's own decompression reads it). The client moves a creature along that travel by itself while the
   montage plays. `anim_end` is the time of the montage's animation-end notify (the animation is over there and the rest of the montage is its blend out): the creature's ability task is
   done at that time, and the cooldowns the task starts run from there. It is filled for the folders the extractor lists as `$NpcAnimEndFolders` (the bandits) and empty for the others,
-  whose cooldowns run from the start of the cast.
+  whose cooldowns run from the start of the cast. `fires` is `time:key` for every notify of the montage that launches a projectile (the time in seconds at a play rate of 1; the key picks the
+  ability's projectile record, 0 when the notify names none): the projectile leaves the creature there, flies by its record's speed and path, and lands the hits of its record when it arrives.
 - `npc_targeting.tsv` (`targeting.py`, from content.db): where each listed ability's hit lands, one line per targeting record of the ability (`key`):
   - `discovery` is how the record finds its target: `none`, `prefers_active` (what the creature fights now, else the one the cast was aimed at), `only_locked` (the one the cast was aimed at),
     `only_active` or `prefers_locked`.

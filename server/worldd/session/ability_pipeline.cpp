@@ -1147,8 +1147,11 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     h.record_guid = in.hit_guid;
     h.source_type = in.source_type;
     h.source_guid = in.source_guid;
-    h.source_is_actor = true;
+    // a creature's projectile hit as the game confirms it: no source actor (the source is the projectile's record), predicted on both the autonomous and the simulated side
+    const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
+    h.source_is_actor = !from_projectile;
     h.predicted_autonomous = true;
+    h.predicted_simulated = from_projectile;
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
     uint8_t flags = in.flags;
     const double before = stat_now(content::kGuidHealth);

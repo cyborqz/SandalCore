@@ -96,6 +96,8 @@ public:
     const HitDef*     hit_named(std::string_view name) const;
     /// A lingering zone (ab_zone: its lifetime and tick rate; the hits are the ones the abilities list).
     const content::ZoneRow* zone(int64_t guid) const;
+    /// A projectile record an ability fires (its speed, path, life and range); null for one the abilities do not fire.
+    const content::ProjectileRow* projectile(int64_t guid) const;
     /// The expression with the ab_expr id; null for 0 (none) and for an id the tables do not have.
     const content::ExprRow* expr(int64_t id) const;
     /// The bundle program of an expression id: -1 when there is none (id 0, or one that does not compile: expr()->error says why).
@@ -117,6 +119,7 @@ private:
     std::map<int64_t, HitDef>             hits_;
     std::map<int64_t, ReactionDef>        reactions_;
     std::map<int64_t, content::ZoneRow>   zones_;
+    std::map<int64_t, content::ProjectileRow> projectiles_;
     std::map<int64_t, content::ExprRow>   exprs_;
 };
 

@@ -51,6 +51,20 @@ private:
     std::vector<int64_t> aligns_;
 };
 
+/// The NetGUIDs the rig's player is known by, with the ServerId and Randomizer of a session: his pawn, and the pawn's collision cylinder (the pawn's ObjectId + 20, as in the captured session).
+inline emit::FIntrepidNetworkGUID rig_pawn_guid(uint64_t id) {
+    emit::FIntrepidNetworkGUID g;
+    g.ObjectId = id;
+    g.ServerId = 60;
+    g.Randomizer = 0x5eed1234u;
+    return g;
+}
+inline emit::FIntrepidNetworkGUID rig_cylinder_guid(uint64_t id) {
+    emit::FIntrepidNetworkGUID g = rig_pawn_guid(id);
+    g.ObjectId = id + 20;
+    return g;
+}
+
 /// A player's session as the world sees it: it takes the NPCs' hits off the character's Health through the pipeline and keeps what it was told.
 class FakePlayer final : public combat::PlayerPort {
 public:
@@ -70,6 +84,8 @@ public:
         this->in_combat = in_combat;
     }
     std::array<uint32_t, 4> character_guid() const override { return guid; }
+    emit::FIntrepidNetworkGUID pawn_guid() const override { return rig_pawn_guid(fighter_.id()); }
+    emit::FIntrepidNetworkGUID cylinder_guid() const override { return rig_cylinder_guid(fighter_.id()); }
     void receive_kill(const combat::KillReward& kill, double now) override {
         kills.push_back(kill);
         (void)now;
@@ -165,6 +181,20 @@ inline bool combat_flag(const world::WorldActor& a, const char* name) {
         return b && *b;
     }
     return false;
+}
+
+/// ActiveTargets' first object in full: its ObjectId, ServerId and Randomizer (an empty NetGUID: none).
+inline emit::FIntrepidNetworkGUID active_target_guid(const world::WorldActor& a) {
+    for (const repl::Subobject& s : a.actor.subobjects) {
+        if (!s.obj.schema || std::string(s.obj.schema->name) != "UNPCCombatInfo") continue;
+        const repl::Value* v = s.obj.state.get(*s.obj.schema, "ActiveTargets.ActiveTargets");
+        const repl::ArrayValue* arr = v ? v->get_if<repl::ArrayValue>() : nullptr;
+        if (!arr || arr->elements.empty()) return {};
+        const auto it = arr->elements[0].values.find(1);
+        const auto* g = it == arr->elements[0].values.end() ? nullptr : it->second.get_if<emit::FIntrepidNetworkGUID>();
+        return g ? *g : emit::FIntrepidNetworkGUID{};
+    }
+    return {};
 }
 
 /// ActiveTargets' first object (0: none).

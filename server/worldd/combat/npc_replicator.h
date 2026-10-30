@@ -32,8 +32,13 @@ size_t write_stats(world::ActorRegistry& registry, uint64_t actor_id, const stat
 /// Sets one stat's EveryoneProxy item (false when the actor has no item for the record or it already holds the value).
 bool write_stat(world::ActorRegistry& registry, uint64_t actor_id, int64_t record, float value);
 
-/// CombatInfo: bInCombat, bIsDead and ActiveTargets (`target_object` the ObjectId of what it fights, 0 for none).  False when the actor has no CombatInfo.
-bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_combat, bool dead, uint64_t target_object);
+/// CombatInfo: bInCombat, bIsDead and ActiveTargets (`target` the NetGUID of what it fights, in full: the ObjectId with the ServerId and Randomizer the client knows it by; an empty one for none).
+/// False when the actor has no CombatInfo.
+bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_combat, bool dead, const ::aoc::protocol::emit::FIntrepidNetworkGUID& target);
+/// The same with the target named by its ObjectId alone (0 for none).
+inline bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_combat, bool dead, uint64_t target_object) {
+    return write_combat(registry, actor_id, in_combat, dead, ::aoc::protocol::emit::FIntrepidNetworkGUID::from_u64(target_object));
+}
 
 /// Gathering stage 3, "Hunting" (the done update of a corpse's hunt, the retail capture and four more): the actor is dead for its clients: CombatInfo.bIsDead set, Health 0 and a bNotTargetable it was
 /// given cleared (never added).  Works on the actor itself, for a caller that is inside the registry's `modify`; what already holds the value changes nothing.  True when something changed.

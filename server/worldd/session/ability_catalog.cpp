@@ -160,6 +160,14 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         if (!row) return std::nullopt;
         c.zones_.emplace(g, std::move(*row));
     }
+    // the projectile records the abilities fire (a creature's bolt flies by its speed, its path and its life); one the file lacks is left out
+    for (const auto& [g, a] : c.abilities_) {
+        for (const content::AbilityHitRow& h : a.hits) {
+            if (h.source != "projectile" || c.projectiles_.count(h.owner_guid)) continue;
+            std::string skipped;
+            if (auto row = db->projectile(h.owner_guid, skipped)) c.projectiles_.emplace(h.owner_guid, std::move(*row));
+        }
+    }
     // the reactions (contentc version 35); a file without their tables has none, and the effects and hits then list none
     if (!db->guids(content::AbilityContent::Table::Reaction, guids, error)) return std::nullopt;
     for (const int64_t g : guids) {
@@ -252,6 +260,11 @@ const HitDef* Catalog::hit_named(std::string_view name) const {
 const content::ZoneRow* Catalog::zone(int64_t guid) const {
     const auto it = zones_.find(guid);
     return it == zones_.end() ? nullptr : &it->second;
+}
+
+const content::ProjectileRow* Catalog::projectile(int64_t guid) const {
+    const auto it = projectiles_.find(guid);
+    return it == projectiles_.end() ? nullptr : &it->second;
 }
 
 const content::ExprRow* Catalog::expr(int64_t id) const {

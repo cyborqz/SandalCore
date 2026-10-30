@@ -5,18 +5,21 @@
 //  combat/npc_ability_data.h
 //
 //  What a creature does when it attacks, from the game's own files (tools/npcabilities writes the three tables):
-//    npc_abilities.tsv   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate
+//    npc_abilities.tsv   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate  arrival
 //                        the ability records the creature Blueprint's state tree uses, the seconds it waits before it uses one again, whether it stands
 //                        still for it, and the conditions the tree puts on using it (the tree is tried in `order`; -1: no such condition); `fight` says the task is one of the
 //                        attacks of the creature's fight, `conds` the other conditions (a roll, its health, the seconds into the fight, line of sight ...) and `why` what the table
 //                        could not say (`unknown`) or "off" for a task a parameter of the tree switches off for the creature, and `starts` the other cooldowns the creature starts
-//                        when it takes the task, and `rotate` ("speed:duration") the turning towards its target that runs with the ability
-//    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end
+//                        when it takes the task (a fixed "name=seconds", or "name=low~high" when the tree rolls the seconds anew each time: the tree's timers that hold a charge once their seconds have
+//                        passed are cooldowns named "acc.<identifier>"), `rotate` ("speed:duration") the turning towards its target that runs with the ability, and `arrival` how near its target the
+//                        creature's approach brings it (cm; -1: none)
+//    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires
 //                        every animation montage beside the Blueprints: its object path, the ids the network layer knows it by, how long it
 //                        plays at a play rate of 1, the hit notifies ("time:key") that tell when each of the ability's hits lands, and how far the
 //                        montage carries the creature ("time:x:y:z": its root bone's travel, in cm ahead, to the right and up from where the creature
 //                        stood when the montage began; empty for a montage that stays in place, or for one whose animation the tables could not read: `root_unreadable`); `anim_end` is the time
-//                        of its animation-end notify, where the creature's ability task is done and the cooldowns it starts begin to run (empty: they begin with the cast)
+//                        of its animation-end notify, where the creature's ability task is done and the cooldowns it starts begin to run (empty: they begin with the cast); `fires` ("time:key")
+//                        the notifies that launch a projectile: when, and the key of the ability's projectile record that flies (see CombatWorld)
 //    npc_targeting.tsv   ability  key  distance  min_distance  angle  angle_center  cone_check  freeze  freeze_distance  freeze_scale  ignore_non_target  discovery  check_validity  los_check  distance_center  volumes  shapes
 //                        where an ability's hit lands (see combat/bite_area.h): how the record finds its target (`discovery`), whether it measures anything at all (`check_validity`, with the
 //                        cone's distance and angle behind `cone_check` and the line of sight behind `los_check`), and the volumes it sweeps (`volumes` of them, `shapes` places the ones that can be
@@ -159,6 +162,12 @@ inline bool eval_group(const CondGroup& group, const CondContext& c) {
     return stack.front().has ? stack.front().value : true;
 }
 
+/// A cooldown a task starts when the creature takes it, `low` to `high` seconds long (the same: a fixed time; else the tree rolls a fresh number between them each time).
+struct CooldownStart {
+    std::string name;
+    double      low = 0, high = 0;
+};
+
 /// One use-ability task of a creature Blueprint's state tree.
 struct CreatureAbility {
     int64_t     ability = 0;       // the ability record's guid
@@ -172,7 +181,8 @@ struct CreatureAbility {
     bool        fight = true;      // the task is one of the creature's attacks of the fight (not an opening, idle or ambient task)
     bool        off = false;       // a parameter of the tree switches the task off for this creature
     std::string why;               // what the table does not say, when `unknown`
-    std::vector<std::pair<std::string, double>> starts;   // the other cooldowns (name, seconds) the creature starts when it takes the task: the tasks of the states above it start them
+    std::vector<CooldownStart> starts;   // the other cooldowns the creature starts when it takes the task: the tasks of the states above it start them
+    double      arrival_cm = -1;       // how near its target the creature's approach brings it (the arrival distance of the tree's move-to-target task; -1: none)
     bool        rotates = false;       // the creature keeps turning towards its target while the ability plays
     double      rotate_speed = -1;     // ... at this many degrees a second (<= 0: its own rate) ...
     double      rotate_seconds = 0;    // ... for this long (0: until the ability is over)
@@ -204,6 +214,11 @@ struct MontageData {
     bool             root_unreadable = false;   // the animation moves the creature in a form the tables could not read: root_motion is empty then and does not mean "stays in place"
     double           anim_end = -1;             // seconds at a play rate of 1 at which the animation ends (its animation-end notify; the rest of the montage is its blend out); -1: the tables do not say
     std::vector<Hit> hits;         // in time order
+    struct Fire {
+        double time = 0;           // seconds into the montage at a play rate of 1
+        int    key = 0;            // which projectile record of the ability flies (the ability's projectile rows carry the same key)
+    };
+    std::vector<Fire> fires;       // the notifies that launch a projectile, in time order
     /// How far the montage carries the creature: where its root bone is (cm ahead and to the right of where the creature faces, from where it stood when the montage began) at each
     /// time (seconds into the montage at a play rate of 1), in time order from 0.  Empty: the montage stays in place.
     struct Step {
@@ -256,7 +271,7 @@ public:
         std::map<std::string, MontageData>                  montages;
         std::map<int64_t, std::map<int, BiteArea>>          areas;
         std::vector<std::vector<std::string>>               rows;
-        if (!read_table(abilities_path, "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate", rows, error)) return false;
+        if (!read_table(abilities_path, "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival", rows, error)) return false;
         for (const auto& r : rows) {
             CreatureAbility a;
             if (!number(r[1], a.ability) || !number(r[3], a.cooldown) || !number(r[5], a.order) || !number(r[6], a.min_distance) || !number(r[7], a.max_distance) || !number(r[8], a.max_angle)) {
@@ -273,10 +288,20 @@ public:
             for (const std::string& st : split(r[14], ';')) {
                 if (st.empty()) continue;
                 const size_t eq = st.find('=');
-                double seconds = 0;
-                if (eq == std::string::npos || !number(st.substr(eq + 1), seconds)) return bad(abilities_path, r[0], error);
-                a.starts.emplace_back(st.substr(0, eq), seconds);
+                CooldownStart c;
+                if (eq == std::string::npos) return bad(abilities_path, r[0], error);
+                c.name = st.substr(0, eq);
+                const std::string span = st.substr(eq + 1);
+                const size_t tilde = span.find('~');
+                if (tilde == std::string::npos) {
+                    if (!number(span, c.low)) return bad(abilities_path, r[0], error);
+                    c.high = c.low;
+                } else if (!number(span.substr(0, tilde), c.low) || !number(span.substr(tilde + 1), c.high) || c.high < c.low) {
+                    return bad(abilities_path, r[0], error);
+                }
+                a.starts.push_back(std::move(c));
             }
+            if (!number(r[16], a.arrival_cm)) return bad(abilities_path, r[0], error);
             if (!r[15].empty()) {   // "speed:duration"
                 const size_t colon = r[15].find(':');
                 if (colon == std::string::npos || !number(r[15].substr(0, colon), a.rotate_speed) || !number(r[15].substr(colon + 1), a.rotate_seconds)) return bad(abilities_path, r[0], error);
@@ -289,7 +314,7 @@ public:
         for (auto& [archetype, tasks] : abilities) {
             std::stable_sort(tasks.begin(), tasks.end(), [](const CreatureAbility& x, const CreatureAbility& y) { return x.order < y.order; });
         }
-        if (!read_table(montages_path, "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end", rows, error)) return false;
+        if (!read_table(montages_path, "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires", rows, error)) return false;
         for (const auto& r : rows) {
             MontageData m;
             m.path = r[0];
@@ -303,6 +328,13 @@ public:
                 MontageData::Hit hit;
                 if (colon == std::string::npos || !number(h.substr(0, colon), hit.time) || !number(h.substr(colon + 1), hit.key)) return bad(montages_path, r[0], error);
                 m.hits.push_back(hit);
+            }
+            for (const std::string& fire : split(r[11], ';')) {
+                if (fire.empty()) continue;
+                const size_t colon = fire.find(':');
+                MontageData::Fire launch;
+                if (colon == std::string::npos || !number(fire.substr(0, colon), launch.time) || !number(fire.substr(colon + 1), launch.key)) return bad(montages_path, r[0], error);
+                m.fires.push_back(launch);
             }
             for (const std::string& s : split(r[8], ';')) {
                 if (s.empty()) continue;

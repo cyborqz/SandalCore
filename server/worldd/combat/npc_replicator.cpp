@@ -96,7 +96,7 @@ bool write_stat(world::ActorRegistry& registry, uint64_t actor_id, int64_t recor
     return changed;
 }
 
-bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_combat, bool dead, uint64_t target_object) {
+bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_combat, bool dead, const ::aoc::protocol::emit::FIntrepidNetworkGUID& target) {
     bool ok = false;
     registry.modify(actor_id, world::Change::State, [&](world::WorldActor& a) {
         repl::Subobject* ci = find_sub(a, "UNPCCombatInfo");
@@ -111,8 +111,8 @@ bool write_combat(world::ActorRegistry& registry, uint64_t actor_id, bool in_com
         if (o.schema->command("ActiveTargets.ActiveTargets")) {
             repl::ArrayValue targets;
             repl::ElementState e;
-            e.values[1] = repl::Value(::aoc::protocol::emit::FIntrepidNetworkGUID::from_u64(target_object));
-            if (target_object != 0 || !in_combat) targets.elements.push_back(std::move(e));
+            e.values[1] = repl::Value(target);
+            if (target.ObjectId != 0 || !in_combat) targets.elements.push_back(std::move(e));
             set("ActiveTargets.ActiveTargets", repl::Value(std::move(targets)));
         }
     });

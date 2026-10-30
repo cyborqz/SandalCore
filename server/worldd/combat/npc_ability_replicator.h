@@ -43,6 +43,7 @@ struct NpcCastState {
 struct NpcCast {
     int64_t                 ability = 0;
     uint64_t                target = 0;            // the actor the attack is aimed at (0: none)
+    emit::FIntrepidNetworkGUID target_guid;        // the component of the target that the item's Targets name (a player's collision cylinder, with the session's ServerId and Randomizer); empty: `target` alone
     double                  tx = 0, ty = 0, tz = 0;   // ... and where it stands (cm)
     uint64_t                montage = 0;           // the montage object's id
     float                   play_rate = 1.0f;
@@ -65,7 +66,7 @@ inline repl::FastArrayState* active_abilities(world::WorldActor& a) {
 
 /// The element's 17 members, in the order of the item: the ability, the cast's number, its target and where the target stood, the montage group and the
 /// montage (cleared when `montage` is 0), the play rate and start position, the animation counter and the creature itself.
-inline repl::ElementState item_state(const NpcCast& c, int64_t instance, uint64_t montage, int32_t counter, uint64_t instigator) {
+inline repl::ElementState item_state(const NpcCast& c, int64_t instance, uint64_t montage, int32_t counter, const emit::FIntrepidNetworkGUID& instigator) {
     repl::ElementState es;
     auto& v = es.values;
     v[1] = repl::Value::i64(c.ability);
@@ -73,8 +74,9 @@ inline repl::ElementState item_state(const NpcCast& c, int64_t instance, uint64_
     repl::ArrayValue targets;
     repl::ArrayValue transforms;
     if (c.target != 0) {
+        // the client finds the target by its NetGUID, in full: the target's collision cylinder with the ServerId and Randomizer it was exported with (a bare ObjectId names nothing it knows)
         repl::ElementState t;
-        t.values[1] = repl::Value(emit::FIntrepidNetworkGUID::from_u64(c.target));
+        t.values[1] = repl::Value(c.target_guid.is_valid() ? c.target_guid : emit::FIntrepidNetworkGUID::from_u64(c.target));
         targets.elements.push_back(std::move(t));
     }
     {
@@ -98,7 +100,7 @@ inline repl::ElementState item_state(const NpcCast& c, int64_t instance, uint64_
     v[14] = repl::Value::boolean(false);        // bMayJumpToPosition
     v[15] = repl::Value::i64(counter);
     v[16] = repl::Value::u64(0);                // MeshYaw
-    v[17] = repl::Value(emit::FIntrepidNetworkGUID::from_u64(instigator));
+    v[17] = repl::Value(instigator);
     return es;
 }
 
@@ -132,7 +134,7 @@ inline bool start_npc_cast(world::ActorRegistry& registry, uint64_t actor_id, Np
         if (state.element != 0) arr->remove(state.element);
         state.element = 0;
         const int64_t instance = state.next_instance;
-        const std::optional<int32_t> id = arr->add(npc_ability_detail::item_state(cast, instance, cast.montage, state.counter, actor_id));
+        const std::optional<int32_t> id = arr->add(npc_ability_detail::item_state(cast, instance, cast.montage, state.counter, a.actor.guid.is_valid() ? a.actor.guid : emit::FIntrepidNetworkGUID::from_u64(actor_id)));
         if (!id) return;
         state.element = *id;
         ++state.counter;

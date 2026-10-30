@@ -36,6 +36,7 @@ public static partial class Reader
     {
         public FStructFallback[] States = Array.Empty<FStructFallback>(), Nodes = Array.Empty<FStructFallback>(), Shared = Array.Empty<FStructFallback>(), Defaults = Array.Empty<FStructFallback>();
         public FStructFallback[] Batches = Array.Empty<FStructFallback>(), Paths = Array.Empty<FStructFallback>(), Sources = Array.Empty<FStructFallback>();
+        public FStructFallback[] Transitions = Array.Empty<FStructFallback>();
     }
 
     /// <summary>Where a bound setting gets its value.</summary>
@@ -67,7 +68,8 @@ public static partial class Reader
             States = StructsOf(tree, "States").ToArray(),
             Nodes = Container(tree.Properties, "Nodes"),
             Shared = InstanceStructs(tree, "SharedInstanceData"),
-            Defaults = InstanceStructs(tree, "DefaultInstanceData")
+            Defaults = InstanceStructs(tree, "DefaultInstanceData"),
+            Transitions = StructsOf(tree, "Transitions").ToArray()
         };
         if (tree.TryGetValue(out FStructFallback bindings, "PropertyBindings") && bindings != null)
         {
@@ -361,6 +363,17 @@ public static partial class Reader
             string op = OpOf(TextOf(node, "Operator"));
             if (op.Length == 0) return Unsaid("Compare(operator)");
             if (invert) op = Negate(op);
+            // a timer's charge (the creature's accumulators: its global cooldown, a special attack's): the timer holds one charge once its seconds have passed since it was emptied, so "has a charge" is a cooldown that is over
+            if (binds.TryGetValue("Left", out var timer) && timer.Kind == "Task" && !timer.Global && timer.Class == "STT_Accumulator_Timer_C" && timer.Path == "Charge")
+            {
+                var charges = Setting(null, str, binds, prm, "Right");
+                var accumulator = charges == null ? null : AccumulatorOf(t, timer);
+                if (charges == null || accumulator == null) return Unsaid("Compare(accumulator:" + timer.Name + ")");
+                bool atZero = Compare(op, 0, charges.Value), atOne = Compare(op, 1, charges.Value);
+                if (atOne && !atZero) return new Atom { Text = "cd(" + Escape("acc." + accumulator.Identifier) + ")", Kind = "cd", Name = "acc." + accumulator.Identifier };
+                if (atOne == atZero) return Constant(atOne);
+                return Unsaid("Compare(accumulator empty:" + timer.Name + ")");
+            }
             // the fight's clock: the elapsed time of the "Combat Timer" task of a state on the way down to this condition
             bool clock = binds.TryGetValue("Left", out var l) && l.Kind == "Task" && !l.Global && (l.Name == "Combat Timer" || l.Name == "CombatStartTime") && l.Path == "TaskElapsedTime" && path.Contains(l.State);
             var right = Setting(null, str, binds, prm, "Right");
@@ -395,17 +408,19 @@ public static partial class Reader
     /// </summary>
     static string? FightRoll(TreeInfo t, Source src, HashSet<int> path)
     {
-        if (src.Kind != "Task" || src.Global || src.Class != "STT_SetBBFloat_C" || src.Path != "Stored Value" || src.Handle == null || !path.Contains(src.State)) return null;
+        // a "Set BBFloat" task's stored value, or a "Generate Float" task's value (a tree's "initial cooldown" of a special attack)
+        bool stored = src.Class == "STT_SetBBFloat_C" && src.Path == "Stored Value", generated = src.Class == "STT_GenerateFloat_C" && src.Path == "Value";
+        if (src.Kind != "Task" || src.Global || !(stored || generated) || src.Handle == null || !path.Contains(src.State)) return null;
         foreach (var node in t.Nodes)
         {
-            if (node == null || ClassOf(node, "TaskClass") != "STT_SetBBFloat_C") continue;
+            if (node == null || ClassOf(node, "TaskClass") != src.Class) continue;
             var handle = StructOf(node, "InstanceDataHandle");
             if (handle == null || !SameHandle(handle, src.Handle)) continue;
             if (node.TryGetValue(out bool enabled, "bTaskEnabled") && !enabled) return null;
             var task = InstanceOf(node, t.Defaults);
             if (task == null) return null;
-            string name = NameOf(task, "Variable Name");
-            var expression = task.Properties.FirstOrDefault(p => p.Name.Text == "Value Expression")?.Tag?.GenericValue is FScriptStruct ss ? ss.StructType as FStructFallback : null;
+            string name = stored ? NameOf(task, "Variable Name") : src.Name;
+            var expression = task.Properties.FirstOrDefault(p => p.Name.Text == (stored ? "Value Expression" : "Value Expr"))?.Tag?.GenericValue is FScriptStruct ss ? ss.StructType as FStructFallback : null;
             if (name.Length == 0 || expression == null || !expression.TryGetValue(out string text, "Expression")) return null;
             double basis, chance, low, high;
             Match m;
@@ -423,6 +438,78 @@ public static partial class Reader
             return Num(basis) + "," + Num(chance) + "," + Num(low) + "," + Num(high) + "," + Escape(name);
         }
         return null;
+    }
+
+    /// <summary>A timer of the tree that holds a charge once `Low` to `High` seconds (a number, or a range the tree rolls anew each time) have passed since it was emptied.</summary>
+    sealed record Accumulator(string Identifier, double Low, double High);
+
+    static bool TargetSeconds(string text, out double low, out double high)
+    {
+        Match m;
+        low = high = 0;
+        if ((m = PlainNumber.Match(text)).Success) { low = high = Parsed(m.Groups[1]); return true; }
+        if ((m = RangeOnly.Match(text)).Success) { low = Parsed(m.Groups[1]); high = Parsed(m.Groups[2]); return low <= high; }
+        return false;
+    }
+
+    /// <summary>An accumulator task: its identifier and seconds; null when it starts empty, holds more than one charge or its seconds are of another form.</summary>
+    static Accumulator? AccumulatorTask(TreeInfo t, FStructFallback node)
+    {
+        if (node.TryGetValue(out bool enabled, "bTaskEnabled") && !enabled) return null;
+        var task = InstanceOf(node, t.Defaults);
+        if (task == null) return null;
+        string id = NameOf(task, "Identifier");
+        var expression = task.Properties.FirstOrDefault(p => p.Name.Text == "Target Value Expr")?.Tag?.GenericValue is FScriptStruct ss ? ss.StructType as FStructFallback : null;
+        if (id.Length == 0 || expression == null || !expression.TryGetValue(out string text, "Expression") || !TargetSeconds(text, out double low, out double high)) return null;
+        double initial = InstanceNumber(task, null, "InitialCharge") ?? 0, most = InstanceNumber(task, null, "MaxCharge") ?? 1;
+        return initial >= 1 && most == 1 ? new Accumulator(id, low, high) : null;
+    }
+
+    /// <summary>The accumulator timer that a bound source names.</summary>
+    static Accumulator? AccumulatorOf(TreeInfo t, Source src)
+    {
+        if (src.Handle == null) return null;
+        foreach (var node in t.Nodes)
+        {
+            if (node == null || ClassOf(node, "TaskClass") != "STT_Accumulator_Timer_C") continue;
+            var handle = StructOf(node, "InstanceDataHandle");
+            if (handle != null && SameHandle(handle, src.Handle)) return AccumulatorTask(t, node);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The accumulators a task's completion empties: a state on the task's way down (below the Combat state) moves on, when it is done and with no condition, to a state with a task that consumes the
+    /// timer's charge.  Said as (identifier, low, high seconds until it holds a charge again).
+    /// </summary>
+    static List<(string Name, double Low, double High)> ConsumedAfter(TreeInfo t, List<int> path)
+    {
+        var found = new List<(string Name, double Low, double High)>();
+        var timers = new Dictionary<string, Accumulator>(StringComparer.Ordinal);
+        foreach (var node in t.Nodes)
+            if (node != null && ClassOf(node, "TaskClass") == "STT_Accumulator_Timer_C" && AccumulatorTask(t, node) is { } timer) timers.TryAdd(timer.Identifier, timer);
+        for (int i = path.Count - 1; i >= 0; i--)
+        {
+            int ps = path[i];
+            if (string.Equals(TextOf(t.States[ps], "Name"), "Combat", StringComparison.OrdinalIgnoreCase)) break;
+            int trb = IntOf(t.States[ps], "TransitionsBegin", 0), trn = IntOf(t.States[ps], "TransitionsNum", 0);
+            for (int k = trb; k < trb + trn && k < t.Transitions.Length; k++)
+            {
+                var tr = t.Transitions[k];
+                if (!TextOf(tr, "Trigger").Contains("OnStateCompleted", StringComparison.Ordinal) || IntOf(tr, "ConditionsNum", 0) != 0) continue;
+                var target = StructOf(tr, "State");
+                int to = target != null ? IntOf(target, "Index") : -1;
+                if (to < 0 || to >= t.States.Length) continue;
+                int tb = IntOf(t.States[to], "TasksBegin", 0), tn = IntOf(t.States[to], "TasksNum", 0);
+                for (int j = tb; j < tb + tn && j < t.Nodes.Length; j++)
+                {
+                    if (t.Nodes[j] == null || ClassOf(t.Nodes[j], "TaskClass") != "STT_ConsumeAccumulatorCharges_C") continue;
+                    var task = InstanceOf(t.Nodes[j], t.Defaults);
+                    if (task != null && timers.TryGetValue(NameOf(task, "Identifier"), out var timer) && !found.Any(f => f.Name == timer.Identifier)) found.Add((timer.Identifier, timer.Low, timer.High));
+                }
+            }
+        }
+        return found;
     }
 
     /// <summary>The names of the states on a task's way down, root first.</summary>

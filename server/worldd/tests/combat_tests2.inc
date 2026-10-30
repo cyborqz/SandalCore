@@ -283,6 +283,8 @@ struct GremCastView {
     int32_t  element = 0;
     int64_t  ability = 0;
     uint64_t montage = 0;
+    aoc::protocol::emit::FIntrepidNetworkGUID target;       // the first of the element's Targets, in full
+    aoc::protocol::emit::FIntrepidNetworkGUID instigator;   // ... and its Instigator
 };
 
 GremCastView grem_cast_view(world::ActorRegistry& registry, uint64_t actor) {
@@ -296,6 +298,15 @@ GremCastView grem_cast_view(world::ActorRegistry& registry, uint64_t actor) {
         if (g != it.values.values.end() && g->second.get_if<int64_t>()) v.ability = *g->second.get_if<int64_t>();
         const auto m = it.values.values.find(11);
         if (m != it.values.values.end() && m->second.get_if<aoc::protocol::emit::FIntrepidNetworkGUID>()) v.montage = m->second.get_if<aoc::protocol::emit::FIntrepidNetworkGUID>()->ObjectId;
+        const auto t = it.values.values.find(3);
+        const aoc::protocol::repl::ArrayValue* targets = t != it.values.values.end() ? t->second.get_if<aoc::protocol::repl::ArrayValue>() : nullptr;
+        v.target = {};
+        if (targets && !targets->elements.empty()) {
+            const auto first = targets->elements[0].values.find(1);
+            if (first != targets->elements[0].values.end() && first->second.get_if<aoc::protocol::emit::FIntrepidNetworkGUID>()) v.target = *first->second.get_if<aoc::protocol::emit::FIntrepidNetworkGUID>();
+        }
+        const auto inst = it.values.values.find(17);
+        v.instigator = inst != it.values.values.end() && inst->second.get_if<aoc::protocol::emit::FIntrepidNetworkGUID>() ? *inst->second.get_if<aoc::protocol::emit::FIntrepidNetworkGUID>() : aoc::protocol::emit::FIntrepidNetworkGUID{};
     }
     return v;
 }
@@ -1288,6 +1299,8 @@ struct LungeSample {
     double   wz = 0;                    // the creature's height (its origin) on the server
     bool     has_rrm_vz = false;        // this tick's update names RepRootMotion.LinearVelocity ...
     double   rrm_vz = 0;                // ... and its vertical part (cm/s)
+    // what the creature names by NetGUID at this tick, in full (ObjectId, ServerId, Randomizer): its cast element's first Target and Instigator, its CombatInfo's first ActiveTarget, and its own actor's NetGUID
+    aoc::protocol::emit::FIntrepidNetworkGUID item_target, item_instigator, active_target, creature_guid;
 };
 
 static std::string creature_path(Fixture& f, const char* leaf) {
@@ -1384,6 +1397,10 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
         s.wz = g->z;
         s.has_rrm_vz = tick_has_vz;
         s.rrm_vz = tick_vz;
+        s.item_target = view.target;
+        s.item_instigator = view.instigator;
+        s.active_target = combat_rig::active_target_guid(*g);
+        s.creature_guid = g->actor.guid;
         last = view;
         out.push_back(s);
         prev = s;
@@ -2063,6 +2080,30 @@ void test_fury_lands_only_inside_its_cone(Fixture& f) {
 
 // ---- hostile humanoids, slice 1: a bandit raider against a player who stands still ---------------------------------------------------------------------------------------------
 
+
+/// The client finds a creature's target by NetGUID, in full: the Targets of the creature's cast element name the player's collision cylinder and its CombatInfo.ActiveTargets his pawn, each with the ServerId and
+/// Randomizer of his session (a bare ObjectId names nothing the client knows, and its targeting then finds no one to fly a bolt at), and the element's Instigator is the creature's own NetGUID in full.
+static void check_targets_named_in_full(const std::vector<LungeSample>& samples, const char* name) {
+    constexpr uint64_t kPlayer = 77;   // (the rig's player)
+    const aoc::protocol::emit::FIntrepidNetworkGUID pawn = combat_rig::rig_pawn_guid(kPlayer), cylinder = combat_rig::rig_cylinder_guid(kPlayer);
+    size_t element_ticks = 0, wrong_target = 0, wrong_instigator = 0, combat_ticks = 0, wrong_active = 0;
+    for (const LungeSample& s : samples) {
+        if (s.ability != 0) {
+            ++element_ticks;
+            wrong_target += s.item_target == cylinder ? 0 : 1;
+            wrong_instigator += s.item_instigator == s.creature_guid && s.creature_guid.ServerId != 0 && s.creature_guid.Randomizer != 0 ? 0 : 1;
+        }
+        if (s.active_target.ObjectId != 0) {
+            ++combat_ticks;
+            wrong_active += s.active_target == pawn ? 0 : 1;
+        }
+    }
+    CHECKF(element_ticks > 0 && wrong_target == 0, "the Targets of the %s's cast name the player's collision cylinder in full (ServerId %u, Randomizer %#x): %zu of %zu ticks wrong", name, cylinder.ServerId, cylinder.Randomizer,
+           wrong_target, element_ticks);
+    CHECKF(wrong_instigator == 0, "the Instigator of the %s's cast is its own NetGUID in full (%zu of %zu ticks wrong)", name, wrong_instigator, element_ticks);
+    CHECKF(combat_ticks > 0 && wrong_active == 0, "the %s's CombatInfo.ActiveTargets names the player's pawn in full (%zu of %zu ticks wrong)", name, wrong_active, combat_ticks);
+}
+
 /// The open the world makes for a bandit Blueprint (spawns::GenericNpcs, as worldd builds it): a recorded guard's open with the abilities of the Blueprint's tree in its list of records.
 struct BanditOpen {
     std::optional<spawns::CapturedData> captured;
@@ -2133,6 +2174,7 @@ void test_bandit_raider_fights_a_standing_player(Fixture& f) {
         combat::CombatWorld::Stats stats;
         CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 800, nullptr, samples, &hits, false, -1, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 8 m away runs", kSeconds);
         if (samples.empty()) return;
+        check_targets_named_in_full(samples, name.c_str());
 
         // the casts as the client sees them: the start of each montage element, its ability and its montage
         struct Cast {
@@ -2270,6 +2312,227 @@ void test_bandit_raider_fights_a_standing_player(Fixture& f) {
     }
 }
 
+// ---- creature projectiles: the bandit arsonists' fire bolts and the goblin shamans' bomb ----------------------------------------------------------------------------------------
+
+/// The casts of a fight as the client sees them: the start of each montage element (when, its ability and its montage).
+struct ShotCast {
+    double      t;
+    int64_t     ability;
+    uint64_t    montage;
+    std::string name;
+};
+
+static std::vector<ShotCast> shot_casts(Fixture& f, const std::vector<LungeSample>& samples) {
+    std::vector<ShotCast> out;
+    for (const LungeSample& s : samples) {
+        if (!s.cast_began) continue;
+        const abilities::AbilityDef* def = f.catalog->ability(s.ability);
+        out.push_back({s.t, s.ability, s.montage, def ? def->row.name : std::string("?")});
+    }
+    return out;
+}
+
+/// What the hits of a fight say about its projectiles: each launch notify of each cast (when it leaves) is tied to the first projectile hit that reaches the player after it.
+struct ShotReport {
+    size_t              due = 0, landed = 0, stray = 0, not_projectile = 0;
+    std::vector<double> after_cast;   // seconds from the start of the cast to the hit, for every launch that landed
+    std::vector<double> flight;       // seconds from the launch notify to the hit
+    double              earliest_after_launch = 1e9;
+};
+
+static ShotReport shot_report(Fixture& f, const combat::NpcAbilityData& tables, const std::vector<ShotCast>& casts, const std::vector<combat::IncomingHit>& hits, double seconds, double flight_limit) {
+    ShotReport r;
+    std::vector<bool> used(hits.size(), false);
+    for (const ShotCast& c : casts) {
+        const combat::MontageData* md = montage_of_cast(f, tables, c.ability, c.montage);
+        if (!md) continue;
+        for (const combat::MontageData::Fire& fire : md->fires) {
+            const bool counted = c.t + md->seconds(1.0) + flight_limit <= seconds - 0.3;   // (a launch the fight ended before it could land is not due)
+            const double leaves = c.t + fire.time / md->rate_scale;
+            if (counted) ++r.due;
+            for (size_t i = 0; i < hits.size(); ++i) {
+                if (used[i] || hits[i].source_type != content::kSourceTypeProjectile || hits[i].at < leaves - 1e-6 || hits[i].at > leaves + flight_limit) continue;
+                used[i] = true;
+                if (counted) ++r.landed;
+                r.after_cast.push_back(hits[i].at - c.t);
+                r.flight.push_back(hits[i].at - leaves);
+                r.earliest_after_launch = std::min(r.earliest_after_launch, hits[i].at - leaves);
+                break;
+            }
+        }
+    }
+    for (size_t i = 0; i < hits.size(); ++i) {
+        if (hits[i].source_type != content::kSourceTypeProjectile) ++r.not_projectile;
+        else if (!used[i]) ++r.stray;
+    }
+    return r;
+}
+
+void test_arsonist_fires_at_a_standing_player(Fixture& f) {
+    std::printf("a bandit arsonist against a player who stands 20 m away: it casts its fire bolt about every 2 s and its combo now and then, each bolt leaves at its montage's notify and lands "
+                "when it arrives, no hit comes without a bolt, and its spray, stream and ring of fire stay off\n");
+    constexpr double kSeconds = 60.0;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    struct Kind {
+        const char* leaf;
+        bool        combo;   // its tree switches the fire bolt combo on
+    };
+    for (const Kind kind : {Kind{"/Bandit_Arsonist/Bandit_Arsonist.Default__Bandit_Arsonist_C", false}, Kind{"/Bandit_Arsonist/CSB_Arsonist_StateTree.Default__CSB_Arsonist_StateTree_C", false},
+                            Kind{"/Bandit_Arsonist/Bandit_Arsonist_Blister.Default__Bandit_Arsonist_Blister_C", true}}) {
+        const std::string path = creature_path(f, kind.leaf);
+        const auto bp = f.motion.find(path);
+        const std::string name = spawns::blueprint_leaf(path);
+        CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the %s and the creature tables list its abilities", name.c_str());
+        if (path.empty() || !bp || !tables.abilities_of(path)) return;
+        CHECKF(spawns::fighting_humanoid(path), "%s is a hostile humanoid whose fights are built", name.c_str());
+        BanditOpen made;
+        CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the %s (verdict: %s)", name.c_str(), spawns::verdict_name(made.why));
+        if (!made.open) return;
+        {   // its open lists every ability of its tree (the client plays only the abilities it has the record of)
+            combat_rig::World probe;
+            if (!probe.problem.empty()) return;
+            const uint64_t id = probe.spawn(path, 0, 0, 7, 900, bp->half_height, made.open);
+            const world::WorldActor* a = probe.registry.find(id);
+            size_t listed = 0, wanted = 0;
+            std::set<int64_t> seen;
+            for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+                if (!seen.insert(t.ability).second) continue;
+                ++wanted;
+                if (a && combat::npc_knows_ability(*a, t.ability)) ++listed;
+            }
+            CHECKF(a && wanted >= 5 && listed == wanted, "the %s's open lists the %zu abilities of its tree (%zu listed)", name.c_str(), wanted, listed);
+        }
+        // the tree: the bolt and the combo are usable, the spray, the stream and the ring of fire are left out
+        {
+            std::map<std::string, std::pair<bool, std::string>> by_name;   // ability -> (usable, why)
+            for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+                const abilities::AbilityDef* def = f.catalog->ability(t.ability);
+                if (def && t.fight) by_name[def->row.name] = {!t.unknown && !t.off, t.why};
+            }
+            CHECKF(by_name["Bandit_Arsonist_Firebolt"].first, "the %s's tree can use the fire bolt", name.c_str());
+            CHECKF(by_name["Bandit_Arsonist_FireboltCombo"].first == kind.combo, "the %s's tree %s the fire bolt combo (%s)", name.c_str(), kind.combo ? "switches on" : "switches off",
+                   by_name["Bandit_Arsonist_FireboltCombo"].second.c_str());
+            for (const char* waits : {"Bandit_Arsonist_FlameBurst", "Bandit_Arsonist_FlameThrow", "Bandit_Arsonist_FlameRing"}) {
+                CHECKF(by_name.count(waits) && !by_name[waits].first && by_name[waits].second.find("waits for") != std::string::npos, "%s stays off in the %s's tree (%s)", waits, name.c_str(), by_name[waits].second.c_str());
+            }
+        }
+        std::vector<LungeSample> samples;
+        std::vector<combat::IncomingHit> hits;
+        combat::CombatWorld::Stats stats;
+        CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 2000, nullptr, samples, &hits, false, 0.5, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 20 m away runs", kSeconds);
+        if (samples.empty()) return;
+        check_targets_named_in_full(samples, name.c_str());
+        const std::vector<ShotCast> casts = shot_casts(f, samples);
+        std::map<std::string, std::vector<double>> by_name;
+        for (const ShotCast& c : casts) by_name[c.name].push_back(c.t);
+        std::string summary;
+        for (const auto& [label, times] : by_name) summary += (summary.empty() ? "" : ", ") + label + " " + std::to_string(times.size());
+        std::printf("  %s, %.0f s: %zu casts (%s), %zu hits\n", name.c_str(), kSeconds, casts.size(), summary.c_str(), hits.size());
+        const auto count = [&](const char* label) { return by_name.count(label) ? by_name[label].size() : size_t{0}; };
+        CHECKF(count("Bandit_Arsonist_Firebolt") >= 12, "it casts its fire bolt over and over (%zu)", count("Bandit_Arsonist_Firebolt"));
+        if (kind.combo) {
+            CHECKF(count("Bandit_Arsonist_FireboltCombo") >= 2, "it casts its combo now and then (%zu)", count("Bandit_Arsonist_FireboltCombo"));
+        } else {
+            CHECKF(count("Bandit_Arsonist_FireboltCombo") == 0, "its tree switches the combo off (%zu)", count("Bandit_Arsonist_FireboltCombo"));
+        }
+        CHECKF(count("Bandit_Arsonist_FlameBurst") + count("Bandit_Arsonist_FlameThrow") + count("Bandit_Arsonist_FlameRing") == 0, "it never casts its spray, stream or ring of fire (%zu, %zu, %zu)",
+               count("Bandit_Arsonist_FlameBurst"), count("Bandit_Arsonist_FlameThrow"), count("Bandit_Arsonist_FlameRing"));
+        // a cast is done at its montage's animation end (1.0 s) and the tree's global timer of 1 s runs from there: casts come 2.0 s apart, plus the 0.2 s the creature looks at
+        std::vector<double> gaps;
+        for (size_t i = 1; i < casts.size(); ++i) gaps.push_back(casts[i].t - casts[i - 1].t);
+        std::sort(gaps.begin(), gaps.end());
+        if (!gaps.empty()) std::printf("  cast to cast: %zu gaps, %.2f s at least, %.2f s in the middle, %.2f s at most\n", gaps.size(), gaps.front(), gaps[gaps.size() / 2], gaps.back());
+        CHECKF(gaps.size() >= 12 && gaps.front() >= 2.0 - 1e-6 && gaps.back() <= 2.4, "casts come 2.0 to 2.4 s apart (%.2f to %.2f s)", gaps.empty() ? 0.0 : gaps.front(), gaps.empty() ? 0.0 : gaps.back());
+        // the combo waits for the tree's timers: its first after 2 to 6 s of the fight, then at least its own 4.5 s and the 5 to 7 s its timer takes to charge again after the cast is done
+        const std::vector<double>& combos = by_name["Bandit_Arsonist_FireboltCombo"];
+        if (!casts.empty() && !combos.empty()) CHECKF(combos.front() - casts.front().t >= 1.7, "the first combo comes after the 2nd second of the fight (%.2f s after the first cast)", combos.front() - casts.front().t);
+        for (size_t i = 1; i < combos.size(); ++i) CHECKF(combos[i] - combos[i - 1] >= 5.99, "two combos are at least 6 s apart (the cast's 1 s and the timer's 5 s: %.2f s)", combos[i] - combos[i - 1]);
+        // every bolt leaves at its notify and lands when it arrives; nothing lands that was not launched
+        const ShotReport report = shot_report(f, tables, casts, hits, kSeconds, 1.5);
+        double single_min = 1e9, single_max = 0;
+        for (const ShotCast& c : casts) {
+            if (c.name != "Bandit_Arsonist_Firebolt") continue;
+            const combat::MontageData* md = montage_of_cast(f, tables, c.ability, c.montage);
+            if (!md || md->fires.size() != 1) continue;
+            const double leaves = c.t + md->fires.front().time / md->rate_scale;
+            for (const combat::IncomingHit& h : hits) {
+                if (h.source_type == content::kSourceTypeProjectile && h.at >= leaves && h.at <= leaves + 1.5) {
+                    single_min = std::min(single_min, h.at - c.t);
+                    single_max = std::max(single_max, h.at - c.t);
+                    break;
+                }
+            }
+        }
+        std::printf("  %zu bolts due, %zu landed; a single bolt landed %.2f to %.2f s after its cast; %zu hits without a bolt, %zu hits not made by a projectile\n", report.due, report.landed, single_min, single_max, report.stray,
+                    report.not_projectile);
+        CHECKF(report.due >= 20 && report.landed == report.due, "every bolt lands (%zu of %zu)", report.landed, report.due);
+        CHECKF(report.stray == 0 && report.not_projectile == 0, "no hit comes without a bolt, and every hit names its projectile as its source (%zu, %zu)", report.stray, report.not_projectile);
+        CHECKF(single_min >= 1.15 && single_max <= 1.45, "a bolt lands 1.15 to 1.45 s after its cast, with a cast 0.57 s long before it leaves and 20 m to fly (%.2f to %.2f s)", single_min, single_max);
+        CHECKF(report.earliest_after_launch >= 0.4, "a bolt takes time to arrive (the quickest %.2f s after it left)", report.earliest_after_launch);
+        // it stands where it is (the player is inside its 25 m) and faces him
+        const LungeSample& last = samples.back();
+        CHECKF(std::hypot(last.wx, last.wy) < 60.0, "it stays where it stood (%.0f cm from its place)", std::hypot(last.wx, last.wy));
+    }
+    // a player 33 m away: it casts as soon as he is within 30 m, the reach its tree lets the bolt go from, and closes in to its tree's arrival distance of 25 m between two casts
+    {
+        const std::string path = creature_path(f, "/Bandit_Arsonist/Bandit_Arsonist.Default__Bandit_Arsonist_C");
+        const auto bp = f.motion.find(path);
+        BanditOpen made;
+        if (path.empty() || !bp || !make_bandit_open(f, tables, path, made)) return;
+        std::vector<LungeSample> samples;
+        CHECKF(run_lunge_fight(f, tables, path, 25.0, 0, 3300, nullptr, samples, nullptr, false, 0.5, nullptr, 40000.0, made.open), "a fight against a player 33 m away runs");
+        double first_gap = -1, second_gap = -1, nearest = 1e9;
+        for (const LungeSample& s : samples) {
+            const double gap = std::hypot(s.wx - s.px, s.wy - s.py) - bp->radius - 34.0;
+            nearest = std::min(nearest, gap);
+            if (!s.cast_began) continue;
+            if (first_gap < 0) first_gap = gap;
+            else if (second_gap < 0) second_gap = gap;
+        }
+        std::printf("  from 33 m: its first cast began %.0f cm from the player's surface, its second %.0f cm, it came as near as %.0f cm\n", first_gap, second_gap, nearest);
+        CHECKF(first_gap >= 2800.0 && first_gap <= 3005.0, "it begins casting once the player is within 30 m, the reach of its bolt (%.0f cm)", first_gap);
+        CHECKF(second_gap >= 2400.0 && second_gap <= 2560.0, "between its first two casts it closes in to 25 m, its tree's arrival distance (%.0f cm)", second_gap);
+        CHECKF(nearest >= 2400.0, "it does not come nearer than that (%.0f cm)", nearest);
+    }
+}
+
+void test_plain_goblin_shaman_throws_its_bomb(Fixture& f) {
+    std::printf("a plain goblin shaman against a player 2.5 m away: its oozing bomb leaves at its montage's notify, flies, and lands its damage when it arrives (it was an instant hit)\n");
+    constexpr double kSeconds = 30.0;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    const std::string path = creature_path(f, "/GoblinShaman/Goblin_Shaman.Default__Goblin_Shaman_C");
+    const auto bp = f.motion.find(path);
+    CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the plain goblin shaman and the creature tables list its abilities");
+    if (path.empty() || !bp || !tables.abilities_of(path)) return;
+    BanditOpen made;
+    CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the shaman (verdict: %s)", spawns::verdict_name(made.why));
+    if (!made.open) return;
+    std::vector<LungeSample> samples;
+    std::vector<combat::IncomingHit> hits;
+    CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 250, nullptr, samples, &hits, false, 0.5, nullptr, 40000.0, made.open), "a fight of %.0f s against a player 2.5 m away runs", kSeconds);
+    if (samples.empty()) return;
+    const std::vector<ShotCast> casts = shot_casts(f, samples);
+    size_t bombs = 0;
+    for (const ShotCast& c : casts) bombs += c.name == "GoblinShaman_OozingBomb" ? 1 : 0;
+    const ShotReport report = shot_report(f, tables, casts, hits, kSeconds, 1.0);
+    std::printf("  %zu casts, %zu of them the bomb; %zu bombs due, %zu landed, the quickest %.2f s after it left; %zu hits without a bomb\n", casts.size(), bombs, report.due, report.landed, report.earliest_after_launch, report.stray);
+    CHECKF(bombs >= 3, "it throws its bomb over and over (%zu)", bombs);
+    CHECKF(report.due >= 3 && report.landed == report.due, "every bomb lands (%zu of %zu)", report.landed, report.due);
+    size_t other_hits = 0;   // the hits that are not the bomb's must be its Bludgeon's (a melee swing at the player beside it)
+    for (const combat::IncomingHit& h : hits) {
+        if (h.source_type == content::kSourceTypeProjectile) continue;
+        const abilities::AbilityDef* def = f.catalog->ability(h.source_guid);
+        if (!def || def->row.name.find("Bludgeon") == std::string::npos) ++other_hits;
+    }
+    CHECKF(report.stray == 0 && other_hits == 0, "no hit comes without a bomb but the Bludgeon's swings (%zu hits of a projectile that never left, %zu of another ability)", report.stray, other_hits);
+    // the bomb leaves at 1.8 s of its montage and lands at once at 2.5 m: no hit before the montage has played that far
+    double earliest_after_cast = 1e9;
+    for (double t : report.after_cast) earliest_after_cast = std::min(earliest_after_cast, t);
+    CHECKF(earliest_after_cast >= 1.8, "no damage comes before the bomb has left the shaman's hand (%.2f s after the cast)", earliest_after_cast);
+}
+
 // ---- creatures made from a generic Blueprint: their own attacks play ---------------------------------------------------------------------------------------------------------------
 
 /// What a fight of a creature made from a generic Blueprint has to show (check_generic_creature_animates).
@@ -2347,6 +2610,7 @@ static void check_generic_creature_animates(Fixture& f, const GenericFightPlan& 
     const double provoke = plan.timid ? 1.0 : -1.0;
     CHECKF(run_lunge_fight(f, tables, path, seconds, 0, 800, nullptr, samples, &hits, plan.timid, provoke, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 8 m away runs", seconds);
     if (samples.empty()) return;
+    check_targets_named_in_full(samples, plan.name);
     struct Cast {
         double      t;
         int64_t     ability;

@@ -108,13 +108,15 @@ bool is_person(const OpenTemplate& t, bool talks) {
     return t.blocks.back().cls == "UNPCAppearanceComponent";
 }
 
-/// The hostile humanoids whose fights are built, by the Blueprint's class name: the bandit raiders (a two-handed sword: strikes, a cleave, a heavy slash, a whirlwind, a leap) and the bandit
-/// captains (a sword and shield).  The camps they stand in are mixed with archers, mages and healers whose arrows, bolts and heals are not built yet: those stay out of the world.
+/// The hostile humanoids whose fights are built, by the Blueprint's class name: the bandit raiders (a two-handed sword: strikes, a cleave, a heavy slash, a whirlwind, a leap), the bandit
+/// captains (a sword and shield) and the bandit arsonists (fire bolts from afar; their spray, stream and ring of fire are left out until the world can play them).  The camps they stand in are
+/// mixed with archers and healers whose arrows and heals are not built yet: those stay out of the world.
 constexpr const char* kFightingHumanoids[] = {
     "Bandit_Raider", "Bandit_Raider1", "Bandit_Raider2", "Bandit_Raider3", "CSB_Bandit_Raider_StateTree",
     "Bandit_Raider_RareSpawn_BigBrother", "Bandit_Raider_RareSpawn_RiverRunnerRiggs", "BanditRaider_RareSpawn_VanguardRowan",
     "Bandit_Captain", "Bandit_Captain1", "Bandit_Captain2", "CSB_Forsaken_Blades_Sergeant",
-    "Bandit_Captain_Clang", "Bandit_Captain_Capn_Knuckles", "Bandit_Captain_RareSpawn_TheShotcaller", "Bandit_Captain_RareSpawn_ChiefArmorerJannus"};
+    "Bandit_Captain_Clang", "Bandit_Captain_Capn_Knuckles", "Bandit_Captain_RareSpawn_TheShotcaller", "Bandit_Captain_RareSpawn_ChiefArmorerJannus",
+    "Bandit_Arsonist", "Bandit_Arsonist1", "CSB_Arsonist_StateTree", "Bandit_Arsonist_Blister", "Bandit_Arsonist_FlameFanatic", "BanditMage_RareSpawn_ChaplainMarion"};
 
 /// Gives the template the ability component of the recorded guard `guard` (a component with a list of records, which a villager's lacks) and puts `kit` into it as the records it loads
 /// (ReplicatedRecordsToLoad), each element made like the first of the guard's own list.  Everything else of the template stays: only this component comes from the guard.  False when

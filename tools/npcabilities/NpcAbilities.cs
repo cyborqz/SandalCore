@@ -25,7 +25,7 @@ namespace NpcAbilities;
 /// A creature Blueprint does not list its abilities itself: its StateTree does.  Every "use ability" task of the tree names one ability record, with the
 /// time the creature waits before it uses that ability again, and sits in a state that the creature enters only when the state's conditions hold.  A
 /// Blueprint that sets no tree of its own plays its parent's.  `npc_abilities.tsv` has one line per (Blueprint, task):
-///   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate
+///   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate  arrival
 /// `archetype` is the Blueprint's default object as npc_motion.tsv names it, `ability` the ability record's guid, `cooldown` seconds and `stop_movement`
 /// whether the creature stands still while the ability plays.  `order` is the task's state in the tree (the creature tries the states in this order and
 /// uses the first whose conditions hold).  The conditions of the states above the task, from the root down: `min_distance` the target must be farther than
@@ -37,14 +37,19 @@ namespace NpcAbilities;
 /// (`cooldown` under the name `task`): the tasks of the states above it may start cooldowns of their own ("name=seconds", joined by ';').  `rotate` is "speed:duration" of the
 /// "Rotate To" task (turn towards the target) that runs with the ability, in its state or in a state above it: the creature keeps turning to its target at `speed` degrees a second
 /// (-1: the task names none, the creature's own rate) for `duration` seconds (0: until the ability is over); empty when no such task runs with the ability.
+/// `arrival` is how near its target the creature's approach brings it: the arrival distance of the move-to-target task in a state directly below the Combat state (-1: the tree has none; the same on
+/// every line of a Blueprint's fight).  A timer of the tree that holds a charge once its seconds have passed since it was emptied (the accumulator tasks: a global cooldown, a special attack's) is said
+/// as a cooldown named "acc.<identifier>": the task's `gates` hold it, and `starts` has it as "acc.<identifier>=seconds" (or "=low~high" when the tree rolls the seconds anew each time) for the
+/// task whose completion empties it.  A few abilities the world cannot play yet are left out whatever their conditions say (`Waiting`), with a `why` that names what they wait for.
 ///
 /// The settings a tree takes from its parameters (the distance of a bite, whether the creature may pounce) are read from the Blueprint's reference to the tree and the
 /// tree's own defaults (Params.cs).
 ///
 /// The montages are the animation assets of the Blueprint's folder.  `npc_montages.tsv` has one line per montage:
-///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end
+///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires
 /// `anim_end` is the time of the montage's "animation end" notify in seconds at a play rate of 1 (the animation is over there and the rest of the montage is its blend out; an ability's task
-/// is done at that notify, and the cooldowns it starts run from there), empty for a montage of a folder that `--anim-end-dir` does not list.
+/// is done at that notify, and the cooldowns it starts run from there), empty for a montage of a folder that `--anim-end-dir` does not list.  `fires` is "time:key" separated by ';' for every
+/// notify that launches a projectile (the time in seconds at a play rate of 1; `key` picks the ability's projectile record, 0 when the notify names none), in time order.
 /// `montage` is the asset's object path as an ability record names it ("/Game/.../Name.Name"), `length` the montage's length in seconds at a play rate of 1
 /// (the time a montage runs is length / rate_scale / the play rate), `sections` "name:start:next" separated by ';' and `hits` "time:key" separated by
 /// ';' for every hit notify of the montage, in time order.  `key` picks the hit record of the ability the notify fires (the ability's hits are keyed the
@@ -61,8 +66,8 @@ public static partial class Reader
 {
     public const string AbilitiesFile = "npc_abilities.tsv";
     public const string MontagesFile = "npc_montages.tsv";
-    public const string AbilitiesHeader = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate";
-    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end";
+    public const string AbilitiesHeader = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
+    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires";
 
     public sealed class AbilityRow
     {
@@ -72,6 +77,7 @@ public static partial class Reader
         public bool StopMovement, Unknown, Fight;
         public int Order;
         public float MinDistance = -1f, MaxDistance = -1f, MaxAngle = -1f;
+        public float Arrival = -1f;
     }
 
     public sealed class MontageRow
@@ -83,6 +89,7 @@ public static partial class Reader
         public bool RootUnreadable;
         public List<(string Name, float Start, string Next)> Sections = new();
         public List<(float Time, int Key)> Hits = new();
+        public List<(float Time, int Key)> Fires = new();   // the notifies that launch a projectile: when, and the key of the ability's projectile record
         public List<(float Time, float X, float Y, float Z)> RootMotion = new();
     }
 
@@ -498,6 +505,39 @@ public static partial class Reader
     }
 
     /// <summary>
+    /// Abilities the world cannot play yet.  A creature's tree skips them, as it skips a task with a condition the table cannot say, instead of landing them as hits nothing shows; the text says what
+    /// each one waits for.  (The fire mage's Flame Burst is a spray of fire in front of it, its Flame Throw a stream it aims by a score among everyone it hates, its Flame Ring a ring of fire on the ground.)
+    /// </summary>
+    static readonly Dictionary<long, string> Waiting = new()
+    {
+        [6064631901149396992] = "waits for the spray hit shape (Flame Burst)",
+        [6064629308658155610] = "waits for channelled attacks aimed by score (Flame Throw)",
+        [6064629308660187227] = "waits for ground zones of a creature (Flame Ring)",
+    };
+
+    /// <summary>How near its target a creature's approach brings it: the arrival distance of the move-to-target task of a state directly below the Combat state on `path`; -1 when there is none.</summary>
+    static float ArrivalOf(TreeInfo info, List<int> path)
+    {
+        int combat = path.FindIndex(p => string.Equals(TextOf(info.States[p], "Name"), "Combat", StringComparison.OrdinalIgnoreCase));
+        if (combat < 0) return -1f;
+        int combatState = path[combat];
+        for (int si = 0; si < info.States.Length; si++)
+        {
+            if (!(info.States[si].TryGetValue(out FStructFallback par, "Parent") && IntOf(par, "Index") == combatState)) continue;
+            if (info.States[si].TryGetValue(out bool stateEnabled, "bEnabled") && !stateEnabled) continue;
+            int tb = IntOf(info.States[si], "TasksBegin", 0), tn = IntOf(info.States[si], "TasksNum", 0);
+            for (int k = tb; k < tb + tn && k < info.Nodes.Length; k++)
+            {
+                if (info.Nodes[k] == null || ClassOf(info.Nodes[k], "TaskClass") != "AoCSTT_MoveToTarget") continue;
+                if (info.Nodes[k].TryGetValue(out bool taskEnabled, "bTaskEnabled") && !taskEnabled) continue;
+                var task = InstanceOf(info.Nodes[k], info.Defaults);
+                if (task != null && NumberOf(task.Properties.FirstOrDefault(p => p.Name.Text == "ArrivalDistance")?.Tag?.GenericValue) is { } distance && distance > 0) return (float)distance;
+            }
+        }
+        return -1f;
+    }
+
+    /// <summary>
     /// The use-ability tasks of a state tree with the conditions of the states they sit in (the state's own and every parent's, as the creature checks them on the way down).
     /// `prm` holds the values of the tree's parameters for the creature the rows are made for.
     /// </summary>
@@ -555,6 +595,16 @@ public static partial class Reader
                         if (identifier.Length > 0 && seconds > 0f && identifier != row.Task && !identifier.Contains(';') && !identifier.Contains('=')) starts.Add(identifier + "=" + F(seconds));
                     }
                 }
+                // the timers of the tree that the task's completion empties (a state on its way down moves on, when it is done, to a state that consumes their charge): they run as cooldowns from there
+                if (row.Fight)
+                {
+                    foreach (var (accumulator, low, high) in ConsumedAfter(info, path))
+                    {
+                        string entry = "acc." + accumulator + "=" + (low == high ? Num(low) : Num(low) + "~" + Num(high));
+                        if (!starts.Contains(entry)) starts.Add(entry);
+                    }
+                    row.Arrival = ArrivalOf(info, path);
+                }
                 row.Starts = string.Join(";", starts.Distinct());
                 var onPath = new HashSet<int>(path);
                 var gates = new List<string>();
@@ -606,6 +656,11 @@ public static partial class Reader
                         groups.Add(string.Join(" ", tokens.Select(x => (x.Operand == "Or" ? "o" : x.Operand == "And" ? "a" : "c") + (x.Delta > 0 ? "+" : "") + x.Delta.ToString(CultureInfo.InvariantCulture) + ":" + x.Atom.Text)));
                     }
                 }
+                if (Waiting.TryGetValue(row.Ability, out var waits))
+                {
+                    row.Unknown = true;
+                    why.Add(waits);
+                }
                 row.Gates = string.Join(";", gates);
                 row.Conds = string.Join("|", groups);
                 row.Why = row.Unknown ? string.Join(",", why) : off ? "off" : "";
@@ -644,11 +699,18 @@ public static partial class Reader
                 if (exportAnimEnd && (r.AnimEnd < 0f || time < r.AnimEnd)) r.AnimEnd = time;
                 continue;
             }
+            if (obj.ExportType == "AoCAnimNotify_FireProjectile")
+            {
+                // a projectile leaves here: `ProjectileKey` picks the ability's projectile record (no key: 0)
+                r.Fires.Add((time, obj.TryGetValue(out int pk, "ProjectileKey") ? pk : 0));
+                continue;
+            }
             if (obj.ExportType != "AoCAnimNotify_AbilityHit") continue;
             int key = obj.TryGetValue(out int hk, "HitKey") ? hk : 0;
             r.Hits.Add((time, key));
         }
         r.Hits.Sort((a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Key.CompareTo(b.Key));
+        r.Fires.Sort((a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Key.CompareTo(b.Key));
         r.RootMotion = ReadRootMotion(e, r.Montage, out bool unreadable);
         r.RootUnreadable = unreadable;
         rows.Add(r);
@@ -700,7 +762,7 @@ public static partial class Reader
                 abilities.Add(new AbilityRow
                 {
                     Archetype = archetype, Ability = r.Ability, Task = r.Task, Gates = r.Gates, Cooldown = r.Cooldown, StopMovement = r.StopMovement, Unknown = r.Unknown, Order = r.Order,
-                    MinDistance = r.MinDistance, MaxDistance = r.MaxDistance, MaxAngle = r.MaxAngle, Fight = r.Fight, Conds = r.Conds, Why = r.Why, Starts = r.Starts, Rotate = r.Rotate
+                    MinDistance = r.MinDistance, MaxDistance = r.MaxDistance, MaxAngle = r.MaxAngle, Fight = r.Fight, Conds = r.Conds, Why = r.Why, Starts = r.Starts, Rotate = r.Rotate, Arrival = r.Arrival
                 });
             }
         }
@@ -717,7 +779,7 @@ public static partial class Reader
         foreach (var r in rows)
             sb.Append(r.Archetype).Append('\t').Append(r.Ability.ToString(CultureInfo.InvariantCulture)).Append('\t').Append(r.Task).Append('\t').Append(F(r.Cooldown)).Append('\t').Append(r.StopMovement ? "1" : "0").Append('\t')
               .Append(r.Order.ToString(CultureInfo.InvariantCulture)).Append('\t').Append(F(r.MinDistance)).Append('\t').Append(F(r.MaxDistance)).Append('\t').Append(F(r.MaxAngle)).Append('\t')
-              .Append(r.Gates).Append('\t').Append(r.Unknown ? "1" : "0").Append('\t').Append(r.Fight ? "1" : "0").Append('\t').Append(r.Conds).Append('\t').Append(r.Why).Append('\t').Append(r.Starts).Append('\t').Append(r.Rotate).Append('\n');
+              .Append(r.Gates).Append('\t').Append(r.Unknown ? "1" : "0").Append('\t').Append(r.Fight ? "1" : "0").Append('\t').Append(r.Conds).Append('\t').Append(r.Why).Append('\t').Append(r.Starts).Append('\t').Append(r.Rotate).Append('\t').Append(F(r.Arrival)).Append('\n');
         return sb.ToString();
     }
 
@@ -733,7 +795,8 @@ public static partial class Reader
               .Append(string.Join(";", r.Hits.Select(h => F(h.Time) + ":" + h.Key.ToString(CultureInfo.InvariantCulture)))).Append('\t')
               .Append(string.Join(";", r.RootMotion.Select(m => F(m.Time) + ":" + F(m.X) + ":" + F(m.Y) + ":" + F(m.Z)))).Append('\t')
               .Append(r.RootUnreadable ? "1" : "0").Append('\t')
-              .Append(r.AnimEnd >= 0f ? F(r.AnimEnd) : "").Append('\n');
+              .Append(r.AnimEnd >= 0f ? F(r.AnimEnd) : "").Append('\t')
+              .Append(string.Join(";", r.Fires.Select(f => F(f.Time) + ":" + f.Key.ToString(CultureInfo.InvariantCulture)))).Append('\n');
         }
         return sb.ToString();
     }
