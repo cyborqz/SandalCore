@@ -3448,6 +3448,106 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
     return out;
 }
 
+namespace {
+
+std::vector<int64_t> json_ids(const std::string& text) {
+    std::vector<int64_t> out;
+    const auto j = nlohmann::json::parse(text, nullptr, false);
+    if (!j.is_array()) return out;
+    for (const auto& e : j) {
+        if (e.is_number_integer()) out.push_back(e.get<int64_t>());
+    }
+    return out;
+}
+
+}  // namespace
+
+std::optional<ObjectData> ContentDb::object_data(std::string& error) const {
+    ObjectData out;
+    const auto failed = [&](const char* table) {
+        error = std::string("content.db ") + table + " query failed: " + db_message(db_) + " (the quest objects are contentc version 36's: rebuild the file with this checkout's contentc)";
+        return std::nullopt;
+    };
+    {
+        Stmt q(db_, "SELECT icd_guid, name, radius, tolerance, discovery, require_los, requirement, pid_guid, channel, busy, allow_combat, single_use, delete_done, delete_delay, anim, grants, reward_table, "
+                    "complete_objs, reveal_objs FROM interactable");
+        if (!q.ok()) return failed("interactable");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            InteractableRow r;
+            const int64_t guid = sqlite3_column_int64(s, 0);
+            r.name = column_text(s, 1);
+            r.radius = sqlite3_column_double(s, 2);
+            r.tolerance = sqlite3_column_double(s, 3);
+            r.discovery = sqlite3_column_double(s, 4);
+            r.require_los = sqlite3_column_int(s, 5) != 0;
+            const std::string requirement = column_text(s, 6);
+            if (!requirement.empty()) {
+                const auto j = nlohmann::json::parse(requirement, nullptr, false);
+                if (j.is_discarded() || !parse_requirement_object(j, r.requirement)) {
+                    error = "content.db interactable " + std::to_string(guid) + ": the rule of its prompt does not read";
+                    return std::nullopt;
+                }
+            }
+            r.pid = sqlite3_column_int64(s, 7);
+            r.channel = sqlite3_column_double(s, 8);
+            r.busy = sqlite3_column_double(s, 9);
+            r.allow_combat = sqlite3_column_int(s, 10) != 0;
+            r.single_use = sqlite3_column_int(s, 11) != 0;
+            r.delete_done = sqlite3_column_int(s, 12) != 0;
+            r.delete_delay = sqlite3_column_double(s, 13);
+            r.anim = column_text(s, 14);
+            const auto grants = nlohmann::json::parse(column_text(s, 15), nullptr, false);
+            if (grants.is_array()) {
+                for (const auto& g : grants) {
+                    if (g.is_array() && g.size() == 2 && g[0].is_number_integer() && g[1].is_number_integer()) r.grants.emplace_back(g[0].get<int64_t>(), g[1].get<int64_t>());
+                }
+            }
+            r.reward_table = sqlite3_column_int64(s, 16);
+            r.complete_objs = json_ids(column_text(s, 17));
+            r.reveal_objs = json_ids(column_text(s, 18));
+            out.interactables.emplace(guid, std::move(r));
+        }
+        if (step != SQLITE_DONE) return failed("interactable");
+    }
+    {
+        Stmt q(db_, "SELECT iad_guid, despawn_delay, despawn_final FROM interactable_actor_def");
+        if (!q.ok()) return failed("interactable_actor_def");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+            sqlite3_stmt* s = q.get();
+            ActorDefRow r;
+            r.despawn_delay = sqlite3_column_double(s, 1);
+            r.despawn_final = sqlite3_column_int(s, 2) != 0;
+            out.actor_defs.emplace(sqlite3_column_int64(s, 0), r);
+        }
+        if (step != SQLITE_DONE) return failed("interactable_actor_def");
+    }
+    {
+        Stmt q(db_, "SELECT instance_guid, iad_guid FROM instance_iad");
+        if (!q.ok()) return failed("instance_iad");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.instance_iad[sqlite3_column_int64(q.get(), 0)] = sqlite3_column_int64(q.get(), 1);
+        if (step != SQLITE_DONE) return failed("instance_iad");
+    }
+    {
+        Stmt q(db_, "SELECT item_guid, major FROM quest_item");
+        if (!q.ok()) return failed("quest_item");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.quest_items[sqlite3_column_int64(q.get(), 0)] = sqlite3_column_int(q.get(), 1) != 0;
+        if (step != SQLITE_DONE) return failed("quest_item");
+    }
+    {
+        Stmt q(db_, "SELECT item_guid, table_guid FROM item_box");
+        if (!q.ok()) return failed("item_box");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.item_boxes[sqlite3_column_int64(q.get(), 0)] = sqlite3_column_int64(q.get(), 1);
+        if (step != SQLITE_DONE) return failed("item_box");
+    }
+    return out;
+}
+
 std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string& error) const {
     std::vector<int64_t> out;
     Stmt q(db_, "SELECT guid FROM item WHERE name = ?1 COLLATE NOCASE ORDER BY guid LIMIT 8");

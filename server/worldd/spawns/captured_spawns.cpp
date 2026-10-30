@@ -16,6 +16,7 @@
 #include "spawns/area_spawns.h"
 #include "spawns/mount_donors.h"
 #include "spawns/spawn_util.h"
+#include "world/interaction_state.h"
 
 #include <array>
 #include <cmath>
@@ -216,15 +217,16 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
     const bool npc = open.category == "npc";
     const bool station = open.category == "station";
     const bool shrine = open.category == "shrine";
-    w.kind = npc ? world::ActorKind::Npc : (station ? world::ActorKind::Station : (shrine ? world::ActorKind::Shrine : world::ActorKind::Gatherable));
+    const bool prop = open.category == "prop";
+    w.kind = npc ? world::ActorKind::Npc : (station ? world::ActorKind::Station : (shrine ? world::ActorKind::Shrine : (prop ? world::ActorKind::Prop : world::ActorKind::Gatherable)));
     repl::Actor& a = w.actor;
     a.guid = mint();
     // a station has no controller and no collision cylinder: its components follow the actor at +2, +4, +6 (retail's pattern for a station)
-    const FIntrepidNetworkGUID controller = (station || shrine) ? FIntrepidNetworkGUID{} : mint();   // the AI controller object (+2): Owner and Controller name it, it has no channel
+    const FIntrepidNetworkGUID controller = (station || shrine || prop) ? FIntrepidNetworkGUID{} : mint();   // the AI controller object (+2): Owner and Controller name it, it has no channel
     // +4: the CollisionCylinder, retail's slot (the AlignmentComponent's GUID - 2 in 211 of 211 captured cylinder exports, +4 of the actor in 511 of
     // 634): the hit confirmations and the ability items name it and export it as the actor's "CollisionCylinder" (E1 stage 3 fix 3: the draft named
     // the actor's + 24, outside the block, which is the next-minted object's GUID: a NetGuidMismatch on the client, the user's disconnect)
-    const FIntrepidNetworkGUID cylinder = (station || shrine) ? FIntrepidNetworkGUID{} : mint();
+    const FIntrepidNetworkGUID cylinder = (station || shrine || prop) ? FIntrepidNetworkGUID{} : mint();
     a.obj = open.actor_block().state;
     a.open.archetype = open.archetype;
     a.open.level = bootstrap::persistent_level_export();
@@ -232,7 +234,7 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
     w.id = a.guid.ObjectId;
     w.npc.archetype = open.archetype_path;
     w.npc.controller = npc ? controller.ObjectId : 0;
-    w.npc.collision_cylinder = (station || shrine) ? 0 : cylinder.ObjectId;
+    w.npc.collision_cylinder = (station || shrine || prop) ? 0 : cylinder.ObjectId;
 
     std::string e;
     repl::ObjectState& actor = a.obj;
@@ -251,6 +253,21 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
             s.checksum = b.checksum;
         } else {
             s.dynamic_class = b.class_chain;
+        }
+        if (b.cls == "UInteractableComponent" && prop && s.obj.schema && p.component_def != 0) {
+            // a quest object: the component's own definition and the player interaction of its first input (the template's are the recorded object's)
+            const repl::Value* data = s.obj.state.get(*s.obj.schema, "InteractionInputData");
+            const auto* arr = data ? data->get_if<repl::ArrayValue>() : nullptr;
+            if (!s.obj.state.set(*s.obj.schema, "ComponentDefId.Guid", repl::Value::i64(p.component_def)) || !arr || arr->elements.empty()) {
+                error = "the interactable component of the template does not hold a definition and an input";
+                return std::nullopt;
+            }
+            repl::ArrayValue copy = *arr;
+            copy.elements[0].values[6] = repl::Value::i64(p.interact_def);   // InteractionInputData.PlayerInteractDefinition.Guid
+            if (!s.obj.state.set(*s.obj.schema, "InteractionInputData", repl::Value(std::move(copy)))) {
+                error = "the interactable component of the template refuses its input";
+                return std::nullopt;
+            }
         }
         if (b.cls == "UInteractableComponent") {
             w.npc.interact_component = s.guid.ObjectId;
@@ -439,6 +456,52 @@ std::optional<world::WorldActor> instantiate(const OpenTemplate& open, const Min
         w.shrine.place = p.attune_record;
         w.shrine.seed = p.seed;
         w.npc.name = "Emberspring";
+        w.npc.source = world::Source::Data;
+    } else if (prop) {
+        // a quest object is a plain actor like a station: where it stands (the same writes), its own InteractableBaseGuid (made from the point's seed) and the actor definition that says
+        // whether it leaves after its use
+        repl::RepMovement m;
+        if (const repl::Value* v = actor.state.get(7)) {
+            if (const auto* old = v->get_if<repl::RepMovement>()) m = *old;
+        }
+        m.simulated_physic_sleep = false;
+        m.rep_physics = false;
+        m.location = repl::quantize_location(actor.opts, p.x, p.y, p.z);
+        m.linear_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
+        m.angular_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
+        m.acceleration.reset();
+        m.rotation = repl::Rot{0, actor.opts.rep_movement_short_rotation ? angle16(p.yaw_degrees) : angle8(p.yaw_degrees), 0};
+        if (!set_path(actor, "ReplicatedMovement", repl::Value(m), e)) { error = e; return std::nullopt; }
+        a.open.spawn.location = repl::quantize_vector(10, p.x, p.y, p.z);
+        a.open.spawn.rotation = repl::Rot{0, angle16(p.yaw_degrees), 0};
+        a.open.spawn.velocity.reset();
+        w.x = p.x;
+        w.y = p.y;
+        w.z = p.z;
+        w.yaw_degrees = p.yaw_degrees;
+        uint64_t seed = p.seed ? p.seed : w.id;
+        const char* const word_paths[4] = {"InteractableBaseGuid.A", "InteractableBaseGuid.B", "InteractableBaseGuid.C", "InteractableBaseGuid.D"};
+        for (const char* path : word_paths) {
+            if (!set_path(actor, path, repl::Value::i64(static_cast<int32_t>(splitmix(seed) >> 16)), e)) { error = e; return std::nullopt; }
+        }
+        if (!set_path(actor, "InteractableActorDefId.Guid", repl::Value::i64(p.actor_def), e)) { error = e; return std::nullopt; }
+        // the actor names its own interactable component (the recorded one's reference means nothing here) and none of the components the template does not carry
+        if (repl::Subobject* ic = sub("UInteractableComponent")) {
+            if (!set_path(actor, "InteractableComponent", repl::Value(ic->guid), e)) { error = e; return std::nullopt; }
+        }
+        for (const char* field : {"SynchronizedMontageComponent", "StatsComponent", "Instigators"}) {
+            if (const schema::RepCommand* c = actor.schema->command(field)) actor.state.erase(c->handle);
+        }
+        // the client offers the interaction only for an input the server allows (CanInputActivate), as for a vendor's or an Emberspring's
+        if (!world::allow_inputs(a)) {
+            error = "the quest object has no interactable component to allow its input on";
+            return std::nullopt;
+        }
+        w.prop.component_def = p.component_def;
+        w.prop.interact_def = p.interact_def;
+        w.prop.actor_def = p.actor_def;
+        w.prop.instance = p.pop_instance;
+        w.npc.name = "quest object";
         w.npc.source = world::Source::Data;
     } else if (station) {
         // where it stands: the same writes as an NPC's, without an owner, a controller or a timestamp (the station is a plain actor)

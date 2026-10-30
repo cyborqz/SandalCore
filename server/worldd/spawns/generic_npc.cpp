@@ -354,6 +354,39 @@ const OpenTemplate* GenericNpcs::station_template(const content::NpcAssetRow& as
     return &made_.emplace(path, std::move(t)).first->second;
 }
 
+const OpenTemplate* GenericNpcs::prop_template(const content::NpcAssetRow& asset, Verdict* why) const {
+    const auto fail = [&](Verdict v) -> const OpenTemplate* {
+        if (why) *why = v;
+        return nullptr;
+    };
+    if (why) *why = Verdict::Generic;
+    const std::string& path = asset.archetype_path;
+    if (path.empty()) return fail(Verdict::NoPath);
+    if (!config_.enabled) return fail(Verdict::Disabled);
+    if (!excluded_.empty() && (excluded_.count(lower(blueprint_leaf(path))) || excluded_.count(lower(path)))) return fail(Verdict::Excluded);
+    // only the game's folders of quest objects, whose classes derive from the state-machine actor the recorded template is (a door or a banner of another folder is a plain actor of another class)
+    static const char* const kFolders[] = {"/Game/DesignAssets/Interactables/Quest/", "/Game/DesignAssets/Quests/", "/Game/DesignAssets/Node/ServiceBuildings/ServiceBuilding_Scaffolding."};
+    bool allowed = false;
+    for (const char* folder : kFolders) allowed = allowed || path.rfind(folder, 0) == 0;
+    if (!allowed) return fail(Verdict::NotPawn);
+    if (const auto it = made_.find(path); it != made_.end()) return &it->second;
+    // the donor: a recorded quest object with its two blocks (the Sword of Judication's piece when the captures hold it, else the first)
+    const OpenTemplate* donor = nullptr;
+    for (const OpenTemplate& t : captured_->opens()) {
+        if (t.category != "prop" || t.blocks.size() != 2) continue;
+        if (!donor || blueprint_leaf(t.archetype_path).rfind("SQ_0091_", 0) == 0) donor = &t;
+    }
+    if (!donor) return fail(Verdict::NoDonor);
+    OpenTemplate t = *donor;
+    t.archetype_path = path;
+    t.capture = t.channel = t.packet = 0;   // made here: no capture opened it
+    const repl::ExportChain* exported = archetype_export(path);
+    if (!exported) return fail(Verdict::NoPath);
+    t.archetype = *exported;
+    ++props_made_;
+    return &made_.emplace(path, std::move(t)).first->second;
+}
+
 const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, Verdict* why, bool talks) const {
     const auto fail = [&](Verdict v) -> const OpenTemplate* {
         if (why) *why = v;

@@ -2790,5 +2790,6 @@ std::optional<Send> PlayerBootstrap::correction(float time_stamp, const repl::Ve
 }
 
 #include "respawn/bootstrap_embersprings.inc"
+#include "quest/bootstrap_objects.inc"
 
 }  // namespace aoc::worldd::bootstrap

@@ -220,6 +220,13 @@ public:
     const quest::QuestBook*       quests() const { return quests_ ? &*quests_ : nullptr; }
     /// A test's quests (load_area reads the real ones).
     void                          set_quests(quest::QuestBook book) { quests_ = std::move(book); }
+    /// Quests part 3, slice 1: the definitions of the quest objects (content::ObjectData), read with the area; null for a content.db older than contentc version 36 (no quest object is made).
+    const content::ObjectData*    objects() const { return objects_ ? &*objects_ : nullptr; }
+    /// A quest object was used and leaves the world: notes that it is made again after its instance's own respawn time (`now_seconds` is the world clock; the caller removes the actor from the
+    /// registry).  False when the actor is no quest object of this world.
+    bool                          prop_gone(uint64_t actor_id, double now_seconds) const;
+    /// Makes the quest objects whose time has come (called by tick_world).
+    void                          tick_props(double now_seconds);
     /// The worker that saves the quest logs and takes the GM commands (null: no quest service; the characters play without quests).  Not owned.
     quest::QuestWorker*           quest_worker() const { return quest_worker_; }
     void                          set_quest_worker(quest::QuestWorker* worker) { quest_worker_ = worker; }
@@ -590,6 +597,10 @@ private:
     world::NodeControl*                  node_control_ = nullptr;
     std::optional<dialogue::Book>        dialogue_;
     std::optional<quest::QuestBook>      quests_;          // quests, slice 1
+    std::optional<content::ObjectData>   objects_;         // quests part 3, slice 1: the quest objects' definitions
+    struct PropSlot { uint64_t actor = 0; double due = 0; };   // actor 0: gone, made again at `due`
+    mutable std::vector<PropSlot>        prop_slots_;      // by PropRecipe (spawns::AreaReport::props)
+    mutable size_t                       props_gone_ = 0;
     quest::QuestWorker*                  quest_worker_ = nullptr;
     std::optional<vendor::TownShops>     shops_;
     std::optional<warehouse::Book>       warehouses_;   // storage clerks, step 0

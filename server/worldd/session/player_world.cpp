@@ -303,6 +303,37 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             spdlog::warn("[world] the quests do not load, so no NPC offers one: {}", qe);
         }
     }
+    {   // quests part 3, slice 1: the quest objects; a content.db of an older version has none and no quest object is made
+        std::string oe;
+        if (auto data = content_->object_data(oe)) {
+            objects_.emplace(std::move(*data));
+            // the interactable definitions that are quest objects: the ones an Interact objective names, and the ones whose use gives an item that a Collect or hand-in objective asks for.  Only the
+            // objectives of quests that can be played count: a disabled quest, a Destiny quest and a "zLegacy" quest are left out (the starter gear's sparkles belong to such quests alone)
+            std::set<int64_t> props, asked;
+            if (quests_) {
+                for (const auto& [guid, q] : quests_->data().quests) {
+                    if (q.disabled || q.flavor == "Destiny" || q.name.rfind("zLegacy", 0) == 0) continue;
+                    for (const content::QuestObjectiveRow& o : q.objectives) {
+                        if (o.type == "Interact") props.insert(o.components.begin(), o.components.end());
+                        if (o.type == "Collect" || o.type == "TurnIn") asked.insert(o.items.begin(), o.items.end());
+                    }
+                }
+            }
+            for (const auto& [icd, row] : objects_->interactables) {
+                for (const auto& [item, quantity] : row.grants) {
+                    if (asked.count(item) != 0) props.insert(icd);
+                }
+            }
+            for (auto it = props.begin(); it != props.end();) {
+                it = objects_->interactables.count(*it) != 0 ? std::next(it) : props.erase(it);
+            }
+            generic_config_.prop_components = std::move(props);
+            spdlog::info("[world] quest objects: {} interactable definitions ({} are quest objects), {} actor definitions, {} quest items, {} reward boxes", objects_->interactables.size(),
+                         generic_config_.prop_components.size(), objects_->actor_defs.size(), objects_->quest_items.size(), objects_->item_boxes.size());
+        } else {
+            spdlog::warn("[world] the quest objects do not load, so none is made: {}", oe);
+        }
+    }
     {   // vendors, step 0: the towns' shops; a content.db of an older version has none and the NPCs keep their answer
         std::string ve;
         if (auto data = content_->vendor_data(ve)) {
@@ -359,6 +390,7 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     sources.gm = &*gm_;
     sources.generic = &*generic_;
     sources.looks = looks_.get();
+    sources.objects = objects_ ? &*objects_ : nullptr;
     spawn_filter_.emplace(spawn_context_, motion_loaded_ ? &motion_ : nullptr);
     sources.filter = &*spawn_filter_;
     area_ = area;
@@ -369,6 +401,9 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     }
     area_report_ = std::move(*report);
     spdlog::info("[area] {}", area_report_->describe());
+    prop_slots_.assign(area_report_->props.size(), PropSlot{});
+    for (size_t i = 0; i < prop_slots_.size(); ++i) prop_slots_[i].actor = area_report_->props[i].actor;
+    if (!area_report_->props.empty()) spdlog::info("[area] quest objects: {} made (from {} recorded template(s))", area_report_->props.size(), generic_ ? generic_->props_made() : 0);
     if (looks_) {
         const auto& lc = looks_->counts();
         spdlog::info("[looks] the area's people: {} dressed ({} customizations from the recorded pool, {} plain), {} named by the data, {} by their Blueprint, {} with no name, {} left as recorded", lc.dressed, lc.from_pool,
@@ -522,6 +557,11 @@ void PlayerWorld::log_npc_types() const {
     if (!pop.lost_excluded.empty()) log_counts("[area] ... of which left out by --npc-exclude: ", {pop.lost_excluded.begin(), pop.lost_excluded.end()});
     log_counts("[area] NPCs by type: ", {area_report_->npcs_by_archetype.begin(), area_report_->npcs_by_archetype.end()});
     if (!pop.generic_by_archetype.empty()) log_counts("[area] ... made from a generic Blueprint: ", {pop.generic_by_archetype.begin(), pop.generic_by_archetype.end()});
+    if (!area_report_->props.empty()) {   // quests part 3: the quest objects by Blueprint
+        std::map<std::string, size_t> by;
+        for (const spawns::PropRecipe& r : area_report_->props) ++by[spawns::blueprint_leaf(r.open->archetype_path)];
+        log_counts("[area] quest objects by Blueprint: ", {by.begin(), by.end()});
+    }
 }
 
 bool PlayerWorld::load_blueprints(const std::string& motion_path, std::string& error) {
@@ -1048,8 +1088,48 @@ void PlayerWorld::start_combat() {
 }
 // ~ C | O | A - C | Y | B ~
 
+bool PlayerWorld::prop_gone(uint64_t actor_id, double now_seconds) const {
+    const world::WorldActor* a = registry_.find(actor_id);
+    if (!a || a->kind != world::ActorKind::Prop || !area_report_ || a->prop.slot == 0 || a->prop.slot > area_report_->props.size()) return false;
+    const size_t i = a->prop.slot - 1;
+    const spawns::PropRecipe& r = area_report_->props[i];
+    // it comes back after its instance's own time (the data's 1 to 150 s, plus up to the variance), at least a second
+    const double jitter = r.variance > 0 ? r.variance * static_cast<double>((a->prop.slot * 2654435761ull) % 1000ull) / 1000.0 : 0.0;
+    prop_slots_[i].actor = 0;
+    prop_slots_[i].due = now_seconds + std::max(1.0, r.respawn) + jitter;
+    ++props_gone_;
+    return true;
+}
+
+void PlayerWorld::tick_props(double now_seconds) {
+    if (props_gone_ == 0 || !area_report_) return;
+    for (size_t i = 0; i < prop_slots_.size(); ++i) {
+        PropSlot& s = prop_slots_[i];
+        if (s.actor != 0 || now_seconds < s.due) continue;
+        const spawns::PropRecipe& r = area_report_->props[i];
+        std::string why;
+        auto w = spawns::instantiate(*r.open, [this] { return guids_.next(); }, r.params, why);
+        if (!w) {
+            s.due = now_seconds + 60.0;
+            spdlog::warn("[props] a quest object could not be made again: {}", why);
+            continue;
+        }
+        w->prop.slot = static_cast<uint32_t>(i + 1);
+        const uint64_t id = w->id;
+        if (!registry_.add(std::move(*w))) {
+            s.due = now_seconds + 60.0;
+            spdlog::warn("[props] a quest object could not be added to the registry again");
+            continue;
+        }
+        s.actor = id;
+        s.due = 0;
+        --props_gone_;
+    }
+}
+
 void PlayerWorld::tick_world(double now_seconds) {
     world_clock_ = now_seconds;
+    tick_props(now_seconds);
     // (review A I2) the Endpoint ticks the world after every datagram it reads: the window is driven at the world's 20 Hz, not at that rate (the NPC world gates itself at 15 Hz)
     if (nav_ && nav_->windowed() && npcs_ && now_seconds - last_window_drive_ >= kWindowPeriodSeconds) {
         last_window_drive_ = now_seconds;

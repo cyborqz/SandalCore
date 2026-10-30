@@ -199,6 +199,7 @@ type objectiveDetailJSON struct {
 	QuestItems   []map[string]any      `json:"qi,omitempty"`
 	Data         map[string]any        `json:"d,omitempty"`
 	Markers      *markerJSON           `json:"mk,omitempty"`
+	Callout      int64                 `json:"cal,omitempty"` // (version 36) the map registration whose speech bubble the objective raises
 }
 
 // markerJSON is what the map pins of an objective need besides the data of its kind (version 30; see objectiveMarkers).
@@ -586,6 +587,7 @@ func objectiveDetail(w *writer, orow designdb.Row) (string, error) {
 		d.Data = data
 	}
 	d.Markers = objectiveMarkers(f, typ)
+	d.Callout = objectiveCallout(f, typ)
 	b, err := json.Marshal(d)
 	return string(b), err
 }
@@ -868,5 +870,5 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 	meta["quests.shrine_icds"] = fmt.Sprint(shrineICDs)
 	meta["quests.kill_set_members"] = fmt.Sprint(killMembers)
 	opt.logf("quests: %d quests (%d with an activation rule), %d objectives (%d missing), %d offers by NPCs, %d accept nodes, %d zone quests, %d item links, %d crate items, %d creatures of the kill objectives' sets, %d shrine interactables", quests, gated, objs, missing, offers, accepts, zoiQuests, itemLinks, crateItems, killMembers, shrineICDs)
-	return nil
+	return buildObjects(w, src, meta)
 }

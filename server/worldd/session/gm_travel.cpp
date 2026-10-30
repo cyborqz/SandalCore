@@ -505,6 +505,7 @@ const char* kind_word(world::ActorKind k) {
         case world::ActorKind::Foliage: return "foliage cell";
         case world::ActorKind::Station: return "crafting station";
         case world::ActorKind::Shrine: return "Emberspring";
+        case world::ActorKind::Prop: return "quest object";
     }
     return "actor";
 }

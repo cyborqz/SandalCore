@@ -109,10 +109,48 @@ CREATE TABLE quest_kill_set (
     instance_guid INTEGER NOT NULL,        -- a creature (population instance) that stands in it
     PRIMARY KEY (set_guid, instance_guid)
 ) WITHOUT ROWID;
+CREATE TABLE interactable (
+    icd_guid       INTEGER PRIMARY KEY,    -- (version 36) an InteractableComponentDef: what the object of a quest (a body, a crate, a root, a site) is used by
+    name           TEXT NOT NULL,
+    radius         REAL NOT NULL,          -- InteractRadius, cm
+    tolerance      REAL NOT NULL,          -- InteractTolerance, cm
+    discovery      REAL NOT NULL,          -- DiscoveryDistance, cm
+    require_los    INTEGER NOT NULL,       -- bRequireLOS
+    requirement    TEXT NOT NULL,          -- the first input point's GameplayRequirements as a requirement tree ('' none): what must hold for the prompt
+    pid_guid       INTEGER NOT NULL,       -- its PlayerInteractionDef (0: none)
+    channel        REAL NOT NULL,          -- ChannelDuration, seconds: the time the use takes (0: at once)
+    busy           REAL NOT NULL,          -- BusyTime
+    allow_combat   INTEGER NOT NULL,       -- AllowInCombat
+    single_use     INTEGER NOT NULL,       -- SingleUse
+    delete_done    INTEGER NOT NULL,       -- DeleteOnCompletion
+    delete_delay   REAL NOT NULL,          -- DeletionDelay
+    anim           TEXT NOT NULL,          -- ChannelAnimation (the client plays it)
+    grants         TEXT NOT NULL,          -- a JSON list [[item, quantity], ...]: ItemsToGrantUponCompletion
+    reward_table   INTEGER NOT NULL,       -- RewardTableId (0: none)
+    complete_objs  TEXT NOT NULL,          -- a JSON list of objective records the use completes
+    reveal_objs    TEXT NOT NULL           -- a JSON list of objective records the use reveals
+);
+CREATE TABLE interactable_actor_def (
+    iad_guid      INTEGER PRIMARY KEY,     -- (version 36) an InteractableActorDef
+    despawn_delay REAL NOT NULL,           -- DespawnDelayTime, seconds
+    despawn_final INTEGER NOT NULL         -- bDespawnAfterFinalState: the object leaves after its use
+);
+CREATE TABLE instance_iad (
+    instance_guid INTEGER PRIMARY KEY,     -- (version 36) a population instance that names an InteractableActorDef
+    iad_guid      INTEGER NOT NULL
+);
+CREATE TABLE quest_item (
+    item_guid INTEGER PRIMARY KEY,         -- (version 36) an item whose record says InventoryFilterType Quest: it belongs in the Quest bag
+    major     INTEGER NOT NULL             -- QuestItemSignificance Major
+);
+CREATE TABLE item_box (
+    item_guid  INTEGER PRIMARY KEY,        -- (version 36) an item that opens the choose-one reward window (its activation loot box)
+    table_guid INTEGER NOT NULL            -- ... the reward table it lists
+);
 `
 
 // QuestTables are the tables QuestDDL creates, in the DDL's order.
-var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set"}
+var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box"}
 
 func createQuests(db *sql.DB) error {
 	if _, err := db.Exec(QuestDDL); err != nil {

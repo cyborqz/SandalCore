@@ -1363,6 +1363,9 @@ private:
     void send_attunements(Connection& conn, Clock::time_point now);                   // the places changed: the pawn's update, and saved with the progress
     void run_embersprings(Connection& conn, Clock::time_point now);                   // discovery: a shrine whose radius holds the player
     void on_shrine_interact(Connection& conn, const world::WorldActor& a, Clock::time_point now);   // using a shrine: the prompt to make it the home
+    void on_prop_interact(Connection& conn, const world::WorldActor& a, Clock::time_point now);     // quests part 3: using a quest object (a body, a crate, a root, a site)
+    void run_props(Connection& conn, Clock::time_point now);                                         // ... a use that takes time ends (or is cancelled by a step away)
+    void finish_prop_use(Connection& conn, uint64_t actor_id, Clock::time_point now);                // ... the object answers, gives what it gives, counts for the quests, leaves
     void on_home_attunement(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);   // RequestServerSetHomeAttunement(bYes)
     void send_respawn_choices(Connection& conn, bool previous_invalid, bool home_on_cooldown);
     void on_plain_respawn(Connection& conn, Clock::time_point now);                   // the Respawn RPC: the window listed nothing
@@ -1547,6 +1550,12 @@ private:
     size_t                                    deaths_ = 0, respawns_ = 0, death_logged_ = 0;
     respawn::Attunements                      attunements_;          // Embersprings: the character's discovered places, home and the last use of the home respawn
     int64_t                                   pending_attune_ = 0;   // the place whose prompt waits for the player's yes or no
+    // quests part 3, slice 1: the use of a quest object that takes time (the character kneels while it runs)
+    bool                                      prop_using_ = false;
+    uint64_t                                  prop_actor_ = 0;
+    Clock::time_point                         prop_end_{};
+    double                                    prop_x_ = 0, prop_y_ = 0;
+    size_t                                    prop_uses_ = 0, prop_cancelled_ = 0, prop_logged_ = 0;
     size_t                                    shrine_uses_ = 0, discoveries_ = 0, homes_set_ = 0, home_uses_ = 0, shrine_logged_ = 0;
     uint64_t                                  pile_actor_ = 0;
     double                                    death_x_ = 0, death_y_ = 0, death_z_ = 0;

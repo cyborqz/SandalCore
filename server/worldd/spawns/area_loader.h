@@ -49,6 +49,16 @@ struct AreaSources {
     const GenericNpcs*           generic = nullptr;   // null: only the Blueprints a capture opened
     const SpawnFilter*           filter = nullptr;    // null: stage 2's behaviour, every point whose Blueprint opens (plan E1, stage 3: spawns/spawn_filter.h)
     const NpcLooks*              looks = nullptr;     // null: the humanoids keep the look and name of the open they are made from (spawns/npc_looks.h)
+    const content::ObjectData*   objects = nullptr;   // null: no quest object has an actor definition (quests part 3)
+};
+
+/// What a quest object that has been used is made again from (quests part 3, slice 1): the open, the instance parameters and when it comes back.
+struct PropRecipe {
+    const OpenTemplate* open = nullptr;
+    InstanceParams      params;
+    int64_t             instance = 0;
+    double              respawn = 0, variance = 0;   // seconds (the instance's own)
+    uint64_t            actor = 0;                   // the registry id of the actor first made
 };
 
 /// What a respawn makes a spawn point's NPC again from (plan E1, stage 3, part 2): the open its Blueprint came from, the instance parameters and the
@@ -79,6 +89,8 @@ struct AreaReport {
     std::map<int64_t, content::NpcRouteRow>    routes;
     /// Plan E1, stage 3, part 2: the recipe of every data NPC that respawns (its spawn point: where, what, at which level).
     std::vector<SpawnRecipe>                   recipes;
+    /// Quests part 3, slice 1: the quest objects the loader made (the actor's PropInfo::slot is the index + 1).
+    std::vector<PropRecipe>                    props;
     /// Plan E1, stage 3, part 2: the respawn shrines within the area (nearest the centre first): where a dead player may come back.
     std::vector<RespawnPoint>                  respawn_points;
     /// Embersprings: the respawn points that became Emberspring actors (the book the session asks) and what the making did with the others.
@@ -95,7 +107,8 @@ struct AreaReport {
 /// A data NPC made an actor: the open instantiated with the spawn's place, level and population, and the NpcInfo the area's NPCs carry (home, aggro and leash radii, the loot tables its
 /// asset and instance name, how it respawns).  The loader's and the node populations' (spawns/node_populations.h) one way to make one.  `params` (optional) gets the instance parameters used.
 /// nullopt, with `error`, when the open refuses a value.
-std::optional<world::WorldActor> make_data_actor(const DataSpawn& spawn, const Minter& mint, uint32_t server_id, double world_time, InstanceParams* params, std::string& error);
+std::optional<world::WorldActor> make_data_actor(const DataSpawn& spawn, const Minter& mint, uint32_t server_id, double world_time, InstanceParams* params, std::string& error,
+                                                 const content::ObjectData* objects = nullptr);
 
 /// Fills `registry`. nullopt, with `error` set, when a source cannot be read at all (the population chain). `server_id` is the ServerId the
 /// actors carry (AuthServerIDReplicated); `world_time` seconds is the timestamp their movement starts at.

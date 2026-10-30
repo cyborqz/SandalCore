@@ -307,6 +307,9 @@ public:
     bool set_attunements(const std::vector<std::vector<uint8_t>>& blocks, int home, double home_last_used);
     /// The pawn's SendClientPromptForHomeAttunement(place): the client asks yes or no.
     std::optional<Send> attune_prompt(int64_t place);
+    /// Quests part 3, slice 1: ClientOnDoInteract on the pawn (reliable): the use of the quest object's interactable component `component` of the actor `actor` ended; the client plays what it ends with.
+    /// nullopt before the pawn's second state or when the RPC does not build.
+    std::optional<Send> interact_done(const emit::FIntrepidNetworkGUID& component, const emit::FIntrepidNetworkGUID& actor);
     /// The pawn's ClientNotifyHomeAttune(shrine) (only when `result`) and SendClientHomeAttuneResult(place, result), in one send.
     std::optional<Send> home_attuned(const emit::FIntrepidNetworkGUID& shrine, int64_t place, bool result);
     /// The PlayerController's ClientReceiveChatMessages with one line.

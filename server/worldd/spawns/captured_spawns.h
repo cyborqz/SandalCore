@@ -139,6 +139,8 @@ struct InstanceParams {
     uint64_t    seed = 0;                  // the new CharacterGuid / GatherableGuid words
     bool        full_health = true;
     int64_t     attune_record = 0;         // an Emberspring: the place it stands for (its AttuneRecordId); its SpawnerGuid words come from `seed`
+    /// A quest object (category "prop"): the definitions its interactable component and its actor name (a definition of 0 leaves the template's)
+    int64_t     component_def = 0, interact_def = 0, actor_def = 0;
 };
 
 /// Mints the NetGUIDs of an actor: next() returns a fresh FIntrepidNetworkGUID of worldd's allocator.

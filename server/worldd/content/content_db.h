@@ -1167,6 +1167,37 @@ struct QuestData {
     std::map<int64_t, std::vector<int64_t>>       shrine_icds;       // ... attune point -> the interactable definitions of the Emberspring of that place
 };
 
+/// Quests part 3, slice 1 (contentc version 36): what a quest object (a body, a crate, a root, a building site) is used by.  An interactable definition (ICD) holds the reach and the
+/// rule of the prompt and, through its first input point, the player interaction (PID) that says how long the use takes and what it gives.
+struct InteractableRow {
+    std::string name;
+    double      radius = 200, tolerance = 30, discovery = 200;   // cm
+    bool        require_los = false;
+    DialogueRequirement requirement;                  // what must hold for the prompt (an objective Active ...); empty: nothing
+    int64_t     pid = 0;                              // the player interaction (0: none)
+    double      channel = 0, busy = 0;                // seconds: the use takes `channel` (0: at once)
+    bool        allow_combat = true, single_use = false, delete_done = false;
+    double      delete_delay = 0;
+    std::string anim;                                 // the montage the client plays
+    std::vector<std::pair<int64_t, int64_t>> grants;  // item, quantity: given when the use ends
+    int64_t     reward_table = 0;                     // given when the use ends (0: none)
+    std::vector<int64_t> complete_objs, reveal_objs;  // objective records the use completes / reveals
+};
+
+/// An interactable actor definition: whether the object leaves after its use.
+struct ActorDefRow {
+    double despawn_delay = 0;
+    bool   despawn_final = false;
+};
+
+struct ObjectData {
+    std::map<int64_t, InteractableRow> interactables;   // by ICD
+    std::map<int64_t, ActorDefRow>     actor_defs;      // by IAD
+    std::map<int64_t, int64_t>         instance_iad;    // population instance -> its IAD
+    std::map<int64_t, bool>            quest_items;     // item record -> Major (it belongs in the Quest bag)
+    std::map<int64_t, int64_t>         item_boxes;      // item record -> the reward table its choose-one window lists
+};
+
 // ---- vendors, step 0 (contentc version 18): which NPC opens which shop and what its listings cost (npc_vendor_link, vendor_def_data, vendor_price, vendor_availability) ----------
 
 /// One priced listing: the tab (inventory) and the listing's index in it, what it sells (item, the variation and the offer the cart names; 0: none) and the price in one
@@ -1544,6 +1575,8 @@ public:
     std::optional<DialogueData> dialogue_data(std::string& error) const;
     /// Quests, slice 1 (contentc version 21): the quests, their objectives, the NPCs' offers, the nodes that offer a quest, the zones that start one and the items bound to quests.
     std::optional<QuestData> quest_data(std::string& error) const;
+    /// Quests part 3, slice 1 (contentc version 36): the quest objects' definitions; nullopt, with `error`, from a content.db of an older version.
+    std::optional<ObjectData> object_data(std::string& error) const;
     /// Crafting, step 0 (contentc version 20): the station definitions and the assets that are their stations, read whole. nullopt, with `error` set, for a file of an older version.
     std::optional<CraftStationData> craft_station_data(std::string& error) const;
     /// Embersprings (contentc version 23): the places, the respawn definitions and the instances that name one, read whole. nullopt, with `error` set, for a file of an older version.

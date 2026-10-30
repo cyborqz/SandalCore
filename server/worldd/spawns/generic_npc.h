@@ -109,6 +109,9 @@ struct GenericConfig {
     std::map<int64_t, std::string> hunting_names;
     /// false (worldd --no-gathering): the world does not look the defs up and no creature is huntable.
     bool                     hunting = true;
+    /// Quests part 3, slice 1: the interactable definitions of the quest objects (content::ObjectData).  A Blueprint that is no pawn and whose instance names one of them is a quest object
+    /// (a body, a crate, a root, a building site): it is made from a recorded one.  Empty: no quest object is made.
+    std::set<int64_t>        prop_components;
     /// The ability records of the Blueprint with this archetype path: the abilities of its state tree, which its open lists as the ones its AbilityComponent loads (the client plays only the
     /// abilities it has the record of).  Empty (or null): the Blueprint has none of its own to list, and a hostile humanoid is then not made from a guard's open (see fighting_humanoid).
     std::function<std::vector<int64_t>(const std::string& archetype_path)> abilities_of;
@@ -144,6 +147,12 @@ public:
     const OpenTemplate* template_for(const content::NpcAssetRow& asset, Verdict* why = nullptr, bool talks = false) const;
     /// The open of a station (see above): nullptr with `why` when the captures hold no station of the asset's family.
     const OpenTemplate* station_template(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
+    /// Quests part 3, slice 1: is `component` the interactable definition of a quest object?
+    bool is_prop_component(int64_t component) const { return component != 0 && config_.prop_components.count(component) != 0; }
+    /// The open of a quest object: a recorded one (category "prop", an actor and its interactable component) with this Blueprint's path in place of the recorded one's; the instance's
+    /// definitions are put in when it is made (spawns::instantiate).  nullptr with `why` when the captures hold none.  The pointer is valid as long as this object.
+    const OpenTemplate* prop_template(const content::NpcAssetRow& asset, Verdict* why = nullptr) const;
+    size_t props_made() const { return props_made_; }
 
     /// A captured open for an NPC whose data does not make it the crate seller the open was recorded from: `open` itself when its interactable offers no crate sale, when the data names its
     /// component (the instance's InteractComponentDefId, else the asset's), or when the captures hold no plain conversation; else a copy with the interactable of a plain conversation.
@@ -157,7 +166,7 @@ public:
     /// The archetype whose recorded interactable (a plain conversation) the people who talk are given; "" when the captures hold none.
     const std::string& talker_interactable() const { return dialogue_path_; }
     const GenericConfig& config() const { return config_; }
-    size_t made() const { return made_.size() - hunting_made_ - stations_made_; }   // the Blueprints' plain templates
+    size_t made() const { return made_.size() - hunting_made_ - stations_made_ - props_made_; }   // the Blueprints' plain templates
     /// How many of the templates made are a station's (crafting, step 0).
     size_t stations_made() const { return stations_made_; }
     /// How many of the templates made are a huntable creature's (eight blocks).
@@ -189,6 +198,7 @@ private:
     mutable size_t           hunting_made_ = 0;
     mutable size_t           conversations_made_ = 0;
     mutable size_t           stations_made_ = 0;
+    mutable size_t           props_made_ = 0;
     mutable std::map<std::string, OpenTemplate> made_;     // by archetype path (stable addresses)
     mutable std::set<uint64_t>                  minted_;   // the static NetGUIDs handed out
     mutable std::map<std::string, repl::ExportChain> exports_;   // the archetype exports, by archetype path (stable addresses)

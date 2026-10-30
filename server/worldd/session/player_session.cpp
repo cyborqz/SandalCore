@@ -661,6 +661,7 @@ void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     run_foliage(conn, now);
     run_floor_net(conn, now);
     run_embersprings(conn, now);   // Embersprings: a shrine whose radius holds the player is discovered
+    run_props(conn, now);          // quests part 3: a use of a quest object that takes time
     run_dialogue(conn, now);
     run_quests(conn, now);
     run_warehouse(conn, now);
@@ -3465,6 +3466,7 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
     if (a->kind == world::ActorKind::Gatherable) return on_gather_interact(conn, *a, now);   // Gathering stage 2: a resource node
     if (a->kind == world::ActorKind::Station) return on_station_interact(conn, *a, now);     // crafting, step 0: a crafting or processing station
     if (a->kind == world::ActorKind::Shrine) return on_shrine_interact(conn, *a, now);       // Embersprings: the prompt to make it the home
+    if (a->kind == world::ActorKind::Prop) return on_prop_interact(conn, *a, now);           // quests part 3: a quest object
     if (view_->state_of(a->id) != world::ClientState::Awake) return ignore("the client does not have that actor open");
     const GoodPosition at = checker_.good();
     const double distance = std::hypot(a->x - at.x, a->y - at.y);
@@ -7465,5 +7467,6 @@ void PlayerSession::on_gm_node_rpc(const repl::ClientRpc& rpc, Clock::time_point
 #include "respawn/session_embersprings.inc"
 #include "quest/session_quests2.inc"
 #include "quest/session_givers.inc"
+#include "quest/session_objects.inc"
 
 }}  // namespace aoc::worldd

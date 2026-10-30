@@ -50,6 +50,7 @@ enum class ActorKind : uint8_t {
     Foliage,     // a foliage cell's AIntrepidStateIFA (Gathering stage 3, "Foliage gathering"): which instances of the cell are cut or growing; opened as a snapshot, never awake
     Station,     // a crafting or processing station (crafting, step 0): an ACraftingStationBase actor of a node's building, opened like any other actor, used for its window
     Shrine,      // an Emberspring (AAoCAttunablePlayerSpawner): a respawn point a player discovers by coming close and attunes to by using it (respawn/embersprings.h)
+    Prop,        // an object of a quest (an AInteractableStateMachineBase actor: a body, a crate, a root, a building site): used by its interactable component, it can leave and come back
 };
 // [C | Y | B ~ C-O-A]
 
@@ -132,6 +133,15 @@ struct StationInfo {
     uint64_t    seed = 0;         // the spawn point's seed (the data's: the same on every start; 0 when the point had none): the station's key and its StationGuid are made from it
 };
 
+/// What a quest object (ActorKind::Prop) is to the server: the definitions its use is read from and the slot of the world's prop book that remakes it.
+struct PropInfo {
+    int64_t  component_def = 0;   // the InteractableComponentDef (what an Interact objective names)
+    int64_t  interact_def = 0;    // its PlayerInteractionDef
+    int64_t  actor_def = 0;       // its InteractableActorDef (0: none)
+    int64_t  instance = 0;        // the population instance it is
+    uint32_t slot = 0;            // 1-based place in the world's prop book (0: none)
+};
+
 /// What an Emberspring (ActorKind::Shrine) is to the server: the place it stands for, the respawn definition the death window names, and the place's number in the master list.
 struct ShrineInfo {
     std::string name;             // the place's name ("Flame and Formula")
@@ -179,6 +189,7 @@ struct WorldActor {
     NpcInfo    npc;
     StationInfo station;                  // ActorKind::Station only
     ShrineInfo  shrine;                   // ActorKind::Shrine only
+    PropInfo    prop;                     // ActorKind::Prop only
     SceneryInfo scenery;                  // ActorKind::NodeLayout only
     GatherSeen gather;                    // ActorKind::Gatherable only (gather/node_wire.h)
 };

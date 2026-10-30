@@ -55,7 +55,8 @@ std::string AreaReport::describe() const {
 }
 // (Cyb) (C.O.A)
 
-std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minter& mint, uint32_t server_id, double world_time, InstanceParams* params, std::string& error) {
+std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minter& mint, uint32_t server_id, double world_time, InstanceParams* params, std::string& error,
+                                                 const content::ObjectData* objects) {
     InstanceParams p;
     p.x = s.x;
     p.y = s.y;
@@ -67,6 +68,15 @@ std::optional<world::WorldActor> make_data_actor(const DataSpawn& s, const Minte
     p.pop_instance = s.instance ? s.instance->guid : 0;
     p.pop_asset = s.asset ? s.asset->guid : 0;
     p.seed = s.seed;
+    if (s.open && s.open->category == "prop" && s.instance) {   // a quest object: the definitions its interactable and its actor are made from
+        p.component_def = s.instance->interact_component != 0 ? s.instance->interact_component : (s.asset ? s.asset->interact_component : 0);
+        p.interact_def = s.instance->interact_response != 0 ? s.instance->interact_response : (s.asset ? s.asset->interaction_def : 0);
+        if (objects) {
+            if (const auto it = objects->instance_iad.find(s.instance->guid); it != objects->instance_iad.end()) p.actor_def = it->second;
+            // the interaction of the definition's first input is what the component lists (the instance's own response is 0 on a crate or a site)
+            if (const auto it = objects->interactables.find(p.component_def); it != objects->interactables.end() && it->second.pid != 0) p.interact_def = it->second.pid;
+        }
+    }
     if (params) *params = p;
     auto w = instantiate(*s.open, mint, p, error);
     if (!w) return std::nullopt;
@@ -137,7 +147,7 @@ std::optional<AreaReport> load_area(world::ActorRegistry& registry, const AreaSo
     for (const DataSpawn& s : data) {
         InstanceParams p;
         std::string why;
-        auto w = make_data_actor(s, mint, server_id, world_time, &p, why);
+        auto w = make_data_actor(s, mint, server_id, world_time, &p, why, sources.objects);
         if (!w) {
             ++report.refused;
             note("a data NPC (" + leaf_of(s.open->archetype_path) + ") was refused: " + why);
@@ -154,11 +164,25 @@ std::optional<AreaReport> load_area(world::ActorRegistry& registry, const AreaSo
         }
         const std::string path = s.open->archetype_path;
         const double x = w->x, y = w->y;
+        const bool prop = w->kind == world::ActorKind::Prop;
+        if (prop) {   // a quest object: the world remakes it after its use
+            PropRecipe recipe;
+            recipe.open = s.open;
+            recipe.params = p;
+            recipe.instance = s.instance ? s.instance->guid : 0;
+            recipe.respawn = s.instance ? s.instance->respawn_time : 0;
+            recipe.variance = s.instance ? s.instance->respawn_variance : 0;
+            recipe.actor = w->id;
+            report.props.push_back(recipe);
+            w->prop.slot = static_cast<uint32_t>(report.props.size());
+        }
         if (!registry.add(std::move(*w))) {
             ++report.refused;
             note("a data NPC could not be added to the registry");
+            if (prop) report.props.pop_back();
             continue;
         }
+        if (prop) continue;   // (a quest object is no NPC: the NPC counts and the duplicate check leave it out)
         placed.push_back({x, y, path});
         ++report.data_npcs;
         ++report.npcs_by_archetype[leaf_of(path)];

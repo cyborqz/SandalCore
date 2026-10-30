@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "35"
+const Version = "36"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -221,10 +221,13 @@ var keep = map[string]bool{
 	"BuildingRecordBase":                   true,
 	"BuildingNodeAssetSetsRecordBase":      true,
 	// Gathering stage 2 (version 13): the gathering tables, the professions and the certification levels (gather.go; ItemRecordBase and ActionResponseRecordBase are kept above)
-	"GatherableActorDefRecordBase":       true,
-	"GatheringFoliageDataRecordBase":     true,
-	"GatheringFoliageStateRecordBase":    true, // Gathering stage 3 (version 15): the states of the painted foliage
-	"PlayerInteractionDefRecordBase":     true,
+	"GatherableActorDefRecordBase":    true,
+	"GatheringFoliageDataRecordBase":  true,
+	"GatheringFoliageStateRecordBase": true, // Gathering stage 3 (version 15): the states of the painted foliage
+	"PlayerInteractionDefRecordBase":  true,
+	// quests part 3 (contentc 36): the quest objects
+	"InteractableComponentDefRecordBase": true,
+	"InteractableActorDefRecordBase":     true,
 	"GatheringInteractionDataRecordBase": true,
 	"GatheringDynamicDefRecordBase":      true,
 	"GatheringToolDataRecordBase":        true,

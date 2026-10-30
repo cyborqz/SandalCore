@@ -68,7 +68,9 @@ const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool
     if (why) *why = Verdict::NoPath;
     if (asset.archetype_path.empty()) return nullptr;
     if (captured) {
-        if (const OpenTemplate* t = captured->template_for(asset.archetype_path)) {
+        const OpenTemplate* t = captured->template_for(asset.archetype_path);
+        // (a recorded quest object is the donor of the others: this Blueprint is made like any other quest object, below)
+        if (t && t->category != "prop") {
             // an Emberspring is no spawn of the population passes (the filter has no node for the towns' ones, and a shrine needs its place): respawn/make_shrines.h makes them from the respawn points
             if (t->category == "shrine") {
                 if (why) *why = Verdict::NotPawn;
@@ -82,6 +84,10 @@ const OpenTemplate* TemplateSource::find(const content::NpcAssetRow& asset, bool
     if (generic) {
         Verdict v = Verdict::NoTable;
         const OpenTemplate* t = generic->template_for(asset, &v, instance != nullptr && NpcLooks::talks(asset, instance));
+        // quests part 3, slice 1: a Blueprint that is no pawn and whose instance names the interactable definition of a quest object is a quest object
+        if (!t && v == Verdict::NotPawn && instance != nullptr && generic->is_prop_component(instance->interact_component != 0 ? instance->interact_component : asset.interact_component)) {
+            t = generic->prop_template(asset, &v);
+        }
         if (why) *why = v;
         if (t && is_generic) *is_generic = true;
         return t;

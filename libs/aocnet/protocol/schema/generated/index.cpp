@@ -34,6 +34,7 @@
 #include "protocol/schema/generated/AGameStateBase.h"
 #include "protocol/schema/generated/AGatherableActor.h"
 #include "protocol/schema/generated/AInfo.h"
+#include "protocol/schema/generated/AInteractableStateMachineBase.h"
 #include "protocol/schema/generated/AIntrepidStateIFA.h"
 #include "protocol/schema/generated/ALootPile.h"
 #include "protocol/schema/generated/ANPCCharacter.h"
@@ -108,6 +109,7 @@ constexpr Entry kByName[] = {
     {"AGameStateBase", &kAGameStateBase},
     {"AGatherableActor", &kAGatherableActor},
     {"AInfo", &kAInfo},
+    {"AInteractableStateMachineBase", &kAInteractableStateMachineBase},
     {"AIntrepidStateIFA", &kAIntrepidStateIFA},
     {"ALootPile", &kALootPile},
     {"ANPCCharacter", &kANPCCharacter},
@@ -201,6 +203,7 @@ constexpr const ClassSchema* kAll[] = {
     &kAGameStateBase,
     &kAGatherableActor,
     &kAInfo,
+    &kAInteractableStateMachineBase,
     &kAIntrepidStateIFA,
     &kALootPile,
     &kANPCCharacter,
