@@ -1160,6 +1160,7 @@ struct QuestData {
     std::map<int64_t, std::vector<QuestOfferRow>> asset_offers;      // PopulationAsset guid -> its offers
     std::map<int64_t, QuestAcceptRow>             accepts;           // by node
     std::map<int64_t, int64_t>                    confirms;          // slice 2: a Confirmation node -> the node the talk goes on at after the player confirms (OnSuccessNode)
+    std::map<int64_t, QuestAcceptRow>             turn_ins;          // quests part 3, slice 2 (contentc version 37): a TurnIn node -> its quest, where the talk goes on after the hand-in and the objectives it lists
     std::map<int64_t, std::vector<int64_t>>       zoi_quests;        // zone of influence guid -> the quests it starts
     std::map<int64_t, std::vector<QuestItemLink>> item_quests;       // item record guid -> its quest links
     std::map<int64_t, int64_t>                    item_crate;        // slice 2 (contentc version 27): crate item record -> its crate type (CrateRecordBase)

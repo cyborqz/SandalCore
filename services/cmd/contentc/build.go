@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "36"
+const Version = "37"
 
 // Options say what Build reads and writes.
 type Options struct {

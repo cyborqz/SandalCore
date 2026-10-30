@@ -17,6 +17,7 @@ import (
 //	                  has to happen (completion_count) and whether finishing it finishes the quest
 //	npc_offered_quest the quests an NPC offers (source_kind 'instance' or 'asset', as in npc_dialogue): the node its talk starts at while the quest is offered
 //	dialogue_accept   the nodes that offer a quest: the quest, the node the talk goes on at after the player takes it and the objectives the node names (JSON list)
+//	dialogue_turnin   (version 37) the nodes that take items for a quest (NodeType TurnIn): the quest, the node the talk goes on at after the hand-in and the objectives the node names (JSON list)
 //	zoi_quest         the quests a zone of influence starts for a character who stands in it (the zone record's LocationQuests: the starting areas' first quests)
 //	item_quest        the quests an item is bound to: it is deleted when the quest is taken out of the log ('delete_all', 'delete_one'), or the quest is taken out of the log when the
 //	                  item is deleted ('abandon')
@@ -147,10 +148,16 @@ CREATE TABLE item_box (
     item_guid  INTEGER PRIMARY KEY,        -- (version 36) an item that opens the choose-one reward window (its activation loot box)
     table_guid INTEGER NOT NULL            -- ... the reward table it lists
 );
+CREATE TABLE dialogue_turnin (
+    node_guid  INTEGER PRIMARY KEY,        -- (version 37) a TurnIn node: the conversation asks the player to hand items in for a quest
+    quest_guid INTEGER NOT NULL,           -- its QuestId (0: none)
+    on_success INTEGER NOT NULL,           -- OnSuccessNode: where the talk goes on after the hand-in (0: it ends)
+    objectives TEXT NOT NULL               -- JSON list of the node's ObjectiveIds: the TurnIn objectives the hand-in panel lists
+);
 `
 
 // QuestTables are the tables QuestDDL creates, in the DDL's order.
-var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box"}
+var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box", "dialogue_turnin"}
 
 func createQuests(db *sql.DB) error {
 	if _, err := db.Exec(QuestDDL); err != nil {

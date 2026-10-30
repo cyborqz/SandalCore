@@ -86,6 +86,13 @@ public:
         const auto it = accepts_.find(node);
         return it == accepts_.end() ? nullptr : &it->second;
     }
+    /// Quests part 3, slice 2: the TurnIn nodes (a node that asks the player to hand items in for a quest), by node: the quest, where the talk goes on after the hand-in and the objectives it lists.
+    void set_turn_ins(std::map<int64_t, content::QuestAcceptRow> turn_ins) { turn_ins_ = std::move(turn_ins); }
+    const content::QuestAcceptRow* turn_in(int64_t node) const {
+        const auto it = turn_ins_.find(node);
+        return it == turn_ins_.end() ? nullptr : &it->second;
+    }
+    size_t turn_in_nodes() const { return turn_ins_.size(); }
     /// Quests, slice 2: the Confirmation nodes (the path a gatewatcher's welcome asks the player to confirm) and where the talk goes on after a yes.
     void set_confirms(std::map<int64_t, int64_t> confirms) { confirms_ = std::move(confirms); }
     std::optional<int64_t> confirm(int64_t node) const {
@@ -146,6 +153,7 @@ public:
 private:
     content::DialogueData d_;
     std::map<int64_t, content::QuestAcceptRow> accepts_;
+    std::map<int64_t, content::QuestAcceptRow> turn_ins_;
     std::map<int64_t, int64_t> confirms_;
 };
 
@@ -162,6 +170,12 @@ public:
     /// Quests, slice 2: the quest the rules that follow belong to (a rule inside a quest or an objective says "this quest" with quest 0); 0: none.
     void scope(int64_t quest) { scope_ = quest; }
     int64_t scope() const { return scope_; }
+
+    /// Quests part 3, slice 2: whether the character has the objective of the quest active (a hand-in panel lists only such objectives); false for a character with no quest log.
+    bool objective_active(int64_t quest, int64_t objective) const {
+        const auto n = facts_.objective_count(quest, objective, "Active");
+        return n && *n > 0;
+    }
 
     /// Quest(X.Available): not disabled, not done (a repeatable quest may be done again), and the quest's activation rule holds.
     bool quest_available(int64_t quest_guid) { return available(quest_guid, 0); }

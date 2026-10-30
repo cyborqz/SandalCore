@@ -1131,6 +1131,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
         if (name_of_rpc == "ServerSelectDialogueChoice") return on_dialogue_choice(conn, rpc, now);
         // quests, slice 1: the quest book's calls
         if (name_of_rpc == "ServerAbandonQuests") return on_abandon_quests(conn, rpc, now);
+        if (name_of_rpc == "ServerRequestItemDelivery") return on_item_delivery(conn, rpc, now);   // quests part 3, slice 2: the hand-in panel's delivery
         if (name_of_rpc == "ServerSetQuestBlacklisted") {   // the Destiny window's toggle: accepted, nothing to toggle yet
             if (quest_told_.insert("ServerSetQuestBlacklisted").second) spdlog::info("[session] {}: ServerSetQuestBlacklisted is accepted and ignored (there is no Destiny track yet; told once)", name());
             return;
@@ -4955,8 +4956,8 @@ bootstrap::PlayerBootstrap::DialogueView PlayerSession::dialogue_view(bool exhau
         sd.node = s.sub->node;
         sd.quest = s.sub->quest;
         sd.objectives = s.sub->objectives;
-        // the objectives the quest starts with: the ones that are awake or that a start action activates
-        if (const quest::QuestBook* qb = world_ ? world_->quests() : nullptr) {
+        // the objectives the quest starts with: the ones that are awake or that a start action activates (a quest offer's preview; the hand-in panel has none)
+        if (const quest::QuestBook* qb = world_ && s.sub->type == 2 ? world_->quests() : nullptr) {
             if (const content::QuestRow* def = qb->quest(s.sub->quest)) {
                 for (const content::QuestObjectiveRow& o : def->objectives) {
                     bool starts = o.awake;
@@ -7471,5 +7472,6 @@ void PlayerSession::on_gm_node_rpc(const repl::ClientRpc& rpc, Clock::time_point
 #include "quest/session_quests2.inc"
 #include "quest/session_givers.inc"
 #include "quest/session_objects.inc"
+#include "quest/session_handin.inc"
 
 }}  // namespace aoc::worldd

@@ -224,7 +224,10 @@ void PlayerSession::run_talk_actions(Connection& conn, const dialogue::Result& r
     quest_engine(conn, now, "a conversation", [&](quest::Engine& eng) {
         for (const dialogue::Result::Run& run : r.actions) {
             const std::string& a = run.action.action;
-            if (a == "CompleteDialogueObjective" || a == "IncrementDialogueObjective") eng.dialogue(instance, run.visited.empty() ? r.visited : run.visited, a == "CompleteDialogueObjective");
+            if (a == "CompleteDialogueObjective" || a == "IncrementDialogueObjective") {
+                eng.dialogue(instance, run.visited.empty() ? r.visited : run.visited, a == "CompleteDialogueObjective");
+                eng.dialogue_turn_in(run.action, a == "CompleteDialogueObjective");   // quests part 3, slice 2: a hand-in objective the talk names
+            }
             else eng.dialogue_action(run.action);
         }
     });

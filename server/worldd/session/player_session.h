@@ -753,6 +753,9 @@ public:
     /// ContributedToServiceBuildingConstruction (once for each crate) and the crate objectives (a TurnIn that takes crates of the item's crate type).
     void     construction_deposit(int64_t node, int64_t building_or_project, int64_t item_record, int32_t count);
     size_t   quests_refused() const { return quests_refused_; }
+    size_t   hand_ins() const { return hand_ins_; }
+    size_t   hand_ins_refused() const { return hand_ins_refused_; }
+    size_t   hand_in_items() const { return hand_in_items_; }
     size_t   quests_abandoned() const { return quests_abandoned_; }
     /// Storage clerks, step 0: whether the storage window is open, the guid the pawn's component of a container of an area has (the one the open window shows; else the first the connection
     /// made; zero when it has none), the storage windows opened and the stacks moved, the requests refused, and what the character keeps.
@@ -951,6 +954,8 @@ private:
     void start_quest(Connection& conn, const content::QuestRow& def, int64_t source, const char* why, Clock::time_point now);
     /// The player answered the quest panel (SubDialogue / Accept, Decline).
     void on_quest_offer(Connection& conn, uint8_t response, Clock::time_point now);
+    /// Quests part 3, slice 2: ServerRequestItemDelivery(QuestRecordId, DeliveryItems): the items the player picked in the hand-in panel (quest/session_handin.inc).
+    void on_item_delivery(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// ServerAbandonQuests(QuestGuids, QuestState): the quests the client names leave the log.
     void on_abandon_quests(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// The client's own debug calls (ServerDebugStartQuest, ServerDebugEndQuest, ServerDebugFailQuestByInstance, ServerClearCompletedQuests): GM commands.
@@ -1672,6 +1677,7 @@ private:
     int64_t              zoi_seen_ = -1;            // the zone of influence the character stood in at the last check (-1: none checked yet)
     Clock::time_point    zone_checked_{};
     size_t               quests_taken_ = 0, quests_refused_ = 0, quests_abandoned_ = 0, quests_logged_ = 0;
+    size_t               hand_ins_ = 0, hand_ins_refused_ = 0, hand_in_items_ = 0;   // quests part 3, slice 2: deliveries taken and refused, and the items they took
     std::set<std::string> quest_told_;               // what a quest's start skipped, told once for each text
     // quests, slice 2
     stats::SplitMix      quest_rng_{0x51e57a11d0fe5eedull};   // the dice of the reward tables (their weights and chances)

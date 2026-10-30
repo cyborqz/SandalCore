@@ -19,6 +19,9 @@
 //                (`sub`).  The player answers the panel (Accept, Decline or Close); an accepted quest goes on to the node the offer names (none: the talk ends), a declined one ends the talk
 //    confirm     (quests, slice 2) a step that arrives at a Confirmation node queues the same kind of panel (ESubDialogueType Confirmation) with no quest: Accept goes on to the node
 //                the confirmation names, Decline goes back to the node the player chose the line on (modelled: no recording shows a declined confirmation), Close ends the talk
+//    hand-in     (quests part 3, slice 2) a step that arrives at a TurnIn node queues the hand-in panel (ESubDialogueType ItemTurnIn) with the node's quest and the objectives it lists that are
+//                active.  The player hands the items in (ServerRequestItemDelivery, which the session answers): what the quest took ends the panel and the talk goes on to the node the TurnIn
+//                names (none: it ends).  A close ends the talk and nothing is taken.  A TurnIn node none of whose objectives is active shows nothing (the line that leads there changes nothing)
 //    cleared     the line ends the conversation, the client closed the window, the player went away or died: every field back to nothing
 //
 //  Actions (quests, slice 2): what a conversation does to the character's quests is returned in Result::actions, in the order the conversation ran it, for the session to carry
@@ -28,8 +31,8 @@
 //  Result::actions when the conversation ends, so that a talk quest is marked done after the talk and not when its window opens.
 //
 //  What this milestone does not do (it opens no windows but a shop's): an action that is not a quest action (SetCertificationLevel, a window that is not a shop's ...) is skipped and
-//  reported; a line that ends the conversation but has such an action changes nothing (the window stays); a node of a kind that needs hand-ins or choices (TurnIn, Confirmation,
-//  BuyOrderFulfillment) is never shown (the line that leads there changes nothing).  ExhaustBehavior is CloseAndClear for all but one node of the data, and every node is treated so.
+//  reported; a line that ends the conversation but has such an action changes nothing (the window stays); a node of a kind that needs choices this milestone does not offer (a
+//  BuyOrderFulfillment node) is never shown (the line that leads there changes nothing).  ExhaustBehavior is CloseAndClear for all but one node of the data, and every node is treated so.
 //  A node with no line that shows is shown with its words alone: the talking window adds a close option of its own ("Farewell." for a person, "Close" for anything else) and the
 //  player ends the conversation with it, so the last words of most conversations are seen before the talk ends.  A node with neither words nor a line (a placeholder root) shows
 //  nothing: a click on an NPC that starts at one does nothing, a line that leads to one ends the conversation, and what entering it does still happens.
@@ -83,14 +86,14 @@ public:
         bool operator==(const Line&) const = default;
     };
 
-    /// The quest panel queued on top of the conversation (SubDialogueInstance, QuestAccept).
+    /// The panel queued on top of the conversation (SubDialogueInstance: QuestAccept, Confirmation or the hand-in panel).
     struct Sub {
-        uint8_t              type = 2;            // ESubDialogueType: 2 QuestAccept, 4 Confirmation (quests, slice 2)
-        int64_t              quest = 0;           // the quest on offer (0 for a confirmation)
+        uint8_t              type = 2;            // ESubDialogueType: 2 QuestAccept, 3 ItemTurnIn (quests part 3, slice 2), 4 Confirmation (quests, slice 2)
+        int64_t              quest = 0;           // the quest on offer or handed in for (0 for a confirmation)
         int64_t              node = 0;            // the node that offers it
         int64_t              previous_node = 0;   // the node the player left to get there
-        int64_t              pending_next = 0;    // where the talk goes on after the quest is taken (0: it ends)
-        std::vector<int64_t> objectives;          // the objectives the node names
+        int64_t              pending_next = 0;    // where the talk goes on after the quest is taken or the items are handed in (0: it ends)
+        std::vector<int64_t> objectives;          // the objectives the node names (a hand-in: the ones that are active)
         bool operator==(const Sub&) const = default;
     };
 
@@ -144,7 +147,7 @@ public:
             }
             return r;
         }
-        if (!enter(book, *n, *shown, 0, s, r)) return r;
+        if (!enter(book, ev, *n, *shown, 0, s, r)) return r;
         entering(book, passes, *shown, s, r);
         state_ = std::move(s);
         commit(r);
@@ -231,7 +234,7 @@ public:
             r.why = "the node " + std::to_string(*target) + " has no words and no line that shows";
             return r;
         }
-        if (!enter(book, *n, *target, state_.shown_node, s, entered)) { drop(r); r.outcome = Outcome::Nothing; r.why = entered.why; return r; }
+        if (!enter(book, ev, *n, *target, state_.shown_node, s, entered)) { drop(r); r.outcome = Outcome::Nothing; r.why = entered.why; return r; }
         r.offer = entered.offer;
         entering(book, passes, *target, s, r);
         state_ = std::move(s);
@@ -291,7 +294,7 @@ public:
                 if (n->type == "Response" && s.lines.empty() && !n->has_text) {   // nothing to say, not even words: the talk ends, what entering the node does still happens
                     entering(book, passes, *next, s, r);
                     commit(r);
-                } else if (n->type == "Response" && enter(book, *n, *next, sub.node, s, entered) && !entered.offer) {
+                } else if (n->type == "Response" && enter(book, ev, *n, *next, sub.node, s, entered) && !entered.offer) {
                     entering(book, passes, *next, s, r);
                     state_ = std::move(s);
                     commit(r);
@@ -329,7 +332,7 @@ private:
 
     /// Whether the node can be shown, and what it adds to the state: an AcceptQuest node queues the quest panel, a Confirmation node the confirmation, a Response node is shown with the lines
     /// that show (none: its words alone, and the window's own close option).  `from` is the node the player left.
-    static bool enter(const Book& book, const content::DialogueNodeRow& n, int64_t guid, int64_t from, State& s, Result& r) {
+    static bool enter(const Book& book, Evaluator& ev, const content::DialogueNodeRow& n, int64_t guid, int64_t from, State& s, Result& r) {
         if (n.type == "AcceptQuest") {
             const content::QuestAcceptRow* offer = book.accept(guid);
             if (!offer || offer->quest == 0) { r.outcome = Outcome::Refused; r.why = "the offer node " + std::to_string(guid) + " is not in the data"; return false; }
@@ -351,6 +354,23 @@ private:
             sub.node = guid;
             sub.previous_node = from;
             sub.pending_next = *confirm;
+            s.sub = std::move(sub);
+            r.offer = true;
+            return true;
+        }
+        if (n.type == "TurnIn") {   // quests part 3, slice 2: the hand-in panel, listing the objectives of the node's quest that the character has active
+            const content::QuestAcceptRow* turn = book.turn_in(guid);
+            if (!turn || turn->quest == 0) { r.outcome = Outcome::Refused; r.why = "the hand-in node " + std::to_string(guid) + " is not in the data"; return false; }
+            Sub sub;
+            sub.type = 3;
+            sub.quest = turn->quest;
+            sub.node = guid;
+            sub.previous_node = from;
+            sub.pending_next = turn->on_success;
+            for (const int64_t o : turn->objectives) {
+                if (ev.objective_active(turn->quest, o)) sub.objectives.push_back(o);
+            }
+            if (sub.objectives.empty()) { r.outcome = Outcome::Refused; r.why = "nothing to hand in at node " + std::to_string(guid) + ": no objective it lists is active"; return false; }
             s.sub = std::move(sub);
             r.offer = true;
             return true;

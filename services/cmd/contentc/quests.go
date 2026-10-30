@@ -745,6 +745,19 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 		accepts++
 	}
 
+	// the nodes that take items for a quest (version 37): the quest, where the talk goes on after the hand-in and the TurnIn objectives the node lists
+	var turnIns int
+	for _, r := range src.rows["DialogueNode"] {
+		if enumValue(strOf(r.Fields["NodeType"])) != "TurnIn" {
+			continue
+		}
+		if err := w.exec(`INSERT INTO dialogue_turnin (node_guid, quest_guid, on_success, objectives) VALUES (?, ?, ?, ?)`,
+			r.Guid, idGuid(r.Fields["QuestId"]), idGuid(r.Fields["OnSuccessNode"]), jsonIDs(idsOf(r.Fields["ObjectiveIds"]))); err != nil {
+			return err
+		}
+		turnIns++
+	}
+
 	// the quests a zone of influence starts
 	var zoiQuests int
 	for _, r := range src.rows["ZOIRecordBase"] {
@@ -864,11 +877,12 @@ func buildQuests(w *writer, src *source, opt *Options, meta map[string]string) e
 	meta["quests.objectives"] = fmt.Sprintf("%d (%d named by a quest but missing)", objs, missing)
 	meta["quests.offers"] = fmt.Sprint(offers)
 	meta["quests.accept_nodes"] = fmt.Sprint(accepts)
+	meta["quests.turnin_nodes"] = fmt.Sprint(turnIns)
 	meta["quests.zoi_quests"] = fmt.Sprint(zoiQuests)
 	meta["quests.item_links"] = fmt.Sprint(itemLinks)
 	meta["quests.crate_items"] = fmt.Sprint(crateItems)
 	meta["quests.shrine_icds"] = fmt.Sprint(shrineICDs)
 	meta["quests.kill_set_members"] = fmt.Sprint(killMembers)
-	opt.logf("quests: %d quests (%d with an activation rule), %d objectives (%d missing), %d offers by NPCs, %d accept nodes, %d zone quests, %d item links, %d crate items, %d creatures of the kill objectives' sets, %d shrine interactables", quests, gated, objs, missing, offers, accepts, zoiQuests, itemLinks, crateItems, killMembers, shrineICDs)
+	opt.logf("quests: %d quests (%d with an activation rule), %d objectives (%d missing), %d offers by NPCs, %d accept nodes, %d turn-in nodes, %d zone quests, %d item links, %d crate items, %d creatures of the kill objectives' sets, %d shrine interactables", quests, gated, objs, missing, offers, accepts, turnIns, zoiQuests, itemLinks, crateItems, killMembers, shrineICDs)
 	return buildObjects(w, src, meta)
 }

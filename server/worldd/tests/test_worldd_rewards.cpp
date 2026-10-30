@@ -485,6 +485,34 @@ void test_biome(Fixture& f) {
 
 }  // namespace
 
+/// The tables that the first objectives of two beginner quests give when the quest starts (quests part 3, slice 2): the Suspicious Bread of Hungry For More (the quest once gave none)
+/// and the Heartwood Extract of The Root of the Problem, whose quantity expression is empty.  Each is one item.
+void test_quest_start_tables(Fixture& f) {
+    std::printf("quest start tables\n");
+    constexpr int64_t kBreadTable = 6064634776945885185ll, kBread = 6064634776923734016ll;
+    constexpr int64_t kExtractTable = 6064634676809564264ll, kExtract = 6064634676810874985ll;
+    std::string err;
+    auto tables = f.db->loot_tables({kBreadTable, kExtractTable}, err);
+    CHECK(tables && tables->count(kBreadTable) == 1 && tables->count(kExtractTable) == 1, "the loot tables of the two start actions are in content.db");
+    if (!tables) return;
+    combat::RewardBook book(*f.catalog, std::move(*tables), 0);
+    Kill k;
+    if (!k.make(f, "Rabid_C", 8, 1)) {
+        CHECK(false, "a Rabid");
+        return;
+    }
+    const auto count_of = [&](int64_t table, int64_t item) {
+        const combat::Rolled r = book.roll({table}, k.ctx);
+        int64_t n = 0;
+        for (const combat::RolledItem& it : r.loot) n += it.item == item ? it.quantity : 0;
+        for (const combat::RolledItem& it : r.direct) n += it.item == item ? it.quantity : 0;
+        return n;
+    };
+    const int64_t breads = count_of(kBreadTable, kBread), extracts = count_of(kExtractTable, kExtract);
+    CHECKF(breads == 1, "the bread's table gives exactly one Suspicious Bread (%lld)", static_cast<long long>(breads));
+    CHECKF(extracts == 1, "the extract's table gives exactly one Heartwood Extract (%lld)", static_cast<long long>(extracts));
+}
+
 int main() {
     if (!real_db_present()) {
         std::printf("test_worldd_rewards: no content.db at %s (set AOC_CONTENT_DB): skipped\n", real_db_path().c_str());
@@ -501,6 +529,7 @@ int main() {
     test_chance_mult(f);
     test_rules(f);
     test_biome(f);
+    test_quest_start_tables(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

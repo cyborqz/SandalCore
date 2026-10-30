@@ -296,6 +296,7 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
             if (dialogue_) {
                 dialogue_->set_accepts(data->accepts);
                 dialogue_->set_confirms(data->confirms);
+                dialogue_->set_turn_ins(data->turn_ins);
             }
             quests_.emplace(std::move(*data));
             spdlog::info("[world] quests: {} quests, {} nodes that offer one, {} zones that start one", quests_->quests(), quests_->data().accepts.size(), quests_->data().zoi_quests.size());

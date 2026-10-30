@@ -1362,6 +1362,8 @@ int main() {
     test_quest_refusals();
     test_quest_gm();
     test_quest_zone();
+    test_quest_hand_in();   // quests part 3, slice 2
+    test_quest_hand_in_engine();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

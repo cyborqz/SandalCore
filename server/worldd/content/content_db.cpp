@@ -3390,6 +3390,24 @@ std::optional<QuestData> ContentDb::quest_data(std::string& error) const {
         }
         if (step != SQLITE_DONE) return failed("dialogue_accept");
     }
+    {   // quests part 3, slice 2 (contentc version 37): the nodes that take items for a quest; a content.db of an older version has none and no hand-in panel is shown
+        Stmt q(db_, "SELECT node_guid, quest_guid, on_success, objectives FROM dialogue_turnin");
+        if (q.ok()) {
+            int step;
+            while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+                sqlite3_stmt* s = q.get();
+                if (!column_is_int(s, 0) || !column_is_int(s, 1) || !column_is_int(s, 2)) return unread("dialogue_turnin", 0);
+                QuestAcceptRow r;
+                r.node = sqlite3_column_int64(s, 0);
+                r.quest = sqlite3_column_int64(s, 1);
+                r.on_success = sqlite3_column_int64(s, 2);
+                if (!parse_guid_list(column_text(s, 3), r.objectives)) return unread("dialogue_turnin", r.node);
+                if (r.quest == 0) continue;   // a TurnIn node of no quest has nothing to take items for
+                out.turn_ins[r.node] = std::move(r);
+            }
+            if (step != SQLITE_DONE) return failed("dialogue_turnin");
+        }
+    }
     {
         Stmt q(db_, "SELECT zoi_guid, quest_guid FROM zoi_quest ORDER BY zoi_guid, idx");
         if (!q.ok()) return failed("zoi_quest");

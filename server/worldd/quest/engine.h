@@ -55,8 +55,8 @@ struct Effect {
     std::string                              text;
 };
 
-/// The node a conversation with the NPC `npc` (its population instance) starts at because of an active Dialogue objective that names it and a node (0: no such objective).  The
-/// first one in the log's order wins.
+/// The node a conversation with the NPC `npc` (its population instance) starts at because of an active Dialogue objective that names it and a node, or an active TurnIn objective of items
+/// (quests part 3, slice 2: its DialogueSources name the node the talk starts at; the hand-in node sits at the end of that talk) (0: no such objective).  The first one in the log's order wins.
 inline int64_t dialogue_entry(const QuestLog& log, const QuestBook& book, int64_t npc) {
     if (npc == 0) return 0;
     for (const QuestInstance& q : log.instances()) {
@@ -66,7 +66,7 @@ inline int64_t dialogue_entry(const QuestLog& log, const QuestBook& book, int64_
         for (size_t i = 0; i < q.objectives.size() && i < d->objectives.size(); ++i) {
             const ObjectiveState& o = q.objectives[i];
             const content::QuestObjectiveRow& r = d->objectives[i];
-            if (!o.active || o.completed || o.failed || r.type != "Dialogue") continue;
+            if (!o.active || o.completed || o.failed || (r.type != "Dialogue" && !(r.type == "TurnIn" && !r.crate))) continue;
             for (const content::QuestSource& s : r.sources) {
                 if ((s.kind.empty() || s.kind == "NPC") && s.instance == npc && s.node != 0) return s.node;
             }
@@ -84,12 +84,26 @@ public:
     // ---- starting -------------------------------------------------------------------------------------------------------------------------------------------------
 
     /// Takes the quest (the caller has asked QuestLog::can_start): the instance joins the log, its start actions run and everything settles.  The instance, or null when the log has none.
+    /// An objective that starts awake starts active (QuestLog::start_instance) and nothing activates it, so what it does when it starts (its start actions: the item a hand-in objective asks
+    /// for, a variable raised ...) is done here, after the quest's own start actions; an objective one of those actions activates ran its start actions then and is not run twice.
     QuestInstance* start(const content::QuestRow& def, int64_t source) {
         Started s = log_.start(def, now_, source, /*run_actions=*/false);
         QuestInstance* q = s.instance;
         if (!q) return nullptr;
         const int64_t record = q->record;
+        std::vector<size_t> starting;   // the objectives that start active
+        for (size_t i = 0; i < q->objectives.size() && i < def.objectives.size(); ++i) {
+            if (q->objectives[i].active) starting.push_back(i);
+        }
         run_actions(def.start_actions, *q, -1);
+        for (const size_t i : starting) {
+            QuestInstance* cur = log_.find(record);
+            if (!cur || cur->status != Status::Active || i >= cur->objectives.size()) break;
+            ObjectiveState& o = cur->objectives[i];
+            if (!o.active || o.completed || o.failed) continue;   // an action ended it already
+            if (!started_.insert({record, o.record}).second) continue;   // a start action activated it: its start actions ran
+            run_actions(def.objectives[i].on_start, *cur, static_cast<int>(i));
+        }
         settle();
         return log_.find(record);
     }
@@ -127,6 +141,45 @@ public:
             any = true;
         });
         return finish_event(any);
+    }
+
+    /// Quests part 3, slice 2: the character handed `count` items in for the TurnIn objective `objective` of `quest` (the hand-in panel's delivery; the caller has checked the items): the
+    /// objective counts them, never above its CompletionCount, and a quest variable it raises is raised by what it took.  Returns how many it took (0: it is no active hand-in
+    /// objective of an active quest, or it needs no more); the caller takes that many items, no more.
+    int64_t turn_in(int64_t quest, int64_t objective, int64_t count) {
+        if (count <= 0) return 0;
+        QuestInstance* q = log_.find(quest);
+        if (!q || q->status != Status::Active) return 0;
+        const content::QuestRow* d = book_.quest(q->record);
+        const int i = index_of(*q, objective);
+        if (!d || i < 0 || static_cast<size_t>(i) >= d->objectives.size()) return 0;
+        const size_t at = static_cast<size_t>(i);
+        const content::QuestObjectiveRow& r = d->objectives[at];
+        const ObjectiveState& o = q->objectives[at];
+        if (r.type != "TurnIn" || r.crate || !o.active || o.completed || o.failed) return 0;
+        const int64_t before = o.count;
+        update_objective(*q, at, r, count);
+        const int64_t taken = q->objectives[at].count - before;
+        if (taken > 0 && r.inc_variable && !r.quest_variable.empty()) log_.set_quest_variable(q->record, r.quest_variable, log_.quest_variable(q->record, r.quest_variable) + taken);
+        finish_event(taken > 0);
+        return taken;
+    }
+
+    /// Quests part 3, slice 2: a conversation action CompleteDialogueObjective (`complete`) or IncrementDialogueObjective names a TurnIn objective of one of the character's quests.  The data
+    /// completes some hand-in objectives by the talk alone (the optional crest of The Root of the Problem is done at the last node of Eudoxia's talk), so the named objective counts.
+    bool dialogue_turn_in(const content::DialogueActionRow& a, bool complete) {
+        if (a.quest == 0 || a.objective == 0) return false;
+        QuestInstance* q = log_.find(a.quest);
+        if (!q || q->status != Status::Active) return false;
+        const content::QuestRow* d = book_.quest(q->record);
+        const int i = index_of(*q, a.objective);
+        if (!d || i < 0 || static_cast<size_t>(i) >= d->objectives.size()) return false;
+        const size_t at = static_cast<size_t>(i);
+        const content::QuestObjectiveRow& r = d->objectives[at];
+        const ObjectiveState& o = q->objectives[at];
+        if (r.type != "TurnIn" || r.crate || !o.active || o.completed || o.failed) return false;
+        update_objective(*q, at, r, complete ? r.count - o.count : 1);
+        return finish_event(true);
     }
 
     /// The character killed the creature `instance` (a population instance) of elite rank `elite`.
@@ -293,6 +346,7 @@ private:
     std::vector<Effect>&      fx_;
     double                    now_;
     std::set<std::string>     told_;
+    std::set<std::pair<int64_t, int64_t>> started_;   // (quest, objective) whose start actions have run in this engine's start of a quest
 
     bool finish_event(bool any) {
         if (any) settle();
@@ -349,6 +403,7 @@ private:
         o.succeeded = o.completed = o.failed = false;
         o.start_time = now_;
         log_.touch(q);
+        started_.insert({q.record, o.record});
         const content::QuestRow* d = book_.quest(q.record);
         if (d && i < d->objectives.size()) run_actions(d->objectives[i].on_start, q, static_cast<int>(i));
     }
