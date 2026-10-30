@@ -261,6 +261,8 @@ const char* const R_CHAN = "a channelled, toggled or chained ability that the cl
 const char* const R_UNRES = "not resolved in stage 3";
 const char* const R_KILL = "the replay's creature (a level-1 Wolf, 34.9 Health, where the capture's target is another actor of unknown level) dies of the ability's first hit since the E1 review's stat fix gave a level-1 creature retail's MaxHealth (a fifth less): the hits after the kill are not confirmed; retail's target survived";
 
+const char* const R_SPEED = "the cast bar's length follows the caster's cast speed: the cost step of ability_timings.h is the median over the ability's recorded casts, so in a capture whose cast was quicker the step comes after the window the replay runs, and lands in the next cast's window (its Mana, its first Cooldowns item); the step is anchored on the client's branch request in the cast-bar change (Part 2 of the timing plan)";
+
 struct Known {
     const char* ability;
     int         capture;

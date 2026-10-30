@@ -122,6 +122,30 @@ bool is_none_tag(const std::string& s) { return s.empty() || s == "None"; }
 
 std::string group_key(const content::AbilityRow& row) { return is_none_tag(row.shared_cooldown_tag) ? std::to_string(row.guid) : row.shared_cooldown_tag; }
 
+// The recorded row of an ability in ability_timings.h for a cast that reaches another actor (`aimed` 1) or not (0): the exact row, else the other kind's (an ability the recordings
+// show in one kind only), else null. The table is sorted by ability, then `aimed`.
+const AbilityTiming* find_timing(int64_t ability, int aimed) {
+    const AbilityTiming* lo = std::begin(kAbilityTimings);
+    const AbilityTiming* hi = std::end(kAbilityTimings);
+    for (const int kind : {aimed, 1 - aimed}) {
+        const AbilityTiming* it = std::lower_bound(lo, hi, std::make_pair(ability, kind), [](const AbilityTiming& x, const std::pair<int64_t, int>& key) {
+            return x.ability != key.first ? x.ability < key.first : x.aimed < key.second;
+        });
+        if (it != hi && it->ability == ability && it->aimed == kind) return it;
+    }
+    return nullptr;
+}
+
+constexpr bool timings_sorted() {
+    for (size_t i = 1; i < std::size(kAbilityTimings); ++i) {
+        const AbilityTiming& a = kAbilityTimings[i - 1];
+        const AbilityTiming& b = kAbilityTimings[i];
+        if (a.ability > b.ability || (a.ability == b.ability && a.aimed >= b.aimed)) return false;
+    }
+    return true;
+}
+static_assert(timings_sorted(), "ability_timings.h is sorted by ability, then aimed");
+
 const char* const kExpirePhases[] = {"Expire", "End"};
 const char* const kTickPhases[] = {"Tick"};
 const char* const kApplyPhases[] = {"Apply"};
@@ -2083,17 +2107,20 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     double item_delay = kItemDelay, cost_delay = kCostDelay, hit_delay = -1;
     double zone_delay = -1;   // when the actor of the zone the cast spawns opens, after the trigger (-1: a moment after the item)
     double zone_end = -1;     // when the dance ends, after the trigger (-1: the zone's life)
+    double table_hit = -1;    // when a projectile of the ability first changed Health, after the trigger (-1: the table has none: the cost step + kProjectileDelay)
+    double table_end = -1;    // when the ability's montage was cleared, after the trigger (-1: the table has none)
     {
-        // what the retail captures show of the ability (ability_timings.h): the montage's first notify differs from one ability to the next
-        const AbilityTiming* lo = std::begin(kAbilityTimings);
-        const AbilityTiming* hi = std::end(kAbilityTimings);
-        const AbilityTiming* it = std::lower_bound(lo, hi, ability, [](const AbilityTiming& x, int64_t g) { return x.ability < g; });
-        if (data_timings_ && it != hi && it->ability == ability) {
+        // what the retail captures show of the ability (ability_timings.h, the median of the recorded casts): the montage's first notify differs from one ability to the next, and a cast that
+        // reaches another actor has a row of its own
+        const AbilityTiming* it = data_timings_ ? find_timing(ability, target_actors.empty() ? 0 : 1) : nullptr;
+        if (it) {
             if (it->item_ms >= 0) item_delay = it->item_ms / 1000.0;
             if (it->cost_ms >= 0) cost_delay = it->cost_ms / 1000.0;
             else if (it->item_ms >= 0) cost_delay = item_delay;
             if (it->zone_ms >= 0) zone_delay = it->zone_ms / 1000.0;
             if (it->zone_close_ms >= 0) zone_end = it->zone_close_ms / 1000.0 - kZoneCloseDelay;   // the actor's close is the dance's end and the fade
+            if (it->hit_ms >= 0) table_hit = it->hit_ms / 1000.0;
+            if (it->end_ms >= 0) table_end = it->end_ms / 1000.0;
         }
     }
     for (const Timing& tm : kTimings) {
@@ -2141,6 +2168,12 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         cast.item_due = t + l.item;
         cast.cost_due = t + l.first_shot;
     }
+    // An ordinary cast clears its montage where the recordings show it, never before its cost step. A cast with effects of its own (a held or toggled ability) keeps its end with the client's
+    // cancel, a song is a loop, a branched and a looped cast have an end of their own, and a swing's steps differ in everything but the ability.
+    if (table_end >= 0 && has_montage && !loop && !cast.branched && !cast.looped && !cast.end_due && cast.own_effects.empty() && !is_weapon_combo(row)) {
+        cast.end_due = std::max(t + table_end, *cast.cost_due + 0.05);
+        cast.clears_montage = true;
+    }
     if (!loop) {
         bool direct = false, projectile = false;
         const bool aimed = !cast.target_actors.empty();
@@ -2155,6 +2188,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         if (direct) cast.hit_due = *cast.cost_due + (hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0);
         if (projectile) {
             cast.projectile_due = *cast.cost_due + kProjectileDelay;
+            // where the recordings show when a projectile of the ability first changed Health, its hit lands then, never before the cost step (a branched, a looped and a gathering cast keep their own tables)
+            if (table_hit >= 0 && !cast.branched && !cast.looped && !cast.gathered) cast.projectile_due = std::max(*cast.cost_due, t + table_hit);
             if (cast.branched) {   // a volley: each missile lands at its own time after the cost step
                 for (const content::AbilityHitRow& h : def->hits) {
                     if (h.source != "projectile") continue;
@@ -2331,7 +2366,7 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
         end_loop(c, cast.def->row.guid, t);
         recompute(c);
     }
-    if (cast.montage_branch && item_instance_ && *item_instance_ == cast.instance) {
+    if ((cast.montage_branch || cast.clears_montage) && item_instance_ && *item_instance_ == cast.instance) {
         cast.item.montage_path.clear();
         cast.item.montage_guid = 0;
         cast.item.branch_predicted = cast.branch_predicted;

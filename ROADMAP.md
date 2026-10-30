@@ -59,6 +59,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.
 - NPCs: face variety, names for rare creatures, and the other hostile humanoids (the bandit archers and healers, and the cultists).
 - Creatures: the remaining creature families' own fights and abilities (the Goblin Flame Shamans' fire bombs and the arsonists' fire spray, stream and ring among them), smooth movement for goblins and bandits while their attack animations play, pack aggro, damage matched to retail, and flying creatures.
+- Abilities: the cast bars (Fireball, Frostbolt, Judgment, Mortal Blast and the other spells with a bar) take their cost and land their damage from the end of the bar instead of the average recorded speed, a cancelled bar costs nothing, and the slow bolts (Thundering Shot) land by distance.
 - The walking map: walls, fences, water and holes.
 - The world: spawns that follow node levels, a world clock with day and night spawns, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.

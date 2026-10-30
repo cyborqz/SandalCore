@@ -23,16 +23,20 @@
 //                 item       the ability item (ReplicatedActiveAbilities): the ability, a ServerInstanceId from the pawn's counter, the montage's
 //                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid), PlayRate 1.0, MontageGroup (DefaultGroup;
 //                            Flourish EmoteGroup, the songs SongGroup), Targets the caster when the call named one; the previous item
-//                            of the pipeline goes in the same update (every retail reply says "deleted 1"). About 300 ms after the trigger
+//                            of the pipeline goes in the same update (every retail reply says "deleted 1"). The median of the recorded casts where
+//                            ability_timings.h has the ability (50 to 110 ms for most, per kind of cast), else about 300 ms after the trigger
 //                            (299-331 ms in 12 of 14 captured casts; kItemDelay); none for an ability with no montage (Fortissimo)
 //                 cost       the same packet in retail: the Cooldowns item (bCooldownTriggered, InitialCooldown, the start and end on the
 //                            synchronized clock, Charges = charges LEFT: Flourish's first use 1, its second 0), the cost deltas (Mana is an absolute
-//                            value in the EveryoneProxy array: 3281.125 - 56.875), the class resource and the effect costs. Also about 300 ms,
+//                            value in the EveryoneProxy array: 3281.125 - 56.875), the class resource and the effect costs. The table's median where it
+//                            has the ability (a charged shot's cost step is at its montage's release: Snipe 2991 ms, Power Shot 1367), else about 300 ms,
 //                            later for a long montage (kCostDelay: Mesmerizing 1011 ms, Saga 906, Story_Joy 1573; modelled for the rest)
 //                 effects    the effects of the ability's hits on the caster, as CurrentEffects items with the record's duration, stacks and
 //                            tick, and the instant stat changes of those hits (Glee's heal): 35 ms after the cost for the ability's own hits
 //                            (retail +34, +36, +32), with it for a zone's overlap hits (Nimble's Evasion arrives with the cost) and for an ability with no
-//                            montage, 340 ms after it for a projectile's hits (Jest's Glee, Pep and heal came +343 after the cost)
+//                            montage, 340 ms after it for a projectile's hits (Jest's Glee, Pep and heal came +343 after the cost) unless the table
+//                            has the moment the projectile first changed Health (Snipe 3343 ms after the trigger); an ordinary cast clears its montage
+//                            where the table shows it
 //               The cost, the cooldown and the stat deltas are applied at the cost step, not at the trigger.
 //    branches   an ability whose cast ends with a branch of its montage (a cast bar: Arcane Volley) waits for the client to ask for the branch
 //               (ServerRequestBranchVerification) and goes on from the request: the montage jumps to the branch's section, the cost follows, the hits land and the
@@ -536,7 +540,7 @@ private:
         std::vector<std::pair<int64_t, double>> stat_costs;       // stat guid, amount
         std::vector<std::pair<int64_t, int>>  effect_costs;       // effect guid, stacks
         bool                                  triggers_cooldown = false;
-
+        bool                                  clears_montage = false;     // an ordinary cast whose montage is cleared where ability_timings.h shows (end_due): the item keeps its place with the montage cleared
     };
     struct EffectInst {
         int64_t                     owner = 0;                    // plan D2, stage 2: the looping ability whose effect this is (0: none)

@@ -251,6 +251,7 @@ const Known kKnown[] = {
     {"Cleric_Mend", 152, "refused:", R_SEQ},
     {"Cleric_FlashCure", 152, "CONF:extra Cleric_FlashCure", R_CHAN},
     {"Cleric_FlashCure", 152, "CD:charges", R_MOD},
+    {"Cleric_Mend", 152, "CD:charges 1 (0)", R_MOD},
     {"Cleric_FlashCure", 152, "COST:mana", R_MOD},
     {"Cleric_FlashCure", 152, "CONF:fewer Cleric_FlashCure", R_CHAN},
     {"Cleric_SoothingGlow", 152, "COST:mana", R_SEQ},
