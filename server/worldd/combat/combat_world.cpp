@@ -283,6 +283,56 @@ TargetInfo CombatWorld::inspect(uint64_t target_actor, const Fighter& from) {
     return t;
 }
 
+std::vector<GatheredTarget> CombatWorld::enemies_in_cone(const Fighter& from, double angle_degrees, double length_cm, double behind_cm, size_t max) {
+    std::vector<GatheredTarget> out;
+    if (max == 0 || length_cm <= 0) return out;
+    const Vec3 me = from.position();
+    // the cone of a creature's attack record (bite_area.h): it starts `distance_center` ahead of the fighter (behind it: negative), reaches `distance` from there
+    BiteArea cone;
+    cone.distance = length_cm;
+    cone.angle = angle_degrees;
+    cone.distance_center = -behind_cm;
+    HitSubject subject;
+    subject.cx = me.x;
+    subject.cy = me.y;
+    subject.yaw = from.facing_degrees();
+    std::vector<uint64_t> ids;
+    registry_.query(me.x, me.y, length_cm + std::max(0.0, behind_cm), ids);
+    for (const uint64_t id : ids) {
+        const TargetInfo ti = inspect(id, from);
+        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile || !ti.in_line_of_sight) continue;
+        subject.tx = ti.position.x;
+        subject.ty = ti.position.y;
+        subject.tradius = ti.radius_cm;
+        if (!validity_holds(cone, subject)) continue;
+        out.push_back({id, distance_xy_cm(me, ti.position)});
+    }
+    std::sort(out.begin(), out.end(), [](const GatheredTarget& a, const GatheredTarget& b) { return a.distance_cm != b.distance_cm ? a.distance_cm < b.distance_cm : a.actor < b.actor; });
+    if (out.size() > max) out.resize(max);
+    return out;
+}
+
+std::vector<GatheredTarget> CombatWorld::enemies_in_line(const Fighter& from, double length_cm, double radius_cm, size_t max) {
+    std::vector<GatheredTarget> out;
+    if (max == 0 || length_cm <= 0) return out;
+    const Vec3 me = from.position();
+    const double yaw = from.facing_degrees() * bite_area_detail::kPi / 180.0;
+    const double fx = std::cos(yaw), fy = std::sin(yaw);
+    std::vector<uint64_t> ids;
+    registry_.query(me.x, me.y, length_cm + radius_cm, ids);
+    for (const uint64_t id : ids) {
+        const TargetInfo ti = inspect(id, from);
+        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile || !ti.in_line_of_sight) continue;
+        const double dx = ti.position.x - me.x, dy = ti.position.y - me.y;
+        const double ahead = dx * fx + dy * fy, aside = std::fabs(dy * fx - dx * fy);
+        if (ahead + ti.radius_cm < 0 || ahead - ti.radius_cm > length_cm || aside > radius_cm + ti.radius_cm) continue;
+        out.push_back({id, std::max(0.0, ahead)});
+    }
+    std::sort(out.begin(), out.end(), [](const GatheredTarget& a, const GatheredTarget& b) { return a.distance_cm != b.distance_cm ? a.distance_cm < b.distance_cm : a.actor < b.actor; });
+    if (out.size() > max) out.resize(max);
+    return out;
+}
+
 std::optional<npc::ai::State> CombatWorld::ai_state(uint64_t actor_id) const {
     const auto it = npcs_.find(actor_id);
     if (it == npcs_.end()) return std::nullopt;
@@ -342,19 +392,21 @@ void CombatWorld::stop_cast(Npc& n) {
 void CombatWorld::forget(uint64_t actor_id) {
     if (const auto it = npcs_.find(actor_id); it != npcs_.end()) stop_cast(*it->second);
     npcs_.erase(actor_id);
-    huntable_stats_.erase(actor_id);
+    stats_filled_.erase(actor_id);
 }
 
-void CombatWorld::fill_huntable_stats(const world::WorldActor& a) {
-    if (!huntable_stats_.insert(a.id).second) return;
+bool CombatWorld::fill_stats(const world::WorldActor& a) {
+    if (!stats_filled_.insert(a.id).second) return false;
+    if (!has_stats(a)) return false;   // (a banner, a tent: nothing to fill)
     const npc::MotionStats bp = motion_.get(a.npc.archetype);
     std::string err;
     const auto cs = book_.make(bp, a.npc.level, err);
     if (!cs) {
-        spdlog::warn("[combat] {} ({}): a huntable whose stats do not run keeps its template's: {}", a.id, spawns::blueprint_leaf(a.npc.archetype), err);
-        return;
+        spdlog::warn("[combat] {} ({}): an NPC whose stats do not run keeps its template's: {}", a.id, spawns::blueprint_leaf(a.npc.archetype), err);
+        return true;
     }
     write_stats(registry_, a.id, *cs);
+    return true;
 }
 
 void CombatWorld::add_shield(uint64_t npc_actor, double amount, double seconds, double now) {
@@ -1285,7 +1337,7 @@ void CombatWorld::tick(double now) {
                 continue;
             }
             if (huntable_ && huntable_(a->npc)) {   // a huntable is no fighter: its stats, nothing more
-                fill_huntable_stats(*a);
+                fill_stats(*a);
                 continue;
             }
             auto h = hostile_by_archetype_.find(a->npc.archetype);
@@ -1299,6 +1351,31 @@ void CombatWorld::tick(double now) {
     }
     for (const auto& [id, n] : npcs_) {
         if (!n->dead && n->ai.state() != npc::ai::State::Idle) todo.insert(id);
+    }
+    // Every NPC a player can see opens in the game with the stat list at its level (a guard's Health, a villager's ...), whether it ever fights or not [R: the retail captures' guards and villagers, 9
+    // items each, Health 56 at level 1 and 320 at level 5 for a Guard_Wizard].  The templates the NPCs here are made from were recorded without the list (an open that repeated what the client
+    // held) or with another guard's (a level-50 Soldier's 13.5 million Health), so it is written from the stat engine, a few of them each second, for the NPCs that are no combatants.
+    if (now >= next_stats_) {
+        next_stats_ = now + cfg_.stats_seconds;
+        size_t budget = 64;
+        for (PlayerPort* p : players_) {
+            const Vec3 pos = p->fighter().position();
+            std::vector<uint64_t> visible;
+            registry_.query(pos.x, pos.y, cfg_.stats_radius_cm, visible);
+            // the nearest first: the one a player stands beside is filled before a far one
+            std::vector<std::pair<double, uint64_t>> todo_stats;
+            for (const uint64_t id : visible) {
+                if (stats_filled_.count(id) != 0 || npcs_.count(id) != 0) continue;
+                const world::WorldActor* a = registry_.find(id);
+                if (!a || a->kind != world::ActorKind::Npc) continue;
+                todo_stats.emplace_back(std::hypot(a->x - pos.x, a->y - pos.y), id);
+            }
+            std::sort(todo_stats.begin(), todo_stats.end());
+            for (const auto& [distance, id] : todo_stats) {
+                if (budget == 0) break;
+                if (const world::WorldActor* a = registry_.find(id); a && fill_stats(*a)) --budget;
+            }
+        }
     }
     for (const uint64_t id : todo) {
         Npc* n = combatant(id);

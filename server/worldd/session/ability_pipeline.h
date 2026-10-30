@@ -37,6 +37,9 @@
 //    branches   an ability whose cast ends with a branch of its montage (a cast bar: Arcane Volley) waits for the client to ask for the branch
 //               (ServerRequestBranchVerification) and goes on from the request: the montage jumps to the branch's section, the cost follows, the hits land and the
 //               montage ends (kBranchedCasts in ability_pipeline.cpp has the offsets). Without a request it goes on as if it came 2.4 s after the trigger.
+//    gathering  an ability that names no target and finds its own (the Ranger's Scatter Shot) has the SERVER gather the enemies in a cone ahead of the caster (a line, for its charged
+//               shot) when the montage jumps and send its projectile at each: the projectile's hit does the damage when it lands (kGatheredCasts). A talent can make such a cast a held
+//               one: it then waits for the key's release (ServerNotifyHeldAbilityCancelled) or the full charge instead of the request.
 //    swings     a weapon combo's swing that another ability's trigger overtakes is over: none of its steps happens (a hit the client asked for already is still verified),
 //               and a swing that has shown no item gets ClientEndAbility, so that its late item cannot take the pawn's item from the ability.
 //    loops      an ability that shoots again and again (the Ranger's Salvo: one shot for each stored charge) takes its cost and sends its projectile at every shot, and
@@ -145,6 +148,15 @@ struct BranchedCast {
     double      answer;     // the montage jumps this long after the request
     double      cost;       // the cost step comes this long after the jump
     double      end;        // the montage ends this long after the cost step
+    // A talent can make the ability a held one (the Ranger's Scatter Shot with Concentrated: "becomes a held ability"). With `held_skill` the request above is not answered: the cast goes on
+    // `release` after the key's release (ServerNotifyHeldAbilityCancelled), or, when the key is held until the charge is full, `charged_answer` after the client's request for `charged_branch`
+    // (the charged shot: its cost comes `charged_cost` after the jump), and on its own `hold_limit` after the trigger when neither is heard.
+    int64_t     held_skill = 0;       // the skill record whose purchase makes the cast a held one (0: the ability has none)
+    double      hold_limit = 0;
+    double      release = 0;
+    int64_t     charged_branch = 0;
+    double      charged_answer = 0;
+    double      charged_cost = 0;
 };
 
 /// An ability whose cast shoots again and again until its charges or its mana are gone, and then ends with a branch of its montage that the SERVER decides (the Ranger's Salvo: "fire all
@@ -158,6 +170,24 @@ struct LoopedCast {
     double      period;       // and each next one this long after the one before
     double      jump;         // after the last shot the montage moves to the branch's section this long later
     double      end;          // and ends this long after that
+};
+
+/// An ability that finds its own targets: the call names none, and when the montage reaches its section the SERVER gathers the enemies a cone ahead of the caster holds and sends the
+/// ability's one homing projectile at each (the Ranger's Scatter Shot). The projectile lands after its flight and its hit does the damage (ability_pipeline.cpp has the table and the evidence).
+struct GatheredCast {
+    const char* ability;
+    int         projectile;   // the key (in the ability's ProjectilesIds) of the projectile that flies at each enemy
+    double      angle;        // the cone's whole angle, degrees
+    double      length;       // how far it reaches from its start, cm
+    double      behind;       // it starts this far behind the caster, cm
+    double      speed;        // the projectile's speed, cm per second
+    // The charged shot of a held cast (BranchedCast::charged_branch): one projectile that flies straight ahead and pierces every enemy in its way, and the montage it jumps into.
+    int         charged_projectile = 0;    // its key (0: none)
+    double      charged_length = 0;        // how far it flies, cm
+    double      charged_radius = 0;        // how wide it is (its sphere's radius), cm
+    double      charged_speed = 0;
+    const char* charged_montage = "";      // the soft path of the montage the cast jumps into
+    uint64_t    charged_montage_guid = 0;
 };
 
 class AbilityPipeline {
@@ -187,6 +217,8 @@ public:
     static constexpr size_t kMaxRecords = 16;
     /// The most casts waiting for their steps at once.
     static constexpr size_t kMaxCasts = 16;
+    /// The most enemies one cast of a gathering ability (GatheredCast) sends a projectile at.
+    static constexpr size_t kMaxGathered = 40;
     /// A song's (or any looping ability's) own effects start this long after the trigger [R: Bard_Music_Cheerful, effects at +2321 ms]
     /// and its loop effect re-adds the others every tick; GetAbilityProgressRatio("SongGroup") reaches 1 this long after they started [R: the HoT
     /// of Cheerful rises 3.4 of 50.9 every 2 s: +50% in 15 s].
@@ -278,7 +310,8 @@ public:
 
     /// ServerTriggerAbility. Refusal::None when the cast was accepted; every other value except Duplicate has queued ClientEndAbility.
     Refusal trigger(int64_t ability, int32_t client_instance_id, double now, const TriggerInfo& info = {});
-    /// ServerNotifyHeldAbilityCancelled: a pipeline instance's cast goes on (retail's reply was unchanged); true when the instance is one of ours.
+    /// ServerNotifyHeldAbilityCancelled: a pipeline instance's cast goes on (retail's reply was unchanged), except a held cast (BranchedCast::held_skill), which waits for this: the key's
+    /// release is what makes its montage jump; true when the instance is one of ours.
     bool cancel(int32_t client_instance_id, double now);
 
     /// ServerRequestBranchVerification: the client's cast bar ended and it asks the server to confirm the branch it took. A cast of an ability that waits for
@@ -469,6 +502,11 @@ private:
         /// each with the time it lands (each its own step); the item as the cast made it (the jump and the end are changes of that item).
         const BranchedCast*                   branched = nullptr;
         const LoopedCast*                     looped = nullptr;           // a cast that shoots until its charges or its mana are gone (kLoopedCasts)
+        const GatheredCast*                   gathered = nullptr;         // a cast that finds its own targets when its montage jumps (kGatheredCasts)
+        int64_t                               gathered_projectile = 0;    // the projectile record it sends at each of them
+        int64_t                               charged_projectile = 0;     // ... and the one of its charged shot
+        bool                                  held = false;               // the character's talent makes the cast a held one: it waits for the key's release or the full charge
+        bool                                  charged = false;            // the charge was full: the cast fires the charged shot
         int                                   shots = 0;                  // the shots it has taken
         int64_t                               shot_projectile = 0;        // the projectile record each shot sends (0: none: it is cast at the air)
         bool                                  montage_branch = false;     // the montage moves to a section when the cast ends (the changes of `item` below)
@@ -476,8 +514,9 @@ private:
         bool                                  branch_predicted = true;    // the client took the branch itself (its cast bar); false when the server decided it
         std::optional<double>                 branch_due, end_due;
         struct Missile {
-            double  due = 0;
-            int64_t projectile = 0;   // the projectile record that lands
+            double   due = 0;
+            int64_t  projectile = 0;   // the projectile record that lands
+            uint64_t target = 0;       // the one enemy it flies at (0: the cast's own targets)
         };
         std::vector<Missile>                  missiles;
         bootstrap::ActiveAbilityItem          item;
@@ -582,6 +621,12 @@ private:
     void   cancel_swings(double t, const std::string& by);
     /// A branched cast's montage: it jumps to the section the branch names, and later it ends (the item keeps its place with the montage cleared).
     void   step_branch(Cast& cast, double t);
+    /// A gathering cast's montage has jumped: the enemies the cone holds (the line of the charged shot) each get a projectile that lands after its flight.
+    void   launch_gathered(Cast& cast, double t);
+    /// Whether the character holds the skill (purchased, or granted by its level).
+    bool   holds_skill(int64_t skill) const;
+    /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
+    void   reschedule_branch(Cast& cast, double branch_at, double cost_after);
     void   step_end(Cast& cast, double t);
     void   finish_cast_if_done(size_t index);
     std::string montage_group_of(const abilities::AbilityDef& def) const;

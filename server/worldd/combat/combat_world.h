@@ -104,6 +104,12 @@ struct TargetInfo {
     bool     is_player = false;
 };
 
+/// An enemy an area ahead of a player holds (a cone, a line), and how far its centre is from the player.
+struct GatheredTarget {
+    uint64_t actor = 0;
+    double   distance_cm = 0;
+};
+
 /// What applying a player's resolved hit to an NPC did.
 struct Delivery {
     bool                applied = false;     // the target was a living combatant
@@ -130,6 +136,10 @@ struct CombatWorldConfig {
     bool   enabled = true;                  // the kill switch (worldd --no-combat): no AI, no hits taken, no stats
     double think_seconds = 0.2;             // the AI's rate
     double scan_radius_cm = 3500.0;         // NPCs this near a player are looked at
+    /// Every NPC this near a player that is no combatant has the stat list its open carries in the game (Health, MaxHealth, Mana ... at its level), filled once, at most 64 of them every
+    /// `stats_seconds`: a guard, a villager or a vendor never fights, and the templates they are made from were recorded without the list or with another level's.
+    double stats_radius_cm = 15000.0;
+    double stats_seconds = 1.0;
     double default_aggro_cm = 800.0;
     double default_leash_cm = 3000.0;
     double default_attack_range_cm = 220.0; // a creature with no kit ability: the generic slash
@@ -184,7 +194,8 @@ public:
 
     /// Gathering stage 3, "Hunting" (retest 3): which creatures are huntable.  A huntable is no combatant (it fights nothing and its CombatInfo is the living huntable's, not a fighter's) but its
     /// stats are filled as a combatant's are, the first time a player is near: retail's living huntable opens with the full list (914 packet 1561 and a hostile Raven's both carry 1563 bits of
-    /// them), so the hunt's done update can write Health 0 into one item, as the five captured hunts do (a 278-bit stats block beside the CombatInfo's and the interactable's).
+    /// them), so the hunt's done update can write Health 0 into one item, as the five captured hunts do (a 278-bit stats block beside the CombatInfo's and the interactable's).  Every other NPC
+    /// that is no combatant is filled the same way (see CombatWorldConfig::stats_radius_cm): retail's guards and villagers open with the list too.
     using HuntablePredicate = std::function<bool(const world::NpcInfo&)>;
     void set_huntable(HuntablePredicate fn) { huntable_ = std::move(fn); }
 
@@ -203,6 +214,13 @@ public:
     uint64_t actor_of_object(uint64_t object_id) const;
     /// What `from` (a player's fighter) would be acting on in `target`: for the validations of a targeted cast and a hit.
     TargetInfo inspect(uint64_t target_actor, const Fighter& from);
+    /// The living enemies of `from` that a cone ahead of it holds (an ability that gathers its own targets: the Ranger's Scatter Shot).  The cone starts `behind_cm` behind `from` along its
+    /// facing, reaches `length_cm` from there and is `angle_degrees` wide (the whole angle, counted as a creature's cone is: bite_area.h); a body counts when any part of it is inside and `from`
+    /// sees it.  Nearest first, at most `max`.
+    std::vector<GatheredTarget> enemies_in_cone(const Fighter& from, double angle_degrees, double length_cm, double behind_cm, size_t max);
+    /// The living enemies of `from` that a projectile of `radius_cm` flying straight ahead from it for `length_cm` would pierce (the Ranger's charged Scatter Shot): a body counts when any part of it
+    /// is within the radius of the line and `from` sees it.  Nearest first, at most `max`; the distance is how far along the line the centre is.
+    std::vector<GatheredTarget> enemies_in_line(const Fighter& from, double length_cm, double radius_cm, size_t max);
     /// The ObjectId of the NPC target's collision cylinder: what the ability items name as Targets and the confirmations export as the actor's
     /// "CollisionCylinder" (NpcInfo::collision_cylinder, the actor's + 4 as retail mints it); 0 for an actor that has none.
     uint64_t hit_component_of(uint64_t actor_id) const;
@@ -335,7 +353,9 @@ private:
     void  kill(Npc& n, uint64_t killer, double now, bool gm = false);
     void  begin_reset(Npc& n, double now);
     void  set_flags(Npc& n, bool in_combat, uint64_t target_actor);
-    void  fill_huntable_stats(const world::WorldActor& a);
+    /// Gives an NPC that is no combatant the stat list its open carries in the game, at its level (the stat engine's NPC profile): true when it did (false: it was filled already, or its open has no
+    /// stats component).  Never makes a combatant: the NPC has no AI, no threat and no fight state.
+    bool  fill_stats(const world::WorldActor& a);
     PlayerPort* player(uint64_t actor_id);
     void  player_exchange(uint64_t player_id, double now);
 
@@ -357,7 +377,8 @@ private:
     const npc::SensesTable* senses_ = nullptr;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
     HuntablePredicate      huntable_;
-    std::set<uint64_t>     huntable_stats_;   // the huntables whose stats were filled
+    std::set<uint64_t>     stats_filled_;     // the NPCs that are no combatants and whose stats were filled (or whose open has none)
+    double                 next_stats_ = 0;
     double                 next_think_ = 0;
     double                 now_ = 0;
     Stats                  stats_;

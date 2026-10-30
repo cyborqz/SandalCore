@@ -37,14 +37,18 @@ stats::NpcShape NpcStatBook::shape_for(const npc::MotionStats& bp, int level) {
 }
 
 std::unique_ptr<stats::CharacterStats> NpcStatBook::make(const npc::MotionStats& bp, int level, std::string& err) const {
-    const int profile = profile_for(bp);
+    const int lv = engine_level(level);
+    // a guard below the level cap is a plain NPC with the default distribution (see kGuardOvertunedLevel)
+    const bool low_guard = bp.list2 == kGuidGuardOvertunedList && lv < kGuardOvertunedLevel;
+    const int profile = low_guard ? (bundle_->class_by_enum(stats::kNpcClassBase) ? stats::kNpcClassBase : 0) : profile_for(bp);
     if (profile == 0) {
         err = "the stat program has no NPC profile";
         return nullptr;
     }
-    const int lv = engine_level(level);
     auto cs = std::make_unique<stats::CharacterStats>(*bundle_, *gear_, profile, lv);
-    cs->set_npc(shape_for(bp, lv));
+    stats::NpcShape shape = shape_for(bp, lv);
+    if (low_guard) shape.dist.fill(1.0 / 8.0);
+    cs->set_npc(shape);
     if (!cs->start({}, err)) return nullptr;
     return cs;
 }

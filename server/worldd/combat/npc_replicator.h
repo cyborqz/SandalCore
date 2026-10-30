@@ -45,4 +45,7 @@ bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int ran
 /// The EveryoneProxy item's value for a stat of an actor opened from a template (what the client is told now); false when there is none.
 bool read_stat(const world::WorldActor& actor, int64_t record, float& value);
 
+/// Whether the actor's open has a stats component with the EveryoneProxy list (a creature or a person has; a banner, a tent and a quest sparkle have none).
+bool has_stats(const world::WorldActor& actor);
+
 }  // namespace aoc::worldd::combat

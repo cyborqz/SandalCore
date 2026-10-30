@@ -145,6 +145,11 @@ bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int ran
     return ok;
 }
 
+bool has_stats(const world::WorldActor& actor) {
+    const repl::Subobject* st = find_sub(actor, "UAoCStatsComponent");
+    return st && st->obj.schema && const_cast<repl::FastArrays&>(st->obj.arrays).get(*st->obj.schema, "StatRepInt32EveryoneProxy") != nullptr;
+}
+
 bool read_stat(const world::WorldActor& actor, int64_t record, float& value) {
     const repl::Subobject* st = find_sub(actor, "UAoCStatsComponent");
     if (!st || !st->obj.schema) return false;

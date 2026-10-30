@@ -188,6 +188,7 @@ public:
         return {g.x, g.y, g.z};
     }
     double radius_cm() const override { return 34.0; }
+    double facing_degrees() const override { return s_.checker_.good().yaw_degrees; }   // the control rotation's yaw, as the client's last good move gave it
     bool alive() const override {
         const stats::StatValue* h = s_.stats_ ? s_.stats_->find(content::kGuidHealth) : nullptr;
         return h && h->value > 0;
@@ -1778,7 +1779,7 @@ void PlayerSession::on_branch_request(Connection& conn, const repl::ClientRpc& r
     // the client's cast bar ended: a cast that waits for its branch goes on from here (the montage's jump, the cost and the hits follow)
     if (!pipeline_->branch_request(request->client_instance_id, request->branch_guid, ability_seconds(now))) {
         if (unhandled_logged_.insert("ServerRequestBranchVerification").second) {
-            spdlog::info("[session] {}: the client's ServerRequestBranchVerification belongs to no cast worldd waits for (it answers it for the casts it knows: Arcane Volley; told once)", name());
+            spdlog::info("[session] {}: the client's ServerRequestBranchVerification belongs to no cast worldd waits for (it answers it for the casts it knows: Arcane Volley, Scatter Shot; told once)", name());
         }
         return;
     }

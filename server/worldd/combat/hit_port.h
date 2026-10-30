@@ -36,6 +36,10 @@ public:
     virtual double reach_cm(bool melee) const = 0;
     /// The player's own fighter and actor id.
     virtual const Fighter& self() const = 0;
+    /// The living enemies the player sees inside a cone ahead of it (see CombatWorld::enemies_in_cone), nearest first.
+    virtual std::vector<GatheredTarget> enemies_in_cone(double /*angle_degrees*/, double /*length_cm*/, double /*behind_cm*/, size_t /*max*/) { return {}; }
+    /// ... and the ones a projectile flying straight ahead of it would pierce (see CombatWorld::enemies_in_line).
+    virtual std::vector<GatheredTarget> enemies_in_line(double /*length_cm*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
 };
 // (C O A ~ C-Y-B)
 
@@ -72,6 +76,10 @@ public:
     }
     double reach_cm(bool melee) const override { return melee ? world_.config().melee_reach_cm : world_.config().player_reach_cm; }
     const Fighter& self() const override { return self_; }
+    std::vector<GatheredTarget> enemies_in_cone(double angle_degrees, double length_cm, double behind_cm, size_t max) override {
+        return world_.enemies_in_cone(self_, angle_degrees, length_cm, behind_cm, max);
+    }
+    std::vector<GatheredTarget> enemies_in_line(double length_cm, double radius_cm, size_t max) override { return world_.enemies_in_line(self_, length_cm, radius_cm, max); }
 
 private:
     CombatWorld&          world_;

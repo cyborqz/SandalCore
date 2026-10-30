@@ -43,6 +43,8 @@ public:
     virtual Vec3     position() const = 0;
     /// How far the actor's body reaches from its centre (cm): a range test counts from the surface.
     virtual double   radius_cm() const { return 50.0; }
+    /// The way the actor faces, in degrees counted as the world counts a yaw (0 along +X, turning towards +Y): a player's control rotation. 0 for a fighter that keeps none.
+    virtual double   facing_degrees() const { return 0.0; }
     virtual bool     alive() const = 0;
     /// CharacterAlignment records the actor carries: who it fights and who fights it.
     virtual const std::vector<int64_t>& alignments() const = 0;

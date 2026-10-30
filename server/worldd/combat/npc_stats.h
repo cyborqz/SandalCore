@@ -29,6 +29,11 @@ namespace aoc::worldd::combat {
 
 /// StatInitializerList_NPC_Elite_Scalar_Guard_Overtuned: the Guard profile's scalar.
 inline constexpr int64_t kGuidGuardOvertunedList = 6064632280717066264ll;
+/// The level at which a Blueprint that names that list has it: the NPC level cap.  The retail guards of level 50 have the Guard profile's numbers (122 stat lists in three captures: Wizard 7.9 million,
+/// Soldier 13.5 million, Captain 22.6 million, Phoenix Sentinel 16.6 million, MoveSpeedMult 1.0), which the engine gives to within 2 units; the four lists recorded below it (a Soldier at levels 1, 12 and 25
+/// and a Wizard at level 1: Health 56.4, 1,275.4, 4,876.1 and 56.4, MoveSpeedMult 1.05) are a villager's [R: the plain profile with the default distribution gives 56.37 at level 1 and 4,876.12 at level 25,
+/// where the Guard profile gives 240,340 and 6.0 million].
+inline constexpr int kGuardOvertunedLevel = 50;
 
 class NpcStatBook {
 public:
@@ -39,8 +44,8 @@ public:
     int profile_for(const npc::MotionStats& bp) const;
     /// The Blueprint's elite rank at a level and its stat distribution as shares.
     static stats::NpcShape shape_for(const npc::MotionStats& bp, int level);
-    /// The NPC's stats at `level`, started: every held value (Health, Mana) at its maximum.  nullptr, with `err`, when the program has no NPC profile or the
-    /// engine refuses.
+    /// The NPC's stats at `level`, started: every held value (Health, Mana) at its maximum.  A Blueprint that names the Guard scalar has it from kGuardOvertunedLevel; below it the NPC is a plain one
+    /// with the default distribution (a villager's).  nullptr, with `err`, when the program has no NPC profile or the engine refuses.
     std::unique_ptr<stats::CharacterStats> make(const npc::MotionStats& bp, int level, std::string& err) const;
 
     /// The level the engine runs an NPC of the data's level at: 1 .. kMaxLevel.

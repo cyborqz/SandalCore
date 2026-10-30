@@ -55,8 +55,27 @@ constexpr Timing kTimings[] = {
 // request, took the cost (the mana, the cooldown) 69 ms after that (1,440 ms from the trigger), and cleared the item's montage 1,170 ms after the cost. The client's own cast bar
 // decides when it asks: 1.289 s after the trigger in the recording, 1.875 s in a first run of this code, so the cast waits for it. A request that is not heard (a replay, a client that
 // never asks) is taken to have come 2.4 s after the trigger; one that comes sooner moves the rest sooner by as much.
+// The Ranger's Scatter Shot [R: twelve recorded casts: seven taps, one with a partial hold, four held until the charge was full]. Its montage waits in a section for the key to go up:
+//  - the ability item came 77 to 105 ms after the trigger (87 ms on average); the client asked for the branch "Ranger_ScatterShot" 89 to 116 ms after it (100 ms), in every cast;
+//  - a character WITHOUT the talent Concentrated: the server moved the montage to the section "Fire" (1.1363 s into it) 94 to 148 ms after that request (120 ms on average of six), took the cost (the
+//    cooldown, the mana) 0 to 51 ms after the jump (36 ms) and cleared the item's montage 1.24 to 1.32 s after the cost (1.275 s). The client's release of the key (ServerNotifyHeldAbilityCancelled,
+//    130 to 163 ms after the trigger) made no difference to it;
+//  - a character WITH the talent ("Scatter Shot becomes a held ability"): the request above was not answered. The jump came 99 and 121 ms after the key's release (a tap at 125 ms, a partial hold at
+//    739 ms) or, when the key was held until the charge was full, 73 to 99 ms (82 ms) after the client's second request, for the branch "Ranger_Passive_ScatterShot_Concentrated" (1.11 to 1.15 s after the
+//    trigger), into the montage of the full charge (also at 1.1363 s) with the cost in the same packet. The data's own timings for this ability (ability_timings.h: the cost at 1,224 ms) are those of the
+//    casts held until the charge was full. A held cast whose release or full charge is not heard goes on as a tap 3 s after the trigger [modelled].
 constexpr BranchedCast kBranchedCasts[] = {
     {"Mage_ArcaneVolley", 6064628901575655424ll, 2.0003722f, 0.099, 2.4, 0.082, 0.069, 1.170},
+    {"Ranger_ScatterShot", 6064630600000733338ll, 1.1363468f, 0.087, 0.100, 0.120, 0.036, 1.275, 6064630644737576924ll, 3.0, 0.100, 6064629886734172383ll, 0.082, 0.0},
+};
+// Casts that find their own targets (see GatheredCast). Scatter Shot [R: the recorded casts, the ability's gather record]: the trigger names no target (the ability is cast "Never" at one), and the SERVER
+// sends the ability's homing projectile (6,000 cm/s) at every enemy a cone ahead of the character holds when the montage jumps to "Fire": the cone is 50 degrees wide, reaches 2,500 cm from a start 250 cm
+// behind the character, and wants a clear line of sight. The one recorded hit (a Raven 180 cm in front of the character) was confirmed 35 ms after the jump, which is its flight (180 cm at 6,000 cm/s is 30 ms);
+// the damage is the projectile's hit (Ranger_ScatterShot), one confirmation for each enemy, predicted on both sides. The charged shot (the talent's) is one projectile of 150 cm radius that flies straight on
+// for 3,500 cm at 7,000 cm/s through every enemy in its way (the one recorded hit came 229 ms after the jump).
+constexpr GatheredCast kGatheredCasts[] = {
+    {"Ranger_ScatterShot", 10, 50.0, 2500.0, 250.0, 6000.0, 9, 3500.0, 150.0, 7000.0,
+     "/Game/Characters/Animations/00_ABLT/Ranger/ABLT_Scattershot_FullCharge_Montage.ABLT_Scattershot_FullCharge_Montage", 10550296575633473351ull},
 };
 // When each missile of a volley lands, after the cost step [R: the same cast: its seven confirmations came 940 to 1,405 ms after the cost step, the seventh missile first]. The
 // order and the gaps are the recorded cast's (a flight takes the target's distance over the projectile's speed, which the capture does not give).
@@ -1470,10 +1489,18 @@ void AbilityPipeline::run_due(double t) {
             if (cast.missiles[first].due <= t) {
                 // the missile that lands is the one projectile this step fires
                 const int64_t projectile = cast.missiles[first].projectile;
+                const uint64_t target = cast.missiles[first].target;
                 cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
                 const int64_t kept = cast.chain_owner;
                 cast.chain_owner = projectile;
+                // a projectile that flies at one enemy lands on that enemy alone
+                std::vector<uint64_t> kept_targets;
+                if (target != 0) {
+                    kept_targets = cast.target_actors;
+                    cast.target_actors = {target};
+                }
                 step_hits(cast, t, "projectile");
+                if (target != 0) cast.target_actors = std::move(kept_targets);
                 cast.chain_owner = kept;
                 finish_cast_if_done(i);
                 return;
@@ -1715,14 +1742,48 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now) {
     for (Held& h : held_) {
         if (h.client_id == client_instance_id && !h.end_due) h.end_due = now_ + kHeldEndDelay;
     }
+    // a cast that a talent made a held one (Scatter Shot with Concentrated) goes on from the key's release [R: 99 and 121 ms later the montage jumped]
+    for (Cast& cast : casts_) {
+        if (cast.client_id != client_instance_id || !cast.held || cast.charged || !cast.branched || !cast.branch_due) continue;
+        const double at = now_ + cast.branched->release;
+        if (at >= *cast.branch_due) continue;
+        spdlog::info("[abilities] the key of {} went up {:.3f} s after the trigger: the cast goes on", cast.def->row.name, now_ - cast.trigger_at);
+        reschedule_branch(cast, at, cast.branched->cost);
+    }
     return std::find(recent_ids_.begin(), recent_ids_.end(), client_instance_id) != recent_ids_.end();
+}
+
+void AbilityPipeline::reschedule_branch(Cast& cast, double branch_at, double cost_after) {
+    cast.branch_due = branch_at;
+    cast.cost_due = branch_at + cost_after;
+    cast.end_due = *cast.cost_due + cast.branched->end;
+    if (CastRecord* rec = record_of(cast.client_id)) {
+        rec->cost_due = *cast.cost_due;
+        rec->window_end = *cast.cost_due + kRequestWindow;
+    }
+}
+
+bool AbilityPipeline::holds_skill(int64_t skill) const {
+    for (const stats::SkillRank& r : stats_.ranks()) {
+        if (r.skill.type_id == stats::kRefTypeSkill && r.skill.guid == skill) return true;
+    }
+    return false;
 }
 
 bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_guid, double now) {
     advance(now);
     for (Cast& cast : casts_) {
         if (cast.client_id != client_instance_id || !cast.branched || !cast.branch_due) continue;
-        if (cast.branched->branch != branch_guid) return false;
+        const BranchedCast& b = *cast.branched;
+        if (cast.held && !cast.charged && b.charged_branch != 0 && branch_guid == b.charged_branch) {
+            // the key was held until the charge was full: the cast fires its charged shot [R: 73 to 99 ms later the montage of the full charge jumped, with the cost]
+            cast.charged = true;
+            spdlog::info("[abilities] the charge of {} was full {:.3f} s after the trigger: the cast fires its charged shot", cast.def->row.name, now_ - cast.trigger_at);
+            reschedule_branch(cast, now_ + b.charged_answer, b.charged_cost);
+            return true;
+        }
+        if (b.branch != branch_guid) return false;
+        if (cast.held) return true;   // (the talent makes this branch invalid: the request is not answered; the release or the full charge goes on)
         // the cast goes on from the request: what it still waits for comes sooner by as much as the request is earlier than the moment it was taken to come
         const double made = std::max(now_, cast.trigger_at + kEarliestBranchRequest);
         const double earlier = (made + cast.branched->answer) - *cast.branch_due;
@@ -2051,9 +2112,22 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         cast.montage_branch = true;
         cast.branch_position = b.position;
         cast.item_due = t + b.item;
-        cast.branch_due = t + b.request + b.answer;
+        // a character whose talent makes the cast a held one waits for the key's release or the full charge: the plan is the fallback for neither being heard
+        cast.held = b.held_skill != 0 && holds_skill(b.held_skill);
+        if (cast.held) spdlog::info("[abilities] {}: the character's talent makes it a held cast: it waits for the key's release or the full charge", row.name);
+        cast.branch_due = cast.held ? t + b.hold_limit + b.release : t + b.request + b.answer;
         cast.cost_due = *cast.branch_due + b.cost;
         cast.end_due = *cast.cost_due + b.end;
+    }
+    // a cast that finds its own targets sends its projectile when the montage jumps (step_branch), not at the cost step
+    for (const GatheredCast& g : kGatheredCasts) {
+        if (row.name != g.ability || !cast.branched) continue;
+        for (const content::AbilityHitRow& h : def->hits) {
+            if (h.source != "projectile") continue;
+            if (h.key == g.projectile) cast.gathered_projectile = h.owner_guid;
+            if (g.charged_projectile != 0 && h.key == g.charged_projectile) cast.charged_projectile = h.owner_guid;
+        }
+        if (cast.gathered_projectile != 0) cast.gathered = &g;
     }
     for (const LoopedCast& l : kLoopedCasts) {
         if (row.name != l.ability || !has_montage || loop) continue;
@@ -2096,6 +2170,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                 }
                 cast.projectile_due.reset();
             }
+            if (cast.gathered) cast.projectile_due.reset();   // (its projectiles fly at the enemies it finds, not at a named target: step_branch)
         }
     }
     // a movement ability opens the move checker's window
@@ -2215,8 +2290,14 @@ void AbilityPipeline::cancel_swings(double t, const std::string& by) {
 }
 
 void AbilityPipeline::step_branch(Cast& cast, double t) {
+    // a cast that finds its own targets sends its projectiles with the jump (the hits land whoever's item the pawn shows by now)
+    if (cast.gathered) launch_gathered(cast, t);
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
     if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
+    if (cast.charged && cast.gathered && cast.gathered->charged_montage[0] != '\0') {   // the charged shot has a montage of its own
+        cast.item.montage_path = cast.gathered->charged_montage;
+        cast.item.montage_guid = cast.gathered->charged_montage_guid;
+    }
     cast.item.montage_position = cast.branch_position;
     cast.item.may_jump_to_position = true;
     cast.item.branch_predicted = cast.branch_predicted;
@@ -2224,6 +2305,20 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
     AbilityChange c;
     c.abilities_changed.push_back(cast.item);
     emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " moves to the end of its cast"});
+}
+
+void AbilityPipeline::launch_gathered(Cast& cast, double t) {
+    if (!combat_ || !cast.gathered) return;
+    const GatheredCast& g = *cast.gathered;
+    const bool charged = cast.charged && cast.charged_projectile != 0;
+    // who is in the way: the enemies in the cone ahead of the caster, or on the line of the charged shot
+    const std::vector<combat::GatheredTarget> found = charged ? combat_->enemies_in_line(g.charged_length, g.charged_radius, kMaxGathered)
+                                                               : combat_->enemies_in_cone(g.angle, g.length, g.behind, kMaxGathered);
+    const int64_t projectile = charged ? cast.charged_projectile : cast.gathered_projectile;
+    const double speed = charged ? g.charged_speed : g.speed;
+    for (const combat::GatheredTarget& e : found) cast.missiles.push_back({t + e.distance_cm / speed, projectile, e.actor});
+    spdlog::info("[abilities] {} ({}): {} enem{} ahead of the caster{}", cast.def->row.name, charged ? "the charged shot" : "the scatter", found.size(), found.size() == 1 ? "y" : "ies",
+                 found.empty() ? ", nothing is hit" : found.size() == 1 ? ", a projectile flies at it" : ", a projectile flies at each");
 }
 
 void AbilityPipeline::step_end(Cast& cast, double t) {
