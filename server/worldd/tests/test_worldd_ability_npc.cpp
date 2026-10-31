@@ -263,7 +263,7 @@ const char* const R_CHAN = "a channelled, toggled or chained ability that the cl
 const char* const R_UNRES = "not resolved in stage 3";
 const char* const R_KILL = "the replay's creature (a level-1 Wolf, 34.9 Health, where the capture's target is another actor of unknown level) dies of the ability's first hit since the E1 review's stat fix gave a level-1 creature retail's MaxHealth (a fifth less): the hits after the kill are not confirmed; retail's target survived";
 
-const char* const R_SPEED = "the cast bar's length follows the caster's cast speed: the cost step of ability_timings.h is the median over the ability's recorded casts, so in a capture whose cast was quicker the step comes after the window the replay runs, and lands in the next cast's window (its Mana, its first Cooldowns item); the step is anchored on the client's branch request in the cast-bar change (Part 2 of the timing plan)";
+const char* const R_JITTER = "the cost step comes the median of the ability's recorded offsets after the montage's jump (Mortal Blast: 199 ms); in this capture it came sooner (165 ms), 5 ms before the next call ended the replay's window for the cast, so the step lands 34 ms after that window and in the next cast's window (its Mana, its Cooldowns item)";
 
 struct Known {
     const char* ability;
@@ -498,6 +498,10 @@ int main(int argc, char** argv) {
                 } else if (q->kind == "HELD") {
                     advance(t);
                     r.pipe->cancel(trigger_id, t);
+                    r.take();
+                } else if (q->kind == "BRANCH") {   // the client's cast bar ended: it asks for its branch (a cast bar's cost and hits follow this request)
+                    advance(t);
+                    r.pipe->branch_request(trigger_id, to_i(q->f[0]), t);
                     r.take();
                 }
             }

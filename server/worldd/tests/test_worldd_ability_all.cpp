@@ -510,6 +510,10 @@ int main(int argc, char** argv) {
                     if (a7) r.a7->cancel(c.client_instance_id, t);
                     else r.pipe->cancel(c.client_instance_id, t);
                     r.take();
+                } else if (q->kind == "BRANCH") {   // the client's cast bar ended: it asks for its branch (a cast bar's cost and hits follow this request)
+                    r.run_to(t);
+                    if (!a7) r.pipe->branch_request(c.client_instance_id, to_i(q->f[0]), t);
+                    r.take();
                 }
             }
             r.run_to(end_t);

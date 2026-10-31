@@ -38,9 +38,14 @@
 //                            has the moment the projectile first changed Health (Snipe 3343 ms after the trigger); an ordinary cast clears its montage
 //                            where the table shows it
 //               The cost, the cooldown and the stat deltas are applied at the cost step, not at the trigger.
-//    branches   an ability whose cast ends with a branch of its montage (a cast bar: Arcane Volley) waits for the client to ask for the branch
+//    branches   an ability whose cast ends with a branch of its montage (a cast bar: Arcane Volley, Fireball, Judgment, Mortal Blast ...) waits for the client to ask for the branch
 //               (ServerRequestBranchVerification) and goes on from the request: the montage jumps to the branch's section, the cost follows, the hits land and the
-//               montage ends (kBranchedCasts in ability_pipeline.cpp has the offsets). Without a request it goes on as if it came 2.4 s after the trigger.
+//               montage ends (kBranchedCasts in ability_pipeline.cpp has the offsets), so the cost and the damage come at the end of the caster's OWN bar. A Smite or an Arcane Circle pays
+//               its cost before the bar ends (the timing table's), and the request moves its jump and end only. A bar the client never ends (no request by the row's deadline, half as long
+//               again as the recorded median) or ends with ServerEndAbility was cancelled: it costs nothing and fires nothing [modelled]. The key's release (ServerNotifyHeldAbilityCancelled)
+//               is no cancel: a tap of the key sends it and the bar goes on. A HELD ability (hold_animation: the Lightning Strike, the Resplendent Beam; the tooltip says "Held ability ... based
+//               on how long it was charged") is released early on purpose: the release (the same call, sent when the key goes up before the bar is full) ends its bar at the fill reached, the
+//               montage jumps, the cost is paid and the damage follows the fill (the formulas' GetAbilityProgressRatio() with no argument: the Lightning Strike's 100% to 300%).
 //    gathering  an ability that names no target and finds its own (the Ranger's Scatter Shot) has the SERVER gather the enemies in a cone ahead of the caster (a line, for its charged
 //               shot) when the montage jumps and send its projectile at each: the projectile's hit does the damage when it lands (kGatheredCasts). A talent can make such a cast a held
 //               one: it then waits for the key's release (ServerNotifyHeldAbilityCancelled) or the full charge instead of the request.
@@ -144,16 +149,20 @@ namespace aoc::worldd {
 
 /// An ability whose cast ends with a branch of its montage: the client's cast bar runs out and it asks the server to confirm (ServerRequestBranchVerification).
 /// The server answers by moving the montage to the branch's section, takes the cost, lands the hits and ends the montage, at these offsets
-/// (ability_pipeline.cpp has the table and the evidence).
+/// (ability_pipeline.cpp has the table and the evidence). One ability can have a row for each of its montage variants (`animation`).
 struct BranchedCast {
     const char* ability;
     int64_t     branch;     // the animation branch record the client names in its request
     float       position;   // where the branch's section starts in the montage, seconds
     double      item;       // the ability item comes this long after the trigger
-    double      request;    // the client's request comes this long after the trigger; when it is not heard the cast goes on as if it came then
+    double      request;    // the deadline: the client's request comes this long after the trigger at the latest (2.5 times the median recorded one); when none is heard the cast goes on as if it came then
     double      answer;     // the montage jumps this long after the request
-    double      cost;       // the cost step comes this long after the jump
-    double      end;        // the montage ends this long after the cost step
+    double      cost;       // the cost step comes this long after the jump (cost_first: not used)
+    double      end;        // the montage ends this long after the cost step (cost_first: after the jump)
+    int         animation = -1;        // the AnimationIndex of the call this row is for (-1: any): a variant of the montage with no cast bar (Smite's melee swing) has no row
+    bool        cost_first = false;    // the cost step comes before the request (the timing table's moment): the request moves the jump and the end only
+    bool        cancels = true;        // a bar ended by ServerEndAbility before its request is cancelled: nothing is paid, nothing fires (false: the cast goes on as if the request came: the Scatter Shot's)
+    double      full = 0;              // a HELD ability (hold_animation): the recorded bar's length, seconds; the key's release before the request ends the bar at the fill reached (0: a release is no more than a tap)
     // A talent can make the ability a held one (the Ranger's Scatter Shot with Concentrated: "becomes a held ability"). With `held_skill` the request above is not answered: the cast goes on
     // `release` after the key's release (ServerNotifyHeldAbilityCancelled), or, when the key is held until the charge is full, `charged_answer` after the client's request for `charged_branch`
     // (the charged shot: its cost comes `charged_cost` after the jump), and on its own `hold_limit` after the trigger when neither is heard.
@@ -343,8 +352,9 @@ public:
     /// ServerTriggerAbility. Refusal::None when the cast was accepted; every other value except Duplicate has queued ClientEndAbility.
     Refusal trigger(int64_t ability, int32_t client_instance_id, double now, const TriggerInfo& info = {});
     /// ServerNotifyHeldAbilityCancelled: a pipeline instance's cast goes on (retail's reply was unchanged), except a held cast (BranchedCast::held_skill), which waits for this: the key's
-    /// release is what makes its montage jump; true when the instance is one of ours.
-    bool cancel(int32_t client_instance_id, double now);
+    /// release is what makes its montage jump; and the cast bar of a HELD ability (BranchedCast::full), which this release ends at the fill reached (`held_seconds`: the call's CancelledTime,
+    /// how long the key was held; 0 or less: worldd's own clock); true when the instance is one of ours.
+    bool cancel(int32_t client_instance_id, double now, double held_seconds = 0);
 
     /// ServerRequestBranchVerification: the client's cast bar ended and it asks the server to confirm the branch it took. A cast of an ability that waits for
     /// its branch (kBranchedCasts) goes on from this moment: the montage's jump, the cost, the hits and the montage's end follow at the offsets the retail
@@ -516,6 +526,7 @@ private:
         int64_t                      ability = 0;
         double                       trigger_at = 0;
         double                       cost_at = -1;     // when its cost step ran (-1: not yet)
+        double                       fill = 1;         // a HELD ability released before its bar was full: how much of the charge it had, 0 to 1 (GetAbilityProgressRatio() with no argument)
         double                       cost_due = 0;     // when it will
         double                       window_end = 0;
         double                       hit_delay = kHitDelay;   // how long after the cost step the cast's hits may apply (its montage's, none without one)
@@ -576,6 +587,8 @@ private:
         std::vector<std::pair<int64_t, int>>  effect_costs;       // effect guid, stacks
         bool                                  triggers_cooldown = false;
         bool                                  clears_montage = false;     // an ordinary cast whose montage is cleared where ability_timings.h shows (end_due): the item keeps its place with the montage cleared
+        bool                                  request_heard = false;      // a kBranchedCasts cast: the client's request for its branch came (else the cast goes on at its fallback time)
+        double                                heard_at = -1;              // ... and when it came (the cast bar's end); the projectiles of a cast bar are launched from there (land_by_flight)
     };
     struct EffectInst {
         int64_t                     owner = 0;                    // plan D2, stage 2: the looping ability whose effect this is (0: none)
@@ -676,6 +689,17 @@ private:
     bool   holds_skill(int64_t skill) const;
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
     void   reschedule_branch(Cast& cast, double branch_at, double cost_after);
+    void   abort_cast(size_t index, double t, const char* why);   // a cast that ends here: none of its steps happens, its item keeps its place with the montage cleared
+    void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
+    void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
+    double held_fill(const Cast& cast, double held_seconds) const;
+    /// The fill the no-argument GetAbilityProgressRatio() reads while a cast's hits are applied (1: the ability whose hit this is has played in full).
+    struct FillScope {
+        AbilityPipeline& p;
+        double           saved;
+        FillScope(AbilityPipeline& pipeline, double fill) : p(pipeline), saved(pipeline.fill_) { p.fill_ = fill; }
+        ~FillScope() { p.fill_ = saved; }
+    };
     void   step_end(Cast& cast, double t);
     void   finish_cast_if_done(size_t index);
     std::string montage_group_of(const abilities::AbilityDef& def) const;
@@ -771,6 +795,8 @@ private:
     double stat_delta_over_time(int64_t stat, double seconds) const;
     double progress_of(const std::string& group) const;
     double last_item_at_ = -1;                                      // when the ability item of the running cast came (the DefaultGroup's progress)
+    double fill_ = 1;                                               // what the no-argument GetAbilityProgressRatio() reads (FillScope): 1, the ability whose hit this is has played in full
+    std::map<int64_t, double> full_bars_;                           // a HELD ability -> the longest bar this client has shown (seconds from the trigger to its request)
     double                    next_regen_ = kRegenInterval;
     std::set<int64_t>         known_;
     std::vector<Cast>         casts_;

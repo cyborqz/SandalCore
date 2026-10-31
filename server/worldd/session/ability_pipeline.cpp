@@ -54,7 +54,7 @@ constexpr Timing kTimings[] = {
 // cast bar ran out and it asked for the branch 1,289 ms after the trigger; the server moved the montage to the section "CastComplete" (2.0004 s into it) 82 ms after the
 // request, took the cost (the mana, the cooldown) 69 ms after that (1,440 ms from the trigger), and cleared the item's montage 1,170 ms after the cost. The client's own cast bar
 // decides when it asks: 1.289 s after the trigger in the recording, 1.875 s in a first run of this code, so the cast waits for it. A request that is not heard (a replay, a client that
-// never asks) is taken to have come 2.4 s after the trigger; one that comes sooner moves the rest sooner by as much.
+// never asks) is taken to have come 3.25 s after the trigger (2.5 times the recorded request); one that comes sooner moves the rest sooner by as much.
 // The Ranger's Scatter Shot [R: twelve recorded casts: seven taps, one with a partial hold, four held until the charge was full]. Its montage waits in a section for the key to go up:
 //  - the ability item came 77 to 105 ms after the trigger (87 ms on average); the client asked for the branch "Ranger_ScatterShot" 89 to 116 ms after it (100 ms), in every cast;
 //  - a character WITHOUT the talent Concentrated: the server moved the montage to the section "Fire" (1.1363 s into it) 94 to 148 ms after that request (120 ms on average of six), took the cost (the
@@ -64,9 +64,50 @@ constexpr Timing kTimings[] = {
 //    739 ms) or, when the key was held until the charge was full, 73 to 99 ms (82 ms) after the client's second request, for the branch "Ranger_Passive_ScatterShot_Concentrated" (1.11 to 1.15 s after the
 //    trigger), into the montage of the full charge (also at 1.1363 s) with the cost in the same packet. The data's own timings for this ability (ability_timings.h: the cost at 1,224 ms) are those of the
 //    casts held until the charge was full. A held cast whose release or full charge is not heard goes on as a tap 3 s after the trigger [modelled].
+//  - The cast bars [R: the recorded casts of each ability below: how many is in the comment of its row; the copies of identical captures count once and a quick variant with no bar is left out]. The client's
+//    cast bar ran out and it asked for the branch the row names; the server moved the montage to the section that starts at `position` `answer` after that request, took the cost (the mana, the cooldown)
+//    `cost` after the jump and cleared the item's montage `end` after the cost. `item` is the ability item's delay and `request` the DEADLINE, two and a half times the median recorded request, rounded up
+//    to 0.05 s: the cast is planned as if the request came then, and the real request comes sooner and moves the rest sooner by as much (branch_request), so the cost and the damage come at the end of the
+//    caster's OWN bar, whatever its length. The
+//    cost of Smite and Arcane Circle comes before the bar's end (the timing table's moment, 72 and 75 ms): their request moves the jump and the end, which counts from the jump. Judgment has a row for
+//    each of its montages (animation 0 and 1); Smite's melee swing (animation 1) is instant and has none. Bless Weapon, Purify, Extract Vessel and Siphon Vessel show no cost step in their recordings:
+//    they take theirs 70 ms after the jump [modelled]. A bar the client ends by ServerEndAbility was cancelled: it costs
+//    nothing and fires nothing [modelled: no recording shows a cancelled bar; the key's release, ServerNotifyHeldAbilityCancelled, is no cancel: every tap of the key sends it]. A bar whose request does
+//    not come by its deadline (`request` + `answer` after the trigger) is not cancelled: the cast goes on as if the request came then [R: in the owner's run every cancelled bar was followed by an end call, and
+//    his bars ran 1.3 to 1.4 times as long as the recorded ones (the Volley 1.82 s against 1.289, the Fireball 3.13 against 2.407): half as long again as the median was too tight for a slow bar]. The Lightning Strike and the Resplendent Beam are HELD abilities (the data's hold_animation, the tooltip's "Held ability ... based on how long it was charged"; `full` is the recorded bar): the key's release
+//    before the bar is full (ServerNotifyHeldAbilityCancelled, the call's CancelledTime = how long the key was held) ends the bar at the fill reached, and the cast goes on from there as from a request: the
+//    montage jumps, the cost is paid, and the damage follows the fill (the Lightning Strike's formula: Lerp(100%, 300%, GetAbilityProgressRatio())). The client sends no request for such a release [R: the owner's
+//    run: nine Lightning Strikes, seven released early, five requests in all, all from full bars; eight releases, seven ends] and the recorded releases of the Deliverance, the third held ability, jumped the
+//    montage 61 ms after the release. Not here: the Air Strike and the Barrage (kTimedCasts), the Disengage (its recordings show no jump) and the Deliverance (a held cast: its release fires it).
+constexpr double kHoldStart = 0.2;   // a HELD ability's key is held from this long after the trigger [R: the Deliverance's recorded releases: CancelledTime was 0.2 to 0.3 s less than the release came after the trigger]
 constexpr BranchedCast kBranchedCasts[] = {
-    {"Mage_ArcaneVolley", 6064628901575655424ll, 2.0003722f, 0.099, 2.4, 0.082, 0.069, 1.170},
-    {"Ranger_ScatterShot", 6064630600000733338ll, 1.1363468f, 0.087, 0.100, 0.120, 0.036, 1.275, 6064630644737576924ll, 3.0, 0.100, 6064629886734172383ll, 0.082, 0.0},
+    {"Mage_ArcaneVolley", 6064628901575655424ll, 2.0003722f, 0.099, 3.25, 0.082, 0.069, 1.170},
+    {"Ranger_ScatterShot", 6064630600000733338ll, 1.1363468f, 0.087, 0.100, 0.120, 0.036, 1.275, -1, false, false, 0.0, 6064630644737576924ll, 3.0, 0.100, 6064629886734172383ll, 0.082, 0.0},
+    {"Cleric_BlessWeapon", 6064631002320929220ll, 1.8000f, 0.059, 3.05, 0.084, 0.070, 1.765},   // n=3, request 1202 ms (698..1210); no cost step in the recordings: modelled
+    {"Cleric_ChainsOfRestraint", 109341746222712ll, 1.6668f, 0.067, 5.20, 0.069, 0.100, 1.285},   // n=3, request 2066 ms (1569..2067)
+    {"Cleric_CommunalRestoration", 109382755440251ll, 1.8588f, 0.258, 4.45, 0.232, 0.036, 1.062},   // n=3, request 1766 ms (1757..2281)
+    {"Cleric_Condemn", 6064629326169899648ll, 1.4024f, 0.087, 4.30, 0.107, 0.101, 0.903},   // n=3, request 1710 ms (907..1716)
+    {"Cleric_Judgment", 109313609651832ll, 2.9978f, 0.065, 9.15, 0.094, 0.068, 1.237, 0, false},   // n=10, request 3648 ms (3644..3657); no end in the recordings: the other montage's
+    {"Cleric_Judgment", 109315044890234ll, 2.9981f, 0.070, 8.85, 0.089, 0.034, 1.237, 1, false},   // n=3, request 3540 ms (2054..3648)
+    {"Cleric_Purify", 6064630996510049918ll, 0.9975f, 0.302, 2.40, 0.315, 0.070, 0.965},   // n=4, request 951 ms (945..1174); no cost step in the recordings: modelled
+    {"Cleric_ResplendentBeam", 6064629659855553923ll, 1.3333f, 0.071, 3.15, 0.066, 0.168, 1.171, -1, false, true, 1.241},   // n=1, request 1241 ms (1241..1241)
+    {"Cleric_Smite", 6064630407207993048ll, 0.8672f, 0.072, 2.75, 0.096, 0.000, 1.236, 0, true},   // n=36, request 1097 ms (808..1128)
+    {"Mage_ArcaneCircle", 6064629093978406920ll, 1.7333f, 0.075, 2.10, 0.099, 0.000, 0.768, -1, true},   // n=2, request 826 ms (825..827)
+    {"Mage_BallLightning", 6064629048751489028ll, 2.0000f, 0.090, 3.20, 0.061, 0.035, 1.709},   // n=1, request 1262 ms (1262..1262)
+    {"Mage_ChainLightning", 6064628934316589056ll, 2.3351f, 0.071, 4.10, 0.072, 0.318, 0.705},   // n=2, request 1634 ms (1627..1642)
+    {"Mage_Fireball", 6064631985904026106ll, 3.0000f, 0.070, 6.05, 0.066, 0.068, 1.234},   // n=1, request 2407 ms (2407..2407)
+    {"Mage_Frostbolt", 6064628890262700041ll, 2.3334f, 0.083, 4.15, 0.087, 0.204, 0.701},   // n=2, request 1647 ms (1633..1661)
+    {"Mage_LightningStrike", 6064628894971461633ll, 3.0000f, 0.089, 6.05, 0.080, 0.102, 2.147, -1, false, true, 2.416},   // n=1, request 2416 ms (2416..2416)
+    {"Mage_MagmaField", 6064629060044980230ll, 2.9327f, 0.076, 3.20, 0.065, 0.036, 1.404},   // n=1, request 1277 ms (1277..1277)
+    {"Mage_Slumber", 6064629064360525827ll, 2.7670f, 0.096, 5.40, 0.074, 0.333, 2.175},   // n=1, request 2159 ms (2159..2159)
+    {"Summoner_ExtractVessel", 6064633645892571971ll, 2.0000f, 0.051, 4.00, 0.059, 0.070, 1.302},   // n=1, request 1592 ms (1592..1592); no cost step in the recordings: modelled
+    {"Summoner_MassAffliction", 6064633572821731033ll, 2.9998f, 0.074, 5.35, 0.068, 0.101, 2.319},   // n=4, request 2136 ms (2125..2137)
+    {"Summoner_MortalBlast", 6064633391727706791ll, 2.0000f, 0.064, 4.00, 0.058, 0.199, 1.268},   // n=6, request 1589 ms (1478..1594)
+    {"Summoner_Shear", 6064633578622266111ll, 1.2667f, 0.072, 2.65, 0.073, 0.103, 0.867},   // n=4, request 1060 ms (1056..1066)
+    {"Summoner_SiphonVessel", 6064633662084370415ll, 2.0000f, 0.059, 4.00, 0.064, 0.070, 1.133},   // n=1, request 1596 ms (1596..1596); no cost step in the recordings: modelled
+    {"Summoner_SoulFlare", 6064633748263029144ll, 1.5003f, 0.053, 2.70, 0.052, 0.400, 0.803},   // n=1, request 1067 ms (1067..1067)
+    {"Summoner_SpectralBindings", 6064633702393973495ll, 2.4962f, 0.068, 3.85, 0.067, 0.350, 1.235},   // n=2, request 1536 ms (1486..1586)
+    {"Summoner_Void", 6064633583948214747ll, 3.0000f, 0.060, 5.35, 0.072, 0.167, 2.139},   // n=2, request 2124 ms (2123..2125)
 };
 // Casts that find their own targets (see GatheredCast). Scatter Shot [R: the recorded casts, the ability's gather record]: the trigger names no target (the ability is cast "Never" at one), and the SERVER
 // sends the ability's homing projectile (6,000 cm/s) at every enemy a cone ahead of the character holds when the montage jumps to "Fire": the cone is 50 degrees wide, reaches 2,500 cm from a start 250 cm
@@ -111,6 +152,29 @@ constexpr MissileLanding kMissileLandings[] = {
     {"Mage_ArcaneVolley", 1, 1.272}, {"Mage_ArcaneVolley", 2, 1.138}, {"Mage_ArcaneVolley", 3, 1.338}, {"Mage_ArcaneVolley", 4, 1.405},
     {"Mage_ArcaneVolley", 5, 1.138}, {"Mage_ArcaneVolley", 6, 1.272}, {"Mage_ArcaneVolley", 7, 0.940},
 };
+
+// When the client launches the projectiles of a cast bar's spell, and the spell's cast bar (see land_by_flight). `bar` is the montage time at which the bar ends (the section that loops starts there): the client plays
+// the montage at `bar` over the seconds the bar took, which is how worldd knows the rate of THIS player's cast (the Volley's bar: 1.0 s of montage in the owner's 1.82 s, a rate of 0.55). `fire` is the montage
+// time after the section of the cast's completion starts at which the client launches the projectile of `key`.
+//  - The Volley's seven [R: the owner's client log of 2026-10-31, FireProjectileAtTarget with the projectile's name, at a rate of 0.546: the launches came 0.028, 0.142, 0.220, 0.309, 0.395, 0.469 and 0.517 s after the
+//    cast bar's end, the projectiles 5, 7, 2, 3, 6, 4, 1 in that order]. They fly the homing speeds of their records (3,200, 2,900, 2,600, 2,500, 2,600, 2,900, 3,200 cm/s). The recorded retail cast fits this: its seven
+//    landings minus these launches at its own rate (0.776) leave 31 to 34 m of flight at those speeds (the target stood about 32 m away), so retail's confirmations are the launch plus the flight, as here.
+//  - The Fireball [R: the owner's client: the launch came 0.066 s after the bar's end at a rate of 0.617: 0.041 s of montage] and the Frostbolt's bolt [modelled: the Fireball's] fly their records' speeds (3,500 and 4,000
+//    cm/s); the retail Frostbolts landed 0.33 and 0.94 s after their bars' ends, which are targets 9 and 33 m away.
+struct Flight {
+    const char* ability;
+    double      bar;
+    int         key;
+    double      fire;
+};
+constexpr Flight kFlights[] = {
+    {"Mage_ArcaneVolley", 1.000001, 5, 0.0153}, {"Mage_ArcaneVolley", 1.000001, 7, 0.0776}, {"Mage_ArcaneVolley", 1.000001, 2, 0.1202}, {"Mage_ArcaneVolley", 1.000001, 3, 0.1688},
+    {"Mage_ArcaneVolley", 1.000001, 6, 0.2158}, {"Mage_ArcaneVolley", 1.000001, 4, 0.2562}, {"Mage_ArcaneVolley", 1.000001, 1, 0.2824},
+    {"Mage_Fireball", 2.0, 1, 0.0407},
+    {"Mage_Frostbolt", 1.3337822, 1, 0.0407},
+};
+// How far past the caster's body a projectile starts (its hand), cm.
+constexpr double kMuzzleCm = 40.0;
 
 // Casts that shoot again and again (see LoopedCast). The Ranger's Salvo [R: the two recorded casts; the montage's sections]: the ability item came 83 ms after the trigger and the first shot's
 // cost 184 ms after it; the next ones followed every 0.24 s (the montage's loop section, "StartLoop", is 0.2373 s long at a play rate of 1; the six costs of the clean cast came 238, 213, 315,
@@ -646,7 +710,7 @@ double AbilityPipeline::progress_of(const std::string& group) const {
         }
         return 0;
     }
-    if (group.empty()) return 1.0;   // the form with no argument: the ability whose hit this is has played [modelled]
+    if (group.empty()) return fill_;   // the form with no argument: the ability whose hit this is has played, in full (1) or to the fill a HELD ability's early release reached [modelled]
     if (group == "DefaultGroup" && last_item_at_ >= 0 && item_instance_) return std::clamp((clock_ - last_item_at_) / kCastSeconds, 0.0, 0.99);
     return 0;
 }
@@ -1526,6 +1590,8 @@ void AbilityPipeline::run_due(double t) {
             return;
         }
         if (cast.branch_due && *cast.branch_due <= t) {
+            // a cast bar whose request did not come by the deadline goes on as if it came then: a cancel is the client's ServerEndAbility (end_request has seen it), and a slow bar, a hitch or a stall
+            // must not lose its cast (the owner's bars run 1.3 to 1.4 times as long as the recorded ones; a Smite has paid its mana already)
             cast.branch_due.reset();
             step_branch(cast, t);
             finish_cast_if_done(i);
@@ -1757,6 +1823,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
 }
 
 void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets) {
+    const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
     AbilityChange c;
     const AbilityDef* def = catalog_->ability(rec.ability);
     HitSource src;
@@ -1794,7 +1861,7 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
               (found ? "" : ": it found nobody")});
 }
 
-bool AbilityPipeline::cancel(int32_t client_instance_id, double now) {
+bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held_seconds) {
     advance(now);
     cancel_timed(client_instance_id, now);
     // a held ability (Guard, Reflect) ends with the key's release: its effects go kHeldEndDelay later
@@ -1809,7 +1876,67 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now) {
         spdlog::info("[abilities] the key of {} went up {:.3f} s after the trigger: the cast goes on", cast.def->row.name, now_ - cast.trigger_at);
         reschedule_branch(cast, at, cast.branched->cost);
     }
+    // the key of a HELD ability went up before its bar was full: the bar ended there, at the fill reached, and the cast goes on as from a request (the client sends none for it) [R: the owner's run; modelled: the
+    // fill is the held time over the longest bar this client has shown, else the recorded one]
+    for (Cast& cast : casts_) {
+        if (cast.client_id != client_instance_id || !cast.branched || cast.branched->full <= 0 || cast.held || cast.request_heard || !cast.branch_due) continue;
+        cast.request_heard = true;
+        cast.heard_at = now_;
+        const double fill = held_fill(cast, held_seconds);
+        if (CastRecord* rec = record_of(cast.client_id)) rec->fill = fill;
+        const double made = std::max(now_, cast.trigger_at + cast.branched->item);
+        const double earlier = (made + cast.branched->answer) - *cast.branch_due;
+        spdlog::info("[abilities] the key of {} went up {:.3f} s after the trigger: the bar ended at {:.0f}% of its charge{}", cast.def->row.name, now_ - cast.trigger_at, fill * 100.0,
+                     earlier < 0 ? ": the cast goes on " + std::to_string(-earlier).substr(0, 5) + " s sooner" : std::string(": the cast goes on as planned"));
+        if (earlier < 0) bring_sooner(cast, earlier);
+        break;
+    }
     return std::find(recent_ids_.begin(), recent_ids_.end(), client_instance_id) != recent_ids_.end();
+}
+
+double AbilityPipeline::held_fill(const Cast& cast, double held_seconds) const {
+    const double held = held_seconds > 0 ? held_seconds : std::max(0.0, now_ - cast.trigger_at - kHoldStart);
+    const auto shown = full_bars_.find(cast.def->row.guid);
+    const double bar = shown != full_bars_.end() ? shown->second : cast.branched->full;
+    return std::clamp(held / std::max(0.1, bar - kHoldStart), 0.0, 1.0);
+}
+
+void AbilityPipeline::bring_sooner(Cast& cast, double earlier) {
+    const bool cost_first = cast.branched && cast.branched->cost_first;
+    const auto move = [earlier](std::optional<double>& d) {
+        if (d) *d += earlier;
+    };
+    move(cast.branch_due);
+    if (!cost_first) {   // (its cost step came before the request: the cast's hits are the client's, and its window stays)
+        move(cast.cost_due);
+        move(cast.hit_due);
+        move(cast.own_due);
+    }
+    move(cast.end_due);
+    move(cast.projectile_due);
+    for (Cast::Missile& m : cast.missiles) m.due += earlier;
+    if (CastRecord* rec = record_of(cast.client_id); rec && !cost_first) {
+        rec->cost_due += earlier;
+        rec->window_end += earlier;
+    }
+}
+
+void AbilityPipeline::abort_cast(size_t index, double t, const char* why) {
+    Cast& cast = casts_[index];
+    const bool paid = cast.branched && cast.branched->cost_first;   // (a Smite paid before its bar's end: only what follows the bar is dropped)
+    spdlog::info("[abilities] {} {:.3f} s after the trigger: {}: {}", cast.def->row.name, t - cast.trigger_at, why, paid ? "its cost was paid before the bar's end, nothing more happens" : "nothing is paid and nothing fires");
+    AbilityChange c;
+    if (cast.montage_branch && !cast.item_due && item_instance_ && *item_instance_ == cast.instance) {   // (its item was sent and is still the pawn's: it keeps its place, the montage cleared)
+        cast.item.montage_path.clear();
+        cast.item.montage_guid = 0;
+        cast.item.branch_predicted = cast.branch_predicted;
+        cast.item.animation_counter = ++animation_counter_;
+        c.abilities_changed.push_back(cast.item);
+    }
+    const std::string text = "the montage of " + cast.def->row.name + " is cleared: " + why;
+    drop_record(cast.client_id);
+    casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (!c.empty()) emit({std::move(c), std::nullopt, t, text});
 }
 
 void AbilityPipeline::reschedule_branch(Cast& cast, double branch_at, double cost_after) {
@@ -1841,26 +1968,22 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
             reschedule_branch(cast, now_ + b.charged_answer, b.charged_cost);
             return true;
         }
-        if (b.branch != branch_guid) return false;
+        if (b.branch != branch_guid) {
+            if (!b.cancels) return false;   // (the Scatter Shot's other branch is no request for this one)
+            // a cast bar's request names its cast by the instance: the end of the bar is the end of the bar whichever branch the client names (a variant the table has no row for must not lose its cast)
+            spdlog::info("[abilities] the client asked for the branch {} of {}, which the table does not list (it has {}): taken as the end of the cast bar", branch_guid, cast.def->row.name, b.branch);
+        }
         if (cast.held) return true;   // (the talent makes this branch invalid: the request is not answered; the release or the full charge goes on)
+        cast.request_heard = true;
+        cast.heard_at = now_;
         // the cast goes on from the request: what it still waits for comes sooner by as much as the request is earlier than the moment it was taken to come
         const double made = std::max(now_, cast.trigger_at + kEarliestBranchRequest);
         const double earlier = (made + cast.branched->answer) - *cast.branch_due;
         spdlog::info("[abilities] the client asked for the branch of {} {:.3f} s after the trigger{}", cast.def->row.name, now_ - cast.trigger_at,
                      earlier < 0 ? ": the cast goes on " + std::to_string(-earlier).substr(0, 5) + " s sooner" : std::string(": the cast goes on as planned"));
+        if (b.full > 0 && now_ - cast.trigger_at >= 0.5 * b.full) full_bars_[cast.def->row.guid] = std::max(full_bars_[cast.def->row.guid], now_ - cast.trigger_at);   // (a HELD ability's full bar, as this client shows it)
         if (earlier >= 0) return true;
-        const auto move = [earlier](std::optional<double>& d) {
-            if (d) *d += earlier;
-        };
-        move(cast.branch_due);
-        move(cast.cost_due);
-        move(cast.end_due);
-        move(cast.projectile_due);
-        for (Cast::Missile& m : cast.missiles) m.due += earlier;
-        if (CastRecord* rec = record_of(cast.client_id)) {
-            rec->cost_due += earlier;
-            rec->window_end += earlier;
-        }
+        bring_sooner(cast, earlier);
         return true;
     }
     return false;
@@ -1868,6 +1991,14 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
 
 bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     advance(now);
+    // a cast bar the client ends before its end (no request for its branch yet) is cancelled: nothing is paid and nothing fires [modelled: no recording shows a cancelled bar]. The end is
+    // answered like every other one (ClientEndAbility kEndDelay later, below): the cancel is not the whole answer
+    for (size_t i = 0; i < casts_.size(); ++i) {
+        const Cast& cast = casts_[i];
+        if (cast.instance != server_instance_id || !cast.branched || !cast.branched->cancels || cast.held || cast.request_heard || !cast.branch_due) continue;
+        abort_cast(i, now_, "the client ended the cast bar");
+        break;
+    }
     for (Instance& i : instances_) {
         if (i.server_id != server_instance_id || i.end_due) continue;
         i.end_due = now_ + kEndDelay;
@@ -2170,6 +2301,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // the cost, the hits and the montage's end are all counted from there
     for (const BranchedCast& b : kBranchedCasts) {
         if (row.name != b.ability || !has_montage || loop) continue;
+        if (b.animation >= 0 && b.animation != cast.animation_index) continue;   // (another montage of the ability: it has a row of its own, or none)
         cast.branched = &b;
         cast.montage_branch = true;
         cast.branch_position = b.position;
@@ -2178,8 +2310,13 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         cast.held = b.held_skill != 0 && holds_skill(b.held_skill);
         if (cast.held) spdlog::info("[abilities] {}: the character's talent makes it a held cast: it waits for the key's release or the full charge", row.name);
         cast.branch_due = cast.held ? t + b.hold_limit + b.release : t + b.request + b.answer;
-        cast.cost_due = *cast.branch_due + b.cost;
-        cast.end_due = *cast.cost_due + b.end;
+        if (b.cost_first) {   // the cost step was paid before the bar's end (the timing table's moment, set above): the request moves the jump and the end
+            cast.end_due = *cast.branch_due + b.end;
+        } else {
+            cast.cost_due = *cast.branch_due + b.cost;
+            cast.end_due = *cast.cost_due + b.end;
+        }
+        break;
     }
     // a cast that finds its own targets sends its projectile when the montage jumps (step_branch), not at the cost step
     for (const GatheredCast& g : kGatheredCasts) {
@@ -2226,7 +2363,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         if (projectile) {
             cast.projectile_due = *cast.cost_due + kProjectileDelay;
             // where the recordings show when a projectile of the ability first changed Health, its hit lands then, never before the cost step (a branched, a looped and a gathering cast keep their own tables)
-            if (table_hit >= 0 && !cast.branched && !cast.looped && !cast.gathered) cast.projectile_due = std::max(*cast.cost_due, t + table_hit);
+            if (table_hit >= 0 && !cast.branched && !cast.looped && !cast.gathered && !is_weapon_combo(row)) cast.projectile_due = std::max(*cast.cost_due, t + table_hit);
             if (cast.branched) {   // a volley: each missile lands at its own time after the cost step
                 for (const content::AbilityHitRow& h : def->hits) {
                     if (h.source != "projectile") continue;
@@ -2367,6 +2504,8 @@ void AbilityPipeline::cancel_swings(double t, const std::string& by) {
 void AbilityPipeline::step_branch(Cast& cast, double t) {
     // a cast that finds its own targets sends its projectiles with the jump (the hits land whoever's item the pawn shows by now)
     if (cast.gathered) launch_gathered(cast, t);
+    // the projectiles of a cast bar are launched from the request: they land when they get to the target
+    land_by_flight(cast, t);
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
     if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
     if (cast.charged && cast.gathered && cast.gathered->charged_montage[0] != '\0') {   // the charged shot has a montage of its own
@@ -2380,6 +2519,65 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
     AbilityChange c;
     c.abilities_changed.push_back(cast.item);
     emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " moves to the end of its cast"});
+}
+
+void AbilityPipeline::land_by_flight(Cast& cast, double t) {
+    if (!combat_ || !cast.branched || cast.target_actors.empty() || cast.heard_at < 0) return;
+    const Flight* plan = nullptr;
+    for (const Flight& f : kFlights) {
+        if (cast.def->row.name == f.ability) {
+            plan = &f;
+            break;
+        }
+    }
+    if (!plan) return;
+    const combat::TargetInfo info = combat_->inspect(cast.target_actors.front());
+    if (!info.exists || !info.alive) return;   // (a target the world does not know keeps the table's landings)
+    const double distance = info.surface_distance_cm + kMuzzleCm;
+    // this player's rate on the cast: the montage time of the bar's end over the seconds the bar took
+    const double rate = plan->bar / std::clamp(cast.heard_at - cast.trigger_at, 0.3, 8.0);
+    const auto land_at = [&](const Flight& f, const content::ProjectileRow& p) {
+        double at = cast.heard_at + f.fire / rate + distance / p.speed;
+        if (cast.cost_due) at = std::max(at, *cast.cost_due);   // (never before the cost step)
+        return std::max(at, t);
+    };
+    double first = 1e18, last = 0;
+    bool any = false;
+    for (Cast::Missile& m : cast.missiles) {   // each missile of a volley, by the key of its projectile
+        if (m.kind != Cast::Missile::Kind::Land) continue;
+        const content::ProjectileRow* p = catalog_->projectile(m.projectile);
+        if (!p || !(p->speed > 0)) continue;
+        int64_t key = 0;
+        for (const content::AbilityHitRow& h : cast.def->hits) {
+            if (h.source == "projectile" && h.owner_guid == m.projectile) key = h.key;
+        }
+        for (const Flight& f : kFlights) {
+            if (cast.def->row.name == f.ability && f.key == key) {
+                m.due = land_at(f, *p);
+                first = std::min(first, m.due);
+                last = std::max(last, m.due);
+                any = true;
+            }
+        }
+    }
+    if (!any && cast.projectile_due) {   // the one projectile of a spell: its first projectile row
+        for (const content::AbilityHitRow& h : cast.def->hits) {
+            if (h.source != "projectile") continue;
+            const content::ProjectileRow* p = catalog_->projectile(h.owner_guid);
+            if (!p || !(p->speed > 0)) continue;
+            for (const Flight& f : kFlights) {
+                if (cast.def->row.name == f.ability && f.key == h.key) {
+                    cast.projectile_due = land_at(f, *p);
+                    first = last = *cast.projectile_due;
+                    any = true;
+                }
+            }
+            if (any) break;
+        }
+    }
+    if (any) {
+        spdlog::info("[abilities] {}: the target is {:.1f} m away: the projectiles land {:.3f} to {:.3f} s after the cast bar's end", cast.def->row.name, distance / 100.0, first - cast.heard_at, last - cast.heard_at);
+    }
 }
 
 void AbilityPipeline::launch_gathered(Cast& cast, double t) {
@@ -2675,6 +2873,8 @@ void AbilityPipeline::run_zone(size_t index, double t) {
 // [Cyb - C | O | A]
 
 void AbilityPipeline::step_hits(Cast& cast, double t, const char* which) {
+    const CastRecord* fill_record = record_of(cast.client_id);
+    const FillScope fill(*this, fill_record ? fill_record->fill : 1.0);
     const AbilityDef& def = *cast.def;
     AbilityChange c;
     // E1 stage 3 fix 2: a weapon combo's projectile step fires the projectile of the swing's step (the montage the client's AnimationIndex named), not

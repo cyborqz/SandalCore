@@ -1765,7 +1765,7 @@ void PlayerSession::on_ability_cancel(Connection& conn, const repl::ClientRpc& r
     const auto cancel = repl::parse_held_ability_cancelled(rpc.call);
     if (!cancel) return;
     if (crate_drop_due_ && cancel->client_instance_id == crate_drop_instance_) crate_drop_due_.reset();   // the cast of Drop Crate was cancelled before its notify: the crate stays
-    if (!runtime->cancel(cancel->client_instance_id, ability_seconds(now)) && pipeline_) pipeline_->cancel(cancel->client_instance_id, ability_seconds(now));
+    if (!runtime->cancel(cancel->client_instance_id, ability_seconds(now)) && pipeline_) pipeline_->cancel(cancel->client_instance_id, ability_seconds(now), static_cast<double>(cancel->cancelled_time));
     take_ability_events();
     flush_abilities(conn);
 }
@@ -1782,7 +1782,7 @@ void PlayerSession::on_branch_request(Connection& conn, const repl::ClientRpc& r
     // the client's cast bar ended: a cast that waits for its branch goes on from here (the montage's jump, the cost and the hits follow)
     if (!pipeline_->branch_request(request->client_instance_id, request->branch_guid, ability_seconds(now))) {
         if (unhandled_logged_.insert("ServerRequestBranchVerification").second) {
-            spdlog::info("[session] {}: the client's ServerRequestBranchVerification belongs to no cast worldd waits for (it answers it for the casts it knows: Arcane Volley, Scatter Shot; told once)", name());
+            spdlog::info("[session] {}: the client's ServerRequestBranchVerification belongs to no cast worldd waits for (it answers it for the cast bars it knows: kBranchedCasts in ability_pipeline.cpp; told once)", name());
         }
         return;
     }
