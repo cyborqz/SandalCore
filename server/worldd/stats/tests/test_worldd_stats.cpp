@@ -1113,6 +1113,47 @@ void test_character_stats(const StatBundle& b) {
     pc.set_current(kHealth, -0.0f);
     CHECK(pc.update(with_heavy, changed, e), "(Health -0.0)");
     CHECK(pc.update(with_heavy, changed, e) && changed.empty(), "a current value of -0.0 under the same maximum is no change");
+
+    // ── the game master's stat overrides ───────────────────────────────────
+    // The override goes through the effects path, so it follows the stat's own
+    // rule: an additive stat adds the value, a multiplying one multiplies by it.
+    ActiveEffect gm;
+    gm.effect = {kRefTypeEffect, 0};   // no real Effect record: no formula's GetEffectCount counts it
+    gm.stacks = 1;
+    gm.mods = {{kMaxHealth, 500.0}};
+    const float max_before = cs.find(kMaxHealth)->value;
+    cs.set_gm_effects({gm});
+    CHECK(cs.update(none, changed, e), "the stats are computed with the override");
+    CHECK(cs.gm_effects().size() == 1, "the override is remembered");
+    CHECK(cs.find(kMaxHealth)->value == max_before + 500.0f, "the override is added to an additive stat");
+
+    // the run the expression programs read has the override too
+    auto ev = cs.evaluation(none, e);
+    CHECK(ev && ev->ok() && ev->stat(kMaxHealth) == static_cast<double>(max_before + 500.0f),
+          "the run the formulas read carries the override");
+
+    // a multiplying stat multiplies by the value: 2 doubles it, 0.5 halves it
+    const int64_t kHealingMult = guid_named(b, "HealingMult");
+    CHECK(kHealingMult != 0, "(HealingMult is in the real graph)");
+    const float heal_before = cs.find(kHealingMult)->value;
+    gm.mods = {{kHealingMult, 2.0}};
+    cs.set_gm_effects({gm});
+    CHECK(cs.update(none, changed, e), "the stats are computed with the double");
+    CHECK(cs.find(kHealingMult)->value == heal_before * 2.0f, "the override multiplies a multiplying stat");
+    gm.mods = {{kHealingMult, 0.5}};
+    cs.set_gm_effects({gm});
+    CHECK(cs.update(none, changed, e), "the stats are computed with the halving");
+    CHECK(cs.find(kHealingMult)->value == heal_before * 0.5f, "0.5 halves it");
+
+    // clearing the overrides brings the gear's numbers back
+    cs.set_gm_effects({});
+    CHECK(cs.update(none, changed, e), "the stats are computed after the clear");
+    CHECK(cs.find(kMaxHealth)->value == max_before, "the clear restores the value");
+    CHECK(cs.find(kHealingMult)->value == heal_before, "...and the multiplying stat's too");
+    CHECK(cs.gm_effects().empty(), "the overrides are gone");
+    ev = cs.evaluation(none, e);
+    CHECK(ev && ev->ok() && ev->stat(kMaxHealth) == static_cast<double>(max_before),
+          "the run the formulas read has the override gone");
 }
 
 /// A worn item whose stat is clamped (Hook_Rate's maximum is 100) and whose contribution is more than any float32: the clamp keeps the VALUE finite,
