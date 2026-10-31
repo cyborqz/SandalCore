@@ -532,12 +532,14 @@ CREATE TABLE stat_program (
 --
 -- An item that can be used: its ItemActivationArchetype (activation is EItemActivationAction without its prefix;
 -- ActivateActionResponses runs item_action's ActionResponses in order) and whether a use consumes one of the stack.
+-- cast_ability_guid (contentc version 38): the ability a CastAbility item casts when it is used (the item's ActivationCastId; 0: none).
 CREATE TABLE item_use (
     item_guid          INTEGER PRIMARY KEY,
     activation         TEXT NOT NULL,
     consume_on_use     INTEGER NOT NULL,
     cooldown           REAL NOT NULL,
-    disabled_in_combat INTEGER NOT NULL
+    disabled_in_combat INTEGER NOT NULL,
+    cast_ability_guid  INTEGER NOT NULL DEFAULT 0
 );
 -- The item's ActivationActionsIds, in the record's order.
 CREATE TABLE item_action (

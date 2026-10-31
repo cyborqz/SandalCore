@@ -80,6 +80,10 @@ public:
     /// `bundle` and `gear` must outlive this object. `class_enum` is ECharacterClass, `level` 1..kMaxLevel.
     CharacterStats(const StatBundle& bundle, const GearCatalog& gear, int class_enum, int level, Rounding rounding = Rounding::HalfUp);
 
+    /// The stat values one item gives at `quality`, as worn gear's do (the rule of stats/gear.h and this character's rounding): what a consumable's
+    /// GetConsumedItemStat answers. Empty for an item with no stat block.
+    std::vector<StatMod> item_stats(int64_t record, int quality) const;
+
     /// The join: computes the stats for the worn items; every current value starts at its maximum. False, with `err`, when the engine
     /// refuses (a class the bundle does not have, a level out of range).
     bool start(std::span<const WornItem> worn, std::string& err);
@@ -148,6 +152,9 @@ public:
         bool eval(int64_t program, ExprHost& host, double& out, std::string& err);
         /// Gathering stage 2: the professions' levels the next programs read (GetPlayerProfessionLevel; a profession not listed is level 1).
         void set_profession_levels(const std::map<std::string, int>& levels);
+        /// The stat values of the consumable the next programs are run for (GetConsumedItemStat), by stat guid; null: nothing was consumed and the programs read 0. The
+        /// list must outlive the programs that read it.
+        void set_consumed(const std::vector<StatMod>* stats);
         /// The run's settled value of a stat (0 when the class has no such stat).
         double stat(int64_t guid) const;
         int faults() const;

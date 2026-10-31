@@ -630,6 +630,39 @@ Outcome Inventory::take_materials(int64_t record, const ItemRarityFacts& facts, 
     return out;
 }
 
+Outcome Inventory::use_up(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count) {
+    Outcome out;
+    const auto refuse = [&](std::string why) {
+        out.ok = false;
+        out.refusal = std::move(why);
+        out.events.clear();
+        return out;
+    };
+    const svc::InventoryItem* item = at(storage, slot);
+    if (!item) return refuse(std::string("no item in ") + container_name(storage) + " slot " + std::to_string(slot));
+    if (!guid_of(guid) || item->instance_guid != guid) {
+        return refuse(std::string("the item in ") + container_name(storage) + " slot " + std::to_string(slot) + " is not the instance named (" + guid + ")");
+    }
+    if (count < 1 || count > item->quantity) {
+        return refuse("the stack in " + std::string(container_name(storage)) + " slot " + std::to_string(slot) + " holds " + std::to_string(item->quantity) +
+                      ", not " + std::to_string(count) + " to use");
+    }
+    const svc::InventoryItem before = *item;
+    Event remove;
+    remove.type = repl::StorageEventType::Remove;
+    remove.container = storage;
+    remove.slot = slot;
+    remove.item = before;
+    remove.count = count < before.quantity ? count : 0;
+    remove.instigated = true;
+    out.events.push_back(std::move(remove));
+    if (count < before.quantity) slots_[{static_cast<uint8_t>(storage), slot}].quantity = before.quantity - count;
+    else slots_.erase({static_cast<uint8_t>(storage), slot});
+    out.ok = true;
+    out.equipment_changed = storage == svc::ItemContainer::Equipment;
+    return out;
+}
+
 Outcome Inventory::consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count) {
     Outcome out;
     const auto refuse = [&](std::string why) {

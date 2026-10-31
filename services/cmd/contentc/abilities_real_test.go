@@ -26,14 +26,16 @@ func TestRealAbilityTables(t *testing.T) {
 		// the gathering tables' 30 (35 since version 15, whose foliage interactions bring 5 more) (meta gather.exprs): the duration, durability and Quality formulas the data had not yet registered (the Profession rewards' were);
 		// version 35: the hits, effects, projectiles and zones that the 183 reactions the abilities' effects and hits carry apply and reach come into the tables (ab_hit 1,341 -> 1,631, ab_effect 1,152 -> 1,213,
 		// ab_projectile 206 -> 215, ab_zone 59 -> 62) with 336 more expressions of the abilities' (ab.exprs 1,322 -> 1,658; ab_expr 1,894 -> 2,229), and the reward tables add one expression fewer (loot.exprs 537 -> 536:
-		// one of their texts is met among the reactions' first)
-		"ab_ability": 827, "ab_hit": 1631, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1213, "ab_expr": 2229,
+		// one of their texts is met among the reactions' first);
+		// version 38: the ability every consumable item casts comes into the tables (150 more abilities: ab_ability 827 -> 977, ab_hit 1,631 -> 1,784, ab_effect 1,213 -> 1,361) with
+		// 65 more expressions of the abilities' (ab.exprs 1,658 -> 1,723; ab_expr 2,229 -> 2,294)
+		"ab_ability": 977, "ab_hit": 1784, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2294,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "827", "ab.hits": "1631", "ab.effects": "1213", "ab.projectiles": "215", "ab.zones": "62", "ab.exprs": "1658", "loot.exprs": "536", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "977", "ab.hits": "1784", "ab.effects": "1361", "ab.projectiles": "215", "ab.zones": "62", "ab.exprs": "1723", "loot.exprs": "536", "gather.exprs": "35"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
 		}

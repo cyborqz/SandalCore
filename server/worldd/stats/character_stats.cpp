@@ -49,6 +49,14 @@ public:
         for (const auto& [name, level] : levels) levels_[lower(name)] = level;
     }
     bool moving() const override { return moving_; }
+    double consumed_item_stat(const RecordRef& r) const override {
+        if (!consumed_) return 0;
+        for (const StatMod& m : *consumed_) {
+            if (m.stat == r.guid) return m.value;
+        }
+        return 0;
+    }
+    void set_consumed(const std::vector<StatMod>* stats) { consumed_ = stats; }
     double npc_elite_rank() const override { return npc_.elite_rank; }
     double npc_stat_distribution(int i) const override { return i >= 0 && i < 8 ? npc_.dist[static_cast<size_t>(i)] : 0; }
 
@@ -60,6 +68,7 @@ private:
     bool moving_, in_combat_;
     NpcShape npc_;
     std::map<std::string, int> levels_;   // by lower-case name
+    const std::vector<StatMod>* consumed_ = nullptr;   // the consumable being used: its stat block's values (GetConsumedItemStat)
 };
 
 }  // namespace
@@ -88,6 +97,8 @@ bool CharacterStats::Evaluation::eval(int64_t program, ExprHost& host, double& o
 }
 
 void CharacterStats::Evaluation::set_profession_levels(const std::map<std::string, int>& levels) { state_->flags.set_levels(levels); }
+
+void CharacterStats::Evaluation::set_consumed(const std::vector<StatMod>* stats) { state_->flags.set_consumed(stats); }
 
 double CharacterStats::Evaluation::stat(int64_t guid) const {
     for (const StatOut& s : result_.stats) {
@@ -130,6 +141,11 @@ bool same_on_the_wire(const StatValue& a, const StatValue& b) {
 
 CharacterStats::CharacterStats(const StatBundle& bundle, const GearCatalog& gear, int class_enum, int level, Rounding rounding)
     : bundle_(&bundle), gear_(&gear), class_(class_enum), level_(level), rounding_(rounding) {}
+
+std::vector<StatMod> CharacterStats::item_stats(int64_t record, int quality) const {
+    const WornItem item{record, quality, 0};
+    return gear_inputs(*gear_, std::span<const WornItem>(&item, 1), rounding_).mods;
+}
 
 bool CharacterStats::compute(std::span<const WornItem> worn, Next& next, std::string& err) const {
     const GearInputs g = gear_inputs(*gear_, worn, rounding_);

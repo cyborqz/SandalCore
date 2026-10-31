@@ -104,8 +104,9 @@ constexpr const char* kSetBonusSql =
 constexpr const char* kEquipSlotSql = "SELECT slot, name FROM equip_slot";
 // plan D1 (contentc version 5): schema.go's item_use, item_action, action_response, action_reward, reward_table, reward_item, reward_xp,
 // leveling_type, leveling_curve, skill_auto_grant and skill_rank_stat_mod
-constexpr const char* kItemUseSql = "SELECT item_guid, activation, consume_on_use, cooldown, disabled_in_combat FROM item_use WHERE item_guid = ?1";
+constexpr const char* kItemUseSql = "SELECT item_guid, activation, consume_on_use, cooldown, disabled_in_combat, cast_ability_guid FROM item_use WHERE item_guid = ?1";
 constexpr const char* kItemActionSql = "SELECT action_guid FROM item_action WHERE item_guid = ?1 ORDER BY ord";
+constexpr const char* kItemHasTagSql = "SELECT 1 FROM item_tag WHERE item_guid = ?1 AND (tag = ?2 OR tag LIKE ?2 || '.%') LIMIT 1";
 constexpr const char* kActionSql = "SELECT guid, name, response_type, class_guid, class_name, remove_up_to_quantity FROM action_response WHERE guid = ?1";
 constexpr const char* kActionRewardSql = "SELECT reward_table_guid FROM action_reward WHERE action_guid = ?1 ORDER BY ord";
 constexpr const char* kRewardTableSql = "SELECT guid, name, predicate, level_below, modelled FROM reward_table WHERE guid = ?1";
@@ -935,6 +936,32 @@ bool guid_list(sqlite3* db, const char* sql, int64_t parent, std::vector<int64_t
 
 }  // namespace
 
+bool ContentDb::item_has_tag(int64_t item_guid, const std::string& tag, std::string& error) const {
+    error.clear();
+    Stmt q(db_, kItemHasTagSql);
+    if (!q.ok()) {
+        error = "content.db item tag query failed: " + db_message(db_);
+        return false;
+    }
+    sqlite3_bind_int64(q.get(), 1, item_guid);
+    sqlite3_bind_text(q.get(), 2, tag.c_str(), -1, SQLITE_TRANSIENT);
+    const int step = sqlite3_step(q.get());
+    if (step == SQLITE_ROW) return true;
+    if (step != SQLITE_DONE) error = "content.db item tag query failed: " + db_message(db_);
+    return false;
+}
+
+int64_t ContentDb::consumable_ability(int64_t item_guid, std::string& error) const {
+    const auto use = item_use(item_guid, error);
+    if (!use || use->activation != "CastAbility" || !use->consume_on_use || use->cast_ability == 0) return 0;
+    // the kinds the server runs: a scroll or an elixir
+    for (const char* tag : {"Item.Consumable.Scroll", "Item.Consumable.Elixir"}) {
+        if (item_has_tag(item_guid, tag, error)) return use->cast_ability;
+        if (!error.empty()) return 0;
+    }
+    return 0;
+}
+
 std::optional<ItemUse> ContentDb::item_use(int64_t item_guid, std::string& error) const {
     error.clear();
     ItemUse u;
@@ -952,7 +979,7 @@ std::optional<ItemUse> ContentDb::item_use(int64_t item_guid, std::string& error
             return std::nullopt;
         }
         sqlite3_stmt* s = q.get();
-        if (!column_is_text(s, 1) || !column_is_int(s, 2) || !column_is_real(s, 3) || !column_is_int(s, 4)) {
+        if (!column_is_text(s, 1) || !column_is_int(s, 2) || !column_is_real(s, 3) || !column_is_int(s, 4) || !column_is_int(s, 5)) {
             error = "content.db item_use " + std::to_string(item_guid) + " has a column of the wrong storage class";
             return std::nullopt;
         }
@@ -961,6 +988,7 @@ std::optional<ItemUse> ContentDb::item_use(int64_t item_guid, std::string& error
         u.consume_on_use = sqlite3_column_int64(s, 2) != 0;
         u.cooldown = sqlite3_column_double(s, 3);
         u.disabled_in_combat = sqlite3_column_int64(s, 4) != 0;
+        u.cast_ability = sqlite3_column_int64(s, 5);
     }
     if (!guid_list(db_, kItemActionSql, item_guid, u.actions, error, "item action")) return std::nullopt;
     return u;

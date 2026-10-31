@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "37"
+const Version = "38"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -137,6 +137,7 @@ var keep = map[string]bool{
 	"AoCAbilityRecordBase":          true,
 	"AbilityHitRecordBase":          true,
 	"EffectRecordBase":              true,
+	"EffectGroupRecordBase":         true, // version 38: the consumables' effect groups (one effect of a group at a time)
 	"StatModRecordBase":             true,
 	// plan B2: the item tables
 	"ItemRecordBase":              true,

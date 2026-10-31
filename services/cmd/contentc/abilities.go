@@ -37,6 +37,12 @@ var montageIDs string
 //go:embed ability_names.tsv
 var abilityNames string
 
+// montageAssets lists the NetGUID of the montage ASSETS every consumable's ability plays (contentc version 38), by the asset's first soft path: a consumable
+// ability that montage_ids.tsv has no row for takes the id of its asset.
+//
+//go:embed montage_assets.tsv
+var montageAssets string
+
 // seedByName reads ability_names.tsv and adds every ability row of each name to the seed; a name no row has is an error (the list is stale).
 func seedByName(abilities map[int64]*designdb.Row, seed map[int64]bool) (int, error) {
 	byName := map[string][]int64{}
@@ -197,6 +203,8 @@ type abBuilder struct {
 	abilities, effects, hits, mods, projectiles, zones map[int64]*designdb.Row
 	targetingNames                                     map[int64]string
 	reactions, cooldowns, targetingRows                map[int64]*designdb.Row
+	groups                                             map[int64]*designdb.Row // contentc version 38: the EffectGroup rows, and the ones written to ab_effect_group
+	groupsWritten                                      map[int64]bool
 }
 
 func indexRows(rows []designdb.Row) map[int64]*designdb.Row {
@@ -232,6 +240,25 @@ func montageNetGuids() (map[string]map[int]uint64, error) {
 			out[f[0]] = map[int]uint64{}
 		}
 		out[f[0]][idx] = guid
+	}
+	// the montage assets (version 38): kept under the soft path with the index -1, which no AnimationIndex is
+	for i, line := range strings.Split(montageAssets, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		f := strings.Split(line, "\t")
+		if len(f) != 2 {
+			return nil, fmt.Errorf("montage_assets.tsv line %d: %d columns, want 2", i+1, len(f))
+		}
+		guid, err := strconv.ParseUint(f[1], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("montage_assets.tsv line %d: bad number", i+1)
+		}
+		if out[f[0]] == nil {
+			out[f[0]] = map[int]uint64{}
+		}
+		out[f[0]][-1] = guid
 	}
 	return out, nil
 }
@@ -304,6 +331,8 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 		reactions:     indexRows(src.rows["ReactionRecordBase"]),
 		cooldowns:     indexRows(src.rows["ModifyCooldownRecordBase"]),
 		targetingRows: indexRows(src.rows["AbilityTargetingRecordBase"]),
+		groups:        indexRows(src.rows["EffectGroupRecordBase"]),
+		groupsWritten: map[int64]bool{},
 	}
 
 	// ---- the ranks of every skill tree (plan D1's skill_rank: the one table of ranks); the abilities and effects they grant seed the closure ----
@@ -348,6 +377,33 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 		return err
 	}
 	opt.logf("ability_names.tsv: %d more abilities", named)
+	// ... and the ability every consumable casts when it is used (version 38: the item's ActivationCastId, any item under Item.Consumable that casts an ability)
+	itemRows, err := w.tx.Query(`SELECT DISTINCT u.cast_ability_guid FROM item_use u JOIN item_tag t ON t.item_guid = u.item_guid
+		WHERE u.activation = 'CastAbility' AND u.cast_ability_guid <> 0 AND (t.tag = 'Item.Consumable' OR t.tag LIKE 'Item.Consumable.%')`)
+	if err != nil {
+		return fmt.Errorf("read item_use (buildProgression and buildGear must run before buildAbilities): %w", err)
+	}
+	consumables, consumablesNew := 0, 0
+	for itemRows.Next() {
+		var ag int64
+		if err := itemRows.Scan(&ag); err != nil {
+			itemRows.Close()
+			return err
+		}
+		if b.abilities[ag] == nil {
+			continue
+		}
+		consumables++
+		if !abilitySeed[ag] {
+			abilitySeed[ag] = true
+			consumablesNew++
+		}
+	}
+	if err := itemRows.Err(); err != nil {
+		return err
+	}
+	itemRows.Close()
+	opt.logf("consumable items: %d abilities, %d of them not seeded before", consumables, consumablesNew)
 	opt.logf("skill_rank: %d distinct ability/effect pairs, %d abilities, %d effects granted by ranks (and the always-on ones)", nranks, len(abilitySeed), len(effectSeed))
 
 	// ---- the closure ----
@@ -890,6 +946,8 @@ func (b *abBuilder) writeAbility(r *designdb.Row, netGuids map[string]map[int]ui
 		var net any
 		if g, ok := netGuids[r.Name][mi]; ok {
 			net = int64(g)
+		} else if g, ok := netGuids[first][-1]; ok {
+			net = int64(g) // the montage asset's own id (montage_assets.tsv)
 		}
 		if err := b.w.exec(`INSERT INTO ab_montage (ability_guid, anim_index, soft_path, paths, direction, select_expr, start_section, hit_keys, targeting_key, net_guid)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.Guid, mi, first, jsonOf(append([]string{}, paths...)), direction, eID, section, jsonOf(append([]int64{}, hk...)), tkey, net); err != nil {
@@ -1171,9 +1229,13 @@ func (b *abBuilder) writeEffect(r *designdb.Row) error {
 	persDeath, persRelog, dispel, significant := f.boolean("bPersistsThroughDeath"), f.boolean("bPersistsRelog"), f.boolean("bDispellable"), f.boolean("bSignificant")
 	durT, reqT, inPlaceT := f.str("EffectDuration"), f.str("ApplicationRequirements"), f.str("InPlaceStackLimit")
 	cc, _ := f.id("CrowdControlId")
+	group := optID(f, "EffectGroupId")
 	extra := map[string][]int64{"ReactionsIds": refGuids(f, "ReactionsIds"), "HitModsIds": refGuids(f, "HitModsIds"), "FragilityDefinitionsIds": refGuids(f, "FragilityDefinitionsIds")}
 	if f.err != nil {
 		return f.err
+	}
+	if err := b.writeEffectGroup(group); err != nil {
+		return err
 	}
 	var ids [3]int64
 	for i, t := range []string{durT, reqT, inPlaceT} {
@@ -1185,9 +1247,9 @@ func (b *abBuilder) writeEffect(r *designdb.Row) error {
 	}
 	if err := b.w.exec(`INSERT INTO ab_effect (guid, name, display_name, category, tags, effect_tags, infinite_duration, duration_expr, tick_timer, ignore_initial_tick,
 		stack_type, global_stack_limit, in_place_stack_limit_expr, stack_duration_refresh, persists_through_death, persists_relog, dispellable, significant,
-		requirement_expr, crowd_control_guid, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		requirement_expr, crowd_control_guid, extra, group_guid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Guid, r.Name, display, category, jsonOf(tags), jsonOf(etags), b2i(infinite), ids[0], tick, b2i(ignoreTick), stackType, limit, ids[2], refresh,
-		b2i(persDeath), b2i(persRelog), b2i(dispel), b2i(significant), ids[1], cc, jsonOf(extra)); err != nil {
+		b2i(persDeath), b2i(persRelog), b2i(dispel), b2i(significant), ids[1], cc, jsonOf(extra), group); err != nil {
 		return err
 	}
 	for _, p := range effectPhases {
@@ -1198,6 +1260,27 @@ func (b *abBuilder) writeEffect(r *designdb.Row) error {
 		}
 	}
 	return b.writeMods("effect", r, f)
+}
+
+// writeEffectGroup writes the ab_effect_group row of an effect's group once (0: the effect has none).
+func (b *abBuilder) writeEffectGroup(g int64) error {
+	if g == 0 || b.groupsWritten[g] {
+		return nil
+	}
+	r := b.groups[g]
+	if r == nil {
+		return fmt.Errorf("no EffectGroup row %d", g)
+	}
+	f := newFields(fmt.Sprintf("EffectGroup %s (%d)", r.Name, g), r.Fields)
+	stackType, refresh, limit := f.str("EffectStackType"), f.str("StackDurationRefresh"), f.int("GlobalStackLimit")
+	if f.err != nil {
+		return f.err
+	}
+	if err := b.w.exec(`INSERT INTO ab_effect_group (guid, name, stack_type, global_stack_limit, stack_duration_refresh) VALUES (?, ?, ?, ?, ?)`, g, r.Name, stackType, limit, refresh); err != nil {
+		return err
+	}
+	b.groupsWritten[g] = true
+	return nil
 }
 
 // writeMods writes the StatMod rows an effect or hit lists (StatModsIds).

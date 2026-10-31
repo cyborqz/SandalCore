@@ -9,6 +9,7 @@
 #include "bootstrap/constants.h"
 #include "content/content_db.h"
 #include "session/ability_timings.h"
+#include "session/consumable_timings.h"
 
 #include <spdlog/spdlog.h>
 
@@ -550,6 +551,7 @@ bool AbilityPipeline::eval(int64_t expr, double& out, std::string& why) {
     Host host(*this);
     std::string err;
     double v = 0;
+    evaluation_->set_consumed(consumed_);
     if (!evaluation_->eval(e->program, host, v, err)) {
         why = err;
         return false;
@@ -930,6 +932,21 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
     const bool override_duration = row.stack_type.find("OverrideDuration") != std::string::npos;
 // Cyb + C O A
 
+    // An effect of a consumables' group (Consumable_Scroll, _Elixir, _Food ...) stacks as its GROUP says (contentc version 38): the group holds one effect at a time and a new one
+    // takes the place of the oldest [R: the retail captures: the old meal's buff is deleted in the very update that adds the new one].  The other groups (the Bard's notes)
+    // keep what their effects' own records say
+    if (row.group_guid != 0 && row.group_limit >= 1 && row.group_name.rfind("Consumable_", 0) == 0 && row.group_stack_type.find("OverrideOldest") != std::string::npos) {
+        for (;;) {
+            size_t count = 0, oldest = effects_.size();
+            for (size_t i = 0; i < effects_.size(); ++i) {
+                if (effects_[i].def->row.group_guid != row.group_guid) continue;
+                ++count;
+                if (oldest == effects_.size() || effects_[i].key < effects_[oldest].key) oldest = i;
+            }
+            if (count < static_cast<size_t>(row.group_limit) || oldest == effects_.size()) break;
+            remove_instance(c, oldest);
+        }
+    }
     EffectInst* existing = nullptr;
     int same = 0;
     for (EffectInst& e : effects_) {
@@ -1561,7 +1578,12 @@ double AbilityPipeline::movement_allowance(double now) const {
 
 void AbilityPipeline::set_dead(bool dead) {
     dead_ = dead;
-    if (dead) casts_.clear();
+    if (dead) {
+        casts_.clear();
+        // a consumable's cast that had not paid its cost is over with the death and takes nothing from the bag (the session lets its item go): the hit the client asked for
+        // before the death must not give the buff of an item that stays where it was
+        records_.erase(std::remove_if(records_.begin(), records_.end(), [](const CastRecord& r) { return r.item_cast && r.cost_at < 0; }), records_.end());
+    }
 }
 
 void AbilityPipeline::regenerate(double t) {
@@ -1916,6 +1938,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
 
 void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets) {
     const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
+    const ConsumedScope consumed(*this, rec.item_cast);   // (a consumable's hit reads the item's numbers)
     AbilityChange c;
     const AbilityDef* def = catalog_->ability(rec.ability);
     HitSource src;
@@ -2240,8 +2263,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     };
     if (dead_) return refused(Refusal::Dead);
     if (!def || a7_.enabled(ability)) return refused(Refusal::NotEnabled);
-    if (!known(ability)) return refused(Refusal::NotKnown);
-    if (info.item) return refused(Refusal::Unsupported, " (an item's ability is not run here)");
+    if (!known(ability) && !info.item_cast) return refused(Refusal::NotKnown);   // (a consumable's ability is in no KnownAbilities: the session checked the item)
+    if (info.item && !info.item_cast) return refused(Refusal::Unsupported, " (an item's ability is not run here)");
     // a trigger during another's cast is taken (retail's weapon combos and channels re-trigger within a montage; no refusal is captured), up to a few
     // waiting at once: more is a client that floods
     if (casts_.size() >= kMaxCasts) return refused(Refusal::Busy);
@@ -2304,6 +2327,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     cast.def = def;
     cast.trigger_at = t;
     cast.animation_index = info.animation_index;
+    cast.item_cast = info.item_cast;
     cast.target = info.target_count > 0 && target_actors.empty();   // (aimed at the caster; a real target is named by the item's Targets)
     // ... but a projectile reaches the caster only when the ability may be aimed at the caster at all: an enemy-only ability whose target the world
     // does not have (another player) is cast at the air, like one with no target, and Mock's Quick Wit heal never lands on the caster [E1 stage 3 fix]
@@ -2383,6 +2407,12 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             item_delay = tm.item;
             cost_delay = tm.cost;
             hit_delay = tm.hit;
+        }
+    }
+    if (info.item_cast) {   // a consumable: the item, the cost and the stack's removal come together, and the montage is cleared where the recordings show (consumable_timings.h)
+        item_delay = cost_delay = kItemCastDelay;
+        for (const content::MontageRow& m : def->montages) {
+            if (m.anim_index == cast.animation_index) table_end = consumable_montage_end(m.soft_path);
         }
     }
     bool has_montage = false;   // (an ability with no montage has a row with an empty path: Fortissimo)
@@ -2508,7 +2538,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     rec.ability = row.guid;
     rec.trigger_at = t;
     rec.cost_due = *cast.cost_due;
-    rec.window_end = rec.cost_due + kRequestWindow;
+    rec.window_end = rec.cost_due + (info.item_cast ? kItemRequestWindow : kRequestWindow);
+    rec.item_cast = info.item_cast;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
     rec.reach = reach_of(*def);
     // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes more requests, closer together
@@ -2918,6 +2949,9 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     for (const auto& [stat, amount] : cast.stat_costs) affordable = affordable && stat_now(stat) >= amount;
     for (const auto& [effect, n] : cast.effect_costs) affordable = affordable && stacks_of(effect) >= n;
     if (const auto g = groups_.find(cast.group); g != groups_.end() && cast.triggers_cooldown && g->second.charges < cast.charge_cost) affordable = false;   // a cast that waited behind another's
+    // a consumable's item is the last of its costs, because paying it takes the item: the session takes one off the stack now, and a stack that is gone since the trigger (sold,
+    // destroyed, handed in) cannot be paid: the cast is over like any that cannot pay, with no cooldown and no buff (the hit the client asked for goes with the cast's record)
+    if (affordable && cast.item_cast && cast.item_cast->consumes && item_taker_) affordable = item_taker_(cast.client_id);
     if (CastRecord* rec = record_of(cast.client_id)) rec->cost_at = t;
     if (!affordable && cast.looped && cast.shots > 0) {
         // a later shot that cannot be paid is the branch's own trigger: the loop ends, and the missiles in flight still land
@@ -3010,6 +3044,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
 
 void AbilityPipeline::step_own(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
+    const ConsumedScope consumed(*this, cast.item_cast);
     AbilityChange c;
     for (const EffectDef* e : cast.own_effects) {
         // an effect the character's talents gate (the Salvo's Expeditious) starts only when its requirement holds
@@ -3173,6 +3208,7 @@ void AbilityPipeline::run_zone(size_t index, double t) {
 void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int depth) {
     const CastRecord* fill_record = record_of(cast.client_id);
     const FillScope fill(*this, fill_record ? fill_record->fill : 1.0);
+    const ConsumedScope consumed(*this, cast.item_cast);
     const AbilityDef& def = *cast.def;
     AbilityChange c;
     // E1 stage 3 fix 2: a weapon combo's projectile step fires the projectile of the swing's step (the montage the client's AnimationIndex named), not

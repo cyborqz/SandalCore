@@ -252,9 +252,9 @@ std::vector<int64_t> carried_combos(const content::ContentDb& content, const ite
 /// The abilities the items the character carries bring with them, each once, in the order the items lie (the bag, then what is worn).  The client's
 /// AbilityComponent loads only what ReplicatedRecordsToLoad lists, and an item use that runs through an ability (a mount item: ActivateItem's SummonMount
 /// and CastAbility branches call TriggerAbility) fails with "Ability not loaded" and sends no ServerTriggerAbility unless the ability is loaded; retail lists
-/// the ability of every item in the bag and on the body (LoadBackpackAbilities, LoadEquipmentAbilities).  Modelled: a mount item's Summon_Mount.  Empty with
-/// no mount tables.
-std::vector<int64_t> carried_item_abilities(const content::MountData* mounts, const items::Inventory& inventory);
+/// the ability of every item in the bag and on the body (LoadBackpackAbilities, LoadEquipmentAbilities).  Modelled: a mount item's Summon_Mount and, with
+/// `content`, the ability a consumable item casts (food, drink, elixir, scroll, potion, salve: item_use's cast_ability).  Empty with neither.
+std::vector<int64_t> carried_item_abilities(const content::MountData* mounts, const items::Inventory& inventory, const content::ContentDb* content = nullptr);
 
 /// The AbilityComponent's General_Unstuck (the first KnownAbilities element of every join) and the static tail of 45 abilities that ends
 /// it (the fishing abilities, Rest, the emotes, Dodge, Guard, Sprint ...): constant in every capture, taken from the captured Bard's list.

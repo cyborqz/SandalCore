@@ -160,6 +160,10 @@ struct EffectRow {
     int64_t     requirement_expr = 0;
     int64_t     crowd_control_guid = 0;
     std::string extra;
+    /// contentc version 38: the effect's group (ab_effect_group; 0: none) and what the group says: effects of one group stack as the group's rule, whatever their own says
+    int64_t     group_guid = 0;
+    std::string group_name, group_stack_type;
+    int         group_limit = 0;
 };
 
 /// ab_effect_hit: a hit an effect fires in a phase (PreApply, Apply, Tick, Consume, Remove, Expire, End).

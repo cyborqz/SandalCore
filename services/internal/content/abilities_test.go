@@ -129,7 +129,7 @@ func TestAbilityReaders(t *testing.T) {
 		!reflect.DeepEqual(z.Hits, map[string][]int64{"LingeringHitsIds": {502, 505}, "OnBeginOverlapHitsIds": {504}}) {
 		t.Errorf("Zone = %+v, %v", z, err)
 	}
-	exec(t, w, `INSERT INTO ab_effect VALUES (800, 'Bard_Pep', 'Pep', 'EEffectCategory::Buff', '["Buff"]', '[]', 0, 4, 0, 0, 'EEffectStackingType::STACK_Override', 1, 0, 'x', 1, 0, 1, 1, 0, 0, '{}')`)
+	exec(t, w, `INSERT INTO ab_effect VALUES (800, 'Bard_Pep', 'Pep', 'EEffectCategory::Buff', '["Buff"]', '[]', 0, 4, 0, 0, 'EEffectStackingType::STACK_Override', 1, 0, 'x', 1, 0, 1, 1, 0, 0, '{}', 0)`)
 	ef, err := db.EffectRowByName("Bard_Pep")
 	if err != nil || ef.Guid != 800 || ef.InfiniteDuration || ef.DurationExpr != 4 || !ef.PersistsThroughDeath || ef.PersistsRelog || !ef.Dispellable || !ef.Significant || !reflect.DeepEqual(ef.Tags, []string{"Buff"}) || len(ef.EffectTags) != 0 {
 		t.Errorf("EffectRowByName = %+v, %v", ef, err)

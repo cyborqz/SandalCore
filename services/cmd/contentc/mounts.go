@@ -87,6 +87,15 @@ func optBool(f *fields, name string) bool {
 	return f.boolean(name)
 }
 
+// optID reads an Id struct field that older rows (and the synthetic ones of the tests) may not have: the Guid, 0 for a missing field.
+func optID(f *fields, name string) int64 {
+	if _, ok := f.get(name); !ok {
+		return 0
+	}
+	g, _ := f.id(name)
+	return g
+}
+
 // mountStatCtx is the stat context a Mount_Base entry runs in: its owner at one level, the stat's running total, the equations by Guid.
 type mountStatCtx struct {
 	aocexpr.NoState

@@ -267,6 +267,11 @@ public:
     /// losing one (the consumables retail used were single items, removed with one Remove event).
     Outcome consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count);
 
+    /// A consumable's use took `count` of the stack in `storage` slot `slot` (the instance `guid`): ONE Remove that names the stack as it was and how many leave, with the character as its
+    /// instigator; the stack keeps the rest in its slot, and one that is emptied is gone (the retail form: a scroll, an elixir and a meal taken from stacks of 1 to 5 were each one Remove
+    /// event with the whole stack's state and a count of 1).  Refused, changing nothing, when the slot does not hold that instance or holds fewer than `count`.
+    Outcome use_up(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count);
+
     /// Glint tiers: the full stack of `full` items in the material bag `storage` slot `slot` (the instance `guid`) becomes `product`, ONE item of the next kind.  The stack goes (one Remove
     /// of the whole stack); the product tops up the first stack of its colour with room, in the order of the bags and slots (one Add of the one item, in that stack's slot), else takes the
     /// first free rectangle of the bags, which the removed stack may have freed (one Add).  `facts` are the product record's rarity facts: two stacks are one colour when the rarity of their

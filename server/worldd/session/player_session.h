@@ -521,6 +521,8 @@ public:
     std::vector<int64_t>        universal_ranks() const { return pb_.tree_ranks(content::kGuidUniversalTree); }
     size_t uses_applied() const { return uses_applied_; }
     size_t uses_refused() const { return uses_refused_; }
+    /// Consumables: the casts that hold an item of the bag and have not paid their cost yet.
+    size_t item_reservations() const { return item_reserved_.size(); }
     size_t levels_gained() const { return levels_gained_; }
     /// Gathering stage 2: the character's 22 professions as the session plays them (certification tier, level, XP; not valid() when the world has no profession tables), and
     /// the profession levels gained by items.
@@ -1105,6 +1107,16 @@ private:
     /// when an item reaches the bag (the retail capture: one update right after the storage event), and sends the pawn's update.  Called every tick; a no-op
     /// when nothing is missing.
     void sync_item_abilities(Connection& conn);
+    /// Consumables: a bag item whose use casts an ability and takes one of the stack (a scroll, an elixir ...). The client sends the ability's trigger with the item's slot in the
+    /// datagram of ServerItemUsed; the cast, not that request, runs the use.
+    bool item_casts_ability(int64_t record) const;
+    /// ... the item a ServerTriggerAbility names: null unless the bag slot holds an item whose use casts this ability (then its numbers, for the ability's formulas).
+    std::shared_ptr<const ItemCast> consumable_cast(int64_t ability, int32_t slot, uint32_t location);
+    /// ... the cast was accepted: one of the stack is reserved for it (a second cast cannot count it again) and taken when the cast's cost step is paid.
+    void take_consumable(const std::shared_ptr<const ItemCast>& cast, int32_t client_instance_id);
+    /// ... the cast's cost step (the runtime calls it through set_item_taker, after the other costs): the reserved item leaves the bag and its storage event goes out with the next
+    /// flush.  False when it cannot: the item is not in the bag any more (sold, destroyed, handed in since the trigger) or nothing is reserved for the cast: the cast is over.
+    bool consumable_paid(int32_t client_instance_id);
     /// The seconds since the session's clock started (its first tick or request): what effect items and the ability runtime are timed on.
     double session_seconds(Clock::time_point now);
     // ---- plan D1 ----
@@ -1518,6 +1530,10 @@ private:
     bool                          abilities_failed_ = false;
     bool                          abilities_dirty_ = false;   // changes applied to the pawn and not sent yet
     std::deque<int32_t>           pending_ends_;               // ClientEndAbility calls not sent yet, in order
+    std::map<int32_t, std::vector<bootstrap::ItemEvent>> item_sends_;   // consumables: the storage events of a cast that took one of a stack, by its ClientInstanceId, until its cost step
+    std::deque<int32_t>           item_taken_;                 // ... and the casts whose cost step has come: their events go out with the next flush
+    std::map<int32_t, std::shared_ptr<const ItemCast>> item_reserved_;   // ... and the items reserved for casts that have not paid yet, by ClientInstanceId
+    std::vector<int64_t>          item_ability_records_;       // the item records carried when sync_item_abilities last looked (it looks again only when they change)
     RequestBudget                 ability_budget_{kAbilityBurst, kAbilityInterval};
     RequestBudget                 hit_budget_{kHitBurst, kHitInterval};
     RequestBudget                 cancel_budget_{kCancelBurst, kCancelInterval};

@@ -90,6 +90,7 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 	for _, r := range src.rows["ItemRecordBase"] {
 		f := newFields(fmt.Sprintf("Item %s (%d)", r.Name, r.Guid), r.Fields)
 		arch, _ := f.id("ActivationArchetypeId")
+		cast := optID(f, "ActivationCastId") // the ability a CastAbility item casts (a consumable's, a flying mount's)
 		actions := f.ids("ActivationActionsIds")
 		if f.err != nil {
 			return f.err
@@ -109,8 +110,8 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 		if af.err != nil {
 			return af.err
 		}
-		if err := w.exec(`INSERT INTO item_use (item_guid, activation, consume_on_use, cooldown, disabled_in_combat) VALUES (?, ?, ?, ?, ?)`,
-			r.Guid, activation, b2i(consume), cooldown, b2i(inCombat)); err != nil {
+		if err := w.exec(`INSERT INTO item_use (item_guid, activation, consume_on_use, cooldown, disabled_in_combat, cast_ability_guid) VALUES (?, ?, ?, ?, ?, ?)`,
+			r.Guid, activation, b2i(consume), cooldown, b2i(inCombat), cast); err != nil {
 			return err
 		}
 		for i, g := range actions {

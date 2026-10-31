@@ -240,9 +240,19 @@ CREATE TABLE ab_effect (
     significant            INTEGER NOT NULL,
     requirement_expr       INTEGER NOT NULL, -- ApplicationRequirements
     crowd_control_guid     INTEGER NOT NULL,
-    extra                  TEXT NOT NULL     -- JSON: ReactionsIds, HitModsIds, FragilityDefinitionsIds: stored, not followed
+    extra                  TEXT NOT NULL,    -- JSON: ReactionsIds, HitModsIds, FragilityDefinitionsIds: stored, not followed
+    group_guid             INTEGER NOT NULL DEFAULT 0   -- contentc version 38: the EffectGroupId (ab_effect_group; 0: none)
 );
 CREATE INDEX ab_effect_by_name ON ab_effect (name);
+-- contentc version 38: the effect groups the effects name. Effects of one group stack as the GROUP says (the consumables' groups hold one effect each and
+-- replace the oldest: one food, one drink, one elixir, one potion, one scroll at a time), whatever the effects' own stacking says.
+CREATE TABLE ab_effect_group (
+    guid                   INTEGER PRIMARY KEY,
+    name                   TEXT NOT NULL,
+    stack_type             TEXT NOT NULL,   -- EEffectStackingType: STACK_OverrideOldest ...
+    global_stack_limit     INTEGER NOT NULL,
+    stack_duration_refresh TEXT NOT NULL
+);
 -- phase: PreApply, Apply, Tick, Consume, Remove, Expire or End.
 CREATE TABLE ab_effect_hit (
     effect_guid INTEGER NOT NULL,

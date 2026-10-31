@@ -119,7 +119,7 @@ inline constexpr const char* kProgressStatements[] = {
     "(6064631187700000020, 'Test_Odd_Scroll', 1, 0, 0), (6064631187700000021, 'Test_Random_Scroll', 1, 0, 0), (6064631187700000022, 'Test_Keep_Scroll', 1, 0, 0)",
     "UPDATE item SET max_stack_size = 20 WHERE guid = 6064631187700000007",   // Test_Potion stacks to 20
     "UPDATE item SET max_durability = 11 WHERE guid IN (6064630214426886486, 6064630214427083132)",   // the chest and the legs
-    "INSERT INTO item_use VALUES (6064634615524884604, 'ActivateActionResponses', 1, 0, 0), (6064630843430862909, 'ActivateActionResponses', 1, 0, 0), "
+    "INSERT INTO item_use (item_guid, activation, consume_on_use, cooldown, disabled_in_combat) VALUES (6064634615524884604, 'ActivateActionResponses', 1, 0, 0), (6064630843430862909, 'ActivateActionResponses', 1, 0, 0), "
     "(6064632139774033920, 'ActivateActionResponses', 1, 0, 0), (6064632956008729280, 'ActivateActionResponses', 1, 0, 0), "
     "(6064632988571664384, 'ActivateActionResponses', 1, 0, 0), (6064632988571926530, 'ActivateActionResponses', 1, 0, 0), "
     "(6064634082466267136, 'ActivateActionResponses', 1, 0, 0), (6064633408453149160, 'ActivateActionResponses', 1, 0, 0), "
@@ -512,7 +512,7 @@ inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
     }
     if (o.progress_tables) {
         ok = exec(db, "CREATE TABLE item_use (item_guid INTEGER PRIMARY KEY, activation TEXT NOT NULL, consume_on_use INTEGER NOT NULL, cooldown REAL NOT NULL, "
-                      "disabled_in_combat INTEGER NOT NULL)") && ok;
+                      "disabled_in_combat INTEGER NOT NULL, cast_ability_guid INTEGER NOT NULL DEFAULT 0)") && ok;
         ok = exec(db, "CREATE TABLE item_action (item_guid INTEGER NOT NULL, ord INTEGER NOT NULL, action_guid INTEGER NOT NULL, PRIMARY KEY (item_guid, ord)) WITHOUT ROWID") && ok;
         ok = exec(db, "CREATE TABLE action_response (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, response_type TEXT NOT NULL, class_guid INTEGER NOT NULL, "
                       "class_name TEXT NOT NULL, remove_up_to_quantity INTEGER NOT NULL)") && ok;

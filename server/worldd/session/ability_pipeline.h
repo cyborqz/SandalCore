@@ -283,6 +283,11 @@ public:
     /// How long after its cost step a cast takes requests for its hits, the most requests one hit takes in a cast and the least time between two
     /// of them (retail: FlashCure's three requests are 200 ms apart).
     static constexpr double kRequestWindow = 5.0;
+    /// A consumable's cast takes the request for its apply hit this long after its cost step: a meal's is asked about seven seconds after the use [R: 6.95-6.98 s].
+    static constexpr double kItemRequestWindow = 15.0;
+    /// A consumable's ability item, cost and stack removal come in one packet this long after the use [R: the retail captures of a food, an elixir and four scrolls:
+    /// 54-113 ms, median about 65].
+    static constexpr double kItemCastDelay = 0.065;
     static constexpr int    kMaxRequestsPerHit = 8;
     static constexpr double kMinRequestGap = 0.100;
     /// A beam (the wand's finisher) keeps the client asking for its tick hit for as long as it burns: up to a dozen requests about 100 ms apart, the closest 68 ms.
@@ -343,6 +348,8 @@ public:
     using WeaponTagsFn = std::function<std::vector<std::string>()>;
     /// The actor id of the caster's selected enemy (the first target slot); 0 when it has none.
     using ActiveTargetFn = std::function<uint64_t()>;
+    /// A consumable's cast reaches its cost step: the session takes one off the item's stack and answers whether it could (false: the stack is gone since the trigger).
+    using ItemTakeFn = std::function<bool(int32_t client_instance_id)>;
 
     /// `catalog` may be null (a content.db without the ability tables, a test with none): only regeneration runs then. `stats` and `a7` belong to
     /// the session and outlive the pipeline; `worn` gives the equipment the stat engine runs with. `seed` seeds RandDouble.
@@ -415,7 +422,8 @@ public:
     HitVerdict hit_request(int64_t ability, int64_t targeting_guid, int64_t hit_guid, size_t components, size_t own, double now, const std::vector<uint64_t>& targets = {});
 
     /// Plan E1, stage 3, part 2: the character died (or came back): a dead character casts nothing (every trigger is refused, Refusal::Dead), the casts waiting
-    /// are dropped, nothing regenerates and the hits that name another actor are not made.
+    /// are dropped (a consumable's cast that had not paid its cost takes the hit requests it holds with it: its item stays in the bag), nothing regenerates and the
+    /// hits that name another actor are not made.
     void set_dead(bool dead);
     bool dead() const { return dead_; }
 // built with C | O | A and C | Y | B
@@ -426,6 +434,8 @@ public:
     void set_weapon_tags(WeaponTagsFn fn) { weapon_tags_ = std::move(fn); }
     /// Where a hit finds the caster's selected enemy, to tell its primary target from the others; none set: the target nearest the caster is the primary one.
     void set_active_target(ActiveTargetFn fn) { active_target_ = std::move(fn); }
+    /// Where a consumable's cast takes its item when its cost step runs (after the other costs); none set: such a cast takes nothing (the pipeline alone, a test with no bag).
+    void set_item_taker(ItemTakeFn fn) { item_taker_ = std::move(fn); }
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
@@ -564,6 +574,7 @@ private:
         double                       cost_due = 0;     // when it will
         double                       window_end = 0;
         double                       hit_delay = kHitDelay;   // how long after the cost step the cast's hits may apply (its montage's, none without one)
+        std::shared_ptr<const ItemCast> item_cast;                // a consumable's cast (see Cast)
         int                          max_requests = kMaxRequestsPerHit;   // a zone's tick hit is asked for as often as the zone's life holds ticks
         double                       min_gap = kMinRequestGap;            // the least time between two requests for one hit
         std::vector<HitSlot>         slots;
@@ -607,6 +618,7 @@ private:
         std::set<uint64_t>                    struck;                     // a Strike: the enemies its areas hurt already (the area hit lets none of them be hurt again by the same cast)
         std::set<uint64_t>                    bounced;                    // a bouncing cast (kBounces): the enemies its projectiles have landed on
         bootstrap::ActiveAbilityItem          item;
+        std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires
@@ -747,6 +759,13 @@ private:
     void   land_shot(Cast& cast, double t);                       // ... it lands a flight after its launch, never before now or the cast's cost step
     Cast*  cast_of(int32_t client_id);
     double held_fill(const Cast& cast, double held_seconds) const;
+    /// The item whose stat block GetConsumedItemStat reads while a consumable's hits and effects are applied (null: nothing was consumed, the formulas read 0).
+    struct ConsumedScope {
+        AbilityPipeline&                     p;
+        const std::vector<stats::StatMod>*   saved;
+        ConsumedScope(AbilityPipeline& pipeline, const std::shared_ptr<const ItemCast>& item) : p(pipeline), saved(pipeline.consumed_) { p.consumed_ = item ? &item->stats : nullptr; }
+        ~ConsumedScope() { p.consumed_ = saved; }
+    };
     /// The fill the no-argument GetAbilityProgressRatio() reads while a cast's hits are applied (1: the ability whose hit this is has played in full).
     struct FillScope {
         AbilityPipeline& p;
@@ -834,6 +853,7 @@ private:
     WornFn                    worn_;
     WeaponTagsFn              weapon_tags_;
     ActiveTargetFn            active_target_;
+    ItemTakeFn                item_taker_;
     double                    world_time_at_zero_;
     stats::SplitMix           rng_;
     std::unique_ptr<stats::CharacterStats::Evaluation> evaluation_;
@@ -850,6 +870,7 @@ private:
     double progress_of(const std::string& group) const;
     double last_item_at_ = -1;                                      // when the ability item of the running cast came (the DefaultGroup's progress)
     double fill_ = 1;                                               // what the no-argument GetAbilityProgressRatio() reads (FillScope): 1, the ability whose hit this is has played in full
+    const std::vector<stats::StatMod>* consumed_ = nullptr;   // what GetConsumedItemStat reads while a consumable's hits are applied (ConsumedScope)
     std::map<int64_t, double> full_bars_;                           // a HELD ability -> the longest bar this client has shown (seconds from the trigger to its request)
     double                    next_regen_ = kRegenInterval;
     std::set<int64_t>         known_;

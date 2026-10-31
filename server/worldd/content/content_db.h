@@ -273,6 +273,7 @@ struct ItemUse {
     bool                 consume_on_use = false;
     double               cooldown = 0;
     bool                 disabled_in_combat = false;
+    int64_t              cast_ability = 0;  // the ability a CastAbility item casts when used (contentc version 38; 0: none)
     std::vector<int64_t> actions;           // ActionResponse guids, in the record's order
 };
 
@@ -1534,6 +1535,11 @@ public:
 
     /// Plan D1: how an item is used. nullopt with `error` empty for an item that is not used; with `error` set when a query failed.
     std::optional<ItemUse> item_use(int64_t item_guid, std::string& error) const;
+    /// Whether the item carries the gameplay tag `tag` or a child of it ("Item.Consumable.Scroll" matches itself and "Item.Consumable.Scroll.Anything").
+    bool item_has_tag(int64_t item_guid, const std::string& tag, std::string& error) const;
+    /// The ability a consumable item casts when it is used, for the kinds the server runs (scrolls and elixirs); 0 for any other item, a meal, a potion or a mount among them.
+    /// Using such an item is the ability's work: the item is taken from the bag when the ability's cost is paid.
+    int64_t consumable_ability(int64_t item_guid, std::string& error) const;
     /// Plan D1: an ActionResponse; nullopt with `error` empty when there is none.
     std::optional<ActionResponse> action_response(int64_t guid, std::string& error) const;
     /// Plan D1: a RewardTable; nullopt with `error` empty when there is none. A row of another storage class than its column's is an error.

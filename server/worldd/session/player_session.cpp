@@ -1386,6 +1386,7 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             if (world_) pipeline_->set_reactions_enabled(world_->reactions_enabled());
             pipeline_->set_weapon_tags([this] { return weapon_tags(); });
             pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
+            pipeline_->set_item_taker([this](int32_t client_instance_id) { return consumable_paid(client_instance_id); });   // consumables: the cost step takes the item
             sync_ability_values();
             if (npc_world_ && npc_world_->combat()) {
                 combat_side_ = std::make_shared<CombatSide>(*this);
@@ -1461,7 +1462,10 @@ void PlayerSession::take_ability_events() {
             if (pending_confirms_.size() >= kMaxPendingConfirms) pending_confirms_.pop_front();
             pending_confirms_.push_back(std::move(h));
         }
-        if (e.end_ability) pending_ends_.push_back(*e.end_ability);
+        if (e.end_ability) {
+            pending_ends_.push_back(*e.end_ability);
+            item_reserved_.erase(*e.end_ability);   // a cast that ended unpaid takes nothing
+        }
         for (const bootstrap::ZoneOp& z : e.zones) {
             if (zone_ops_.size() < kMaxZoneOps) zone_ops_.push_back(z);
         }
@@ -1596,6 +1600,23 @@ void PlayerSession::flush_abilities(Connection& conn) {
                     abilities_off("the connection refused an ability update");
                     return;
             }
+        }
+    }
+    // consumables: the cast paid its cost, so one of the stack leaves the client's bag now (the retail server sent it in the packet of the cooldown and the ability item)
+    while (!item_taken_.empty()) {
+        const auto sent = item_sends_.find(item_taken_.front());
+        if (sent == item_sends_.end()) {
+            item_taken_.pop_front();
+            continue;
+        }
+        if (!room_for(sent->second.size() / bootstrap::kMaxEventsPerChain + 2)) break;   // (no room now: the next flush tries again)
+        const std::vector<bootstrap::ItemEvent> events = std::move(sent->second);
+        item_sends_.erase(sent);
+        item_taken_.pop_front();
+        for (size_t at = 0; at < events.size(); at += bootstrap::kMaxEventsPerChain) {
+            const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at),
+                                                         events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at + bootstrap::kMaxEventsPerChain)));
+            queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
         }
     }
     while (!pending_ends_.empty()) {
@@ -1740,7 +1761,9 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
     if (pipeline_ && pipeline_->handles(ability)) {
+        if (item_slot != -1) info.item_cast = consumable_cast(ability, item_slot, item_location);   // consumables: the item whose numbers the ability reads
         const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
+        if (accepted == Refusal::None && info.item_cast) take_consumable(info.item_cast, instance);
         // Drop Crate: the cast plays its montage and the crate leaves the back at the montage's notify, whatever the place (the original drops nothing at a place a crate cannot lie)
         if (ability == content::kGuidDropCrate && accepted == Refusal::None) {
             crate_drop_due_ = now + kCrateDropDelay;
@@ -3218,6 +3241,8 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
         if (item && item->instance_guid == items::guid_hex(use->expected_item)) {
             const auto info = catalog_->info(item->item_record_id);
             if (!info || !info->wearable()) {
+                // a consumable casts an ability: the client sends the ability's trigger in the same datagram and the cast runs the use (nothing is done here)
+                if (item_casts_ability(item->item_record_id)) return;
                 const svc::InventoryItem copy = *item;   // the inventory changes under the use
                 return on_item_activated(conn, *use, copy, now);
             }
@@ -6314,6 +6339,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     cancel_quick_make(&conn, "the player died");   // Crafting, step 3
     cancel_gather(&conn, "the player died", Interrupt::Death);   // Gathering stage 2
     if (pipeline_) pipeline_->set_dead(true);
+    item_reserved_.clear();   // consumables: the casts that had not paid are gone with the death (set_dead dropped them): their items stay in the bag and can be used again
     // the mounts milestone, stage 3: the dead player is dismounted (the death frame below restarts its pawn) and its mount is desummoned
     if (mounted()) dismount(conn, now, DismountWhy::PlayerDied);
     if (mounts_ && abilities_) mounts_->desummon(ability_seconds(now));
@@ -6711,27 +6737,104 @@ void PlayerSession::rebuild_ability_lists() {
     if (!book_ || !db) return;
     const talents::AbilityLists lists =
         talents::join_abilities(*book_, bootstrap::general_unstuck(), combo_, bootstrap::carried_combos(*db, inventory_), bootstrap::static_known_tail(),
-                                bootstrap::carried_item_abilities(world_->mounts() ? &world_->mounts()->data() : nullptr, inventory_));
+                                bootstrap::carried_item_abilities(world_->mounts() ? &world_->mounts()->data() : nullptr, inventory_, db));
     known_ = lists.known;
     records_ = lists.records;
 }
 
+bool PlayerSession::item_casts_ability(int64_t record) const {
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!db) return false;
+    std::string error;
+    return db->consumable_ability(record, error) != 0;
+}
+
+std::shared_ptr<const ItemCast> PlayerSession::consumable_cast(int64_t ability, int32_t slot, uint32_t location) {
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    const auto container = container_of_location(static_cast<uint8_t>(location));
+    if (!db || !container || *container != svc::ItemContainer::Backpack || !stats_ || !stats_->started()) return nullptr;
+    const svc::InventoryItem* item = inventory_.at(*container, slot);
+    if (!item || item->quantity < 1) return nullptr;
+    int32_t reserved = 0;   // the casts already counting this stack
+    for (const auto& [id, held] : item_reserved_) reserved += held->container == static_cast<int>(*container) && held->slot == slot && held->instance_guid == item->instance_guid ? 1 : 0;
+    if (item->quantity - reserved < 1) return nullptr;
+    std::string error;
+    if (db->consumable_ability(item->item_record_id, error) != ability) return nullptr;
+    auto cast = std::make_shared<ItemCast>();
+    cast->record = item->item_record_id;
+    cast->ability = ability;
+    cast->quality = item->quality;
+    cast->stats = stats_->item_stats(item->item_record_id, item->quality);
+    cast->container = static_cast<int>(*container);
+    cast->slot = slot;
+    cast->instance_guid = item->instance_guid;
+    return cast;
+}
+
+void PlayerSession::take_consumable(const std::shared_ptr<const ItemCast>& cast, int32_t client_instance_id) {
+    if (!cast->consumes) return;
+    while (item_reserved_.size() >= 16) item_reserved_.erase(item_reserved_.begin());   // (a hostile client's casts that never pay)
+    item_reserved_[client_instance_id] = cast;
+    spdlog::log(level_for(use_logged_), "[session] {}: a consumable is used: item record {} (quality {}) from the {} slot {} casts ability {}; {} stat(s) from its stat block", name(), cast->record,
+                cast->quality, items::container_name(static_cast<svc::ItemContainer>(cast->container)), cast->slot, cast->ability, cast->stats.size());
+}
+
+bool PlayerSession::consumable_paid(int32_t client_instance_id) {
+    const auto reserved = item_reserved_.find(client_instance_id);
+    if (reserved == item_reserved_.end()) return false;   // (nothing is reserved for this cast: a hostile client's casts pushed it out)
+    const std::shared_ptr<const ItemCast> cast = reserved->second;
+    item_reserved_.erase(reserved);
+    items::Outcome taken = inventory_.use_up(static_cast<svc::ItemContainer>(cast->container), cast->slot, cast->instance_guid, 1);
+    if (!taken.ok) {
+        // the stack moved since the trigger (a move or a split in those 65 ms): the instance is looked for where it lies now
+        for (const svc::InventoryItem& it : inventory_.items()) {
+            if (it.item_record_id == cast->record && it.instance_guid == cast->instance_guid && it.container == svc::ItemContainer::Backpack) {
+                taken = inventory_.use_up(it.container, it.slot, it.instance_guid, 1);
+                break;
+            }
+        }
+    }
+    if (!taken.ok) {
+        // the stack is gone since the trigger (a sale, a destroy or a hand-in within those 65 ms): the cast cannot be paid, so it ends and gives nothing
+        spdlog::log(level_for(use_logged_), "[session] {}: the consumable cast {} cannot be paid, its item is not in the bag any more ({}): the cast is over", name(), client_instance_id,
+                    taken.refusal);
+        return false;
+    }
+    inventory_dirty_ = true;
+    inventory_changed_ = true;
+    ++uses_applied_;
+    ++items_applied_;
+    while (item_sends_.size() >= 16) item_sends_.erase(item_sends_.begin());   // (a hostile client's casts that never reach their cost step)
+    item_sends_[client_instance_id] = item_events_for(taken);
+    item_taken_.push_back(client_instance_id);
+    return true;
+}
+
 void PlayerSession::sync_item_abilities(Connection& conn) {
-    if (!world_ || !world_->mounts() || !phase_in_done_ || !join_.empty() || finished_ || failed_ || abilities_failed_) return;
-    const std::vector<int64_t> carried = bootstrap::carried_item_abilities(&world_->mounts()->data(), inventory_);
+    const content::ContentDb* db = world_ ? world_->content() : nullptr;
+    if (!world_ || (!world_->mounts() && !db) || !phase_in_done_ || !join_.empty() || finished_ || failed_ || abilities_failed_) return;
+    // what is carried is compared first: the items' abilities are looked up only when it changed
+    const std::vector<int64_t> carried_records = inventory_.records();
+    if (carried_records == item_ability_records_) return;
+    const std::vector<int64_t> carried = bootstrap::carried_item_abilities(world_->mounts() ? &world_->mounts()->data() : nullptr, inventory_, db);
     std::vector<int64_t> missing;
     for (const int64_t a : carried) {
         if (std::find(records_.begin(), records_.end(), a) == records_.end()) missing.push_back(a);
     }
-    if (missing.empty() || !room_for(1)) return;   // (no room now: the next tick tries again)
+    if (missing.empty()) {
+        item_ability_records_ = carried_records;
+        return;
+    }
+    if (!room_for(1)) return;   // (no room now: the next tick tries again)
     for (const int64_t a : missing) records_.push_back(a);
     if (!push_abilities()) {
         for (const int64_t a : missing) records_.erase(std::remove(records_.begin(), records_.end(), a), records_.end());
         return;
     }
+    item_ability_records_ = carried_records;
     ++item_ability_syncs_;
     spdlog::log(level_for(item_ability_logged_),
-                "[session] {}: {} item ability record(s) added to ReplicatedRecordsToLoad (a mount item is carried: the client needs Summon_Mount loaded to send the summon)", name(),
+                "[session] {}: {} item ability record(s) added to ReplicatedRecordsToLoad (an item that casts an ability is carried: the client needs the ability loaded to send its trigger)", name(),
                 missing.size());
     queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("item abilities"); }, conn);
 }

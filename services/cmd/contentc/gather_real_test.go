@@ -451,8 +451,9 @@ func TestRealGatherExpressions(t *testing.T) {
 	db := builtDB(t)
 	// None of the 24 expressions that failed on the five gathering reads fails now (ab_expr ids are the order the build met the texts in; the gathering
 	// ones are appended after the reward tables', so the older ids did not move; the ids are 14 higher since the creature tables' 38 abilities brought 14 expressions of the abilities';
-	// and 335 higher again in version 35: the reactions bring 336 more expressions of the abilities' ahead of the reward tables', and one text the reward tables used to add is met among them first)
-	for _, id := range []int{1661, 1662, 1663, 1664, 1670, 1704, 1705, 1706, 1707, 1708, 1709, 1910, 1911, 1913, 1914, 1979, 1981, 1982, 1983, 1984, 1985, 1998, 1999, 2005} {
+	// and 335 higher again in version 35: the reactions bring 336 more expressions of the abilities' ahead of the reward tables', and one text the reward tables used to add is met among them first;
+	// and 65 higher again in version 38: the consumables' abilities bring 65 more expressions of the abilities' ahead of the reward tables')
+	for _, id := range []int{1726, 1727, 1728, 1729, 1735, 1769, 1770, 1771, 1772, 1773, 1774, 1975, 1976, 1978, 1979, 2044, 2046, 2047, 2048, 2049, 2050, 2063, 2064, 2070} {
 		var program int
 		var errText string
 		if err := db.SQL().QueryRow(`SELECT program, error FROM ab_expr WHERE id = ?`, id).Scan(&program, &errText); err != nil || program < 0 || errText != "" {
@@ -464,8 +465,8 @@ func TestRealGatherExpressions(t *testing.T) {
 			t.Errorf("%d expressions still fail on %s", got, fn)
 		}
 	}
-	if got := scalarInt(t, db, `SELECT COUNT(*) FROM ab_expr WHERE program < 0`); got != 140 {
-		t.Errorf("%d expressions do not compile, want 140 (300 in version 12: 24 compile now on the gathering reads, 79 more on GetPlayerProfessionLevel(GetPlayer(), ...), and the Quality formula of the Hunting prototype variation, new in version 13, does not; 43 more in version 28 on GetNarrativeContentLevel, the quests' experience and Glint; 2 fewer in version 33 on HasValidEquipment, the Drop Crate requirement among them; 13 fewer in version 35: 32 of the 153 compile with the reactions' functions, GetEffect (22), GetStatBase (6) and GetEffectRecordByName among them, and the reactions' closure brings 19 expressions that do not, GetPrimaryArchetype (6) among them)", got)
+	if got := scalarInt(t, db, `SELECT COUNT(*) FROM ab_expr WHERE program < 0`); got != 148 {
+		t.Errorf("%d expressions do not compile, want 148 (300 in version 12: 24 compile now on the gathering reads, 79 more on GetPlayerProfessionLevel(GetPlayer(), ...), and the Quality formula of the Hunting prototype variation, new in version 13, does not; 43 more in version 28 on GetNarrativeContentLevel, the quests' experience and Glint; 2 fewer in version 33 on HasValidEquipment, the Drop Crate requirement among them; 13 fewer in version 35: 32 of the 153 compile with the reactions' functions, GetEffect (22), GetStatBase (6) and GetEffectRecordByName among them, and the reactions' closure brings 19 expressions that do not, GetPrimaryArchetype (6) among them; 8 more in version 38, all on GetPrimaryArchetype: the class resources and apply conditions of the consumables)", got)
 	}
 	// every gathering interaction's duration and durability formula compiles, as does every ItemVariation's Quality
 	if got := scalarInt(t, db, `SELECT COUNT(*) FROM gather_def g JOIN ab_expr e ON e.id = g.duration_expr WHERE e.program >= 0`); got != 339 {

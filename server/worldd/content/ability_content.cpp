@@ -120,13 +120,15 @@ constexpr const char* kHitEffectsSql = "SELECT kind, ord, effect_guid, requireme
                                        "FROM ab_hit_effect WHERE hit_guid = ?1 ORDER BY kind, ord";
 constexpr const char* kHitProjectilesSql = "SELECT projectile_guid FROM ab_hit_projectile WHERE hit_guid = ?1 AND kind = 'fire' ORDER BY ord";
 constexpr const char* kEffectByGuidSql =
-    "SELECT guid, name, display_name, category, tags, effect_tags, infinite_duration, duration_expr, tick_timer, ignore_initial_tick, stack_type, "
-    "global_stack_limit, in_place_stack_limit_expr, stack_duration_refresh, persists_through_death, persists_relog, dispellable, significant, "
-    "requirement_expr, crowd_control_guid, extra FROM ab_effect WHERE guid = ?1";
+    "SELECT e.guid, e.name, e.display_name, e.category, e.tags, e.effect_tags, e.infinite_duration, e.duration_expr, e.tick_timer, e.ignore_initial_tick, e.stack_type, "
+    "e.global_stack_limit, e.in_place_stack_limit_expr, e.stack_duration_refresh, e.persists_through_death, e.persists_relog, e.dispellable, e.significant, "
+    "e.requirement_expr, e.crowd_control_guid, e.extra, e.group_guid, COALESCE(g.name, ''), COALESCE(g.stack_type, ''), COALESCE(g.global_stack_limit, 0) "
+    "FROM ab_effect e LEFT JOIN ab_effect_group g ON g.guid = e.group_guid WHERE e.guid = ?1";
 constexpr const char* kEffectByNameSql =
-    "SELECT guid, name, display_name, category, tags, effect_tags, infinite_duration, duration_expr, tick_timer, ignore_initial_tick, stack_type, "
-    "global_stack_limit, in_place_stack_limit_expr, stack_duration_refresh, persists_through_death, persists_relog, dispellable, significant, "
-    "requirement_expr, crowd_control_guid, extra FROM ab_effect WHERE name = ?1";
+    "SELECT e.guid, e.name, e.display_name, e.category, e.tags, e.effect_tags, e.infinite_duration, e.duration_expr, e.tick_timer, e.ignore_initial_tick, e.stack_type, "
+    "e.global_stack_limit, e.in_place_stack_limit_expr, e.stack_duration_refresh, e.persists_through_death, e.persists_relog, e.dispellable, e.significant, "
+    "e.requirement_expr, e.crowd_control_guid, e.extra, e.group_guid, COALESCE(g.name, ''), COALESCE(g.stack_type, ''), COALESCE(g.global_stack_limit, 0) "
+    "FROM ab_effect e LEFT JOIN ab_effect_group g ON g.guid = e.group_guid WHERE e.name = ?1";
 constexpr const char* kEffectHitsSql = "SELECT phase, ord, hit_guid FROM ab_effect_hit WHERE effect_guid = ?1 ORDER BY phase, ord";
 constexpr const char* kModsSql = "SELECT ord, stat_mod_guid, stat_guid, stat_name, value_expr, shield_absorb FROM ab_mod WHERE owner_kind = ?1 AND owner_guid = ?2 ORDER BY ord";
 constexpr const char* kProjectileSql = "SELECT guid, name, projectile_type, speed, range, life_time, max_hits, chain_hit_count, chain_radius, sphere_radius "
@@ -347,6 +349,10 @@ bool read_effect(sqlite3_stmt* s, EffectRow& e, std::string& error) {
     e.requirement_expr = col_i64(s, 18);
     e.crowd_control_guid = col_i64(s, 19);
     e.extra = col_text(s, 20);
+    e.group_guid = col_i64(s, 21);
+    e.group_name = col_text(s, 22);
+    e.group_stack_type = col_text(s, 23);
+    e.group_limit = col_int(s, 24);
     return true;
 }
 // Cyb with C | O | A

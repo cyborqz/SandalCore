@@ -1,0 +1,7 @@
+# montage_assets.tsv: the NetGUID of the montage assets every consumable's ability plays, by the asset's first soft path (seen in the retail captures: the same
+# id in every session and on every server). contentc writes it into ab_montage.net_guid where montage_ids.tsv has no row for the ability.
+# columns: soft_path<TAB>montage_netguid (a uint64)
+/Game/DesignAssets/Consumable/Consumable_Food.Consumable_Food	12904452941110820499
+/Game/DesignAssets/Consumable/Consumable_Potion.Consumable_Potion	15119089601457736597
+/Game/DesignAssets/Consumable/Consumable_Scroll.Consumable_Scroll	4957130304431320543
+/Game/DesignAssets/Consumable/Consumable_Regen.Consumable_Regen	9161270686164925905
