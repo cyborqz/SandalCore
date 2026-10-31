@@ -503,13 +503,16 @@ public:
     /// The game master's stat overrides on this character: the effects that carry
     /// them. They are applied on top of the computed stats and the change goes to
     /// the client like a gear change does. False, with `err`, when the stats
-    /// cannot be computed.
+    /// cannot be computed or the client refused the change (nothing is left
+    /// behind then: the overrides stay as they were).
     bool set_gm_effects(const std::vector<stats::ActiveEffect>& effects, std::string& err);
+    /// Takes the overrides off (the change goes to the client like a gear change does). The overrides stay when the client refuses it.
     void clear_gm_effects();
     const std::vector<stats::ActiveEffect>& gm_effects() const;
     /// The character's stats as they are now.
     std::vector<stats::StatValue> player_stats() const;
-    /// Sets the current value of a stat the character holds (Health, Mana).
+    /// Sets the current value of a stat the character holds (Health, Mana): the change goes to the client like a gear change
+    /// does. False, with `err`, when the character has no such stat, holds no current value for it, or the client refused it.
     bool set_player_current_stat(int64_t guid, double value, std::string& err);
     /// Gear changes that changed stats, the stat items they changed, and the ones the pawn would not take.
     size_t stat_updates() const { return stat_updates_; }

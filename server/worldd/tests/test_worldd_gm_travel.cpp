@@ -12,7 +12,8 @@
 //    run speed     the pawn's MoveSpeedMult stat, the move checker's limits scaled (accepts moves at the multiplied speed, still refuses beyond it), the Sprint on top, the grace after
 //                  the speed goes down, the reset; on a mount the mount's MoveSpeedMult and limit; survives the dismount; a new session starts at 1
 //    client RPCs   ServerTeleportXYZ, ServerTeleport and ServerTeleportPlayer: received and logged with the switch off, answered with it on
-//    GM stats      the game master's stat overrides: the stats the session holds change, and the override is remembered and cleared
+//    GM stats      the game master's stat overrides: the stats the session holds change, the override is remembered and cleared, a refused change leaves nothing behind; the current value of a
+//                  held stat goes to the client
 //    admin API     WorldAdminService over a real gRPC server: the service token (no token, a wrong one, a bare Bearer, the token without Bearer: refused), the queue (every call is
 //                  applied on the draining thread, never the gRPC thread; a call the network thread does not take in time is Unavailable and never applied)
 // ============================================================================
@@ -57,6 +58,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -1536,6 +1538,70 @@ static void test_client_text_in_the_log() {
 
 // ---- the game master's stat overrides -------------------------------------------------------------------------------------------------------------
 
+/// The guid of a stat of the real graph, by its name (0 when the graph does not have it).
+static int64_t guid_named(const Harness& h, const char* name) {
+    const stats::StatBundle* bundle = h.fx.world->stat_bundle();
+    if (!bundle) return 0;
+    for (size_t i = 0; i < bundle->stats.size(); ++i) {
+        if (bundle->stat_name(i) == name) return bundle->stats[i].guid;
+    }
+    return 0;
+}
+
+/// The value the client has for a stat (NaN when it has none): the stat's item in the pawn's stat arrays, as the last chain that carried it.
+static float client_stat(const Harness& h, int64_t guid) {
+    float value = std::numeric_limits<float>::quiet_NaN();
+    const bs::SessionGuids& guids = h.s->bootstrap().setup().guids;
+    const repl::Subobject* stats = h.s->bootstrap().pawn().find(guids.stats);
+    const stats::StatBundle* bundle = h.fx.world->stat_bundle();
+    if (!stats || !stats->obj.schema || !bundle) return value;
+    const schema::ClassSchema& cls = *stats->obj.schema;
+    repl::CodecOptions opts;
+    // the client's stat table is not on the wire: the stats that carry base and equipment are the bundle's bucket ones
+    opts.stat_int32_extended = [bundle](int64_t record) {
+        const auto it = bundle->by_guid.find(record);
+        return it != bundle->by_guid.end() && (bundle->stats[it->second].flags & stats::kStatBuckets) != 0;
+    };
+    for (const fake::Delivered* d : chains_on(h, h.pawn_ch, 0)) {
+        const auto blocks = repl::read_content_blocks(d->content.data(), d->content.bit_pos(), 0);
+        if (!blocks) continue;
+        for (const repl::BlockView& b : *blocks) {
+            if (b.header.is_actor || b.header.object != guids.stats) continue;
+            size_t p = b.payload_pos;
+            const size_t end = b.payload_pos + b.payload_bits;
+            if (b.header.has_rep_layout && !repl::read_rep_block(cls, d->content.data(), end, p, opts)) continue;
+            if (p >= end) continue;
+            const auto fields = repl::read_fast_array_fields(cls, d->content.data(), end, p, opts);
+            if (!fields) continue;
+            for (const repl::FastArrayField& f : *fields) {
+                for (const auto& c : f.delta.changed) {
+                    const auto it = c.values.values.find(1);
+                    const auto* s = it != c.values.values.end() ? it->second.get_if<repl::StatInt32Inst>() : nullptr;
+                    if (s && s->record == guid) value = std::bit_cast<float>(s->value);
+                }
+            }
+        }
+    }
+    return value;
+}
+
+/// Takes the item of a stat out of the pawn's arrays: the pawn then refuses every change of that stat.
+static bool drop_stat_item(const Harness& h, int64_t record) {
+    repl::Subobject* stats = const_cast<repl::Subobject*>(h.s->bootstrap().pawn().find(h.s->bootstrap().setup().guids.stats));
+    for (const char* field : {"StatRepInt32Owner", "StatRepInt32OwnerProxy", "StatRepInt32EveryoneProxy"}) {
+        repl::FastArrayState* a = stats ? stats->obj.arrays.get(*stats->obj.schema, field) : nullptr;
+        if (!a) continue;
+        int32_t id = 0;
+        for (const repl::FastArrayItem& it : a->items()) {
+            const auto found = it.values.values.find(1);
+            const auto* t = found != it.values.values.end() ? found->second.get_if<repl::StatInt32Inst>() : nullptr;
+            if (t && t->record == record) id = it.id;
+        }
+        if (id != 0 && a->remove(id)) return true;
+    }
+    return false;
+}
+
 // The game master's stat overrides reach the character: the stats the session
 // holds change, and the override is remembered.
 static void test_gm_effects(Harness& h) {
@@ -1543,29 +1609,72 @@ static void test_gm_effects(Harness& h) {
     PlayerSession* session = h.s.get();
     if (!session || !session->character_stats()) { std::printf("  [SKIP] the session has no stats\n"); return; }
 
-    const auto before = session->player_stats();
-    if (before.empty()) { CHECK(false, "the session has stats"); return; }
-    const int64_t guid = before.front().guid;
-    const float value = before.front().value;
+    // the stats by name, not by their place in the list: MaxHealth is additive (the override adds to it), Health is the held one
+    // (it has a current value), MaxHealth is not
+    const int64_t max_health = guid_named(h, "MaxHealth");
+    const int64_t health = guid_named(h, "Health");
+    CHECK(max_health != 0 && health != 0, "(MaxHealth and Health are in the real graph)");
+    const stats::StatValue* before = session->character_stats()->find(max_health);
+    CHECK(before != nullptr, "the character has MaxHealth");
+    const float value = before ? before->value : 0.0f;
 
     // the override travels as an effect: one stack, one mod on the stat
     stats::ActiveEffect effect;
     effect.effect = {stats::kRefTypeEffect, 0};
     effect.stacks = 1;
-    effect.mods = {{guid, 5.0}};
+    effect.mods = {{max_health, 5.0}};
 
     std::string err;
     CHECK(session->set_gm_effects({effect}, err), "the override is accepted");
     CHECK(session->gm_effects().size() == 1, "the override is remembered");
-    const auto after = session->player_stats();
-    bool found = false;
-    for (const stats::StatValue& v : after) {
-        if (v.guid == guid) { found = true; CHECK(std::fabs(v.value - (value + 5.0f)) < 0.001f, "the value grew"); }
-    }
-    CHECK(found, "the overridden stat is still there");
+    const stats::StatValue* after = session->character_stats()->find(max_health);
+    CHECK(after != nullptr && std::fabs(after->value - (value + 5.0f)) < 0.001f, "the value grew");
+    h.run(milliseconds(100));
+    CHECK(std::fabs(client_stat(h, max_health) - (value + 5.0f)) < 0.001f, "and the client has the new value");
 
     session->clear_gm_effects();
     CHECK(session->gm_effects().empty(), "the override is cleared");
+    const stats::StatValue* cleared = session->character_stats()->find(max_health);
+    CHECK(cleared != nullptr && cleared->value == value, "and the stat is what it was");
+
+    // a stat the character does not have, and one it holds no current value for, are refused
+    std::string err_missing;
+    CHECK(!session->set_player_current_stat(424242424242ll, 10.0, err_missing) && !err_missing.empty(),
+          "a stat the character does not have is refused");
+    std::string err_not_held;
+    CHECK(!session->set_player_current_stat(max_health, 10.0, err_not_held) && !err_not_held.empty(),
+          "a stat with no current value to set is refused");
+    const stats::StatValue* untouched = session->character_stats()->find(max_health);
+    CHECK(untouched != nullptr && untouched->value == value, "and the stat is untouched");
+
+    // the current value of a held stat goes to the client, like a gear change does
+    const stats::StatValue* held = session->character_stats()->find(health);
+    CHECK(held != nullptr && held->held(), "(Health is a held stat: it has a current value)");
+    const float want = held ? held->value / 2.0f : 0.0f;
+    std::string err_current;
+    CHECK(session->set_player_current_stat(health, want, err_current), "the current value is set");
+    const stats::StatValue* now = session->character_stats()->find(health);
+    CHECK(now != nullptr && std::fabs(now->value - want) < 0.001f, "the session's Health is the new value");
+    h.run(milliseconds(100));
+    const stats::StatValue* ticked = session->character_stats()->find(health);
+    const float client = client_stat(h, health);
+    CHECK(ticked != nullptr && std::fabs(client - ticked->value) < 0.001f, "and the client has it too (the client's Health is the session's)");
+    CHECK(client >= want - 0.001f && client < want + 20.0f, "and it is the value that was set (a regeneration tick may have added a little)");
+
+    // a change the pawn refuses leaves the overrides as they were: nothing is left behind
+    std::string err_again;
+    CHECK(session->set_gm_effects({effect}, err_again), "the override is set again");
+    CHECK(drop_stat_item(h, max_health), "(the pawn's array lost the stat's item)");
+    stats::ActiveEffect other;
+    other.effect = {stats::kRefTypeEffect, 0};
+    other.stacks = 1;
+    other.mods = {{max_health, 7.0}};
+    const size_t failed = session->stat_updates_failed();
+    std::string err_refused;
+    CHECK(!session->set_gm_effects({other}, err_refused) && !err_refused.empty(), "the change the pawn refuses is refused");
+    CHECK(session->stat_updates_failed() == failed + 1, "(the session counted the refusal)");
+    CHECK(session->gm_effects().size() == 1 && session->gm_effects()[0].mods[0].value == 5.0,
+          "and the override that was there is still there: nothing is left behind");
 }
 
 // ---- the admin API ------------------------------------------------------------------------------------------------------------------------------
