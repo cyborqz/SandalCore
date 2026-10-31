@@ -13,7 +13,7 @@
     certs\server.pem   the server certificate for 127.0.0.1 / localhost, signed by that CA
     certs\server.key   its private key
   The CA's private key is deleted right after signing, so nothing else can ever be signed with your trusted CA.
-  Uses OpenSSL (Git for Windows ships it; install_dependencies.bat installs Git).
+  Uses OpenSSL (Git for Windows ships it; install.bat installs Git).
   Nothing happens when the three files already exist and the CA is trusted.
 
 .PARAMETER Force
@@ -68,7 +68,7 @@ if ($haveAll -and -not $Force) {
 
 $openssl = Find-OpenSsl
 if (-not $openssl) {
-    throw 'OpenSSL not found. Install Git for Windows (install_dependencies.bat does), then launch again.'
+    throw 'OpenSSL not found. Install Git for Windows (install.bat does), then launch again.'
 }
 New-Item -ItemType Directory -Force -Path $certs | Out-Null
 $env:MSYS2_ARG_CONV_EXCL = '*'     # stop Git's MSYS openssl from rewriting "/CN=..." as a path

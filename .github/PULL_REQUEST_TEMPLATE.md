@@ -14,7 +14,7 @@
 - [ ] Python/script syntax: verified clean execution
 
 ## Checklist
-- [ ] My code adheres to the project guidelines in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- [ ] My code adheres to the project guidelines in [CONTRIBUTING.md](CONTRIBUTING.md).
 - [ ] I have not included proprietary assets, game binaries, or Unreal Engine source files.
 - [ ] I have verified that no personal data, private IPs, credentials, or tokens are present in diffs.
 - [ ] All new and existing tests pass locally.

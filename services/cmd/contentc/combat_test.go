@@ -22,7 +22,7 @@ func exportedCombatINI(t *testing.T) string {
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "DefaultCombat.ini"))
 	if err != nil {
-		t.Skip("DefaultCombat.ini is not at hand (run extract_game_data.bat, or set AOC_CLIENT_CONFIG): " + err.Error())
+		t.Skip("DefaultCombat.ini is not at hand (run install.bat, or set AOC_CLIENT_CONFIG): " + err.Error())
 	}
 	return string(data)
 }

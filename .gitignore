@@ -118,7 +118,7 @@ capture_*.bin
 Dumped*.txt
 
 # ──────────────────────────────────────────────────────────────────────────
-# Game data and sources made by extract_game_data.bat from your own game install (dist/content is under dist/; nothing of it is committed)
+# Game data and sources made by scripts/extract_game_data.ps1 (install.bat runs it) from your own game install (dist/content is under dist/; nothing of it is committed)
 /server/worldd/world/zoi_surface_table.h
 /server/worldd/world/node_constants.h
 /server/worldd/spawns/region_data.h

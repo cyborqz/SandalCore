@@ -41,5 +41,5 @@ body:
       options:
         - label: "I searched existing issues and discussions to avoid duplicate suggestions."
           required: true
-        - label: "I reviewed ROADMAP.md to see if this feature is already planned."
+        - label: "I reviewed docs/ROADMAP.md to see if this feature is already planned."
           required: true

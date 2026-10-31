@@ -10,7 +10,7 @@ set "MISSING="
 for %%E in (tether_server launcher worldd) do if not exist "%~dp0dist\Release\%%E.exe" set "MISSING=1"
 if defined MISSING (
     echo The server is not built yet ^(dist\Release is missing programs^).
-    echo Run install_dependencies.bat, then build_all.bat, then this file again.
+    echo Run install.bat first, then this file again.
     pause
     exit /b 1
 )

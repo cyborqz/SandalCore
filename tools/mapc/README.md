@@ -36,7 +36,7 @@ The outputs are the same bytes every run (the placements are sorted by mesh and 
 
 ## The Riverlands (G1, stage 1; an uncommitted draft)
 
-The world is the whole Riverlands now: the 12 ZOIs whose biome is Riverlands, 49.12 km2, as the exact 401 rectangles of `tools/mapc/region_rects.tsv` (written by `python tools/capture/gen_region.py` from `fixtures/region/*.json`, which `tools/capture/gen_region_rects.py` cuts from the game's zone-of-influence grid; `gen_region.py` also writes worldd's `spawns/region_data.h`; `extract_game_data.bat` runs both). **A region is mapc's default; `--center X,Y --radius CM` is E1's circle (review B I7: it needs its own `--out-dir`, because the default `dist/content` holds the Riverlands' files, and it has no `--check`: E1's files were made by an earlier mapc, geometry version 1, mesh names without `@hash`, and 7 of its tiles differ since the package-path fix, so they cannot be reproduced byte for byte; E1's guarantee is `test_worldd_nav_window`'s comparison of its tiles with the region's, below)** (`--region FILE` names another set of rectangles; `--margin` is the geometry margin, 150 m, for the rectangles as for the circle).
+The world is the whole Riverlands now: the 12 ZOIs whose biome is Riverlands, 49.12 km2, as the exact 401 rectangles of `tools/mapc/region_rects.tsv` (written by `python tools/capture/gen_region.py` from `fixtures/region/*.json`, which `tools/capture/gen_region_rects.py` cuts from the game's zone-of-influence grid; `gen_region.py` also writes worldd's `spawns/region_data.h`; `scripts\extract_game_data.ps1` runs both). **A region is mapc's default; `--center X,Y --radius CM` is E1's circle (review B I7: it needs its own `--out-dir`, because the default `dist/content` holds the Riverlands' files, and it has no `--check`: E1's files were made by an earlier mapc, geometry version 1, mesh names without `@hash`, and 7 of its tiles differ since the package-path fix, so they cannot be reproduced byte for byte; E1's guarantee is `test_worldd_nav_window`'s comparison of its tiles with the region's, below)** (`--region FILE` names another set of rectangles; `--margin` is the geometry margin, 150 m, for the rectangles as for the circle).
 
 ```
 mapc probe-cells [--batches M]                master umap only (4 s): the cells the region reads, per grid, their packages' sizes and how M batches would cut them
@@ -76,7 +76,7 @@ The navmesh: **the tiles are 4,000 cm and anchored on E1's corner (the login spo
 
 ## From a clean checkout
 
-`dist/` is git-ignored: the ground, the navmesh, the Blueprint table and `content.db` are built, not committed. `extract_game_data.bat` (`scripts\extract_game_data.ps1`) builds all of it from your own game install, in this order, and skips what is up to date:
+`dist/` is git-ignored: the ground, the navmesh, the Blueprint table and `content.db` are built, not committed. `scripts\extract_game_data.ps1` (`install.bat` runs it) builds all of it from your own game install, in this order, and skips what is up to date:
 
 1. `powershell -File tools\mapc\fetch_cue4parse.ps1` (the pinned CUE4Parse commit under `third_party/CUE4Parse`), `dotnet build -c Release tools/mapc`, and contentc (Go);
 2. `mapc export-config` (the game's `AOC/Config` files, as the game ships them, into `dist/content/client_config`) and the mappings file `layouts\aoc.usmap` copied to `dist\content`; `mapc artisan-curves` and `mapc mount-speeds`;

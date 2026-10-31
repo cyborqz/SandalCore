@@ -3,15 +3,17 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 30 October 2026
+**Last updated:** 1 November 2026
 
 ---
 
 ## Where We Are Now
 
-**Current milestones:** `9- City Nodes and Civilization`, `11- Quests and Narrative` and `13- Economy and Player Trading` (all in progress)
+**5 of 16 phases are done** (1-5), **7 are in progress** (6-12) and 4 are planned (13-16).
 
-Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilities, navigation, mounts, and gathering and professions) are complete and validated against retail captures and test suites in `server/worldd/tests`. Since then the server gained NPC conversations and the first part of quests, merchants and currency, crafting at the towns' stations, item rarities, weapon combo finishers, magic weapon scaling, creatures that notice and chase by their own settings, storage, NPC looks and names, and the Embersprings.
+**Current phases:** `6- Progression and items`, `7- Combat and abilities`, `8- Gathering and professions`, `9- Living world`, `10- City nodes`, `11- Quests` and `12- Economy` (all in progress)
+
+Phases 1-5 (the network protocol, login, entering the world, stats and mounts) are complete and validated against retail captures and test suites in `server/worldd/tests`. Phases 6-12 work in their first parts, and what is left of each is named in its line below and under "Achieved and left". Since the first phases the server gained NPC conversations and the first part of quests, merchants and currency, crafting at the towns' stations, item rarities, weapon combo finishers, magic weapon scaling, creatures that notice and chase by their own settings, storage, NPC looks and names, and the Embersprings.
 
 ---
 
@@ -49,7 +51,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
-- Reactions (first iteration): the game's reactions run for your own hits and for paying an ability's cost. The Bard's Resonance follows the game's rule (the Resonant Weapon passive from level 5) and its Menacing and Cathartic melodies add their damage at a combo finisher and spend up to 3 Resonance. The weapon talents that react at a finisher (the wand's Burning, Chilled and Volatile, the axes' Bleed, Snare and Wound, and the like) fire at the finishing hit of the weapon in hand, and the damage talents of the weapon trees count for its hits. The other classes' reactions run from the game's data and are not checked against the game yet.
+- Reactions (first iteration): the game's reactions run for your own hits and for paying an ability's cost. The Bard's Resonance follows the game's rule (the Resonant Weapon passive from level 5) and its Menacing and Cathartic melodies add their damage at a combo finisher and spend up to 3 Resonance. The weapon talents that react at a finisher (the wand's Burning, Chilled and Volatile, the axes' Bleed, Snare and Wound, and the like) fire at the deadly finishing hit of the weapon in hand, and the damage talents of the weapon trees count for its hits. The other classes' reactions run from the game's data and are not checked against the game yet.
 - Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot, which slows the carrier; a trade crate's rarity follows its materials, a quest can give a crate, and the Drop Crate ability takes the crate off the back. Next: the crate lying on the ground for others to pick up, then putting crates into building sites and selling them. The other crate types stay under Left.
 
 ### Left
@@ -78,18 +80,19 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 
 ## Milestones
 
-1. **1- Connection and Protocol Foundations** — [Done] Handshake protocol, stateless connect, packet framing, NetGUID allocation, and bunch replication codecs.
-2. **2- Authentication and Character Management** — [Done] Auth service, account profiles, character creation with visual customization, and lobby transitions.
-3. **3- World Bootstrap and Replication** — [Done] Map loading into Verra World Master, actor open sequences, possession handshake, and player state synchronization.
-4. **4- Stats Engine and Calculations** — [Done] Core attribute formulas, expression evaluator, compiled stat programs, and equipment/gear stat recalculation.
-5. **5- Progression, Talents, and Items** — [Done] Adventuring XP curves, level caps, skill tree purchases, action bar assignments, item usage, and inventory storage.
-6. **6- Combat and Class Abilities** — [Done] Ability pipeline across all classes, cast verification, cooldown ledger, projectiles, hit confirmations, floating text, and status effects.
-7. **7- Living World and Navigation** — [Done] Chunked navmesh windows, Riverlands region partitioning, NPC actor spawning, AI agro/leash behavior, and respawn cycles.
-8. **8- Mounts and Traversal** — [Done] Ground, aquatic, and flying mount summoning, riding possession, mount combat on mount health, dash, and road traversal.
-9. **9- City Nodes and Civilization** — [In progress] CityNodeService, node experience and level state, town asset replication, and citizenship/mayorship structures; the five towns have their real floor, their buildings in the walking map and their crafting stations; next: the Wilderness and Camp stages, node experience and vassals, citizenship and mayor, and node taxes.
-10. **10- Gathering and Professions** — [Done] Gathering professions, node harvesting, the Riverlands' foliage, hunting, resource bags and the pick-up popup.
-11. **11- Quests and Narrative** — [In progress] NPC conversations, quest offers, acceptance, the journal, abandoning, objectives that count, the hand-in and the rewards, the map markers, the quest objects and the item hand-in to a person are done for the first quests of the starting area (both ways); next: the choose-one reward window, the Quest bag and the speech bubbles over NPCs.
-12. **12- Guilds and Social Systems** — [Planned] Guild creation, ranks, member permissions, party/raid formations, chat channels, and mail delivery.
-13. **13- Economy and Player Trading** — [In progress] Currency, merchants, selling and repairing, crafting at stations and item rarities are done; next: secure player trading, marketplaces and node currency.
-14. **14- Node Sieges and Territory Wars** — [Planned] Siege declarations, siege weaponry, battlefield boundaries, and node destruction/de-leveling mechanics.
-15. **15- Caravans and Trade Routes** — [Planned] Caravan creation, trade route navigation, open-world PvP escort/plunder, and regional trade goods.
+1. **1- Network protocol** — [Done] How the client and the server talk: the handshake, packet framing and replication.
+2. **2- Login** — [Done] The launcher, accounts, character creation and character select.
+3. **3- Into the world** — [Done] Entering the world as your character, with your progress kept across logins.
+4. **4- Stats** — [Done] The game's own stat formulas, updated as your gear changes.
+5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
+6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: splitting and joining stacks, food and potions.
+7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Still to come: debuffs on creatures (the weapon finisher talents' effects among them) and Summoner pets.
+8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
+9. **9- Living world** — [In progress] Navigation, and creatures that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other creature families, flying creatures, and day and night spawns.
+10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.
+11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events.
+12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC merchants, crates and storage. Still to come: node currencies and more crates.
+13. **13- Social** — [Planned] Seeing other players, guilds, parties and raids, chat and mail, player trading and the marketplace.
+14. **14- Node sieges** — [Planned] Node sieges and territory wars.
+15. **15- Caravans** — [Planned] Caravans and trade routes.
+16. **16- World events** — [Planned] Corruption events and other world events.

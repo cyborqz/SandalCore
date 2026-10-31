@@ -36,7 +36,7 @@
   packages, so it needs the network once. A full run takes about 10 minutes on a fast PC (the longest step is the map read for the navigation mesh) and up to
   4 GB of memory for any one program; the first build of the C++ libraries (vcpkg) comes on top and can take a long time.
 
-  Every step is skipped when what it reads is unchanged since the last run (a stamp per step in dist\content\.extract), so build_all.bat and the launchers can call
+  Every step is skipped when what it reads is unchanged since the last run (a stamp per step in dist\content\.extract), so install.bat and the launchers can call
   this every time. The navigation mesh step, the longest, reads the map, the towns' floors and buildings, the Riverlands' rectangles and where the five towns' nodes stand
   in content.db: it runs again when one of those changes, not when other game numbers do. The supported client build is the one of 2026-01-29 (AOCClient-Win64-Shipping.exe
   235,606,624 bytes, CacheDB.dbc 144,085,052 bytes); with another build the script warns and goes on.
@@ -112,7 +112,7 @@ if ($NavThreads -le 0) { $NavThreads = [Math]::Max(2, [Math]::Min(8, [int]($core
 # Output
 # ---------------------------------------------------------------------------------------------------------------------
 function Write-Log([string]$text) {
-    if (Test-Path -LiteralPath $stampDir) { try { Add-Content -LiteralPath $logFile -Value $text -Encoding ASCII } catch { } }
+    if (-not $CheckOnly -and (Test-Path -LiteralPath $stampDir)) { try { Add-Content -LiteralPath $logFile -Value $text -Encoding ASCII } catch { } }
 }
 function Say([string]$text, [string]$color = '') {
     if ($color) { Write-Host $text -ForegroundColor $color } else { Write-Host $text }
@@ -184,7 +184,7 @@ function Find-GameRoot {
             Fail "-GameRoot '$GameRoot' is not the game's folder (it has no $PaksRel and no $DbcRel)." @(
                 'Give the folder that holds AOCClient.exe and the AOC folder (the Game folder of the install), not the launcher folder.',
                 'If the install is incomplete, let Steam verify the game files, then run this again.',
-                'More: README.md, "Build and run", "If something goes wrong".')
+                'More: README.md, "Getting started", "If something goes wrong".')
         }
         return [pscustomobject]@{ Path = $r; Via = '-GameRoot' }
     }
@@ -332,8 +332,10 @@ function Assert-Files([string[]]$rel, [string]$why) {
 # ---------------------------------------------------------------------------------------------------------------------
 # Start
 # ---------------------------------------------------------------------------------------------------------------------
-New-Item -ItemType Directory -Force -Path $stampDir | Out-Null
-Set-Content -LiteralPath $logFile -Value ("extract_game_data.ps1 " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding ASCII
+if (-not $CheckOnly) {      # -CheckOnly changes nothing: no folder, no log
+    New-Item -ItemType Directory -Force -Path $stampDir | Out-Null
+    Set-Content -LiteralPath $logFile -Value ("extract_game_data.ps1 " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding ASCII
+}
 
 $found = Find-GameRoot
 if (-not $found) {
@@ -341,11 +343,11 @@ if (-not $found) {
         'Sandal Core builds its game data from your own installed copy of the game (the game files are only read).',
         'It looked at: -GameRoot, the GAME_ROOT variable, game_executable in config\paths.json, the Steam libraries (libraryfolders.vdf) and the usual folders on every fixed drive.',
         'Install the game (Steam), or tell the script where it is and run this again:',
-        '    extract_game_data.bat -GameRoot "D:\...\steamapps\common\Ashes of Creation\Game"',
-        '-GameRoot counts for that run only. To keep it for build_all.bat and the launchers, set GAME_ROOT once and open a new window:',
+        '    install.bat -GameRoot "D:\...\steamapps\common\Ashes of Creation\Game"',
+        '-GameRoot counts for that run only. To keep it for install.bat and the launchers, set GAME_ROOT once and open a new window:',
         '    setx GAME_ROOT "D:\...\steamapps\common\Ashes of Creation\Game"',
         '(the folder that holds AOCClient.exe and the AOC folder).',
-        'More: README.md, "Build and run", "If something goes wrong".')
+        'More: README.md, "Getting started", "If something goes wrong".')
 }
 $game = $found.Path
 $gameExe  = Join-Path $game $ExeRel
@@ -361,7 +363,7 @@ if (($exeLen -eq $Supported.ExeBytes) -and ($dbcLen -eq $Supported.DbcBytes)) {
 } else {
     Say ("WARNING: this client is not the build this code was made for ({0}: exe {1:N0} bytes, CacheDB.dbc {2:N0} bytes; yours: exe {3:N0}, CacheDB.dbc {4:N0})." -f `
         $Supported.Date, $Supported.ExeBytes, $Supported.DbcBytes, $exeLen, $dbcLen) 'Yellow'
-    Say '         The data may be wrong or a step may fail (README.md, "After a game patch").' 'Yellow'
+    Say '         The data may be wrong or a step may fail (README.md, "The game data", "After a game patch").' 'Yellow'
 }
 
 # what identifies the player's game files: names, sizes and write times of the containers, the exe and the design database
@@ -378,8 +380,8 @@ if (-not $go)     { $missing += 'Go (go on PATH)' }
 if (-not (Test-Path -LiteralPath $usmapSrc)) { $missing += 'layouts\aoc.usmap (part of the repository)' }
 if ($missing.Count -gt 0) {
     Fail ('Missing: ' + ($missing -join '; ') + '.') @(
-        'Run install_dependencies.bat to install what is missing, open a new window (so the new PATH applies), then run this again.',
-        'More: README.md, "Build and run", "What to install".')
+        'Run install.bat to install what is missing, open a new window (so the new PATH applies), then run this again.',
+        'More: README.md, "Getting started", "What you need".')
 }
 Say ("Tools       : Python {0}, .NET SDK, Go; {1} jobs for C++, {2} threads for the navigation mesh" -f $python.Version, $Jobs, $NavThreads)
 

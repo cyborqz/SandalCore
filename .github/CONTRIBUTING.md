@@ -12,7 +12,7 @@ To keep the repository clean, legal, and safe for everyone, all contributors mus
 2. **No Unreal Engine Source Code**: Never copy code from the proprietary Unreal Engine source tree into this repository.
 3. **No Personal Data or Secrets**: Never include personal identification, real names, personal file paths, non-loopback IP addresses, MAC addresses, credentials, private keys, or session tokens in code, comments, test fixtures, or pull request descriptions.
 4. **Focused Pull Requests**: Keep pull requests focused on a single logical change or bug fix. Avoid massive indiscriminate refactors.
-5. **License Agreement**: All contributions are submitted under and licensed pursuant to the **GNU Affero General Public License version 3 (AGPL-3.0-only)** along with the additional terms specified in [`NOTICE`](./NOTICE).
+5. **License Agreement**: All contributions are submitted under and licensed pursuant to the **GNU Affero General Public License version 3 (AGPL-3.0-only)** along with the additional terms specified in [`NOTICE`](../NOTICE).
 
 ---
 
@@ -22,7 +22,7 @@ To keep the repository clean, legal, and safe for everyone, all contributors mus
 
 Before submitting changes, ensure your modifications compile cleanly and pass all test suites.
 
-Run `extract_game_data.bat` once first (`build_all.bat` does): the build and the tests need the game data it makes from your own Ashes of Creation install. Everything it writes is git-ignored (`dist/` and the files listed in `.gitignore`); never commit any of it.
+Run `install.bat` once first (`powershell -File scripts\extract_game_data.ps1` makes only the game data): the build and the tests need the game data it makes from your own Ashes of Creation install. Everything it writes is git-ignored (`dist/` and the files listed in `.gitignore`); never commit any of it.
 
 - **Go Services** (in `services/`):
   ```bash
@@ -49,12 +49,12 @@ Run `extract_game_data.bat` once first (`build_all.bat` does): the build and the
 1. Fork the repository and create your branch from `main`.
 2. Ensure all tests pass and code compiles with zero warnings or errors.
 3. Review your diff thoroughly to verify no credentials, personal paths, or proprietary files were added.
-4. Open a pull request using the project's [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
+4. Open a pull request using the project's [Pull Request Template](PULL_REQUEST_TEMPLATE.md).
 5. Explain what changed and why, linking to relevant GitHub issues if applicable.
 
 ---
 
 ## Reporting Bugs & Security Vulnerabilities
 
-- **Bug Reports**: Open an issue using our [GitHub Bug Report Form](.github/ISSUE_TEMPLATE/bug_report.yml). Provide clear reproduction steps, commit hash, and sanitized logs.
+- **Bug Reports**: Open an issue using our [GitHub Bug Report Form](ISSUE_TEMPLATE/bug_report.yml). Provide clear reproduction steps, commit hash, and sanitized logs.
 - **Security Vulnerabilities**: Do **not** post security bugs to public issues. Please report security issues privately via GitHub's private vulnerability reporting feature as described in [`SECURITY.md`](./SECURITY.md).

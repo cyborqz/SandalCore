@@ -17,8 +17,8 @@
 #      -Scan        AOC_ACTORS_SCAN    the research's per-capture actor scan folder (gen_npc_appearance)
 #      -Cc          AOC_RESEARCH_CC    the research's decoded captures, flat/<id>.jsonl (gen_equip)
 #      -ContentDb   AOC_CONTENT_DB     dist\content\content.db (gen_tooltips, gen_gm_garden, gen_pop_golden, gen_node_pop_golden, gen_zoi_surface, gen_equip)
-#      -ClientConfig AOC_CLIENT_CONFIG the game's AOC\Config directory (gen_node_constants: DefaultAoCRecordConstants.ini); default dist\content\client_config (extract_game_data.bat)
-#      -ZoiChunks   AOC_ZOI_CHUNKS     the ZOI chunk folder (gen_zoi_surface, gen_region_rects); default dist\content\zoi_chunks (extract_game_data.bat)
+#      -ClientConfig AOC_CLIENT_CONFIG the game's AOC\Config directory (gen_node_constants: DefaultAoCRecordConstants.ini); default dist\content\client_config (scripts\extract_game_data.ps1)
+#      -ZoiChunks   AOC_ZOI_CHUNKS     the ZOI chunk folder (gen_zoi_surface, gen_region_rects); default dist\content\zoi_chunks (scripts\extract_game_data.ps1)
 #  gen_region.py (G1 stage 1) reads fixtures\region\*.json only;
 #  gen_gm_garden.py and gen_pop_golden.py (G1 stage 1, Part B) read content.db (the second also npc_motion.tsv and spawns\area_spawns.h); gen_node_pop_golden.py (Nodes 1, stage 3b) the same
 #  for the towns' people (tests\node_pop_golden.h).

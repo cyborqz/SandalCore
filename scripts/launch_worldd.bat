@@ -4,7 +4,7 @@ REM Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemos
 REM GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
 rem ============================================================================
-rem  launch_worldd.bat - the whole stack, for double-clicking
+rem  scripts\launch_worldd.bat - the whole stack (launch.bat in the repository root checks the build, then calls this)
 rem
 rem  Starts the Go services with worldd as the world server, the tether and the
 rem  launcher window; sign in and press LAUNCH GAME.  Takes no arguments.

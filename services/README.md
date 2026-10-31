@@ -44,7 +44,7 @@ loses its session. `stop` needs neither Go nor Docker.
 `run` clears `AOC_MESH_STATIC_WORLD`: worldd registers itself, and a static world would take players
 whenever worldd's heartbeats lapse, with tickets worldd could never redeem.
 
-The whole stack with the game client is `launch_worldd.bat` (`scripts\launch_all.bat` does the work and
+The whole stack with the game client is `launch.bat` (`scripts\launch_all.bat` does the work and
 takes no arguments): the Go services and worldd, the tether and the launcher window. Build worldd
 first (`scripts\build.ps1 -Target worldd`). It first stops any of them left running from this checkout.
 `launch_all.bat` checks that the process on each port it waits for (TCP, and the UDP ports of worldd, 7777,
@@ -977,7 +977,7 @@ The inputs stay outside the repo and are given as flags with environment default
 | Flag | Environment | What |
 |---|---|---|
 | `--dbc` | `AOC_DESIGN_DB` | the client's `CacheDB.dbc`, in the game's `Game\AOC\Plugins\DesignDataPlugin\Generated\Client` |
-| `--usmap` | `AOC_USMAP` | the mappings file: `layouts/aoc.usmap` (`extract_game_data.bat` copies it to `dist/content/aoc.usmap`) |
+| `--usmap` | `AOC_USMAP` | the mappings file: `layouts/aoc.usmap` (`scripts\extract_game_data.ps1` copies it to `dist/content/aoc.usmap`) |
 | `--config` | `AOC_CLIENT_CONFIG` | the game's `AOC\Config` directory (`mapc export-config` writes it to `dist/content/client_config`): `DefaultCombat.ini` is the source of the combat tables and of `StatRegenTime` |
 | `--out` | | `dist/content/content.db` at the repo root (git-ignored) |
 | `--artisan-curves` | `AOC_ARTISAN_CURVES` | optional (Gathering stage 2): `mapc artisan-curves`' output, the profession level-up curves of the paks; default `dist/content/artisan_curves.tsv`. Without it the placeholder curves stay and the build says so |
@@ -990,7 +990,7 @@ warns when it finds one, and `meta` records the names. Until 2026-10-01 there wa
 none of them one of the typed tables, and `meta` keeps a note of that. The folder holds only
 `CacheDB.dbc` now.
 
-`extract_game_data.bat` runs contentc with the right inputs. By hand:
+`scripts\extract_game_data.ps1` (`install.bat` runs it) runs contentc with the right inputs. By hand:
 
 ```powershell
 $env:AOC_DESIGN_DB = '<game>\Game\AOC\Plugins\DesignDataPlugin\Generated\Client\CacheDB.dbc'
