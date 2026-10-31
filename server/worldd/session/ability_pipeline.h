@@ -190,6 +190,7 @@ struct LoopedCast {
     double      period;       // and each next one this long after the one before
     double      jump;         // after the last shot the montage moves to the branch's section this long later
     double      end;          // and ends this long after that
+    double      fire = 0;     // the montage time of the first FireProjectile notify (a shot's arrow leaves at it and again every `period`), seconds; 0: no notify, the arrow lands kProjectileDelay after its shot
 };
 
 /// An ability that finds its own targets: the call names none, and when the montage reaches its section the SERVER gathers the enemies a cone ahead of the caster holds and sends the
@@ -245,6 +246,7 @@ struct ShotCast {
     bool        magical;      // the client plays the montage at MagicalSpeed (else at PhysicalSpeed)
     const char* ask;          // the hit the client asks the server to verify with the launch (its AbilityHit notify sits next to the FireProjectile one): the request is the launch ("": none)
     double      ask_gap;      // ... and how long after the launch, in montage seconds
+    int         key = 0;      // the key (in the ability's ProjectilesIds) of the projectile this montage launches: only its hits land (the Firebolt's two hands); 0: the ability's one projectile
 };
 
 /// An ordinary cast (no cast bar) whose montage launches SEVERAL projectiles at the cast's target, each at a moment of its own (the Bard's Discordance: three notes): every one flies and lands on its
@@ -531,6 +533,8 @@ private:
         /// E1 stage 3 fix 3: the confirmation's Source is the target actor itself, one confirmation per target (the hits fired where a projectile
         /// landed: the book's Split hits; retail: Source = the target in 1,289 of 1,289, one target each)
         bool    source_is_target = false;
+        /// The confirmation's Source is this actor, the enemy a bounce flew from (the child hit names it, the next enemy is its target); 0: no Source
+        uint64_t source_actor = 0;
     };
     /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
     struct HitEvent {
@@ -590,6 +594,7 @@ private:
         /// each with the time it lands (each its own step); the item as the cast made it (the jump and the end are changes of that item).
         const BranchedCast*                   branched = nullptr;
         const LoopedCast*                     looped = nullptr;           // a cast that shoots until its charges or its mana are gone (kLoopedCasts)
+        double                                loop_scale = 1.0;           // ... and the montage plays at this caster's rate: its times in the table are seconds at a rate of 1, so they are multiplied by this (1 over the rate)
         const GatheredCast*                   gathered = nullptr;         // a cast that finds its own targets when its montage jumps (kGatheredCasts)
         int64_t                               gathered_projectile = 0;    // the projectile record it sends at each of them
         int64_t                               charged_projectile = 0;     // ... and the one of its charged shot
@@ -806,9 +811,9 @@ private:
     // hit requests and slots
     CastRecord*  record_of(int32_t client_id);
     void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets);
-    /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation.
+    /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target.
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                const abilities::AbilityDef* ability);
+                                const abilities::AbilityDef* ability, bool* landed = nullptr);
     // reactions (session/ability_reactions.cpp)
     /// An expression of the reaction tables run for the event: the hit's tags and flags, the stat mods it resolved, the ability whose cost was paid.
     bool   eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why);

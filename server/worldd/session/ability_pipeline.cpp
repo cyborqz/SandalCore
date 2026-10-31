@@ -162,7 +162,7 @@ constexpr MissileLanding kMissileLandings[] = {
 //    client log of 2026-10-31, FireProjectileAtTarget with the projectile's name: 5, 7, 2, 3, 6, 4 and 1, in that order, at a rate of 0.546]. They fly the homing speeds of their records (3,200, 2,900, 2,600, 2,500,
 //    2,600, 2,900 and 3,200 cm/s). The recorded retail cast fits this: its seven landings minus these launches at its own rate (0.776) leave 31 to 34 m of flight at those speeds (the target stood about 32 m
 //    away), so retail's confirmations are the launch plus the flight, as here.
-//  - The Fireball (the notify 3.0354 s, the section CastComplete at 3.0 s: 0.0354 s; the owner's client launched it 0.059 to 0.066 s after the bar's end at a rate of 0.617, which is 0.036 to 0.041 s of montage), the
+//  - The Fireball (the notify 3.0354 s, the section CastComplete at 3.0 s: 0.0354 s; the client launched it 0.059 to 0.066 s after the bar's end at a rate of 0.617, which is 0.036 to 0.041 s of montage), the
 //    Frostbolt (2.4984 s, CastComplete at 2.3334 s: 0.1650 s) and the Soul Flare (1.6960 s, CastComplete at 1.5003 s: 0.1957 s) fly their records' speeds (3,500, 4,000 and 3,200 cm/s). The two recorded Frostbolts
 //    launched within 4 ms of their cost steps (the request over the bar's montage time gives their rates, 0.803 and 0.817) and landed 0.63 and 0.04 s after it, targets 25 and 1.5 m away; the recorded Soul
 //    Flare landed 0.56 s after its launch, a target 18 m away.
@@ -207,9 +207,11 @@ constexpr ShotCast kShotCasts[] = {
     {"Ranger_PowerShot", -1, 1.3300842, false, "", 0},
     {"Ranger_Headshot", -1, 0.99284714, false, "Ranger_Headshot_Check_Target", 0.0048},
     {"Ranger_ThunderingShot", -1, 1.0793436, false, "", 0},
-    {"Mage_Firebolt", 0, 0.22428152, true, "", 0},
-    {"Mage_Firebolt", 1, 0.31828308, true, "", 0},
-    {"Mage_Firebolt", 2, 0.3165209, true, "", 0},
+    // The Firebolt throws with a hand at a time: its three montages launch the projectile of key 1, 2 and 1 (the right hand, the left, the right) and only that projectile's hits land, one fireball
+    // a cast [R: three recorded casts, one projectile each, the right hand, the left and the right]
+    {"Mage_Firebolt", 0, 0.22428152, true, "", 0, 1},
+    {"Mage_Firebolt", 1, 0.31828308, true, "", 0, 2},
+    {"Mage_Firebolt", 2, 0.3165209, true, "", 0, 1},
     {"Summoner_DimensionalBolt", -1, 0.2294855, true, "Summoner_DimensionalBolt_Lockout", 0.0033},
     {"Tank_Tomahawk", 0, 0.30069223, false, "", 0},
     {"Tank_Tomahawk", 1, 0.29991198, false, "", 0},
@@ -261,8 +263,13 @@ constexpr BounceRule kBounces[] = {
 // cost 184 ms after it; the next ones followed every 0.24 s (the montage's loop section, "StartLoop", is 0.2373 s long at a play rate of 1; the six costs of the clean cast came 238, 213, 315,
 // 169 and 310 ms apart, 249 ms on average); the loop ends by the server's own branch (no charge left, or less Mana than a shot costs): 139 and 166 ms after the last shot's cost the item moved
 // the montage to its section "EndLoop" (0.4384 s into the montage, the section's start; the item's bBranchPredictedOnAutonomous 0), and the montage ended 503 and 736 ms after that.
+// Each shot's arrow leaves at the montage's FireProjectile notify of its pass (`fire`, 0.2943 s into the montage, and again every `period`) and its hit lands when the arrow gets to the target
+// [R: the two recorded casts played at 1.013 and 0.988; their landings came 376 and 577 ms, and 532, 780, 988, 1,292 and 1,429 ms after the trigger, which is each notify over the rate plus 0.05
+// to 0.27 s of flight at 7,000 cm/s]. The montage plays at the caster's rate, so the shots, the arrows and the branch are modelled to keep pace with it: the table's seconds are at a rate of 1 and are
+// multiplied by 1 over the rate [M: both retail Salvos ran at a rate of about 1, so no recording shows the shots' gap, the branch's jump or the end at another rate; a cast at a rate of 0.79 launched its
+// arrows 0.29 to 0.30 s apart, the loop section's 0.2373 s over 0.79, and the branch of shots 0.24 s apart left the last two arrows behind it].
 constexpr LoopedCast kLoopedCasts[] = {
-    {"Ranger_Salvo", 0.43836784f, 0.083, 0.184, 0.2373, 0.150, 0.503},
+    {"Ranger_Salvo", 0.43836784f, 0.083, 0.184, 0.2373, 0.150, 0.503, 0.29427722},
 };
 
 // The speed (cm/s) the retail client's own moves reached while an ability played, for the abilities whose data has no NetworkingMaxSpeed:
@@ -1182,7 +1189,8 @@ double AbilityPipeline::take_damage(double amount, double now) {
 }
 
 void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                           const AbilityDef* ability) {
+                                           const AbilityDef* ability, bool* landed) {
+    if (landed) *landed = false;
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
@@ -1218,6 +1226,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             closest_cm = ti.surface_distance_cm;
         }
     }
+    // the hit reached a live target when one is in reach, whether or not its damage can be worked out (the Throw's cannot): that is what fires a bounce. An enemy an earlier hit killed is no target
+    if (landed) *landed = closest != 0;
     std::vector<bootstrap::HitTargetOut> outs;
     HitEvent event;   // reactions: what this hit did to the targets it reached
     for (const uint64_t id : targets) {
@@ -1330,7 +1340,9 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         confirmations_.push_back(std::move(h));
     };
     if (!src.source_is_target) {
-        confirm(std::move(outs), std::nullopt);
+        // a bounce's child hit names the enemy the projectile flew from as its Source, and the next enemy is its target [R: the recorded bounce hit of the Throw]
+        if (src.source_actor != 0) confirm(std::move(outs), combat_->guid_of(src.source_actor));
+        else confirm(std::move(outs), std::nullopt);
     } else {
         // E1 stage 3 fix 3: a hit fired where a projectile landed names that target actor as its Source (the origin the client spawns the next projectile
         // from), one confirmation per target [R: the book's Split hits, 1,289 of 1,289: Source = the target, one target each]
@@ -2461,8 +2473,9 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         cast.montage_branch = true;
         cast.branch_position = l.position;
         cast.branch_predicted = false;
+        cast.loop_scale = 1.0 / client_rate(false);   // (the montage plays at this caster's rate: the table's seconds are at a rate of 1, and the shots and the arrows keep pace with it)
         cast.item_due = t + l.item;
-        cast.cost_due = t + l.first_shot;
+        cast.cost_due = t + l.first_shot * cast.loop_scale;
     }
     // An ordinary cast clears its montage where the recordings show it, never before its cost step. A cast with effects of its own (a held or toggled ability) keeps its end with the client's
     // cancel, a song is a loop, a branched and a looped cast have an end of their own, and a swing's steps differ in everything but the ability.
@@ -2505,17 +2518,37 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                 cast.projectile_due.reset();
             }
             if (cast.gathered || cast.timed || cast.toggle_off) cast.projectile_due.reset();   // (its projectiles fly at the enemies it finds, not at a named target: step_branch, start_timed; a press that only ends a toggle fires none)
+            // a cast bar's spell at an enemy: the montage launches one of its projectiles (kFlights) and only that projectile's hits land, however the bar ends. The Frostbolt's other projectile (the shard)
+            // is fired by a hit of its own, not by the cast
+            if (cast.branched && aimed && cast.projectile_due && cast.chain_owner == 0) {
+                for (const content::AbilityHitRow& h : def->hits) {
+                    if (h.source != "projectile") continue;
+                    const content::ProjectileRow* p = catalog_->projectile(h.owner_guid);
+                    if (!p || !(p->speed > 0)) continue;
+                    bool listed = false;
+                    for (const Flight& f : kFlights) listed = listed || (row.name == f.ability && (f.animation < 0 || f.animation == cast.animation_index) && f.key == h.key);
+                    if (listed) {
+                        cast.chain_owner = h.owner_guid;
+                        break;
+                    }
+                }
+            }
             // an ordinary cast with one projectile: it leaves where the montage launches it and lands when it gets to the target (kShotCasts); a heal at the caster himself (or at another player, whom this
             // world does not have) has no flight: it lands as the projectile leaves
             const bool at_caster = !aimed && cast.target && cast.self_reachable;
             const bool plain = cast.projectile_due && !cast.branched && !cast.looped && !cast.gathered && !cast.timed && !cast.toggle_off && !is_weapon_combo(row);
             if ((aimed || at_caster) && plain) {
+                // the row of the montage the client named; an index no row names (the client may send any) takes the ability's first row, so that the Firebolt still throws one projectile
+                const ShotCast* shot = nullptr;
                 for (const ShotCast& sc : kShotCasts) {
-                    if (row.name == sc.ability && (sc.animation < 0 || sc.animation == cast.animation_index)) {
-                        plan_shot(cast, sc, t);
+                    if (row.name != sc.ability) continue;
+                    if (!shot) shot = &sc;
+                    if (sc.animation < 0 || sc.animation == cast.animation_index) {
+                        shot = &sc;
                         break;
                     }
                 }
+                if (shot) plan_shot(cast, *shot, t);
             }
             // an ordinary cast that sends several projectiles at its target: each leaves at a notify of its own and lands a flight later (kNoteCasts)
             if (aimed && plain && !cast.shot) plan_notes(cast, t);
@@ -2737,6 +2770,15 @@ void AbilityPipeline::plan_shot(Cast& cast, const ShotCast& shot, double t) {
     cast.flight_pending = true;
     cast.launch_at = t + shot.fire / client_rate(shot.magical);
     cast.projectile_due = cast.launch_at;   // (the launch: the landing, below, is what never comes before the cost step)
+    // an ability with a projectile for each hand (the Firebolt): the montage launches the one of its key, and only that projectile's hits land
+    if (shot.key != 0 && cast.chain_owner == 0) {
+        for (const content::AbilityHitRow& h : cast.def->hits) {
+            if (h.source == "projectile" && h.key == shot.key) {
+                cast.chain_owner = h.owner_guid;
+                break;
+            }
+        }
+    }
     // an ability whose hit fires a bounce (the Throw): the cast's own landing is the hits of the projectile the montage launches, the bounce's come with the projectile it fires
     if (cast.chain_owner != 0) return;
     bool bounces = false;
@@ -2827,10 +2869,11 @@ void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t
     if (!combat_) return;
     // a note leaves with the montage: when another ability's item has taken the pawn's place nothing more leaves (a bounce flies on whatever the pawn plays)
     if (fly.depth == 0 && cast.instance >= 0 && (!item_instance_ || *item_instance_ != cast.instance)) return;
+    const char* what = cast.looped ? "arrow" : (fly.depth == 0 ? "note" : "bounce");   // (a looped cast's shot sends an arrow the same way a burst sends its notes)
     const content::ProjectileRow* p = catalog_->projectile(fly.projectile);
     const combat::TargetInfo info = combat_->inspect(fly.target);
     if (!p || !(p->speed > 0) || !info.exists || !info.alive) {   // (the enemy it flew at is gone, or the projectile has no speed: nothing lands)
-        spdlog::info("[abilities] {}: {} {} finds nobody at its target", cast.def->row.name, fly.depth == 0 ? "note" : "bounce", fly.index);
+        spdlog::info("[abilities] {}: {} {} finds nobody at its target", cast.def->row.name, what, fly.index);
         return;
     }
     // a note flies from the caster's hand to the target's surface, a bounce from the enemy it left to the next one's surface
@@ -2842,9 +2885,9 @@ void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t
     land.index = fly.index;
     land.depth = fly.depth;
     land.due = t + distance / p->speed;
-    if (cast.cost_due) land.due = std::max(land.due, *cast.cost_due);   // (never before the cost step)
+    if (cast.cost_due && !cast.looped) land.due = std::max(land.due, *cast.cost_due);   // (never before the cost step; a looped cast's pending cost is the next shot's, and this arrow's own came before it left)
     cast.missiles.push_back(land);
-    spdlog::info("[abilities] {}: {} {} leaves {:.3f} s after the trigger; the {} is {:.1f} m away: it lands {:.3f} s after it leaves", cast.def->row.name, fly.depth == 0 ? "note" : "bounce", fly.index, t - cast.trigger_at,
+    spdlog::info("[abilities] {}: {} {} leaves {:.3f} s after the trigger; the {} is {:.1f} m away: it lands {:.3f} s after it leaves", cast.def->row.name, what, fly.index, t - cast.trigger_at,
                  fly.depth == 0 ? "target" : "next enemy", distance / 100.0, land.due - t);
 }
 
@@ -2893,6 +2936,7 @@ void AbilityPipeline::bounce_from(AbilityChange& c, Cast& cast, const HitDef& hi
         src.confirm = true;
         src.simulated = false;
         src.autonomous = false;
+        src.source_actor = target;   // (the Source is the enemy just hit: the client spawns the bounce projectile there)
         apply_hit_on_targets(c, *child, {pick}, t, src, cast.def);
         if (!rule->random) cast.bounced.insert(pick);
         Cast::Missile fly;
@@ -2953,10 +2997,22 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     // destroyed, handed in) cannot be paid: the cast is over like any that cannot pay, with no cooldown and no buff (the hit the client asked for goes with the cast's record)
     if (affordable && cast.item_cast && cast.item_cast->consumes && item_taker_) affordable = item_taker_(cast.client_id);
     if (CastRecord* rec = record_of(cast.client_id)) rec->cost_at = t;
+    // the loop ends: the montage moves to the branch's section (an arrow whose notify the montage has not reached by then never leaves)
+    const auto end_shots = [&cast](double now) {
+        cast.branch_due = now + cast.looped->jump * cast.loop_scale;
+        cast.end_due = *cast.branch_due + cast.looped->end * cast.loop_scale;
+        const double jump_at = *cast.branch_due;
+        cast.missiles.erase(std::remove_if(cast.missiles.begin(), cast.missiles.end(), [jump_at](const Cast::Missile& m) { return m.kind == Cast::Missile::Kind::Fly && m.depth == 0 && m.due >= jump_at; }),
+                            cast.missiles.end());
+    };
+    // another ability's item has taken the pawn's place since the loop began: the arrows of the shots after it never leave (launch_note), so the loop ends here and no shot is paid for an arrow that stays behind
+    if (cast.looped && cast.shots > 0 && cast.instance >= 0 && (!item_instance_ || *item_instance_ != cast.instance)) {
+        end_shots(t);
+        return;
+    }
     if (!affordable && cast.looped && cast.shots > 0) {
         // a later shot that cannot be paid is the branch's own trigger: the loop ends, and the missiles in flight still land
-        cast.branch_due = t + cast.looped->jump;
-        cast.end_due = *cast.branch_due + cast.looped->end;
+        end_shots(t);
         return;
     }
     if (!affordable) {
@@ -3024,18 +3080,28 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         }
     }
     if (cast.looped) {
-        // a shot: its missile flies, and the loop goes on while a charge is left and the next shot can be paid (the branch's trigger: no charge left, or less Mana than a shot costs)
+        // a shot: its arrow leaves at the montage's notify of this pass and lands when it gets to the target (a cast at nobody lands kProjectileDelay after the shot), and the loop goes on while a
+        // charge is left and the next shot can be paid (the branch's trigger: no charge left, or less Mana than a shot costs)
         ++cast.shots;
-        if (cast.shot_projectile != 0) cast.missiles.push_back({t + kProjectileDelay, cast.shot_projectile});
+        if (cast.shot_projectile != 0) {
+            const uint64_t aim = cast.target_actors.empty() ? 0 : cast.target_actors.front();
+            if (cast.looped->fire > 0 && aim != 0) {
+                Cast::Missile fly;
+                fly.kind = Cast::Missile::Kind::Fly;
+                fly.due = std::max(t, cast.trigger_at + (cast.looped->fire + (cast.shots - 1) * cast.looped->period) * cast.loop_scale);
+                fly.projectile = cast.shot_projectile;
+                fly.target = aim;
+                fly.index = cast.shots;
+                cast.missiles.push_back(fly);
+            } else {
+                cast.missiles.push_back({t + kProjectileDelay, cast.shot_projectile});
+            }
+        }
         bool more = true;
         if (const auto g = groups_.find(cast.group); g == groups_.end() || g->second.charges < cast.charge_cost) more = false;
         for (const auto& [stat, amount] : cast.stat_costs) more = more && stat_now(stat) >= amount;
-        if (more) {
-            cast.cost_due = t + cast.looped->period;
-        } else {
-            cast.branch_due = t + cast.looped->jump;
-            cast.end_due = *cast.branch_due + cast.looped->end;
-        }
+        if (more) cast.cost_due = t + cast.looped->period * cast.loop_scale;
+        else end_shots(t);
     }
     recompute(c);
     emit({std::move(c), std::nullopt, t, "the cost, cooldown and class resource of " + def.row.name});
@@ -3282,9 +3348,11 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
             src.confirm = true;
             src.simulated = true;
         }
-        if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def);
-        // a hit that fires a bounce when it lands (the Discordance's notes, the Throw): the projectile flies on from this enemy to another near it
-        if (std::string_view(which) == "projectile" && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, h.owner_guid, cast.target_actors.front(), depth, t);
+        bool landed = false;
+        if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+        // a hit that fires a bounce when it lands (the Discordance's notes, the Throw): the projectile flies on from this enemy to another near it. A hit that landed on nobody (the enemy
+        // an earlier note killed) fires none; a hit that killed its enemy did land and does
+        if (landed && std::string_view(which) == "projectile" && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, h.owner_guid, cast.target_actors.front(), depth, t);
         // A projectile flies to its target: its hits land on the actor it reaches, the caster only when the cast aimed at nobody else (Jest on oneself).
         // Mock lists the Quick Wit projectile too (both abilities list both: Mockery and Quick Wit), and its Bard_QuickWit_Apply heal names Self and Ally
         // [R: the retail capture line 295, Mock at another actor: Bard_Mockery_Apply alone is confirmed, no Bard_QuickWit_Apply, no Glee; the user's run of
