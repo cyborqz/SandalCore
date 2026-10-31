@@ -371,7 +371,9 @@ const OpenTemplate* GenericNpcs::prop_template(const content::NpcAssetRow& asset
     bool allowed = false;
     for (const char* folder : kFolders) allowed = allowed || path.rfind(folder, 0) == 0;
     if (!allowed) return fail(Verdict::NotPawn);
-    if (const auto it = made_.find(path); it != made_.end()) return &it->second;
+    // (kept under a key of its own: template_for looks a pawn up by the plain path, so a Blueprint that is a quest object in one place and a pawn in another must not hand the prop's open to the pawn)
+    const std::string key = path + "#prop";
+    if (const auto it = made_.find(key); it != made_.end()) return &it->second;
     // the donor: a recorded quest object with its two blocks (the Sword of Judication's piece when the captures hold it, else the first)
     const OpenTemplate* donor = nullptr;
     for (const OpenTemplate& t : captured_->opens()) {
@@ -386,7 +388,7 @@ const OpenTemplate* GenericNpcs::prop_template(const content::NpcAssetRow& asset
     if (!exported) return fail(Verdict::NoPath);
     t.archetype = *exported;
     ++props_made_;
-    return &made_.emplace(path, std::move(t)).first->second;
+    return &made_.emplace(key, std::move(t)).first->second;
 }
 
 const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, Verdict* why, bool talks) const {

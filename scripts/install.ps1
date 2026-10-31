@@ -130,7 +130,7 @@ if ($CheckOnly) {
 
     Write-Step 3 'the programs'
     $lacking = @($programs | Where-Object { -not (Test-Path -LiteralPath (Join-Path $distDir $_) -PathType Leaf) })
-    if ($lacking.Count -eq 0) { Write-Host ("Built: dist\{0} has {1}." -f $Config, ($programs -join ', ')) }
+    if ($lacking.Count -eq 0) { Write-Host ("Present: dist\{0} has {1} (install.bat rebuilds what changed)." -f $Config, ($programs -join ', ')) }
     else { Write-Host ("Not built yet: dist\{0} lacks {1}." -f $Config, ($lacking -join ', ')) }
 
     $todo = New-Object System.Collections.Generic.List[string]
@@ -143,10 +143,10 @@ if ($CheckOnly) {
     elseif ($wouldRun.Count -gt 0) { Write-Host ("  Game data   {0} step(s) would run: {1}" -f $wouldRun.Count, ($wouldRun -join ', ')) -ForegroundColor Yellow; $todo.Add('make the game data') }
     else { Write-Host '  Game data   up to date' -ForegroundColor Green }
     if ($lacking.Count -gt 0) { Write-Host ("  Programs    not built (dist\{0} lacks {1})" -f $Config, ($lacking -join ', ')) -ForegroundColor Yellow; $todo.Add('build the programs') }
-    else { Write-Host ("  Programs    built (dist\{0})" -f $Config) -ForegroundColor Green }
+    else { Write-Host ("  Programs    present (dist\{0}); install.bat rebuilds what changed" -f $Config) -ForegroundColor Green }
     Write-Host ''
     if ($todo.Count -eq 0) {
-        Write-Host 'Nothing left to do. Next: launch.bat' -ForegroundColor Green
+        Write-Host 'Nothing is missing. After a git pull or a game patch run install.bat again: it rebuilds what changed. Next: launch.bat' -ForegroundColor Green
         exit 0
     }
     Write-Host ("Left to do: {0}. install.bat does all of it." -f ($todo -join ', ')) -ForegroundColor Yellow
@@ -198,12 +198,15 @@ if ($Test) { $buildArgs += '-Test' }
 if ($Jobs -gt 0) { $buildArgs += @('-Jobs', "$Jobs") }
 Invoke-Script 'build.ps1' $buildArgs
 if ($script:rc -ne 0) {
-    Stop-Install 3 'the programs' $script:rc @('The build failed - see the messages above.',
+    Stop-Install 3 'the programs' $script:rc @($(if ($Test) { 'The build or its tests failed - see the messages above (the tests run after the build).' } else { 'The build failed - see the messages above.' }),
         'If a tool is reported missing, run install.bat again in a new window.')
 }
 
 Write-Host ''
-Write-Host ("Install finished in {0}: the tools are in place, the game data is up to date and the programs are built (dist\{1})." -f (Format-Elapsed $clock.Elapsed), $Config) -ForegroundColor Green
+Write-Host ("Install finished in {0}: the build tools are in place, the game data is up to date and the programs are built (dist\{1})." -f (Format-Elapsed $clock.Elapsed), $Config) -ForegroundColor Green
+if (-not $SkipDocker -and -not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host 'Docker Desktop is not installed, so nothing here starts PostgreSQL and NATS: run them yourself, or run install.bat again and accept Docker Desktop.' -ForegroundColor Yellow
+}
 if ($Config -ne 'Release') { Write-Host 'launch.bat starts the Release build; this was a different configuration.' -ForegroundColor Yellow }
 Write-Host 'Next: launch.bat' -ForegroundColor Green
 exit 0

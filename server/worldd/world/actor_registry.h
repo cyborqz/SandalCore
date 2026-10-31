@@ -118,7 +118,7 @@ struct SceneryInfo {
     size_t      payload_bits = 0;    // the field payload as an open sends it
 };
 
-/// What a station (ActorKind::Station) is to the server: which def it shows the window of, which node, plot and building it belongs to (spawns/station_data.h).
+/// What a station (ActorKind::Station) is to the server: which def it shows the window of, which node, plot and building it belongs to (crafting/station.h).
 struct StationInfo {
     std::string name;             // the station Blueprint's leaf ("CraftingStation_Carpentry_T2")
     bool        processing = false;   // a processing station (jobs over time) or a fast-craft one

@@ -157,7 +157,7 @@ void test_weapon_finisher_picks(Fixture& f) {
     CHECK(marker_holds(with_wand, stats::kRefTypeSkill, burning->skill) && marker_holds(with_wand, stats::kRefTypeSkillRank, burning->ranks.front().guid),
           "the wand in hand: the Burning pick is held under the weapon-in-hand marker, as its skill and as its rank");
     CHECK(!marker_holds(rig.book->held_ranks(axe->weapon_line), stats::kRefTypeSkill, burning->skill) && !marker_holds(rig.book->held_ranks(0), stats::kRefTypeSkill, burning->skill) &&
-              !marker_holds(rig.book->held_ranks(), stats::kRefTypeSkill, burning->skill),
+              !marker_holds(rig.book->held_ranks(0), stats::kRefTypeSkill, burning->skill),
           "...not with the axe in hand, with none in hand, nor when the caller names no weapon");
     size_t under_marker = 0, in_wand_tree = 0;
     bool in_tree = false;
@@ -3183,4 +3183,41 @@ void test_humanoids_walk_up_on_the_real_ground(Fixture& f) {
         }
         CHECKF(runs >= 1, "the %s has a real spot 20 m from its camp that it can walk to (%zu found)", name.c_str(), runs);
     }
+}
+
+// The creature tables are read strictly: a number that is not finite (nan, inf) and a flag that is neither 0 nor 1 fail the load.  They used to be read as a number (a NaN length froze a creature, an
+// infinite angle looped) or as a plain 0 without a word.
+void test_creature_tables_are_read_strictly() {
+    std::printf("the creature tables: a good row loads; a NaN or an infinite number and a flag that is neither 0 nor 1 fail the load\n");
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path() / "aoc_creature_tables_strict";
+    fs::create_directories(dir, ec);
+    const std::string abilities_header =
+        "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
+    const std::string montages_header = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires";
+    const std::string targeting_header =
+        "ability\tkey\tdistance\tmin_distance\tangle\tangle_center\tcone_check\tfreeze\tfreeze_distance\tfreeze_scale\tignore_non_target\tdiscovery\tcheck_validity\tlos_check\tdistance_center\tvolumes\tshapes";
+    const auto write = [&](const char* name, const std::string& header, const std::string& row) {
+        std::ofstream out(dir / name, std::ios::binary);
+        out << header << "\n";
+        if (!row.empty()) out << row << "\n";
+        return (dir / name).string();
+    };
+    const std::string montages = write("montages.tsv", montages_header, "");
+    const std::string targeting = write("targeting.tsv", targeting_header, "");
+    // archetype, ability, task, cooldown, stop_movement, order, min_distance, max_distance, max_angle, gates, unknown, fight, conds, why, starts, rotate, arrival
+    const auto ability_row = [](const char* cooldown, const char* stop, const char* max_distance, const char* fight) {
+        return std::string("Wolf\t7\tBite\t") + cooldown + "\t" + stop + "\t0\t0\t" + max_distance + "\t180\t\t0\t" + fight + "\t\t\t\t\t0";
+    };
+    const auto loads = [&](const std::string& row) {
+        combat::NpcAbilityData tables;
+        std::string err;
+        return tables.load(write("abilities.tsv", abilities_header, row), montages, targeting, err);
+    };
+    CHECK(loads(ability_row("2.5", "1", "300", "1")), "a good row loads");
+    CHECK(!loads(ability_row("nan", "1", "300", "1")), "a NaN cooldown fails the load");
+    CHECK(!loads(ability_row("2.5", "1", "inf", "1")), "an infinite reach fails the load");
+    CHECK(!loads(ability_row("2.5", "2", "300", "1")) && !loads(ability_row("2.5", "1", "300", "yes")), "a flag that is neither 0 nor 1 fails the load");
+    fs::remove_all(dir, ec);
 }

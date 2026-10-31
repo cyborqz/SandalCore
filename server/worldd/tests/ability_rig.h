@@ -252,7 +252,7 @@ struct Rig {
             if (!placed) loose.push_back({{stats::kRefTypeSkillTree, class_tree_guid(class_enum)}, {stats::kRefTypeSkill, guid}});
         }
         for (const auto& [tree, ranks] : bought) book->load(tree, ranks);
-        std::vector<stats::SkillRank> ranks = book->held_ranks();
+        std::vector<stats::SkillRank> ranks = book->held_ranks(0);
         ranks.insert(ranks.end(), loose.begin(), loose.end());
         cs.emplace(*ctx->bundle, *ctx->gear, class_enum, level, ctx->rounding);
         base_ranks = ranks;

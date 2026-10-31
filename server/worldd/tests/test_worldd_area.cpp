@@ -322,6 +322,16 @@ static void test_population(const content::ContentDb& db, const spawns::Captured
     }
     spawns::GenericNpcs generic(captured, &table, spawns::GenericConfig{});
     CHECK(!generic.donor().empty(), "a plain creature's open the captures hold is the donor of the generic NPCs (the Wolf's)");
+    {   // a quest object made as a prop has a key of its own: the same Blueprint asked for as a pawn does not get the prop's open
+        content::NpcAssetRow quest_object;
+        quest_object.guid = 9000001;
+        quest_object.archetype_path = "/Game/DesignAssets/Interactables/Quest/CSQ_INT_BacklogCheck.CSQ_INT_BacklogCheck_C";
+        spawns::Verdict v_prop = spawns::Verdict::Generic, v_pawn = spawns::Verdict::Generic;
+        const spawns::OpenTemplate* as_prop = generic.prop_template(quest_object, &v_prop);
+        const spawns::OpenTemplate* as_pawn = generic.template_for(quest_object, &v_pawn);
+        CHECK(as_prop && as_prop->category == "prop", "a quest object's Blueprint is made as a prop from a recorded quest object");
+        CHECK(as_prop && (!as_pawn || as_pawn != as_prop), "the same Blueprint asked for as a pawn does not get the prop's open (the prop is kept under its own key)");
+    }
     spawns::PopulationStats gs;
     const auto all = spawns::select_data_spawns(*data, spawns::TemplateSource{&captured, &generic}, area, gs);
     CHECK(gs.points_in_area + gs.area_points == gs.spawned + gs.blacklisted + gs.no_asset + gs.no_template, "with the generic NPCs every point is still counted once");

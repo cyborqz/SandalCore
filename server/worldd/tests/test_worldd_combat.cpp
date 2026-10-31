@@ -28,6 +28,8 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <set>
 
 #ifndef NPC_MOTION_PATH
@@ -295,6 +297,7 @@ int main() {
     test_creature_parameter_and_health_gates(f);
     test_creature_roll_gate(f);
     test_hit_area_rules();
+    test_creature_tables_are_read_strictly();
     test_bite_lands_wherever_the_player_stands(f);
     test_fury_lands_only_inside_its_cone(f);
     test_lunge_pauses_at_the_player(f);

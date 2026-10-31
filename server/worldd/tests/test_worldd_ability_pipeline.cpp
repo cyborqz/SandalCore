@@ -917,7 +917,7 @@ void test_held_ranks() {
     Rig bard(2, 25, kTalents);
     CHECKF(bard.ok(), "the rig: %s", bard.problem.c_str());
     if (!bard.ok()) return;
-    const std::vector<stats::SkillRank> held = bard.book->held_ranks();
+    const std::vector<stats::SkillRank> held = bard.book->held_ranks(0);
     const int64_t tree = bard.book->class_tree()->guid;
     // a formula names a held skill (160 of the 171 that ask GetSkillPurchased) or one rank of it (11, a talent's upgrade): both are held, for every listed rank
     size_t skills = 0, ranks = 0;
@@ -966,7 +966,7 @@ void test_held_ranks() {
         CHECKF(mage.ok(), "the Mage rig with the upgrade: %s", mage.problem.c_str());
         if (mage.ok()) {
             CHECK(eval_expr(mage, expr_by_text(mage.path, "GetSkillPurchased(GetInstigator(), $#297887639323616934:107281647359609$, $#4847957796014348780:6064631986549818361$)")) == 1.0, "...and true once the rank is bought (it could never be true: the join held skills only)");
-            CHECK(holds(mage.book->held_ranks(), stats::kRefTypeSkillTree, 107281647359609ll, stats::kRefTypeSkillRank, 6064631986549818361ll), "held_ranks() lists the rank-typed reference of the bought rank");
+            CHECK(holds(mage.book->held_ranks(0), stats::kRefTypeSkillTree, 107281647359609ll, stats::kRefTypeSkillRank, 6064631986549818361ll), "held_ranks() lists the rank-typed reference of the bought rank");
         }
     }
 }

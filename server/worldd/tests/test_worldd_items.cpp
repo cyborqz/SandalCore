@@ -681,7 +681,7 @@ static void test_retail_equips() {
     }
     std::printf("    %zu retail events compared\n", events_checked);
     CHECK(events_checked > 80, "more than eighty retail events compared");
-    (void)record_of;
+    (void)&record_of;
 }
 
 // ---- the storage RPCs against the captures --------------------------------------------------------------------------------------

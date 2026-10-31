@@ -213,6 +213,11 @@ if (-not $missing.Count) {
 
 # ---------------------------------------------------------------- install
 if (-not $script:winget) {
+    # Docker only runs the servers (PostgreSQL and NATS): when it is the one thing missing, the build can go on without it
+    if ($missing.Count -eq 1 -and $missing[0] -eq 'Docker') {
+        Write-Host 'Docker Desktop is missing and winget is not here to install it, so the install goes on without it. Run PostgreSQL and NATS yourself, or install Docker Desktop and run this again. -SkipDocker leaves this note out.' -ForegroundColor Yellow
+        exit 0
+    }
     Write-Warning 'winget is missing. Install "App Installer" from the Microsoft Store, then run this script again.'
     exit 1
 }

@@ -18,7 +18,7 @@
 //            radius from it, or when the table is empty (every attacker died or left).
 //    reset   it walks home at a run, its threat is cleared, and when it is there stage 2's behaviour takes it back (the CombatWorld heals it to full).
 //
-//  [modelled: no capture shows an aggro by proximity, a leash or a reset (research/combat 6 and 9); the numbers are the data's where it has them (a creature's
+//  [modelled: no capture shows an aggro by proximity, a leash or a reset; the numbers are the data's where it has them (a creature's
 //  intelligence settings from its Blueprint, tools/npcabilities; the asset's AggroRadius with its override flag: 500 to 2,500 cm; LeashRadius is 0 for every NPC type of
 //  the area) and kDefault... where it does not.]
 // ============================================================================

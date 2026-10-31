@@ -97,6 +97,9 @@ inline double rarity_step_chance(const content::ArtisanData& a, const Ratings& r
 /// The whole quality an exact number becomes, at the very last step: the nearest whole number, a half up (9.98 is 10, 9.4 is 9, 9.5 is 10).  An item's quality is a whole number on the client (the
 /// FItemInstance NetSerialize carries it as a packed int32), so this is where the exact number ends; nothing before it is rounded: not a piece's share of its rarity band and not the rating's
 /// bonus (the community crafting calculator cuts both off; the server carries them exactly, 6 and 3.98 is 9.98 until here).  The one place that converts.
-inline int quality_from(double v) { return static_cast<int>(std::floor(v + 0.5 + 1e-9)); }
+inline int quality_from(double v) {
+    if (std::isnan(v)) return 0;   // (the lowest quality; every caller cuts the result to 1 and up)
+    return static_cast<int>(std::floor(std::clamp(v, -1.0e9, 1.0e9) + 0.5 + 1e-9));   // (an enormous number is cut off, not an undefined conversion)
+}
 
 }  // namespace aoc::worldd::crafting

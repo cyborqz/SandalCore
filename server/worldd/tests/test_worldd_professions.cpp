@@ -677,6 +677,8 @@ static void test_artisan(const content::ContentDb& db, const PlayerWorld& world)
           "a share of the band is exact, whole number of qualities or not (half way up Common 1 to 5 is 3, 0.6 of the way 3.4), and every product has it: a piece of gear and a stackable one");
     CHECK(cr::quality_from(9.98) == 10 && cr::quality_from(9.4) == 9 && cr::quality_from(9.5) == 10 && cr::quality_from(4.979) == 5 && cr::quality_from(8.5347) == 9 && cr::quality_from(0.2) == 0,
           "the whole quality is the nearest whole number to the exact one, a half up (9.98 is 10, 9.4 is 9)");
+    CHECK(cr::quality_from(std::nan("")) == 0 && cr::quality_from(1.0e300) == 1000000000 && cr::quality_from(-1.0e300) == -1000000000,
+          "a NaN rating is quality 0 and an enormous one is cut off, neither is an undefined conversion");
     // the slot is what a quality is averaged over, not the record: one slot paid with two records is one slot
     const std::vector<cr::PaidUnits> two_records = {{1, 1, 37, 0}, {1, 6, 37, 1}, {2, 1, 25, 0}}, two_slots = {{1, 1, 37, 0}, {2, 6, 37, 1}, {3, 1, 25, 0}};
     CHECK(std::fabs(cr::craft_mean_rarity(two_records) - 0.25) < 1e-9 && std::fabs(cr::craft_mean_rarity(two_slots) - 1.0 / 3.0) < 1e-9,

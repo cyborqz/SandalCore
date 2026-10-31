@@ -41,6 +41,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace aoc::worldd::combat {
@@ -278,12 +279,11 @@ public:
                 return bad(abilities_path, r[0], error);
             }
             a.task = r[2];
-            a.stop_movement = r[4] == "1";
+            if (!flag(r[4], a.stop_movement)) return bad(abilities_path, r[0], error);
             for (std::string& g : split(r[9], ';')) {
                 if (!g.empty()) a.gates.push_back(std::move(g));
             }
-            a.unknown = r[10] == "1";
-            a.fight = r[11] == "1";
+            if (!flag(r[10], a.unknown) || !flag(r[11], a.fight)) return bad(abilities_path, r[0], error);
             a.why = r[13];
             for (const std::string& st : split(r[14], ';')) {
                 if (st.empty()) continue;
@@ -319,7 +319,7 @@ public:
             MontageData m;
             m.path = r[0];
             m.package = r[2];
-            m.root_unreadable = r[9] == "1";
+            if (!flag(r[9], m.root_unreadable)) return bad(montages_path, r[0], error);
             if (!r[10].empty() && (!number(r[10], m.anim_end) || !(m.anim_end >= 0))) return bad(montages_path, r[0], error);
             if (!number(r[1], m.guid) || !number(r[3], m.package_guid) || !number(r[4], m.length) || !number(r[5], m.rate_scale)) return bad(montages_path, r[0], error);
             for (const std::string& h : split(r[7], ';')) {
@@ -363,9 +363,9 @@ public:
                 !number(r[15], area.volume_count)) {
                 return bad(targeting_path, r[0], error);
             }
-            area.cone_check = r[6] == "1";
+            if (!flag(r[6], area.cone_check)) return bad(targeting_path, r[0], error);
             rule.kind = r[7] == "stop" ? RootMotionFreezeRule::Kind::Stop : r[7] == "pause" ? RootMotionFreezeRule::Kind::Pause : RootMotionFreezeRule::Kind::None;
-            rule.ignore_non_target = r[10] == "1";
+            if (!flag(r[10], rule.ignore_non_target)) return bad(targeting_path, r[0], error);
             static const std::map<std::string, BiteArea::Discovery> discoveries = {{"none", BiteArea::Discovery::None},
                                                                                    {"prefers_active", BiteArea::Discovery::PrefersActive},
                                                                                    {"only_locked", BiteArea::Discovery::OnlyLocked},
@@ -586,7 +586,15 @@ private:
     static bool number(const std::string& s, T& out) {
         if (s.empty()) return false;
         const auto r = std::from_chars(s.data(), s.data() + s.size(), out);
-        return r.ec == std::errc() && r.ptr == s.data() + s.size();
+        if (r.ec != std::errc() || r.ptr != s.data() + s.size()) return false;
+        if constexpr (std::is_floating_point_v<T>) return std::isfinite(out);   // (from_chars reads "nan" and "inf": a NaN length froze a creature and an infinite angle looped)
+        return true;
+    }
+    /// A flag column is exactly "0" or "1"; anything else is a table this build does not read, not a silent 0.
+    static bool flag(const std::string& s, bool& out) {
+        if (s != "0" && s != "1") return false;
+        out = s == "1";
+        return true;
     }
     static bool read_table(const std::string& path, std::string_view header, std::vector<std::vector<std::string>>& rows, std::string& error) {
         rows.clear();
