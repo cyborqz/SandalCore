@@ -125,6 +125,195 @@ void test_player_cast(Fixture& f) {
 }
 // built with C_Y_B and CoA
 
+// The weapon talents ask GetSkillPurchased about "the tree of the weapon in hand": the Book answers it from the weapon line in hand (held_ranks).  The finisher picks of that tree fire their
+// reactions at its finishing hit (the wand's Burning at the beam's end), and not after the weapon in hand changed or without the pick; the damage talents of the tree count for its hits.
+void test_weapon_finisher_picks(Fixture& f) {
+    std::printf("the weapon talents see the weapon in hand: a finisher pick fires its reaction at that weapon's finishing hit\n");
+    Rig rig(4, 25, {});
+    CHECKF(rig.ok(), "the rig: %s", rig.problem.c_str());
+    if (!rig.ok()) return;
+    const talents::Tree* wand = rig.talent_catalog->tree_named("Weapon_Ranged_Wand");
+    const talents::Tree* axe = rig.talent_catalog->tree_named("Weapon_1H_Axe");
+    CHECK(wand && axe && wand->weapon_line != 0 && axe->weapon_line != 0 && wand->weapon_line != axe->weapon_line, "the wand's and the 1H axe's weapon trees, each with a line of its own");
+    if (!wand || !axe) return;
+    const auto node_of = [](const talents::Tree& tree, const char* skill) -> const talents::Node* {
+        for (const talents::Node& n : tree.nodes)
+            if (n.skill_name == skill && !n.ranks.empty()) return &n;
+        return nullptr;
+    };
+    const talents::Node* burning = node_of(*wand, "Weapon_Finisher_Burning");
+    const talents::Node* bleed = node_of(*axe, "Weapon_Finisher_Bleed");
+    CHECK(burning && bleed, "the wand's Burning pick and the axe's Bleed pick");
+    if (!burning || !bleed) return;
+    const auto marker_holds = [](const std::vector<stats::SkillRank>& held, uint64_t type, int64_t guid) {
+        for (const stats::SkillRank& s : held)
+            if (s.cls == stats::kWeaponTreeRef && s.skill.type_id == type && s.skill.guid == guid) return true;
+        return false;
+    };
+
+    // the Book: with the wand's pick bought, the marker holds it while the wand is in hand and only then
+    rig.book->load(wand->guid, {burning->ranks.front().guid});
+    const auto with_wand = rig.book->held_ranks(wand->weapon_line);
+    CHECK(marker_holds(with_wand, stats::kRefTypeSkill, burning->skill) && marker_holds(with_wand, stats::kRefTypeSkillRank, burning->ranks.front().guid),
+          "the wand in hand: the Burning pick is held under the weapon-in-hand marker, as its skill and as its rank");
+    CHECK(!marker_holds(rig.book->held_ranks(axe->weapon_line), stats::kRefTypeSkill, burning->skill) && !marker_holds(rig.book->held_ranks(0), stats::kRefTypeSkill, burning->skill) &&
+              !marker_holds(rig.book->held_ranks(), stats::kRefTypeSkill, burning->skill),
+          "...not with the axe in hand, with none in hand, nor when the caller names no weapon");
+    size_t under_marker = 0, in_wand_tree = 0;
+    bool in_tree = false;
+    for (const stats::SkillRank& s : with_wand) {
+        under_marker += s.cls == stats::kWeaponTreeRef ? 1 : 0;
+        in_wand_tree += s.cls.type_id == stats::kRefTypeSkillTree && s.cls.guid == wand->guid ? 1 : 0;
+        in_tree = in_tree || (s.cls.type_id == stats::kRefTypeSkillTree && s.cls.guid == wand->guid && s.skill.type_id == stats::kRefTypeSkill && s.skill.guid == burning->skill);
+    }
+    CHECKF(under_marker == in_wand_tree && under_marker > 0, "the marker holds exactly what the wand's tree holds (%zu of %zu)", under_marker, in_wand_tree);
+    CHECK(in_tree, "(the pick is still held under its own tree, as before)");
+
+    // the world: a Wolf 6 m away, the wand's and the axe's combos known
+    combat_rig::World w;
+    if (!w.problem.empty()) return;
+    const std::string wolf_path = wolf_archetype(f);
+    combat::NpcStatBook book(*f.ctx->bundle, *f.ctx->gear);
+    combat::CombatWorld world(w.registry, w.npcs.get(), &navfix::shared_nav(), *f.data, *f.catalog, book, f.motion);
+    const uint64_t wolf = w.spawn(wolf_path, 600, 0, 8, 100);
+    combat_rig::FakePlayer player(rig, 77, {0, 0, 1098});
+    world.add_player(&player);
+    combat::WorldHitPort port(world, w.registry, player.fighter());
+    rig.pipe->set_combat(&port);
+    rig.know({"WeaponCombo_Ranged_Wand", "WeaponCombo_Melee_1H_Axe"});
+    const abilities::AbilityDef* wand_combo = f.catalog->ability_named("WeaponCombo_Ranged_Wand");
+    const abilities::AbilityDef* axe_combo = f.catalog->ability_named("WeaponCombo_Melee_1H_Axe");
+    const abilities::HitDef* beam_end = f.catalog->hit_named("Weapon_Wand_Beam_ComboEnd_Hit");
+    const abilities::HitDef* axe_finisher = f.catalog->hit_named("WeaponCombo_Axe_1H_Hit4+");
+    const abilities::HitDef* burning_hit = f.catalog->hit_named("Weapon_Finisher_Burning");
+    const abilities::HitDef* bleeding_hit = f.catalog->hit_named("Weapon_Finisher_Bleeding");
+    CHECK(wolf != 0 && wand_combo && axe_combo && beam_end && axe_finisher && burning_hit && bleeding_hit, "a Wolf, the two combos, their finishing hits and the two reactions' hits");
+    if (!wolf || !wand_combo || !axe_combo || !beam_end || !axe_finisher || !burning_hit || !bleeding_hit) return;
+    const auto targeting_of = [](const abilities::AbilityDef& def, const abilities::HitDef& hit) {
+        int64_t targeting = content::kTargetingDefaultSelf;
+        for (const content::AbilityHitRow& h : def.hits) {
+            if (h.hit_guid != hit.row.guid || h.source != "hit") continue;
+            for (const content::TargetingRow& tg : def.targetings)
+                if (tg.key == h.key) targeting = tg.guid;
+        }
+        return targeting;
+    };
+
+    // what the character holds, as the session hands it over: the ranks with the line in hand, and the effects (carriers) of the ranks of that line's tree
+    const auto hold = [&](int64_t ranks_line, int64_t carriers_line) {
+        rig.cs->set_passives(rig.book->passives(carriers_line));
+        rig.cs->set_ranks(rig.book->held_ranks(ranks_line));
+        rig.pipe->set_reaction_carriers(rig.book->reaction_carriers(carriers_line));
+        rig.pipe->refresh(rig.clock, "the weapon in hand", true);
+        rig.take();
+    };
+    // One finishing hit of `combo` at the Wolf (the cast, then the client's request for the hit, 0.8 s later as the beam's end comes): how many times the reaction's hit was confirmed, and what the
+    // finishing hit did to the Wolf (the formula's value and the roll's flags).
+    struct Finish {
+        int    reacted = 0;
+        double value = 0;
+        int    flags = -1;
+    };
+    double t = 100.0;
+    int32_t id = 500;
+    const auto finish = [&](const abilities::AbilityDef& combo, int anim, const abilities::HitDef& hit, const abilities::HitDef& reaction_hit, bool check = true) {
+        Finish out;
+        t += 5.0;
+        TriggerInfo info;
+        info.animation_index = anim;
+        info.target_count = 1;
+        info.target_actors = {wolf};
+        const Refusal refusal = rig.pipe->trigger(combo.row.guid, id++, t, info);
+        if (check) CHECKF(refusal == Refusal::None, "%s is accepted (%d)", combo.row.name.c_str(), static_cast<int>(refusal));
+        rig.run_to(t + 0.4);
+        const auto verdict = rig.pipe->hit_request(combo.row.guid, targeting_of(combo, hit), hit.row.guid, 1, 0, t + 0.8, {wolf});
+        if (check) CHECKF(verdict == AbilityPipeline::HitVerdict::Scheduled, "the request for %s is scheduled", hit.row.name.c_str());
+        int landed = 0;
+        for (const Seen& s : rig.run_to(t + 1.6)) {
+            for (const bootstrap::HitConfirm& c : s.confirmations) {
+                if (c.record_guid == hit.row.guid && c.source_type == content::kSourceTypeAbility) {
+                    ++landed;
+                    if (!c.targets.empty()) {
+                        out.flags = c.targets[0].flags;
+                        out.value = c.targets[0].mods.empty() ? 0.0 : c.targets[0].mods[0].value;
+                    }
+                }
+                out.reacted += c.record_guid == reaction_hit.row.guid && c.source_type == content::kSourceTypeReaction ? 1 : 0;
+            }
+        }
+        if (check) CHECKF(landed == 1, "%s landed once (%d)", hit.row.name.c_str(), landed);
+        return out;
+    };
+
+    // the wand in hand with the Burning pick: the reaction fires at every beam's end (no chance, no limit in its data)
+    hold(wand->weapon_line, wand->weapon_line);
+    const size_t fired0 = rig.pipe->reactions_fired();
+    int burns = 0;
+    for (int i = 0; i < 3; ++i) burns += finish(*wand_combo, 4, *beam_end, *burning_hit).reacted;
+    CHECKF(burns == 3 && rig.pipe->reactions_fired() == fired0 + 3, "the wand in hand with the Burning pick: Weapon_Finisher_Burning fires at each of 3 beam ends (%d confirmed, %zu reactions)", burns, rig.pipe->reactions_fired() - fired0);
+
+    // the weapon in hand changes while the pick's effect is still carried (only the answer to the marker differs): the reaction does not fire
+    hold(axe->weapon_line, wand->weapon_line);
+    const size_t fired1 = rig.pipe->reactions_fired();
+    const int after_swap = finish(*wand_combo, 4, *beam_end, *burning_hit).reacted;
+    CHECKF(after_swap == 0 && rig.pipe->reactions_fired() == fired1, "...the same beam end with the axe's line in hand: nothing fires (%d)", after_swap);
+    hold(0, wand->weapon_line);
+    const size_t fired2 = rig.pipe->reactions_fired();
+    const int none_in_hand = finish(*wand_combo, 4, *beam_end, *burning_hit).reacted;
+    CHECKF(none_in_hand == 0 && rig.pipe->reactions_fired() == fired2, "...and with no weapon in hand: nothing fires (%d)", none_in_hand);
+    hold(wand->weapon_line, wand->weapon_line);
+    const size_t fired3 = rig.pipe->reactions_fired();
+    CHECK(finish(*wand_combo, 4, *beam_end, *burning_hit).reacted == 1 && rig.pipe->reactions_fired() == fired3 + 1, "...back to the wand: it fires again");
+
+    // the pick gone (refunded): the wand in hand, the same beam end: nothing fires
+    rig.book->load(wand->guid, {});
+    hold(wand->weapon_line, wand->weapon_line);
+    const size_t fired4 = rig.pipe->reactions_fired();
+    const int no_pick = finish(*wand_combo, 4, *beam_end, *burning_hit).reacted;
+    CHECKF(no_pick == 0 && rig.pipe->reactions_fired() == fired4, "without the pick: nothing fires (%d)", no_pick);
+
+    // another weapon's pick: the axe's Bleed fires its reaction at the 1H axe's proc'd finishing hit, with the axe in hand
+    rig.book->load(axe->guid, {bleed->ranks.front().guid});
+    hold(axe->weapon_line, axe->weapon_line);
+    const size_t fired5 = rig.pipe->reactions_fired();
+    const Finish plain = finish(*axe_combo, 0, *axe_finisher, *bleeding_hit);
+    const size_t with_pick = rig.pipe->reactions_fired() - fired5;
+    CHECKF(plain.reacted == 1, "the axe in hand with the Bleed pick: Weapon_Finisher_Bleeding fires at the proc'd finishing hit (%d confirmed)", plain.reacted);
+    hold(wand->weapon_line, axe->weapon_line);
+    const size_t fired6 = rig.pipe->reactions_fired();
+    const int bleeds_wand = finish(*axe_combo, 0, *axe_finisher, *bleeding_hit).reacted;
+    const size_t without = rig.pipe->reactions_fired() - fired6;
+    CHECKF(bleeds_wand == 0 && with_pick == without + 1, "...but not with the wand's line in hand (%d confirmed; %zu reactions against %zu: the Fighter's own reactions fire either way)", bleeds_wand, without, with_pick);
+
+    // the damage talents of the tree read the same marker: Damage Focus (+1 % each) and Finisher Damage (+3 % each), three ranks of each, raise the axe's finishing hit by 12 % while the axe is in
+    // hand (a hit that was not missed, blocked or critical; the same hit twice, the formula's value is the same but for the talents)
+    const auto plain_hit = [&](int64_t ranks_line, int64_t carriers_line) {
+        hold(ranks_line, carriers_line);
+        Finish r;
+        for (int tries = 0; tries < 12; ++tries) {
+            r = finish(*axe_combo, 0, *axe_finisher, *bleeding_hit, false);
+            if (r.flags == 0 && r.value != 0.0) break;
+        }
+        CHECKF(r.flags == 0 && r.value != 0.0, "a hit that was not missed, blocked or critical within 12 tries (flags %d)", r.flags);
+        return r;
+    };
+    const Finish base = plain_hit(axe->weapon_line, axe->weapon_line);
+    std::vector<int64_t> bought = {bleed->ranks.front().guid};
+    for (const char* skill : {"Weapon_Passive_DamageFocus_1", "Weapon_Passive_DamageFocus_2", "Weapon_Passive_DamageFocus_3", "Weapon_Passive_Finisher_Damage_1", "Weapon_Passive_Finisher_Damage_2",
+                              "Weapon_Passive_Finisher_Damage_3"}) {
+        const talents::Node* n = node_of(*axe, skill);
+        if (n) bought.push_back(n->ranks.front().guid);
+    }
+    CHECKF(bought.size() == 7, "the axe tree has the six damage talents (%zu bought)", bought.size());
+    rig.book->load(axe->guid, bought);
+    const Finish boosted = plain_hit(axe->weapon_line, axe->weapon_line);
+    CHECKF(base.value != 0.0 && boosted.value != 0.0 && near(boosted.value / base.value, 1.12, 1e-3), "the axe's finishing hit with the six damage talents deals 12 %% more (%.3f over %.3f = %.4f)", boosted.value, base.value,
+           base.value != 0.0 ? boosted.value / base.value : 0.0);
+    const Finish elsewhere = plain_hit(wand->weapon_line, axe->weapon_line);
+    CHECKF(elsewhere.value != 0.0 && near(elsewhere.value / base.value, 1.0, 1e-3), "...and the same as without them while the wand's line is in hand (%.4f)", base.value != 0.0 ? elsewhere.value / base.value : 0.0);
+    CHECK(rig.pawn.broken.empty(), "(the pawn took every change)");
+}
+
 void test_npc_hits_player(Fixture& f) {
     std::printf("an NPC's hit on the player: Health through the shields, the confirmation\n");
     Rig rig(4, 20, {});

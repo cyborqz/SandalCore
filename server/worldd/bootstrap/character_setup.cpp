@@ -1071,7 +1071,7 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
         // (plan D2: through the effect state, the one path for every stat mod; the ranks held are what GetSkillPurchased reads)
         if (out.book) {
             character_stats.set_passives(out.book->passives(out.wielded_line));
-            character_stats.set_ranks(out.book->held_ranks());
+            character_stats.set_ranks(out.book->held_ranks(out.wielded_line));
         } else {
             character_stats.set_passives(rank_effects_of(granted));
         }

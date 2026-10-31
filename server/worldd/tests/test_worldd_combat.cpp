@@ -285,6 +285,7 @@ int main() {
     test_fight(f);
     test_hostile(f);
     test_player_cast(f);
+    test_weapon_finisher_picks(f);
     test_npc_hits_player(f);
     test_npc_damage_mult(f);
     test_fallback_attack(f);

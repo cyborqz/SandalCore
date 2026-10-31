@@ -301,13 +301,19 @@ std::vector<stats::ActiveEffect> Book::passives(int64_t wielded_line) const {
     return out;
 }
 
-std::vector<stats::SkillRank> Book::held_ranks() const {
+std::vector<stats::SkillRank> Book::held_ranks(int64_t wielded_line) const {
     std::vector<stats::SkillRank> out;
     for (const Tree* t : listed_trees()) {
+        // the tree of the weapon in hand answers to the marker GetCurrentWeaponSkilltree gives (the weapon talents' triggers ask about it)
+        const bool in_hand = wielded_line != 0 && t->kind == Kind::Weapon && t->weapon_line == wielded_line;
         for (const RankRef& r : listed(*t)) {
             // a formula names a held skill (GetSkillPurchased(tree, skill): most of them) or one rank of it (a talent's upgrade): both are held
             out.push_back({{stats::kRefTypeSkillTree, t->guid}, {stats::kRefTypeSkill, r.node->skill}});
             out.push_back({{stats::kRefTypeSkillTree, t->guid}, {stats::kRefTypeSkillRank, r.rank->guid}});
+            if (in_hand) {
+                out.push_back({stats::kWeaponTreeRef, {stats::kRefTypeSkill, r.node->skill}});
+                out.push_back({stats::kWeaponTreeRef, {stats::kRefTypeSkillRank, r.rank->guid}});
+            }
         }
     }
     return out;

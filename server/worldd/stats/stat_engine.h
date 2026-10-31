@@ -77,6 +77,9 @@ inline constexpr uint64_t kRefTypeEffect = 3377240744094973029ull;
 inline constexpr uint64_t kRefTypeSkillTree = 297887639323616934ull;
 inline constexpr uint64_t kRefTypeSkill = 4146438674247114715ull;
 inline constexpr uint64_t kRefTypeSkillRank = 4847957796014348780ull;
+// What GetCurrentWeaponSkilltree gives is no record but a marker (type 0, guid -1): GetSkillPurchased of it asks about the skill tree of the weapon in hand. The host answers it by holding the
+// skills of that tree under the marker too (talents::Book::held_ranks).
+inline constexpr RecordRef kWeaponTreeRef{0, -1};
 // C-O-A - C-Y-B
 
 struct ActiveEffect {

@@ -2558,7 +2558,7 @@ void PlayerSession::sync_ability_values() {
 void PlayerSession::refresh_rank_mods() {
     if (stats_ && book_) {
         stats_->set_passives(book_->passives(wielded_line_));
-        stats_->set_ranks(book_->held_ranks());
+        stats_->set_ranks(book_->held_ranks(wielded_line_));
     }
     if (pipeline_ && book_) pipeline_->set_reaction_carriers(book_->reaction_carriers(wielded_line_));   // the reactions the ranks' effects carry
     sync_ability_values();   // (the ranks changed what the formulas give Sprint's speed)

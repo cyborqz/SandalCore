@@ -227,8 +227,10 @@ public:
     /// work while it is on the character (the pipeline's carriers).
     std::vector<int64_t> reaction_carriers(int64_t wielded_line) const;
     /// Every skill the character holds, as GetSkillPurchased reads them (the tree and the skill): the listed ranks of every tree it has, the
-    /// auto-granted ranks of its level and the bought ones, whichever weapon is in hand.
-    std::vector<stats::SkillRank> held_ranks() const;
+    /// auto-granted ranks of its level and the bought ones, whichever weapon is in hand.  The weapon talents ask about "the tree of the weapon in hand"
+    /// (stats::kWeaponTreeRef, which the client never names): the skills and ranks of the weapon tree of the line `wielded_line` (0: no weapon in hand)
+    /// are held under that marker as well, so the answer follows the weapon in hand.
+    std::vector<stats::SkillRank> held_ranks(int64_t wielded_line = 0) const;
 
     /// What is left of each point type in a tree: earned by the character's level minus what the bought ranks cost.
     int64_t points_left(const Tree& tree, int64_t point_type) const;
