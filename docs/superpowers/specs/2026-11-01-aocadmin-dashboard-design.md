@@ -117,6 +117,19 @@ dashboard sets it again after a reconnect.
 ### 5.2 The four new RPCs
 
 ```proto
+service WorldAdminService {
+  // The bundle's stats with the player's current values, and the GM override on
+  // each. The catalog is the whole bundle, so the dashboard shows every stat the
+  // game has.
+  rpc GetPlayerStats(GetPlayerStatsRequest) returns (GetPlayerStatsResponse);
+  // The GM's stat mods on a player, replacing the ones already there.
+  rpc SetStatMods(SetStatModsRequest) returns (SetStatModsResponse);
+  // The GM's stat mods on a player are removed.
+  rpc ClearStatMods(ClearStatModsRequest) returns (ClearStatModsResponse);
+  // The current value of a stat the player holds (Health, Mana, Stamina).
+  rpc SetCurrentStat(SetCurrentStatRequest) returns (SetCurrentStatResponse);
+}
+
 // One stat of the bundle, with the player's current value.
 message StatInfo {
   int64  guid    = 1;   // the stat's guid in the bundle
