@@ -193,8 +193,8 @@ constexpr int64_t kStatPhysicalSpeed = 109343399171808ll;
 
 // Ordinary casts (no cast bar) whose montage launches ONE projectile (see ShotCast, plan_shot): the hit lands when the projectile gets to the target, which is its launch plus the target's distance over the
 // record's speed, not the recordings' median for the distance of the stage they were recorded on (the Thundering Shot's first damage came 33 to 932 ms after its cost step in 7 casts: targets 1 to 28 m away).
-// `fire` is the montage's FireProjectile notify [D: the 622 player montages' notifies, 2026-10-31]. The client plays the montage at its speed stat, a Ranger's or a Tank's ability at
-// PhysicalSpeed and a Mage's or a Summoner's at MagicalSpeed [R: the owner's play rates, 0.790392 for a level 15 Ranger and 0.737536 for a level 3 Mage, against the stat engine's 0.786758 and 0.731477 for a fresh
+// `fire` is the montage's FireProjectile notify [D: the 622 player montages' notifies, 2026-10-31]. The client plays the montage at its speed stat, a Ranger's, a Tank's or a Rogue's ability at
+// PhysicalSpeed and a Mage's, a Summoner's, a Bard's or a Cleric's at MagicalSpeed [R: the owner's play rates, 0.790392 for a level 15 Ranger and 0.737536 for a level 3 Mage, against the stat engine's 0.786758 and 0.731477 for a fresh
 // character of those levels], so the launch comes `fire` over that rate after the trigger [R: the owner's Ranger: the Power Shot launched 1.711, 1.675 and 1.689 s after the key, which is 1.352, 1.324 and 1.335 s
 // of montage at 0.7904 (the notify: 1.330 s); the Thundering Shot 1.367 and 1.362 s = 1.080 and 1.077 s (1.079 s)]. A montage with a part that plays at a rate of its own (AoCAnimNotifyState_LockPlayRate: the
 // Headshot's runs at 0.760 where the Power Shot's runs at 0.790) is slower than that, so where the client asks the server to verify a hit with the launch (the montage's AbilityHit notify sits within 30 ms of the
@@ -213,6 +213,47 @@ constexpr ShotCast kShotCasts[] = {
     {"Tank_Tomahawk", 0, 0.30069223, false, "", 0},
     {"Tank_Tomahawk", 1, 0.29991198, false, "", 0},
     {"Tank_Grapple", -1, 0.4352452, false, "", 0},
+    // The Bard's Mock and Quick Wit, the Rogue's Sleep Dart and Throw and the Cleric's Mend (every projectile's hit lands when the projectile gets there). The notifies are the montages' (the Mock's
+    // ABLT_Bard_QuickWit_Harm at 0.455 s, the Jest's and the Quick Wit's help montage at 0.3528 s, the Sleep Dart at 0.2089 s, the Throw at 0.1654 s, and the Mend's five at 0.106 to 0.113 s, one montage for each
+    // step of its chain). [R: the owner's Bard played the Mock at a rate of 1.007: the projectile left 0.443 s after the key (0.455 s over 1.007) and hit 0.745 s after it, a target 24 m away at 8,000 cm/s, while the
+    // damage number came 0.15 s after the key with the cost step.] The recorded game confirmed the Mock 0.93 to 0.99 s after the key, the Quick Wit heal 0.50 to 0.65 s, the Sleep Dart 0.52 s and the Throw 0.06 s
+    // (before its shuriken could have left: here its hit lands when the shuriken gets there). A cast at the caster himself (a heal) has no flight: it lands as the projectile leaves.
+    {"Bard_Misc_QuickWit_Mock", -1, 0.455, true, "", 0},
+    {"Bard_Misc_QuickWit_Jest", -1, 0.35280734, true, "", 0},
+    {"Bard_Misc_QuickWit", 0, 0.455, true, "", 0},
+    {"Bard_Misc_QuickWit", 1, 0.35280734, true, "", 0},
+    {"Rogue_SleepDart", -1, 0.20893234, false, "", 0},
+    {"Rogue_Throw", -1, 0.1653507, false, "", 0},
+    {"Cleric_Mend", 0, 0.10627984, true, "", 0},
+    {"Cleric_Mend", 1, 0.1084725, true, "", 0},
+    {"Cleric_Mend", 2, 0.1084725, true, "", 0},
+    {"Cleric_Mend", 3, 0.11285792, true, "", 0},
+    {"Cleric_Mend", 4, 0.11285792, true, "", 0},
+    {"Cleric_Mend", 5, 0.11176154, true, "", 0},
+};
+
+// Casts whose montage launches several projectiles at the cast's target (see NoteCast, plan_notes). The Bard's Discordance: "a wild burst of 3 discordant notes", each dealing 50% Arcane damage and applying Staggered.
+// The montage launches the notes at 0.2353, 0.5882 and 0.9412 s (the projectiles Discordance1, 2 and 3, homing at 1,250 cm/s [R: the owner's Bard launched them 0.234, 0.594 and about 0.94 s after the key at a rate
+// of 1.007]). Each note is a projectile of its own and its hit lands when it gets to the target; before this all of the ability's projectile hits (the three notes' and the two bounces') landed at once, about
+// 0.35 s after the cost step, on the one target, before the second and third notes had left.
+constexpr NoteCast kNoteCasts[] = {
+    {"Bard_Misc_Discordance", 1, 0.23529412, true},
+    {"Bard_Misc_Discordance", 4, 0.5882353, true},
+    {"Bard_Misc_Discordance", 5, 0.94117653, true},
+};
+
+// Hits that fire a bounce (see BounceRule, bounce_from). Their parent hit lands, the child hit (no damage of its own) is confirmed on the next enemy, and the projectile it fires flies from the enemy just hit to that
+// one and lands the projectile's hits there.
+//  - The Discordance: "the notes will bounce to random nearby enemies dealing reduced damage". The note's hit fires the first bounce (Bounce1, its projectile carries Hit2, 75% of the note) and that hit the second
+//    (Bounce2, carrying Hit3, 50%). The enemy is drawn at random among those within 1,000 cm of the one just hit, except that one itself (the data's score is a random number and its filter says the target must not be
+//    the source), so the second bounce may go back to the first enemy; with no other enemy near there is no bounce. (The targeting record's radius says 1,000 cm and its expression 1,500: 10 m is used.)
+//  - The Throw: "bounces up to 2 times to other nearby enemies dealing lesser damage with each bounce". Each bounce goes to the enemy nearest to the one just hit and to the caster among those within 1,000 cm that the
+//    Throw has not hit yet in this cast (the data's filter counts the cast's hits by target; its score is the two distances); the recorded Throw bounced to a second enemy 33 ms after the first impact (the
+//    shuriken flies at 4,000 cm/s).
+constexpr BounceRule kBounces[] = {
+    {"Bard_Misc_Discordance_Bounce1", 1000.0, 2, true},
+    {"Bard_Misc_Discordance_Bounce2", 1000.0, 2, true},
+    {"Rogue_Throw_Bounce", 1000.0, 2, false},
 };
 
 // Casts that shoot again and again (see LoopedCast). The Ranger's Salvo [R: the two recorded casts; the montage's sections]: the ability item came 83 ms after the trigger and the first shot's
@@ -1647,16 +1688,18 @@ void AbilityPipeline::run_due(double t) {
                 if (cast.missiles[k].due < cast.missiles[first].due) first = k;
             }
             if (cast.missiles[first].due <= t) {
-                if (cast.missiles[first].kind != Cast::Missile::Kind::Land) {   // a timed cast's launch, or the landing of a Strike's arrow
+                if (cast.missiles[first].kind != Cast::Missile::Kind::Land) {   // a timed cast's launch, the landing of a Strike's arrow, or a note or a bounce that leaves
                     const Cast::Missile step = cast.missiles[first];
                     cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
-                    step_timed(cast, step, t);
+                    if (step.kind == Cast::Missile::Kind::Fly) launch_note(cast, step, t);
+                    else step_timed(cast, step, t);
                     finish_cast_if_done(i);
                     return;
                 }
                 // the missile that lands is the one projectile this step fires
                 const int64_t projectile = cast.missiles[first].projectile;
                 const uint64_t target = cast.missiles[first].target;
+                const int depth = cast.missiles[first].depth;
                 cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
                 const int64_t kept = cast.chain_owner;
                 cast.chain_owner = projectile;
@@ -1666,7 +1709,7 @@ void AbilityPipeline::run_due(double t) {
                     kept_targets = cast.target_actors;
                     cast.target_actors = {target};
                 }
-                step_hits(cast, t, "projectile");
+                step_hits(cast, t, "projectile", depth);
                 if (target != 0) cast.target_actors = std::move(kept_targets);
                 cast.chain_owner = kept;
                 finish_cast_if_done(i);
@@ -2432,8 +2475,11 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                 cast.projectile_due.reset();
             }
             if (cast.gathered || cast.timed || cast.toggle_off) cast.projectile_due.reset();   // (its projectiles fly at the enemies it finds, not at a named target: step_branch, start_timed; a press that only ends a toggle fires none)
-            // an ordinary cast with one projectile: it leaves where the montage launches it and lands when it gets to the target (kShotCasts)
-            if (aimed && cast.projectile_due && !cast.branched && !cast.looped && !cast.gathered && !cast.timed && !cast.toggle_off && !is_weapon_combo(row)) {
+            // an ordinary cast with one projectile: it leaves where the montage launches it and lands when it gets to the target (kShotCasts); a heal at the caster himself (or at another player, whom this
+            // world does not have) has no flight: it lands as the projectile leaves
+            const bool at_caster = !aimed && cast.target && cast.self_reachable;
+            const bool plain = cast.projectile_due && !cast.branched && !cast.looped && !cast.gathered && !cast.timed && !cast.toggle_off && !is_weapon_combo(row);
+            if ((aimed || at_caster) && plain) {
                 for (const ShotCast& sc : kShotCasts) {
                     if (row.name == sc.ability && (sc.animation < 0 || sc.animation == cast.animation_index)) {
                         plan_shot(cast, sc, t);
@@ -2441,6 +2487,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                     }
                 }
             }
+            // an ordinary cast that sends several projectiles at its target: each leaves at a notify of its own and lands a flight later (kNoteCasts)
+            if (aimed && plain && !cast.shot) plan_notes(cast, t);
         }
     }
     // a movement ability opens the move checker's window
@@ -2652,11 +2700,28 @@ AbilityPipeline::Cast* AbilityPipeline::cast_of(int32_t client_id) {
 }
 
 void AbilityPipeline::plan_shot(Cast& cast, const ShotCast& shot, double t) {
-    if (!combat_ || cast.target_actors.empty() || !cast.cost_due) return;
+    if (!combat_ || !cast.cost_due) return;
+    if (cast.target_actors.empty() && !(cast.target && cast.self_reachable)) return;   // (nobody to fly at, and no cast at the caster)
     cast.shot = &shot;
     cast.flight_pending = true;
     cast.launch_at = t + shot.fire / client_rate(shot.magical);
     cast.projectile_due = cast.launch_at;   // (the launch: the landing, below, is what never comes before the cost step)
+    // an ability whose hit fires a bounce (the Throw): the cast's own landing is the hits of the projectile the montage launches, the bounce's come with the projectile it fires
+    if (cast.chain_owner != 0) return;
+    bool bounces = false;
+    int64_t launched = 0;
+    for (const content::AbilityHitRow& h : cast.def->hits) {
+        if (h.source != "projectile") continue;
+        const content::ProjectileRow* q = catalog_->projectile(h.owner_guid);
+        if (launched == 0 && q && q->speed > 0) launched = h.owner_guid;
+        const HitDef* hit = catalog_->hit(h.hit_guid);
+        if (!hit) continue;
+        for (const content::RecursiveHitRow& r : hit->recursive) {
+            const HitDef* child = catalog_->hit(r.child_hit);
+            for (const BounceRule& b : kBounces) bounces = bounces || (child && child->row.name == b.child_hit);
+        }
+    }
+    if (bounces) cast.chain_owner = launched;
 }
 
 void AbilityPipeline::land_shot(Cast& cast, double t) {
@@ -2667,19 +2732,22 @@ void AbilityPipeline::land_shot(Cast& cast, double t) {
 
 void AbilityPipeline::launch_shot(Cast& cast, double t) {
     cast.flight_pending = false;
-    const combat::TargetInfo info = combat_->inspect(cast.target_actors.front());
+    const combat::TargetInfo info = cast.target_actors.empty() ? combat::TargetInfo{} : combat_->inspect(cast.target_actors.front());
     const content::ProjectileRow* p = nullptr;
     for (const content::AbilityHitRow& h : cast.def->hits) {
         if (h.source != "projectile") continue;
+        if (cast.chain_owner != 0 && h.owner_guid != cast.chain_owner) continue;   // (a chain's step flies its own projectile, a bouncing ability's first flies the one the montage launches)
         const content::ProjectileRow* q = catalog_->projectile(h.owner_guid);
         if (q && q->speed > 0) {
             p = q;
             break;
         }
     }
-    if (!p || !info.exists || !info.alive) {   // (a target the world does not know or that is gone, or a projectile with no speed: the hit lands as the projectile leaves)
+    if (!p || !info.exists || !info.alive) {   // (a cast at the caster, a target the world does not know or that is gone, or a projectile with no speed: the hit lands as the projectile leaves)
         cast.flight = 0;
         land_shot(cast, t);
+        spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger (the client plays at {:.3f}); {}: it lands as it leaves", cast.def->row.name, cast.launch_at - cast.trigger_at,
+                     client_rate(cast.shot->magical), cast.target_actors.empty() ? "the cast is at the caster" : "its target is not there");
         return;
     }
     const double distance = info.surface_distance_cm + kMuzzleCm;
@@ -2697,6 +2765,117 @@ void AbilityPipeline::anchor_shot(Cast& cast, double now) {
     else if (cast.projectile_due) land_shot(cast, now);                              // on its way: it lands a flight after the launch the request shows
     spdlog::info("[abilities] {}: the client asked for the hit that goes with the launch {:.3f} s after the trigger: the projectile {} {:.3f} s from the plan", cast.def->row.name, now - cast.trigger_at,
                  cast.launch_at < was ? "left" : "leaves", std::fabs(cast.launch_at - was));
+}
+
+void AbilityPipeline::plan_notes(Cast& cast, double t) {
+    if (!combat_ || cast.target_actors.empty() || !cast.cost_due) return;
+    std::vector<Cast::Missile> notes;
+    for (const NoteCast& n : kNoteCasts) {
+        if (cast.def->row.name != n.ability) continue;
+        int64_t projectile = 0;
+        for (const content::AbilityHitRow& h : cast.def->hits) {
+            if (h.source == "projectile" && h.key == n.key) projectile = h.owner_guid;
+        }
+        if (projectile == 0) continue;
+        Cast::Missile fly;
+        fly.kind = Cast::Missile::Kind::Fly;
+        fly.due = t + n.fire / client_rate(n.magical);
+        fly.projectile = projectile;
+        fly.target = cast.target_actors.front();
+        fly.index = static_cast<int>(notes.size()) + 1;
+        notes.push_back(fly);
+    }
+    if (notes.empty()) return;
+    for (const Cast::Missile& m : notes) cast.missiles.push_back(m);
+    cast.projectile_due.reset();   // (the cast's projectile hits land with the notes, each when its own projectile gets there)
+    spdlog::info("[abilities] {}: {} projectiles leave {:.3f} to {:.3f} s after the trigger (the client plays at {:.3f}); each lands when it gets to the target", cast.def->row.name, notes.size(), notes.front().due - t,
+                 notes.back().due - t, client_rate(true));
+}
+
+void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t) {
+    if (!combat_) return;
+    // a note leaves with the montage: when another ability's item has taken the pawn's place nothing more leaves (a bounce flies on whatever the pawn plays)
+    if (fly.depth == 0 && cast.instance >= 0 && (!item_instance_ || *item_instance_ != cast.instance)) return;
+    const content::ProjectileRow* p = catalog_->projectile(fly.projectile);
+    const combat::TargetInfo info = combat_->inspect(fly.target);
+    if (!p || !(p->speed > 0) || !info.exists || !info.alive) {   // (the enemy it flew at is gone, or the projectile has no speed: nothing lands)
+        spdlog::info("[abilities] {}: {} {} finds nobody at its target", cast.def->row.name, fly.depth == 0 ? "note" : "bounce", fly.index);
+        return;
+    }
+    // a note flies from the caster's hand to the target's surface, a bounce from the enemy it left to the next one's surface
+    const double distance = fly.depth == 0 ? info.surface_distance_cm + kMuzzleCm : std::max(0.0, std::hypot(info.position.x - fly.x, info.position.y - fly.y) - info.radius_cm);
+    Cast::Missile land;
+    land.kind = Cast::Missile::Kind::Land;
+    land.projectile = fly.projectile;
+    land.target = fly.target;
+    land.index = fly.index;
+    land.depth = fly.depth;
+    land.due = t + distance / p->speed;
+    if (cast.cost_due) land.due = std::max(land.due, *cast.cost_due);   // (never before the cost step)
+    cast.missiles.push_back(land);
+    spdlog::info("[abilities] {}: {} {} leaves {:.3f} s after the trigger; the {} is {:.1f} m away: it lands {:.3f} s after it leaves", cast.def->row.name, fly.depth == 0 ? "note" : "bounce", fly.index, t - cast.trigger_at,
+                 fly.depth == 0 ? "target" : "next enemy", distance / 100.0, land.due - t);
+}
+
+void AbilityPipeline::bounce_from(AbilityChange& c, Cast& cast, const HitDef& hit, int64_t projectile, uint64_t target, int depth, double t) {
+    if (!combat_) return;
+    for (const content::RecursiveHitRow& r : hit.recursive) {
+        const HitDef* child = catalog_->hit(r.child_hit);
+        if (!child || child->fires.empty()) continue;
+        const BounceRule* rule = nullptr;
+        for (const BounceRule& b : kBounces) {
+            if (child->row.name == b.child_hit) rule = &b;
+        }
+        if (!rule || depth >= rule->max_bounces) continue;
+        const content::ProjectileRow* flying = catalog_->projectile(child->fires.front());
+        const combat::TargetInfo from = combat_->inspect(target);
+        if (!flying || !(flying->speed > 0) || !from.exists) continue;
+        cast.bounced.insert(target);
+        // who else stands within the rule's radius of the enemy just hit, and in the caster's reach (a hit out of it could not land there)
+        const combat::Vec3 me = combat_->self().position();
+        const double reach = combat_->reach_cm(false) + combat_->data().activation_leeway_cm();
+        std::vector<uint64_t> pool;
+        uint64_t nearest = 0;
+        double best = 0;
+        for (const combat::GatheredTarget& e : combat_->enemies_around(from.position, rule->radius, 32)) {
+            if (e.actor == target) continue;                               // (the enemy just hit is the source: never the next)
+            if (!rule->random && cast.bounced.count(e.actor)) continue;    // (one this cast has hit already is out)
+            const combat::TargetInfo ti = combat_->inspect(e.actor);
+            if (!ti.exists || !ti.alive || ti.surface_distance_cm > reach) continue;
+            pool.push_back(e.actor);
+            const double score = e.distance_cm + std::hypot(ti.position.x - me.x, ti.position.y - me.y);   // (the distance to the enemy just hit and to the caster: the least wins)
+            if (nearest == 0 || score < best) {
+                nearest = e.actor;
+                best = score;
+            }
+        }
+        if (pool.empty()) {
+            spdlog::info("[abilities] {}: no enemy within {:.0f} m of the one just hit: no bounce", cast.def->row.name, rule->radius / 100.0);
+            continue;
+        }
+        const uint64_t pick = rule->random ? pool[static_cast<size_t>(bounce_rng_() % pool.size())] : nearest;
+        // the child hit is confirmed on the next enemy with the parent's source, predicted on neither side [R: the Throw's recorded bounce hit], and the projectile it fires flies there
+        HitSource src;
+        src.type = content::kSourceTypeProjectile;
+        src.guid = projectile;
+        src.actor = false;
+        src.confirm = true;
+        src.simulated = false;
+        src.autonomous = false;
+        apply_hit_on_targets(c, *child, {pick}, t, src, cast.def);
+        if (!rule->random) cast.bounced.insert(pick);
+        Cast::Missile fly;
+        fly.kind = Cast::Missile::Kind::Fly;
+        fly.due = t;
+        fly.projectile = child->fires.front();
+        fly.target = pick;
+        fly.index = depth + 1;
+        fly.depth = depth + 1;
+        fly.x = from.position.x;
+        fly.y = from.position.y;
+        fly.z = from.position.z;
+        cast.missiles.push_back(fly);
+    }
 }
 
 void AbilityPipeline::launch_gathered(Cast& cast, double t) {
@@ -2991,7 +3170,7 @@ void AbilityPipeline::run_zone(size_t index, double t) {
 }
 // [Cyb - C | O | A]
 
-void AbilityPipeline::step_hits(Cast& cast, double t, const char* which) {
+void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int depth) {
     const CastRecord* fill_record = record_of(cast.client_id);
     const FillScope fill(*this, fill_record ? fill_record->fill : 1.0);
     const AbilityDef& def = *cast.def;
@@ -3068,6 +3247,8 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which) {
             src.simulated = true;
         }
         if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def);
+        // a hit that fires a bounce when it lands (the Discordance's notes, the Throw): the projectile flies on from this enemy to another near it
+        if (std::string_view(which) == "projectile" && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, h.owner_guid, cast.target_actors.front(), depth, t);
         // A projectile flies to its target: its hits land on the actor it reaches, the caster only when the cast aimed at nobody else (Jest on oneself).
         // Mock lists the Quick Wit projectile too (both abilities list both: Mockery and Quick Wit), and its Bard_QuickWit_Apply heal names Self and Ally
         // [R: the retail capture line 295, Mock at another actor: Bard_Mockery_Apply alone is confirmed, no Bard_QuickWit_Apply, no Glee; the user's run of

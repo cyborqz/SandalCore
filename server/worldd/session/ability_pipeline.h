@@ -56,6 +56,10 @@
 //               the ability put on its caster off (kLoopedCasts in ability_pipeline.cpp has the offsets).
 //    launches   an ability whose montage launches projectiles at moments of its own (the Ranger's Air Strike, Raining Death and Barrage) is played by the SERVER: every launch is a step of the cast at the
 //               time of the montage's notify and what it launches lands after its flight (kTimedCasts in ability_pipeline.cpp has the table). A hit the client asks for that fires projectiles (Maim's wave) sends them.
+//    flights    an ordinary cast with one projectile (the charged shots and the bolts, the Bard's Mock and its heals, the Sleep Dart, the Throw, the Mend) lands its hit when the projectile gets to the
+//               target: the montage's launch notify over the client's play rate, plus the target's distance over the projectile's speed (kShotCasts); a cast at the caster himself has no flight.
+//               One that sends several projectiles (the Discordance's three notes, kNoteCasts) does so for each of them, and a hit that fires a bounce when it lands (kBounces) sends the
+//               projectile on from the enemy just hit to another one near it, where it lands its hits when it gets there.
 //    hits       a hit applies to the caster when its mask names Self (1) and its requirement holds: the ability's own hits (ab_ability_hit "hit"), the
 //               hits of the projectiles it fires when it has a target (the caster), the first overlap of the zones it spawns (the Initial and
 //               OnBeginOverlap hits; their ticks are the client's requests, and see "zones" below) and the Tick hits of an effect the caster has. An applied hit gives
@@ -141,6 +145,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
 #include <vector>
@@ -240,6 +245,24 @@ struct ShotCast {
     bool        magical;      // the client plays the montage at MagicalSpeed (else at PhysicalSpeed)
     const char* ask;          // the hit the client asks the server to verify with the launch (its AbilityHit notify sits next to the FireProjectile one): the request is the launch ("": none)
     double      ask_gap;      // ... and how long after the launch, in montage seconds
+};
+
+/// An ordinary cast (no cast bar) whose montage launches SEVERAL projectiles at the cast's target, each at a moment of its own (the Bard's Discordance: three notes): every one flies and lands on its
+/// own, a flight after its launch (ability_pipeline.cpp has the table and the evidence).
+struct NoteCast {
+    const char* ability;
+    int         key;          // the key (in the ability's ProjectilesIds) of the projectile this launch sends
+    double      fire;         // the montage time of its FireProjectile notify, seconds
+    bool        magical;      // the client plays the montage at MagicalSpeed (else at PhysicalSpeed)
+};
+
+/// A hit that fires further hits when it lands (its RecursiveHit child, which fires a projectile): the projectile flies on from the enemy just hit to another enemy near it, and its hits land there
+/// when it gets there (the Bard's Discordance, the Rogue's Throw; ability_pipeline.cpp has the table and the evidence).
+struct BounceRule {
+    const char* child_hit;    // the name of the child hit that fires the bounce projectile
+    double      radius;       // how far from the enemy just hit the next one may stand, cm
+    int         max_bounces;  // how many times in a row the projectile may fly on
+    bool        random;       // the next enemy is drawn at random (else: the nearest one that this cast has not hit yet, to the enemy just hit and to the caster)
 };
 
 class AbilityPipeline {
@@ -571,15 +594,18 @@ private:
             double   due = 0;
             int64_t  projectile = 0;   // the projectile record that lands
             uint64_t target = 0;       // the one enemy it flies at (0: the cast's own targets)
-            // A timed cast (kTimedCasts) has two more kinds of step in this list: a launch (launch `index` leaves) and, for a Strike, the landing of arrow `index` at (x, y, z)
-            enum class Kind : uint8_t { Land, Launch, Strike };
+            // A timed cast (kTimedCasts) has two more kinds of step in this list: a launch (launch `index` leaves) and, for a Strike, the landing of arrow `index` at (x, y, z).
+            // A Fly is a projectile that leaves at `due` (kNoteCasts: a note; a bounce leaves the enemy just hit, at (x, y, z)) and lands a flight later on `target`; `depth` counts the bounces before it
+            enum class Kind : uint8_t { Land, Launch, Strike, Fly };
             Kind     kind = Kind::Land;
             int      index = 0;
             double   x = 0, y = 0, z = 0;
+            int      depth = 0;
         };
         std::vector<Missile>                  missiles;
         const TimedCast*                      timed = nullptr;            // a cast whose montage launches its projectiles at moments of its own (kTimedCasts)
         std::set<uint64_t>                    struck;                     // a Strike: the enemies its areas hurt already (the area hit lets none of them be hurt again by the same cast)
+        std::set<uint64_t>                    bounced;                    // a bouncing cast (kBounces): the enemies its projectiles have landed on
         bootstrap::ActiveAbilityItem          item;
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
@@ -683,7 +709,13 @@ private:
     void   run_cast_step(Cast& cast, double t);
     void   step_item(Cast& cast, double t);
     void   step_cost(Cast& cast, double t);
-    void   step_hits(Cast& cast, double t, const char* which);
+    void   step_hits(Cast& cast, double t, const char* which, int depth = 0);
+    /// A hit that fires further hits when it lands (RecursiveHit, kBounces): the child hit is confirmed on another enemy near the one just hit, and the projectile it fires flies there (a Fly step).
+    void   bounce_from(bootstrap::AbilityChange& c, Cast& cast, const abilities::HitDef& hit, int64_t projectile, uint64_t target, int depth, double t);
+    /// An ordinary cast that sends several projectiles at its target (kNoteCasts): each is a Fly step at the montage's notify of its own, and none of the cast's hits lands before its projectile gets there.
+    void   plan_notes(Cast& cast, double t);
+    /// A Fly step: the projectile leaves now; its landing is the target's distance (from the caster, or from the enemy a bounce left) over its speed away, never before the cast's cost step.
+    void   launch_note(Cast& cast, const Cast::Missile& fly, double t);
     /// A weapon combo's swing that another ability's trigger overtakes is over (the client cancels it with its own press): none of its steps happens, and one whose item has not shown yet is
     /// ended with ClientEndAbility. Without this the swing's item, due later than the ability's, took the pawn's item from the ability: the ability's montage never got its jump or its end.
     void   cancel_swings(double t, const std::string& by);
@@ -827,6 +859,7 @@ private:
     std::deque<int32_t>       recent_ids_;
     std::optional<int64_t>    item_instance_;                       // the ability item on the pawn
     int32_t                   animation_counter_ = 0;
+    std::mt19937_64           bounce_rng_{0x5a17d00du};              // which enemy a bounce flies on to, where the data draws it at random (the same sequence after every start, like the dice)
     std::vector<std::pair<double, double>> movement_;               // (until, speed)
     std::set<std::string>     unsupported_;                         // abilities whose unsupported shape was logged
     std::set<int64_t>         no_formula_;                          // abilities whose broken formula was logged
