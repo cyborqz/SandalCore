@@ -45,7 +45,7 @@
 
 ### Task 1: The GM stat overrides in the stat engine
 
-The engine takes the gear's contribution as a list of `StatMod` (a stat's guid and a value) and applies each mod in the stat's own form: an additive stat adds the value, a multiplying stat multiplies by it. The GM override is that same list, added after the gear's, so it needs no new machinery in the engine.
+The engine applies the **effects** in each stat's own form: an additive stat adds the value, a multiplying stat multiplies by it (the gear's own `in.mods` path is always additive, so it cannot carry the override). The GM override therefore travels as an `ActiveEffect`: one effect per (stat, value) pair, merged with the other effects in `compute()` and in the run the expression programs read.
 
 **Files:**
 - Modify: `server/worldd/stats/character_stats.h`
@@ -53,11 +53,11 @@ The engine takes the gear's contribution as a list of `StatMod` (a stat's guid a
 - Test: `server/worldd/stats/tests/test_worldd_stats.cpp`
 
 **Interfaces:**
-- Consumes: `stats::StatMod`.
+- Consumes: `stats::ActiveEffect` (`server/worldd/stats/stat_engine.h`), `stats::EffectMod { int64_t stat; double value; }`, `stats::kRefTypeEffect`.
 - Produces on `aoc::worldd::stats::CharacterStats`:
   ```cpp
-  void set_gm_mods(std::vector<StatMod> mods) { gm_mods_ = std::move(mods); }
-  const std::vector<StatMod>& gm_mods() const { return gm_mods_; }
+  void set_gm_effects(std::vector<ActiveEffect> effects) { gm_effects_ = std::move(effects); }
+  const std::vector<ActiveEffect>& gm_effects() const { return gm_effects_; }
   ```
 
 - [ ] **Step 1: Write the failing test**
@@ -66,20 +66,37 @@ In `server/worldd/stats/tests/test_worldd_stats.cpp`, inside `void test_characte
 
 ```cpp
     // ── the game master's stat overrides ───────────────────────────────────
-    // The GM mods are applied after the gear's, so they land in the computed
-    // stats like any other mod: an additive stat adds the value.
+    // The override travels as an effect, so it follows the stat's own rule: an
+    // additive stat adds the value, a multiplying one multiplies by it.
     const float max_before = cs.find(kMaxHealth)->value;
     const int64_t max_guid = cs.find(kMaxHealth)->guid;
-    cs.set_gm_mods({StatMod{max_guid, 500.0}});
+    ActiveEffect gm;
+    gm.effect = {kRefTypeEffect, 0};
+    gm.stacks = 1;
+    gm.mods = {{max_guid, 500.0}};
+    cs.set_gm_effects({gm});
     CHECK(cs.update(none, changed, e), "the stats are computed with the override");
-    CHECK(cs.gm_mods().size() == 1, "the override is remembered");
+    CHECK(cs.gm_effects().size() == 1, "the override is remembered");
     CHECK(cs.find(kMaxHealth)->value == max_before + 500.0f, "the override is added to the stat");
 
+    // a multiplying stat is multiplied by the value: 2 doubles it, 0.5 halves it
+    const int64_t mult_guid = guid_named(b, "HealingMult");
+    if (mult_guid) {
+        const float mult_before = cs.find(mult_guid)->value;
+        ActiveEffect gm2;
+        gm2.effect = {kRefTypeEffect, 0};
+        gm2.stacks = 1;
+        gm2.mods = {{mult_guid, 2.0}};
+        cs.set_gm_effects({gm2});
+        CHECK(cs.update(none, changed, e), "the stats are computed with the multiplying override");
+        CHECK(cs.find(mult_guid)->value == mult_before * 2.0f, "the override doubles the stat");
+    }
+
     // clearing the overrides brings the gear's numbers back
-    cs.set_gm_mods({});
+    cs.set_gm_effects({});
     CHECK(cs.update(none, changed, e), "the stats are computed after the clear");
     CHECK(cs.find(kMaxHealth)->value == max_before, "the clear restores the value");
-    CHECK(cs.gm_mods().empty(), "the overrides are gone");
+    CHECK(cs.gm_effects().empty(), "the overrides are gone");
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -88,43 +105,49 @@ Run:
 ```powershell
 pwsh -File D:\SandalCore-main\scripts\build.ps1 -Target test_worldd_stats
 ```
-Expected: the build fails with `no member named 'set_gm_mods' in 'aoc::worldd::stats::CharacterStats'`.
+Expected: the build fails with `no member named 'set_gm_effects' in 'aoc::worldd::stats::CharacterStats'`.
 
 - [ ] **Step 3: Add the setter, the getter and the member**
 
 In `server/worldd/stats/character_stats.h`, after `void set_ranks(std::vector<SkillRank> ranks) { ranks_ = std::move(ranks); }` add:
 
 ```cpp
-    /// The game master's overrides: the stat mods applied on top of the computed
-    /// stats (the gear's, the level's, the effects'). They are part of the next
-    /// prepare(), so the client sees them like any other stat change. A value
+    /// The game master's overrides: the effects applied on top of the computed
+    /// stats (the gear's, the level's, the other effects'). They are part of the
+    /// next prepare(), so the client sees them like any other stat change. A value
     /// follows the stat's own rule: an additive stat adds it, a multiplying one
     /// multiplies by it.
-    void set_gm_mods(std::vector<StatMod> mods) { gm_mods_ = std::move(mods); }
-    const std::vector<StatMod>& gm_mods() const { return gm_mods_; }
+    void set_gm_effects(std::vector<ActiveEffect> effects) { gm_effects_ = std::move(effects); }
+    const std::vector<ActiveEffect>& gm_effects() const { return gm_effects_; }
 ```
 
 and next to `std::vector<ActiveEffect> passives_;` in the private members add:
 
 ```cpp
-    std::vector<StatMod>         gm_mods_;      // the game master's overrides
+    std::vector<ActiveEffect>      gm_effects_;   // the game master's overrides
 ```
 
-- [ ] **Step 4: Apply the overrides in `compute()`**
+- [ ] **Step 4: Apply the overrides in `compute()` and in the evaluation's run**
 
 In `server/worldd/stats/character_stats.cpp`, in `CharacterStats::compute()`, change:
 
 ```cpp
-    in.mods = g.mods;
+    in.effects = passives_;
+    in.effects.insert(in.effects.end(), effects_.begin(), effects_.end());
 ```
 to:
 ```cpp
-    in.mods = g.mods;
-    // the game master's overrides come after the gear's: the engine applies them
-    // in each stat's own form, so an additive stat adds them and a multiplying one
+    in.effects = passives_;
+    in.effects.insert(in.effects.end(), effects_.begin(), effects_.end());
+    // the game master's overrides are effects too: the engine applies them in each
+    // stat's own form, so an additive stat adds them and a multiplying one
     // multiplies by them.
-    in.mods.insert(in.mods.end(), gm_mods_.begin(), gm_mods_.end());
+    in.effects.insert(in.effects.end(), gm_effects_.begin(), gm_effects_.end());
 ```
+
+And in `CharacterStats::evaluation()` (the run the expression programs read), merge
+`gm_effects_` into its `StatInputs` the same way, so the ability formulas and the
+client agree on the numbers.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -154,13 +177,19 @@ git commit -m "Added the game master's stat overrides to the stat engine"
 - Test: `server/worldd/tests/test_worldd_gm_travel.cpp`
 
 **Interfaces:**
-- Consumes: `CharacterStats::set_gm_mods` (Task 1).
+- Consumes: `CharacterStats::set_gm_effects(std::vector<ActiveEffect>)` and `gm_effects()` (Task 1 — the override travels as an **effect**, so the stat's own rule applies: an additive stat adds the value, a multiplying one multiplies by it).
 - Produces on `aoc::worldd::PlayerSession`:
   ```cpp
-  bool set_gm_stat_mods(const std::vector<stats::StatMod>& mods, std::string& err);
-  void clear_gm_stat_mods();
-  const std::vector<stats::StatMod>& gm_stat_mods() const;
+  /// The game master's stat overrides on this character: the effects that carry
+  /// them. They are applied on top of the computed stats and the change goes to
+  /// the client like a gear change does. False, with `err`, when the stats
+  /// cannot be computed.
+  bool set_gm_effects(const std::vector<stats::ActiveEffect>& effects, std::string& err);
+  void clear_gm_effects();
+  const std::vector<stats::ActiveEffect>& gm_effects() const;
+  /// The character's stats as they are now.
   std::vector<stats::StatValue> player_stats() const;
+  /// Sets the current value of a stat the character holds (Health, Mana).
   bool set_player_current_stat(int64_t guid, double value, std::string& err);
   ```
 
@@ -171,7 +200,7 @@ In `server/worldd/tests/test_worldd_gm_travel.cpp`, add a function that uses the
 ```cpp
 // The game master's stat overrides reach the character: the stats the session
 // holds change, and the override is remembered.
-static void test_gm_stat_mods(Harness& h) {
+static void test_gm_effects(Harness& h) {
     PlayerSession* session = h.s.get();
     if (!session || !session->character_stats()) { std::printf("  [SKIP] the session has no stats\n"); return; }
 
@@ -180,9 +209,15 @@ static void test_gm_stat_mods(Harness& h) {
     const int64_t guid = before.front().guid;
     const float value = before.front().value;
 
+    // the override travels as an effect: one stack, one mod on the stat
+    stats::ActiveEffect effect;
+    effect.effect = {stats::kRefTypeEffect, 0};
+    effect.stacks = 1;
+    effect.mods = {{guid, 5.0}};
+
     std::string err;
-    CHECK(session->set_gm_stat_mods({stats::StatMod{guid, 5.0}}, err), "the override is accepted");
-    CHECK(session->gm_stat_mods().size() == 1, "the override is remembered");
+    CHECK(session->set_gm_effects({effect}, err), "the override is accepted");
+    CHECK(session->gm_effects().size() == 1, "the override is remembered");
     const auto after = session->player_stats();
     bool found = false;
     for (const stats::StatValue& v : after) {
@@ -190,8 +225,8 @@ static void test_gm_stat_mods(Harness& h) {
     }
     CHECK(found, "the overridden stat is still there");
 
-    session->clear_gm_stat_mods();
-    CHECK(session->gm_stat_mods().empty(), "the override is cleared");
+    session->clear_gm_effects();
+    CHECK(session->gm_effects().empty(), "the override is cleared");
 }
 ```
 
@@ -203,7 +238,7 @@ Run:
 ```powershell
 pwsh -File D:\SandalCore-main\scripts\build.ps1 -Target test_worldd_gm_travel
 ```
-Expected: the build fails with `no member named 'set_gm_stat_mods' in 'aoc::worldd::PlayerSession'`.
+Expected: the build fails with `no member named 'set_gm_effects' in 'aoc::worldd::PlayerSession'`.
 
 - [ ] **Step 3: Add the session's methods**
 
@@ -212,24 +247,24 @@ In `server/worldd/session/player_session.h`, next to `const stats::CharacterStat
 In `server/worldd/session/player_session.cpp`, add the definitions:
 
 ```cpp
-bool PlayerSession::set_gm_stat_mods(const std::vector<stats::StatMod>& mods, std::string& err) {
+bool PlayerSession::set_gm_effects(const std::vector<stats::ActiveEffect>& effects, std::string& err) {
     if (!stats_ || !stats_->started()) { err = "the character has no stats"; return false; }
-    stats_->set_gm_mods(mods);
+    stats_->set_gm_effects(effects);
     const size_t failed = stat_updates_failed_;
     apply_gear_stats("the game master's stat overrides");
     if (stat_updates_failed_ != failed) { err = "the engine refused the stat overrides"; return false; }
     return true;
 }
 
-void PlayerSession::clear_gm_stat_mods() {
+void PlayerSession::clear_gm_effects() {
     if (!stats_) return;
-    stats_->set_gm_mods({});
+    stats_->set_gm_effects({});
     apply_gear_stats("the game master's stat overrides were cleared");
 }
 
-const std::vector<stats::StatMod>& PlayerSession::gm_stat_mods() const {
-    static const std::vector<stats::StatMod> kEmpty;
-    return stats_ ? stats_->gm_mods() : kEmpty;
+const std::vector<stats::ActiveEffect>& PlayerSession::gm_effects() const {
+    static const std::vector<stats::ActiveEffect> kEmpty;
+    return stats_ ? stats_->gm_effects() : kEmpty;
 }
 
 std::vector<stats::StatValue> PlayerSession::player_stats() const {
@@ -383,8 +418,10 @@ GmStatsResult GmTravel::get_player_stats(const std::string& character) {
         info.max = v.has_max ? v.max : 0.0;
         const auto it = names.find(v.guid);
         if (it != names.end()) info.name = it->second;
-        for (const stats::StatMod& m : h.player->gm_stat_mods()) {
-            if (m.stat == v.guid) { info.has_override = true; info.override = m.value; }
+        for (const stats::ActiveEffect& e : h.player->gm_effects()) {
+            for (const stats::EffectMod& m : e.mods) {
+                if (m.stat == v.guid) { info.has_override = true; info.override = m.value; }
+            }
         }
         out.stats.push_back(std::move(info));
     }
@@ -397,11 +434,20 @@ GmStatModsResult GmTravel::set_stat_mods(const std::string& character,
     GmStatModsResult out;
     PlayerHandle h = find_player(character);
     if (!h) { out.status = GmStatus::NotFound; out.message = "no player named " + character; return out; }
-    std::vector<stats::StatMod> list;
+    std::vector<stats::ActiveEffect> list;
     list.reserve(mods.size());
-    for (const auto& m : mods) list.push_back(stats::StatMod{m.first, m.second});
+    for (const auto& m : mods) {
+        // one effect per stat: the game master's own (no Effect record, no tags), one
+        // stack, one mod on the stat. The engine applies it in the stat's own form:
+        // an additive stat adds the value, a multiplying one multiplies by it.
+        stats::ActiveEffect effect;
+        effect.effect = {stats::kRefTypeEffect, 0};
+        effect.stacks = 1;
+        effect.mods = {{m.first, m.second}};
+        list.push_back(std::move(effect));
+    }
     std::string err;
-    if (!h.player->set_gm_stat_mods(list, err)) {
+    if (!h.player->set_gm_effects(list, err)) {
         out.status = GmStatus::FailedPrecondition;
         out.message = err;
         return out;
@@ -415,7 +461,7 @@ GmStatModsResult GmTravel::clear_stat_mods(const std::string& character, const s
     GmStatModsResult out;
     PlayerHandle h = find_player(character);
     if (!h) { out.status = GmStatus::NotFound; out.message = "no player named " + character; return out; }
-    h.player->clear_gm_stat_mods();
+    h.player->clear_gm_effects();
     out.character = h.player->name();
     out.stats = get_player_stats(character).stats;
     return out;
@@ -1872,3 +1918,4 @@ Then run the dashboard, sign in, press LAUNCH GAME and, from the dashboard:
 git add services/cmd/aocadmin/app.go services/cmd/aocadmin/frontend/app.js
 git commit -m "Filled the dashboard's five tabs"
 ```
+
