@@ -33,8 +33,12 @@ $caSubject = 'Sandal Core Local CA'
 function Find-OpenSsl {
     $c = Get-Command openssl -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($c) { return $c.Source }
-    foreach ($p in @("$env:ProgramFiles\Git\mingw64\bin\openssl.exe", "$env:ProgramFiles\Git\usr\bin\openssl.exe",
-                     "${env:ProgramFiles(x86)}\Git\mingw64\bin\openssl.exe")) {
+    # A 32-bit shell has $env:ProgramFiles pointing at "Program Files (x86)", so the
+    # 64-bit Git folder is only reachable through ProgramW6432.
+    $pf64 = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+    $pf32 = ${env:ProgramFiles(x86)}
+    foreach ($p in @("$pf64\Git\mingw64\bin\openssl.exe", "$pf64\Git\usr\bin\openssl.exe",
+                     "$pf32\Git\mingw64\bin\openssl.exe", "$pf32\Git\usr\bin\openssl.exe")) {
         if (Test-Path $p) { return $p }
     }
     return $null

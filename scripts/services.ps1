@@ -182,6 +182,23 @@ try {
                 $who = 'the character service will refuse to create characters and worldd every login'
                 Write-Host "warning: $contentDb does not exist: $who. Build it: cd services; go run ./cmd/contentc (services\README.md, 'Content')" -ForegroundColor Yellow
             }
+            # The gRPC ports have defaults that other software on the machine may
+            # already hold (Incredibuild takes 50051 and 50052). Every service reads
+            # the same environment, so moving a port here moves it for the clients
+            # too; a service that cannot bind its port exits at once.
+            foreach ($pair in @(@('AOC_AUTH_GRPC_ADDR', 50051), @('AOC_CHARACTER_GRPC_ADDR', 50052))) {
+                $var = $pair[0]; $default = $pair[1]
+                $busy = @(Get-NetTCPConnection -LocalPort $default -State Listen -ErrorAction SilentlyContinue)
+                if ($busy.Count -eq 0) { continue }
+                $owner = (Get-Process -Id $busy[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
+                $free = $default
+                for ($p = $default + 10; $p -lt $default + 200; $p++) {
+                    if (-not (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)) { $free = $p; break }
+                }
+                if ($free -eq $default) { throw "port $default is taken by $owner and no free port was found near it" }
+                Write-Host "port $default is taken by $owner - $var moves to 127.0.0.1:$free" -ForegroundColor Yellow
+                Set-Item -Path "env:$var" -Value "127.0.0.1:$free"
+            }
             Build
             New-ServiceToken
             $started = @()
