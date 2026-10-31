@@ -22,6 +22,7 @@
 #pragma once
 
 #include "content/content_db.h"
+#include "crafting/artisan.h"
 #include "crafting/station.h"
 #include "items/inventory.h"
 #include "protocol/repl/craft_rpc.h"
@@ -56,15 +57,23 @@ inline bool unfinished(const svc::ProcessingJob& j, int64_t now_ms) { return now
 struct Product {
     int64_t item = 0;
     int64_t quantity = 0;
+    int     quality = 0;                        // the quality of these units; 0: the job's own (JobRewards::quality)
 };
 struct JobRewards {
     std::vector<Product> products;
-    int                  quality = 1;           // the quality of every product
-    int                  rarity = 0;            // ... and its band (Common 0 ... Artifact 6)
+    int                  quality = 1;           // the quality of the products before the crafter's artisan ratings (a job's units that stepped up a rarity have their own: Product::quality)
+    int                  rarity = 0;            // the rarity the experience is worked out at (Common 0 ... Artifact 6): a job's is the mean rarity of what was paid, rounded down; a craft's is its product's
     int64_t              profession = 0;        // the profession the experience goes to
     int64_t              profession_xp = 0;     // 0: none (a recipe with no such reward, or a formula the server does not know)
     int64_t              adventuring_xp = 0;
     int                  level = 1;             // the crafter's level the Adventuring experience was worked out at
+    // crafting quality: what the crafter's artisan ratings made of it (for the log and the checks)
+    Ratings              ratings;
+    double               xp_multiplier = 1.0;   // the profession experience was multiplied by this
+    double               quality_added = 0.0;   // a craft's quality formula added this to its base quality (a decimal)
+    double               quality_exact = 0.0;   // the exact quality, before the nearest whole number the item has (a craft: the base and quality_added; a job: the mean of what was paid, before it is rounded up)
+    int64_t              extra_units = 0;       // a job: units made beyond the quantity
+    int64_t              stepped_units = 0;     // a job: units that came out a rarity higher (counted once for each step)
 };
 
 /// The rewards of a job, or nullopt when they cannot be worked out (its recipe is none of the data's).
@@ -110,11 +119,12 @@ inline std::vector<repl::ItemInstance> product_instances(const svc::ProcessingJo
     out.reserve(rewards.products.size());
     for (size_t i = 0; i < rewards.products.size(); ++i) {
         const Product& p = rewards.products[i];
+        if (p.quantity < 1) continue;   // (a line with no unit is not shown: the window would clamp it to one)
         repl::ItemInstance it;
         it.has_item = true;
         it.record_id = static_cast<uint64_t>(p.item);
         it.quantity = static_cast<uint32_t>(std::clamp<int64_t>(p.quantity, 1, 1 << 20));
-        it.quality = static_cast<uint32_t>(std::clamp(rewards.quality, 1, 200));
+        it.quality = static_cast<uint32_t>(std::clamp(p.quality > 0 ? p.quality : rewards.quality, 1, 200));
         it.guid = product_guid(job, i);
         it.creation_time = items::ticks_of_ms(j.end_ms());
         out.push_back(std::move(it));
@@ -215,6 +225,18 @@ inline std::vector<std::array<int32_t, 4>> active_station_words(const std::vecto
     return out;
 }
 
+/// A rating sum as a job keeps it (the table holds 0 to 1e9): a rating below 0 does what 0 does (the curves are flat below their first point), and a number that is no number is none.
+inline double kept_rating(double v) { return std::isfinite(v) ? std::clamp(v, 0.0, 1e9) : 0.0; }
+
+/// The ratings a job was queued with, as its formulas add them up: the job pays them whatever its crafter wears when it is collected.
+inline Ratings job_ratings(const svc::ProcessingJob& j) {
+    Ratings r;
+    r.xp = j.rating_xp;
+    r.quantity = j.rating_quantity;
+    r.rarity = j.rating_rarity;
+    return r;
+}
+
 /// A new job guid: 32 lower-case hex digits, not all zero.
 inline std::string new_job_guid() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
@@ -227,7 +249,7 @@ inline std::string new_job_guid() {
 
 /// A job started at the station `key` at the wall-clock instant `now_ms`: it begins now, or when the player's last job there that is not over ends.
 inline svc::ProcessingJob make_job(const std::vector<svc::ProcessingJob>& jobs, const std::string& key, int64_t recipe, int32_t quantity, int64_t duration_ms, const repl::GuidValue& transaction,
-                                   std::vector<svc::JobResource> resources, int64_t now_ms) {
+                                   std::vector<svc::JobResource> resources, int64_t now_ms, const Ratings& ratings = {}) {
     svc::ProcessingJob j;
     j.job_guid = new_job_guid();
     j.station_key = key;
@@ -242,6 +264,9 @@ inline svc::ProcessingJob make_job(const std::vector<svc::ProcessingJob>& jobs, 
     j.duration_ms = duration_ms;
     j.client_txn = items::guid_hex(transaction);
     j.resources = std::move(resources);
+    j.rating_xp = kept_rating(ratings.xp);
+    j.rating_quantity = kept_rating(ratings.quantity);
+    j.rating_rarity = kept_rating(ratings.rarity);
     return j;
 }
 

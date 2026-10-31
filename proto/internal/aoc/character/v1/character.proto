@@ -144,6 +144,11 @@ message ProcessingJob {
   int64 duration_ms = 8; // how long it runs: 1 or more
   string client_txn = 9; // 32 lowercase hex digits: the client's id of the request that started it, which the window shows the job back with
   repeated JobResource resources = 10; // what was paid, by record and rarity band
+  // The crafter's artisan ratings when the job was queued (crafting quality, migration 0019): the sums the job's formulas add up, so the job pays what it started with whatever the crafter
+  // wears when it is collected. 0 or more, not above 1e9; 0 for a job saved before them.
+  double rating_xp = 11; // the experience rating (the experience of the job is multiplied by 1 plus the curve value)
+  double rating_quantity = 12; // the quantity rating (the chance of one more unit)
+  double rating_rarity = 13; // the rarity rating (the chance of a unit coming out one rarity higher)
 }
 
 // One resource of a job (a record) with the rarities and counts that were paid.

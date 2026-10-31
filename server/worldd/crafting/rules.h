@@ -30,12 +30,13 @@
 //  tenth and 338 with half; a citizen crate at 8 costs 9 in node currency.  The one retail price in Glint fits a rounding down (a market crate at 80 with a tenth of tax cost 87), so a price in
 //  Glint is rounded down.  A job (a processing station) takes only money.
 //
-//  The time.  A job takes the recipe's base duration for each unit: the time equation of the recipes is 1 for a character with no artisan gear, and no character has any yet.  A quick make
-//  takes the base duration, and takes the materials and the price when it ends, not when it starts.
+//  The time.  A job takes the recipe's base duration for each unit, times what the crafter's processing time ratings make of it (artisan.h; 1 for a crafter with none) when the recipe has a time
+//  formula.  A quick make takes the base duration, and takes the materials and the price when it ends, not when it starts.
 // ============================================================================
 #pragma once
 
 #include "content/content_db.h"
+#include "crafting/artisan.h"
 #include "crafting/job.h"
 #include "items/inventory.h"
 #include "items/rarity.h"
@@ -64,6 +65,7 @@ inline int band_lo(int rarity) { return items::first_quality_of(rarity); }
 /// One take from the material bags: `count` of `record` whose rarity (by the record's rarity facts) is `rarity_lo` to `rarity_hi`.
 struct Take {
     int64_t                record = 0;
+    int                    slot = 0;   // the recipe input (its place in the recipe) this take pays: one input is paid by one take, or by several when the request names several records or rarities for it
     items::ItemRarityFacts facts = items::default_rarity_facts();   // the record's quality curve and RarityMin..RarityMax
     int                    rarity_lo = 0, rarity_hi = items::kRarityCount - 1;
     int64_t                count = 0;
@@ -91,6 +93,7 @@ struct StartFacts {
     bool                            quick = false;         // the station crafts at once (a crafting station): one unit, no queue, no job
     std::function<bool(int64_t)>    taught;                // whether the character was taught a recipe (one that has to be learned)
     std::function<items::ItemRarityFacts(int64_t)> rarity_facts;   // an item record's rarity rule (its quality curve and RarityMin..RarityMax); none: the common curve with no bound
+    std::function<double(int64_t)>  rating_stat;           // an artisan rating stat's settled value by its guid (none: every rating is 0)
 };
 
 /// Whether a station definition is a Crate Packing station: it makes construction crates.
@@ -126,6 +129,8 @@ struct Plan {
     int64_t                               unit_taxed = 0;
     int64_t                               cost = 0;
     int64_t                               duration_ms = 0;
+    Ratings                               ratings;                 // the crafter's artisan ratings for the recipe's profession when the craft was planned (a job keeps them)
+    double                                time_multiplier = 1.0;   // what the job's base time was multiplied by (the crafter's processing time rating)
 };
 
 /// One unit's price with the station's tax: `unit x (1 + percent) + flat`, the percent as a double, rounded half up (a price in Glint: rounded down, as the one retail price in Glint is).
@@ -322,10 +327,12 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     for (const content::CraftInput& in : r->inputs) {
         const int64_t need = static_cast<int64_t>(in.quantity) * req.quantity;
         if (need < 1) continue;
+        const int slot = static_cast<int>(&in - r->inputs.data());
         if (in.primary) {
             // the reagent: stacks whose rarity is the recipe's minimum or better, the lowest quality first (a shop sells it at quality 1, and an item that is never Common shows its own rarity)
             Take t;
             t.record = in.item;
+            t.slot = slot;
             t.facts = facts_of(in.item);
             t.rarity_lo = std::clamp(in.min_rarity, 0, items::kRarityCount - 1);
             t.count = need;
@@ -381,6 +388,7 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             for (const Pick& p : picks) {
                 Take t;
                 t.record = p.record;
+                t.slot = slot;
                 t.facts = facts_of(p.record);
                 t.rarity_lo = t.rarity_hi = p.rarity;
                 t.count = p.count;
@@ -406,6 +414,7 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             // a general input: the stacks that show the rarity the request names (the client groups what it offers by that rarity)
             Take t;
             t.record = in.item;
+            t.slot = slot;
             t.facts = facts_of(in.item);
             t.rarity_lo = t.rarity_hi = rarity;
             t.count = count;
@@ -454,7 +463,10 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     } else if (plan.cost > f.copper) {
         return refuse("the purse holds " + std::to_string(f.copper) + " copper and the job costs " + std::to_string(plan.cost));
     }
-    plan.duration_ms = static_cast<int64_t>(std::llround(r->base_duration * 1000.0 * req.quantity));
+    plan.ratings = ratings_of(data.artisan, r->profession, f.rating_stat);
+    // a job of a processing profession whose recipe has a time formula lasts less with a time rating; a craft at a crafting station does not (its time formula is none)
+    if (!f.quick && r->has_duration_formula && is_processing(data.artisan, r->profession)) plan.time_multiplier = time_multiplier(data.artisan, plan.ratings);
+    plan.duration_ms = static_cast<int64_t>(std::llround(r->base_duration * 1000.0 * req.quantity * plan.time_multiplier));
     if (plan.duration_ms < 1) return refuse(r->name + " has no duration in the data");
     plan.ok = true;
     return plan;

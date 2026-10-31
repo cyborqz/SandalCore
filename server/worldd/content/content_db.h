@@ -937,6 +937,7 @@ struct CraftRecipe {
     int         fuel = 0;
     bool        blacklisted = false;
     std::string category_tag;    // CategoryTag: for a piece of gear its slot ("Slot.Head"), else the kind of thing ("Item.Caravan.Component")
+    bool        has_duration_formula = false, has_quantity_formula = false, has_quality_formula = false;   // crafting quality: the recipe has such a formula (the text is in the data); a processing recipe's three read the crafter's artisan ratings, a crafting recipe's quality formula does
     std::vector<CraftInput> inputs;   // the general resources in order, then the reagents
     std::vector<CraftPred>  preds;
 };
@@ -977,10 +978,27 @@ inline constexpr int64_t kCurveBaseKillXp = 6064630639394422811ll;
 inline constexpr int64_t kCurveTierModNovice = 6064633469604267308ll, kCurveTierModApprentice = 6064633469606364461ll, kCurveTierModJourneyman = 6064633469607937326ll;
 /// The TypeId of a CharacterProfessions record, as the experience rows of a finished job name it.
 inline constexpr int64_t kTypeCharacterProfession = 5612931243805009072ll;
+/// Crafting quality: the rating stats of a crafting or processing profession (Artisan_Crafting_<Profession>_Quality_Rating ...), found by name in stat_def; 0 where the profession has none.
+struct ArtisanProfession {
+    bool    processing = false;   // a processing profession (time, quantity, rarity, experience), else a crafting one (quality, experience)
+    int64_t quality = 0, xp = 0, time = 0, quantity = 0, rarity = 0;
+};
+/// What the recipes' artisan formulas read: the curves of their equations (stat_curve, by name) and the rating stats whose two values (the general one and the profession's own) a formula adds up.
+struct ArtisanData {
+    using Curve = std::vector<std::pair<double, double>>;
+    Curve                                crafting_quality, crafting_xp, processing_time, processing_xp;
+    Curve                                rarity_step[5];       // the chance of one rarity up, by the rarity the unit has: Common to Epic (a Legendary or Artifact unit never steps up)
+    Curve                                quantity_chance[6];   // the chance of an extra unit, by rarity: Common to Legendary (an Artifact unit never)
+    ArtisanProfession                    general_crafting, general_processing;   // the ratings every crafting / processing recipe adds to its profession's own
+    std::map<int64_t, ArtisanProfession> by_profession;        // the CharacterProfessions guid -> its own rating stats
+    size_t                               crafting_professions = 0, processing_professions = 0;
+    bool ok() const { return !crafting_quality.empty() && !crafting_xp.empty() && !processing_time.empty() && !processing_xp.empty() && !by_profession.empty(); }
+};
 struct CraftRecipeData {
     std::unordered_map<int64_t, CraftRecipe>           recipes;
     std::unordered_map<int64_t, CraftReward>           rewards;       // by reward table guid (CraftRecipe::reward)
     CraftXpCurves                                      xp_curves;
+    ArtisanData                                        artisan;       // crafting quality: the curves and the rating stats of the artisan formulas
     std::map<int64_t, CraftCost>                       costs;
     std::map<int64_t, std::vector<int64_t>>            set_lists;     // recipe set -> its lists, in order
     std::map<int64_t, std::vector<int64_t>>            list_recipes;  // list -> its recipes, in order

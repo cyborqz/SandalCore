@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"time"
 
@@ -28,6 +29,8 @@ const (
 	maxJobResources     = 64
 	maxJobRarities      = 8
 	maxJobCount         = 1_000_000
+	// MaxJobRating bounds each of a job's rating sums (the table's constraints).
+	MaxJobRating = 1e9
 )
 
 var (
@@ -60,6 +63,8 @@ type ProcessingJob struct {
 	DurationMs    int64
 	ClientTxn     string // 32 lowercase hex digits
 	Resources     []JobResource
+	// The crafter's artisan ratings when the job was queued (migration 0019): the sums its formulas add up. 0 to MaxJobRating; 0 for a job saved before they were kept.
+	RatingXP, RatingQuantity, RatingRarity float64
 }
 
 // ValidateJobs checks the jobs of a save: the table's constraints, said where the message can name the job, each guid once, and not more than a character can have.
@@ -92,6 +97,8 @@ func ValidateJobs(jobs []ProcessingJob) error {
 			return fmt.Errorf("%w: processing job %d: client id %q is not 32 lowercase hex digits", ErrInvalid, i, j.ClientTxn)
 		case len(j.Resources) > maxJobResources:
 			return fmt.Errorf("%w: processing job %d: %d resources (at most %d)", ErrInvalid, i, len(j.Resources), maxJobResources)
+		case !validRating(j.RatingXP) || !validRating(j.RatingQuantity) || !validRating(j.RatingRarity):
+			return fmt.Errorf("%w: processing job %d: ratings %v, %v, %v are not 0 to %g", ErrInvalid, i, j.RatingXP, j.RatingQuantity, j.RatingRarity, MaxJobRating)
 		}
 		seen[j.JobGUID] = true
 		for _, r := range j.Resources {
@@ -108,12 +115,15 @@ func ValidateJobs(jobs []ProcessingJob) error {
 	return nil
 }
 
+// validRating reports whether a job's rating sum is a number from 0 to MaxJobRating (NaN and the infinities are none).
+func validRating(v float64) bool { return !math.IsNaN(v) && v >= 0 && v <= MaxJobRating }
+
 // ProcessingJobs returns the jobs of a character in the order they were queued. A character with none has an empty list; an unknown character is ErrNotFound.
 func (s *Store) ProcessingJobs(ctx context.Context, characterID string) ([]ProcessingJob, error) {
 	if !idPattern.MatchString(characterID) {
 		return nil, ErrNotFound
 	}
-	rows, err := s.pool.Query(ctx, `SELECT job_guid, station_key, recipe_guid, sub_recipe_guid, quantity, queued_at, started_at, duration_ms, client_txn, resources
+	rows, err := s.pool.Query(ctx, `SELECT job_guid, station_key, recipe_guid, sub_recipe_guid, quantity, queued_at, started_at, duration_ms, client_txn, resources, rating_xp, rating_quantity, rating_rarity
 		FROM character_processing_jobs WHERE character_id = $1 ORDER BY ordinal`, characterID)
 	if err != nil {
 		return nil, err
@@ -123,7 +133,7 @@ func (s *Store) ProcessingJobs(ctx context.Context, characterID string) ([]Proce
 	for rows.Next() {
 		var j ProcessingJob
 		var resources []byte
-		if err := rows.Scan(&j.JobGUID, &j.StationKey, &j.RecipeGUID, &j.SubRecipeGUID, &j.Quantity, &j.QueuedAt, &j.StartedAt, &j.DurationMs, &j.ClientTxn, &resources); err != nil {
+		if err := rows.Scan(&j.JobGUID, &j.StationKey, &j.RecipeGUID, &j.SubRecipeGUID, &j.Quantity, &j.QueuedAt, &j.StartedAt, &j.DurationMs, &j.ClientTxn, &resources, &j.RatingXP, &j.RatingQuantity, &j.RatingRarity); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(resources, &j.Resources); err != nil {
@@ -187,9 +197,9 @@ func replaceProcessingJobs(ctx context.Context, tx pgx.Tx, characterID string, j
 		if err != nil {
 			return fmt.Errorf("%w: processing job %d: %v", ErrInvalid, i, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO character_processing_jobs (character_id, job_guid, ordinal, station_key, recipe_guid, sub_recipe_guid, quantity, queued_at, started_at, duration_ms, client_txn, resources)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
-			characterID, j.JobGUID, i, j.StationKey, j.RecipeGUID, j.SubRecipeGUID, j.Quantity, j.QueuedAt, j.StartedAt, j.DurationMs, j.ClientTxn, string(body)); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO character_processing_jobs (character_id, job_guid, ordinal, station_key, recipe_guid, sub_recipe_guid, quantity, queued_at, started_at, duration_ms, client_txn, resources, rating_xp, rating_quantity, rating_rarity)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)`,
+			characterID, j.JobGUID, i, j.StationKey, j.RecipeGUID, j.SubRecipeGUID, j.Quantity, j.QueuedAt, j.StartedAt, j.DurationMs, j.ClientTxn, string(body), j.RatingXP, j.RatingQuantity, j.RatingRarity); err != nil {
 			return itemsError(err)
 		}
 	}

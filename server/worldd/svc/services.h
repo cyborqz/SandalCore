@@ -115,6 +115,9 @@ struct ProcessingJob {
     int64_t                  duration_ms = 0;
     std::string              client_txn;      // 32 lowercase hex digits
     std::vector<JobResource> resources;
+    // the crafter's artisan ratings when the job was queued (crafting quality; the sums its formulas add up): the job pays what it was started with, whatever its crafter wears when it is collected.  0 for a
+    // job saved before they were kept.
+    double rating_xp = 0, rating_quantity = 0, rating_rarity = 0;
     int64_t end_ms() const { return started_at_ms + duration_ms; }
     bool operator==(const ProcessingJob&) const = default;
 };

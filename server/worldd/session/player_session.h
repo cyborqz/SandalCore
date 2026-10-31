@@ -700,6 +700,8 @@ public:
     size_t   crafts_claimed() const { return crafts_claimed_; }
     size_t   claims_refused() const { return claims_refused_; }
     const std::vector<svc::ProcessingJob>& processing_jobs() const { return jobs_; }
+    /// Crafting quality: the artisan ratings this character holds now for the recipes of `profession` (the stat engine's settled values: worn gear, and later effects and skills); all 0 when it has no stats.
+    crafting::Ratings artisan_ratings(int64_t profession) const;
     /// Crafting, step 2, a game master's tool: finishes the character's jobs that are not over (all of them, or those at one station when `station_name` is not empty: its Blueprint's name or
     /// its definition's), at once and ready to collect.  The number of jobs finished (0 when there were none, or none at that station).
     size_t   gm_finish_jobs(Connection& conn, Clock::time_point now, const std::string& station_name, const std::string& by);
@@ -1212,8 +1214,10 @@ private:
     void run_crafting(Connection& conn, Clock::time_point now);
     /// The earliest moment any job of the character changes status again (wall milliseconds; INT64_MAX when none will).
     int64_t next_job_event(int64_t now_ms) const;
-    /// What a finished job made and pays for this character (crafting/rewards.h), at the character's level now.
+    /// What a finished job made and pays for this character (crafting/rewards.h), at the character's level now and with the artisan ratings the job was started with.
     std::optional<crafting::JobRewards> job_rewards(const svc::ProcessingJob& job) const;
+    /// An artisan rating stat's settled value by its guid (0 for a stat the character does not have).
+    double artisan_stat(int64_t stat) const;
     /// The station actor whose key is `key` (nullptr when the world has none).
     const world::WorldActor* station_by_key(const std::string& key) const;
     /// The wall clock in Unix milliseconds, and the client's synchronized clock now (the one ClientSetTime sets, in seconds).

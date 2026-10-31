@@ -27,7 +27,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - City nodes: node levels and experience, the towns' scenery, people and floor, and the towns' crafting stations.
 - NPC conversations (the talking window).
 - Merchants: currency, buying, selling, repairing and destroying items; talking shopkeepers.
-- Crafting: processing jobs, quick make and collecting finished jobs.
+- Crafting: processing jobs, quick make and collecting finished jobs; the artisan gear a crafter wears (shirt, pants and tool belt of a profession) changes the result: a crafted piece's quality and experience, and a job's time, extra units, units that come out a rarity higher, and experience.
 - Item rarities for resources, weapons and armor, from creatures and from crafting.
 - Glint: all six kinds, ten of a kind into one of the next with a right-click, and kills paying Glint in kinds.
 - Tutorials that stay done, and quiet confirmations (targets, the PvP flag, loot windows, map markers).
@@ -55,6 +55,7 @@ Milestones 1-8 and 10 (login, world bootstrap, stats, talents, combat and abilit
 - Quests: the speech bubbles over NPCs who have an objective for you; the choose-one reward window and the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the statuses of its damage melodies, checking the other classes' finisher effects and the weapon-tree finisher procs against the game, and the reactions that wait for you being hit or for other events.
 - Summoner pets.
+- Crafting ratings from more than gear: potions, food, drinks, elixirs and scrolls (using a consumable does nothing yet) and guild perks (there are no guilds yet).
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.

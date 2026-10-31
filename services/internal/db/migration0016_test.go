@@ -29,11 +29,11 @@ func before16(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// schemaWithoutQuests lists every column, constraint and table but the four of 0016 and those of the later migrations 0017 and 0018 (Migrate applies every version that is not recorded): what 0016
-// must not change.
+// schemaWithoutQuests lists every column, constraint and table but the four of 0016, those of the later migrations 0017 and 0018 and the table 0019 adds columns to (Migrate applies every version that
+// is not recorded): what 0016 must not change.
 func schemaWithoutQuests(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement'`
+	const skip = `'character_quests', 'character_quests_completed', 'character_quest_variables', 'character_quest_commands', 'character_warehouse_items', 'character_attunements', 'character_home_attunement', 'character_processing_jobs'`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns

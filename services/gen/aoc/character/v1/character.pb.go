@@ -595,8 +595,13 @@ type ProcessingJob struct {
 	DurationMs    int64                  `protobuf:"varint,8,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`            // how long it runs: 1 or more
 	ClientTxn     string                 `protobuf:"bytes,9,opt,name=client_txn,json=clientTxn,proto3" json:"client_txn,omitempty"`                // 32 lowercase hex digits: the client's id of the request that started it, which the window shows the job back with
 	Resources     []*JobResource         `protobuf:"bytes,10,rep,name=resources,proto3" json:"resources,omitempty"`                                // what was paid, by record and rarity band
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The crafter's artisan ratings when the job was queued (crafting quality, migration 0019): the sums the job's formulas add up, so the job pays what it started with whatever the crafter
+	// wears when it is collected. 0 or more, not above 1e9; 0 for a job saved before them.
+	RatingXp       float64 `protobuf:"fixed64,11,opt,name=rating_xp,json=ratingXp,proto3" json:"rating_xp,omitempty"`                   // the experience rating (the experience of the job is multiplied by 1 plus the curve value)
+	RatingQuantity float64 `protobuf:"fixed64,12,opt,name=rating_quantity,json=ratingQuantity,proto3" json:"rating_quantity,omitempty"` // the quantity rating (the chance of one more unit)
+	RatingRarity   float64 `protobuf:"fixed64,13,opt,name=rating_rarity,json=ratingRarity,proto3" json:"rating_rarity,omitempty"`       // the rarity rating (the chance of a unit coming out one rarity higher)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ProcessingJob) Reset() {
@@ -697,6 +702,27 @@ func (x *ProcessingJob) GetResources() []*JobResource {
 		return x.Resources
 	}
 	return nil
+}
+
+func (x *ProcessingJob) GetRatingXp() float64 {
+	if x != nil {
+		return x.RatingXp
+	}
+	return 0
+}
+
+func (x *ProcessingJob) GetRatingQuantity() float64 {
+	if x != nil {
+		return x.RatingQuantity
+	}
+	return 0
+}
+
+func (x *ProcessingJob) GetRatingRarity() float64 {
+	if x != nil {
+		return x.RatingRarity
+	}
+	return 0
 }
 
 // One resource of a job (a record) with the rarities and counts that were paid.
@@ -2314,7 +2340,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x0epersisted_mana\x18\f \x01(\x02H\x01R\rpersistedMana\x88\x01\x01\x12'\n" +
 	"\x0flock_expiration\x18\r \x01(\x03R\x0elockExpirationB\x13\n" +
 	"\x11_persisted_healthB\x11\n" +
-	"\x0f_persisted_mana\"\xf3\x02\n" +
+	"\x0f_persisted_mana\"\xde\x03\n" +
 	"\rProcessingJob\x12\x19\n" +
 	"\bjob_guid\x18\x01 \x01(\tR\ajobGuid\x12\x1f\n" +
 	"\vstation_key\x18\x02 \x01(\tR\n" +
@@ -2331,7 +2357,10 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\n" +
 	"client_txn\x18\t \x01(\tR\tclientTxn\x12;\n" +
 	"\tresources\x18\n" +
-	" \x03(\v2\x1d.aoc.character.v1.JobResourceR\tresources\"c\n" +
+	" \x03(\v2\x1d.aoc.character.v1.JobResourceR\tresources\x12\x1b\n" +
+	"\trating_xp\x18\v \x01(\x01R\bratingXp\x12'\n" +
+	"\x0frating_quantity\x18\f \x01(\x01R\x0eratingQuantity\x12#\n" +
+	"\rrating_rarity\x18\r \x01(\x01R\fratingRarity\"c\n" +
 	"\vJobResource\x12\x1b\n" +
 	"\trecord_id\x18\x01 \x01(\x03R\brecordId\x127\n" +
 	"\brarities\x18\x02 \x03(\v2\x1b.aoc.character.v1.JobRarityR\brarities\"`\n" +

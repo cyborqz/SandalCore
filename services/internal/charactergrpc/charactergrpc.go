@@ -395,7 +395,8 @@ func toProtoJobs(jobs []character.ProcessingJob) []*characterv1.ProcessingJob {
 	out := make([]*characterv1.ProcessingJob, 0, len(jobs))
 	for _, j := range jobs {
 		p := &characterv1.ProcessingJob{JobGuid: j.JobGUID, StationKey: j.StationKey, RecipeGuid: j.RecipeGUID, SubRecipeGuid: j.SubRecipeGUID, Quantity: j.Quantity,
-			QueuedAtMs: j.QueuedAt.UnixMilli(), StartedAtMs: j.StartedAt.UnixMilli(), DurationMs: j.DurationMs, ClientTxn: j.ClientTxn}
+			QueuedAtMs: j.QueuedAt.UnixMilli(), StartedAtMs: j.StartedAt.UnixMilli(), DurationMs: j.DurationMs, ClientTxn: j.ClientTxn,
+			RatingXp: j.RatingXP, RatingQuantity: j.RatingQuantity, RatingRarity: j.RatingRarity}
 		for _, r := range j.Resources {
 			res := &characterv1.JobResource{RecordId: r.RecordID}
 			for _, ra := range r.Rarities {
@@ -412,7 +413,8 @@ func fromProtoJobs(jobs []*characterv1.ProcessingJob) []character.ProcessingJob 
 	out := make([]character.ProcessingJob, 0, len(jobs))
 	for _, p := range jobs {
 		j := character.ProcessingJob{JobGUID: p.GetJobGuid(), StationKey: p.GetStationKey(), RecipeGUID: p.GetRecipeGuid(), SubRecipeGUID: p.GetSubRecipeGuid(), Quantity: p.GetQuantity(),
-			QueuedAt: time.UnixMilli(p.GetQueuedAtMs()).UTC(), StartedAt: time.UnixMilli(p.GetStartedAtMs()).UTC(), DurationMs: p.GetDurationMs(), ClientTxn: p.GetClientTxn()}
+			QueuedAt: time.UnixMilli(p.GetQueuedAtMs()).UTC(), StartedAt: time.UnixMilli(p.GetStartedAtMs()).UTC(), DurationMs: p.GetDurationMs(), ClientTxn: p.GetClientTxn(),
+			RatingXP: p.GetRatingXp(), RatingQuantity: p.GetRatingQuantity(), RatingRarity: p.GetRatingRarity()}
 		for _, r := range p.GetResources() {
 			res := character.JobResource{RecordID: r.GetRecordId()}
 			for _, ra := range r.GetRarities() {

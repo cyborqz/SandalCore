@@ -572,6 +572,26 @@ DELETE FROM schema_migrations WHERE version = 18;
 COMMIT;
 ```
 
+**Rolling back migration 0019.** Migration 0019 (crafting quality, "a job keeps the ratings it was queued with") adds THREE columns to `character_processing_jobs`, `rating_xp`, `rating_quantity` and `rating_rarity` (the crafter's artisan
+ratings for the job's formulas when it was queued: DOUBLE PRECISION, default 0, checked 0 to 1e9); it writes nowhere else, rewrites no row and touches no other table or column. worldd saves them with the job (`SaveInventory` with
+`replace_processing_jobs`) and reads them back at login. The rollback drops the three columns and their checks with the ratings they hold: a job that is running or waiting is then paid at the base tables (no extra unit, no unit one rarity higher,
+the base experience), the same as a job saved before 0019. The jobs themselves, the characters, their items and their money are untouched, and the migration applies again. A pre-0019 worldd or character service needs no rollback (it does not
+select the columns). Stop the character service and worldd first.
+
+```sql
+-- rollback of migration 0019 (crafting quality: the ratings a job was queued with)
+BEGIN;
+ALTER TABLE character_processing_jobs
+    DROP CONSTRAINT character_processing_jobs_rating_xp,
+    DROP CONSTRAINT character_processing_jobs_rating_quantity,
+    DROP CONSTRAINT character_processing_jobs_rating_rarity,
+    DROP COLUMN rating_xp,
+    DROP COLUMN rating_quantity,
+    DROP COLUMN rating_rarity;
+DELETE FROM schema_migrations WHERE version = 19;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or
@@ -584,7 +604,7 @@ its name. worldd takes the commands of a character that plays every moment and d
 
 **Content (crafting, step 0).** contentc version 20 adds the crafting tables (`internal/content/crafting.go`): `craft_station_def` (the 130 station definitions: kind, title, certification tier, queue, tax tag, recipe set), `craft_station_asset` (which population asset is whose station, by name), `craft_recipe_set` with `craft_recipe_set_list`, `craft_recipe_list` with `craft_recipe_list_member`, `craft_pred` (the biome, node level, node and building-modification predicates of lists and recipes), `craft_recipe` (4,274 recipes: profession, tier, durations and formulas, cost, flags) with `craft_recipe_input` (what it takes), `craft_cost` and `craft_reward` (the reward tables the recipes name and the sub-tables they reach, as JSON). worldd reads the definitions and the asset link; the steps that start and collect a job read the rest.
 
-**Processing jobs (crafting, step 1).** Migration 0013 adds `character_processing_jobs`: the batches a player started at the processing stations, in the order they were queued, each with the station it is at (`station_key`, 16 hex digits made from the station's place in the world's data, the same on every start of the server), the recipe and quantity, what was paid (`resources`, JSON), when it was queued and began (`started_at`: queued, or the end of the job before it) and how long it runs. A job runs on the wall clock, so it goes on while its player is logged out. worldd reads the jobs with `GetCharacter` (with items) and saves them with the items and the wallet in the same transaction (`SaveInventory` with `replace_processing_jobs`): a job and the materials and coin it took are stored together or not at all. worldd prices and times a job from the recipes in `content.db`: one unit costs the recipe's copper plus the station's service tax, rounded half up, and takes the recipe's base duration.
+**Processing jobs (crafting, step 1).** Migration 0013 adds `character_processing_jobs`: the batches a player started at the processing stations, in the order they were queued, each with the station it is at (`station_key`, 16 hex digits made from the station's place in the world's data, the same on every start of the server), the recipe and quantity, what was paid (`resources`, JSON), when it was queued and began (`started_at`: queued, or the end of the job before it) and how long it runs. A job runs on the wall clock, so it goes on while its player is logged out. worldd reads the jobs with `GetCharacter` (with items) and saves them with the items and the wallet in the same transaction (`SaveInventory` with `replace_processing_jobs`): a job and the materials and coin it took are stored together or not at all. Migration 0019 adds the crafter's artisan ratings the job was queued with (`rating_xp`, `rating_quantity`, `rating_rarity`: the sums its formulas add up, 0 for a job saved before them), so a job pays what it was started with after any login. worldd prices and times a job from the recipes in `content.db`: one unit costs the recipe's copper plus the station's service tax, rounded half up, and takes the recipe's base duration.
 
 **Known recipes (crafting, step 3).** Migration 0014 adds `character_known_recipes`: the recipes a game master taught a character although the game makes a player learn them (a recipe the game does not make a player learn is known to everybody and has no row). worldd reads them with `GetCharacter` (with items) and saves them with the items and the wallet in the same transaction (`SaveInventory` with `replace_known_recipes`). The admin API's `TeachRecipe`, `ForgetRecipe` and `ListTaughtRecipes` (`worldctl craft teach`, `forget`, `taught`) change the list of a character in the world.
 

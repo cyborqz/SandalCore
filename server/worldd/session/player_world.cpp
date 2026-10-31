@@ -817,8 +817,9 @@ void PlayerWorld::load_crafting_data() {
             unread += reward.unread != 0 ? 1 : 0;
             unknown_xp += reward.unknown_formula.empty() ? 0 : 1;
         }
-        spdlog::info("[world] recipes: {} recipes, {} cost records, {} recipe sets, {} reward tables ({} with a part left out, {} with an experience formula not worked out), experience curves {}", recipes_->recipes.size(),
-                     recipes_->costs.size(), recipes_->set_lists.size(), recipes_->rewards.size(), unread, unknown_xp, recipes_->xp_curves.ok() ? "read" : "MISSING: no Adventuring experience for a job");
+        spdlog::info("[world] recipes: {} recipes, {} cost records, {} recipe sets, {} reward tables ({} with a part left out, {} with an experience formula not worked out), experience curves {}, artisan ratings of {} crafting and {} processing professions{}",
+                     recipes_->recipes.size(), recipes_->costs.size(), recipes_->set_lists.size(), recipes_->rewards.size(), unread, unknown_xp, recipes_->xp_curves.ok() ? "read" : "MISSING: no Adventuring experience for a job",
+                     recipes_->artisan.crafting_professions, recipes_->artisan.processing_professions, recipes_->artisan.ok() ? "" : " (MISSING: crafts and jobs ignore the crafter's ratings)");
     } else {
         spdlog::warn("[world] the recipes do not load, so no job can be started at a station: {}", re);
     }

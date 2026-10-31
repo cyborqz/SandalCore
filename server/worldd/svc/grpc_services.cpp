@@ -150,6 +150,9 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         job.started_at_ms = j.started_at_ms();
         job.duration_ms = j.duration_ms();
         job.client_txn = j.client_txn();
+        job.rating_xp = j.rating_xp();
+        job.rating_quantity = j.rating_quantity();
+        job.rating_rarity = j.rating_rarity();
         for (const auto& res : j.resources()) {
             JobResource jr;
             jr.record_id = res.record_id();
@@ -360,6 +363,9 @@ CallStatus GrpcServices::save_inventory(const std::string& id, const std::vector
             j->set_started_at_ms(job.started_at_ms);
             j->set_duration_ms(job.duration_ms);
             j->set_client_txn(job.client_txn);
+            j->set_rating_xp(job.rating_xp);
+            j->set_rating_quantity(job.rating_quantity);
+            j->set_rating_rarity(job.rating_rarity);
             for (const JobResource& res : job.resources) {
                 auto* r = j->add_resources();
                 r->set_record_id(res.record_id);

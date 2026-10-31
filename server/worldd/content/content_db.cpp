@@ -3832,7 +3832,7 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
         return std::nullopt;
     };
     {
-        Stmt q(db_, "SELECT guid, name, profession_guid, tier, base_duration, std_cost, cost_guid, reward_guid, learnable, destination, fuel, blacklisted, category_tag FROM craft_recipe");
+        Stmt q(db_, "SELECT guid, name, profession_guid, tier, base_duration, std_cost, cost_guid, reward_guid, learnable, destination, fuel, blacklisted, category_tag, duration_formula, quantity_formula, quality_formula FROM craft_recipe");
         if (!q.ok()) return failed("craft_recipe");
         int step;
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
@@ -3855,6 +3855,9 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
             r.fuel = static_cast<int>(sqlite3_column_int64(s, 10));
             r.blacklisted = sqlite3_column_int64(s, 11) != 0;
             r.category_tag = column_text(s, 12);
+            r.has_duration_formula = !column_text(s, 13).empty();
+            r.has_quantity_formula = !column_text(s, 14).empty();
+            r.has_quality_formula = !column_text(s, 15).empty();
             out.recipes[r.guid] = std::move(r);
         }
         if (step != SQLITE_DONE) return failed("craft_recipe");
@@ -3989,6 +3992,75 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
         out.xp_curves.tier[0] = stat_curve_points(db_, kCurveTierModNovice);
         out.xp_curves.tier[1] = stat_curve_points(db_, kCurveTierModApprentice);
         out.xp_curves.tier[2] = stat_curve_points(db_, kCurveTierModJourneyman);
+    }
+    {   // crafting quality: the curves of the artisan equations and the rating stats of the crafting and processing professions (the names are matched without case: LumberMilling / Lumbermilling)
+        ArtisanData& a = out.artisan;
+        const auto curve_named = [&](const std::string& name) {
+            ArtisanData::Curve points;
+            Stmt q(db_, "SELECT level, value FROM stat_curve WHERE name = ?1 ORDER BY ord");
+            if (!q.ok()) return points;
+            sqlite3_bind_text(q.get(), 1, name.c_str(), static_cast<int>(name.size()), SQLITE_TRANSIENT);
+            while (sqlite3_step(q.get()) == SQLITE_ROW) points.emplace_back(sqlite3_column_double(q.get(), 0), sqlite3_column_double(q.get(), 1));
+            return points;
+        };
+        a.crafting_quality = curve_named("CraftingQuality");
+        a.crafting_xp = curve_named("CraftingXP");
+        a.processing_time = curve_named("ProcessingTime");
+        a.processing_xp = curve_named("ProcessingXP");
+        static const char* const kRarities[] = {"Common", "Uncommon", "Rare", "Heroic", "Epic", "Legendary"};
+        for (int i = 0; i < 5; ++i) a.rarity_step[i] = curve_named(std::string("ProcessingRarityIncrease_") + kRarities[i]);
+        for (int i = 0; i < 6; ++i) a.quantity_chance[i] = curve_named(std::string("ProcessingQuantityChance_") + kRarities[i]);
+        const auto lower_of = [](std::string s) {
+            for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return s;
+        };
+        std::map<std::string, int64_t> rating;   // the lower case name of a rating stat -> its guid
+        {
+            Stmt q(db_, "SELECT guid, name FROM stat_def WHERE name LIKE 'Artisan%Rating'");
+            if (q.ok()) {
+                while (sqlite3_step(q.get()) == SQLITE_ROW) {
+                    if (column_is_int(q.get(), 0)) rating[lower_of(column_text(q.get(), 1))] = sqlite3_column_int64(q.get(), 0);
+                }
+            }
+        }
+        const auto stat_of = [&](const std::string& name) -> int64_t {
+            const auto it = rating.find(lower_of(name));
+            return it == rating.end() ? 0 : it->second;
+        };
+        a.general_crafting.quality = stat_of("Artisan_Crafting_Quality_Rating");
+        a.general_crafting.xp = stat_of("Artisan_Crafting_XP_Rating");
+        a.general_processing.processing = true;
+        a.general_processing.time = stat_of("Artisan_Processing_Time_Rating");
+        a.general_processing.quantity = stat_of("Artisan_Processing_Quantity_Rating");
+        a.general_processing.rarity = stat_of("Artisan_Processing_Rarity_Rating");
+        a.general_processing.xp = stat_of("Artisan_Processing_XP_Rating");
+        Stmt q(db_, "SELECT guid, name, category FROM profession");
+        if (q.ok()) {
+            while (sqlite3_step(q.get()) == SQLITE_ROW) {
+                if (!column_is_int(q.get(), 0)) continue;
+                const int64_t guid = sqlite3_column_int64(q.get(), 0);
+                const std::string name = column_text(q.get(), 1), category = column_text(q.get(), 2);
+                ArtisanProfession p;
+                if (category == "Crafting") {
+                    p.quality = stat_of("Artisan_Crafting_" + name + "_Quality_Rating");
+                    p.xp = stat_of("Artisan_Crafting_" + name + "_XP_Rating");
+                    if (p.quality != 0 || p.xp != 0) {
+                        a.by_profession[guid] = p;
+                        ++a.crafting_professions;
+                    }
+                } else if (category == "Processing") {
+                    p.processing = true;
+                    p.time = stat_of("Artisan_Processing_" + name + "_Time_Rating");
+                    p.quantity = stat_of("Artisan_Processing_" + name + "_Quantity_Rating");
+                    p.rarity = stat_of("Artisan_Processing_" + name + "_Rarity_Rating");
+                    p.xp = stat_of("Artisan_Processing_" + name + "_XP_Rating");
+                    if (p.time != 0 || p.quantity != 0 || p.rarity != 0 || p.xp != 0) {
+                        a.by_profession[guid] = p;
+                        ++a.processing_professions;
+                    }
+                }
+            }
+        }
     }
     return out;
 }

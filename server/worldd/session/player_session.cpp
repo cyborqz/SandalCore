@@ -3637,6 +3637,7 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
     facts.inventory = &inventory_;
     facts.rarity_facts = [this](int64_t item) { return world_->item_rarity_facts(item); };   // (the rarity the client shows for a stack: the inputs are found by it)
     facts.copper = wallet_.copper();
+    facts.rating_stat = [this](int64_t stat) { return artisan_stat(stat); };   // crafting quality: the job's time reads the character's processing time ratings
     facts.unfinished_here = crafting::unfinished_at(jobs_, key, now_ms);
     facts.held_here = crafting::held_at(jobs_, key);
     if (jobs_.size() >= crafting::kMaxJobsHeld) return refuse("the character holds " + std::to_string(jobs_.size()) + " jobs already");
@@ -3658,7 +3659,7 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
         inventory_ = kept;
         return refuse("the job takes from " + std::to_string(taken.events.size()) + " stacks: more events than one answer holds");
     }
-    svc::ProcessingJob job = crafting::make_job(jobs_, key, plan.recipe->guid, req->quantity, plan.duration_ms, req->transaction, crafting::job_resources_of(plan.paid), now_ms);
+    svc::ProcessingJob job = crafting::make_job(jobs_, key, plan.recipe->guid, req->quantity, plan.duration_ms, req->transaction, crafting::job_resources_of(plan.paid), now_ms, plan.ratings);   // (the ratings are saved with the job)
     const auto state = crafting::to_state(job, now_ms, sync_now(now));
     if (!state) {   // (the guids were made here: cannot happen)
         inventory_ = kept;
@@ -3691,9 +3692,14 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
     queue_later("craft started", [station_guid, delta, shown](bootstrap::PlayerBootstrap& pb) { return pb.craft_started_answer(station_guid, items::kMoneyTier, delta, shown); }, conn,
                 now + kTickAfterRemoves, /*must_build=*/true);
     spdlog::log(level_for(craft_logged_, kCraftLogged),
-                "[session] {}: started {} x{} at {} ({}): {} copper ({} each with the tax of {:.2f}, {} before it) leaves the purse ({} -> {}), {} stack(s) leave the material bags, the job runs {:.0f} s {}", name(),
+                "[session] {}: started {} x{} at {} ({}): {} copper ({} each with the tax of {:.2f}, {} before it) leaves the purse ({} -> {}), {} stack(s) leave the material bags, the job runs {:.0f} s{} {}", name(),
                 plan.recipe->name, req->quantity, a->station.name, key, plan.cost, plan.unit_taxed, facts.tax.percent, plan.unit_cost, before, wallet_.copper(), taken.events.size(),
-                plan.duration_ms / 1000.0, state->status == crafting::kPending ? "after the one before it" : "from now");
+                plan.duration_ms / 1000.0,
+                plan.ratings.any() ? " (x" + std::to_string(plan.time_multiplier).substr(0, 5) + " of its base time with the ratings: time " + std::to_string(static_cast<int64_t>(std::lround(plan.ratings.time))) + ", quantity " +
+                                         std::to_string(static_cast<int64_t>(std::lround(plan.ratings.quantity))) + ", rarity " + std::to_string(static_cast<int64_t>(std::lround(plan.ratings.rarity))) + ", experience " +
+                                         std::to_string(static_cast<int64_t>(std::lround(plan.ratings.xp))) + ")"
+                                   : std::string(),
+                state->status == crafting::kPending ? "after the one before it" : "from now");
 }
 
 // -- crafting, step 3: the quick make ------------------------------------------------------------------------------------------------------------------------
@@ -3904,7 +3910,9 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
             return fail(o.refusal);
         }
         if (!t.lowest_first) {
-            for (const items::Event& e : o.events) paid.push_back({e.item.item_record_id, e.item.quality, e.count > 0 ? e.count : e.item.quantity});
+            for (const items::Event& e : o.events) {
+                paid.push_back({t.slot, e.item.quality, e.count > 0 ? e.count : e.item.quantity, world_->item_rarity_facts(e.item.item_record_id).rarity_of(e.item.quality)});
+            }
         }
         taken.events.insert(taken.events.end(), std::make_move_iterator(o.events.begin()), std::make_move_iterator(o.events.end()));
     }
@@ -3934,9 +3942,9 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         }
     }
 
-    // 3. the product: its quality is the paid materials', its experience the recipe's reward table's
+    // 3. the product: its quality starts from the paid materials' rarity and the crafter's artisan ratings add to it, its experience is the recipe's reward table's times the experience rating's multiplier
     const content::ContentDb* db = world_->content();
-    const int quality = crafting::craft_quality(paid);
+    const double crate_mean = crafting::craft_mean_rarity(paid);   // (a trade crate starts where the mean rarity of what it was made of puts it in its band, like a piece of gear, and no rating adds to it)
     const auto facts_of = [db](int64_t item) -> std::optional<content::ItemSaleFacts> {
         if (!db) return std::nullopt;
         std::string error;
@@ -3944,7 +3952,8 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         if (!f || !f->known) return std::nullopt;
         return f;
     };
-    const std::optional<crafting::JobRewards> made = crafting::roll_craft(*recipes, recipe, quality, progress_.level, crafting::seed_of(items::guid_hex(req.transaction)), facts_of);
+    const crafting::Ratings ratings = artisan_ratings(recipe.profession);
+    const std::optional<crafting::JobRewards> made = crafting::roll_craft(*recipes, recipe, paid, ratings, progress_.level, crafting::seed_of(items::guid_hex(req.transaction)), facts_of);
     if (!made || made->products.empty()) {
         inventory_ = kept_bags;
         wallet_ = kept_purse;
@@ -3985,12 +3994,17 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
                 if (other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();   // (fresh_guid looks at the inventory only)
             }
             it.quantity = static_cast<int32_t>(take);
-            it.quality = rewards.quality;
+            it.quality = p.quality > 0 ? p.quality : rewards.quality;
             if (cargo) {
-                // a crate has no quality numbers of its own to add up: a trade crate is the first quality of the rarity the materials give (the mean quality of the paid stacks, as a crafted piece of gear has it),
-                // a construction crate the record's own
+                // a crate has no quality numbers of its own to add up: a trade crate starts where the mean rarity of the paid stacks puts it in its band (the first quality of that rarity and its share of the
+                // band, to the nearest whole number, as a crafted piece has it; its own rarity bounds hold it inside them), a construction crate has the record's own
                 it.quality = std::max(1, rec ? rec->default_quality : 1);
-                if (crate_follows_materials(db, p.item)) it.quality = items::first_quality_of(world_->item_rarity_facts(p.item).rarity_of(quality));
+                if (crate_follows_materials(db, p.item)) {
+                    const items::ItemRarityFacts crate_facts = world_->item_rarity_facts(p.item);
+                    it.quality = std::clamp(crafting::quality_from(crafting::craft_base_quality(crate_mean, crate_facts)), 1, crafting::kMaxQuality);
+                    const int shown = crate_facts.rarity_of(it.quality);
+                    if (shown != crate_facts.band_of(it.quality)) it.quality = items::first_quality_of(shown);
+                }
             }
             it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
@@ -4159,11 +4173,21 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         line += (i ? ", " : "") + (shown_name.count(rewards.products[i].item) ? shown_name[rewards.products[i].item] : std::to_string(rewards.products[i].item)) + " x" +
                 std::to_string(rewards.products[i].quantity);
     }
+    // the quality: the whole number the item has (1 to 200: the nearest to the exact number the calculation came to, nothing is cut off before) and what it reads as on the community crafting calculator's tier
+    // scale (the rarity, the way through its band: 10 in Uncommon is "Uncommon +44.4 %, 2.4444")
+    const items::ItemRarityFacts product_facts = world_->item_rarity_facts(rewards.products.front().item);
+    const double on_scale = crafting::tier_scale(product_facts, rewards.quality);
+    const std::string as_tier = fmt::format("{:.2f}", rewards.quality_exact) + " exactly, nearest whole; " + std::string(items::rarity_name(product_facts.rarity_of(rewards.quality))) + " +" +
+                                fmt::format("{:.1f}", (on_scale - std::floor(on_scale)) * 100.0) + " %, " + fmt::format("{:.4f}", on_scale) + " on the tier scale";
     line += (cargo ? " into the cargo slot at quality " + std::to_string(fresh.front().quality) + " (rarity " + std::string(items::rarity_name(world_->item_rarity_facts(fresh.front().item_record_id).rarity_of(fresh.front().quality))) + ")"
-                   : " at quality " + std::to_string(rewards.quality) + " (rarity " + std::to_string(rewards.rarity) + ") in " + std::to_string(fresh.size()) + " stack(s)") +
+                   : " at quality " + std::to_string(rewards.quality) + " (" + as_tier + ") in " + std::to_string(fresh.size()) + " stack(s)") +
             "; " + std::to_string(plan.cost) + " " + price_unit(plan.currency) + " paid" +
             (plan.currency == items::kMoneyTier ? " (" + std::to_string(before) + " -> " + std::to_string(wallet_.copper()) + ")" : std::string()) + ", " + std::to_string(taken.events.size()) +
             " stack(s) of materials taken";
+    if (rewards.ratings.any()) {
+        line += "; artisan ratings: quality " + std::to_string(std::lround(rewards.ratings.quality)) + " adds " + fmt::format("{:.2f}", rewards.quality_added) + " to the base, experience " +
+                std::to_string(std::lround(rewards.ratings.xp)) + " (x" + fmt::format("{:.3f}", rewards.xp_multiplier) + ")";
+    }
     for (const professions::Change& c : changes) {
         const professions::Profession* pf = professions_.book()->find(c.profession);
         if (pf) line += "; " + pf->name + " +" + std::to_string(c.after.xp - c.before.xp) + " XP (now " + std::to_string(c.after.xp) + ", level " + std::to_string(c.after.level) + ")";
@@ -4474,7 +4498,19 @@ void PlayerSession::on_set_map_marker(Connection& conn, const repl::ClientRpc& r
 std::optional<crafting::JobRewards> PlayerSession::job_rewards(const svc::ProcessingJob& job) const {
     const content::CraftRecipeData* recipes = world_ ? world_->craft_recipes() : nullptr;
     if (!recipes) return std::nullopt;
-    return crafting::roll_job(*recipes, job, progress_.level);
+    // crafting quality: the job's extra units, steps up and experience come from the artisan ratings it was started with, saved with it (a job saved before they were kept has none)
+    return crafting::roll_job(*recipes, job, progress_.level, crafting::job_ratings(job), [this](int64_t item) { return world_->item_rarity_facts(item); });
+}
+
+double PlayerSession::artisan_stat(int64_t stat) const {
+    const stats::StatValue* v = stats_ ? stats_->find(stat) : nullptr;
+    return v ? static_cast<double>(v->value) : 0.0;
+}
+
+crafting::Ratings PlayerSession::artisan_ratings(int64_t profession) const {
+    const content::CraftRecipeData* recipes = world_ ? world_->craft_recipes() : nullptr;
+    if (!recipes || !stats_ || !stats_->started()) return {};
+    return crafting::ratings_of(recipes->artisan, profession, [this](int64_t stat) { return artisan_stat(stat); });
 }
 
 const world::WorldActor* PlayerSession::station_by_key(const std::string& key) const {
@@ -4624,6 +4660,7 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
     std::map<int64_t, std::string> shown_name;
     for (size_t at_product = rewards.products.size(); at_product-- > 0;) {
         const crafting::Product& p = rewards.products[at_product];
+        if (p.quantity < 1) continue;   // (a line with no unit has no stack: an empty entry would make the grant refuse and the job could never be collected)
         const auto info = item_catalog().info(p.item);
         if (!info) return refuse("the item table does not know product " + std::to_string(p.item) + " of " + recipe_it->second.name);
         std::string error;
@@ -4641,7 +4678,7 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
                 if (other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();   // (fresh_guid looks at the inventory only)
             }
             it.quantity = static_cast<int32_t>(take);
-            it.quality = rewards.quality;
+            it.quality = p.quality > 0 ? p.quality : rewards.quality;
             it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
             by_product.back().push_back(it);
@@ -4759,9 +4796,14 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
     std::string line = "collected " + recipe_it->second.name + " x" + std::to_string(job.quantity) + " at " + station_name + " (" + key + "): ";
     for (size_t i = 0; i < rewards.products.size(); ++i) {
         line += (i ? ", " : "") + (shown_name.count(rewards.products[i].item) ? shown_name[rewards.products[i].item] : std::to_string(rewards.products[i].item)) + " x" +
-                std::to_string(rewards.products[i].quantity);
+                std::to_string(rewards.products[i].quantity) + " (q" + std::to_string(rewards.products[i].quality > 0 ? rewards.products[i].quality : rewards.quality) + ")";
     }
-    line += " at quality " + std::to_string(rewards.quality) + " in " + std::to_string(fresh.size()) + " stack(s)";
+    line += " at base quality " + std::to_string(rewards.quality) + " in " + std::to_string(fresh.size()) + " stack(s)";
+    if (rewards.ratings.any()) {
+        line += "; artisan ratings of the start: quantity " + std::to_string(std::lround(rewards.ratings.quantity)) + " (" + std::to_string(rewards.extra_units) + " extra unit(s)), rarity " +
+                std::to_string(std::lround(rewards.ratings.rarity)) + " (" + std::to_string(rewards.stepped_units) + " step(s) up), experience " + std::to_string(std::lround(rewards.ratings.xp)) + " (x" +
+                fmt::format("{:.3f}", rewards.xp_multiplier) + ")";
+    }
     for (const professions::Change& c : changes) {
         const professions::Profession* pf = professions_.book()->find(c.profession);
         if (pf) line += "; " + pf->name + " +" + std::to_string(c.after.xp - c.before.xp) + " XP (now " + std::to_string(c.after.xp) + ", level " + std::to_string(c.after.level) + ")";
