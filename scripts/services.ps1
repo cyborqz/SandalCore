@@ -64,8 +64,16 @@ $contentDb = if ($env:AOC_CONTENT_DB) { $env:AOC_CONTENT_DB } else { Join-Path $
 # checkout (not another checkout's copy).
 function Get-ServiceProcess {
     $exes = @('auth', 'character', 'citynode', 'quests', 'mesh', 'gateway' | ForEach-Object { Join-Path $out "$_.exe" }) + $worldd
-    Get-Process -Name auth, character, citynode, quests, mesh, gateway, worldd -ErrorAction SilentlyContinue |
-        Where-Object { $exes -contains $_.Path }
+    $procs = @(Get-Process -Name auth, character, citynode, quests, mesh, gateway, worldd -ErrorAction SilentlyContinue)
+    foreach ($p in $procs) {
+        $path = $p.Path
+        if (-not $path) {
+            # A 32-bit shell cannot read the path of a 64-bit process, so it comes
+            # back empty and this checkout's services would be invisible here.
+            $path = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction SilentlyContinue).ExecutablePath
+        }
+        if ($path -and @($exes | Where-Object { $_ -eq $path }).Count -gt 0) { $p }
+    }
 }
 
 # Lets only this user open $path (like the launcher's saved login token).
@@ -216,6 +224,12 @@ try {
                 foreach ($name in $names) {
                     $exe = if ($name -eq 'worldd') { $worldd } else { Join-Path $out "$name.exe" }
                     $exeArgs = if ($name -eq 'worldd' -or $name -eq 'character') { " --content-db `"$contentDb`"" } else { '' }
+                    if ($name -eq 'worldd' -and $env:AOC_CHARACTER_GRPC_ADDR) {
+                        # worldd is C++ and reads the character service's address from its
+                        # own option (it has no environment variable for it), so it has to
+                        # be told when the service moved to another port.
+                        $exeArgs += " --character `"$env:AOC_CHARACTER_GRPC_ADDR`""
+                    }
                     $log = Join-Path $logs "$name.log"
                     $outLog = Join-Path $logs "$name.out.log"
                     foreach ($f in $log, $outLog) {
