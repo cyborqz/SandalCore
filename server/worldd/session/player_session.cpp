@@ -2646,6 +2646,37 @@ void PlayerSession::apply_gear_stats(const char* what) {
                 without_item ? " (" + std::to_string(without_item) + " of them new to the client's arrays: added)" : std::string());
 }
 
+bool PlayerSession::set_gm_effects(const std::vector<stats::ActiveEffect>& effects, std::string& err) {
+    if (!stats_ || !stats_->started()) { err = "the character has no stats"; return false; }
+    stats_->set_gm_effects(effects);
+    const size_t failed = stat_updates_failed_;
+    apply_gear_stats("the game master's stat overrides");
+    if (stat_updates_failed_ != failed) { err = "the engine refused the stat overrides"; return false; }
+    return true;
+}
+
+void PlayerSession::clear_gm_effects() {
+    if (!stats_) return;
+    stats_->set_gm_effects({});
+    apply_gear_stats("the game master's stat overrides were cleared");
+}
+
+const std::vector<stats::ActiveEffect>& PlayerSession::gm_effects() const {
+    static const std::vector<stats::ActiveEffect> kEmpty;
+    return stats_ ? stats_->gm_effects() : kEmpty;
+}
+
+std::vector<stats::StatValue> PlayerSession::player_stats() const {
+    if (!stats_) return {};
+    return stats_->values();
+}
+
+bool PlayerSession::set_player_current_stat(int64_t guid, double value, std::string& err) {
+    if (!stats_) { err = "the character has no stats"; return false; }
+    stats_->set_current(guid, static_cast<float>(value));
+    return true;
+}
+
 // ============================================================================================================================
 //  using an item (plan D1)
 // ============================================================================================================================

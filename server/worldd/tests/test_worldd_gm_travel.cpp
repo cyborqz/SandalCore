@@ -12,6 +12,7 @@
 //    run speed     the pawn's MoveSpeedMult stat, the move checker's limits scaled (accepts moves at the multiplied speed, still refuses beyond it), the Sprint on top, the grace after
 //                  the speed goes down, the reset; on a mount the mount's MoveSpeedMult and limit; survives the dismount; a new session starts at 1
 //    client RPCs   ServerTeleportXYZ, ServerTeleport and ServerTeleportPlayer: received and logged with the switch off, answered with it on
+//    GM stats      the game master's stat overrides: the stats the session holds change, and the override is remembered and cleared
 //    admin API     WorldAdminService over a real gRPC server: the service token (no token, a wrong one, a bare Bearer, the token without Bearer: refused), the queue (every call is
 //                  applied on the draining thread, never the gRPC thread; a call the network thread does not take in time is Unavailable and never applied)
 // ============================================================================
@@ -1533,6 +1534,40 @@ static void test_client_text_in_the_log() {
     spdlog::set_default_logger(previous);
 }
 
+// ---- the game master's stat overrides -------------------------------------------------------------------------------------------------------------
+
+// The game master's stat overrides reach the character: the stats the session
+// holds change, and the override is remembered.
+static void test_gm_effects(Harness& h) {
+    std::printf("the game master's stat overrides: the stats the session holds change, and the override is remembered\n");
+    PlayerSession* session = h.s.get();
+    if (!session || !session->character_stats()) { std::printf("  [SKIP] the session has no stats\n"); return; }
+
+    const auto before = session->player_stats();
+    if (before.empty()) { CHECK(false, "the session has stats"); return; }
+    const int64_t guid = before.front().guid;
+    const float value = before.front().value;
+
+    // the override travels as an effect: one stack, one mod on the stat
+    stats::ActiveEffect effect;
+    effect.effect = {stats::kRefTypeEffect, 0};
+    effect.stacks = 1;
+    effect.mods = {{guid, 5.0}};
+
+    std::string err;
+    CHECK(session->set_gm_effects({effect}, err), "the override is accepted");
+    CHECK(session->gm_effects().size() == 1, "the override is remembered");
+    const auto after = session->player_stats();
+    bool found = false;
+    for (const stats::StatValue& v : after) {
+        if (v.guid == guid) { found = true; CHECK(std::fabs(v.value - (value + 5.0f)) < 0.001f, "the value grew"); }
+    }
+    CHECK(found, "the overridden stat is still there");
+
+    session->clear_gm_effects();
+    CHECK(session->gm_effects().empty(), "the override is cleared");
+}
+
 // ---- the admin API ------------------------------------------------------------------------------------------------------------------------------
 
 namespace adminv1 = ::aoc::worldadmin::v1;
@@ -1780,6 +1815,11 @@ int main() {
     test_speed_before_mounting();
     test_client_rpcs();
     test_client_text_in_the_log();
+    {
+        Harness h(cyb_record());
+        h.play();
+        test_gm_effects(h);
+    }
     test_admin_api();
     test_admin_queue();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
