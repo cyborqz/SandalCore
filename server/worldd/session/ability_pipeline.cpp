@@ -155,26 +155,65 @@ constexpr MissileLanding kMissileLandings[] = {
 
 // When the client launches the projectiles of a cast bar's spell, and the spell's cast bar (see land_by_flight). `bar` is the montage time at which the bar ends (the section that loops starts there): the client plays
 // the montage at `bar` over the seconds the bar took, which is how worldd knows the rate of THIS player's cast (the Volley's bar: 1.0 s of montage in the owner's 1.82 s, a rate of 0.55). `fire` is the montage
-// time after the section of the cast's completion starts at which the client launches the projectile of `key`.
-//  - The Volley's seven [R: the owner's client log of 2026-10-31, FireProjectileAtTarget with the projectile's name, at a rate of 0.546: the launches came 0.028, 0.142, 0.220, 0.309, 0.395, 0.469 and 0.517 s after the
-//    cast bar's end, the projectiles 5, 7, 2, 3, 6, 4, 1 in that order]. They fly the homing speeds of their records (3,200, 2,900, 2,600, 2,500, 2,600, 2,900, 3,200 cm/s). The recorded retail cast fits this: its seven
-//    landings minus these launches at its own rate (0.776) leave 31 to 34 m of flight at those speeds (the target stood about 32 m away), so retail's confirmations are the launch plus the flight, as here.
-//  - The Fireball [R: the owner's client: the launch came 0.066 s after the bar's end at a rate of 0.617: 0.041 s of montage] and the Frostbolt's bolt [modelled: the Fireball's] fly their records' speeds (3,500 and 4,000
-//    cm/s); the retail Frostbolts landed 0.33 and 0.94 s after their bars' ends, which are targets 9 and 33 m away.
+// time after the section of the cast's completion starts at which the montage's FireProjectile notify launches the projectile of `key` [D: the 622 player montages' notifies, 2026-10-31].
+// `animation` picks the montage of an ability that has two (-1: any); `speed` replaces the projectile record's speed (0: the record's).
+//  - The Volley's seven: the notifies 2.0086, 2.0720, 2.1195, 2.1686, 2.2149, 2.2516 and 2.2824 s of the montage (the section CastComplete starts at 2.0004 s), and the projectile each one launches [R: the owner's
+//    client log of 2026-10-31, FireProjectileAtTarget with the projectile's name: 5, 7, 2, 3, 6, 4 and 1, in that order, at a rate of 0.546]. They fly the homing speeds of their records (3,200, 2,900, 2,600, 2,500,
+//    2,600, 2,900 and 3,200 cm/s). The recorded retail cast fits this: its seven landings minus these launches at its own rate (0.776) leave 31 to 34 m of flight at those speeds (the target stood about 32 m
+//    away), so retail's confirmations are the launch plus the flight, as here.
+//  - The Fireball (the notify 3.0354 s, the section CastComplete at 3.0 s: 0.0354 s; the owner's client launched it 0.059 to 0.066 s after the bar's end at a rate of 0.617, which is 0.036 to 0.041 s of montage), the
+//    Frostbolt (2.4984 s, CastComplete at 2.3334 s: 0.1650 s) and the Soul Flare (1.6960 s, CastComplete at 1.5003 s: 0.1957 s) fly their records' speeds (3,500, 4,000 and 3,200 cm/s). The two recorded Frostbolts
+//    launched within 4 ms of their cost steps (the request over the bar's montage time gives their rates, 0.803 and 0.817) and landed 0.63 and 0.04 s after it, targets 25 and 1.5 m away; the recorded Soul
+//    Flare landed 0.56 s after its launch, a target 18 m away.
+//  - The Judgment [R: 10 recorded casts at an enemy, 5 at an ally]: its AbilityHit notify is the launch (3.0368 s, key 2, the enemy's projectile; 3.0357 s, key 1, the ally's; CastLoopComplete at 2.9978 s). The
+//    enemy casts' first damage confirmation came WITH the cost step in all 10 (0 ms), whatever the distance: nothing flies, so its row has a speed no flight lasts for. The ally casts' came 0 to 99 ms after it (39 ms
+//    in the middle: an ally a few metres away at the record's 5,000 cm/s).
 struct Flight {
     const char* ability;
     double      bar;
     int         key;
     double      fire;
+    int         animation = -1;
+    double      speed = 0;
 };
 constexpr Flight kFlights[] = {
-    {"Mage_ArcaneVolley", 1.000001, 5, 0.0153}, {"Mage_ArcaneVolley", 1.000001, 7, 0.0776}, {"Mage_ArcaneVolley", 1.000001, 2, 0.1202}, {"Mage_ArcaneVolley", 1.000001, 3, 0.1688},
-    {"Mage_ArcaneVolley", 1.000001, 6, 0.2158}, {"Mage_ArcaneVolley", 1.000001, 4, 0.2562}, {"Mage_ArcaneVolley", 1.000001, 1, 0.2824},
-    {"Mage_Fireball", 2.0, 1, 0.0407},
-    {"Mage_Frostbolt", 1.3337822, 1, 0.0407},
+    {"Mage_ArcaneVolley", 1.000001, 5, 0.0083}, {"Mage_ArcaneVolley", 1.000001, 7, 0.0716}, {"Mage_ArcaneVolley", 1.000001, 2, 0.1192}, {"Mage_ArcaneVolley", 1.000001, 3, 0.1683},
+    {"Mage_ArcaneVolley", 1.000001, 6, 0.2145}, {"Mage_ArcaneVolley", 1.000001, 4, 0.2512}, {"Mage_ArcaneVolley", 1.000001, 1, 0.2821},
+    {"Mage_Fireball", 2.0, 1, 0.0354},
+    {"Mage_Frostbolt", 1.3337822, 1, 0.1650},
+    {"Summoner_SoulFlare", 1.000645, 1, 0.1957},
+    {"Cleric_Judgment", 2.9972165, 2, 0.0390, 0, 1.0e9},
+    {"Cleric_Judgment", 2.9962265, 1, 0.0376, 1},
 };
 // How far past the caster's body a projectile starts (its hand), cm.
 constexpr double kMuzzleCm = 40.0;
+// The stats the client takes its montages' play rates from (stat_def: MagicalSpeed, PhysicalSpeed).
+constexpr int64_t kStatMagicalSpeed = 109343399106257ll;
+constexpr int64_t kStatPhysicalSpeed = 109343399171808ll;
+
+// Ordinary casts (no cast bar) whose montage launches ONE projectile (see ShotCast, plan_shot): the hit lands when the projectile gets to the target, which is its launch plus the target's distance over the
+// record's speed, not the recordings' median for the distance of the stage they were recorded on (the Thundering Shot's first damage came 33 to 932 ms after its cost step in 7 casts: targets 1 to 28 m away).
+// `fire` is the montage's FireProjectile notify [D: the 622 player montages' notifies, 2026-10-31]. The client plays the montage at its speed stat, a Ranger's or a Tank's ability at
+// PhysicalSpeed and a Mage's or a Summoner's at MagicalSpeed [R: the owner's play rates, 0.790392 for a level 15 Ranger and 0.737536 for a level 3 Mage, against the stat engine's 0.786758 and 0.731477 for a fresh
+// character of those levels], so the launch comes `fire` over that rate after the trigger [R: the owner's Ranger: the Power Shot launched 1.711, 1.675 and 1.689 s after the key, which is 1.352, 1.324 and 1.335 s
+// of montage at 0.7904 (the notify: 1.330 s); the Thundering Shot 1.367 and 1.362 s = 1.080 and 1.077 s (1.079 s)]. A montage with a part that plays at a rate of its own (AoCAnimNotifyState_LockPlayRate: the
+// Headshot's runs at 0.760 where the Power Shot's runs at 0.790) is slower than that, so where the client asks the server to verify a hit with the launch (the montage's AbilityHit notify sits within 30 ms of the
+// FireProjectile one) that request IS the launch [R: the client sends the Headshot's request in the very frame of its launch]: the Snipe's Hasting, the Headshot's Check_Target and the Dimensional
+// Bolt's Lockout (`ask_gap` is the notifies' gap in montage seconds). The recorded hits fit launch plus flight: the Dimensional Bolt's landed 117 to 245 ms after its request (targets 9 to 18 m away at 7,500 cm/s),
+// the Grapple's 68 to 252 ms after its cost step (12,000 cm/s). Before this the hit came at the recordings' median: the owner's Headshot landed 0.22 s before its arrow left.
+constexpr ShotCast kShotCasts[] = {
+    {"Ranger_Snipe", -1, 2.9934108, false, "Ranger_Snipe_Hasting", 0.0292},
+    {"Ranger_PowerShot", -1, 1.3300842, false, "", 0},
+    {"Ranger_Headshot", -1, 0.99284714, false, "Ranger_Headshot_Check_Target", 0.0048},
+    {"Ranger_ThunderingShot", -1, 1.0793436, false, "", 0},
+    {"Mage_Firebolt", 0, 0.22428152, true, "", 0},
+    {"Mage_Firebolt", 1, 0.31828308, true, "", 0},
+    {"Mage_Firebolt", 2, 0.3165209, true, "", 0},
+    {"Summoner_DimensionalBolt", -1, 0.2294855, true, "Summoner_DimensionalBolt_Lockout", 0.0033},
+    {"Tank_Tomahawk", 0, 0.30069223, false, "", 0},
+    {"Tank_Tomahawk", 1, 0.29991198, false, "", 0},
+    {"Tank_Grapple", -1, 0.4352452, false, "", 0},
+};
 
 // Casts that shoot again and again (see LoopedCast). The Ranger's Salvo [R: the two recorded casts; the montage's sections]: the ability item came 83 ms after the trigger and the first shot's
 // cost 184 ms after it; the next ones followed every 0.24 s (the montage's loop section, "StartLoop", is 0.2373 s long at a play rate of 1; the six costs of the clean cast came 238, 213, 315,
@@ -1585,6 +1624,11 @@ void AbilityPipeline::run_due(double t) {
         }
         if (cast.projectile_due && *cast.projectile_due <= t) {
             cast.projectile_due.reset();
+            if (cast.flight_pending) {   // the projectile leaves now: its hit lands when it gets there
+                launch_shot(cast, t);
+                finish_cast_if_done(i);
+                return;
+            }
             step_hits(cast, t, "projectile");
             finish_cast_if_done(i);
             return;
@@ -1785,6 +1829,11 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
         }
     }
     if (!rec) return HitVerdict::NoCast;
+    // the hit the client asks for with the launch of the cast's projectile (kShotCasts): the request is the launch
+    if (Cast* c = cast_of(rec->client_id); c && c->shot && !c->anchored && c->shot->ask[0] != '\0') {
+        const HitDef* h = catalog_->hit(hit_guid);
+        if (h && h->row.name == c->shot->ask) anchor_shot(*c, now_);
+    }
     if (!rec->reach.count(hit_guid)) return HitVerdict::NotItsHit;
     const int max_requests = rec->max_requests;
     HitSlot* slot = nullptr;
@@ -2383,6 +2432,15 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                 cast.projectile_due.reset();
             }
             if (cast.gathered || cast.timed || cast.toggle_off) cast.projectile_due.reset();   // (its projectiles fly at the enemies it finds, not at a named target: step_branch, start_timed; a press that only ends a toggle fires none)
+            // an ordinary cast with one projectile: it leaves where the montage launches it and lands when it gets to the target (kShotCasts)
+            if (aimed && cast.projectile_due && !cast.branched && !cast.looped && !cast.gathered && !cast.timed && !cast.toggle_off && !is_weapon_combo(row)) {
+                for (const ShotCast& sc : kShotCasts) {
+                    if (row.name == sc.ability && (sc.animation < 0 || sc.animation == cast.animation_index)) {
+                        plan_shot(cast, sc, t);
+                        break;
+                    }
+                }
+            }
         }
     }
     // a movement ability opens the move checker's window
@@ -2523,9 +2581,10 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
 
 void AbilityPipeline::land_by_flight(Cast& cast, double t) {
     if (!combat_ || !cast.branched || cast.target_actors.empty() || cast.heard_at < 0) return;
+    const auto matches = [&](const Flight& f) { return cast.def->row.name == f.ability && (f.animation < 0 || f.animation == cast.animation_index); };
     const Flight* plan = nullptr;
     for (const Flight& f : kFlights) {
-        if (cast.def->row.name == f.ability) {
+        if (matches(f)) {
             plan = &f;
             break;
         }
@@ -2537,7 +2596,7 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
     // this player's rate on the cast: the montage time of the bar's end over the seconds the bar took
     const double rate = plan->bar / std::clamp(cast.heard_at - cast.trigger_at, 0.3, 8.0);
     const auto land_at = [&](const Flight& f, const content::ProjectileRow& p) {
-        double at = cast.heard_at + f.fire / rate + distance / p.speed;
+        double at = cast.heard_at + f.fire / rate + distance / (f.speed > 0 ? f.speed : p.speed);
         if (cast.cost_due) at = std::max(at, *cast.cost_due);   // (never before the cost step)
         return std::max(at, t);
     };
@@ -2552,7 +2611,7 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
             if (h.source == "projectile" && h.owner_guid == m.projectile) key = h.key;
         }
         for (const Flight& f : kFlights) {
-            if (cast.def->row.name == f.ability && f.key == key) {
+            if (matches(f) && f.key == key) {
                 m.due = land_at(f, *p);
                 first = std::min(first, m.due);
                 last = std::max(last, m.due);
@@ -2566,7 +2625,7 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
             const content::ProjectileRow* p = catalog_->projectile(h.owner_guid);
             if (!p || !(p->speed > 0)) continue;
             for (const Flight& f : kFlights) {
-                if (cast.def->row.name == f.ability && f.key == h.key) {
+                if (matches(f) && f.key == h.key) {
                     cast.projectile_due = land_at(f, *p);
                     first = last = *cast.projectile_due;
                     any = true;
@@ -2578,6 +2637,66 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
     if (any) {
         spdlog::info("[abilities] {}: the target is {:.1f} m away: the projectiles land {:.3f} to {:.3f} s after the cast bar's end", cast.def->row.name, distance / 100.0, first - cast.heard_at, last - cast.heard_at);
     }
+}
+
+double AbilityPipeline::client_rate(bool magical) const {
+    const double r = stat_now(magical ? kStatMagicalSpeed : kStatPhysicalSpeed);
+    return (r > 0.2 && r < 3.0) ? r : 1.0;
+}
+
+AbilityPipeline::Cast* AbilityPipeline::cast_of(int32_t client_id) {
+    for (Cast& c : casts_) {
+        if (c.client_id == client_id) return &c;
+    }
+    return nullptr;
+}
+
+void AbilityPipeline::plan_shot(Cast& cast, const ShotCast& shot, double t) {
+    if (!combat_ || cast.target_actors.empty() || !cast.cost_due) return;
+    cast.shot = &shot;
+    cast.flight_pending = true;
+    cast.launch_at = t + shot.fire / client_rate(shot.magical);
+    cast.projectile_due = cast.launch_at;   // (the launch: the landing, below, is what never comes before the cost step)
+}
+
+void AbilityPipeline::land_shot(Cast& cast, double t) {
+    double land = std::max(t, cast.launch_at + cast.flight);
+    if (cast.cost_due) land = std::max(land, *cast.cost_due);
+    cast.projectile_due = land;
+}
+
+void AbilityPipeline::launch_shot(Cast& cast, double t) {
+    cast.flight_pending = false;
+    const combat::TargetInfo info = combat_->inspect(cast.target_actors.front());
+    const content::ProjectileRow* p = nullptr;
+    for (const content::AbilityHitRow& h : cast.def->hits) {
+        if (h.source != "projectile") continue;
+        const content::ProjectileRow* q = catalog_->projectile(h.owner_guid);
+        if (q && q->speed > 0) {
+            p = q;
+            break;
+        }
+    }
+    if (!p || !info.exists || !info.alive) {   // (a target the world does not know or that is gone, or a projectile with no speed: the hit lands as the projectile leaves)
+        cast.flight = 0;
+        land_shot(cast, t);
+        return;
+    }
+    const double distance = info.surface_distance_cm + kMuzzleCm;
+    cast.flight = distance / p->speed;
+    land_shot(cast, t);
+    spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger (the client plays at {:.3f}{}); the target is {:.1f} m away: it lands {:.3f} s after the launch", cast.def->row.name,
+                 cast.launch_at - cast.trigger_at, client_rate(cast.shot->magical), cast.anchored ? ", the launch is the client's request" : "", distance / 100.0, *cast.projectile_due - cast.launch_at);
+}
+
+void AbilityPipeline::anchor_shot(Cast& cast, double now) {
+    cast.anchored = true;
+    const double was = cast.launch_at;
+    cast.launch_at = std::max(now - cast.shot->ask_gap / client_rate(cast.shot->magical), cast.trigger_at);
+    if (cast.flight_pending) cast.projectile_due = std::max(now, cast.launch_at);   // not left yet: it leaves now
+    else if (cast.projectile_due) land_shot(cast, now);                              // on its way: it lands a flight after the launch the request shows
+    spdlog::info("[abilities] {}: the client asked for the hit that goes with the launch {:.3f} s after the trigger: the projectile {} {:.3f} s from the plan", cast.def->row.name, now - cast.trigger_at,
+                 cast.launch_at < was ? "left" : "leaves", std::fabs(cast.launch_at - was));
 }
 
 void AbilityPipeline::launch_gathered(Cast& cast, double t) {

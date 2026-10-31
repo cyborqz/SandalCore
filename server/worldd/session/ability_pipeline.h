@@ -231,6 +231,17 @@ struct TimedCast {
     double      end_at = 0;
 };
 
+/// An ordinary cast (no cast bar) whose montage launches ONE projectile at a moment of its own: the hit lands when the projectile gets to the target (the target's distance over the projectile
+/// record's speed), not at a time the recordings show for some other distance (ability_pipeline.cpp has the table and the evidence).
+struct ShotCast {
+    const char* ability;
+    int         animation;    // the AnimationIndex of the montage this row is for (-1: any)
+    double      fire;         // the montage time of its FireProjectile notify, seconds
+    bool        magical;      // the client plays the montage at MagicalSpeed (else at PhysicalSpeed)
+    const char* ask;          // the hit the client asks the server to verify with the launch (its AbilityHit notify sits next to the FireProjectile one): the request is the launch ("": none)
+    double      ask_gap;      // ... and how long after the launch, in montage seconds
+};
+
 class AbilityPipeline {
 public:
     // ---- numbers that are not content.db's, each with its evidence (header) --------------------------------------------------------------
@@ -589,6 +600,11 @@ private:
         bool                                  clears_montage = false;     // an ordinary cast whose montage is cleared where ability_timings.h shows (end_due): the item keeps its place with the montage cleared
         bool                                  request_heard = false;      // a kBranchedCasts cast: the client's request for its branch came (else the cast goes on at its fallback time)
         double                                heard_at = -1;              // ... and when it came (the cast bar's end); the projectiles of a cast bar are launched from there (land_by_flight)
+        const ShotCast*                       shot = nullptr;             // an ordinary cast whose one projectile flies to the target (kShotCasts)
+        bool                                  flight_pending = false;     // ... and has not left yet: projectile_due is its launch, then its landing
+        double                                launch_at = -1;             // ... when it leaves: the plan (the montage's notify at the client's play rate), then the client's own request
+        bool                                  anchored = false;           // ... the client's request for the hit that goes with the launch came
+        double                                flight = 0;                 // ... how long it flies, seconds (the target's distance over the projectile's speed)
     };
     struct EffectInst {
         int64_t                     owner = 0;                    // plan D2, stage 2: the looping ability whose effect this is (0: none)
@@ -692,6 +708,12 @@ private:
     void   abort_cast(size_t index, double t, const char* why);   // a cast that ends here: none of its steps happens, its item keeps its place with the montage cleared
     void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
     void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
+    double client_rate(bool magical) const;                       // the speed the client plays a montage at: its MagicalSpeed or PhysicalSpeed stat (1.0 when the stat is not there)
+    void   plan_shot(Cast& cast, const ShotCast& shot, double t); // an ordinary cast with one projectile: when it leaves (the montage's notify over the client's play rate)
+    void   launch_shot(Cast& cast, double t);                     // ... it leaves now: it lands after its flight over the target's distance (kShotCasts)
+    void   anchor_shot(Cast& cast, double now);                   // ... the client asked for the hit that goes with the launch: that moment is the launch
+    void   land_shot(Cast& cast, double t);                       // ... it lands a flight after its launch, never before now or the cast's cost step
+    Cast*  cast_of(int32_t client_id);
     double held_fill(const Cast& cast, double held_seconds) const;
     /// The fill the no-argument GetAbilityProgressRatio() reads while a cast's hits are applied (1: the ability whose hit this is has played in full).
     struct FillScope {
