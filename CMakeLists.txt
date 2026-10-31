@@ -10,6 +10,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(MSVC)
+    # The big translation units (server/worldd/session/player_session.cpp is 450 KB)
+    # run into the object file section limit: "error C1128: number of sections
+    # exceeded object file format limit". /bigobj raises that limit.
+    add_compile_options(/bigobj)
+endif()
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 # ── Output directory ────────────────────────────────────────────────────────
