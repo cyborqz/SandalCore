@@ -790,5 +790,8 @@ func Create(db *sql.DB) error {
 	if err := createCurrency(db); err != nil {
 		return err
 	}
-	return createWarehouse(db)
+	if err := createWarehouse(db); err != nil {
+		return err
+	}
+	return createEffectControl(db) // extends ab_effect: after the ability tables
 }

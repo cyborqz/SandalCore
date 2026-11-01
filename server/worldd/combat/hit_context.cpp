@@ -69,6 +69,26 @@ bool HitContext::host_fn(int fn, const std::string& name, const double* /*args*/
         out = target && target_effects ? target_effects->remaining(std::strtoll(name.c_str(), nullptr, 10)) : 0.0;
         return true;
     }
+    // the effect in progress (its numbers are being worked out): EffectHasTag(GetEffect(), tag), GetEffect() == <effect>
+    if (fn == stats::kHostEffectHasTag && effect_guid != 0) {
+        out = 0;
+        if (effect_tags) {
+            for (const std::string& t : *effect_tags) {
+                if (tag_matches(t, name)) out = 1;
+            }
+        }
+        return true;
+    }
+    if (fn == stats::kHostEffectIs && effect_guid != 0) {
+        out = effect_guid == std::strtoll(name.c_str(), nullptr, 10) ? 1.0 : 0.0;
+        return true;
+    }
+    // CalcEffectDuration(<effect>): the lengths worked out beforehand for the effects the expression names (an effect not worked out reads as 0)
+    if (fn == stats::kHostEffectDuration && effect_durations) {
+        const auto it = effect_durations->find(std::strtoll(name.c_str(), nullptr, 10));
+        out = it == effect_durations->end() ? 0.0 : it->second;
+        return true;
+    }
     switch (fn) {
         case stats::kHostDistanceBetween: {
             int a = 0, b = 0;

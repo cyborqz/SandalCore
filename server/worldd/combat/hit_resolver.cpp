@@ -7,13 +7,41 @@
 #include "combat/hit_resolver.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <functional>
+#include <map>
+#include <set>
 
 namespace aoc::worldd::combat {
 
 namespace {
 
 double clamp01(double v) { return std::isfinite(v) ? std::clamp(v, 0.0, 1.0) : 0.0; }
+
+// The guids of the effects a compiled expression text asks the length of: CalcEffectDuration($#<record type>:<guid>$).
+std::vector<int64_t> effect_duration_refs(const std::string& text) {
+    std::vector<int64_t> out;
+    const std::string call = "CalcEffectDuration(";
+    for (size_t p = text.find(call); p != std::string::npos; p = text.find(call, p + 1)) {
+        size_t q = p + call.size();
+        while (q < text.size() && text[q] == ' ') ++q;
+        if (text.compare(q, 2, "$#") != 0) continue;
+        q += 2;
+        while (q < text.size() && std::isdigit(static_cast<unsigned char>(text[q]))) ++q;
+        if (q >= text.size() || text[q] != ':') continue;
+        ++q;
+        int64_t guid = 0;
+        bool any = false;
+        while (q < text.size() && std::isdigit(static_cast<unsigned char>(text[q])) && guid < 922337203685477580LL) {
+            guid = guid * 10 + (text[q] - '0');
+            any = true;
+            ++q;
+        }
+        if (any && q < text.size() && text[q] == '$') out.push_back(guid);
+    }
+    return out;
+}
 
 // The host of a resolver run on its own (an NPC's hit): a random number from the resolver's source and nothing of a cast.
 class ResolverHost final : public ContextHost {
@@ -255,40 +283,74 @@ bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attack
         std::string err;
         return e && e->program >= 0 && attacker.eval(e->program, host, v, err) && std::isfinite(v);
     };
+    // The effect whose numbers are being worked out is the context's effect in progress (EffectHasTag(GetEffect(), tag)), and CalcEffectDuration(<effect>) reads the lengths
+    // of the effects the expression names, worked out ahead of it: the engine cannot run a program from inside another one.
+    std::vector<std::string> effect_tags;
+    std::map<int64_t, double> durations;
+    ctx.effect_tags = &effect_tags;
+    ctx.effect_durations = &durations;
+    std::set<int64_t> measuring;
+    const std::function<void(int64_t)> measure = [&](int64_t expr) {
+        const content::ExprRow* e = expr != 0 ? catalog_.expr(expr) : nullptr;
+        if (!e) return;
+        for (const int64_t guid : effect_duration_refs(e->text)) {
+            if (durations.count(guid) != 0 || !measuring.insert(guid).second) continue;
+            const abilities::EffectDef* d = catalog_.effect(guid);
+            double secs = 0;
+            if (d && !d->row.infinite_duration && d->row.duration_expr != 0) {
+                measure(d->row.duration_expr);
+                double v = 0;
+                if (number(d->row.duration_expr, v)) secs = std::max(0.0, v);
+            }
+            durations[guid] = secs;
+            measuring.erase(guid);
+        }
+    };
+    const auto run = [&](int64_t expr, double& v) {
+        measure(expr);
+        return number(expr, v);
+    };
     for (const content::HitEffectRow& row : hit.effects) {
         if (row.kind == "self") continue;
         const abilities::EffectDef* def = catalog_.effect(row.effect_guid);
         if (!def) continue;
+        effect_tags = def->row.tags;
+        effect_tags.insert(effect_tags.end(), def->row.effect_tags.begin(), def->row.effect_tags.end());
+        ctx.effect_guid = def->row.guid;
         double v = 0;
         // the row's own requirement, then its stack count: no expression is one stack, and a count that works out to nothing applies nothing
-        if (row.requirement_expr != 0 && (!number(row.requirement_expr, v) || v == 0)) continue;
+        if (row.requirement_expr != 0 && (!run(row.requirement_expr, v) || v == 0)) continue;
         double count = 1;
-        if (row.stack_count_expr != 0 && !number(row.stack_count_expr, count)) {
+        if (row.stack_count_expr != 0 && !run(row.stack_count_expr, count)) {
             why += (why.empty() ? "" : "; ") + std::string("the stack count of ") + def->row.name + " does not run";
             continue;
         }
         const int stacks = static_cast<int>(std::clamp(std::floor(count), 0.0, 4096.0));
         if (stacks < 1) continue;
         // the effect's own requirement (it reads the target: the burn is applied to a target that has burn to give)
-        if (def->row.requirement_expr != 0 && (!number(def->row.requirement_expr, v) || v == 0)) continue;
+        if (def->row.requirement_expr != 0 && (!run(def->row.requirement_expr, v) || v == 0)) continue;
         effects::Applied a;
         a.def = def;
         a.stacks = stacks;
         // the duration: the row's, else the record's (a number of seconds), else none
-        if (row.duration_expr != 0 && number(row.duration_expr, v)) {
+        if (row.duration_expr != 0 && run(row.duration_expr, v)) {
             a.duration = std::max(0.0, v);
         } else if (!def->row.infinite_duration && def->row.duration_expr != 0) {
-            if (!number(def->row.duration_expr, v)) {
+            if (!run(def->row.duration_expr, v)) {
                 why += (why.empty() ? "" : "; ") + std::string("the duration of ") + def->row.name + " does not run";
                 continue;
             }
             a.duration = std::max(0.0, v);
         }
         a.in_place_limit = std::max(1, def->row.global_stack_limit);
-        if (def->row.in_place_stack_limit_expr != 0 && number(def->row.in_place_stack_limit_expr, v) && v >= 1) a.in_place_limit = static_cast<int>(std::min(v, 4096.0));
+        if (def->row.in_place_stack_limit_expr != 0 && run(def->row.in_place_stack_limit_expr, v) && v >= 1) a.in_place_limit = static_cast<int>(std::min(v, 4096.0));
+        // ExtendDuration: the seconds one more application adds and the longest it may be extended to; an amount that does not run (the burn aura's does not compile) leaves the
+        // duration refreshed in full
+        a.extended_max = def->row.extended_max;
+        if (def->row.extension_expr != 0 && run(def->row.extension_expr, v)) a.extension = std::max(0.0, v);
         for (const content::ModRow& m : def->mods) {
             if (m.shield_absorb || m.value_expr == 0 || m.stat_guid == content::kGuidTempHealth) continue;
-            if (number(m.value_expr, v)) a.mods.push_back({m.stat_guid, v});
+            if (run(m.value_expr, v)) a.mods.push_back({m.stat_guid, v});
         }
         out.effects.push_back(std::move(a));
     }

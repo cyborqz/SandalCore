@@ -748,7 +748,10 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	if err := b.buildLoot(opt, meta); err != nil { // plan E1, stage 3, part 2: the reward tables (their expressions join the set)
 		return err
 	}
-	return b.buildGather(opt, meta) // Gathering stage 2: the gathering tables (their formulas join the set)
+	if err := b.buildGather(opt, meta); err != nil { // Gathering stage 2: the gathering tables (their formulas join the set)
+		return err
+	}
+	return b.writeEffectControl(opt, meta, sortedBools(effectSet)) // version 39: after every other table, so that no existing expression id moves
 }
 
 // [CoA ~ C_Y_B]

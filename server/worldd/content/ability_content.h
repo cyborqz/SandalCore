@@ -164,6 +164,46 @@ struct EffectRow {
     int64_t     group_guid = 0;
     std::string group_name, group_stack_type;
     int         group_limit = 0;
+    /// contentc version 39 (ab_effect_control): effects applied by different instigators stack apart (each instigator has its own bleed)
+    bool        compare_source = false;
+    /// ... the effect's tick hits are worked out again from the instigator's stats at every tick
+    bool        recalc_on_tick = false;
+    /// ... when its duration runs out it loses stacks_lost_expr stacks (an ab_expr id) and starts again, until none are left
+    bool        stacks_lost_on_elapse = false;
+    int64_t     stacks_lost_expr = 0;
+    /// ... the most seconds an ExtendDuration effect has left after an application, and the seconds one more application adds to it (an ab_expr id; 0: none given)
+    double      extended_max = 0;
+    int64_t     extension_expr = 0;
+};
+
+/// ab_crowd_control (contentc version 39): what a crowd-control record does to its holder.  `applied_status` is a bit set: Root 1, no turning 2, abilities disabled 4, Snare 16,
+/// displaced 32 (Stun and Trip 7, Frozen 11, a push 36).  The push fields are the data's expression text; no push is played yet.
+struct CrowdControlRow {
+    int64_t     guid = 0;
+    std::string name;
+    int64_t     applied_status = 0;
+    double      snare_strength = 0;       // the share of its speed a snared character loses (0.5: half speed)
+    std::string animation_request;        // ECrowdControlAnimationRequest: None, Custom, Stunned, Tripped
+    int         priority = 0;
+    int64_t     disable_guid = 0;         // the ab_ability_disable row that says which abilities it stops (0: none)
+    bool        face_source = false, ignore_non_combatant = false, restart_montage = false, override_client_move = false;
+    std::string push_parameterization, push_magnitude, push_duration;
+    double      push_dir_x = 0, push_dir_y = 0, push_dir_z = 0, push_arrival_distance = 0;
+    bool        end_push_at_arrival = false;
+};
+
+/// ab_ability_disable: the filter text says which abilities a silence, a disarm or an exhaustion leaves usable.
+struct AbilityDisableRow {
+    int64_t     guid = 0;
+    std::string name, filter;
+};
+
+/// ab_fragility: when an effect breaks by itself (a sleep at the first damage, a root at a hit), as the data's expression texts; `bindings` is a JSON object of the event kinds' bit sets.
+struct FragilityRow {
+    int64_t     guid = 0;
+    std::string name, fragility_type, break_threshold, accumulation_rate;
+    double      tick_frequency = 0;
+    std::string break_immediately, evaluate_accumulation, bindings;
 };
 
 /// ab_effect_hit: a hit an effect fires in a phase (PreApply, Apply, Tick, Consume, Remove, Expire, End).
@@ -286,6 +326,13 @@ public:
     std::optional<ReactionRow> reaction(int64_t guid, std::string& error) const;
     /// ab_hit_recursive: the hits a hit fires when it lands, in order (empty without the reaction tables).
     bool hit_recursive(int64_t hit, std::vector<RecursiveHitRow>& out, std::string& error) const;
+
+    /// contentc version 39: the crowd-control, ability-disable and fragility records the effects name (nullopt, with `error`, for a guid the tables do not have).
+    std::optional<CrowdControlRow>   crowd_control(int64_t guid, std::string& error) const;
+    std::optional<AbilityDisableRow> ability_disable(int64_t guid, std::string& error) const;
+    std::optional<FragilityRow>      fragility(int64_t guid, std::string& error) const;
+    /// ab_effect_fragility: the fragility records an effect lists, in order.
+    bool effect_fragilities(int64_t effect, std::vector<int64_t>& out, std::string& error) const;
 
     /// The guids of every ability, hit, effect, projectile or zone of the tables, in guid order (what a catalog that holds them all loads).
     /// Reaction lists the reactions (empty without the reaction tables).

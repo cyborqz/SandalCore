@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 1 November 2026
+**Last updated:** 2 November 2026
 
 ---
 
@@ -49,6 +49,8 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Embersprings: discovering them, attuning to one, and choosing where to respawn.
 - Weapon line experience: kills and the game master level scrolls pay every weapon you wear, each of the 21 weapon lines levels up to 25 on its own, the Skill Tree shows a line's level, bar and talent points, the weapon talents are bought with them, and the free Accuracy passives arrive at levels 5, 10, 15, 20 and 25.
 - Burning mobs: the Burning debuff takes a fire number from a mob every second for 8 seconds (up to 24), shows the fire and the Burning icon, follows it home after a reset and ends with its death or the burner's leaving.
+- Debuffs on mobs: the bleeds (Bleeding, Hemorrhage), the poisons and the stat debuffs of a hit take effect on a mob. Bleeds and poisons take Health at their ticks (one Bleeding debuff for each attacker, a poison's stacks make its ticks bigger), Shaken and Volatile make a mob take more physical and magical damage, Demoralized makes it hit softer and Blinded makes it miss more.
+- Server speed with many players: a fixed-rate server tick, the players' views of the world taking turns, cheaper updates and move answers at the original server's pace.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -57,7 +59,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; the choose-one reward window and the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
-- Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, the other debuffs the weapon finishers put on a mob (the slows, bleeds and wounds), checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
+- Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, the slows the weapon finishers put on a mob, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Summoner pets.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).
@@ -87,7 +89,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 4. **4- Stats** — [Done] The game's own stat formulas, updated as your gear changes.
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
 6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: splitting and joining stacks, food and potions.
-7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff of a hit. Still to come: the other debuffs and CC on mobs (the weapon finisher talents' slows, bleeds and wounds among them) and Summoner pets.
+7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit. Still to come: slows, snares and CC on mobs (roots, stuns; the weapon finisher talents' slows among them) and Summoner pets.
 8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.

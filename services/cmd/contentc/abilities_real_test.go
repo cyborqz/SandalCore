@@ -28,8 +28,10 @@ func TestRealAbilityTables(t *testing.T) {
 		// ab_projectile 206 -> 215, ab_zone 59 -> 62) with 336 more expressions of the abilities' (ab.exprs 1,322 -> 1,658; ab_expr 1,894 -> 2,229), and the reward tables add one expression fewer (loot.exprs 537 -> 536:
 		// one of their texts is met among the reactions' first);
 		// version 38: the ability every consumable item casts comes into the tables (150 more abilities: ab_ability 827 -> 977, ab_hit 1,631 -> 1,784, ab_effect 1,213 -> 1,361) with
-		// 65 more expressions of the abilities' (ab.exprs 1,658 -> 1,723; ab_expr 2,229 -> 2,294)
-		"ab_ability": 977, "ab_hit": 1784, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2294,
+		// 65 more expressions of the abilities' (ab.exprs 1,658 -> 1,723; ab_expr 2,229 -> 2,294);
+		// version 39: the effect-control export adds the effects' extension and stack-loss texts after every other table (13 more expressions, ab_expr 2,294 -> 2,307; meta ab.exprs is
+		// the abilities' own count and stays 1,723), and one row of ab_effect_control per effect
+		"ab_ability": 977, "ab_hit": 1784, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2307, "ab_effect_control": 1361,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
