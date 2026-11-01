@@ -19,6 +19,7 @@
     <button class="tab" data-tab="stats">الإحصائيات</button>
     <button class="tab" data-tab="world">العالم</button>
     <button class="tab" data-tab="cities">المدن</button>
+    <button class="tab" data-tab="embers">Embersprings</button>
     <button class="tab" data-tab="logs">السجل</button>
   </nav>
 
@@ -70,6 +71,22 @@
     <section id="cities" class="panel">
       <table id="cities-table">
         <thead><tr><th>المدينة</th><th>المستوى</th><th>الخبرة</th><th>الساعة</th><th>إجراءات</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="embers" class="panel">
+      <div class="row">
+        <span id="embers-player">اختر لاعباً من تبويب اللاعبين</span>
+        <input id="embers-filter" placeholder="ابحث عن Emberspring…">
+        <button id="refresh-embers">تحديث</button>
+      </div>
+      <p class="note">
+        نقاط العودة (Embersprings): كل نقطة في العالم يكتشفها اللاعب ويتّ-tune إليها ويرجع منها بعد الموت.
+        اضغط «انقل إليه» بعد اختيار لاعب من تبويب اللاعبين.
+      </p>
+      <table id="embers-table">
+        <thead><tr><th>الاسم</th><th>الرقم</th><th>الرمز</th><th>الموقع</th><th>إجراءات</th></tr></thead>
         <tbody></tbody>
       </table>
     </section>

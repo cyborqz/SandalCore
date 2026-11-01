@@ -1,6 +1,6 @@
 // app.js: the dashboard's calls and tables. The Go side is the window's
 // bindings: window.go.main.App.<Method>().
-const state = { players: [], selected: "", stats: [], places: [], items: null, tab: "players" };
+const state = { players: [], selected: "", stats: [], places: [], items: null, embers: null, tab: "players" };
 
 // The bound methods: the Go package (main) and the App struct.
 function backend() {
@@ -413,6 +413,62 @@ async function loadCities() {
   }
 }
 
+// ── the embersprings tab: the world's respawn points ───────────────────────────
+// The list comes from the game's own data (the attune_point table), so it is
+// the whole world: every shrine a player can attune to, with where it stands.
+async function loadEmbers() {
+  if (!state.embers) state.embers = (await call("Embersprings")) || [];
+  const q = document.getElementById("embers-filter").value.trim().toLowerCase();
+  const who = document.getElementById("embers-player");
+  who.textContent = state.selected ? ("اللاعب: " + state.selected) : "اختر لاعباً من تبويب اللاعبين";
+  const body = document.querySelector("#embers-table tbody");
+  body.innerHTML = "";
+  let shown = 0;
+  for (const e of state.embers) {
+    const label = e.descriptor || e.name;
+    if (q && !label.toLowerCase().includes(q) && !e.name.toLowerCase().includes(q)) continue;
+    const tr = document.createElement("tr");
+    tr.title = e.name;
+    tr.innerHTML = `
+      <td>${escape(label)}</td>
+      <td class="mono">${e.number}</td>
+      <td class="mono">${escape(regionOf(e.name))}</td>
+      <td class="mono">${Math.round(e.x)}, ${Math.round(e.y)}, ${Math.round(e.z)}</td>
+      <td class="actions"><button data-act="tp">انقل إليه</button></td>`;
+    tr.querySelector('[data-act="tp"]').addEventListener("click", async () => {
+      if (!state.selected) { toast("اختر لاعباً من تبويب اللاعبين أول", true); return; }
+      const out = await call("Teleport", state.selected, "", e.x, e.y, e.z, true);
+      if (out) toast("انتقل " + state.selected + " إلى " + label);
+    });
+    body.appendChild(tr);
+    shown++;
+  }
+  if (!shown) {
+    const empty = document.createElement("tr");
+    empty.innerHTML = '<td colspan="5">ما فيه نتائج</td>';
+    body.appendChild(empty);
+  }
+}
+
+// regionOf: the world's parts, as the data's own names say them. The name
+// starts with the region's code (RVR_, TUR_, JUN_, ANV_, SAN_), and a place
+// of a node with it (NODE_RVR_...).
+function regionOf(name) {
+  const parts = String(name).split("_");
+  const code = parts[0] === "NODE" ? parts[1] : parts[0];
+  const names = {
+    RVR: "Riverlands",
+    TUR: "Turquoise Sea",
+    JUN: "Jundark",
+    ANV: "Anvils",
+    SAN: "Sanctuary",
+  };
+  return names[code] || code || "";
+}
+
+document.getElementById("embers-filter").addEventListener("input", loadEmbers);
+document.getElementById("refresh-embers").addEventListener("click", loadEmbers);
+
 // ── the log tab ────────────────────────────────────────────────────────────────
 async function loadLogs() {
   const names = ["worldd.log", "gateway.log", "auth.log", "character.log", "mesh.log", "citynode.log", "quests.log"];
@@ -440,6 +496,7 @@ async function refresh() {
   if (state.tab === "players") { await loadPlayers(); }
   else if (state.tab === "world") { await loadWorld(); }
   else if (state.tab === "cities") { await loadCities(); }
+  else if (state.tab === "embers") { await loadEmbers(); }
   else if (state.tab === "logs") { await loadLogs(); }
 }
 
@@ -449,6 +506,13 @@ document.getElementById("start-stack").addEventListener("click", async () => {
   toast(out || "شغّلنا الستاك");
   setTimeout(refresh, 3000);
 });
+
+// The web view keeps the text the user typed last time (it restores its
+// session), so the filters would start with a word in them. They start empty.
+document.getElementById("player-filter").value = "";
+document.getElementById("stats-filter").value = "";
+document.getElementById("world-filter").value = "a";
+document.getElementById("embers-filter").value = "";
 
 document.getElementById("refresh-players").addEventListener("click", loadPlayers);
 setInterval(refresh, 2000);

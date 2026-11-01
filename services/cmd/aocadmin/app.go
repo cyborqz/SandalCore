@@ -328,6 +328,57 @@ func (a *App) ItemNames() []ItemName {
 	return out
 }
 
+// Emberspring: one of the world's respawn points: the shrine a player
+// discovers, attunes to and comes back at. The game's data holds them all,
+// with the name the players see, the number it has in the master list and
+// where it stands.
+type Emberspring struct {
+	Name       string  `json:"name"`       // "RVR_Flame_and_Formula"
+	Descriptor string  `json:"descriptor"` // "Flame and Formula"
+	LevelName  string  `json:"level_name"` // "Verra_World_Master"
+	Number     int     `json:"number"`     // its number in the master list (1 to 255)
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Z          float64 `json:"z"`
+	Radius     float64 `json:"radius"` // how close a player has to come to discover it
+}
+
+// Embersprings: the world's respawn points, read from the extracted game
+// data (the attune_point table of content.db). The places the master list
+// numbers are the ones a player can attune to; the unnumbered ones (the
+// playgrounds and the test ruins) are left out.
+func (a *App) Embersprings() []Emberspring {
+	root := repoRoot()
+	if root == "" {
+		return []Emberspring{}
+	}
+	db, err := content.Open(filepath.Join(root, "dist", "content", "content.db"))
+	if err != nil {
+		return []Emberspring{}
+	}
+	defer db.Close()
+
+	rows, err := db.SQL().Query(
+		"SELECT name, descriptor, level_name, idx, x, y, z, radius FROM attune_point WHERE idx > 0 ORDER BY idx")
+	if err != nil {
+		return []Emberspring{}
+	}
+	defer rows.Close()
+
+	out := make([]Emberspring, 0, 64)
+	for rows.Next() {
+		var e Emberspring
+		if err := rows.Scan(&e.Name, &e.Descriptor, &e.LevelName, &e.Number, &e.X, &e.Y, &e.Z, &e.Radius); err != nil {
+			continue
+		}
+		if e.Descriptor == "" {
+			e.Descriptor = e.Name
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // Teleport: the player to a place (by its name) or to a point.
 func (a *App) Teleport(character, place string, x, y, z float64, hasZ bool) (string, error) {
 	out, err := call(a, func(ctx context.Context) (*worldadminv1.TeleportResponse, error) {
