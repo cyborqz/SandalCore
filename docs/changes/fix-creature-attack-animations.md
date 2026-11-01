@@ -1,0 +1,2 @@
+@known-issues set Mobs / Fights
+| **Mobs / Fights** | Most hostile mobs (undead, Minotaurs, constructs, spiders and others) now play their own attack animations from the game's data; a few attacks whose hits land by a volume the world cannot place keep the single swing. The goblin shamans' bomb flies but leaves no ooze on the ground (the flame shamans' fire bombs are not thrown) and the goblins do not rally yet. | None. | Open. |

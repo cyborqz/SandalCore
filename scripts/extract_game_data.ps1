@@ -86,10 +86,9 @@ $logFile   = Join-Path $stampDir 'current.log'
 $lastLog   = Join-Path $stampDir 'last_run.log'
 # The creature kinds that attack with their own animation: one container folder of the game's files per kind (its Blueprints and the animation montages beside them).
 # worldd animates exactly the Blueprints this reads; a kind that is not listed keeps its single swing.
-$NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Content/DesignAssets/Population/NPC/Beast/Canine', 'AOC/Content/DesignAssets/Population/NPC/Beast/Bear',
-               'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin',
-               # the bandits (raiders, captains, archers, mages, healers: their Blueprints, trees and animation montages) and the one raider montage that lives beside the raider's animations
-               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider')
+$NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast', 'AOC/Content/DesignAssets/Population/NPC/Humanoid', 'AOC/Content/DesignAssets/Population/NPC/Monster',
+               # the bandits (raiders, captains, archers, mages, healers: their Blueprints, trees and animation montages) and the one raider montage that lives beside their Blueprints
+               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider', 'AOC/Content/DesignAssets/Population/NPC/PCRaces/Cultists')
 # The folders whose montages also export the time of their animation end notify (the montage table's anim_end): where an ability's task is done and its cooldowns start (the bandits').
 # The other creatures' abilities are done when their montage is over.
 $NpcAnimEndFolders = @('AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider')
