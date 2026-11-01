@@ -272,68 +272,81 @@ public:
         std::map<std::string, MontageData>                  montages;
         std::map<int64_t, std::map<int, BiteArea>>          areas;
         std::vector<std::vector<std::string>>               rows;
-        if (!read_table(abilities_path, "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival", rows, error)) return false;
+        const std::string abilities_header = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
+        if (!read_table(abilities_path, abilities_header, rows, error)) return false;
+        const std::vector<std::string> ability_columns = split(abilities_header, '\t');
         for (const auto& r : rows) {
+            const auto bad_at = [&](size_t column) { return bad(abilities_path, r[0], ability_columns[column], r[column], error); };   // (the error names the column that does not read)
             CreatureAbility a;
-            if (!number(r[1], a.ability) || !number(r[3], a.cooldown) || !number(r[5], a.order) || !number(r[6], a.min_distance) || !number(r[7], a.max_distance) || !number(r[8], a.max_angle)) {
-                return bad(abilities_path, r[0], error);
-            }
+            if (!number(r[1], a.ability)) return bad_at(1);
+            if (!number(r[3], a.cooldown)) return bad_at(3);
+            if (!number(r[5], a.order)) return bad_at(5);
+            if (!number(r[6], a.min_distance)) return bad_at(6);
+            if (!number(r[7], a.max_distance)) return bad_at(7);
+            if (!number(r[8], a.max_angle)) return bad_at(8);
             a.task = r[2];
-            if (!flag(r[4], a.stop_movement)) return bad(abilities_path, r[0], error);
+            if (!flag(r[4], a.stop_movement)) return bad_at(4);
             for (std::string& g : split(r[9], ';')) {
                 if (!g.empty()) a.gates.push_back(std::move(g));
             }
-            if (!flag(r[10], a.unknown) || !flag(r[11], a.fight)) return bad(abilities_path, r[0], error);
+            if (!flag(r[10], a.unknown)) return bad_at(10);
+            if (!flag(r[11], a.fight)) return bad_at(11);
             a.why = r[13];
             for (const std::string& st : split(r[14], ';')) {
                 if (st.empty()) continue;
                 const size_t eq = st.find('=');
                 CooldownStart c;
-                if (eq == std::string::npos) return bad(abilities_path, r[0], error);
+                if (eq == std::string::npos) return bad_at(14);
                 c.name = st.substr(0, eq);
                 const std::string span = st.substr(eq + 1);
                 const size_t tilde = span.find('~');
                 if (tilde == std::string::npos) {
-                    if (!number(span, c.low)) return bad(abilities_path, r[0], error);
+                    if (!number(span, c.low)) return bad_at(14);
                     c.high = c.low;
                 } else if (!number(span.substr(0, tilde), c.low) || !number(span.substr(tilde + 1), c.high) || c.high < c.low) {
-                    return bad(abilities_path, r[0], error);
+                    return bad_at(14);
                 }
                 a.starts.push_back(std::move(c));
             }
-            if (!number(r[16], a.arrival_cm)) return bad(abilities_path, r[0], error);
+            if (!number(r[16], a.arrival_cm)) return bad_at(16);
             if (!r[15].empty()) {   // "speed:duration"
                 const size_t colon = r[15].find(':');
-                if (colon == std::string::npos || !number(r[15].substr(0, colon), a.rotate_speed) || !number(r[15].substr(colon + 1), a.rotate_seconds)) return bad(abilities_path, r[0], error);
+                if (colon == std::string::npos || !number(r[15].substr(0, colon), a.rotate_speed) || !number(r[15].substr(colon + 1), a.rotate_seconds)) return bad_at(15);
                 a.rotates = true;
             }
             a.off = !a.unknown && a.why == "off";
-            if (!parse_conditions(r[12], a.groups)) return bad(abilities_path, r[0], error);
+            if (!parse_conditions(r[12], a.groups)) return bad_at(12);
             abilities[r[0]].push_back(std::move(a));
         }
         for (auto& [archetype, tasks] : abilities) {
             std::stable_sort(tasks.begin(), tasks.end(), [](const CreatureAbility& x, const CreatureAbility& y) { return x.order < y.order; });
         }
-        if (!read_table(montages_path, "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires", rows, error)) return false;
+        const std::string montages_header = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires";
+        if (!read_table(montages_path, montages_header, rows, error)) return false;
+        const std::vector<std::string> montage_columns = split(montages_header, '\t');
         for (const auto& r : rows) {
+            const auto bad_at = [&](size_t column) { return bad(montages_path, r[0], montage_columns[column], r[column], error); };
             MontageData m;
             m.path = r[0];
             m.package = r[2];
-            if (!flag(r[9], m.root_unreadable)) return bad(montages_path, r[0], error);
-            if (!r[10].empty() && (!number(r[10], m.anim_end) || !(m.anim_end >= 0))) return bad(montages_path, r[0], error);
-            if (!number(r[1], m.guid) || !number(r[3], m.package_guid) || !number(r[4], m.length) || !number(r[5], m.rate_scale)) return bad(montages_path, r[0], error);
+            if (!flag(r[9], m.root_unreadable)) return bad_at(9);
+            if (!r[10].empty() && (!number(r[10], m.anim_end) || !(m.anim_end >= 0))) return bad_at(10);
+            if (!number(r[1], m.guid)) return bad_at(1);
+            if (!number(r[3], m.package_guid)) return bad_at(3);
+            if (!number(r[4], m.length)) return bad_at(4);
+            if (!number(r[5], m.rate_scale)) return bad_at(5);
             for (const std::string& h : split(r[7], ';')) {
                 if (h.empty()) continue;
                 const size_t colon = h.find(':');
                 MontageData::Hit hit;
-                if (colon == std::string::npos || !number(h.substr(0, colon), hit.time) || !number(h.substr(colon + 1), hit.key)) return bad(montages_path, r[0], error);
+                if (colon == std::string::npos || !number(h.substr(0, colon), hit.time) || !number(h.substr(colon + 1), hit.key)) return bad_at(7);
                 m.hits.push_back(hit);
             }
             for (const std::string& fire : split(r[11], ';')) {
                 if (fire.empty()) continue;
                 const size_t colon = fire.find(':');
                 MontageData::Fire launch;
-                if (colon == std::string::npos || !number(fire.substr(0, colon), launch.time) || !number(fire.substr(colon + 1), launch.key)) return bad(montages_path, r[0], error);
+                if (colon == std::string::npos || !number(fire.substr(0, colon), launch.time) || !number(fire.substr(colon + 1), launch.key)) return bad_at(11);
                 m.fires.push_back(launch);
             }
             for (const std::string& s : split(r[8], ';')) {
@@ -341,38 +354,46 @@ public:
                 const std::vector<std::string> f = split(s, ':');
                 MontageData::Step step;
                 double up = 0;
-                if (f.size() != 4 || !number(f[0], step.time) || !number(f[1], step.x) || !number(f[2], step.y) || !number(f[3], up)) return bad(montages_path, r[0], error);
-                if (!m.root_motion.empty() && step.time < m.root_motion.back().time) return bad(montages_path, r[0], error);
+                if (f.size() != 4 || !number(f[0], step.time) || !number(f[1], step.x) || !number(f[2], step.y) || !number(f[3], up)) return bad_at(8);
+                if (!m.root_motion.empty() && step.time < m.root_motion.back().time) return bad_at(8);
                 m.root_motion.push_back(step);
             }
             montages[m.path] = std::move(m);
         }
-        if (!read_table(targeting_path,
-                        "ability\tkey\tdistance\tmin_distance\tangle\tangle_center\tcone_check\tfreeze\tfreeze_distance\tfreeze_scale\tignore_non_target\tdiscovery\tcheck_validity\tlos_check\tdistance_center\tvolumes\tshapes",
-                        rows, error)) {
-            return false;
-        }
+        const std::string targeting_header =
+            "ability\tkey\tdistance\tmin_distance\tangle\tangle_center\tcone_check\tfreeze\tfreeze_distance\tfreeze_scale\tignore_non_target\tdiscovery\tcheck_validity\tlos_check\tdistance_center\tvolumes\tshapes";
+        if (!read_table(targeting_path, targeting_header, rows, error)) return false;
+        const std::vector<std::string> targeting_columns = split(targeting_header, '\t');
         std::map<int64_t, RootMotionFreezeRule> freezes;
         for (const auto& r : rows) {
+            const auto bad_at = [&](size_t column) { return bad(targeting_path, r[0], targeting_columns[column], r[column], error); };
             int64_t ability = 0;
             int key = 0;
             BiteArea area;
             RootMotionFreezeRule rule;
-            if (!number(r[0], ability) || !number(r[1], key) || !number(r[2], area.distance) || !number(r[3], area.min_distance) || !number(r[4], area.angle) || !number(r[5], area.angle_center) ||
-                !number(r[8], rule.distance) || !number(r[9], rule.radius_scale) || (r[7] != "none" && r[7] != "pause" && r[7] != "stop") || !number(r[14], area.distance_center) ||
-                !number(r[15], area.volume_count)) {
-                return bad(targeting_path, r[0], error);
-            }
-            if (!flag(r[6], area.cone_check)) return bad(targeting_path, r[0], error);
+            if (!number(r[0], ability)) return bad_at(0);
+            if (!number(r[1], key)) return bad_at(1);
+            if (!number(r[2], area.distance)) return bad_at(2);
+            if (!number(r[3], area.min_distance)) return bad_at(3);
+            if (!number(r[4], area.angle)) return bad_at(4);
+            if (!number(r[5], area.angle_center)) return bad_at(5);
+            if (!number(r[8], rule.distance)) return bad_at(8);
+            if (!number(r[9], rule.radius_scale)) return bad_at(9);
+            if (r[7] != "none" && r[7] != "pause" && r[7] != "stop") return bad_at(7);
+            if (!number(r[14], area.distance_center)) return bad_at(14);
+            if (!number(r[15], area.volume_count)) return bad_at(15);
+            if (!flag(r[6], area.cone_check)) return bad_at(6);
             rule.kind = r[7] == "stop" ? RootMotionFreezeRule::Kind::Stop : r[7] == "pause" ? RootMotionFreezeRule::Kind::Pause : RootMotionFreezeRule::Kind::None;
-            if (!flag(r[10], rule.ignore_non_target)) return bad(targeting_path, r[0], error);
+            if (!flag(r[10], rule.ignore_non_target)) return bad_at(10);
             static const std::map<std::string, BiteArea::Discovery> discoveries = {{"none", BiteArea::Discovery::None},
                                                                                    {"prefers_active", BiteArea::Discovery::PrefersActive},
                                                                                    {"only_locked", BiteArea::Discovery::OnlyLocked},
                                                                                    {"only_active", BiteArea::Discovery::OnlyActive},
                                                                                    {"prefers_locked", BiteArea::Discovery::PrefersLocked}};
             const auto found = discoveries.find(r[11]);
-            if (found == discoveries.end() || (r[12] != "0" && r[12] != "1") || (r[13] != "0" && r[13] != "1")) return bad(targeting_path, r[0], error);
+            if (found == discoveries.end()) return bad_at(11);
+            if (r[12] != "0" && r[12] != "1") return bad_at(12);
+            if (r[13] != "0" && r[13] != "1") return bad_at(13);
             area.discovery = found->second;
             area.check_validity = r[12] == "1";
             area.los_check = r[13] == "1";
@@ -396,10 +417,10 @@ public:
                     area.readable = false;
                     area.unreadable_why = f[1];
                 } else {
-                    return bad(targeting_path, r[0], error);
+                    return bad_at(16);
                 }
             }
-            if (entries != area.volume_count) return bad(targeting_path, r[0], error);   // (the count and the shapes agree)
+            if (entries != area.volume_count) return bad_at(15);   // (the count and the shapes agree)
             areas[ability][key] = area;
             freezes[ability] = rule;   // (the same on every line of the ability)
         }
@@ -565,8 +586,9 @@ private:
         }
         return true;
     }
-    static bool bad(const std::string& file, const std::string& row, std::string& error) {
-        error = file + ": a line of " + row + " does not read";
+    /// A value of a line that does not read: the error names the file, the line (its first column), the column and what the column holds.
+    static bool bad(const std::string& file, const std::string& row, const std::string& column, const std::string& text, std::string& error) {
+        error = file + ": a line of " + row + " does not read: the column " + column + " holds \"" + (text.size() > 40 ? text.substr(0, 40) + "..." : text) + "\"";
         return false;
     }
     static std::vector<std::string> split(const std::string& s, char sep) {

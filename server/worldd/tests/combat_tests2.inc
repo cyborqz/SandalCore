@@ -157,8 +157,8 @@ void test_weapon_finisher_picks(Fixture& f) {
     CHECK(marker_holds(with_wand, stats::kRefTypeSkill, burning->skill) && marker_holds(with_wand, stats::kRefTypeSkillRank, burning->ranks.front().guid),
           "the wand in hand: the Burning pick is held under the weapon-in-hand marker, as its skill and as its rank");
     CHECK(!marker_holds(rig.book->held_ranks(axe->weapon_line), stats::kRefTypeSkill, burning->skill) && !marker_holds(rig.book->held_ranks(0), stats::kRefTypeSkill, burning->skill) &&
-              !marker_holds(rig.book->held_ranks(0), stats::kRefTypeSkill, burning->skill),
-          "...not with the axe in hand, with none in hand, nor when the caller names no weapon");
+              !marker_holds(rig.book->held_ranks(-1), stats::kRefTypeSkill, burning->skill),
+          "...not with the axe in hand, with none in hand (0), nor with a weapon line that no weapon tree has (-1)");
     size_t under_marker = 0, in_wand_tree = 0;
     bool in_tree = false;
     for (const stats::SkillRank& s : with_wand) {
@@ -518,6 +518,25 @@ struct GremCast {
     std::vector<double> notifies;                       // seconds after the start at which each bite is due
 };
 
+/// The creature tables the extractor's npcabilities step makes (tools/npcabilities). A tree that has none of the three files has not run that step: the test says so and is skipped. Tables that are
+/// there and do not read are a failure of their own, not a skip: a check that quietly stops looking would pass on the very files it is for.
+static bool load_creature_tables(combat::NpcAbilityData& tables) {
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    const std::string files[3] = {dir + "npc_abilities.tsv", dir + "npc_montages.tsv", dir + "npc_targeting.tsv"};
+    std::string err;
+    if (tables.load(files[0], files[1], files[2], err)) return true;
+    std::error_code ec;
+    bool any_there = false;
+    for (const std::string& file : files) any_there = any_there || std::filesystem::exists(file, ec);
+    if (!any_there) {
+        std::printf("  [skip] the creature tables (tools/npcabilities, the npcabilities extractor step): %s\n", err.c_str());
+        return false;
+    }
+    CHECKF(false, "the creature tables are there but do not read: %s", err.c_str());
+    return false;
+}
+
 static double wrap180(double a) {
     while (a > 180.0) a -= 360.0;
     while (a < -180.0) a += 360.0;
@@ -527,14 +546,8 @@ static double wrap180(double a) {
 void test_grem_fight(Fixture& f) {
     std::printf("a Grem against a player who stands still: it lunges to the player, bites in reach, never goes through or drifts away, turns, and comes back when the player steps away\n");
     constexpr double kPi = 3.14159265358979323846;
-    std::string dir = NPC_MOTION_PATH;
-    dir.erase(dir.find_last_of("/\\") + 1);
     combat::NpcAbilityData tables;
-    std::string err;
-    if (!tables.load(dir + "npc_abilities.tsv", dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err)) {
-        std::printf("  [skip] the creature tables (tools/npcabilities, the npcabilities extractor step): %s\n", err.c_str());
-        return;
-    }
+    if (!load_creature_tables(tables)) return;
     std::string rabid_path;
     for (const auto& [path, row] : f.motion.rows()) {
         if (path.find("/Beast/Rabid/Rabid.Default__Rabid_C") != std::string::npos) rabid_path = path;
@@ -1097,14 +1110,8 @@ void read_move_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow& 
 void test_creature_movement_reaches_client(Fixture& f) {
     std::printf("a creature whose open has the client ignore its movement: it walks, plays an in-place attack and turns, and every one of those updates reaches a client that applies them\n");
     constexpr double kPi = 3.14159265358979323846;
-    std::string dir = NPC_MOTION_PATH;
-    dir.erase(dir.find_last_of("/\\") + 1);
     combat::NpcAbilityData tables;
-    std::string err;
-    if (!tables.load(dir + "npc_abilities.tsv", dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err)) {
-        std::printf("  [skip] the creature tables (tools/npcabilities, the npcabilities extractor step): %s\n", err.c_str());
-        return;
-    }
+    if (!load_creature_tables(tables)) return;
     // an Alpha Wolf that is hurt: its Growl plays in place, and it bites with a short lunge
     std::string alpha_path;
     for (const auto& [path, row] : f.motion.rows()) {
@@ -1234,14 +1241,8 @@ void test_creature_movement_reaches_client(Fixture& f) {
 
 void test_creature_parameter_and_health_gates(Fixture& f) {
     std::printf("the Alpha Wolf's Growl is gated by a tree parameter (the plain Wolf's is switched off) and by its own health (under 75 %%): the same fight, a full-health Alpha, a hurt Alpha and a hurt Wolf\n");
-    std::string dir = NPC_MOTION_PATH;
-    dir.erase(dir.find_last_of("/\\") + 1);
     combat::NpcAbilityData tables;
-    std::string err;
-    if (!tables.load(dir + "npc_abilities.tsv", dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err)) {
-        std::printf("  [skip] the creature tables (tools/npcabilities, the npcabilities extractor step): %s\n", err.c_str());
-        return;
-    }
+    if (!load_creature_tables(tables)) return;
     const auto path_of = [&](const char* leaf) {
         std::string found;
         for (const auto& [path, row] : f.motion.rows()) {
@@ -1343,14 +1344,8 @@ void test_creature_parameter_and_health_gates(Fixture& f) {
 
 void test_creature_roll_gate(Fixture& f) {
     std::printf("the Bear's right swing is gated by a roll of one half, asked afresh at every try: over a long fight it swings right and left, neither always\n");
-    std::string dir = NPC_MOTION_PATH;
-    dir.erase(dir.find_last_of("/\\") + 1);
     combat::NpcAbilityData tables;
-    std::string err;
-    if (!tables.load(dir + "npc_abilities.tsv", dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err)) {
-        std::printf("  [skip] the creature tables (tools/npcabilities, the npcabilities extractor step): %s\n", err.c_str());
-        return;
-    }
+    if (!load_creature_tables(tables)) return;
     std::string bear_path;
     for (const auto& [path, row] : f.motion.rows()) {
         if (path.find("/Beast/Bear/Bear.Default__Bear_C") != std::string::npos) bear_path = path;
@@ -1624,15 +1619,6 @@ static const combat::MontageData* montage_of_cast(Fixture& f, const combat::NpcA
         if (md && md->guid == montage) return md;
     }
     return nullptr;
-}
-
-static bool load_creature_tables(combat::NpcAbilityData& tables) {
-    std::string dir = NPC_MOTION_PATH;
-    dir.erase(dir.find_last_of("/\\") + 1);
-    std::string err;
-    if (tables.load(dir + "npc_abilities.tsv", dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err)) return true;
-    std::printf("  [skip] the creature tables (tools/npcabilities, the npcabilities extractor step): %s\n", err.c_str());
-    return false;
 }
 
 void test_bite_lands_wherever_the_player_stands(Fixture& f) {
@@ -3185,13 +3171,22 @@ void test_humanoids_walk_up_on_the_real_ground(Fixture& f) {
     }
 }
 
-// The creature tables are read strictly: a number that is not finite (nan, inf) and a flag that is neither 0 nor 1 fail the load.  They used to be read as a number (a NaN length froze a creature, an
-// infinite angle looped) or as a plain 0 without a word.
+/// A suffix for a folder of the temp directory that no other running copy of this program uses (two gates can run it at once): the clock and an address of this run.
+std::string unique_temp_suffix() {
+    int marker = 0;
+    char text[64];
+    std::snprintf(text, sizeof text, "%llx_%llx", static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count()),
+                  static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(&marker)));
+    return text;
+}
+
+// The creature tables are read strictly: a number that is not finite (nan, inf) and a flag that is neither 0 nor 1 fail the load.  They used to be read as a number (a NaN length would freeze a creature, an
+// infinite angle would loop) or as a plain 0 without a word.
 void test_creature_tables_are_read_strictly() {
     std::printf("the creature tables: a good row loads; a NaN or an infinite number and a flag that is neither 0 nor 1 fail the load\n");
     namespace fs = std::filesystem;
     std::error_code ec;
-    const fs::path dir = fs::temp_directory_path() / "aoc_creature_tables_strict";
+    const fs::path dir = fs::temp_directory_path() / ("aoc_creature_tables_strict_" + unique_temp_suffix());
     fs::create_directories(dir, ec);
     const std::string abilities_header =
         "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";

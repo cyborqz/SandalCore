@@ -28,7 +28,9 @@
 #include "spawns/generic_npc.h"
 
 #include <bit>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>

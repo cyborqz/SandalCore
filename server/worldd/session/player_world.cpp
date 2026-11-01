@@ -508,11 +508,11 @@ void PlayerWorld::log_huntables() const {
     // Gathering stage 3, "Hunting": the creatures of the area whose corpse is hunted with a Bow, by kind
     const std::set<int64_t>& defs = generic_config_.hunting_defs;
     if (!generic_config_.hunting) {
-        spdlog::info("[hunt] --no-gathering: no creature is huntable");
+        spdlog::info("[hunt] --no-gathering: no mob is huntable");
         return;
     }
     if (defs.empty()) {
-        spdlog::info("[hunt] no huntable creatures: content.db has no hunting interactions (rebuild it with contentc 15 or later)");
+        spdlog::info("[hunt] no huntable mobs: content.db has no hunting interactions (rebuild it with contentc 15 or later)");
         return;
     }
     std::map<int64_t, size_t> by_def;
@@ -533,7 +533,7 @@ void PlayerWorld::log_huntables() const {
     }
     std::vector<std::pair<std::string, size_t>> counts;
     for (const auto& [def, n] : by_def) counts.emplace_back(names.count(def) ? names[def] : std::to_string(def), n);
-    spdlog::info("[hunt] huntable creatures in the area: {} of {} NPCs ({} kinds, eight blocks with the hunting interactable{}); a Bow in Equipment slot 38 hunts a corpse for a carcass or a trainable and Hunter XP",
+    spdlog::info("[hunt] huntable mobs in the area: {} of {} NPCs ({} kinds, eight blocks with the hunting interactable{}); a Bow in Equipment slot 38 hunts a corpse for a carcass or a trainable and Hunter XP",
                  total, registry_.count(world::ActorKind::Npc), by_def.size(), generic_ && !generic_->has_hunting_block() ? "; NOT: the Raven's captured open is missing, so they are plain creatures" : "");
     log_counts("[hunt] by kind: ", counts);
 }
@@ -594,7 +594,7 @@ bool PlayerWorld::load_npc_abilities(const std::string& abilities_path, const st
     combat::NpcAbilityData data;
     if (!data.load(abilities_path, montages_path, targeting_path, error)) return false;
     npc_abilities_ = std::move(data);
-    spdlog::info("[combat] creature attack animations: {} Blueprints, {} montages", npc_abilities_.kinds(), npc_abilities_.montages());
+    spdlog::info("[combat] mob attack animations: {} Blueprints, {} montages", npc_abilities_.kinds(), npc_abilities_.montages());
     // what the tables let each Blueprint's fight use, and what they leave out and why
     for (const std::string& line : npc_abilities_.coverage_lines()) spdlog::info("[combat]   {}", line);
     return true;
@@ -608,7 +608,7 @@ bool PlayerWorld::load_npc_senses(const std::string& senses_path, const std::str
     npc::SensesTable table;
     if (!table.load(senses_path, curves_path, error)) return false;
     npc_senses_ = std::move(table);
-    spdlog::info("[combat] creature senses: {} Blueprints (what each notices, how far it follows)", npc_senses_.size());
+    spdlog::info("[combat] mob senses: {} Blueprints (what each notices, how far it follows)", npc_senses_.size());
     return true;
 }
 
@@ -1337,7 +1337,7 @@ void PlayerWorld::start_aftermath() {
         } else if (!variation_error.empty()) {
             spdlog::warn("[loot] no item variations: {} (the kills' items keep their record's quality)", variation_error);
         }
-        spdlog::info("[loot] {} reward tables of the {} the area's creatures and the quests name ({} of them only the quests'), the experience decay {}, {} item variation formulas for the quality of the drops", n,
+        spdlog::info("[loot] {} reward tables of the {} the area's mobs and the quests name ({} of them only the quests'), the experience decay {}, {} item variation formulas for the quality of the drops", n,
                      roots.size(), quest_tables, decay != 0 ? "of the Adventuring leveling type" : "(none)", formulas);
     }
     aftermath_ = std::make_unique<combat::Aftermath>(registry_, *combat_, rewards_ ? &*rewards_ : nullptr, [this] { return guids_.next(); }, aftermath_config_);

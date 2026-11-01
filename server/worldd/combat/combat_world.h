@@ -199,6 +199,8 @@ public:
     /// each hit when the montage's notify says and starts its next attack when the montage is over; every other creature swings as it always did.  Null (the default) for none.
     /// The tables outlive the world.
     void set_ability_data(const NpcAbilityData* data) { anim_ = data; }
+    /// Whether the ability launches projectiles: a montage of it has a notify that launches one, and the ability carries a projectile row of that notify's key (what a creature that shoots stands off for).
+    bool launches_projectiles(const abilities::AbilityDef& def) const;
     /// What each creature notices and how far it follows (npc/motion_table.h, the senses table): a creature whose Blueprint the table lists notices by its Blueprint's aggro radius (scaled by its
     /// level), hearing and sight, and leashes at its Blueprint's distance from the place its fight began; every other creature keeps the flat radius and leash of the config.  Null (the default) for
     /// none.  The table outlives the world, and is set before the creatures are made.
@@ -411,8 +413,6 @@ private:
     bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
     /// `projectile`: the record of the projectile that carried the hit (0: the ability itself made it), which the confirmation names as its source.
     void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now, int64_t projectile = 0);
-    /// Whether the ability launches projectiles at all: it lists projectile records and a montage of it has a notify that launches one.
-    bool  launches_projectiles(const abilities::AbilityDef& def) const;
     /// For a creature whose attacks launch projectiles: the arrival distance of its tree's approach (it closes in to it between two casts) and the farthest its tree lets it cast from; both -1 for a
     /// creature that does not shoot.
     void  stand_off_of(const Npc& n, double& arrival, double& reach) const;

@@ -317,6 +317,12 @@ public:
     /// A branch request counts as made this long after the trigger at the soonest: a forged request cannot bring a cast forward past the shortest run of a cast bar
     /// [modelled: the recorded cast bar ran 1.289 s at a cast speed of 0.888].
     static constexpr double kEarliestBranchRequest = 0.6;
+    /// A held cast's request for its charged shot counts as made this long after the trigger at the soonest: the charge is a key held down, and a forged request cannot fire the charged shot
+    /// at once [R: the recorded full charges asked 1.11 to 1.15 s after the trigger; the floor is modelled].
+    static constexpr double kEarliestChargedRequest = 1.0;
+    /// A client's request for the hit that goes with a shot's launch moves the launch at most this much sooner than the montage's plan puts it, and a shot flies at most this long [modelled].
+    static constexpr double kLaunchAdvance = 0.15;
+    static constexpr double kMaxShotFlight = 3.0;
     /// How many effects deep an effect's Apply hit may apply further effects.
     static constexpr int kMaxApplyDepth = 4;
     /// A movement ability's window after its trigger and the factor on its measured or data speed.
@@ -570,6 +576,7 @@ private:
         double                   last_request = -1e9;
         std::vector<Pending>     due;          // when a request's application runs
         bool                     applied = false;   // the server applied it by itself (no request came by the deadline)
+        bool                     fired = false;     // the projectiles the hit fires have left: they leave once a cast, however often the client asks for the hit
     };
     /// A cast that takes hit requests until its window ends.
     struct CastRecord {
@@ -758,6 +765,8 @@ private:
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
     void   reschedule_branch(Cast& cast, double branch_at, double cost_after);
     void   abort_cast(size_t index, double t, const char* why);   // a cast that ends here: none of its steps happens, its item keeps its place with the montage cleared
+    void   end_zones_of(const Cast& cast, double t);              // the zones a cast made go with it: one that did not open is dropped, one that did ends now
+    bool   can_pay(const Cast& cast) const;                       // whether the character holds what the cast's cost step takes (stats, effect stacks, a charge of its group): asked at the cost step and by a jump that comes before it
     void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
     void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
     double client_rate(bool magical) const;                       // the speed the client plays a montage at: its MagicalSpeed or PhysicalSpeed stat (1.0 when the stat is not there)

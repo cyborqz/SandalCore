@@ -39,10 +39,10 @@ flowchart LR
 | | 🛠️ | **6 · Progression and items** | XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. *Still to come: splitting and joining stacks, food and potions.* |
 | | 🛠️ | **7 · Combat and abilities** | Most classes' abilities, weapon combos and finishers, buffs, death and respawn. *Mobs take the Burning debuff of a hit. Still to come: the other debuffs and CC on mobs (the weapon finisher talents' slows, bleeds and wounds among them) and Summoner pets.* |
 | 🌍 **The world** | 🛠️ | **8 · Gathering and professions** | Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. *Still to come: fishing and the rest of the 22 professions.* |
-| | 🛠️ | **9 · Living world** | Navigation, and creatures that see, hear, chase and fight with their own attacks, with loot and respawns. *Still to come: the other creature families, flying creatures, and day and night spawns.* |
+| | 🛠️ | **9 · Living world** | Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. *Still to come: the other mob families, flying mobs, and day and night spawns.* |
 | | 🛠️ | **10 · City nodes** | Node levels and XP, and the five towns with their people, buildings and crafting stations. *Still to come: citizenship, mayors, taxes and vassal nodes.* |
 | | 🛠️ | **11 · Quests** | NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. *Still to come: more quests, group quests and events.* |
-| 🤝 **Playing together** | 🛠️ | **12 · Economy** | Gold, silver, copper and Glint, the NPC merchants, crates and storage. *Still to come: node currencies and more crates.* |
+| 🤝 **Playing together** | 🛠️ | **12 · Economy** | Gold, silver, copper and Glint, the NPC vendors, crates and storage. *Still to come: node currencies and more crates.* |
 | | ⬜ | **13 · Social** | Seeing other players, guilds, parties and raids, chat and mail, player trading and the marketplace |
 | ⚔️ **Wars and world events** | ⬜ | **14 · Node sieges** | Node sieges and territory wars |
 | | ⬜ | **15 · Caravans** | Caravans and trade routes |
@@ -134,7 +134,7 @@ The game folder is the one that holds `AOCClient.exe` and the `AOC` folder; with
 | `content.db` (323 MB) | the game numbers the servers use | `contentc`, from the client's `CacheDB.dbc` |
 | `*.tsv` | mount speeds and riders, profession curves, NPC motion, foliage and roads | `tools\mapc` (from the game's containers) and `contentc roads` |
 | `item_names.tsv` | the words the Glint kinds and some quest items are named with | `tools\itemnames` (from the game's containers) |
-| `npc_abilities.tsv`, `npc_montages.tsv`, `npc_targeting.tsv`, `npc_senses.tsv`, `npc_aggro_curves.tsv` | what the creatures attack with, how their attack animations carry them, where each hit lands, and what each creature notices and how far it follows | `tools\npcabilities` (from the game's containers and `content.db`) |
+| `npc_abilities.tsv`, `npc_montages.tsv`, `npc_targeting.tsv`, `npc_senses.tsv`, `npc_aggro_curves.tsv` | what the mobs attack with, how their attack animations carry them, where each hit lands, and what each mob notices and how far it follows | `tools\npcabilities` (from the game's containers and `content.db`) |
 | `npc_looks.tsv`, `npc_appearances.tsv`, `npc_names.tsv`, `npc_trees.tsv` | how the people (humanoid NPCs) look, what they are called, and whether they wander or patrol | `tools\npcabilities` (from the game's containers and `content.db`) |
 | `town_platforms.bin` (4 MB) | the floor of the five towns | `tools\mapc` (from two of the game's map packages) |
 | `town_layout_items.tsv` (6 MB), `town_layouts.bin` (13 MB) | the buildings, walls and terraces of the five towns at the level each town starts at | a list made from the design data by `tools\capture\gen_town_layouts.py`, then their collision from the game's packages by `tools\mapc` |
@@ -145,7 +145,7 @@ It also makes the generated sources and test fixtures the build includes (for ex
 
 **How long.** About 10 minutes the first time on a fast PC (24 threads, 31 GB: 10.3 minutes in all, of which the map read and the navigation mesh take 8); a slower PC takes longer. Every step is skipped when what it reads has not changed, so running it again takes about a second.
 
-**What runs again.** Every step keeps a record of what it read (in `dist\content\.extract\`) and runs again only when that changed. The navigation mesh step, the longest, reads the map, the five towns' floors and buildings, the Riverlands' rectangles and, in `content.db`, where the five towns' nodes stand. When only other game numbers change (abilities, items, quests, creatures), `content.db` and the files made from it are made again, but the navigation mesh is left as it is, which saves the 8 minutes it takes on a fast PC.
+**What runs again.** Every step keeps a record of what it read (in `dist\content\.extract\`) and runs again only when that changed. The navigation mesh step, the longest, reads the map, the five towns' floors and buildings, the Riverlands' rectangles and, in `content.db`, where the five towns' nodes stand. When only other game numbers change (abilities, items, quests, mobs), `content.db` and the files made from it are made again, but the navigation mesh is left as it is, which saves the 8 minutes it takes on a fast PC.
 
 Run `powershell -File scripts\extract_game_data.ps1` by hand to use its options (`install.bat` runs it without them):
 

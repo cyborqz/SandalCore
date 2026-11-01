@@ -29,7 +29,7 @@ const npcHelp = "worldctl npc kill|respawn|reset|heal|despawn <id> | worldctl np
 // parseNpc checks the arguments of `worldctl npc` and returns the call that runs it.
 func parseNpc(pos []string) (call, error) {
 	if len(pos) < 2 {
-		return nil, usageError("needs an action and a creature's actor id: " + npcHelp)
+		return nil, usageError("needs an action and a mob's actor id: " + npcHelp)
 	}
 	action := pos[0]
 	id, err := strconv.ParseUint(strings.TrimSpace(pos[1]), 10, 64)
@@ -37,7 +37,7 @@ func parseNpc(pos []string) (call, error) {
 		return nil, usageError(fmt.Sprintf("%q is not an actor id (the number the world stream and Inspect give): %s", pos[1], npcHelp))
 	}
 	if action != "move" && len(pos) != 2 {
-		return nil, usageError(fmt.Sprintf("takes only the creature's id after %q: %s", action, npcHelp))
+		return nil, usageError(fmt.Sprintf("takes only the mob's id after %q: %s", action, npcHelp))
 	}
 	say := func(out io.Writer, sentence string) error {
 		_, err := fmt.Fprintln(out, sentence)
@@ -86,7 +86,7 @@ func parseNpc(pos []string) (call, error) {
 		}, nil
 	case "move":
 		if len(pos) < 4 || len(pos) > 5 {
-			return nil, usageError("needs the creature's id and a point: worldctl npc move <id> <x> <y> [<z>]")
+			return nil, usageError("needs the mob's id and a point: worldctl npc move <id> <x> <y> [<z>]")
 		}
 		var v [3]float64
 		for i, s := range pos[2:] {

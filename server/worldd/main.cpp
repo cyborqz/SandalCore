@@ -560,13 +560,13 @@ int main(int argc, char** argv) {
         {
             std::string animation_error;
             if (!players.load_npc_abilities(npc_abilities_path, npc_montages_path, npc_targeting_path, animation_error)) {
-                spdlog::warn("[combat] no creature attack animations ({}): the creatures swing without an animation (run scripts/extract_game_data.ps1)", animation_error);
+                spdlog::warn("[combat] no mob attack animations ({}): the mobs swing without an animation (run scripts/extract_game_data.ps1)", animation_error);
             }
         }
         {
             std::string senses_error;
             if (!players.load_npc_senses(npc_senses_path, npc_aggro_curves_path, senses_error)) {
-                spdlog::warn("[combat] no creature senses ({}): every creature notices within {} cm and leashes at {} cm (run scripts/extract_game_data.ps1)", senses_error, npc_aggro_cm, npc_leash_cm);
+                spdlog::warn("[combat] no mob senses ({}): every mob notices within {} cm and leashes at {} cm (run scripts/extract_game_data.ps1)", senses_error, npc_aggro_cm, npc_leash_cm);
             }
         }
         {

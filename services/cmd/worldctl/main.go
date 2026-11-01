@@ -27,8 +27,8 @@
 //	worldctl weapon-xp <character> <line> <level|xp=N>  sets a weapon line's experience (a test command): a level, 1 to 25 ("5"), puts the line at the XP total that reaches it; xp=N sets the
 //	                                                  total itself (0 to 5718160). The line is its name (Weapon_Ranged_Wand), the same without Weapon_ (Ranged_Wand) or a word that ends it
 //	                                                  (wand); a word that fits several lines is refused with the list. The client is told at once and the character is saved
-//	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one creature, named by its actor id (npc.go says what each does)
-//	worldctl npc move <id> <x> <y> [<z>]              stands a creature at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
+//	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one mob, named by its actor id (npc.go says what each does)
+//	worldctl npc move <id> <x> <y> [<z>]              stands a mob at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
 //	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
 //	                                                  watches worldd's world stream (WorldStreamService, AOC_WORLD_STREAM_ADDR, default 127.0.0.1:50057): one line a second with the
 //	                                                  frames that came, the entities held and the cost of a publish (watch.go)
@@ -88,8 +88,8 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   craft taught <character>          list the recipes the character was taught
   tutorials reset <character>       put the character's finished tutorials back, so its hints can start again (a test command)
   weapon-xp <character> <line> <level|xp=N>   set a weapon line's experience: a level (1 to 25) or an XP total (xp=12000); the line is its name or a word that ends it, such as wand (a test command)
-  npc kill|respawn|reset|heal|despawn <id>   a game master's action on one creature, by its actor id
-  npc move <id> <x> <y> [<z>]       stand a creature at a point (cm); its leash is centred there, its spawn point stays
+  npc kill|respawn|reset|heal|despawn <id>   a game master's action on one mob, by its actor id
+  npc move <id> <x> <y> [<z>]       stand a mob at a point (cm); its leash is centred there, its spawn point stays
   watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
 every command takes --addr and --token-file`
 

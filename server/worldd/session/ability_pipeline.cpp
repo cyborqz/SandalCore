@@ -630,6 +630,7 @@ bool AbilityPipeline::eval_requirement(int64_t expr, const std::vector<uint64_t>
     Host host(*this);
     host.set_context(&ctx);
     double v = 0;
+    evaluation_->set_consumed(consumed_);
     if (!evaluation_->eval(e->program, host, v, err)) {
         why = err;
         return false;
@@ -666,6 +667,7 @@ bool AbilityPipeline::eval_in_event(int64_t expr, const ReactionContext& rc, dou
     host.set_reaction(&rc);
     std::string err;
     double v = 0;
+    evaluation_->set_consumed(consumed_);
     const bool ran = evaluation_->eval(e->program, host, v, err);
     drop_evaluation();   // the character as it is when the next event looks (a reaction's hits change it)
     if (!ran) {
@@ -2050,7 +2052,10 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
         if (!slot.hit->mods.empty() || slot.hit->row.has_fx || (slot.hit->row.applicable_targets & 8) != 0) confirmations_.push_back(std::move(h));
     } else {
         apply_hit(c, *slot.hit, t, true, src);
-        if (!slot.hit->fires.empty()) fire_from_hit(rec, *slot.hit, t);
+        if (!slot.hit->fires.empty() && !slot.fired) {   // (they leave once a cast, however often the client asks for the hit)
+            slot.fired = true;
+            fire_from_hit(rec, *slot.hit, t);
+        }
     }
     recompute(c);
     emit({std::move(c), std::nullopt, t,
@@ -2092,7 +2097,9 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held
 }
 
 double AbilityPipeline::held_fill(const Cast& cast, double held_seconds) const {
-    const double held = held_seconds > 0 ? held_seconds : std::max(0.0, now_ - cast.trigger_at - kHoldStart);
+    // the key cannot have been held longer than the cast has run: a CancelledTime beyond that is cut there (a forged one would fill the bar at once)
+    const double ran = std::max(0.0, now_ - cast.trigger_at);
+    const double held = held_seconds > 0 ? std::min(held_seconds, ran) : std::max(0.0, ran - kHoldStart);
     const auto shown = full_bars_.find(cast.def->row.guid);
     const double bar = shown != full_bars_.end() ? shown->second : cast.branched->full;
     return std::clamp(held / std::max(0.1, bar - kHoldStart), 0.0, 1.0);
@@ -2132,8 +2139,35 @@ void AbilityPipeline::abort_cast(size_t index, double t, const char* why) {
     }
     const std::string text = "the montage of " + cast.def->row.name + " is cleared: " + why;
     drop_record(cast.client_id);
+    end_zones_of(cast, t);
     casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
     if (!c.empty()) emit({std::move(c), std::nullopt, t, text});
+}
+
+bool AbilityPipeline::can_pay(const Cast& cast) const {
+    for (const auto& [stat, amount] : cast.stat_costs) {
+        if (stat_now(stat) < amount) return false;
+    }
+    for (const auto& [effect, n] : cast.effect_costs) {
+        if (stacks_of(effect) < n) return false;
+    }
+    const auto g = groups_.find(cast.group);
+    return !(g != groups_.end() && cast.triggers_cooldown && g->second.charges < cast.charge_cost);
+}
+
+// The zones a cast made go with it (a cast that cannot pay, a cast bar the client ended): one that did not open is dropped, one that did ends now.
+void AbilityPipeline::end_zones_of(const Cast& cast, double t) {
+    for (size_t i = 0; i < zones_.size();) {
+        Zone& z = zones_[i];
+        if (z.client_id != cast.client_id || z.ability != cast.def->row.guid || z.state == Zone::State::Ended) {
+            ++i;
+        } else if (z.state == Zone::State::Pending) {
+            zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(i));
+        } else {
+            z.end_at = std::min(z.end_at, t);
+            ++i;
+        }
+    }
 }
 
 void AbilityPipeline::reschedule_branch(Cast& cast, double branch_at, double cost_after) {
@@ -2161,8 +2195,11 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
         if (cast.held && !cast.charged && b.charged_branch != 0 && branch_guid == b.charged_branch) {
             // the key was held until the charge was full: the cast fires its charged shot [R: 73 to 99 ms later the montage of the full charge jumped, with the cost]
             cast.charged = true;
-            spdlog::info("[abilities] the charge of {} was full {:.3f} s after the trigger: the cast fires its charged shot", cast.def->row.name, now_ - cast.trigger_at);
-            reschedule_branch(cast, now_ + b.charged_answer, b.charged_cost);
+            // the charge is a key held down: a request that comes sooner than a charge can fill counts as made at the earliest moment it can (a forged one cannot fire the charged shot at once)
+            const double made = std::max(now_, cast.trigger_at + kEarliestChargedRequest);
+            const std::string late = made > now_ ? " (the request came sooner than a charge fills: taken as made " + std::to_string(made - now_).substr(0, 5) + " s later)" : std::string();
+            spdlog::info("[abilities] the charge of {} was full {:.3f} s after the trigger: the cast fires its charged shot{}", cast.def->row.name, now_ - cast.trigger_at, late);
+            reschedule_branch(cast, made + b.charged_answer, b.charged_cost);
             return true;
         }
         if (b.branch != branch_guid) {
@@ -2171,6 +2208,7 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
             spdlog::info("[abilities] the client asked for the branch {} of {}, which the table does not list (it has {}): taken as the end of the cast bar", branch_guid, cast.def->row.name, b.branch);
         }
         if (cast.held) return true;   // (the talent makes this branch invalid: the request is not answered; the release or the full charge goes on)
+        const bool first = !cast.request_heard;   // (the cast goes on from the first request or release: how full the bar was is that one's to say)
         cast.request_heard = true;
         cast.heard_at = now_;
         // the cast goes on from the request: what it still waits for comes sooner by as much as the request is earlier than the moment it was taken to come
@@ -2179,6 +2217,11 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
         spdlog::info("[abilities] the client asked for the branch of {} {:.3f} s after the trigger{}", cast.def->row.name, now_ - cast.trigger_at,
                      earlier < 0 ? ": the cast goes on " + std::to_string(-earlier).substr(0, 5) + " s sooner" : std::string(": the cast goes on as planned"));
         if (b.full > 0 && now_ - cast.trigger_at >= 0.5 * b.full) full_bars_[cast.def->row.guid] = std::max(full_bars_[cast.def->row.guid], now_ - cast.trigger_at);   // (a HELD ability's full bar, as this client shows it)
+        // a HELD ability's request: a bar that ran out asks at its end (a full charge), but a tap asks at once (retail's own quick Lightning Strike asked 171 ms after its trigger) and has the charge the key
+        // had given it by then
+        if (first && b.full > 0 && now_ - cast.trigger_at < 0.5 * b.full) {
+            if (CastRecord* rec = record_of(cast.client_id)) rec->fill = held_fill(cast, 0);
+        }
         if (earlier >= 0) return true;
         bring_sooner(cast, earlier);
         return true;
@@ -2742,8 +2785,9 @@ void AbilityPipeline::cancel_swings(double t, const std::string& by) {
 }
 
 void AbilityPipeline::step_branch(Cast& cast, double t) {
-    // a cast that finds its own targets sends its projectiles with the jump (the hits land whoever's item the pawn shows by now)
-    if (cast.gathered) launch_gathered(cast, t);
+    // a cast that finds its own targets sends its projectiles with the jump (the hits land whoever's item the pawn shows by now); when its cost step is still to come and the character cannot pay it any more
+    // (a tap's jump comes before its cost), nothing is sent: the cast ends unpaid at its cost step
+    if (cast.gathered && (!cast.cost_due || can_pay(cast))) launch_gathered(cast, t);
     // the projectiles of a cast bar are launched from the request: they land when they get to the target
     land_by_flight(cast, t);
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
@@ -2875,7 +2919,7 @@ void AbilityPipeline::land_shot(Cast& cast, double t) {
 
 void AbilityPipeline::launch_shot(Cast& cast, double t) {
     cast.flight_pending = false;
-    const combat::TargetInfo info = cast.target_actors.empty() ? combat::TargetInfo{} : combat_->inspect(cast.target_actors.front());
+    const combat::TargetInfo info = cast.target_actors.empty() || !combat_ ? combat::TargetInfo{} : combat_->inspect(cast.target_actors.front());
     const content::ProjectileRow* p = nullptr;
     for (const content::AbilityHitRow& h : cast.def->hits) {
         if (h.source != "projectile") continue;
@@ -2894,7 +2938,7 @@ void AbilityPipeline::launch_shot(Cast& cast, double t) {
         return;
     }
     const double distance = info.surface_distance_cm + kMuzzleCm;
-    cast.flight = distance / p->speed;
+    cast.flight = std::min(distance / p->speed, kMaxShotFlight);   // (a target pulled far away by the time the shot leaves would hold the cast's slot for as long as the flight)
     land_shot(cast, t);
     spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger (the client plays at {:.3f}{}); the target is {:.1f} m away: it lands {:.3f} s after the launch", cast.def->row.name,
                  cast.launch_at - cast.trigger_at, client_rate(cast.shot->magical), cast.anchored ? ", the launch is the client's request" : "", distance / 100.0, *cast.projectile_due - cast.launch_at);
@@ -2903,7 +2947,8 @@ void AbilityPipeline::launch_shot(Cast& cast, double t) {
 void AbilityPipeline::anchor_shot(Cast& cast, double now) {
     cast.anchored = true;
     const double was = cast.launch_at;
-    cast.launch_at = std::max(now - cast.shot->ask_gap / client_rate(cast.shot->magical), cast.trigger_at);
+    // the request is the launch, but one that comes much sooner than the montage's plan is not believed: it moves the launch at most kLaunchAdvance sooner (a forged one would land the shot at the cost step)
+    cast.launch_at = std::max({now - cast.shot->ask_gap / client_rate(cast.shot->magical), cast.trigger_at, was - kLaunchAdvance});
     if (cast.flight_pending) cast.projectile_due = std::max(now, cast.launch_at);   // not left yet: it leaves now
     else if (cast.projectile_due) land_shot(cast, now);                              // on its way: it lands a flight after the launch the request shows
     spdlog::info("[abilities] {}: the client asked for the hit that goes with the launch {:.3f} s after the trigger: the projectile {} {:.3f} s from the plan", cast.def->row.name, now - cast.trigger_at,
@@ -3059,10 +3104,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
     AbilityChange c;
     // the costs again: nothing but regeneration and Sprint's drain can have moved since the trigger, and a cast that cannot pay now is over
-    bool affordable = true;
-    for (const auto& [stat, amount] : cast.stat_costs) affordable = affordable && stat_now(stat) >= amount;
-    for (const auto& [effect, n] : cast.effect_costs) affordable = affordable && stacks_of(effect) >= n;
-    if (const auto g = groups_.find(cast.group); g != groups_.end() && cast.triggers_cooldown && g->second.charges < cast.charge_cost) affordable = false;   // a cast that waited behind another's
+    bool affordable = can_pay(cast);   // (a cast that waited behind another's finds its charge gone)
     // a consumable's item is the last of its costs, because paying it takes the item: the session takes one off the stack now, and a stack that is gone since the trigger (sold,
     // destroyed, handed in) cannot be paid: the cast is over like any that cannot pay, with no cooldown and no buff (the hit the client asked for goes with the cast's record)
     if (affordable && cast.item_cast && cast.item_cast->consumes && item_taker_) affordable = item_taker_(cast.client_id);
@@ -3087,18 +3129,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     }
     if (!affordable) {
         drop_record(cast.client_id);
-        // the zones the cast made go with it: one that did not open is dropped, one that did ends now
-        for (size_t i = 0; i < zones_.size();) {
-            Zone& z = zones_[i];
-            if (z.client_id != cast.client_id || z.ability != def.row.guid || z.state == Zone::State::Ended) {
-                ++i;
-            } else if (z.state == Zone::State::Pending) {
-                zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(i));
-            } else {
-                z.end_at = std::min(z.end_at, t);
-                ++i;
-            }
-        }
+        end_zones_of(cast, t);
         AbilityEvent e;
         if (item_instance_ && cast.instance >= 0 && *item_instance_ == cast.instance) {
             e.change.abilities_removed.push_back(cast.instance);
@@ -3114,6 +3145,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         cast.missiles.clear();
         cast.loop_due.reset();
         cast.own_due.reset();
+        cast.branch_due.reset();   // (a held cast's charged shot has its jump due with its cost: a cast that cannot pay launches nothing)
         events_.push_back(std::move(e));
         return;
     }
@@ -3662,7 +3694,7 @@ void AbilityPipeline::cancel_timed(int32_t client_instance_id, double now) {
 }
 
 void AbilityPipeline::fire_from_hit(const CastRecord& rec, const HitDef& hit, double t) {
-    if (!combat_ || hit.fires.empty()) return;
+    if (!combat_ || hit.fires.empty() || dead_) return;   // (a request accepted just before the death runs after it: a dead caster fires nothing)
     // the hit's own requirement decides whether it fires at all (Maim's Slicing hit asks for the talent that makes the blow throw a wave)
     std::string why;
     bool ok = true;

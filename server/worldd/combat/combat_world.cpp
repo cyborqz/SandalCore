@@ -702,12 +702,16 @@ bool CombatWorld::can_animate(const Npc& n) const {
 
 bool CombatWorld::launches_projectiles(const abilities::AbilityDef& def) const {
     if (!anim_) return false;
-    bool rows = false;
-    for (const content::AbilityHitRow& r : def.hits) rows = rows || r.source == "projectile";
-    if (!rows) return false;
+    // a notify that fires counts where plan_cast flies something from it: the ability carries a projectile row of the notify's key, and the projectile is in the data (an ability whose notify
+    // names a key that no projectile row has would stand at its shot reach and repeat a cast that shows nothing)
     for (const content::MontageRow& m : def.montages) {
         const MontageData* md = m.soft_path.empty() ? nullptr : anim_->montage(m.soft_path);
-        if (md && !md->fires.empty()) return true;
+        if (!md) continue;
+        for (const MontageData::Fire& fire : md->fires) {
+            for (const content::AbilityHitRow& r : def.hits) {
+                if (r.source == "projectile" && r.key == fire.key && catalog_.projectile(r.owner_guid)) return true;
+            }
+        }
     }
     return false;
 }
@@ -1048,6 +1052,18 @@ void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::Ability
 void CombatWorld::resolve_pending(double now) {
     std::vector<Pending> keep;   // attacks with their own animation that still have a hit or their end to come
     for (size_t i = 0; i < pending_.size();) {
+        // (an attack that is not due yet is passed over without a copy: this runs every tick for every attack under way; one of a creature that died or was reset goes, due or not)
+        if (pending_[i].due > now) {
+            bool gone = false;
+            if (pending_[i].animated) {
+                const auto owner = npcs_.find(pending_[i].npc);
+                gone = owner == npcs_.end() || owner->second->dead;
+            }
+            if (!gone) {
+                ++i;
+                continue;
+            }
+        }
         Pending p = pending_[i];
         if (p.animated) {
             const auto it = npcs_.find(p.npc);
