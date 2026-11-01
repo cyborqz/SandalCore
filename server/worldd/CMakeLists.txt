@@ -364,6 +364,7 @@ if(MSVC)
         NOMINMAX
         _WIN32_WINNT=0x0A00
     )
+    target_compile_options(worldd_core PRIVATE /bigobj)
 endif()
 set_target_properties(worldd_core PROPERTIES FOLDER "Servers/worldd")
 
@@ -383,6 +384,7 @@ function(worldd_add_test name)
         STATS_CORPUS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/stats/testdata/corpus.txt"
         TALENT_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tests/talent_fixture.sql")
     set_target_properties(${name} PROPERTIES FOLDER "Tests/worldd")
+    target_compile_options(${name} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
 endfunction()
 
 foreach(t
