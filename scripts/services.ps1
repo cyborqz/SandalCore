@@ -1,6 +1,6 @@
 <#
   Go services helper.
-    scripts\services.ps1 up      start PostgreSQL (docker compose, waits for healthy)
+    scripts\services.ps1 up      start PostgreSQL + NATS (docker compose, waits for healthy)
     scripts\services.ps1 test    buf lint + generated-code check, go vet + go test (needs 'up'); the tests of the
                                  character creation rules and of the character service's content.db use
                                  $env:AOC_CONTENT_DB (or dist\content\content.db) when that file exists, and skip without it
@@ -64,19 +64,16 @@ $contentDb = if ($env:AOC_CONTENT_DB) { $env:AOC_CONTENT_DB } else { Join-Path $
 # checkout (not another checkout's copy).
 function Get-ServiceProcess {
     $exes = @('auth', 'character', 'citynode', 'quests', 'mesh', 'gateway' | ForEach-Object { Join-Path $out "$_.exe" }) + $worldd
-    Get-Process -Name auth, character, citynode, quests, mesh, gateway, worldd -ErrorAction SilentlyContinue |
-        Where-Object { $exes -contains $_.Path }
-}
-
-# Stops service processes: worldd first (and waited for), then the others, so that worldd's streams to the services end because worldd is gone, not because a service was
-# killed under it (worldd would log "the citynode stream ended" at every stop).
-function Stop-ServiceProcesses($procs) {
-    $worlds = @($procs | Where-Object { $_.Name -eq 'worldd' })
-    $others = @($procs | Where-Object { $_.Name -ne 'worldd' })
-    $worlds | Stop-Process -Force -ErrorAction SilentlyContinue
-    $worlds | ForEach-Object { $null = $_.WaitForExit(5000) }
-    $others | Stop-Process -Force -ErrorAction SilentlyContinue
-    $others | ForEach-Object { $null = $_.WaitForExit(5000) }
+    $procs = @(Get-Process -Name auth, character, citynode, quests, mesh, gateway, worldd -ErrorAction SilentlyContinue)
+    foreach ($p in $procs) {
+        $path = $p.Path
+        if (-not $path) {
+            # A 32-bit shell cannot read the path of a 64-bit process, so it comes
+            # back empty and this checkout's services would be invisible here.
+            $path = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction SilentlyContinue).ExecutablePath
+        }
+        if ($path -and @($exes | Where-Object { $_ -eq $path }).Count -gt 0) { $p }
+    }
 }
 
 # Lets only this user open $path (like the launcher's saved login token).
@@ -105,7 +102,7 @@ function Format-Process($procs) {
 try {
     switch ($Action) {
         'up' {
-            & docker compose -f $compose up -d --wait --remove-orphans   # (a NATS container left by an older compose file is removed)
+            & docker compose -f $compose up -d --wait
             if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed (is Docker Desktop running?)' }
             # The init script creates aoc_test only on a fresh volume; make sure it exists.
             $exists = & docker compose -f $compose exec -T postgres psql -U aoc -d aoc -tAc "SELECT 1 FROM pg_database WHERE datname = 'aoc_test'"
@@ -115,7 +112,7 @@ try {
             }
         }
         'down' {
-            & docker compose -f $compose down --remove-orphans
+            & docker compose -f $compose down
             if ($LASTEXITCODE -ne 0) { throw 'docker compose down failed' }
         }
         'test' {
@@ -193,6 +190,23 @@ try {
                 $who = 'the character service will refuse to create characters and worldd every login'
                 Write-Host "warning: $contentDb does not exist: $who. Build it: cd services; go run ./cmd/contentc (services\README.md, 'Content')" -ForegroundColor Yellow
             }
+            # The gRPC ports have defaults that other software on the machine may
+            # already hold (Incredibuild takes 50051 and 50052). Every service reads
+            # the same environment, so moving a port here moves it for the clients
+            # too; a service that cannot bind its port exits at once.
+            foreach ($pair in @(@('AOC_AUTH_GRPC_ADDR', 50051), @('AOC_CHARACTER_GRPC_ADDR', 50052))) {
+                $var = $pair[0]; $default = $pair[1]
+                $busy = @(Get-NetTCPConnection -LocalPort $default -State Listen -ErrorAction SilentlyContinue)
+                if ($busy.Count -eq 0) { continue }
+                $owner = (Get-Process -Id $busy[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
+                $free = $default
+                for ($p = $default + 10; $p -lt $default + 200; $p++) {
+                    if (-not (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)) { $free = $p; break }
+                }
+                if ($free -eq $default) { throw "port $default is taken by $owner and no free port was found near it" }
+                Write-Host "port $default is taken by $owner - $var moves to 127.0.0.1:$free" -ForegroundColor Yellow
+                Set-Item -Path "env:$var" -Value "127.0.0.1:$free"
+            }
             Build
             New-ServiceToken
             $started = @()
@@ -210,6 +224,12 @@ try {
                 foreach ($name in $names) {
                     $exe = if ($name -eq 'worldd') { $worldd } else { Join-Path $out "$name.exe" }
                     $exeArgs = if ($name -eq 'worldd' -or $name -eq 'character') { " --content-db `"$contentDb`"" } else { '' }
+                    if ($name -eq 'worldd' -and $env:AOC_CHARACTER_GRPC_ADDR) {
+                        # worldd is C++ and reads the character service's address from its
+                        # own option (it has no environment variable for it), so it has to
+                        # be told when the service moved to another port.
+                        $exeArgs += " --character `"$env:AOC_CHARACTER_GRPC_ADDR`""
+                    }
                     $log = Join-Path $logs "$name.log"
                     $outLog = Join-Path $logs "$name.out.log"
                     foreach ($f in $log, $outLog) {
@@ -231,7 +251,7 @@ try {
             Start-Sleep -Seconds 2
             $dead = @($started | Where-Object { $_.Process.HasExited })
             if ($dead.Count -gt 0) {
-                Stop-ServiceProcesses @(Get-ServiceProcess)
+                Get-ServiceProcess | Stop-Process -Force -ErrorAction SilentlyContinue
                 $why = ($dead | ForEach-Object {
                     '{0} exited with code {1} (see {2})' -f $_.Name, $_.Process.ExitCode, $_.Log
                 }) -join '; '
@@ -245,7 +265,8 @@ try {
                 Write-Host "nothing to stop: no auth, character, citynode, quests, mesh, gateway or worldd running from this checkout"
             } else {
                 $what = Format-Process $procs
-                Stop-ServiceProcesses $procs
+                $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+                $procs | ForEach-Object { $null = $_.WaitForExit(5000) }
                 Write-Host "stopped $what"
             }
         }

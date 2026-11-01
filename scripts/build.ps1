@@ -81,7 +81,7 @@ if ($Clean -and (Test-Path $buildDir)) {
 
 # ── Locate vcpkg ────────────────────────────────────────────────────────
 # Check $env:VCPKG_ROOT first, then fall back to common locations including
-# the VS2022-integrated vcpkg.
+# the VS-integrated vcpkg.
 function Find-Vcpkg {
     if ($env:VCPKG_ROOT -and (Test-Path (Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'))) {
         return $env:VCPKG_ROOT
@@ -96,12 +96,71 @@ function Find-Vcpkg {
         'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg',
         'C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\vcpkg',
         'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\vcpkg',
-        'C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\vcpkg'
+        'C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\vcpkg',
+        'C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\vcpkg',
+        'C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional\VC\vcpkg',
+        'C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\vcpkg',
+        'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\vcpkg'
     )
     foreach ($p in $candidates) {
         if (Test-Path (Join-Path $p 'scripts\buildsystems\vcpkg.cmake')) { return $p }
     }
+    # Every Visual Studio instance may carry the integrated vcpkg, and where it lives
+    # depends on the edition, the version and whether VS installed itself under
+    # Program Files or Program Files (x86). Ask vswhere for the instances instead of
+    # guessing fixed paths.
+    if ($vswhere -and (Test-Path $vswhere)) {
+        $instances = & $vswhere -all -products * -property installationPath
+        foreach ($inst in $instances) {
+            if (-not $inst) { continue }
+            $p = Join-Path $inst 'VC\vcpkg'
+            if (Test-Path (Join-Path $p 'scripts\buildsystems\vcpkg.cmake')) { return $p }
+        }
+    }
     return $null
+}
+
+# ── Windows SDK: the linker needs rc.exe ──────────────────────────────────
+# The linker needs rc.exe (and CMake needs mt.exe) from the Windows SDK. The Visual
+# Studio generator and vcpkg pick the newest installed Windows SDK, and when that SDK
+# is installed without its bin tools - the headers and the libs are there, rc.exe is not -
+# the link fails with "LNK1158: cannot run 'rc.exe'". CMake is only testing the
+# compiler at that point, so it reports "No CMAKE_CXX_COMPILER could be found", which
+# hides the real cause.
+#
+# Nothing is copied out of the SDK: the tools of the SDK that has them go on PATH, and
+# the build is told to use that SDK, so the headers, the libs and the tools are one
+# version. An SDK without its bin tools is a broken install, and the warning at the end
+# of this block says so.
+function Get-WindowsSdk {
+    $kitsRoot = $null
+    try {
+        $kitsRoot = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots' -ErrorAction Stop).KitsRoot10
+    } catch { }
+    if (-not $kitsRoot) { $kitsRoot = 'C:\Program Files (x86)\Windows Kits\10' }
+    $kitsRoot = $kitsRoot.TrimEnd('\')
+    $binRoot = Join-Path $kitsRoot 'bin'
+
+    $newest = $null
+    $complete = $null
+    if (Test-Path $binRoot) {
+        $versions = Get-ChildItem $binRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $parsed = $null
+            if ([version]::TryParse($_.Name, [ref]$parsed)) {
+                [pscustomobject]@{ Name = $_.Name; Version = $parsed }
+            }
+        } | Sort-Object Version -Descending
+        foreach ($cand in $versions) {
+            if (-not $newest) { $newest = $cand.Name }
+            if (-not $complete) {
+                $dir = Join-Path $binRoot "$($cand.Name)\x64"
+                if ((Test-Path (Join-Path $dir 'rc.exe')) -and (Test-Path (Join-Path $dir 'mt.exe'))) {
+                    $complete = [pscustomobject]@{ Version = $cand.Name; Bin = $dir }
+                }
+            }
+        }
+    }
+    return [pscustomobject]@{ KitsRoot = $kitsRoot; Newest = $newest; Complete = $complete }
 }
 
 $vcpkgRoot = Find-Vcpkg
@@ -109,6 +168,33 @@ if ($vcpkgRoot) {
     Write-Host "vcpkg   : $vcpkgRoot"
 } else {
     Write-Warning "vcpkg not found. Install from https://github.com/microsoft/vcpkg or set VCPKG_ROOT."
+}
+
+# The linker needs rc.exe on PATH, and CMake needs mt.exe: both are in the bin
+# folder of a Windows SDK. The SDK that has them is the one the build uses.
+$sdk = Get-WindowsSdk
+$sdkVersion = $null
+if ($sdk.Complete) {
+    $env:PATH = "$($sdk.Complete.Bin);$env:PATH"
+    $sdkVersion = $sdk.Complete.Version
+    Write-Host "Windows SDK: $($sdk.Complete.Version) (its bin tools are on PATH for the build)"
+} elseif ($sdk.Newest) {
+    Write-Warning "The Windows SDK $($sdk.Newest) is installed without its bin tools (no rc.exe/mt.exe), and no other installed SDK has them. The link will fail with 'LNK1158: cannot run rc.exe'. Repair the Windows SDK in the Visual Studio Installer (the 'SDK for Windows desktop development' component), or install an SDK that has its tools."
+}
+
+# Report the SDKs that are installed without their bin tools: the build fails with
+# "LNK1158: cannot run 'rc.exe'" and "CMAKE_MT-NOTFOUND" when the toolchain picks one
+# of them, and the message names neither the SDK nor the missing file.
+$sdkWithoutTools = @()
+# The SDKs that are installed are the ones with headers; their bin folder with
+# rc.exe and mt.exe may be missing.
+foreach ($dir in (Get-ChildItem (Join-Path $sdk.KitsRoot 'Include') -Directory -ErrorAction SilentlyContinue)) {
+    $parsed = $null
+    if (-not [version]::TryParse($dir.Name, [ref]$parsed)) { continue }
+    if (-not (Test-Path (Join-Path $sdk.KitsRoot "bin\$($dir.Name)\x64\mt.exe"))) { $sdkWithoutTools += $dir.Name }
+}
+if ($sdkWithoutTools) {
+    Write-Warning "These Windows SDKs are installed without their bin tools (no rc.exe/mt.exe): $($sdkWithoutTools -join ', '). The libraries that vcpkg builds need an SDK whose tools are there - repair the Windows SDK in the Visual Studio Installer, or install one that has them."
 }
 
 # ── Configure (CMake) if needed ─────────────────────────────────────────
@@ -142,6 +228,21 @@ if ($needConfigure) {
             $cmakeArgs += "-DVCPKG_TARGET_TRIPLET=x64-windows"
             # the DLLs are copied once after the build (below), not after every program
             $cmakeArgs += "-DVCPKG_APPLOCAL_DEPS=OFF"
+            # The overlay triplet builds the libraries with the same toolset the
+            # project itself uses (the generator above is Visual Studio 17 2022 =
+            # v143). vcpkg would otherwise pick the newest Visual Studio on the
+            # machine, and the libraries would then need STL internals that the
+            # programs' STL does not have (LNK2019 __std_*).
+            $overlayTriplets = Join-Path $repoRoot 'vcpkg-triplets'
+            if (Test-Path $overlayTriplets) {
+                $cmakeArgs += "-DVCPKG_INSTALL_OPTIONS=--overlay-triplets=$overlayTriplets"
+            }
+        }
+        if ($sdkVersion) {
+            # The SDK with its bin tools: CMake looks for mt.exe in the bin folder of
+            # the SDK version it is told to use, and that version is the one whose
+            # rc.exe is on PATH.
+            $cmakeArgs += "-DCMAKE_WINDOWS_TARGET_PLATFORM_VERSION=$sdkVersion"
         }
         & $cmake @cmakeArgs
         if ($LASTEXITCODE -ne 0) {

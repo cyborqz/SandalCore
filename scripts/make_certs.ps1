@@ -13,7 +13,7 @@
     certs\server.pem   the server certificate for 127.0.0.1 / localhost, signed by that CA
     certs\server.key   its private key
   The CA's private key is deleted right after signing, so nothing else can ever be signed with your trusted CA.
-  Uses OpenSSL (Git for Windows ships it; install.bat installs Git).
+  Uses OpenSSL (Git for Windows ships it; install_dependencies.bat installs Git).
   Nothing happens when the three files already exist and the CA is trusted.
 
 .PARAMETER Force
@@ -33,8 +33,12 @@ $caSubject = 'Sandal Core Local CA'
 function Find-OpenSsl {
     $c = Get-Command openssl -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($c) { return $c.Source }
-    foreach ($p in @("$env:ProgramFiles\Git\mingw64\bin\openssl.exe", "$env:ProgramFiles\Git\usr\bin\openssl.exe",
-                     "${env:ProgramFiles(x86)}\Git\mingw64\bin\openssl.exe")) {
+    # A 32-bit shell has $env:ProgramFiles pointing at "Program Files (x86)", so the
+    # 64-bit Git folder is only reachable through ProgramW6432.
+    $pf64 = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+    $pf32 = ${env:ProgramFiles(x86)}
+    foreach ($p in @("$pf64\Git\mingw64\bin\openssl.exe", "$pf64\Git\usr\bin\openssl.exe",
+                     "$pf32\Git\mingw64\bin\openssl.exe", "$pf32\Git\usr\bin\openssl.exe")) {
         if (Test-Path $p) { return $p }
     }
     return $null
@@ -68,7 +72,7 @@ if ($haveAll -and -not $Force) {
 
 $openssl = Find-OpenSsl
 if (-not $openssl) {
-    throw 'OpenSSL not found. Install Git for Windows (install.bat does), then launch again.'
+    throw 'OpenSSL not found. Install Git for Windows (install_dependencies.bat does), then launch again.'
 }
 New-Item -ItemType Directory -Force -Path $certs | Out-Null
 $env:MSYS2_ARG_CONV_EXCL = '*'     # stop Git's MSYS openssl from rewriting "/CN=..." as a path
