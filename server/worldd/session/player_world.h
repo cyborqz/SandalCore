@@ -477,6 +477,10 @@ public:
     /// How each session's ActorView runs (the rings, the tick, the opens cap): the defaults are retail's; a test changes them before a session joins.
     void                          set_view_config(const ActorView::Config& config) { view_config_ = config; }
     const ActorView::Config&      view_config() const { return view_config_; }
+    /// The pace of the answers to the players' good moves (session/members/move_ack.inc): the latest good move of a tick is answered when more than this has gone by since the last
+    /// answer (the original server's 100 ms; worldd's default); zero answers every move at once (the default here, and --move-ack-gap-ms 0).
+    void                          set_move_ack_gap(std::chrono::milliseconds gap) { move_ack_gap_ = std::chrono::duration_cast<Clock::duration>(gap); }
+    Clock::duration               move_ack_gap() const { return move_ack_gap_; }
 // built by Cyb with C | O | A
 
 private:
@@ -569,6 +573,7 @@ private:
     bool                                 gm_garden_ = false;
     std::optional<spawns::GardenReport>  garden_report_;
     ActorView::Config                    view_config_;
+    Clock::duration                      move_ack_gap_{};
     std::unique_ptr<nav::AreaNav>        nav_;
     npc::MotionTable                     motion_;
     bool                                 motion_loaded_ = false;

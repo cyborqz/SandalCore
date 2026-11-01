@@ -31,6 +31,11 @@ struct TickProfile {
     double view_us = 0;        // ActorView::tick (the view of the world of every player)
     double view_scan_us = 0;   // of which the passes' registry queries, rings and ordering (the rest is opens, updates and closes)
     uint64_t view_passes = 0;
+    double open_us = 0;        // of which the opens (an actor's whole state, new to the client, and its exports)
+    uint64_t opens = 0;
+    double update_us = 0;      // of which the updates of actors the client holds awake that changed
+    double update_build_us = 0;  // ... of which the building of what changed (the rest: the sending)
+    uint64_t updates = 0;
     double flush_us = 0;       // Connection::flush of every session: the packets built and sent
     // the session that cost the most since the profile started (its tick and its sends)
     std::string top_name;
@@ -55,5 +60,22 @@ inline TickProfile& tick_profile() {
 inline double tick_profile_us_since(std::chrono::steady_clock::time_point from) {
     return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - from).count();
 }
+
+/// Adds the time of its scope to `*slot` while the profile is on.
+class TickProfileSpan {
+public:
+    explicit TickProfileSpan(double* slot) : slot_(tick_profile().on ? slot : nullptr) {
+        if (slot_) started_ = std::chrono::steady_clock::now();
+    }
+    ~TickProfileSpan() {
+        if (slot_) *slot_ += tick_profile_us_since(started_);
+    }
+    TickProfileSpan(const TickProfileSpan&) = delete;
+    TickProfileSpan& operator=(const TickProfileSpan&) = delete;
+
+private:
+    double* slot_;
+    std::chrono::steady_clock::time_point started_{};
+};
 
 }}  // namespace aoc::worldd

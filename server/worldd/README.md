@@ -300,7 +300,7 @@ bunch exported (`mark_exported`), so later chains name those objects without the
 | pawn `ServerItemUsed` | wears the item in a bag slot or takes off the item in an equipment slot (plan B2, below): the storage events and the gear's update in one packet, or, refused, the Backpack's and the Equipment's payloads |
 | pawn `ServerActivateItem` | nothing: the retail client sends it with every `ServerItemUsed` of an item that can be worn, with the same four parameters, and the server answers the pair once |
 | PlayerController `ServerRequestStorageEvent` | a stack moved or swapped inside the Backpack (plan B2, below) |
-| `ServerMovePacked` | read whole and checked (plan A6, below): a plausible move gets `ClientMoveResponsePacked`, unreliable, with its TimeStamp; an implausible one gets `ClientAdjustPosition`. The old unpacked `ServerMove*` RPCs are neither checked nor acknowledged |
+| `ServerMovePacked` | read whole and checked (plan A6, below): a plausible move gets `ClientMoveResponsePacked`, unreliable, with its TimeStamp (at the original server's pace: the latest good move of a tick, not within 100 ms of the last answer; `--move-ack-gap-ms`); an implausible one gets `ClientAdjustPosition`. The old unpacked `ServerMove*` RPCs are neither checked nor acknowledged |
 | AbilityComponent `ServerTriggerAbility` | Sprint, Dodge or Rest starts (plan A7, below): an update of the pawn's Stamina, active abilities, effects and cooldowns, reliable. Any other ability the character knows runs in the generic runtime (plan D2, "Abilities of every class"): its item, cost, cooldown and effects at their times. A refused one gets `ClientEndAbility(ClientInstanceId)` |
 | AbilityComponent `ServerNotifyHeldAbilityCancelled` | releases a running Sprint or Rest (plan A7) |
 | anything else | the RPC's name is logged once at debug, and ignored |
@@ -825,7 +825,7 @@ The part-2 spec's "Settled in E1" (`docs/superpowers/specs/2026-10-04-e1-living-
 | out | nothing; an actor that was open is closed with Relevancy (3); one the client holds dormant stays (retail and UE do not destroy a dormant actor by distance) |
 | removed from the registry | Destroyed (0) on its channel; a dormant one is opened and closed so that the client forgets it |
 
-A player's mounts and effects are never dormant (awake or out). A channel is the lowest free index from 3 (the player's four actors', and none a lingering zone reserved, are skipped) and is held until its close is acknowledged (`Connection::channel_closing`: UE's GetFreeChannelIndex), so a re-open never races its own close. Every chain is built on a copy of the shadow and the shadow is kept only when the Connection accepted it (the replicator's atomic emission contract); exports are marked acknowledged from the connection's ack events, which the session forwards (`take_acks`). A pass opens at most 16 actors, nearest first (a teleport would otherwise open hundreds in one packet window); the rest follow in the next passes. `CloseReason::Disconnect = 5` is in `net/connection.h` for the stage that kicks.
+A player's mounts and effects are never dormant (awake or out). A channel is the lowest free index from 3 (the player's four actors', and none a lingering zone reserved, are skipped) and is held until its close is acknowledged (`Connection::channel_closing`: UE's GetFreeChannelIndex), so a re-open never races its own close. The shadow is kept only when the Connection accepted the chain (the replicator's atomic emission contract): an open is built on a new shadow, an update is collected on the shadow itself and put back with the replicator's undo record when the Connection refuses it; exports are marked acknowledged from the connection's ack events, which the session forwards (`take_acks`). A pass opens at most 16 actors, nearest first (a teleport would otherwise open hundreds in one packet window); the rest follow in the next passes. `CloseReason::Disconnect = 5` is in `net/connection.h` for the stage that kicks.
 
 **What the first in-game run of stage 1 changed.** (1) *The name.* A vendor's nameplate is `UNPCInfo.CharacterName` (every retail NPC open has it: "Siege Vendor", "Smithy Foreman"); the first draft wrote the label into `CreatureOwnerName`, a pet's owner, so every vendor kept the template's "Siege Vendor". It also kept the retail instance's `PopInstanceId` / `PopAssetId`, and the client applies the population records they name (`ANPCCharacter::ApplyPopulationRecordData`): the instance record `Node_Filler_Barracks_Vendor` has `DisplayNameOverrides` = "Siege Vendor", which would win over a replicated name. So a GM vendor now has CharacterName = its label ("GM Gear 0-9", "GM Mounts", ...) and both ids 0. The legend (label, arc and place, item count) is in worldd's log at start (`[area] GM vendor legend`): the inner arc holds the first 12 defs left to right, the outer arc the other 14. (2) *Foreign object references.* `UNPCSecondaryInfo.AppearanceComponent` named the retail server's NetGUID of the NPC's appearance component; every NPC with one now names the component this instance minted, and `AuthServerIDReplicated` is the class default 0 (the player's actors and 49 of the 51 retail NPC templates) instead of the mesh's server id. (3) *Pacing.* The world's opens were queued without limit behind and in front of the player's own unreliable chains (stat updates, move acknowledgements), which are dropped from the queue when the 256-packet window fills: the view starts nothing while more than 96 packets are unacknowledged or 128 bunches wait for a packet (`ActorView::Config`, `Stats::throttled`).
 
@@ -1599,12 +1599,28 @@ player.
   time it is. Datagrams are read between the ticks either way, at most 256 per read.
 - **Order.** A tick that falls due while datagrams are being read runs before the next one is handled, so the times the endpoint sees only go
   forward.
+- **The players' view passes take turns.** A player's view of the world passes every n-th tick (n = 2 at 30 ticks a second) and every pass costs
+  about the same. Left to the clock alone, the tick of a player's first pass would be the tick of all its later ones, and players who join
+  together (the load test's bots join 200 ms apart, an even number of ticks) would all pass on the same tick of the pair: half the ticks heavy,
+  half empty, the heavy one late while the server is far from busy. So the views share a count of ticks (`session/view_phases.h`, counted once
+  per tick by the world step): each view takes the phase (0 to n-1) that holds the fewest views when it first passes and passes on the ticks of
+  that phase, gives it back when it ends, and moves to the lightest phase at a pass of its own when its phase holds two or more views than that
+  one. A tick that ran late and was caught up, or a restart of the grid, changes nobody's phase. `--no-view-spread` turns it off.
+- **Move answers at the original server's pace.** The original server did not answer every move: a good move only set the answer, the server's
+  frame sent the latest one when more than 100 ms had gone by since its last answer and dropped it otherwise (about every second move of a
+  walking client was answered; one that moved less than 10 times a second got an answer for each). The client frees every move it saved up
+  to the TimeStamp it is given, so a move that was not answered is answered for by the next. worldd now does the same
+  (`session/player_move_ack.cpp`): a good move holds its TimeStamp, the session's tick sends it when the pace allows, a refused move drops the
+  held one (its correction goes out with the datagram, as before). `--move-ack-gap-ms N` is the 100 ms; 0 answers every move at once.
 - **`--tick-hz 0`** keeps the old loop (a tick after every datagram, and every 10 ms without one), for comparing the two.
 - **`--loop-stats N`** prints every N seconds a `[loop]` line (the ticks, the share of the time spent working, the p50, p99 and longest tick,
   the datagrams and bytes each way, the sessions, the position saver's queue) and a `[tick]` line: the rate, the datagrams per second and per
   tick, the milliseconds spent reading datagrams and ticking, the world's share (the NPC world, the fights, the towns' people, the ground
-  window, the corpses), the sessions' (their views, of which the relevancy scans), the packets' and the costliest session of the interval.
-  Off (the default) nothing is measured.
+  window, the corpses), the sessions' (their views, of which the relevancy scans, the opens and the updates with the time they spent
+  building what changed), the packets' and the costliest session of the interval. The ticks caught up, dropped and the restarts of the grid
+  are the interval's; the latest tick figure includes the stall that restarts the grid. N is 1 or more. Off (the default) nothing is measured.
+- **The socket.** worldd asks the system for a 1 MB receive buffer (the default is about 64 KB) so that the datagrams of a stalled tick wait
+  instead of being dropped; the start line says what the system granted.
 - Tests: `test_worldd_endpoint` (`endpoint_fixed_tick_tests.inc`): 50 datagrams between two due ticks run one tick, each at its own arrival
   time; a tick due in the middle of a batch runs between its datagrams; a slow tick is caught up on the grid, a stall of 10.5 periods starts
   the grid again (9 ticks skipped); with every tick 1.5 periods long the datagrams are still read; 10 to 120 ticks a second run as asked; at
@@ -1629,7 +1645,7 @@ worldd --bind 127.0.0.1:7777 --public-address 127.0.0.1:7777 --mesh 127.0.0.1:50
        [--content-db dist/content/content.db] [--gamestate-mode tier1|tier2|tier3|captured] [--max-move-speed 2135]
        [--area-radius -1|1000] [--gm-garden] [--no-zone-filter]
        [--world-admin 127.0.0.1:50056] [--no-world-admin] [--gm-commands]
-       [--world-stream 127.0.0.1:50057] [--no-world-stream] [--tick-hz 30] [--loop-stats 0]
+       [--world-stream 127.0.0.1:50057] [--no-world-stream] [--tick-hz 30] [--loop-stats 0] [--no-view-spread] [--move-ack-gap-ms 100]
 ```
 
 At start it binds the UDP port, registers with mesh (retrying until mesh answers) and sends

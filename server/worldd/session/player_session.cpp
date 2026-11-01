@@ -492,7 +492,7 @@ void PlayerSession::tick(Connection& conn) { pump(conn); }
 
 void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     last_now_ = now;
-    pump(conn);
+    pump(conn); send_move_ack(conn, now);   // (the held answer to the latest good move, session/player_move_ack.cpp)
     if (finished_ || failed_) return;
     session_seconds(now);   // the clock starts at the first tick
     run_abilities(conn, now);

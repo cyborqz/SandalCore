@@ -37,23 +37,27 @@ void add_ability_exports(std::vector<repl::ContentBlock>& blocks, const std::vec
     }
 }
 
-/// repl::update_actor with the exports of a creature's attack added to the AbilityComponent's block.
-std::optional<repl::Emission> update_with_ability_exports(const repl::Actor& actor, repl::ActorShadow& shadow, const repl::ExportAcks& acks,
-                                                          const std::vector<repl::ExportChain>& exports, bool* failed, repl::SentRecord* record) {
-    if (exports.empty()) return repl::update_actor(actor, shadow, acks, failed, record);
-    if (failed) *failed = false;
-    repl::ShadowUndo undo;
+/// repl::update_actor with the exports of a creature's attack added to the AbilityComponent's block, collected on the shadow itself and not on a copy of it (the copy of every
+/// actor's whole shadow, for every update of every player's view, was the larger part of an update's cost).  `undo` receives what the collect changed: the caller puts the shadow
+/// back with undo.rollback when the connection does not take the chain.  A failure, or an update with nothing to send, leaves the shadow as it was.  The emission is the one
+/// repl::update_actor builds from the same shadow.
+std::optional<repl::Emission> update_in_place(const repl::Actor& actor, repl::ActorShadow& shadow, const repl::ExportAcks& acks, const std::vector<repl::ExportChain>& exports,
+                                              bool* failed, repl::SentRecord* record, repl::ShadowUndo& undo) {
+    *failed = false;
     std::vector<repl::ContentBlock> blocks;
-    if (!repl::collect_update_blocks(actor, shadow, blocks, &undo)) {
-        if (failed) *failed = true;
+    if (!repl::collect_update_blocks(actor, shadow, blocks, &undo)) {   // (it put the shadow back itself)
+        *failed = true;
         return std::nullopt;
     }
-    if (blocks.empty()) return std::nullopt;
-    add_ability_exports(blocks, exports);
+    if (blocks.empty()) {
+        undo.rollback(shadow);
+        return std::nullopt;
+    }
+    if (!exports.empty()) add_ability_exports(blocks, exports);
     auto e = repl::assemble_blocks(actor, blocks, acks);
     if (!e) {
         undo.rollback(shadow);
-        if (failed) *failed = true;
+        *failed = true;
     } else if (record) {
         *record = repl::sent_record(undo, shadow);
     }
@@ -72,6 +76,8 @@ void ActorView::finish() {
     if (finished_) return;
     finished_ = true;
     registry_.off_remove(listener_);
+    if (phase_taken_ && config_.phases) config_.phases->leave(phase_);   // the tick it passed on is the other views' to take
+    phase_taken_ = false;
 }
 // C.O.A + C | Y | B
 
@@ -195,6 +201,8 @@ std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, 
 // C-Y-B - C O A
 
 bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snapshot, Clock::time_point now) {
+    TickProfileSpan span(&tick_profile().open_us);   // (--loop-stats)
+    if (tick_profile().on) ++tick_profile().opens;
     const uint32_t channel = allocate_channel(conn);
     if (channel == 0) {
         ++stats_.no_channel;
@@ -259,11 +267,20 @@ bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snap
 
 bool ActorView::send_update(Connection& conn, world::WorldActor& a, Entry& e) {
     if (a.version == e.sent_version && a.reliable_version == e.sent_reliable) return true;
-    repl::ActorShadow work = e.shadow;
+    TickProfile& profile = tick_profile();   // (--loop-stats: the building of the change, the rest)
+    TickProfileSpan span(&profile.update_us);
+    std::chrono::steady_clock::time_point t1{};
+    if (profile.on) {
+        ++profile.updates;
+        t1 = std::chrono::steady_clock::now();
+    }
+    // the change is collected on the shadow itself (no copy of it per update); `undo` puts it back if the connection does not take the chain
     bool failed = false;
     repl::SentRecord record;
     repl::Actor scratch;
-    auto em = update_with_ability_exports(view_of(a, scratch), work, acks_, a.ability_exports, &failed, &record);
+    repl::ShadowUndo undo;
+    auto em = update_in_place(view_of(a, scratch), e.shadow, acks_, a.ability_exports, &failed, &record, undo);
+    if (profile.on) profile.update_build_us += tick_profile_us_since(t1);
     if (failed) {
         e.broken = true;
         ++stats_.broken;
@@ -280,8 +297,11 @@ bool ActorView::send_update(Connection& conn, world::WorldActor& a, Entry& e) {
     }
     ChainId chain = 0;
     size_t parts = 1;
-    if (!send(conn, e.channel, /*open=*/false, reliable, *em, &chain, &parts)) return false;
-    e.shadow = std::move(work);
+    if (!send(conn, e.channel, /*open=*/false, reliable, *em, &chain, &parts)) {
+        ++stats_.refused_updates;
+        undo.rollback(e.shadow);   // the connection did not take the chain: the client has what it had
+        return false;
+    }
     e.sent_version = a.version;
     e.sent_reliable = a.reliable_version;
     e.ledger.sent(chain, reliable, parts, record, e.shadow);
@@ -516,6 +536,14 @@ void ActorView::tick_unprofiled(Connection& conn, double x, double y, Clock::tim
         pending_snapshots_.erase(pending_snapshots_.begin() + static_cast<std::ptrdiff_t>(i));
     }
     if (passed_ && now - last_pass_ < config_.relevancy.tick) return;
+    if (config_.phases) {   // the pass runs on the tick of this view's phase, so that the players' passes do not all land on one tick of the cycle (view_phases.h)
+        if (!phase_taken_) {
+            phase_ = config_.phases->join();
+            phase_taken_ = true;
+        }
+        if (!config_.phases->due(phase_)) return;
+        phase_ = config_.phases->balance(phase_);
+    }
     passed_ = true;
     last_pass_ = now;
     pass(conn, x, y, now);

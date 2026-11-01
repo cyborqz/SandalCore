@@ -171,11 +171,8 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
             if (pipeline_) pipeline_->set_moving(moving);
             if (!on_mount) tally_speed(before, checker_.good(), abilities->sprinting(), abilities->evading());
         }
-        auto ack = on_mount ? mount_ack(move.time_stamp) : pb_.good_move_ack(move.time_stamp);
-        if (!ack) return;
-        if (send(conn, *ack) != Outcome::Sent) return;   // the actor's channel is not open yet: the client resends its moves
-        if (on_mount) ++mount_moves_acked_;
-        if (++moves_acked_ == 1) spdlog::info("[session] {}: the first move is acknowledged (TimeStamp {})", name(), move.time_stamp);
+        // the answer: at once, or (PlayerWorld::move_ack_gap, the original server's pace) the latest good move's at the tick (session/player_move_ack.cpp)
+        if (!hold_move_ack(move.time_stamp, on_mount)) answer_move(conn, move.time_stamp, on_mount);
         return;
     }
 // C O A and Cyb
@@ -200,6 +197,7 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
     // The correction goes out once the datagram's bunches are all judged (end_of_datagram), the latest refusal's.
     // (a TimeStamp that is NaN or infinite names no saved move: the client ignores it, so 0 goes out instead)
     pending_fix_ = std::isfinite(move.time_stamp) ? move.time_stamp : 0.0f;
+    held_move_ack_.reset();   // the correction wins over the answer held for the move before it (the original server's one pending adjustment)
 }
 
 bool PlayerSession::is_moving(const GoodPosition& before, const repl::NetworkMove& move) const {

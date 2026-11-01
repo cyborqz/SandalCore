@@ -24,6 +24,7 @@
 #include "protocol/repl/replicator.h"
 #include "protocol/schema/generated/index.h"
 #include "session/actor_view.h"
+#include "test_registry.h"
 #include "world/actor_registry.h"
 #include "world/relevancy.h"
 
@@ -771,6 +772,8 @@ static void test_state_actor() {
     CHECK(v.state_of(5000) == world::ClientState::None || v.tracked() == 0, "a removed actor is let go");
 }
 
+#include "actor_view_registered.inc"
+
 int main() {
     test_view_owner_and_component_index();
     test_registry();
@@ -781,6 +784,7 @@ int main() {
     test_view_never_dormant_and_removal();
     test_view_cap_and_exports();
     test_state_actor();
+    g_fail += aoc_tests::run();   // every check registered in actor_view_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

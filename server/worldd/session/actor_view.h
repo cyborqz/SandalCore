@@ -9,7 +9,8 @@
 //  tick; the view does the rest:
 //
 //    pass       every RelevancyConfig::tick (67 ms) the registry is asked for the actors around the player and each is put in a ring
-//               (awake, snapshot, out) with the hysteresis its state allows.  What the ring changes:
+//               (awake, snapshot, out) with the hysteresis its state allows (a server that ticks at a fixed rate gives the views a phase of their
+//               own, session/view_phases.h, so that the players' passes spread over the ticks).  What the ring changes:
 //
 //                 none      + awake     open the channel with the actor's whole state (a channel is the lowest free index from 3)
 //                 none      + snapshot  open it, and close it with Dormancy 134 ms later: the client keeps the actor as it was
@@ -51,9 +52,10 @@
 //  (changed handles, the NAK ledger, the right channel).  The registry's actor is never touched, so another connection never sees this player's
 //  guid and nothing needs taking off when the session ends (retail lists the players near the NPC; the client looks for its own).
 //
-//  Atomic emission.  Every chain is built on a copy of the shadow and the shadow is kept only when the Connection accepted the chain
-//  (libs/aocnet/README.md "Caller contracts"); a refused open leaves the actor as it was and is tried again next pass.  Exports are marked
-//  acknowledged from the Connection's ack events (on_ack), once per object, as the replicator's ExportAcks needs.
+//  Atomic emission.  The shadow is kept only when the Connection accepted the chain (libs/aocnet/README.md "Caller contracts"): an open is built on a
+//  new shadow that replaces the entry's when the chain went out, an update is collected on the entry's shadow itself and put back with the replicator's undo
+//  record when the Connection refuses it (no copy of the shadow per update).  A refused open or update leaves the actor as it was and is tried again next
+//  pass.  Exports are marked acknowledged from the Connection's ack events (on_ack), once per object, as the replicator's ExportAcks needs.
 //
 //  Cost.  A pass visits the actors in the 350 m ring and the ones the view tracks: with a few hundred actors that is a few microseconds each
 //  (the tests measure it: test_worldd_actor_view).  Opens per pass are capped (RelevancyConfig::max_opens_per_tick), nearest first.
@@ -64,6 +66,7 @@
 #include "net/connection.h"
 #include "protocol/repl/replicator.h"
 #include "protocol/repl/send_ledger.h"
+#include "session/view_phases.h"
 #include "world/actor_registry.h"
 #include "world/relevancy.h"
 
@@ -72,6 +75,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -95,6 +99,9 @@ public:
         /// while this many packets are unacknowledged or this many bunches wait for a packet, the view starts nothing new (it tries again next pass).
         size_t max_packets_in_flight = 96;
         size_t max_queued_bunches = 128;
+        /// The tick of the cycle each view passes on, shared by the views of one server (session/view_phases.h): the server gives it when its tick passes every n-th tick, so that the
+        /// players' passes do not all land on one tick.  None: a pass is due once the relevancy config's tick has gone by since the last (the tests, and the old loop).
+        std::shared_ptr<ViewPhases> phases;
     };
 
     /// What the view did, for the log and the tests.
@@ -110,6 +117,7 @@ public:
         size_t closes_dormancy = 0, closes_relevancy = 0, closes_destroyed = 0;
         size_t forgotten = 0;        // dormant actors the view stopped tracking (the client keeps them)
         size_t refused_opens = 0;    // an open the connection could not take (window) or the replicator could not build
+        size_t refused_updates = 0;  // an update chain the connection could not take (tried again at the next pass)
         size_t refused_closes = 0;
         size_t broken = 0;           // actors whose state cannot be written (never retried)
         size_t capped = 0;           // passes in which the opens cap held an actor back
@@ -148,6 +156,8 @@ public:
     void finish();
 
     const Stats& stats() const { return stats_; }
+    /// The phase this view passes on (Config::phases; 0 until its first tick, and when it has none).
+    unsigned phase() const { return phase_; }
     /// The channel an actor is open on (0: none).
     uint32_t channel_of(uint64_t actor) const;
     world::ClientState state_of(uint64_t actor) const;
@@ -249,6 +259,8 @@ private:
     std::unordered_map<ChainId, uint64_t>     chain_owner_;   // an update chain in a ledger -> its actor
     Clock::time_point                   last_pass_{};
     bool                                passed_ = false;
+    unsigned                            phase_ = 0;               // the tick of the cycle this view passes on (Config::phases)
+    bool                                phase_taken_ = false;     // ... and whether it holds one
     bool                                finished_ = false;
     Stats                               stats_;
     std::deque<uint64_t>                pending_snapshots_;   // opened as snapshots, their Dormancy close not sent yet, in the order they were opened
