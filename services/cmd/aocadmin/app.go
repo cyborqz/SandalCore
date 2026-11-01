@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/status"
@@ -29,6 +30,15 @@ import (
 type App struct {
 	ctx    context.Context
 	client *Client
+
+	// windowMu guards the INSERT key's state: the dashboard is either in
+	// front of the game (raised) or out of the way.
+	windowMu     sync.Mutex
+	windowRaised bool
+
+	// handleMu guards the window's own handle, found by its title.
+	handleMu sync.Mutex
+	hwnd     uintptr
 }
 
 // NewApp: the application.
@@ -45,6 +55,8 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.client = c
+	// the INSERT key brings the window back over the game
+	go a.watchHotkey()
 }
 
 // shutdown: the window is closed: the connections go with it.

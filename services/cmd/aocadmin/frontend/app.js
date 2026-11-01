@@ -453,3 +453,9 @@ document.getElementById("start-stack").addEventListener("click", async () => {
 document.getElementById("refresh-players").addEventListener("click", loadPlayers);
 setInterval(refresh, 2000);
 refresh();
+
+// ── the Go side's messages ──────────────────────────────────────────────────────
+// The INSERT key lives on the Go side; it says here what it did.
+if (window.runtime && window.runtime.EventsOn) {
+  window.runtime.EventsOn("toast", (message) => toast(message));
+}
