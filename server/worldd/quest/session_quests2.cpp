@@ -2,12 +2,61 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  quest/session_quests2.inc  (quests milestone, slice 2, "do it and hand it in")
+//  quest/session_quests2.cpp  (quests, "do it and hand it in")
 //
-//  PlayerSession's members for playing a quest, included at the end of session/player_session.cpp (inside namespace aoc::worldd): the quest engine (quest/engine.h) is built over the
+//  PlayerSession's members for playing a quest: the quest engine (quest/engine.h) is built over the
 //  character's log whenever something happens that a quest may count (a conversation action, a kill, an interaction, the place the character stands at, the items it carries, a delivery
 //  of crates) and says what the world has to do: give the rewards, take items, show a toast, take the finished quest out of the log.  This file does those things.
 // ============================================================================
+
+#include "session/player_session.h"
+
+#include "bootstrap/character_setup.h"
+#include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rewards.h"
+#include "crafting/rules.h"
+#include "crafting/station.h"
+#include "content/content_db.h"
+#include "dialogue/talk.h"
+#include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
+#include "protocol/repl/hit_rpc.h"
+#include "protocol/repl/item_rpc.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/storage_rpc.h"
+#include "session/gm_travel.h"
+#include "protocol/repl/rpc_fields.h"
+#include "items/acquired.h"
+#include "vendor/node_tax.h"
+#include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "quest/registry_points.h"
+#include "world/zoi_surface.h"
+
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <bit>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <random>
+#include <set>
+
+namespace aoc { namespace worldd {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+namespace wire = ::aoc::protocol::wire;
+using bootstrap::Role;
+using protocol::emit::FIntrepidNetworkGUID;
 
 namespace {
 
@@ -226,7 +275,7 @@ void PlayerSession::run_talk_actions(Connection& conn, const dialogue::Result& r
             const std::string& a = run.action.action;
             if (a == "CompleteDialogueObjective" || a == "IncrementDialogueObjective") {
                 eng.dialogue(instance, run.visited.empty() ? r.visited : run.visited, a == "CompleteDialogueObjective");
-                eng.dialogue_turn_in(run.action, a == "CompleteDialogueObjective");   // quests part 3, slice 2: a hand-in objective the talk names
+                eng.dialogue_turn_in(run.action, a == "CompleteDialogueObjective");   // quests: a hand-in objective the talk names
             }
             else eng.dialogue_action(run.action);
         }
@@ -353,3 +402,5 @@ void PlayerSession::tick_quests(Connection& conn, Clock::time_point now) {
         }
     });
 }
+
+}}  // namespace aoc::worldd

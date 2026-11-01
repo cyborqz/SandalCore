@@ -50,6 +50,14 @@ When you add a test that needs the game data, add its program to `scripts/ci_nee
 
 To try the Go job on a machine without game data: `cd services && go test -tags aoc_standin ./...`. Never use the tag where the game data exists: the compiler stops with "redeclared" errors.
 
+### Where New Code Goes
+
+Put a new feature into source files of its own and register it the way the existing features do, instead of growing the big files:
+
+- The world server's player session has one file per feature (`server/worldd/session/player_<feature>.cpp`). A feature registers the client calls it answers in its own file (`register_<feature>_rpcs`, listed once in `server/worldd/session/rpc_registered.inc`) and lists its file in `server/worldd/session/session_sources.cmake`.
+- Tests are registered from files of their own (`server/worldd/tests/README.md`).
+- `scripts/hotspot_limits.txt` lists the files that were split and the most lines each may have; `scripts/check_hotspots.ps1` reports a file that grew past its limit (CI runs it).
+
 ### Commit Messages
 
 - Use clear, past-tense commit titles, as the project's own history does: e.g., `Fixed harvest channel cancel state`, `Added validation for mount possession RPC`.

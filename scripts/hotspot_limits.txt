@@ -1,0 +1,7 @@
+# The files that were split into one file per feature, and the most lines each may have (scripts/check_hotspots.ps1).
+# A file over its limit is a finding: the new code goes into a file of its own, registered the way CONTRIBUTING.md ("Where New Code Goes") describes.
+# Raise a limit by hand, in the commit that needs it, so that a reviewer sees it.
+#
+# <most lines> <path from the repository root>
+1052 server/worldd/session/player_session.cpp
+1826 server/worldd/session/player_session.h

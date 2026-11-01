@@ -69,7 +69,7 @@
 //                       ServerActivateItem                   not answered: the client sends it with ServerItemUsed, the same four
 //                                                            parameters, for an item that can be worn, and the server's answer is one
 //    PlayerController   ServerRequestStorageEvent            a stack moved or swapped inside the Backpack (plan B2, below)
-//    Missing systems, step 1 (the client's quiet requests; session/player_session.cpp "quiet confirmations"):
+//    Missing systems, step 1 (the client's quiet requests; session/player_requests.cpp "quiet confirmations"):
 //    pawn               ServerSetActiveTarget        the target of slot 1 or 2 is kept (an actor of the world or the player itself; anything else is no target)
 //                                                    and CombatInfo.ActiveTargets answers about 84 ms later
 //    pawn               ServerSetHoverTargetGuid     CombatInfo.HoverTargetGuid, the same way
@@ -288,6 +288,7 @@
 #include "session/move_checker.h"
 #include "session/player_world.h"
 #include "session/riding.h"
+#include "session/rpc_table.h"
 #include "session/position_saver.h"
 #include "session/professions.h"
 #include "session/talents.h"
@@ -731,21 +732,21 @@ public:
     size_t   items_destroyed() const { return items_destroyed_; }
     size_t   vendor_refused() const { return vendor_refused_; }
     size_t   interactions_ignored() const { return interact_ignored_; }
-    /// Quests, slice 0: the talking window.  The NPC the player talks to (0: nobody), the conversation, and how many were opened, lines chosen, closed and refused.
+    /// Quests: the talking window.  The NPC the player talks to (0: nobody), the conversation, and how many were opened, lines chosen, closed and refused.
     uint64_t talk_actor() const { return talk_.state().source; }
     const dialogue::Talk& talk() const { return talk_; }
     size_t   dialogue_opens() const { return dialogue_opens_; }
     size_t   dialogue_steps() const { return dialogue_steps_; }
     size_t   dialogue_closes() const { return dialogue_closes_; }
     size_t   dialogue_refused() const { return dialogue_refused_; }
-    // ---- quests, slice 1 ----
+    // ---- quests: the quest log ----
     const quest::QuestLog& quest_log() const { return quest_log_; }
     /// Whether the character's quest log loaded (or it has none): the quests work.  False: no quest service, or it did not answer at the login.
     bool     quests_on() const { return quests_on_; }
     size_t   quests_taken() const { return quests_taken_; }
     size_t   quests_finished() const { return quests_finished_; }
     size_t   quest_objectives_done() const { return quest_objectives_done_; }
-    /// Quests, slice 2: the two entry points of the construction crates (the crates' code calls them; they only note the event, the quests count it on the next tick).
+    /// Quests: the two entry points of the construction crates (the crates' code calls them; they only note the event, the quests count it on the next tick).
     /// The character carries the construction crate `item_record` now (it picked one up at a construction station): the EventNotification ConstructionCrateEquipped.
     void     construction_crate_equipped(int64_t item_record);
     /// The character put `count` of the crate `item_record` into the construction `building_or_project` of the city node `node`: the EventNotification
@@ -929,7 +930,20 @@ private:
     static spdlog::level::level_enum level_for(size_t& count, size_t limit = kLoggedPerKind);
     void dispatch(Connection& conn, bootstrap::Role role, const protocol::repl::ClientRpc& rpc, const InBunch& bunch,
                   Clock::time_point now);
-    // ---- quests, slice 0: the talking window ------------------------------------------------------------------------------------------
+    /// The client calls a session answers: one table for all sessions, filled by the features' registrations.  Each feature defines register_<feature>_rpcs in its own file and
+    /// session/rpc_registered.inc lists it (session/rpc_table.h).
+    static const RpcTable& rpc_table();
+#define AOC_RPC_FEATURE(feature) static void register_##feature##_rpcs(RpcTable&);
+#include "session/rpc_registered.inc"
+#undef AOC_RPC_FEATURE
+    /// Calls dispatch() answered in place before there was a table: the possession acknowledgement, the start of cutting a tree, the Destiny toggle, the phase-in and the unanswered
+    /// item activation.
+    void on_possession_ack(const protocol::repl::ClientRpc& rpc);
+    void on_foliage_start(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    void on_quest_blacklisted();
+    void on_phase_in_ready(Connection& conn, Clock::time_point now);
+    void on_activate_item_ignored();
+    // ---- quests: the talking window ------------------------------------------------------------------------------------------
     /// What the conditions of a conversation ask of this character (the bag, the level, where the player and the NPC stand).
     std::unique_ptr<dialogue::Facts> dialogue_facts(const world::WorldActor* npc) const;
     /// The click on an NPC that has a conversation: opens the window with its greeting.  False when the NPC has none that can be shown (the caller then answers as before).
@@ -942,7 +956,7 @@ private:
     bootstrap::PlayerBootstrap::DialogueView dialogue_view(bool exhaust = false) const;
     /// Sends the conversation as it is now (the PlayerController's CurrentDialogueInstance).  `exhaust`: the quest offer was answered, so ExhaustBehavior goes with the cleared queue.
     void send_dialogue(Connection& conn, const char* why, bool exhaust = false);
-    // ---- quests, slice 1: the quest log and the quest panel -----------------------------------------------------------------------------------------
+    // ---- quests: the quest log and the quest panel -----------------------------------------------------------------------------------------
     /// At the join: the character's saved log becomes the quest component's arrays.
     void init_quests(PlayerWorld& world, const svc::Character& character);
     /// Brings the quest component in line with the log, queues the update and marks the log to be saved.
@@ -953,7 +967,7 @@ private:
     void start_quest(Connection& conn, const content::QuestRow& def, int64_t source, const char* why, Clock::time_point now);
     /// The player answered the quest panel (SubDialogue / Accept, Decline).
     void on_quest_offer(Connection& conn, uint8_t response, Clock::time_point now);
-    /// Quests part 3, slice 2: ServerRequestItemDelivery(QuestRecordId, DeliveryItems): the items the player picked in the hand-in panel (quest/session_handin.inc).
+    /// Quests: ServerRequestItemDelivery(QuestRecordId, DeliveryItems): the items the player picked in the hand-in panel (quest/session_handin.cpp).
     void on_item_delivery(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// ServerAbandonQuests(QuestGuids, QuestState): the quests the client names leave the log.
     void on_abandon_quests(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
@@ -969,7 +983,7 @@ private:
     void end_dialogue(Connection& conn, const char* why);
     /// Every tick: a conversation whose NPC is gone or far away ends.
     void run_dialogue(Connection& conn, Clock::time_point now);
-    // ---- quests, slice 2: objectives, hand-in and rewards (quest/session_quests2.inc) ------------------------------------------------------------
+    // ---- quests: objectives, hand-in and rewards (quest/session_quests2.cpp) ------------------------------------------------------------
     /// The quests' clock: the world's seconds.
     double quest_clock(Clock::time_point now);
     /// Builds the quest engine over the character's log and the conversations' evaluator, lets `fn` use it, carries out what the engine says the world has to do and tells the client of a change.
@@ -991,7 +1005,7 @@ private:
     void quest_shrine(Connection& conn, int64_t place, Clock::time_point now);
     /// Once a second: the places (GoTo), the items carried (Collect), the rules (Custom); and the rewards that waited for room.
     void tick_quests(Connection& conn, Clock::time_point now);
-    // ---- quests, map markers (quest/session_givers.inc) ------------------------------------------------------------------------------------------------
+    // ---- quests, map markers (quest/session_givers.cpp) ------------------------------------------------------------------------------------------------
     /// Tells the client which NPCs around the character have a quest it can take (the quest component's QuestGiverInfos): the client puts the quest-available mark on them and on the
     /// map.  Looks again when the log changed, else every few seconds.
     void tick_quest_givers(Connection& conn, Clock::time_point now);
@@ -1000,7 +1014,7 @@ private:
     /// A quest-bound crate a reward gives (1100 and 1101 hand one out) is CARRIED, not stored: this is the ONE place that puts it in the character's hands.  False: it was not placed here
     /// (this build keeps the crate in the bag like any item; the construction crates' carry code takes it over).
     bool carry_quest_crate(Connection& conn, const combat::RolledItem& crate, Clock::time_point now);
-    // ---- storage clerks, step 0 (warehouse/player_warehouse.inc) ----
+    // ---- storage clerks, step 0 (warehouse/player_warehouse.cpp) ----
     /// The join's last piece for the warehouse: the character's base item chunk gets its component and OwnerInfo lists it, as retail's login does (the client asks for its data and has it
     /// before any window opens).  Queued behind the join.
     void list_item_chunk(Connection& conn);
@@ -1170,7 +1184,7 @@ private:
     std::string fresh_guid();
     /// Tells the client what an applied request did (the events, then the visible gear) and marks the inventory dirty.
     void apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what);
-    /// Crates, slice 1: note_cargo_crate() looks at an applied outcome and calls construction_crate_equipped() (the quests' input, declared with the quest functions above) when a
+    /// Crates: note_cargo_crate() looks at an applied outcome and calls construction_crate_equipped() (the quests' input, declared with the quest functions above) when a
     /// construction crate (gameplay tag Item.Crate.Construction) now stands in the cargo slot: the one place that tells the quests a crate is carried.  construction_deposit() is the
     /// deposit input that the construction site will call once a crate is put into it.
     void note_cargo_crate(const items::Outcome& outcome);
@@ -1369,11 +1383,11 @@ private:
     void check_death(Connection& conn, Clock::time_point now);
     void die(Connection& conn, Clock::time_point now);
     /// RequestServerRespawnChoices (the client asks 6 s after the death) is answered with SendClientRespawnChoices: the discovered Emberspring nearest the body and the home
-    /// (respawn/session_embersprings.inc; an area with no Emberspring keeps its one fixed choice).
+    /// (respawn/session_embersprings.cpp; an area with no Emberspring keeps its one fixed choice).
     void on_respawn_choices_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// SendServerRespawnChoice(record): the player comes back at the Emberspring chosen (the home only outside its two-hour cooldown), alive, with full Health and Mana.
     void on_respawn_choice(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
-    /// Embersprings (respawn/session_embersprings.inc).
+    /// Embersprings (respawn/session_embersprings.cpp).
     const respawn::ShrineBook* shrine_book() const;                                   // the area's Emberspring (null: none)
     void init_attunements(const svc::Character& character);                           // the join: the saved places on the pawn
     void send_attunements(Connection& conn, Clock::time_point now);                   // the places changed: the pawn's update, and saved with the progress
@@ -1572,7 +1586,7 @@ private:
     size_t                                    deaths_ = 0, respawns_ = 0, death_logged_ = 0;
     respawn::Attunements                      attunements_;          // Embersprings: the character's discovered places, home and the last use of the home respawn
     int64_t                                   pending_attune_ = 0;   // the place whose prompt waits for the player's yes or no
-    // quests part 3, slice 1: the use of a quest object that takes time (the character kneels while it runs)
+    // quests: the use of a quest object that takes time (the character kneels while it runs)
     bool                                      prop_using_ = false;
     uint64_t                                  prop_actor_ = 0;
     Clock::time_point                         prop_end_{};
@@ -1636,7 +1650,7 @@ private:
     int64_t                        vendor_def_ = 0;
     bool                           vendor_by_talk_ = false;   // the open window was opened by a line of the shopkeeper's conversation, not by a use of it
     RequestBudget                  vendor_budget_{kVendorBurst, kVendorInterval};
-    // storage clerks, step 0 (warehouse/player_warehouse.inc)
+    // storage clerks, step 0 (warehouse/player_warehouse.cpp)
     struct WhComponent {
         warehouse::Key                  key;
         warehouse::Spec                 spec;   // the container as the window shows it (the base chunk's data is sent with no window open)
@@ -1681,12 +1695,12 @@ private:
     std::set<std::string> station_told_;              // what was said once about a station kind
     size_t vendor_sales_ = 0, vendor_repairs_ = 0, items_destroyed_ = 0;
     bool   vendor_unreadable_logged_ = false, vendor_sale_logged_ = false;
-    // quests, slice 0: the talking window
+    // quests: the talking window
     dialogue::Talk talk_;
     RequestBudget  dialogue_budget_{kVendorBurst, kVendorInterval};
     size_t         dialogue_opens_ = 0, dialogue_steps_ = 0, dialogue_closes_ = 0, dialogue_refused_ = 0, dialogue_logged_ = 0;
     std::set<std::string> dialogue_told_;   // what the conversation skipped or could not answer, told once for each text
-    // quests, slice 1: the quest log
+    // quests: the quest log
     quest::QuestLog      quest_log_;
     bool                 quests_on_ = false;        // the log loaded
     quest::QuestWorker*  quest_worker_ = nullptr;   // saves the log, takes the GM commands (null: no quest service)
@@ -1694,9 +1708,9 @@ private:
     int64_t              zoi_seen_ = -1;            // the zone of influence the character stood in at the last check (-1: none checked yet)
     Clock::time_point    zone_checked_{};
     size_t               quests_taken_ = 0, quests_refused_ = 0, quests_abandoned_ = 0, quests_logged_ = 0;
-    size_t               hand_ins_ = 0, hand_ins_refused_ = 0, hand_in_items_ = 0;   // quests part 3, slice 2: deliveries taken and refused, and the items they took
+    size_t               hand_ins_ = 0, hand_ins_refused_ = 0, hand_in_items_ = 0;   // quests: deliveries taken and refused, and the items they took
     std::set<std::string> quest_told_;               // what a quest's start skipped, told once for each text
-    // quests, slice 2
+    // quests: objectives, hand-in and rewards
     stats::SplitMix      quest_rng_{0x51e57a11d0fe5eedull};   // the dice of the reward tables (their weights and chances)
     Clock::time_point    quest_checked_{};          // the last once-a-second quest tick
     Clock::time_point    quest_last_now_{};         // the time of the last quest work (what happens outside a tick uses it)
@@ -1795,6 +1809,8 @@ private:
     size_t combat_logged_ = 0;
     size_t combat_empty_logged_ = 0;
     size_t reply_sent_logged_ = 0;
+    // Members of the features added after the split: one file each, session/members/<feature>.inc, listed in session/members_registered.inc
+#include "session/members_registered.inc"
 };
 
 /// The ItemEvents the bootstrap sends for an Outcome's events (Gathering stage 3: the one conversion, for the session and for a harvest).

@@ -338,4 +338,17 @@ void PlayerSession::cancel_foliage(Connection* conn, const std::string& why, Int
     if (interrupt != Interrupt::None || !run.data_sent) unlock_foliage_client(*conn, run.index, run.owner, run.component);
 }
 
+void PlayerSession::on_foliage_start(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    // (retest 3: the client sets its own FoliageData the moment it sends this and says "while gathering" to everything else until the server answers; an unreadable call left no line)
+    if (!rpc.call.decoded && ++foliage_unreadable_logged_ <= kLoggedPerKind) {
+        spdlog::warn("[session] {}: ServerStartInteractionWithFoliage arrived and its parameters do not decode: no cutting starts, and the client is told to end its own (ClientInterruptInteractionWithFoliage)", name());
+    }
+    return on_foliage_interact(conn, rpc, now);
+}
+
+/// The client calls of cutting trees and plants (session/rpc_table.h).
+void PlayerSession::register_foliage_rpcs(RpcTable& t) {
+    t.add(RpcScope::PlayerController, "ServerStartInteractionWithFoliage", [](PlayerSession& s, const RpcContext& c) { s.on_foliage_start(c.conn, c.rpc, c.now); });
+}
+
 }}  // namespace aoc::worldd

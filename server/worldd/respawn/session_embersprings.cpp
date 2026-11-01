@@ -2,12 +2,61 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  respawn/session_embersprings.inc  (Embersprings)
+//  respawn/session_embersprings.cpp  (Embersprings)
 //
-//  PlayerSession's Embersprings members, included at the end of session/player_session.cpp (inside namespace aoc::worldd::session): the character's places (loaded at the
+//  PlayerSession's Embersprings members: the character's places (loaded at the
 //  join, saved with the progress), the discovery by coming close, the use of a shrine (the prompt, the home), and the death window's choices and the respawn.  The rules are
 //  respawn/embersprings.h's.
 // ============================================================================
+
+#include "session/player_session.h"
+
+#include "bootstrap/character_setup.h"
+#include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rewards.h"
+#include "crafting/rules.h"
+#include "crafting/station.h"
+#include "content/content_db.h"
+#include "dialogue/talk.h"
+#include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
+#include "protocol/repl/hit_rpc.h"
+#include "protocol/repl/item_rpc.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/storage_rpc.h"
+#include "session/gm_travel.h"
+#include "protocol/repl/rpc_fields.h"
+#include "items/acquired.h"
+#include "vendor/node_tax.h"
+#include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "quest/registry_points.h"
+#include "world/zoi_surface.h"
+
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <bit>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <random>
+#include <set>
+
+namespace aoc { namespace worldd {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+namespace wire = ::aoc::protocol::wire;
+using bootstrap::Role;
+using protocol::emit::FIntrepidNetworkGUID;
 
 namespace {
 
@@ -106,7 +155,7 @@ void PlayerSession::on_home_attunement(Connection& conn, const repl::ClientRpc& 
         spdlog::log(level_for(shrine_logged_, 40), "[embersprings] {}: said yes to a place this world does not hold: nothing changes", name());
         return;
     }
-    quest_shrine(conn, place, now);   // quests, slice 2: attuning to an Emberspring is what an Interact objective of the quests names
+    quest_shrine(conn, place, now);   // quests: attuning to an Emberspring is what an Interact objective of the quests names
     if (!attunements_.has(s->number)) {
         // a place the character has not discovered yet is discovered by this, and that is all (the home is made by the next use)
         attunements_.discover(s->number);
@@ -234,7 +283,7 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     checker_.teleport(spot.x, spot.y, spot.z, spot.yaw);
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
     // The death's ClientRestart restarted the client's pawn, and with it its movement clock (the TimeStamp of every move starts again near 0): the checker's last good TimeStamp is
-    // from the old clock, and every move below it would be dropped silently as TimeStampNotRising for as long as the old clock had run (the user's death of 2026-10-10: 66 s frozen
+    // from the old clock, and every move below it would be dropped silently as TimeStampNotRising for as long as the old clock had run (a death in a play test of 2026-10-10: 66 s frozen
     // at the shrine, then snapped back).  The respawn forgets it; the correction below still names the old stamp.
     checker_.restart_clock();
     const uint8_t mode = checker_.good().movement_mode == 0 ? repl::kMoveWalking : checker_.good().movement_mode;
@@ -244,3 +293,13 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     spdlog::log(level_for(death_logged_), "[session] {}: comes back at {} ({:.0f}, {:.0f}, {:.0f}) with full Health and Mana", name(), spot.name, spot.x, spot.y, spot.z);
     (void)now;
 }
+
+/// The client calls of Embersprings: respawn choices and the home (session/rpc_table.h).
+void PlayerSession::register_respawn_rpcs(RpcTable& t) {
+    t.add(RpcScope::Pawn, "RequestServerRespawnChoices", [](PlayerSession& s, const RpcContext& c) { s.on_respawn_choices_request(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::Pawn, "RequestServerSetHomeAttunement", [](PlayerSession& s, const RpcContext& c) { s.on_home_attunement(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::Pawn, "Respawn", [](PlayerSession& s, const RpcContext& c) { s.on_plain_respawn(c.conn, c.now); });
+    t.add(RpcScope::Pawn, "SendServerRespawnChoice", [](PlayerSession& s, const RpcContext& c) { s.on_respawn_choice(c.conn, c.rpc, c.now); });
+}
+
+}}  // namespace aoc::worldd

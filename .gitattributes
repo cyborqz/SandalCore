@@ -53,3 +53,7 @@ go.sum text eol=lf
 
 # The lists of check files (server/worldd/tests/README.md): every new feature adds one line at the end, and when two branches do it at the same time git keeps both
 server/worldd/tests/*_registered.inc merge=union
+
+# The lists of PlayerSession's features (server/worldd/session/rpc_table.h): every new feature adds one line at the end, and when two branches do it at the same time git keeps both
+server/worldd/session/*_registered.inc merge=union
+server/worldd/session/session_sources.cmake merge=union

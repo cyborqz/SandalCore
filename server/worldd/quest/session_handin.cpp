@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  quest/session_handin.inc
+//  quest/session_handin.cpp
 //
-//  Quests part 3, slice 2 (the item hand-in to a person): the player's answer to the hand-in panel.  Included at the end of session/player_session.cpp.
+//  The item hand-in to a person: the player's answer to the hand-in panel.
 //
 //  A TurnIn node of a conversation (dialogue/talk.h) queues the hand-in panel (ESubDialogueType ItemTurnIn) with the node's quest and the TurnIn objectives of it that are active.  The client
 //  lists those objectives (UMayoralCommissionsDeliveryMenu::SetTurnInFromSubDialogue), the player picks items for them from the bags, and the dialogue widget sends ONE call
@@ -17,6 +20,57 @@
 //    * the items leave the bags, then the objective counts them (and raises the quest variable it names), then the panel ends and the talk goes on to the node the TurnIn names (none: it ends).
 //  The client sends nothing else for a hand-in and expects nothing but the changes: the bags' events, the quest component and the conversation.
 // ============================================================================
+
+#include "session/player_session.h"
+
+#include "bootstrap/character_setup.h"
+#include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rewards.h"
+#include "crafting/rules.h"
+#include "crafting/station.h"
+#include "content/content_db.h"
+#include "dialogue/talk.h"
+#include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
+#include "protocol/repl/hit_rpc.h"
+#include "protocol/repl/item_rpc.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/storage_rpc.h"
+#include "session/gm_travel.h"
+#include "protocol/repl/rpc_fields.h"
+#include "items/acquired.h"
+#include "vendor/node_tax.h"
+#include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "quest/registry_points.h"
+#include "world/zoi_surface.h"
+
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <bit>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <random>
+#include <set>
+
+#include "session/player_session_util.h"
+
+namespace aoc { namespace worldd {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+namespace wire = ::aoc::protocol::wire;
+using bootstrap::Role;
+using protocol::emit::FIntrepidNetworkGUID;
 
 namespace {
 
@@ -210,3 +264,10 @@ void PlayerSession::on_item_delivery(Connection& conn, const repl::ClientRpc& rp
         send_dialogue(conn, "items were handed in", /*exhaust=*/true);
     }
 }
+
+/// The client calls of the hand-in panel's delivery (session/rpc_table.h).
+void PlayerSession::register_handin_rpcs(RpcTable& t) {
+    t.add(RpcScope::PlayerController, "ServerRequestItemDelivery", [](PlayerSession& s, const RpcContext& c) { s.on_item_delivery(c.conn, c.rpc, c.now); });
+}
+
+}}  // namespace aoc::worldd

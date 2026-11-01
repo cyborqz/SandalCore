@@ -24,6 +24,8 @@ on:
       - 'CMakeLists.txt'
       - 'vcpkg.json'
       - 'scripts/ci_*'
+      - 'scripts/check_hotspots.ps1'
+      - 'scripts/hotspot_limits.txt'
       - '.github/workflows/cpp.yml'
   pull_request:
     paths:
@@ -35,6 +37,8 @@ on:
       - 'CMakeLists.txt'
       - 'vcpkg.json'
       - 'scripts/ci_*'
+      - 'scripts/check_hotspots.ps1'
+      - 'scripts/hotspot_limits.txt'
       - '.github/workflows/cpp.yml'
   workflow_dispatch:
 
@@ -51,6 +55,24 @@ env:
   VCPKG_DISABLE_METRICS: 1
 
 jobs:
+  # The files that were split into one file per feature may not grow past the limits of scripts/hotspot_limits.txt.  A file over its limit shows as a warning on the run;
+  # change -Mode Warn to -Mode Fail to make it fail the run.  It needs no build, so it answers within a minute.
+  hotspots:
+    name: files that must not grow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Files that must not grow
+        run: ./scripts/check_hotspots.ps1 -Mode Warn
+
   windows:
     name: MSVC build and tests without game data
     runs-on: windows-2022

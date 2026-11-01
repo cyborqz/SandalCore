@@ -342,6 +342,8 @@ add_library(worldd_core STATIC
     npc/npc_world.cpp
     npc/npc_world.h
 )
+# the player session's feature files have a list of their own
+include("${CMAKE_CURRENT_SOURCE_DIR}/session/session_sources.cmake")
 target_include_directories(worldd_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(worldd_core PUBLIC
     aocnet

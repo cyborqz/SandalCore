@@ -2,16 +2,65 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  quest/session_givers.inc  (quests milestone, "map markers")
+//  quest/session_givers.cpp  (quests milestone, "map markers")
 //
 //  PlayerSession's members for the map: the pins of the objectives that are active (the log is brought in line with the quest component in quest_sync, which makes the items) and the
-//  quest givers (the NPCs that have a quest the character can take).  Included at the end of session/player_session.cpp, inside namespace aoc::worldd.
+//  quest givers (the NPCs that have a quest the character can take).
 //
 //  A quest giver is told to the client as an item of the quest component's QuestGiverInfos array: the NPC's population instance, the flavor of the quest on offer and the map
 //  registration the quest names for its giver.  The client puts that registration on the NPC (its quest-available mark, and its place on the map).  An NPC that has nothing on offer
 //  any more keeps its item, changed to "none": the client keeps what it was told when an item is deleted.  The client adds each registration it is told to the ones the NPC shows and only
 //  "none" empties them, so an NPC goes from one registration to another through "none".  Only the NPCs the client can have are looked at (the relevancy rings).
 // ============================================================================
+
+#include "session/player_session.h"
+
+#include "bootstrap/character_setup.h"
+#include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rewards.h"
+#include "crafting/rules.h"
+#include "crafting/station.h"
+#include "content/content_db.h"
+#include "dialogue/talk.h"
+#include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
+#include "protocol/repl/hit_rpc.h"
+#include "protocol/repl/item_rpc.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/storage_rpc.h"
+#include "session/gm_travel.h"
+#include "protocol/repl/rpc_fields.h"
+#include "items/acquired.h"
+#include "vendor/node_tax.h"
+#include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "quest/registry_points.h"
+#include "world/zoi_surface.h"
+
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <bit>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <random>
+#include <set>
+
+namespace aoc { namespace worldd {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+namespace wire = ::aoc::protocol::wire;
+using bootstrap::Role;
+using protocol::emit::FIntrepidNetworkGUID;
 
 namespace {
 
@@ -143,3 +192,5 @@ void PlayerSession::tick_quest_givers(Connection& conn, Clock::time_point now) {
     }
     if (changed) queue("QuestConsumerComponent", [](bootstrap::PlayerBootstrap& pb) { return pb.quest_update(); }, conn, /*must_build=*/false);
 }
+
+}}  // namespace aoc::worldd

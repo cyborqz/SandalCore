@@ -575,4 +575,9 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
     if (inventory_dirty_) hand_over_inventory("a harvest", /*periodic=*/false);
 }
 
+/// The client calls of gathering from resource nodes (session/rpc_table.h).
+void PlayerSession::register_gather_rpcs(RpcTable& t) {
+    t.add(RpcScope::Pawn, "ServerInterruptChannel", [](PlayerSession& s, const RpcContext& c) { s.on_interrupt_channel(c.conn, c.now); });
+}
+
 }}  // namespace aoc::worldd

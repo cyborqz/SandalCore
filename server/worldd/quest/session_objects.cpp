@@ -2,9 +2,9 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  quest/session_objects.inc
+//  quest/session_objects.cpp
 //
-//  Quests part 3, slice 1 (quest objects): using a body, a crate, a root or a building site of a quest.  Included at the end of session/player_session.cpp.
+//  Quest objects: using a body, a crate, a root or a building site of a quest.
 //
 //  The client sends ONE ServerInteractWithInteractableComponent when the player presses the key and shows the use itself (the kneel, the bar): the object's player interaction says how
 //  long it takes.  A use that takes time is run here: the server answers ClientOnDoInteract when it ends, as the game's server does (a recorded delivery to a building site answers
@@ -12,6 +12,57 @@
 //  checks the same rule and the reach.  When the use ends: the object answers, gives what its player interaction gives, counts for the Interact objectives that name its definition and, when
 //  its actor definition says so, leaves and is made again after its instance's own respawn time (PlayerWorld::prop_gone).
 // ============================================================================
+
+#include "session/player_session.h"
+
+#include "bootstrap/character_setup.h"
+#include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rewards.h"
+#include "crafting/rules.h"
+#include "crafting/station.h"
+#include "content/content_db.h"
+#include "dialogue/talk.h"
+#include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
+#include "protocol/repl/hit_rpc.h"
+#include "protocol/repl/item_rpc.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/storage_rpc.h"
+#include "session/gm_travel.h"
+#include "protocol/repl/rpc_fields.h"
+#include "items/acquired.h"
+#include "vendor/node_tax.h"
+#include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "quest/registry_points.h"
+#include "world/zoi_surface.h"
+
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <bit>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <random>
+#include <set>
+
+#include "session/player_session_util.h"
+
+namespace aoc { namespace worldd {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+namespace wire = ::aoc::protocol::wire;
+using bootstrap::Role;
+using protocol::emit::FIntrepidNetworkGUID;
 
 void PlayerSession::on_prop_interact(Connection& conn, const world::WorldActor& a, Clock::time_point now) {
     const std::string label = a.npc.archetype.empty() ? std::string("a quest object") : spawns::blueprint_leaf(a.npc.archetype);
@@ -115,3 +166,5 @@ void PlayerSession::finish_prop_use(Connection& conn, uint64_t actor_id, Clock::
         if (world_->prop_gone(actor_id, world_->world_clock() + std::max(0.0, ad->second.despawn_delay))) registry_->remove(actor_id);
     }
 }
+
+}}  // namespace aoc::worldd

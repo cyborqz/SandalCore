@@ -2,9 +2,9 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  warehouse/player_warehouse.inc  (storage clerks, step 0, "put it in, take it out")
+//  warehouse/player_warehouse.cpp  (storage clerks, step 0, "put it in, take it out")
 //
-//  The session's side of the storage clerk's window.  It is part of session/player_session.cpp (included at its end, inside the namespace), so that the build lists stay as they are.
+//  The session's side of the storage clerk's window.
 //
 //  The base item chunk.  The character's base chunk gets its component on the pawn when the character joins, and OwnerInfo lists it in NodeItemContainers (list_item_chunk), as retail's login
 //  does: the client asks for its data and has it before any window opens.  The chunk stays listed for good.
@@ -18,6 +18,55 @@
 //  mapped, before a list names them: the first half is that.  The client then asks for the summary and the data and moves stacks (ServerRequestStorageEvent) and closes the window
 //  (ServerCloseWarehouse).  A clerk who is gone, a walk of 12 m or more away and death close it too: the tab lists empty and the tabs read-only, as the client's close does.
 // ============================================================================
+
+#include "session/player_session.h"
+
+#include "bootstrap/character_setup.h"
+#include "combat/combat_world.h"
+#include "crafting/job.h"
+#include "crafting/rewards.h"
+#include "crafting/rules.h"
+#include "crafting/station.h"
+#include "content/content_db.h"
+#include "dialogue/talk.h"
+#include "protocol/repl/ability_rpc.h"
+#include "protocol/repl/dialogue_rpc.h"
+#include "world/city_nodes.h"
+#include "protocol/repl/hit_rpc.h"
+#include "protocol/repl/item_rpc.h"
+#include "protocol/repl/move_packed.h"
+#include "protocol/repl/storage_rpc.h"
+#include "session/gm_travel.h"
+#include "protocol/repl/rpc_fields.h"
+#include "items/acquired.h"
+#include "vendor/node_tax.h"
+#include "vendor/sell_rules.h"
+#include "quest/quest_wire.h"
+#include "quest/registry_points.h"
+#include "world/zoi_surface.h"
+
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <bit>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <random>
+#include <set>
+
+namespace aoc { namespace worldd {
+
+namespace repl = ::aoc::protocol::repl;
+namespace schema = ::aoc::protocol::schema;
+namespace wire = ::aoc::protocol::wire;
+using bootstrap::Role;
+using protocol::emit::FIntrepidNetworkGUID;
 
 void PlayerSession::list_item_chunk(Connection& conn) {
     const warehouse::Book* book = world_ ? world_->warehouses() : nullptr;
@@ -378,3 +427,13 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
     spdlog::log(level_for(wh_logged_), "[session] {}: a stack moves {} the warehouse ({} event(s))", name(), from_wh && to_wh ? "inside" : from_wh ? "out of" : "into", events.size());
     return true;
 }
+
+/// The client calls of the storage clerk's window (the client sends ServerFetchWarehouse on the pawn: the window's "have these containers ready") (session/rpc_table.h).
+void PlayerSession::register_warehouse_rpcs(RpcTable& t) {
+    t.add(RpcScope::PlayerController, "ServerRequestWarehouseSummary", [](PlayerSession& s, const RpcContext& c) { s.on_warehouse_request(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerVisitWarehouse", [](PlayerSession& s, const RpcContext& c) { s.on_warehouse_request(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerCloseWarehouse", [](PlayerSession& s, const RpcContext& c) { s.on_warehouse_close(c.conn); });
+    t.add(RpcScope::Pawn, "ServerFetchWarehouse", [](PlayerSession& s, const RpcContext& c) { s.on_warehouse_request(c.conn, c.rpc, c.now); });
+}
+
+}}  // namespace aoc::worldd
