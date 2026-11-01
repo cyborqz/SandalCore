@@ -218,7 +218,8 @@ void PlayerSession::send_channeling(Connection& conn, const repl::ChannelingData
     }, conn, /*must_build=*/true);
 }
 
-void PlayerSession::on_interrupt_channel(Connection& conn, Clock::time_point) {
+void PlayerSession::on_interrupt_channel(Connection& conn, Clock::time_point now) {
+    if (!within_budget(cancel_budget_, "ServerInterruptChannel", now)) return;   // (the cancels of the abilities share it: a client ends a channel no faster than this)
     if (foliage_.row != kNoInstance) {   // Gathering stage 3: the client ends the cutting of a tree or plant the same way [modelled: no capture shows the client's cancel of a foliage channel]
         cancel_foliage(&conn, "the client interrupted the channel (ServerInterruptChannel)");
         return;

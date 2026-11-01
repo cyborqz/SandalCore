@@ -394,33 +394,49 @@ func TestTokensAreStoredHashedAndUnique(t *testing.T) {
 	}
 }
 
-// An unknown username must cost about one Argon2id comparison, like a wrong
-// password does. Without the dummy compare the lookup alone takes well under a
-// millisecond.
+// An unknown username must cost one Argon2id comparison, like a wrong password does (the answer would tell which names exist otherwise). The test counts the comparisons and reads
+// which hash each one ran against; it measures no time, so a busy machine cannot fail it.
 func TestAuthenticateUnknownUserCostsAHashCompare(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	if _, err := s.Register(ctx, "cyb", "secret1"); err != nil {
 		t.Fatal(err)
 	}
-
-	hash, err := hashPassword("secret1")
-	if err != nil {
-		t.Fatal(err)
+	var compared []string // the hash each comparison ran against, in order
+	s.check = func(stored, password string) (bool, bool, error) {
+		compared = append(compared, stored)
+		return checkPassword(stored, password)
 	}
-	start := time.Now()
-	if match, _, err := checkPassword(hash, "wrong-pw"); match || err != nil {
-		t.Fatalf("wrong password: match=%v err=%v", match, err)
-	}
-	cost := time.Since(start)
 
-	dummyHash() // warm the lazily computed hash
-	start = time.Now()
+	// a wrong password: one comparison, against the account's own hash
+	if _, err := s.Authenticate(ctx, "cyb", "wrong-pw"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password: %v", err)
+	}
+	if len(compared) != 1 || compared[0] == dummyHash() {
+		t.Fatalf("a wrong password ran %d comparison(s) (%v), want one against the account's hash", len(compared), compared)
+	}
+
+	// an unknown user: the same one comparison, against the dummy hash
+	compared = nil
 	if _, err := s.Authenticate(ctx, "nobody", "secret1"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("unknown user: %v", err)
 	}
-	if took := time.Since(start); took < cost/2 {
-		t.Errorf("unknown user took %v, want at least half of one hash compare (%v): the dummy compare is missing", took, cost)
+	if len(compared) != 1 || compared[0] != dummyHash() {
+		t.Errorf("an unknown user ran %d comparison(s), want one against the dummy hash: the dummy compare is missing", len(compared))
+	}
+
+	// the dummy hash is in today's form, so its comparison costs what a comparison with a new account's hash costs
+	if p, _, _, err := parseArgon2id(dummyHash()); err != nil || p != current {
+		t.Errorf("the dummy hash is %+v (%v), want today's form %+v", p, err, current)
+	}
+
+	// input that cannot belong to any account is refused before any comparison
+	compared = nil
+	if _, err := s.Authenticate(ctx, "x", "secret1"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("a name that cannot exist: %v", err)
+	}
+	if len(compared) != 0 {
+		t.Errorf("a name that cannot exist ran %d comparison(s), want none", len(compared))
 	}
 }
 

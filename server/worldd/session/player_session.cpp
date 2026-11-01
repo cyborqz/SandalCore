@@ -1483,6 +1483,10 @@ void PlayerSession::take_ability_events() {
                                 !e.change.abilities_changed.empty() || !e.change.effects_added.empty() || !e.change.effects_removed.empty() ||
                                 !e.change.effects_changed.empty() || !e.change.cooldowns_set.empty() || !e.change.cooldowns_removed.empty();
         const bool refusal = e.refusal;
+        if (transition && last_now_ - ability_log_window_start_ >= kAbilityLogWindow) {   // (a session that runs for hours keeps its recent ability steps in the log: 100 at info in each minute)
+            ability_log_window_start_ = last_now_;
+            ability_transitions_logged_ = 0;
+        }
         const spdlog::level::level_enum level = refusal      ? level_for(ability_logged_)
                                                 : transition ? level_for(ability_transitions_logged_, kLoggedAbilityTransitions)
                                                              : spdlog::level::debug;

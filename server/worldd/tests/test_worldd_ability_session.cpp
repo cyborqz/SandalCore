@@ -46,6 +46,7 @@
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
+#include "test_registry.h"
 #include "net/endpoint.h"
 #include "protocol/repl/ability_rpc.h"
 #include "protocol/repl/hit_rpc.h"
@@ -4286,6 +4287,8 @@ static void test_flight_leftovers() {
     }
 }
 
+#include "ability_session_registered.inc"
+
 int main() {
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
     logger->set_level(spdlog::level::debug);
@@ -4344,6 +4347,7 @@ int main() {
     } else {
         std::printf("no content.db at %s: the plan D2 session tests are skipped\n", ability_rig::real_db_path().c_str());
     }
+    g_fail += aoc_tests::run();   // every check registered in ability_session_registered.inc
 
     if (const char* f = std::getenv("AOC_TEST_LOG_FILTER")) {   // (a debugging aid: the log lines that contain the text)
         std::istringstream in(g_log.str());

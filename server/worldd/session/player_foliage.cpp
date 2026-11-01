@@ -102,6 +102,11 @@ void PlayerSession::unlock_foliage_client(Connection& conn, uint32_t index, cons
 
 void PlayerSession::on_foliage_interact(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
     ++foliage_interacts_;
+    if (!within_budget(foliage_budget_, "ServerStartInteractionWithFoliage", now)) {   // (a start over the budget is not worked on, and counts as a refusal)
+        ++foliage_refused_;
+        ++foliage_refusals_["over the request budget"];
+        return;
+    }
     foliage::Foliage* f = npc_world_ ? npc_world_->foliage() : nullptr;
     gather::Gathering* g = npc_world_ ? npc_world_->gathering() : nullptr;
     // the call's parameters when they decoded: the instance (left out when 0), its owner and component by name, the state the client sees it in

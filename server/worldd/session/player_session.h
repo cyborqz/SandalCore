@@ -423,6 +423,7 @@ public:
     /// How many of a session's ability transitions (a Sprint or a Dodge starts or ends, a Rest, a refusal's answer) are logged at
     /// info: what an in-game run reads.  A client that Sprints in a loop does not fill the log; the rest are at debug.
     static constexpr size_t kLoggedAbilityTransitions = 100;
+    static constexpr std::chrono::seconds kAbilityLogWindow{60};   // ... of each window of this length
 
     /// Builds the player's setup and bootstrap, gives the four actors their channels and queues the join sequence,
     /// sending what the Connection takes now. nullptr, with `error` set to one sentence for the log, when the setup is
@@ -1514,6 +1515,7 @@ private:
     size_t use_logged_ = 0, use_refused_logged_ = 0;
     int64_t next_passive_effect_id_ = kFirstPassiveEffectId;
     RequestBudget item_budget_{kItemBurst, kItemInterval};
+    RequestBudget foliage_budget_{kItemBurst, kItemInterval};   // ServerStartInteractionWithFoliage: a client clicks a tree no faster than this
     RequestBudget resync_budget_{kResyncBurst, kResyncInterval};
     size_t items_applied_ = 0, items_refused_ = 0, inventories_handed_over_ = 0;
     size_t item_applied_logged_ = 0, item_refused_logged_ = 0, item_periodic_logged_ = 0;
@@ -1546,6 +1548,7 @@ private:
     size_t hit_requests_ = 0, hit_dropped_ = 0, confirms_sent_ = 0, cancels_ = 0, cancels_dropped_ = 0, hit_unreadable_logged_ = 0, hit_unserved_logged_ = 0;
     size_t ability_triggers_ = 0, ability_dropped_ = 0, ability_updates_ = 0, ability_ends_ = 0;
     size_t ability_logged_ = 0, ability_unreadable_logged_ = 0, ability_transitions_logged_ = 0, ability_build_logged_ = 0, item_ability_logged_ = 0;
+    Clock::time_point ability_log_window_start_{};   // when the window of ability_transitions_logged_ began
     // plan E1: the world's other actors, the phase-in and the GM vendor window
     world::ActorRegistry*          registry_ = nullptr;
     PlayerWorld*                   npc_world_ = nullptr;   // plan E1, stage 2: the NPCs' world (the player's place is told to it every tick)

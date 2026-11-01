@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"aocrop/services/internal/dbtest"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,6 +59,32 @@ func schemaWithout(t *testing.T, pool *pgxpool.Pool, skip string) []string {
 	return out
 }
 
+// constraintDefinition is the definition of the named constraint in THIS test's schema. A lookup by name alone reads every schema of the database (each test has one, and each of them has
+// character_items_container): it can read another test's definition, and while another package's test drops its schema it fails with "could not open relation with OID".
+func constraintDefinition(pool *pgxpool.Pool, name string) (string, error) {
+	var def string
+	err := pool.QueryRow(context.Background(), `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1 AND connamespace = current_schema()::regnamespace`, name).Scan(&def)
+	return def, err
+}
+
+// A schema of another test holds a constraint of the same name with another definition: the name alone finds both, the lookup of the test finds its own.
+func TestConstraintLookupReadsOnlyItsOwnSchema(t *testing.T) {
+	ctx := context.Background()
+	pool := before11(t)
+	other := dbtest.Pool(t)
+	if _, err := other.Exec(ctx, `CREATE TABLE lookup_probe (container text, CONSTRAINT character_items_container CHECK (container = 'Elsewhere'))`); err != nil {
+		t.Fatal(err)
+	}
+	var byName int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint WHERE conname = 'character_items_container'`).Scan(&byName); err != nil || byName < 2 {
+		t.Fatalf("the name alone finds %d constraints (%v): both schemas should show, or this check proves nothing", byName, err)
+	}
+	def, err := constraintDefinition(pool, "character_items_container")
+	if err != nil || !strings.Contains(def, "'Backpack'") || strings.Contains(def, "Elsewhere") {
+		t.Errorf("the lookup of the test read %q (%v): it must read its own schema's constraint", def, err)
+	}
+}
+
 // ~ C Y B :: C-O-A ~
 
 func TestMigration0011AddsOneTableAndTouchesNothingElse(t *testing.T) {
@@ -88,8 +116,8 @@ func TestMigration0011AddsOneTableAndTouchesNothingElse(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM character_items`).Scan(&itemsAfter); err != nil || itemsAfter != itemsBefore {
 		t.Errorf("character_items has %d rows after 0011 (%v), %d before", itemsAfter, err, itemsBefore)
 	}
-	var def string
-	if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'character_items_container'`).Scan(&def); err != nil || !strings.Contains(def, "'Backpack'") || strings.Contains(def, "Resource") {
+	def, err := constraintDefinition(pool, "character_items_container")
+	if err != nil || !strings.Contains(def, "'Backpack'") || strings.Contains(def, "Resource") {
 		t.Errorf("character_items_container is %q (%v): it must stay as migration 0004 made it", def, err)
 	}
 	after := rows(t, pool, true)

@@ -31,6 +31,7 @@
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
+#include "test_registry.h"
 #include "bootstrap/character_setup.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
@@ -1842,6 +1843,8 @@ static void test_login_in_the_real_world() {
     CHECK(step_us < 5000.0, "and a step takes under 5 ms");
 }
 
+#include "foliage_session_registered.inc"
+
 int main() {
     {   // the lines of the log (info and above) go to g_log: the tests read what the user's test would
         auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
@@ -1882,6 +1885,7 @@ int main() {
     test_flood();
     test_full_bag();
     test_foliage_off();
+    g_fail += aoc_tests::run();   // every check registered in foliage_session_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

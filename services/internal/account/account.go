@@ -74,13 +74,14 @@ func ValidateCredentials(username, password string) error {
 }
 
 type Store struct {
-	pool *pgxpool.Pool
-	ttl  time.Duration
-	now  func() time.Time
+	pool  *pgxpool.Pool
+	ttl   time.Duration
+	now   func() time.Time
+	check func(stored, password string) (match, upgrade bool, err error) // compares a password with a stored hash: checkPassword (a test counts the calls)
 }
 
 func NewStore(pool *pgxpool.Pool, tokenTTL time.Duration) *Store {
-	return &Store{pool: pool, ttl: tokenTTL, now: time.Now}
+	return &Store{pool: pool, ttl: tokenTTL, now: time.Now, check: checkPassword}
 }
 
 func (s *Store) TokenTTL() time.Duration { return s.ttl }
@@ -122,13 +123,13 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) (Ac
 		"SELECT id, username, password_hash FROM accounts WHERE lower(username) = lower($1)",
 		username).Scan(&acc.ID, &acc.Username, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
-		_, _, _ = checkPassword(dummyHash(), password)
+		_, _, _ = s.check(dummyHash(), password)
 		return Account{}, ErrInvalidCredentials
 	}
 	if err != nil {
 		return Account{}, err
 	}
-	match, upgrade, err := checkPassword(hash, password)
+	match, upgrade, err := s.check(hash, password)
 	if err != nil {
 		return Account{}, fmt.Errorf("account %d: password hash: %w", acc.ID, err)
 	}
