@@ -1483,9 +1483,18 @@ async function giveItem(p) {
 
 // ── the stats tab ───────────────────────────────────────────────────────
 // The bundle's own flags (server/worldd/stats/stat_program.h): a stat whose
-// kStatMulMods bit is set multiplies by its mods instead of adding them.
+// kStatMulMods bit is set multiplies by its mods instead of adding them, and a
+// kStatMulCompl stat multiplies by one minus the value.
 const kStatMulMods = 1 << 0;
+const kStatMulCompl = 1 << 6;
 const kStatResource = 1 << 7;
+
+// The unit of an override: the stat's own rule decides what the number means.
+function statUnit(stat) {
+  if ((stat.flags & kStatMulMods) === 0) return "+";
+  if ((stat.flags & kStatMulCompl) !== 0) return "×(1-v)";
+  return "×";
+}
 
 function statKind(stat) {
   const name = stat.name || "";
@@ -1507,16 +1516,16 @@ async function loadStats() {
   body.innerHTML = "";
   for (const stat of stats) {
     if (filter && !(stat.name || "").toLowerCase().includes(filter)) continue;
-    const multi = (stat.flags & kStatMulMods) !== 0;
+    const unit = statUnit(stat);
     const row = document.createElement("tr");
     row.innerHTML = `
       <td class="mono">${stat.name || stat.guid}</td>
       <td>${statKind(stat)}</td>
       <td>${stat.value}</td>
-      <td>${stat.max || "-"}</td>
-      <td>${stat.has_override ? (multi ? "×" : "+") + stat.override : "-"}</td>
-      <td><input class="stat-input" data-guid="${stat.guid}" data-multi="${multi ? 1 : 0}"
-                 value="${stat.has_override ? stat.override : ""}" placeholder="${multi ? "×" : "+"}"></td>`;
+      <td>${stat.max || "بلا حد"}</td>
+      <td>${stat.has_override ? unit + stat.override : "-"}</td>
+      <td><input class="stat-input" data-guid="${stat.guid}" data-multi="${(stat.flags & kStatMulMods) !== 0 ? 1 : 0}"
+                 value="${stat.has_override ? stat.override : ""}" placeholder="${unit}"></td>`;
     body.appendChild(row);
   }
 }
