@@ -82,6 +82,10 @@ constexpr uint8_t kMoveFalling = 3;
 constexpr uint8_t kMoveSwimming = 4;   // (the mounts milestone, stage 4: an aquatic mount in water; a flyer's flight is 5)
 constexpr uint8_t kMoveFlying = 5;
 
+struct NetworkMove;
+/// The base of a move for a log line: `"CollisionCylinder" of object 17045704` for one named in place, `object 17045708` for a plain one, with `, bone X` when it has one.
+std::string describe_base(const NetworkMove& m);
+
 /// One FCharacterNetworkMoveData.
 struct NetworkMove {
     float    time_stamp = 0;                 // the client's clock, seconds
@@ -89,12 +93,19 @@ struct NetworkMove {
     QuantVec location;                       // value * 100 (FVector_NetQuantize100), cm
     Rot      control_rotation;               // 16-bit compressed pitch, yaw, roll
     uint8_t  compressed_flags = 0;           // FSavedMove_Character::CompressedFlags: 1 jump, 2 crouch, 0x10.. custom
-    std::optional<emit::FIntrepidNetworkGUID> base;   // MovementBase
+    std::optional<emit::FIntrepidNetworkGUID> base;   // MovementBase, a plain object reference
+    /// MovementBase named in place (GUID ObjectId 1, then export flags, the outer and the path): an object the server never exported to the client, such as a component of an
+    /// actor worldd never replicated a GUID for.  Unreal sends a base only when the move's Location (and maybe Acceleration) is RELATIVE to it, so a move with a base is
+    /// not a world position until the base is placed.
+    std::optional<InlineObject>               base_inline;
     std::optional<NameValue>                  base_bone;
     uint8_t  movement_mode = kMoveWalking;   // the client's mode at the end of the move
     uint8_t  input_bits = 0;                 // bit 0 x > 0, 1 x < 0, 2 y > 0, 3 y < 0
 
     bool operator==(const NetworkMove&) const = default;
+
+    /// The move stands on a movement base (plain or named in place): its Location is relative to it.
+    bool has_base() const { return base.has_value() || base_inline.has_value(); }
 
     Vec3d  acceleration_cm() const { return dequantize_vector(acceleration, 10); }
     Vec3d  location_cm() const { return dequantize_vector(location, 100); }

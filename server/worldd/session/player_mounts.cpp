@@ -380,6 +380,7 @@ bool PlayerSession::mount_up(Connection& conn, const world::WorldActor& a, Clock
     checker_.rebase(ride_->limits(base_limits_, t), start);   // (review A I1: the pace bank and the credits are the session's, a new checker per possession refilled them)
     ride_->moved(a.x, a.y, a.z, a.yaw_degrees, t);   // a mount that stands on a road starts on it
     pending_fix_.reset();
+    based_fix_.reset();
     dismounted_valid_ = false;
     ++mount_ups_;
     // a mounted rider has no Sprint and no Stamina use (stage 3 fix 2: a play test of 2026-10-08 sprinted on through the mount-up and drained to 0 mounted): a running Sprint ends
@@ -455,6 +456,7 @@ void PlayerSession::dismount(Connection& conn, Clock::time_point now, DismountWh
     start.movement_mode = repl::kMoveFalling;   // the rider leaps off [R: 912: its moves start in mode 3]
     checker_.rebase(base_limits_, start);
     pending_fix_.reset();
+    based_fix_.reset();
     dismounted_at_ = now;
     dismounted_valid_ = true;
     dismount_extra_sent_ = false;

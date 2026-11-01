@@ -316,6 +316,20 @@ field says. The container is the new move, then (with a bit each) the pending mo
 movement mode and four bits of AoC's own (the input direction). All 2,483 captured moves read and write back to the client's
 own bits (`test_repl_move_packed`). Layout evidence, with the exe addresses, is in the header.
 
+**A move on a movement base.** The game sends a movement base with a move when the character stands on a movable thing (the mount it just got off, a corpse), and then the move's
+location and acceleration are in that base's own frame: the offset from the base, turned back by the base's rotation. The base is a plain object reference or an object named in place
+(the game has no id for a component the server never sent it); both read. Every such move is put in the world before it is judged:
+- a base that is the root cylinder of an actor the world holds (a mount, a creature) puts the move at the actor's position plus the offset, and the acceleration is turned the same
+  way, by the actor's yaw (a character's capsule turns about the vertical axis only);
+- any other base (another component of an actor, a bone, a thing the world does not hold) is followed: the first move on it stays where the player was, and each move after it on the
+  same base moves the player by what the offset changed by (the base is taken to stand still). The move is then judged like any other, by its speed, its height and its TimeStamp, so
+  a jump on such a base is refused and corrected, and the next move on it counts as a first one again;
+- a client that names a new base with every move would never be judged: after 120 moves in place in a row, counted from the last move whose place the server knows (an ordinary move
+  or a placed base), the player is put back at its last good position.
+
+Moves that do not read are counted, the first and every 100th is logged, and the 30-second position line of a session carries the counts (`unreadable`, `on a movement base`,
+`not placed`) once there are any (`test_repl_move_packed`, `test_worldd_movement`).
+
 **Checking.** Each session has a `MoveChecker` with the last good position (location, yaw, movement mode, TimeStamp), which
 starts at the spawn point. For each packet the old and pending moves are judged first, oldest first (those whose TimeStamp the
 checker has seen are skipped: every packet repeats the last frame), then the new move, whose verdict is the reply. A move is
@@ -362,8 +376,8 @@ saver's destructor does not wait again, it abandons what is left and joins the w
 at most). Worst case from the signal to the exit: 0.5 s telling the clients + 5 s + 2 s = 7.5 s. The network thread only
 queues, so it never waits for the service.
 
-Not checked, and unproven: collision; a movement base and an old move (no
-capture has either; read as the exe's code says); the limits for classes other than the Bard, mounts and speed buffs (the
+Not checked, and unproven: collision; an old move, and a movement base as the game
+sends it for a mount or a corpse (no capture has either; hand-made moves test them; a followed base that itself moves is taken to stand still); the limits for classes other than the Bard, mounts and speed buffs (the
 captures are one Bard's; `--max-move-speed` raises the limit); `max_fall_speed` and the clock-reset gap come from UE's
 defaults, not the exe. In game: walk, log out, log in at the same spot; with `--max-move-speed 300` walking snaps back
 (not run: the client is the user's).

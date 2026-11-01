@@ -571,7 +571,7 @@ void PlayerSession::log_position(Clock::time_point) {
     }
     const double from_login = npc_world_ ? std::hypot(at.x - npc_world_->area().center_x, at.y - npc_world_->area().center_y) / 100.0 : 0.0;
     spdlog::info("[session] {}: at ({:.0f}, {:.0f}, {:.0f}) cm, {:.0f} m from the login spot, movement mode {}{}; {} moves acknowledged, {} refused, {} dropped as stale{}; its view holds {} awake and {} dormant actors",
-                 name(), at.x, at.y, at.z, from_login, static_cast<unsigned>(at.movement_mode), mounted() ? " (mounted)" : "", moves_acked_, moves_refused_, moves_stale_, ground,
+                 name(), at.x, at.y, at.z, from_login, static_cast<unsigned>(at.movement_mode), mounted() ? " (mounted)" : "", moves_acked_, moves_refused_, moves_stale_, based_move_summary() + ground,
                  view_ ? view_->count(world::ClientState::Awake) : 0, view_ ? view_->count(world::ClientState::Dormant) : 0);
 }
 
@@ -1005,7 +1005,7 @@ void PlayerSession::on_phase_in_ready(Connection& conn, Clock::time_point now) {
 }
 
 void PlayerSession::end_of_datagram(Connection& conn) {
-    if (!pending_fix_) return;
+    if (!release_based_fix() && !pending_fix_) return;
     const float time_stamp = *pending_fix_;
     pending_fix_.reset();
     if (failed_) return;

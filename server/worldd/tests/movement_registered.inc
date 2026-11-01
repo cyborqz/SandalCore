@@ -7,3 +7,4 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "movement_move_ack_tests.inc"
+#include "movement_based_move_tests.inc"

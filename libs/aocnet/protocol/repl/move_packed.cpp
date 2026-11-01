@@ -45,9 +45,12 @@ bool read_move(PacketReader& r, NetworkMove& m, std::string* why) {
     for (uint16_t* a : axes) *a = r.read_bit() ? r.read_uint16() : 0;
     m.compressed_flags = read_optional_u8(r, 0);
     if (r.read_bit()) {
-        auto base = read_object(r);
+        // a plain reference, or an object named in place (the client has no GUID for a component the server never exported: ObjectId 1, flags, outer, path)
+        auto base = read_object_value(r, /*allow_inline=*/true);
         if (!base) return fail(why, "MovementBase is not an object reference the reader knows", r.pos());
-        m.base = *base;
+        if (const auto* g = base->get_if<emit::FIntrepidNetworkGUID>()) m.base = *g;
+        else if (const auto* o = base->get_if<InlineObject>()) m.base_inline = *o;
+        else return fail(why, "MovementBase is not an object reference the reader knows", r.pos());
     }
     if (r.read_bit()) {
         auto bone = read_name(r);
@@ -60,6 +63,19 @@ bool read_move(PacketReader& r, NetworkMove& m, std::string* why) {
     return true;
 }
 
+}  // namespace
+
+std::string describe_base(const NetworkMove& m) {
+    std::string t;
+    if (m.base_inline) t = "\"" + m.base_inline->path + "\" of object " + std::to_string(m.base_inline->outer.ObjectId);
+    else if (m.base) t = "object " + std::to_string(m.base->ObjectId);
+    else t = "none";
+    if (m.base_bone) t += ", bone " + m.base_bone->text;
+    return t;
+}
+
+namespace {
+
 bool write_move(BunchWriter& out, const NetworkMove& m) {
     out.write_uint32(std::bit_cast<uint32_t>(m.time_stamp));
     if (!write_quantized_vector(out, m.acceleration) || !write_quantized_vector(out, m.location)) return false;
@@ -69,8 +85,10 @@ bool write_move(BunchWriter& out, const NetworkMove& m) {
         if (a != 0) out.write_uint16(a);
     }
     write_optional_u8(out, m.compressed_flags, 0);
-    out.write_bit(m.base.has_value());
+    if (m.base && m.base_inline) return false;   // one base
+    out.write_bit(m.has_base());
     if (m.base && !write_object(out, *m.base)) return false;
+    if (m.base_inline && !write_inline_object(out, *m.base_inline)) return false;
     out.write_bit(m.base_bone.has_value());
     if (m.base_bone && !write_name(out, *m.base_bone)) return false;
     write_optional_u8(out, m.movement_mode, kMoveWalking);
