@@ -128,10 +128,10 @@ function Find-Vcpkg {
 # compiler at that point, so it reports "No CMAKE_CXX_COMPILER could be found", which
 # hides the real cause.
 #
-# Nothing is copied out of the SDK: the tools of the SDK that has them go on PATH, and
-# the build is told to use that SDK, so the headers, the libs and the tools are one
-# version. An SDK without its bin tools is a broken install, and the warning at the end
-# of this block says so.
+# Nothing is copied out of the SDK: the tools of the SDK that has them go on PATH, so
+# the linker finds them. CMake looks for mt.exe in the bin folder of the SDK version it
+# picked, and it cannot be pointed elsewhere, so an SDK without its bin tools is a broken
+# install: the warning at the end of this block says so, and the build fails with it.
 function Get-WindowsSdk {
     $kitsRoot = $null
     try {
@@ -237,12 +237,6 @@ if ($needConfigure) {
             if (Test-Path $overlayTriplets) {
                 $cmakeArgs += "-DVCPKG_INSTALL_OPTIONS=--overlay-triplets=$overlayTriplets"
             }
-        }
-        if ($sdkVersion) {
-            # The SDK with its bin tools: CMake looks for mt.exe in the bin folder of
-            # the SDK version it is told to use, and that version is the one whose
-            # rc.exe is on PATH.
-            $cmakeArgs += "-DCMAKE_WINDOWS_TARGET_PLATFORM_VERSION=$sdkVersion"
         }
         & $cmake @cmakeArgs
         if ($LASTEXITCODE -ne 0) {
