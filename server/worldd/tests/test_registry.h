@@ -20,6 +20,7 @@
 //  - The tests run in the order of the registrations, which is the order of the source text: a test program is one translation unit, so the
 //    order is the same on every machine and every build. What a test prints is its own; the runner prints nothing unless something is wrong.
 //  - Every check still counts through the program's own CHECK macros; the runner does not count checks.
+//  - A program that registers tests and never calls run() prints a "[FAIL]" line when it ends (the exit code stays as the program leaves it).
 //  - A test that throws is reported as a "[FAIL]" line and the next test runs. So are a test made for another fixture type and a name that is
 //    registered twice. run() returns how many of these it found: add it to the program's failure count (as above), so that the
 //    "N passed, M failed" line and the exit code stay true.
@@ -39,10 +40,11 @@ namespace aoc_tests {
 
 namespace detail {
 
-/// An address that is the same for the same type and differs between types (no RTTI needed).
+/// An address that is the same for the same type and differs between types (no RTTI needed). The object is not const: a linker may fold identical read-only data of
+/// different types into one address (MSVC /OPT:ICF), but never a writable object.
 template <class T>
 const void* type_tag() {
-    static const char tag = 0;
+    static char tag = 0;
     return &tag;
 }
 
@@ -54,12 +56,6 @@ struct Entry {
     std::function<void(void*)> call;
 };
 
-/// The list lives in a function-local static, built on first use: the registrations run before main(), in no fixed order between files.
-inline std::vector<Entry>& entries() {
-    static std::vector<Entry> list;
-    return list;
-}
-
 /// The last part of a path (a failure line names the file, never its folder).
 inline const char* base_name(const char* path) {
     const char* base = path;
@@ -68,6 +64,26 @@ inline const char* base_name(const char* path) {
     }
     return base;
 }
+
+/// The list lives in a function-local static, built on first use: the registrations run before main(), in no fixed order between files. When the program ends it says so
+/// if tests were registered and run() was never called: such a program would run none of them and still report no failure.
+struct Registry {
+    std::vector<Entry> list;
+    bool               ran = false;   // run() was called
+    ~Registry() {
+        if (!ran && !list.empty()) {
+            std::printf("  [FAIL] test registry: %zu test(s) are registered (the first is %s, %s:%d) but this program never calls aoc_tests::run(): none of them ran\n", list.size(),
+                        list.front().name, base_name(list.front().file), list.front().line);
+        }
+    }
+};
+
+inline Registry& registry() {
+    static Registry r;
+    return r;
+}
+
+inline std::vector<Entry>& entries() { return registry().list; }
 
 }  // namespace detail
 
@@ -83,11 +99,11 @@ public:
     }
 };
 
-/// Runs every registered test in the order of the registrations, with `ctx` for the tests that take a fixture. Returns the number of problems it
-/// found itself (a test that threw, a test made for another fixture type, a name registered twice); each one is printed as a "[FAIL]" line.
+/// Runs the tests of `list` in their order, with `ctx` for the tests that take a fixture. Returns the number of problems it found itself (a test that threw, a test made
+/// for another fixture type, a name registered twice); each one is printed to `out` as a "[FAIL]" line. run() calls it with the registered tests and stdout; the registry's
+/// own checks call it with a list of their own and a file.
 template <class Ctx>
-int run(Ctx& ctx) {
-    const std::vector<detail::Entry>& list = detail::entries();
+int run_list(const std::vector<detail::Entry>& list, Ctx& ctx, std::FILE* out) {
     const void* const want = detail::type_tag<std::remove_const_t<Ctx>>();
     int problems = 0;
     for (std::size_t i = 0; i < list.size(); ++i) {
@@ -95,26 +111,34 @@ int run(Ctx& ctx) {
         bool twice = false;
         for (std::size_t j = 0; j < i; ++j) twice = twice || std::strcmp(list[j].name, e.name) == 0;
         if (twice) {
-            std::printf("  [FAIL] test registry: the name %s is registered twice (%s:%d); the second one did not run\n", e.name, detail::base_name(e.file), e.line);
+            std::fprintf(out, "  [FAIL] test registry: the name %s is registered twice (%s:%d); the second one did not run\n", e.name, detail::base_name(e.file), e.line);
             ++problems;
             continue;
         }
         if (e.context && e.context != want) {
-            std::printf("  [FAIL] test registry: %s (%s:%d) takes another fixture type than the one this program runs with; it did not run\n", e.name, detail::base_name(e.file), e.line);
+            std::fprintf(out, "  [FAIL] test registry: %s (%s:%d) takes another fixture type than the one this program runs with; it did not run\n", e.name, detail::base_name(e.file), e.line);
             ++problems;
             continue;
         }
         try {
             e.call(e.context ? static_cast<void*>(&ctx) : nullptr);
         } catch (const std::exception& ex) {
-            std::printf("  [FAIL] %s threw: %s\n", e.name, ex.what());
+            std::fprintf(out, "  [FAIL] %s threw: %s\n", e.name, ex.what());
             ++problems;
         } catch (...) {
-            std::printf("  [FAIL] %s threw something that is not an exception\n", e.name);
+            std::fprintf(out, "  [FAIL] %s threw something that is not an exception\n", e.name);
             ++problems;
         }
     }
     return problems;
+}
+
+/// Runs every registered test in the order of the registrations, with `ctx` for the tests that take a fixture. Returns the number of problems it
+/// found itself (a test that threw, a test made for another fixture type, a name registered twice); each one is printed as a "[FAIL]" line.
+template <class Ctx>
+int run(Ctx& ctx) {
+    detail::registry().ran = true;
+    return run_list(detail::entries(), ctx, stdout);
 }
 
 /// The same for a program that has no fixture: only the tests that take nothing can run.

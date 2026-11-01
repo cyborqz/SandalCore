@@ -8,3 +8,4 @@
 // ============================================================================
 #include "combat_hostile_tests.inc"
 #include "combat_burn_tests.inc"
+#include "combat_registry_tests.inc"

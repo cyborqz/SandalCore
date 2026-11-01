@@ -22,7 +22,7 @@ Put them in a file of their own and register them. No line of the program and no
    #include "combat_burn_tests.inc"
    ```
 
-   The list is merged line by line (`merge=union` in `.gitattributes`): when two branches add a line at the same time, git keeps both. The order of the lines does not matter.
+   The list is merged line by line (`merge=union` in `.gitattributes`): when two branches add a line at the same time, git keeps both. The order of the lines does not matter. The rule also keeps a line that one branch removed when the other branch adds a line right next to it (measured: a removed last line comes back when another branch appends one), so remove or rename a line of the list in a change of its own and look at the list after the merge.
 
 3. That is all. The program already includes the list and calls `aoc_tests::run(f)` once in `main()`, which runs every registered test in the order of the source text. No `main()` edit and no build-file edit: the new file is part of the program because the program's `.cpp` includes the list.
 
@@ -30,7 +30,7 @@ Things to keep in mind:
 
 - Test names are unique within a program (the runner reports a repeated name as a failed check and skips the second one).
 - A test does not depend on another test having run before it.
-- After adding checks, the program's `N passed` count goes up by the number of checks you added. If it does not, the program has no `aoc_tests::run` call (see below).
+- After adding checks, the program's `N passed` count goes up by the number of checks you added. If it does not, the program has no `aoc_tests::run` call (see below); a program that registers tests and never calls `aoc_tests::run` also prints a `[FAIL]` line when it ends.
 - A test that throws is reported as a failed check and the rest still run.
 
 ## A program that has no registered checks yet
