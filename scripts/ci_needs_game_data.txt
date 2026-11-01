@@ -1,0 +1,32 @@
+# Test programs that scripts\ci_run_tests.ps1 does not run in CI. They need the game data, which a CI machine does not have, and they fail without it.
+# The data is the content database (dist\content\content.db), the stat corpus (server\worldd\stats\testdata\corpus.txt) or the zone tables
+# (server\worldd\world\zoi_surface_table.h), all made from the player's own game install. scripts\run_tests.ps1 runs these on a machine that has it.
+# One test program per line, then "#" and the reason. A new test program that needs the data goes here. A program that skips itself without the data
+# (it prints a "[skip]" line and exits 0) does not: CI runs it and counts the skip.
+test_worldd_abilities          # the stat corpus
+test_worldd_ability_session    # the stat corpus
+test_worldd_area               # the content database
+test_worldd_area_session       # the stat corpus
+test_worldd_character_setup    # the stat corpus
+test_worldd_city_nodes         # the zone tables
+test_worldd_content_db         # the stat corpus
+test_worldd_effects            # the stat corpus
+test_worldd_gm_travel          # the content database
+test_worldd_items              # the stat corpus
+test_worldd_items_session      # the stat corpus
+test_worldd_leveling           # the stat corpus
+test_worldd_mounts             # the content database
+test_worldd_mounts_fly         # the content database
+test_worldd_mounts_ride        # the content database
+test_worldd_mounts_session     # the content database
+test_worldd_movement           # the stat corpus
+test_worldd_node_layout        # the content database
+test_worldd_node_pop           # the content database
+test_worldd_node_state         # the content database
+test_worldd_region             # the content database
+test_worldd_region_load        # heavy (wall-clock checks) and needs the ground file
+test_worldd_resource           # the stat corpus
+test_worldd_session            # the stat corpus
+test_worldd_spawn_filter       # the content database
+test_worldd_stats              # the stat corpus
+test_worldd_talents            # the stat corpus

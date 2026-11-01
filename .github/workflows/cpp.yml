@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+# GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+
+# The C++ programs (libaocnet, worldd, the launcher, the tether server and every test program) on GitHub's machines, without any game data.
+#   - scripts/ci_standin_data.ps1 writes small placeholder files where the extractor writes the game-derived headers and test files
+#     (they are git-ignored, and the script refuses to run on a machine that has game data). Nothing in CMake changes.
+#   - vcpkg comes from a clone at the baseline commit named in vcpkg.json. The built packages are kept as vcpkg binary archives in the
+#     Actions cache (a run on the main branch saves them): the first run, and a run after a package changes, builds from source and is long.
+#   - The build uses the arguments of scripts/build.ps1 (MSVC, the x64-windows packages, Release). scripts/ci_run_tests.ps1 runs the
+#     test programs that need no game data and lists the ones it does not run (scripts/ci_needs_game_data.txt).
+# Everything that needs the game data (those test programs, the content database, the in-game runs) stays outside CI.
+name: C++
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'libs/**'
+      - 'server/**'
+      - 'src/**'
+      - 'proto/**'
+      - 'third_party/**'
+      - 'CMakeLists.txt'
+      - 'vcpkg.json'
+      - 'scripts/ci_*'
+      - '.github/workflows/cpp.yml'
+  pull_request:
+    paths:
+      - 'libs/**'
+      - 'server/**'
+      - 'src/**'
+      - 'proto/**'
+      - 'third_party/**'
+      - 'CMakeLists.txt'
+      - 'vcpkg.json'
+      - 'scripts/ci_*'
+      - '.github/workflows/cpp.yml'
+  workflow_dispatch:
+
+# No job writes anything and none uses a secret.
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the run before it; a run on the main branch is never cancelled.
+concurrency:
+  group: cpp-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  VCPKG_DISABLE_METRICS: 1
+
+jobs:
+  windows:
+    name: MSVC build and tests without game data
+    runs-on: windows-2022
+    timeout-minutes: 240
+    env:
+      # vcpkg reads and writes its built packages as archives in this folder; the cache steps below restore and save it.
+      VCPKG_BINARY_SOURCES: clear;files,C:\vcpkg-archives,readwrite
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Machine
+        run: |
+          "processors: $env:NUMBER_OF_PROCESSORS"
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null } | ForEach-Object { "{0}: {1:N1} GB free" -f $_.Name, ($_.Free / 1GB) }
+
+      - name: Write the placeholder game-data files
+        run: .\scripts\ci_standin_data.ps1
+
+      # The baseline commit in vcpkg.json fixes the version of every package; vcpkg reads it from the git history of its own folder.
+      # The workspace drive has about 14 GB and the installed packages are more than 10 GB, so vcpkg and its packages go to the C: drive.
+      - name: Set up vcpkg
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $baseline = (Get-Content -Raw vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+          $root = 'C:\vcpkg-ci'
+          git clone --quiet https://github.com/microsoft/vcpkg.git $root
+          if ($LASTEXITCODE -ne 0) { throw 'git clone of vcpkg failed' }
+          git -C $root checkout --quiet $baseline
+          if ($LASTEXITCODE -ne 0) { throw "git checkout of $baseline failed" }
+          & "$root\bootstrap-vcpkg.bat" -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'bootstrap-vcpkg failed' }
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$root" -Encoding ascii
+          Add-Content -Path $env:GITHUB_ENV -Value 'AOC_PACKAGES_DIR=C:\vcpkg-packages' -Encoding ascii
+          New-Item -ItemType Directory -Force -Path 'C:\vcpkg-archives' | Out-Null
+
+      # The built packages are kept between runs. A pull request only reads this cache; a run on the main branch saves it after the build.
+      - name: Restore the vcpkg package cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\vcpkg-archives
+          key: vcpkg-v1-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-v1-${{ runner.os }}-
+
+      - name: Build
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $packages = $env:AOC_PACKAGES_DIR -replace '\\', '/'
+          cmake -S . -B build/x64 -G 'Visual Studio 17 2022' -A x64 -T host=x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_APPLOCAL_DEPS=OFF "-DVCPKG_INSTALLED_DIR=$packages" -DVCPKG_INSTALL_OPTIONS=--clean-after-build
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+          cmake --build build/x64 --config Release --target ALL_BUILD -- /m:4 /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:CL_MPCount=4 /nr:false /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+          # the DLLs of the packages next to the programs, once (scripts/build.ps1 does the same)
+          New-Item -ItemType Directory -Force -Path dist/Release | Out-Null
+          Copy-Item "$packages/x64-windows/bin/*.dll" dist/Release
+
+      - name: Save the vcpkg package cache
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\vcpkg-archives
+          key: vcpkg-v1-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Run the tests that need no game data
+        run: .\scripts\ci_run_tests.ps1

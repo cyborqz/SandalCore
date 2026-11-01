@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"aocrop/services/internal/standin"
 )
 
 // The corpus file is shared with the C++ test: server/worldd/stats/testdata/corpus.txt.
@@ -18,6 +20,7 @@ var corpusPath = filepath.Join("..", "..", "..", "server", "worldd", "stats", "t
 // TestCorpusReplay runs the committed corpus through the Go engine, as the C++ test runs it through
 // its own: it needs no content.db.
 func TestCorpusReplay(t *testing.T) {
+	standin.Skip(t, "the stat corpus made from the game install")
 	data, err := os.ReadFile(corpusPath)
 	if err != nil {
 		t.Fatal(err)

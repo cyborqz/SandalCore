@@ -1,0 +1,136 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+# GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+
+# The Go services on GitHub's machines, without any game data.
+#   - The data-free build: -tags aoc_standin swaps the one source file that is made from the game install for a placeholder
+#     (services/internal/citynode/constants_standin.go). The few tests that need the real values skip themselves and say so.
+#   - go vet, gofmt and go test against a PostgreSQL service container (the tests make their own schemas in aoc_test).
+#   - govulncheck on its own job.
+# Everything that needs the game data (the C++ tests on the real tables, the content database, the in-game runs) stays outside CI.
+name: Go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# No job writes anything and none uses a secret.
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the run before it; a run on the main branch is never cancelled.
+concurrency:
+  group: go-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Use the toolchain that setup-go installs; never fetch another one.
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    name: vet and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: aoc
+          POSTGRES_PASSWORD: aoc
+          POSTGRES_DB: aoc_test
+        ports:
+          - 5432:5432
+        # Over TCP, as deploy/docker-compose.yml does: only the final server listens there, not the one that runs the image's start-up.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U aoc -d aoc_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      AOC_TEST_DATABASE_URL: postgres://aoc:aoc@127.0.0.1:5432/aoc_test?sslmode=disable
+    defaults:
+      run:
+        shell: bash
+        working-directory: services
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The minor version in go.mod (for example 1.27), so that setup-go takes the newest patch release of it.
+      - name: Read the Go version from go.mod
+        id: gover
+        run: echo "version=$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2]; exit }' go.mod)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.gover.outputs.version }}
+          check-latest: true
+          cache-dependency-path: services/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet -tags aoc_standin ./...
+
+      - name: go build
+        run: go build -tags aoc_standin ./...
+
+      # The packages share one test database, so they run one at a time (-p 1).
+      - name: go test
+        run: go test -tags aoc_standin -count=1 -p 1 -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+
+      # A test that needs the game data prints "data-free build" and is skipped; this lists every skipped test and its reason.
+      - name: Skipped tests
+        if: always()
+        run: |
+          {
+            echo "### Skipped tests"
+            echo '```'
+            grep -a -B1 -- '--- SKIP' "$RUNNER_TEMP/go-test.log" | grep -a -v '^--$' || echo "none"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  vulncheck:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: services
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the Go version from go.mod
+        id: gover
+        run: echo "version=$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2]; exit }' go.mod)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.gover.outputs.version }}
+          check-latest: true
+          cache-dependency-path: services/go.sum
+
+      # The module proxy and the checksum database verify the download of this pinned version.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
+      - name: govulncheck
+        run: govulncheck -tags aoc_standin ./...

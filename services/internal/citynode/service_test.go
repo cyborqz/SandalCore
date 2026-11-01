@@ -15,6 +15,7 @@ import (
 
 	"aocrop/services/internal/citynode"
 	"aocrop/services/internal/citynodetest"
+	"aocrop/services/internal/standin"
 )
 
 var ctx = context.Background()
@@ -249,6 +250,7 @@ func TestSetNodeLevelTouchesOnlyTheLevel(t *testing.T) {
 }
 
 func TestAddNodeExperience(t *testing.T) {
+	standin.Skip(t, "the node constants made from the game install")
 	e := citynodetest.New(t, citynodetest.SeedJoevaHalcyon)
 	e.Start(t)
 	if _, _, err := e.Svc.SetNodeLevel(ctx, 0, "Winstead", 1, false); err != nil {
