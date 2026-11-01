@@ -92,7 +92,8 @@ type TermDef struct {
 	Clamp   Clamp
 }
 
-// Clamp is an equation's constraint: bClampMin and bClampMax with their Min and Max.
+// Clamp is a limit: bClampMin and bClampMax with their Min and Max. A term's limits bind its value; an equation's record lists the same fields, which
+// nothing here applies (Graph.Clamps).
 type Clamp struct {
 	HasMin, HasMax bool
 	Min, Max       float64
@@ -112,9 +113,9 @@ type Graph struct {
 	Classes   []ClassDef // by class enum
 	Curves    map[int64]*aocexpr.Curve
 	Equations map[int64]string
-	// Clamps are the limits of the equations that have them (a StatEquationType's Constraints, plan D2): the equation's
-	// value is raised to Min and lowered to Max, as its record says. An equation with a constraint of another kind is
-	// not in Equations at all.
+	// Clamps are the limits that the equations which have them list (a StatEquationType's Constraints: 12 equations in the design data, each one plain
+	// clamp). They are data only: the game's evaluator returns an equation's or a formula's value as it is, so neither the compiler nor the reference
+	// engine applies them. (The burn's formula uses the damage equation, whose limit is "not above 0", and its pool is a positive number.)
 	Clamps map[int64]Clamp
 	// Terms are the TermType rows GetTerm names (plan D2): what a term is when nothing supplies it, and its limits.
 	Terms    map[int64]TermDef
@@ -289,12 +290,8 @@ func LoadContentDB(path string) (*Graph, error) {
 		if err := json.Unmarshal(rec.Fields, &f); err != nil {
 			return nil, fmt.Errorf("equation %d: %w", guid, err)
 		}
-		if len(f.Constraints) > 1 || (len(f.Constraints) == 1 && !strings.HasSuffix(f.Constraints[0].Value.Rounding, "Rounding_None")) {
-			// A constraint that is more than a clamp (several, or a rounding rule) is not modelled: the equation is left
-			// out, so a formula that names it fails to compile instead of ignoring the constraint.
-			continue
-		}
-		if len(f.Constraints) == 1 {
+		// The equation compiles whatever its constraints say (the evaluator does not apply them); a plain clamp is kept as data.
+		if len(f.Constraints) == 1 && strings.HasSuffix(f.Constraints[0].Value.Rounding, "Rounding_None") {
 			c := f.Constraints[0].Value
 			if c.ClampMin || c.ClampMax {
 				g.Clamps[guid] = Clamp{HasMin: c.ClampMin, HasMax: c.ClampMax, Min: c.Min, Max: c.Max}

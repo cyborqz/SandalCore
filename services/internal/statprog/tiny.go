@@ -22,8 +22,8 @@ import (
 //
 // Stats (guid = 1000 + n): 1 Str, 2 Dex, 3 Mul, 4 Hp, 5 MaxHp, 6 Regen, 7 Ctx,
 // 8 Shield, 9 Formula, 10 Logic, 11 Enum, 12 Named, 13 Plain (not in any list),
-// 17 Compl (a multiplying stat whose effects multiply by one minus the mod), 18 Clamped (reads equations with a
-// constraint), 19 Speed (an additive stat effects change), 20 Heal (a multiplying stat)
+// 17 Compl (a multiplying stat whose effects multiply by one minus the mod), 18 Constrained (reads equations whose records list a
+// limit, which a read does not apply), 19 Speed (an additive stat effects change), 20 Heal (a multiplying stat)
 // and with faults 14 Fault, 15 Overflow, 16 Cubic.
 func TinyGraph(faults bool) *Graph {
 	stat := func(n int) string { return fmt.Sprintf("$#%d:%d$", TypeStatDef, 1000+n) }
@@ -80,7 +80,7 @@ func TinyGraph(faults bool) *Graph {
 	add(12, "Named", 1, StatDef{Base: "GetStat(GetOwner(), $Stat:Str$) * 2 + GetStat(GetOwner(), " + stat(13) + ")"})
 	add(13, "Plain", 1, StatDef{Base: "7.5"})
 	add(17, "Compl", 5, StatDef{MultiplyMods: true, MultiplyCompliment: true, Base: "1.0 - GetStat(GetOwner(), " + stat(1) + ") / 1000.0", Min: "0", Max: "1"})
-	add(18, "Clamped", 1, StatDef{Base: "EvalE(" + eq(103) + ") + EvalFormula(" + fm(201) + ") * 100.0"})
+	add(18, "Constrained", 1, StatDef{Base: "EvalE(" + eq(103) + ") + EvalFormula(" + fm(201) + ") * 100.0"})
 	add(19, "Speed", 7, StatDef{Base: "1.0", Min: "0", Max: "10"})
 	add(20, "Heal", 5, StatDef{MultiplyMods: true, Base: "1.0 + GetStat(GetOwner(), " + stat(1) + ") / 4000.0", Min: "0"})
 	g.Lists["CombatStats"] = []InitItem{{1001, ""}, {1002, ""}, {1003, ""}, {1004, ""}, {1005, ""}, {1006, ""}, {1007, ""}, {1008, ""}, {1009, ""}, {1010, ""}, {1011, ""}, {1012, ""}, {1017, ""}, {1018, ""}, {1019, ""}, {1020, ""}}
@@ -101,7 +101,8 @@ func TinyGraph(faults bool) *Graph {
 		300: "0.5 * EvalE(" + eq(100) + ")",
 		301: "GetStat(GetOwner(), " + stat(1) + ") + 1",
 	}}
-	// Equations with a constraint: 103 is raised to 0 and lowered to 15, 104 (through the formula 201) only lowered to 0.75.
+	// Equations whose records list a limit (103: 0 to 15; 104, read through the formula 201: at most 0.75). A read gives the equation's own value, so Str 80
+	// gives 60 for 103 and 0.8 for 201, past both limits.
 	g.Equations[103] = "GetStat(GetOwner(), " + stat(1) + ") - 20.0"
 	g.Clamps[103] = Clamp{HasMin: true, Min: 0, HasMax: true, Max: 15}
 	g.Equations[104] = "GetTerm(" + fmt.Sprintf("$#%d:%d$", 6137747221710071900, 302) + ") * 0.01"

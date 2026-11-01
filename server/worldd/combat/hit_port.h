@@ -29,6 +29,11 @@ public:
     virtual Delivery deliver(uint64_t target_actor, const Resolved& hit, double now) = 0;
     /// A shield (a TempHealth effect's amount) on the target for `seconds` (0: until it is used up).
     virtual void shield(uint64_t target_actor, double amount, double seconds, double now) = 0;
+    /// Puts the effects a resolved hit applies on the target, each with its numbers worked out (HitResolver::resolve_effects): the world keeps them on the target, runs their hits
+    /// and ticks and shows them to the clients.  A port that has no effect lists ignores them.
+    virtual void apply_effects(uint64_t /*target_actor*/, const std::vector<effects::Applied>& /*effects*/, double /*now*/) {}
+    /// Seconds left of an effect record on the target (0: it is not on): what GetEffectRemainingDuration(GetTarget(), effect) reads.
+    virtual double effect_remaining(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) const { return 0; }
     /// The target's NetGUID and its HitComp (the collision cylinder) for a confirmation.
     virtual protocol::emit::FIntrepidNetworkGUID guid_of(uint64_t actor) = 0;
     virtual protocol::emit::FIntrepidNetworkGUID hit_component_of(uint64_t actor) = 0;
@@ -66,6 +71,8 @@ public:
         return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now));
     }
     void shield(uint64_t target_actor, double amount, double seconds, double now) override { world_.add_shield(target_actor, amount, seconds, world_time(now)); }
+    void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now) override { world_.apply_effects(target_actor, self_.id(), effects, world_time(now)); }
+    double effect_remaining(uint64_t target_actor, int64_t effect_guid, double now) const override { return world_.effect_remaining(target_actor, effect_guid, world_time(now)); }
     /// The world's clock for a time of the runtime's.
     double world_time(double runtime_now) const { return runtime_now + clock_offset_; }
     double clock_offset() const { return clock_offset_; }

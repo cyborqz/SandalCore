@@ -1928,7 +1928,7 @@ func (f *fnc) inline(e aocexpr.Call, guid int64, formula bool) (val, error) {
 	}
 	text, ok := f.c.g.Equations[eq]
 	if !ok {
-		return val{}, errAt(e.At, "%s: no equation %d (or it has constraints, which are not modelled)", e.Name, eq)
+		return val{}, errAt(e.At, "%s: no equation %d", e.Name, eq)
 	}
 	if err := f.enter(key); err != nil {
 		return val{}, errAt(e.At, "%s: %v", e.Name, err)
@@ -1952,14 +1952,13 @@ func (f *fnc) inline(e aocexpr.Call, guid int64, formula bool) (val, error) {
 	if v.t != tNum {
 		return val{}, errAt(e.At, "%s %d: its value is %v, not a number", e.Name, guid, v.t)
 	}
+	// The value is the equation's own: the game's evaluator returns an equation's (or a formula's) value as it is, and never applies the limits the equation's
+	// record lists (Graph.Clamps). The burn's formula shares the damage equation, whose limit is "not above 0": its pool is a positive number.
 	v.float = true // a stat equation is a float (aocexpr.StatFloatFuncs)
-	if cl, ok := f.c.g.Clamps[eq]; ok {
-		v = f.clamp(v, cl)
-	}
 	return v, nil
 }
 
-// clamp applies an equation's constraint: raised to its Min, then lowered to its Max (Unreal's Clamp order).
+// clamp applies a limit: raised to its Min, then lowered to its Max (Unreal's Clamp order). A term's limits bind its value (an equation's do not: see inline).
 func (f *fnc) clamp(v val, cl Clamp) val {
 	limit := func(op byte, v val, bound float64) val {
 		b := f.num(bound)

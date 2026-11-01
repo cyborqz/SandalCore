@@ -446,6 +446,9 @@ public:
     /// the client draws them. Lethal when `lethal`. Nothing changes on the character.
     void confirm_hit_on(const combat::IncomingHit& hit, double now, const protocol::emit::FIntrepidNetworkGUID& target, const protocol::emit::FIntrepidNetworkGUID& cylinder,
                         double taken, bool lethal);
+    /// A hit of an effect the character put on a creature (a burn's damage each second), worked out by the world: the confirmation names the character as the instigator and the creature as
+    /// the source and the target, carries the number the client draws and the flags, and is predicted on both sides when the hit is the effect's tick. The change is an event.
+    void confirm_effect_hit(const combat::EffectHitNote& note, double now);
     /// Runs what fell due up to `now`: cast steps, effect ticks and expiries, cooldown timers, regeneration.
     void tick(double now);
     std::vector<AbilityEvent> take_events();

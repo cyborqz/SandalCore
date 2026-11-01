@@ -180,6 +180,9 @@ public:
     void receive_kill(const combat::KillReward& kill, double) override {
         if (kills.size() < 64) kills.push_back(kill);
     }
+    void confirm_effect_hit(const combat::EffectHitNote& note, double) override {
+        if (effect_notes.size() < 256) effect_notes.push_back(note);
+    }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }
@@ -201,6 +204,7 @@ public:
 
     std::vector<combat::IncomingHit> inbox;
     std::vector<combat::KillReward>  kills;
+    std::vector<combat::EffectHitNote> effect_notes;   // the hits of the effects this player put on creatures, to confirm to his client
     bool                             wants_in_combat = false;
 
 private:
@@ -269,6 +273,10 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
     std::vector<combat::IncomingHit> hits;
     hits.swap(combat_side_->inbox);
     for (const combat::IncomingHit& h : hits) take_hit(conn, h, now);
+    // the hits of the effects he put on creatures (a burn's damage each second): confirmed to his client, which draws the number
+    std::vector<combat::EffectHitNote> notes;
+    notes.swap(combat_side_->effect_notes);
+    for (const combat::EffectHitNote& n : notes) pipeline_->confirm_effect_hit(n, sec);
     // the experience of the kills (a level-up sends a dozen chains: it waits for room)
     while (!combat_side_->kills.empty()) {
         if (!room_for(12 + (world_ ? world_->auto_grants().size() : 0))) break;

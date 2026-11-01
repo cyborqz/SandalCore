@@ -25,6 +25,7 @@
 #include "combat/hit_resolver.h"
 #include "combat/npc_ability_data.h"
 #include "combat/npc_stats.h"
+#include "effects/effect_book.h"
 #include "nav/area_nav.h"
 #include "npc/ai/npc_ai.h"
 #include "npc/motion_table.h"
@@ -62,6 +63,19 @@ struct IncomingHit {
 };
 // built with C-Y-B and CoA
 
+/// One hit of an effect a player put on a creature (a burn's damage each second), worked out by the world: the player's session confirms it to the player's client, which draws the
+/// number over the creature.
+struct EffectHitNote {
+    uint64_t                 holder = 0;          // the creature's actor id
+    int64_t                  hit_guid = 0;
+    int64_t                  effect_guid = 0;     // the effect whose hit it is: the confirmation's source
+    uint8_t                  flags = 0;           // Miss, Block, Crit, Lethal
+    bool                     predicted = false;   // an effect's Tick hit is predicted by the client; an Apply or Expire hit is not
+    std::vector<ResolvedMod> mods;                // the mods the client draws (Health and Mana)
+    std::vector<double>      effective;           // per mod: the part that took effect
+    double                   at = 0;
+};
+
 /// What a kill gives a player (plan E1, stage 3, part 2: combat/aftermath.h): the experience of the creature's worth after the decay of the player's level.
 struct KillReward {
     uint64_t    npc = 0;
@@ -95,6 +109,8 @@ public:
     virtual protocol::emit::FIntrepidNetworkGUID cylinder_guid() const { return {}; }
     /// The player killed a creature or helped to: the experience it is worth (the session applies it to its progress).
     virtual void receive_kill(const KillReward& /*kill*/, double /*now*/) {}
+    /// A hit of an effect this player put on a creature, with something to show (the burn's damage each second): the session confirms it to its client.
+    virtual void confirm_effect_hit(const EffectHitNote& /*note*/, double /*now*/) {}
 };
 
 /// What a player asks about a target before it acts on it.
@@ -235,8 +251,19 @@ public:
     /// "CollisionCylinder" (NpcInfo::collision_cylinder, the actor's + 4 as retail mints it); 0 for an actor that has none.
     uint64_t hit_component_of(uint64_t actor_id) const;
 
-    /// Applies a player's resolved hit to an NPC: Health (and Mana) move, the threat, the combat flags, the death. Returns what happened.
+    /// Applies a player's resolved hit to an NPC: Health (and Mana) move, and so do the status stats it holds (the burn's pool and its seconds), the threat, the combat flags, the
+    /// death. Returns what happened.
     Delivery apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, const Resolved& resolved, double now);
+
+    /// Puts the effects a player's hit applies (HitResolver::resolve_effects) on an NPC.  The NPC keeps them in its effect book, shows them to the clients (its CurrentEffects), and runs
+    /// their hits from the player to it: the Apply hits now, the Tick, Expire and End hits as their moments come (tick()).  An effect that carries a slow, snare or CC record is left off
+    /// (a mob does not yet slow down or stop for one).  Everything of a player ends when he leaves or dies; everything of a mob ends with its death (and not with a reset).
+    void apply_effects(uint64_t npc_actor, uint64_t instigator, const std::vector<effects::Applied>& effects, double now);
+    /// Seconds left of an effect record on an NPC (0: it is not on).
+    double effect_remaining(uint64_t npc_actor, int64_t effect_guid, double now) const;
+    /// How many stacks of an effect record an NPC holds, and how many instances of effects it holds in all (for the tests and the log).
+    int    effect_stacks(uint64_t npc_actor, int64_t effect_guid) const;
+    size_t effect_count(uint64_t npc_actor) const;
 
     /// Advances the world to `now`: the AI of every combatant near a player, the attacks, the flags, the NPCs' regeneration.
     void tick(double now);
@@ -393,6 +420,19 @@ private:
     void  launch(Npc& n, uint64_t target, const abilities::AbilityDef& ability, const PlannedFire& fire, double now);
     void  advance_flights(double now);
     void  kill(Npc& n, uint64_t killer, double now, bool gm = false);
+    /// The part of apply_hit_to_npc that moves the stats and starts the fight; `log` says whether the hit gets its line in the log.
+    Delivery land_hit(Npc& n, uint64_t attacker, const Resolved& resolved, double now, bool log);
+    // ---- the effects a creature holds
+    void  land_effect(Npc& n, const effects::Applied& applied, uint64_t instigator, double now);
+    /// Runs the hits of `e` in the given phases, from the player that applied it to the creature that holds it: each is resolved with the two as they are now, landed on the creature, its
+    /// own effects are put on the creature the same way, and the player's client is told what it has to show.  An effect whose player is gone or dead ends instead.
+    void  run_effect_hits(Npc& n, const effects::Instance& e, const char* const* phases, size_t count, double at);
+    void  advance_effects(double now);
+    /// Writes a change of the creature's book into its CurrentEffects.
+    void  send_effects(Npc& n, const effects::Book::Changes& changes);
+    void  clear_effects(Npc& n);
+    /// Everything the player applied goes (he left the area or died).
+    void  drop_effects_of(uint64_t instigator);
     void  begin_reset(Npc& n, double now);
     void  set_flags(Npc& n, bool in_combat, uint64_t target_actor);
     /// Gives an NPC that is no combatant the stat list its open carries in the game, at its level (the stat engine's NPC profile): true when it did (false: it was filled already, or its open has no
@@ -421,6 +461,13 @@ private:
     std::unordered_map<std::string, bool> hostile_by_archetype_;
     HuntablePredicate      huntable_;
     std::set<uint64_t>     stats_filled_;     // the NPCs that are no combatants and whose stats were filled (or whose open has none)
+    std::set<uint64_t>     effect_holders_;   // the combatants whose effect book is not empty
+    std::set<int64_t>      refused_effects_;  // the slow, snare and CC effects already named in the log as left off
+    int                    effect_depth_ = 0; // how many effects deep an effect's Apply hit is applying further effects
+    size_t                 effect_hits_logged_ = 0;                  // the effect hits written to the log so far (the first kLoggedEffectHits)
+    static constexpr size_t kLoggedEffectHits = 120;
+    static constexpr int    kMaxEffectDepth = 4;                     // as deep as the player's own effects go
+    static constexpr size_t kMaxEffectSteps = 4096;                  // the most ends and ticks one creature runs in one step (a long stall)
     double                 next_stats_ = 0;
     double                 next_think_ = 0;
     double                 now_ = 0;

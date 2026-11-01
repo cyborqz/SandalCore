@@ -90,6 +90,19 @@ public:
         kills.push_back(kill);
         (void)now;
     }
+    /// A hit of an effect the player put on a creature: queued, as the session queues it (it confirms it at its next tick, never inside the cast that made the hit).
+    void confirm_effect_hit(const combat::EffectHitNote& note, double) override { effect_notes.push_back(note); }
+    /// What the session does at its next tick: the queued notes become confirmations of the pipeline.
+    void deliver_effect_notes() {
+        std::vector<combat::EffectHitNote> notes;
+        notes.swap(effect_notes);
+        for (const combat::EffectHitNote& n : notes) {
+            confirmed_notes.push_back(n);
+            rig_.pipe->confirm_effect_hit(n, rig_.clock = std::max(rig_.clock, n.at));
+        }
+        rig_.take();
+    }
+    std::vector<combat::EffectHitNote>       effect_notes, confirmed_notes;
     std::array<uint32_t, 4>                  guid = {0x11111111u, 0x22222222u, 0x33333333u, 0x44444444u};
     std::vector<combat::KillReward>          kills;
     std::vector<combat::IncomingHit>         hits;

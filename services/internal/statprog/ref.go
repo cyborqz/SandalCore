@@ -183,8 +183,7 @@ func (c refCtx) Equation(r aocexpr.Ref) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("no equation %d", r.Guid)
 	}
-	v, err := c.e.evalIn("E"+fmt.Sprint(r.Guid), text, nil)
-	return c.e.clamp(v, r.Guid), err
+	return c.e.evalIn("E"+fmt.Sprint(r.Guid), text, nil) // the equation's own value: its record's limits are not applied (see compile.go inline)
 }
 func (c refCtx) Formula(r aocexpr.Ref) (float64, error) {
 	if r.Kind != "" || r.TypeID != TypeStatFormula {
@@ -198,8 +197,7 @@ func (c refCtx) Formula(r aocexpr.Ref) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("no equation %d", fm.Equation)
 	}
-	v, err := c.e.evalIn("F"+fmt.Sprint(r.Guid), text, fm.Terms)
-	return c.e.clamp(v, fm.Equation), err
+	return c.e.evalIn("F"+fmt.Sprint(r.Guid), text, fm.Terms) // the equation's own value, whatever the formula
 }
 func (c refCtx) Term(r aocexpr.Ref) (float64, error) {
 	e := c.e
@@ -282,21 +280,6 @@ func (e *RefEngine) evalIn(key, text string, terms map[int64]string) (float64, e
 		delete(e.active, key)
 	}()
 	return e.evalText(text)
-}
-
-// clamp applies an equation's constraint (raised to Min, lowered to Max).
-func (e *RefEngine) clamp(v float64, equation int64) float64 {
-	cl, ok := e.g.Clamps[equation]
-	if !ok {
-		return v
-	}
-	if cl.HasMin {
-		v = math.Max(v, e.num(cl.Min))
-	}
-	if cl.HasMax {
-		v = math.Min(v, e.num(cl.Max))
-	}
-	return v
 }
 
 // C | O | A and Cyb

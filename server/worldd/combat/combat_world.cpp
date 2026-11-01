@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string_view>
 
 namespace aoc::worldd::combat {
 
@@ -123,6 +125,8 @@ public:
         double until = 0;   // 0: until used up
     };
     std::vector<Shield>                    shields;
+    effects::Book                          book;             // the effects it holds (a burn, a bleed ...): the world runs their hits and shows them as its CurrentEffects
+    EffectItemIds                          item_ids;         // the CurrentEffects array's item for each effect of the book
 
     /// A loss goes through the shields first (the oldest first); what is left reaches Health.
     double absorb(double loss, double now) {
@@ -153,7 +157,10 @@ void CombatWorld::add_player(PlayerPort* port) {
 
 void CombatWorld::remove_player(PlayerPort* port) {
     players_.erase(std::remove(players_.begin(), players_.end(), port), players_.end());
-    if (port) player_combat_until_.erase(port->actor_id());
+    if (port) {
+        player_combat_until_.erase(port->actor_id());
+        drop_effects_of(port->actor_id());   // what a player put on the creatures ends with him
+    }
 }
 
 PlayerPort* CombatWorld::player(uint64_t actor_id) {
@@ -185,6 +192,14 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     if (!n->cs) {
         spdlog::warn("[combat] {} ({}): its stats do not run: {}", a.id, leaf, err);
         return nullptr;
+    }
+    // the status stats a hit's mods move (how much burn is left and for how long): a creature keeps a current value of each
+    {
+        std::set<int64_t> held;
+        for (const int64_t stat : {data_.ids().status_burning, data_.ids().status_burning_dur}) {
+            if (stat != 0) held.insert(stat);
+        }
+        n->cs->set_resources(std::move(held));
     }
     n->aligns.assign(bp.alignments.begin(), bp.alignments.end());
     n->hostile = data_.relation(n->aligns, CombatData::player_alignments()) == Relation::Hostile;
@@ -422,6 +437,7 @@ void CombatWorld::forget(uint64_t actor_id) {
     flights_.erase(std::remove_if(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.npc == actor_id; }), flights_.end());
     npcs_.erase(actor_id);
     stats_filled_.erase(actor_id);
+    effect_holders_.erase(actor_id);
 }
 
 bool CombatWorld::fill_stats(const world::WorldActor& a) {
@@ -1218,21 +1234,49 @@ void CombatWorld::advance_flights(double now) {
 // -- C.Y.B & CoA --
 
 Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, const Resolved& r, double now) {
+    Npc* n = combatant(npc_actor);
+    if (!n || n->dead) {
+        Delivery d;
+        d.target_object = hit_component_of(npc_actor);
+        return d;
+    }
+    return land_hit(*n, attacker, r, now, true);
+}
+
+Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, double now, bool log) {
+    Npc* n = &nn;
+    const uint64_t npc_actor = n->actor_id;
     Delivery d;
     d.target_object = hit_component_of(npc_actor);
-    Npc* n = combatant(npc_actor);
-    if (!n || n->dead) return d;
     d.applied = true;
     d.flags = r.flags;
     d.effective.assign(r.mods.size(), 0.0);
     n->attackers.insert(attacker);
     ++stats_.player_hits;
     const double health_before = n->health();
+    double burn_before = 0, burn_dur_before = 0;
+    bool burn_moved = false;
     if (!r.miss()) {
         const CombatStatIds& id = data_.ids();
+        if (const stats::StatValue* v = id.status_burning ? n->cs->find(id.status_burning) : nullptr) burn_before = v->value;
+        if (const stats::StatValue* v = id.status_burning_dur ? n->cs->find(id.status_burning_dur) : nullptr) burn_dur_before = v->value;
         for (size_t i = 0; i < r.mods.size(); ++i) {
             const ResolvedMod& m = r.mods[i];
-            if ((m.stat_guid != id.health && m.stat_guid != id.mana) || !std::isfinite(m.value)) continue;
+            if (!std::isfinite(m.value)) continue;
+            if (id.is_status_stat(m.stat_guid)) {
+                // a status stat the creature holds: the mod moves it between its limits (a stat with none stays above 0); the clients are not told (they see the effects that read it)
+                const stats::StatValue* cur = n->cs->find(m.stat_guid);
+                if (!cur || !cur->held()) continue;
+                const double before = cur->value;
+                double next = before + m.value;
+                if (cur->has_max) next = std::min(next, static_cast<double>(cur->max));
+                next = std::max(next, cur->has_min ? static_cast<double>(cur->min) : 0.0);
+                d.effective[i] = static_cast<float>(next) - before;
+                n->cs->set_current(m.stat_guid, static_cast<float>(next));
+                burn_moved = true;
+                continue;
+            }
+            if (m.stat_guid != id.health && m.stat_guid != id.mana) continue;
             const stats::StatValue* cur = n->cs->find(m.stat_guid);
             const stats::StatValue* max = n->cs->find(m.stat_guid == id.health ? id.max_health : id.max_mana);
             if (!cur || !max) continue;
@@ -1249,10 +1293,22 @@ Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, co
     // the threat: what the hit says, else what it took
     double threat = r.threat;
     if (threat <= 0 && !r.miss()) {
-        for (const double e : d.effective) threat += e < 0 ? -e : 0;
+        for (size_t i = 0; i < d.effective.size(); ++i) {
+            if (d.effective[i] < 0 && !data_.ids().is_status_stat(r.mods[i].stat_guid)) threat += -d.effective[i];
+        }
     }
-    spdlog::info("[combat] player {} hit {} ({}, level {}): {}Health {:.1f} -> {:.1f}, threat {:.1f}", attacker, n->leaf, npc_actor, n->lvl, r.miss() ? "a miss, " : "", health_before, n->health(),
-                 std::max(threat, 1.0));
+    if (log) {
+        spdlog::info("[combat] player {} hit {} ({}, level {}): {}Health {:.1f} -> {:.1f}, threat {:.1f}", attacker, n->leaf, npc_actor, n->lvl, r.miss() ? "a miss, " : "", health_before,
+                     n->health(), std::max(threat, 1.0));
+    }
+    if (burn_moved) {
+        const CombatStatIds& id = data_.ids();
+        const stats::StatValue* pool = id.status_burning ? n->cs->find(id.status_burning) : nullptr;
+        const stats::StatValue* dur = id.status_burning_dur ? n->cs->find(id.status_burning_dur) : nullptr;
+        if (log && pool && dur && (pool->value != burn_before || dur->value != burn_dur_before)) {
+            spdlog::info("[combat] {} ({}) is burning: {:.1f} fire damage to burn over {:.1f} s (it was {:.1f} over {:.1f} s)", n->leaf, npc_actor, pool->value, dur->value, burn_before, burn_dur_before);
+        }
+    }
     if (!lethal) n->ai.notice(attacker, std::max(threat, 1.0), now);
     player_exchange(attacker, now);
     if (lethal) {
@@ -1268,6 +1324,7 @@ Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, co
 void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
     if (n.dead) return;
     n.dead = true;
+    clear_effects(n);   // a dead creature burns no more and shows no effect
     n.killer = killer;
     n.ai.kill();
     n.cs->set_in_combat(false);
@@ -1295,6 +1352,225 @@ void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
         e.attackers = n.attackers;
         e.gm = gm;
         death_hook_(e);
+    }
+}
+
+// ---- the effects a creature holds ---------------------------------------------------------------------------------------------------
+
+namespace {
+
+const char* const kApplyPhases[] = {"Apply"};
+const char* const kTickPhases[] = {"Tick"};
+const char* const kExpirePhases[] = {"Expire", "End"};
+
+/// The effects a creature's book holds, for the reads of them in a hit's expressions.
+class BookView final : public TargetEffects {
+public:
+    BookView(const effects::Book& book, double now) : book_(book), now_(now) {}
+    double remaining(int64_t effect_guid) const override { return book_.remaining(effect_guid, now_); }
+
+private:
+    const effects::Book& book_;
+    double               now_;
+};
+
+/// The CurrentEffects item of an instance: its start on the synchronized clock the clients' effect lists run on.
+bootstrap::EffectItem item_of(const effects::Instance& e) {
+    bootstrap::EffectItem item;
+    item.effect_id = e.key;
+    item.effect_guid = e.def->row.guid;
+    item.start_time = bootstrap::effect_clock(e.start);
+    item.duration = std::isinf(e.end) ? std::numeric_limits<float>::max() : static_cast<float>(e.end - e.start);
+    item.tick_time = static_cast<float>(e.def->row.tick_timer);
+    item.stacks = e.stacks;
+    return item;
+}
+
+}  // namespace
+
+void CombatWorld::send_effects(Npc& n, const effects::Book::Changes& changes) {
+    if (changes.empty()) return;
+    const auto write_of = [&](const effects::Instance& e) {
+        EffectItemWrite w;
+        w.item = item_of(e);
+        if (const PlayerPort* p = player(e.instigator)) w.applier = p->character_guid();
+        return w;
+    };
+    std::vector<EffectItemWrite> added, changed;
+    for (const effects::Instance& e : changes.added) added.push_back(write_of(e));
+    for (const effects::Instance& e : changes.changed) changed.push_back(write_of(e));
+    write_effect_items(registry_, n.actor_id, n.item_ids, changes.removed, added, changed);
+    if (n.book.empty()) effect_holders_.erase(n.actor_id);
+    else effect_holders_.insert(n.actor_id);
+}
+
+void CombatWorld::clear_effects(Npc& n) {
+    effects::Book::Changes changes;
+    n.book.clear(changes);
+    send_effects(n, changes);
+    effect_holders_.erase(n.actor_id);
+}
+
+void CombatWorld::drop_effects_of(uint64_t instigator) {
+    for (const uint64_t id : std::vector<uint64_t>(effect_holders_.begin(), effect_holders_.end())) {
+        const auto it = npcs_.find(id);
+        if (it == npcs_.end()) {
+            effect_holders_.erase(id);
+            continue;
+        }
+        Npc& n = *it->second;
+        effects::Book::Changes changes;
+        if (n.book.remove_from(instigator, changes) == 0) continue;
+        send_effects(n, changes);
+        if (n.book.empty()) {   // nothing is left to burn what the stats hold
+            for (const int64_t stat : {data_.ids().status_burning, data_.ids().status_burning_dur}) {
+                if (stat != 0) n.cs->set_current(stat, 0.0f);
+            }
+        }
+        spdlog::info("[effects] the effects of player {} on {} ({}) end: he is gone", instigator, n.leaf, n.actor_id);
+    }
+}
+
+void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now) {
+    if (n.dead || !a.def) return;
+    if (a.def->row.crowd_control_guid != 0) {   // a mob does not yet slow down or stop for one: it would wear the icon and keep walking
+        if (refused_effects_.insert(a.def->row.guid).second) {
+            spdlog::info("[effects] {} is a slow, snare or CC: mobs do not slow down or stop for one yet, so it is not put on {}", a.def->row.name, n.leaf);
+        }
+        return;
+    }
+    effects::Book::Changes changes;
+    effects::Instance created;
+    const bool made = n.book.apply(a, instigator, now, changes, &created);
+    send_effects(n, changes);
+    if (made && effect_depth_ < kMaxEffectDepth) {   // its Apply hits run now that it is on
+        ++effect_depth_;
+        run_effect_hits(n, created, kApplyPhases, 1, now);
+        --effect_depth_;
+    }
+}
+
+void CombatWorld::apply_effects(uint64_t npc_actor, uint64_t instigator, const std::vector<effects::Applied>& list, double now) {
+    Npc* n = combatant(npc_actor);
+    if (!n || n->dead) return;
+    for (const effects::Applied& a : list) {
+        if (n->dead) break;
+        land_effect(*n, a, instigator, now);
+    }
+}
+
+double CombatWorld::effect_remaining(uint64_t npc_actor, int64_t effect_guid, double now) const {
+    const auto it = npcs_.find(npc_actor);
+    return it == npcs_.end() ? 0.0 : it->second->book.remaining(effect_guid, now);
+}
+
+int CombatWorld::effect_stacks(uint64_t npc_actor, int64_t effect_guid) const {
+    const auto it = npcs_.find(npc_actor);
+    return it == npcs_.end() ? 0 : it->second->book.stacks_of(effect_guid);
+}
+
+size_t CombatWorld::effect_count(uint64_t npc_actor) const {
+    const auto it = npcs_.find(npc_actor);
+    return it == npcs_.end() ? 0 : it->second->book.size();
+}
+
+void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char* const* phases, size_t count, double at) {
+    if (!e.def || n.dead) return;
+    PlayerPort* port = player(e.instigator);
+    if (!port || !port->fighter().alive()) {   // the player who applied it left or died: what he put on the creatures ends
+        drop_effects_of(e.instigator);
+        return;
+    }
+    const bool tick_phase = count == 1 && std::string_view(phases[0]) == "Tick";
+    Fighter& from = port->fighter();
+    const Relation rel = data_.relation(from.alignments(), n.aligns);
+    const CombatStatIds& id = data_.ids();
+    for (const auto& [phase, hit_guid] : e.def->hits) {
+        bool wanted = false;
+        for (size_t i = 0; i < count; ++i) wanted = wanted || phase == phases[i];
+        if (!wanted) continue;
+        if (n.dead) return;
+        const abilities::HitDef* hit = catalog_.hit(hit_guid);
+        if (!hit) continue;
+        const int mask = hit->row.applicable_targets;   // who it reaches, from the player's side: an enemy of his, or on whoever else the mask names
+        if (rel == Relation::Hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) continue;
+        HitMeta meta;
+        meta.source_type = content::kSourceTypeEffect;
+        meta.source_guid = e.def->row.guid;
+        const BookView view(n.book, at);
+        meta.target_effects = &view;
+        if (!resolver_.requirement_holds(from, n, *hit, meta)) continue;
+        Resolved r;
+        std::string why;
+        if (!resolver_.resolve(from, n, *hit, meta, r, why)) {
+            spdlog::debug("[combat] {} ({}): the hit {} of {} does not run: {}", n.leaf, n.actor_id, hit->row.name, e.def->row.name, why);
+            continue;
+        }
+        const double health_before = n.health();
+        const Delivery d = land_hit(n, e.instigator, r, at, false);
+        if (!d.applied) return;
+        // what the hit took or gave, in the log and as the number the client draws; a hit with nothing to show is not confirmed
+        EffectHitNote note;
+        for (size_t i = 0; i < r.mods.size(); ++i) {
+            const ResolvedMod& m = r.mods[i];
+            if (m.stat_guid != id.health && m.stat_guid != id.mana) continue;
+            if (m.value == 0.0 && d.effective[i] == 0.0) continue;
+            note.mods.push_back(m);
+            note.effective.push_back(d.effective[i]);
+        }
+        if (!note.mods.empty() && !r.miss()) {
+            const stats::StatValue* pool = id.status_burning ? n.cs->find(id.status_burning) : nullptr;
+            const stats::StatValue* dur = id.status_burning_dur ? n.cs->find(id.status_burning_dur) : nullptr;
+            spdlog::log(effect_hits_logged_++ < kLoggedEffectHits ? spdlog::level::info : spdlog::level::debug,
+                        "[combat] {} ({}) takes {:.1f} from {} of player {}{}: Health {:.1f} -> {:.1f}{}", n.leaf, n.actor_id, note.mods[0].value, hit->row.name, e.instigator,
+                        (r.flags & stats::kHitCrit) ? " (a critical hit)" : "", health_before, n.health(),
+                        pool && dur && pool->value > 0 ? fmt::format("; {:.1f} fire damage left to burn over {:.1f} s", pool->value, dur->value) : std::string());
+        }
+        if (!note.mods.empty() || hit->row.has_fx || r.miss()) {
+            note.holder = n.actor_id;
+            note.hit_guid = hit->row.guid;
+            note.effect_guid = e.def->row.guid;
+            note.flags = d.flags;
+            note.predicted = tick_phase;
+            note.at = at;
+            port->confirm_effect_hit(note, at);
+        }
+        if (n.dead || r.miss()) continue;
+        // the effects the hit puts on the creature in its turn (the burn's damage keeps its aura on, its last step ends the chain)
+        Resolved gate;
+        if (!resolver_.resolve_effects(from, n, *hit, meta, gate, why)) continue;
+        if (!why.empty()) spdlog::debug("[combat] {} ({}): the effects of {}: {}", n.leaf, n.actor_id, hit->row.name, why);
+        for (const effects::Applied& a : gate.effects) {
+            if (n.dead) return;
+            land_effect(n, a, e.instigator, at);
+        }
+    }
+}
+
+void CombatWorld::advance_effects(double now) {
+    if (effect_holders_.empty()) return;
+    for (const uint64_t id : std::vector<uint64_t>(effect_holders_.begin(), effect_holders_.end())) {
+        for (size_t step = 0; step < kMaxEffectSteps; ++step) {
+            const auto it = npcs_.find(id);
+            if (it == npcs_.end() || it->second->dead || it->second->book.empty()) {
+                effect_holders_.erase(id);
+                break;
+            }
+            Npc& n = *it->second;
+            const effects::Book::Due due = n.book.next_due(now);
+            if (due.kind == effects::Book::Due::Kind::None) break;
+            if (due.kind == effects::Book::Due::Kind::End) {
+                effects::Instance gone;
+                effects::Book::Changes changes;
+                if (!n.book.end_of(due.key, gone, changes)) break;
+                send_effects(n, changes);
+                run_effect_hits(n, gone, kExpirePhases, 2, due.at);
+            } else {
+                effects::Instance ticking;
+                if (!n.book.ticked(due.key, due.at, ticking)) break;
+                run_effect_hits(n, ticking, kTickPhases, 1, due.at);
+            }
+        }
     }
 }
 
@@ -1508,6 +1784,7 @@ void CombatWorld::tick(double now) {
     if (!cfg_.enabled) return;
     resolve_pending(now);
     advance_flights(now);
+    advance_effects(now);
     if (now < next_think_) return;
     next_think_ = now + cfg_.think_seconds;
 

@@ -7,3 +7,4 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "combat_hostile_tests.inc"
+#include "combat_burn_tests.inc"

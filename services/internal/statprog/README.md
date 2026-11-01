@@ -145,7 +145,7 @@ every class plus what their formulas read.
   number or boolean, a `set` that changes a type, a non-boolean condition, an unknown function: an error naming the formula.
 - **Division** follows `aocexpr`: it needs an operand proven to be a float (a literal with a decimal point, `Float`, `SelectFloat`,
   `EvalCurve`, `GetStat` and the other stat functions, a variable only ever given such a value). Every formula of the player graph passes it.
-- A text that is not in the subset, an equation with constraints, a cycle between formulas, a number that does not fit (in
+- A text that is not in the subset, a cycle between formulas, a number that does not fit (in
   `ModeSingle`), more than 64 locals or 8,192 bytes of code: an error, never a skipped formula.
 - `GetTerm` is resolved in the scope of the formula's caller; equations may nest 16 deep and never call themselves.
 - Not hoisted but not lazy either: `SelectFloat` and `SelectInt` evaluate all three arguments, as `aocexpr` does.
@@ -204,8 +204,9 @@ an expression outside the programs, repeated or out of order; `Lerp` and `Abs` t
 3. `GetAbilityProgressRatio("SongGroup")` and `GetEffectCountByRecordAndInstigator(target, effect, instigator)` read the host (`ExprHost`; the instigator is the caster).
 4. `RandDouble()` reads the host's source. `SplitMix` (SplitMix64; `RandDouble` is the top 53 bits over 2^53) is the seeded source of the tests and the corpus, bit-identical in C++; the draws are in program order
    (`&&` and `||` are lazy: a draw behind a false skill test is not made, and the corpus keeps the order).
-5. **Equation constraints**: a `StatEquationType` with one constraint (a clamp, `Rounding_None`) compiles: its value is raised to Min and lowered to Max (13 equations have constraints; the HealingMod's is a Min of 0).
-   Another kind (several constraints, a rounding rule) is still refused.
+5. **Equation constraints**: a `StatEquationType` may list a limit (13 equations do, 12 of them a plain clamp; the HealingMod's is a Min of 0, the DamageMod's a Max of 0). A read of the equation (`EvalE`) or of a formula that uses
+   it (`EvalFormula`) gives the equation's own value: the limit is applied neither to the equation's result nor to the formulas that share the equation (the game's evaluator returns the value as it is). The burn's formula
+   shares the DamageMod equation with a term of +1 (the damage's is -1): its pool is a positive number. `Graph.Clamps` keeps the plain clamps as data; nothing reads them.
 6. The hit-event functions a heal or a shield formula reads (done last, after everything above): `GetHitInProgress`, `CheckForDamageTag`/`HitHasTag`, `GetHitFlags` + `HitFlagsContains(.., EHitFlag::Crit)`, `GetNumTargets`,
    `GetXPDebtRatio`: host inputs (the damage functions, `CalculateDamage*`, are not: no NPC).
 

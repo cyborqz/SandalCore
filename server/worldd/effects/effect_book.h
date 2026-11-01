@@ -1,0 +1,262 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
+// GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// ============================================================================
+//  effects/effect_book.h
+//
+//  The effects an actor holds: the instances an effect record's hits put on it, with the stacking and refresh rules of the record, the moments of their ticks and
+//  ends, and the list of changes a replicated array needs.  Creatures keep one (combat/combat_world.h); the player's own effects are still the ability runtime's.
+//
+//  The book knows nothing of expressions, hits or the world.  Whoever resolved the hit has already worked out every number an application needs (`Applied`: the
+//  stacks, the duration, the in-place limit and the values of one stack's stat mods, evaluated for the character that applied it), so a book can be driven from the
+//  world's tick with nothing but the clock.
+//
+//  The rules (the same the ability runtime applies to the player's effects):
+//    OverrideAlways    one instance; a new application replaces it (a new instance, a new key), unless the record never refreshes
+//    StackInPlace      one instance whose stacks grow up to the in-place limit; every application refreshes it
+//    StackSeperate     a new instance per application, up to the record's global limit
+//    OverrideDuration  one instance; an application refreshes it
+//  A record that never refreshes keeps its times (a new stack still counts).  An effect that extends its duration is refreshed to its full duration: the amounts
+//  the data gives for extending it (and the longest it may be extended to) are not read yet.
+//  A hit's effect that works out to no stacks is never applied: that is the data's way to make an effect conditional.
+// ============================================================================
+#pragma once
+
+#include "session/ability_catalog.h"
+#include "stats/stat_engine.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <vector>
+
+namespace aoc::worldd::effects {
+
+inline constexpr double kForever = std::numeric_limits<double>::infinity();
+
+/// One application of an effect with all its numbers worked out.
+struct Applied {
+    const abilities::EffectDef*   def = nullptr;
+    int                           stacks = 1;            // 1 or more
+    double                        duration = kForever;   // seconds; kForever: it does not end by itself
+    int                           in_place_limit = 1;    // the most stacks one instance holds (StackInPlace)
+    std::vector<stats::EffectMod> mods;                  // one stack's stat mod values
+};
+
+/// An effect on its holder.
+struct Instance {
+    int64_t                       key = 0;               // what the replicated item is known by (EffectId)
+    const abilities::EffectDef*   def = nullptr;
+    int                           stacks = 1;
+    double                        start = 0, end = kForever;
+    double                        next_tick = kForever;  // kForever: it does not tick
+    std::vector<stats::EffectMod> mods;
+    uint64_t                      instigator = 0;        // the actor that applied it (the one it is shown to be from); 0: none
+};
+
+class Book {
+public:
+    /// The most instances one holder keeps (a hostile list cannot grow the book without bound).
+    static constexpr size_t kMaxInstances = 256;
+
+    /// What a call changed, in the order the replicated array must see it: the keys that went, then the instances added and the ones changed in place.
+    struct Changes {
+        std::vector<int64_t>  removed;
+        std::vector<Instance> added;
+        std::vector<Instance> changed;
+        bool empty() const { return removed.empty() && added.empty() && changed.empty(); }
+    };
+
+    /// The earliest thing due at or before `now`: an end, or a tick.  An end comes before a tick of the same moment.
+    struct Due {
+        enum class Kind : uint8_t { None, End, Tick };
+        Kind    kind = Kind::None;
+        int64_t key = 0;
+        double  at = 0;
+    };
+
+    explicit Book(int64_t first_key = 1) : next_key_(first_key) {}
+
+    const std::vector<Instance>& instances() const { return items_; }
+    bool   empty() const { return items_.empty(); }
+    size_t size() const { return items_.size(); }
+
+    /// Applies `a` for `instigator` at time `t`.  When it made a NEW instance (the caller runs that effect's Apply hits then) `created` holds a copy of it and the
+    /// result is true; a stack added in place, a refresh and an application that changed nothing give false.
+    bool apply(const Applied& a, uint64_t instigator, double t, Changes& out, Instance* created = nullptr) {
+        if (!a.def || a.stacks < 1) return false;
+        const content::EffectRow& row = a.def->row;
+        const bool never_refresh = row.stack_duration_refresh.find("NeverRefresh") != std::string::npos;
+        const bool in_place = row.stack_type.find("StackInPlace") != std::string::npos;
+        const bool separate = row.stack_type.find("StackSeperate") != std::string::npos;
+        const bool override_duration = row.stack_type.find("OverrideDuration") != std::string::npos;
+        Instance* existing = nullptr;
+        int same = 0;
+        for (Instance& e : items_) {
+            if (e.def != a.def) continue;
+            ++same;
+            if (!existing) existing = &e;
+        }
+        const auto refresh = [&](Instance& e) {
+            e.mods = a.mods;
+            e.instigator = instigator;
+            if (never_refresh) return;
+            e.start = t;
+            e.end = std::isinf(a.duration) ? kForever : t + a.duration;
+        };
+        const auto fresh = [&](int stacks) {
+            if (items_.size() >= kMaxInstances) return false;
+            Instance e;
+            e.key = next_key_++;
+            e.def = a.def;
+            e.stacks = stacks;
+            e.start = t;
+            e.end = std::isinf(a.duration) ? kForever : t + a.duration;
+            e.mods = a.mods;
+            e.next_tick = row.tick_timer > 0 ? (row.ignore_initial_tick ? t + row.tick_timer : t) : kForever;
+            e.instigator = instigator;
+            items_.push_back(e);
+            out.added.push_back(e);
+            if (created) *created = e;
+            return true;
+        };
+        if (!existing) return fresh(in_place ? std::min(a.stacks, std::max(1, a.in_place_limit)) : 1);
+        if (in_place) {
+            existing->stacks = std::min(std::max(1, a.in_place_limit), existing->stacks + a.stacks);
+            refresh(*existing);
+            note_changed(*existing, out);
+        } else if (separate) {
+            if (same < std::max(1, row.global_stack_limit)) return fresh(1);
+        } else if (override_duration) {
+            refresh(*existing);
+            note_changed(*existing, out);
+        } else {   // OverrideAlways: one instance, replaced (a record that never refreshes keeps what it has)
+            if (never_refresh) return false;
+            const int64_t old_key = existing->key;
+            remove_key(old_key, out);
+            return fresh(1);
+        }
+        return false;
+    }
+
+    /// The earliest end or tick due at or before `now`.
+    Due next_due(double now) const {
+        Due best;
+        for (const Instance& e : items_) {
+            if (e.end <= now && (best.kind == Due::Kind::None || e.end < best.at || (e.end == best.at && best.kind == Due::Kind::Tick))) best = {Due::Kind::End, e.key, e.end};
+            if (e.next_tick <= now && (best.kind == Due::Kind::None || e.next_tick < best.at)) best = {Due::Kind::Tick, e.key, e.next_tick};
+        }
+        return best;
+    }
+
+    /// The instance reached its end: it is taken off and returned (its Expire and End hits are the caller's).  False when there is none with that key.
+    bool end_of(int64_t key, Instance& gone, Changes& out) {
+        for (const Instance& e : items_) {
+            if (e.key != key) continue;
+            gone = e;
+            remove_key(key, out);
+            return true;
+        }
+        return false;
+    }
+
+    /// The instance ticked at `at`: its next tick is a period later.  False when there is none with that key.
+    bool ticked(int64_t key, double at, Instance& copy) {
+        for (Instance& e : items_) {
+            if (e.key != key) continue;
+            const double period = e.def->row.tick_timer;
+            e.next_tick = period > 0 ? at + period : kForever;
+            copy = e;
+            return true;
+        }
+        return false;
+    }
+
+    /// Takes the instance with `key` off.  False when there is none.
+    bool remove(int64_t key, Changes& out) { return remove_key(key, out); }
+
+    /// Takes off everything `instigator` applied (it is gone); the number of instances that went.
+    size_t remove_from(uint64_t instigator, Changes& out) {
+        size_t n = 0;
+        for (size_t i = 0; i < items_.size();) {
+            if (items_[i].instigator == instigator) {
+                out.removed.push_back(items_[i].key);
+                items_.erase(items_.begin() + static_cast<std::ptrdiff_t>(i));
+                ++n;
+            } else {
+                ++i;
+            }
+        }
+        return n;
+    }
+
+    /// Takes everything off (a death).
+    void clear(Changes& out) {
+        for (const Instance& e : items_) out.removed.push_back(e.key);
+        items_.clear();
+    }
+
+    /// Seconds left of the longest-lasting instance of an effect record (0: it is not on; a record without an end reads as a very long time).
+    double remaining(int64_t effect_guid, double now) const {
+        double best = 0;
+        for (const Instance& e : items_) {
+            if (e.def->row.guid != effect_guid) continue;
+            best = std::max(best, std::isinf(e.end) ? 1.0e9 : std::max(0.0, e.end - now));
+        }
+        return best;
+    }
+
+    /// The stacks of the instances of an effect record.
+    int stacks_of(int64_t effect_guid) const {
+        int n = 0;
+        for (const Instance& e : items_) {
+            if (e.def->row.guid == effect_guid) n += e.stacks;
+        }
+        return n;
+    }
+
+private:
+    bool remove_key(int64_t key, Changes& out) {
+        for (size_t i = 0; i < items_.size(); ++i) {
+            if (items_[i].key != key) continue;
+            // an instance this same change added never reached the replicated array: it is dropped from the change, not removed
+            bool unsent = false;
+            for (auto it = out.added.begin(); it != out.added.end(); ++it) {
+                if (it->key == key) {
+                    out.added.erase(it);
+                    unsent = true;
+                    break;
+                }
+            }
+            for (auto it = out.changed.begin(); it != out.changed.end();) it = it->key == key ? out.changed.erase(it) : it + 1;
+            if (!unsent) out.removed.push_back(key);
+            items_.erase(items_.begin() + static_cast<std::ptrdiff_t>(i));
+            return true;
+        }
+        return false;
+    }
+
+    // an instance changed in place; one that is new in this same change stays an addition with its latest values
+    static void note_changed(const Instance& e, Changes& out) {
+        for (Instance& a : out.added) {
+            if (a.key == e.key) {
+                a = e;
+                return;
+            }
+        }
+        for (Instance& c : out.changed) {
+            if (c.key == e.key) {
+                c = e;
+                return;
+            }
+        }
+        out.changed.push_back(e);
+    }
+
+    std::vector<Instance> items_;
+    int64_t               next_key_ = 1;
+};
+
+}  // namespace aoc::worldd::effects

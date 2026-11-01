@@ -12,6 +12,7 @@
 // Without a content.db the test says so and is skipped.
 // ============================================================================
 #include "ability_rig.h"
+#include "bootstrap/constants.h"
 #include "combat_rig.h"
 #include "test_registry.h"
 #include "combat/combat_data.h"

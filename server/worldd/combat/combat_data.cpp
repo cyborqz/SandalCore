@@ -60,6 +60,8 @@ std::optional<CombatData> CombatData::build(const content::CombatRows& rows, con
     s.max_mana = find("MaxMana");
     s.move_speed_mult = find("MoveSpeedMult");
     s.health_regeneration = find("HealthRegeneration");
+    s.status_burning = find("Status_Burning");
+    s.status_burning_dur = find("Status_BurningDur");
     return d;
 }
 

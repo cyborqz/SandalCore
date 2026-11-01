@@ -150,6 +150,68 @@ bool has_stats(const world::WorldActor& actor) {
     return st && st->obj.schema && const_cast<repl::FastArrays&>(st->obj.arrays).get(*st->obj.schema, "StatRepInt32EveryoneProxy") != nullptr;
 }
 
+bool write_effect_items(world::ActorRegistry& registry, uint64_t actor_id, EffectItemIds& ids, const std::vector<int64_t>& removed, const std::vector<EffectItemWrite>& added,
+                        const std::vector<EffectItemWrite>& changed) {
+    bool ok = false;
+    registry.modify(actor_id, world::Change::State, [&](world::WorldActor& a) {
+        repl::Subobject* st = find_sub(a, "UAoCStatsComponent");
+        if (!st || !st->obj.schema) return;
+        repl::FastArrayState* arr = st->obj.arrays.get(*st->obj.schema, "CurrentEffects");
+        if (!arr) return;
+        ok = true;
+        for (const int64_t key : removed) {
+            const auto it = ids.find(key);
+            if (it == ids.end()) continue;
+            arr->remove(it->second);
+            arr->mark_array_dirty();   // (a removal moves the array's key by two, as the player's items do)
+            ids.erase(it);
+        }
+        for (const EffectItemWrite& w : added) {
+            if (const auto id = arr->add(bootstrap::effect_item_state(w.applier, w.item))) ids[w.item.effect_id] = *id;
+        }
+        for (const EffectItemWrite& w : changed) {
+            const auto it = ids.find(w.item.effect_id);
+            if (it != ids.end()) arr->change(it->second, bootstrap::effect_item_state(w.applier, w.item));
+        }
+    });
+    return ok;
+}
+
+std::vector<EffectItemWrite> read_effect_items(const world::WorldActor& actor) {
+    std::vector<EffectItemWrite> out;
+    const repl::Subobject* st = find_sub(actor, "UAoCStatsComponent");
+    if (!st || !st->obj.schema) return out;
+    const repl::FastArrayState* arr = const_cast<repl::FastArrays&>(st->obj.arrays).get(*st->obj.schema, "CurrentEffects");
+    if (!arr) return out;
+    for (const repl::FastArrayItem& it : arr->items()) {
+        const auto get = [&](uint16_t field) -> const repl::Value* {
+            const auto f = it.values.values.find(field);
+            return f == it.values.values.end() ? nullptr : &f->second;
+        };
+        const auto i64 = [&](uint16_t field) {
+            const repl::Value* v = get(field);
+            const int64_t* p = v ? v->get_if<int64_t>() : nullptr;
+            return p ? *p : int64_t{0};
+        };
+        EffectItemWrite w;
+        w.item.effect_id = i64(1);
+        w.item.effect_guid = i64(2);
+        if (const repl::Value* v = get(3)) {
+            if (const double* p = v->get_if<double>()) w.item.start_time = *p;
+        }
+        if (const repl::Value* v = get(4)) {
+            if (const float* p = v->get_if<float>()) w.item.duration = *p;
+        }
+        if (const repl::Value* v = get(5)) {
+            if (const float* p = v->get_if<float>()) w.item.tick_time = *p;
+        }
+        w.item.stacks = static_cast<int32_t>(i64(6));
+        for (uint16_t i = 0; i < 4; ++i) w.applier[i] = static_cast<uint32_t>(static_cast<int32_t>(i64(static_cast<uint16_t>(7 + i))));
+        out.push_back(std::move(w));
+    }
+    return out;
+}
+
 bool read_stat(const world::WorldActor& actor, int64_t record, float& value) {
     const repl::Subobject* st = find_sub(actor, "UAoCStatsComponent");
     if (!st || !st->obj.schema) return false;

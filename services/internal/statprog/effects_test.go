@@ -484,8 +484,8 @@ func TestExprValuesByHand(t *testing.T) {
 	if want := map[bool]float64{true: 1, false: 2}[sm.RandDouble() < 0.5]; got != want || h3.Rand.State == 5 {
 		t.Errorf("with the skill: %v, want %v", got, want)
 	}
-	// the constrained equation: Str - 20 = 60, lowered to 15: 15 * 2 + Clamped (15 + 0.75 * 100 = 90)
-	if got := eval("a constrained equation", host); got != 15*2+90 {
+	// the equations whose records list a limit give their own value: Str - 20 = 60 (the record says 0 to 15), 60 * 2 + Constrained (60 + 0.8 * 100 = 140; the other record says at most 0.75)
+	if got := eval("a constrained equation", host); got != 60*2+140 {
 		t.Errorf("a constrained equation = %v", got)
 	}
 }

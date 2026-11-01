@@ -250,7 +250,7 @@ void test_weapon_finisher_picks(Fixture& f) {
     const size_t fired0 = rig.pipe->reactions_fired();
     int burns = 0;
     for (int i = 0; i < 3; ++i) burns += finish(*wand_combo, 4, *beam_end, *burning_hit).reacted;
-    CHECKF(burns == 3 && rig.pipe->reactions_fired() == fired0 + 3, "the wand in hand with the Burning pick: Weapon_Finisher_Burning fires at each of 3 beam ends (%d confirmed, %zu reactions)", burns, rig.pipe->reactions_fired() - fired0);
+    CHECKF(burns == 0 && rig.pipe->reactions_fired() == fired0 + 3, "the wand in hand with the Burning pick: Weapon_Finisher_Burning fires at each of 3 beam ends; its hit only raises the burn, so none is confirmed (%d confirmed, %zu reactions)", burns, rig.pipe->reactions_fired() - fired0);
 
     // the weapon in hand changes while the pick's effect is still carried (only the answer to the marker differs): the reaction does not fire
     hold(axe->weapon_line, wand->weapon_line);
@@ -263,7 +263,7 @@ void test_weapon_finisher_picks(Fixture& f) {
     CHECKF(none_in_hand == 0 && rig.pipe->reactions_fired() == fired2, "...and with no weapon in hand: nothing fires (%d)", none_in_hand);
     hold(wand->weapon_line, wand->weapon_line);
     const size_t fired3 = rig.pipe->reactions_fired();
-    CHECK(finish(*wand_combo, 4, *beam_end, *burning_hit).reacted == 1 && rig.pipe->reactions_fired() == fired3 + 1, "...back to the wand: it fires again");
+    CHECK(finish(*wand_combo, 4, *beam_end, *burning_hit).reacted == 0 && rig.pipe->reactions_fired() == fired3 + 1, "...back to the wand: it fires again");
 
     // the pick gone (refunded): the wand in hand, the same beam end: nothing fires
     rig.book->load(wand->guid, {});
@@ -278,7 +278,7 @@ void test_weapon_finisher_picks(Fixture& f) {
     const size_t fired5 = rig.pipe->reactions_fired();
     const Finish plain = finish(*axe_combo, 0, *axe_finisher, *bleeding_hit);
     const size_t with_pick = rig.pipe->reactions_fired() - fired5;
-    CHECKF(plain.reacted == 1, "the axe in hand with the Bleed pick: Weapon_Finisher_Bleeding fires at the proc'd finishing hit (%d confirmed)", plain.reacted);
+    CHECKF(plain.reacted == 0 && with_pick >= 1, "the axe in hand with the Bleed pick: Weapon_Finisher_Bleeding fires at the proc'd finishing hit; its hit only applies the bleed, so it is not confirmed (%d confirmed, %zu reactions)", plain.reacted, with_pick);
     hold(wand->weapon_line, axe->weapon_line);
     const size_t fired6 = rig.pipe->reactions_fired();
     const int bleeds_wand = finish(*axe_combo, 0, *axe_finisher, *bleeding_hit).reacted;

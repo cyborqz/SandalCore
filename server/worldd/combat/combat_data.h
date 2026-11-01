@@ -43,6 +43,9 @@ struct CombatStatIds {
     int64_t health = 0, max_health = 0, mana = 0, max_mana = 0;
     int64_t move_speed_mult = 0;
     int64_t health_regeneration = 0;
+    /// The status stats a creature holds a current value of (a hit's stat mod moves them and its effects read them): how much fire damage is left to burn and for how many seconds.
+    int64_t status_burning = 0, status_burning_dur = 0;
+    bool is_status_stat(int64_t stat) const { return stat != 0 && (stat == status_burning || stat == status_burning_dur); }
 };
 
 class CombatData {

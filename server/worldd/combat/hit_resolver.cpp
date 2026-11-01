@@ -107,6 +107,7 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
     ctx.active_is_target = meta.target_is_active;
     ctx.active_in_hit = meta.active_in_hit;
     ctx.target_is_closest = meta.target_is_closest;
+    ctx.target_effects = meta.target_effects;
     const HitAspect aspect = aspect_of(ctx.tags);
     ctx.hit.tag = aspect.element;
     ctx.hit.physical = aspect.physical;
@@ -177,6 +178,142 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
         if (row && row->program >= 0 && attacker.eval(row->program, host, v, e) && std::isfinite(v)) out.threat = std::max(0.0, v);
     }
     return ok;
+}
+
+// ---- what a hit puts on its target, and whether it may run at all ----------------------------------------------------------------------
+
+namespace {
+
+// The context the expressions of a hit run in, once its stat mods are applied (the fields resolve_with fills; no rolls: the flags are the hit's).
+void fill_context(HitContext& ctx, const CombatData& data, const abilities::HitDef& hit, const HitMeta& meta, const EvalView& attacker_view, const EvalView* target_view,
+                  double distance_cm, bool enemy, bool neutral) {
+    ctx.profile = &data.profile();
+    if (hit.use_item_tags) ctx.tags = meta.item_tags;
+    ctx.tags.insert(ctx.tags.end(), hit.tags.begin(), hit.tags.end());
+    ctx.tags.insert(ctx.tags.end(), meta.ability_tags.begin(), meta.ability_tags.end());
+    ctx.source_type = meta.source_type;
+    ctx.instigator = &attacker_view;
+    ctx.target = target_view;
+    ctx.targets = meta.targets;
+    ctx.distance_cm = distance_cm;
+    ctx.enemy = enemy;
+    ctx.neutral = neutral;
+    ctx.active_is_target = meta.target_is_active;
+    ctx.active_in_hit = meta.active_in_hit;
+    ctx.target_is_closest = meta.target_is_closest;
+    ctx.target_effects = meta.target_effects;
+    const HitAspect aspect = aspect_of(ctx.tags);
+    ctx.hit.tag = aspect.element;
+    ctx.hit.physical = aspect.physical;
+}
+
+}  // namespace
+
+bool HitResolver::resolve_effects(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why) {
+    std::string err;
+    auto a = attacker.stats().evaluation(attacker.worn(), err, true);
+    if (!a) {
+        why = "the attacker's stats do not run: " + err;
+        return false;
+    }
+    auto t = target.stats().evaluation(target.worn(), err, true);
+    if (!t) {
+        why = "the target's stats do not run: " + err;
+        return false;
+    }
+    ResolverHost host(rng_);
+    const double dist = distance_cm(attacker.position(), target.position());
+    const Relation rel = data_.relation(attacker.alignments(), target.alignments());
+    return resolve_effects_with(*a, host, t.get(), dist, rel == Relation::Hostile, rel == Relation::Neutral, hit, meta, out, why);
+}
+
+bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attacker, ContextHost& host, const stats::CharacterStats::Evaluation* target, double distance_cm,
+                                       bool enemy, bool neutral, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why) {
+    bool any = false;
+    for (const content::HitEffectRow& row : hit.effects) any = any || row.kind != "self";
+    if (!any) return true;
+    const EvalView attacker_view(attacker);
+    const EvalView target_view(target ? *target : attacker);
+    if (target && target != &attacker) {
+        if (!attacker.set_actor(stats::kRoleTarget, *target, why)) return false;
+    } else {
+        attacker.clear_actors();
+    }
+    struct Forget {   // whatever way this returns, the evaluation and the host forget the hit and its actors
+        stats::CharacterStats::Evaluation& e;
+        ContextHost&                       h;
+        ~Forget() {
+            h.set_context(nullptr);
+            e.clear_actors();
+        }
+    } forget{attacker, host};
+    HitContext ctx;
+    fill_context(ctx, data_, hit, meta, attacker_view, target && target != &attacker ? &target_view : nullptr, distance_cm, enemy, neutral);
+    host.set_context(&ctx);
+    const auto number = [&](int64_t expr, double& v) {
+        const content::ExprRow* e = catalog_.expr(expr);
+        std::string err;
+        return e && e->program >= 0 && attacker.eval(e->program, host, v, err) && std::isfinite(v);
+    };
+    for (const content::HitEffectRow& row : hit.effects) {
+        if (row.kind == "self") continue;
+        const abilities::EffectDef* def = catalog_.effect(row.effect_guid);
+        if (!def) continue;
+        double v = 0;
+        // the row's own requirement, then its stack count: no expression is one stack, and a count that works out to nothing applies nothing
+        if (row.requirement_expr != 0 && (!number(row.requirement_expr, v) || v == 0)) continue;
+        double count = 1;
+        if (row.stack_count_expr != 0 && !number(row.stack_count_expr, count)) {
+            why += (why.empty() ? "" : "; ") + std::string("the stack count of ") + def->row.name + " does not run";
+            continue;
+        }
+        const int stacks = static_cast<int>(std::clamp(std::floor(count), 0.0, 4096.0));
+        if (stacks < 1) continue;
+        // the effect's own requirement (it reads the target: the burn is applied to a target that has burn to give)
+        if (def->row.requirement_expr != 0 && (!number(def->row.requirement_expr, v) || v == 0)) continue;
+        effects::Applied a;
+        a.def = def;
+        a.stacks = stacks;
+        // the duration: the row's, else the record's (a number of seconds), else none
+        if (row.duration_expr != 0 && number(row.duration_expr, v)) {
+            a.duration = std::max(0.0, v);
+        } else if (!def->row.infinite_duration && def->row.duration_expr != 0) {
+            if (!number(def->row.duration_expr, v)) {
+                why += (why.empty() ? "" : "; ") + std::string("the duration of ") + def->row.name + " does not run";
+                continue;
+            }
+            a.duration = std::max(0.0, v);
+        }
+        a.in_place_limit = std::max(1, def->row.global_stack_limit);
+        if (def->row.in_place_stack_limit_expr != 0 && number(def->row.in_place_stack_limit_expr, v) && v >= 1) a.in_place_limit = static_cast<int>(std::min(v, 4096.0));
+        for (const content::ModRow& m : def->mods) {
+            if (m.shield_absorb || m.value_expr == 0 || m.stat_guid == content::kGuidTempHealth) continue;
+            if (number(m.value_expr, v)) a.mods.push_back({m.stat_guid, v});
+        }
+        out.effects.push_back(std::move(a));
+    }
+    return true;
+}
+
+bool HitResolver::requirement_holds(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta) {
+    if (hit.row.requirement_expr == 0) return true;
+    std::string err;
+    auto a = attacker.stats().evaluation(attacker.worn(), err, true);
+    auto t = target.stats().evaluation(target.worn(), err, true);
+    const content::ExprRow* e = catalog_.expr(hit.row.requirement_expr);
+    if (!a || !t || !e || e->program < 0) return false;
+    if (!a->set_actor(stats::kRoleTarget, *t, err)) return false;
+    const EvalView attacker_view(*a), target_view(*t);
+    const Relation rel = data_.relation(attacker.alignments(), target.alignments());
+    HitContext ctx;
+    fill_context(ctx, data_, hit, meta, attacker_view, &target_view, distance_cm(attacker.position(), target.position()), rel == Relation::Hostile, rel == Relation::Neutral);
+    ResolverHost host(rng_);
+    host.set_context(&ctx);
+    double v = 0;
+    const bool ran = a->eval(e->program, host, v, err) && std::isfinite(v);
+    host.set_context(nullptr);
+    a->clear_actors();
+    return ran && v != 0;
 }
 
 }  // namespace aoc::worldd::combat

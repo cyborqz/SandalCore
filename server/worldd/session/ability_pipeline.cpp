@@ -413,6 +413,18 @@ bool is_weapon_combo(const content::AbilityRow& row) {
     return row.name.rfind("WeaponCombo_", 0) == 0;
 }
 
+// The effects an actor of the world holds, as the world's port knows them, for the expressions of a hit on it.
+class PortEffects final : public combat::TargetEffects {
+public:
+    PortEffects(combat::HitPort& port, uint64_t actor, double t) : port_(port), actor_(actor), t_(t) {}
+    double remaining(int64_t effect_guid) const override { return port_.effect_remaining(actor_, effect_guid, t_); }
+
+private:
+    combat::HitPort& port_;
+    uint64_t         actor_;
+    double           t_;
+};
+
 }  // namespace
 
 // What a program asks of the host besides the stats: the instigator's effect counts, a seeded random number, nothing of a running ability's
@@ -1250,6 +1262,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         meta.target_is_active = id == active;
         meta.active_in_hit = active_in_hit;
         meta.target_is_closest = id == closest;
+        const PortEffects target_effects(*combat_, id, t);   // what the target holds (GetEffectRemainingDuration(GetTarget(), ...))
+        meta.target_effects = &target_effects;
         combat::Resolved r;
         if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, r, why)) {
             if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on another actor: {}", hit.row.name, why);
@@ -1282,6 +1296,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             // a stat mod whose value is 0 is not on the wire [R: the book's Weapon_Book_Hit_n, whose mod is the data's "0", carries no StatMod in
             // 408 of 408 retail confirmations; a heal at full Health keeps its Value with EffectiveValue 0]
             if (r.mods[i].value == 0.0 && d.effective[i] == 0.0) continue;
+            // what a hit raises on a creature's burn is no number the client draws: the Fireball's burning hit is confirmed with no mods [R: the retail confirmation of it]
+            if (combat_->data().ids().is_status_stat(r.mods[i].stat_guid)) continue;
             out.mods.push_back({r.mods[i].stat_mod_guid, static_cast<float>(r.mods[i].value), static_cast<float>(d.effective[i])});
         }
         outs.push_back(std::move(out));
@@ -1301,6 +1317,22 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
                     if (!def->row.infinite_duration && def->row.duration_expr != 0) eval(def->row.duration_expr, seconds, why);
                     if (row.duration_expr != 0) eval(row.duration_expr, seconds, why);
                     combat_->shield(id, amount, std::max(0.0, seconds), t);
+                }
+            }
+            // ... and the target's effects (a burn, a bleed, a debuff) go on its effect list, with their numbers worked out here, for the character as he is and the target as
+            // the hit left it: what the hit's own stat mods raised may be what an effect requires (the burn needs the burn this hit added)
+            bool applies_effects = false;
+            for (const content::HitEffectRow& row : hit.effects) applies_effects = applies_effects || row.kind != "self";
+            std::string after_err;
+            if (applies_effects && !d.lethal) {
+                if (auto after = tf->stats().evaluation(tf->worn(), after_err, true)) {
+                    combat::Resolved gate;
+                    std::string gate_why;
+                    if (combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, gate,
+                                                                 gate_why)) {
+                        if (!gate_why.empty()) spdlog::debug("[abilities] the effects of {} on actor {}: {}", hit.row.name, id, gate_why);
+                        if (!gate.effects.empty()) combat_->apply_effects(id, gate.effects, t);
+                    }
                 }
             }
         }
@@ -1339,7 +1371,13 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         h.response = src.response;
         confirmations_.push_back(std::move(h));
     };
-    if (!src.source_is_target) {
+    // A hit the client asked for or predicted is always confirmed; one the server makes by itself (a reaction's) only when there is something to show: a number, or an effect to
+    // play [R: the retail confirmations of a reaction's effect-only hit: none when it applied].  Its reactions still see it land.
+    bool shows = hit.row.has_fx;
+    for (const bootstrap::HitTargetOut& o : outs) shows = shows || !o.mods.empty();
+    if (src.type == content::kSourceTypeReaction && !shows) {
+        // nothing to confirm
+    } else if (!src.source_is_target) {
         // a bounce's child hit names the enemy the projectile flew from as its Source, and the next enemy is its target [R: the recorded bounce hit of the Throw]
         if (src.source_actor != 0) confirm(std::move(outs), combat_->guid_of(src.source_actor));
         else confirm(std::move(outs), std::nullopt);
@@ -1422,6 +1460,38 @@ void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, 
     h.flags = flags;
     confirmations_.push_back(std::move(h));
     emit({AbilityChange{}, std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character's mount"});
+}
+void AbilityPipeline::confirm_effect_hit(const combat::EffectHitNote& note, double now) {
+    if (!combat_) return;
+    advance(now);
+    bootstrap::HitConfirm h;
+    h.record_guid = note.hit_guid;
+    h.source_type = content::kSourceTypeEffect;
+    h.source_guid = note.effect_guid;
+    h.source_is_actor = false;
+    h.source = combat_->guid_of(note.holder);   // an effect's hit on a creature names the creature as its source; the instigator is the character
+    h.predicted_autonomous = note.predicted;
+    h.predicted_simulated = note.predicted;
+    bootstrap::HitTargetOut out;
+    out.component = combat_->guid_of(note.holder);
+    out.cylinder = combat_->hit_component_of(note.holder);
+    const combat::TargetInfo ti = combat_->inspect(note.holder);
+    out.has_impact = true;
+    out.impact_location = {ti.position.x, ti.position.y, ti.position.z};
+    {
+        const combat::Vec3 from = combat_->self().position();
+        double nx = from.x - ti.position.x, ny = from.y - ti.position.y, nz = from.z - ti.position.z;
+        const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+        if (len > 1e-6) { nx /= len; ny /= len; nz /= len; } else { nx = 0; ny = 0; nz = 1; }
+        out.impact_normal = {nx, ny, nz};
+    }
+    out.flags = note.flags;
+    for (size_t i = 0; i < note.mods.size(); ++i) {
+        out.mods.push_back({note.mods[i].stat_mod_guid, static_cast<float>(note.mods[i].value), static_cast<float>(i < note.effective.size() ? note.effective[i] : 0.0)});
+    }
+    h.targets.push_back(std::move(out));
+    confirmations_.push_back(std::move(h));
+    emit({AbilityChange{}, std::nullopt, now_, "an effect's hit on actor " + std::to_string(note.holder)});
 }
 // -- C O A & Cyb --
 

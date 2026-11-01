@@ -65,6 +65,10 @@ bool HitContext::host_fn(int fn, const std::string& name, const double* /*args*/
         out = profile->calculate(fn, *instigator, tgt, seen);
         return true;
     }
+    if (fn == stats::role_fn(stats::kRoleTarget, stats::kRoleOpEffectRemaining)) {
+        out = target && target_effects ? target_effects->remaining(std::strtoll(name.c_str(), nullptr, 10)) : 0.0;
+        return true;
+    }
     switch (fn) {
         case stats::kHostDistanceBetween: {
             int a = 0, b = 0;
