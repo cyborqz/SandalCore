@@ -52,7 +52,7 @@
 //                       ServerRequestClientLoad              the four storage payloads on the PlayerController,
 //                                                            ClientUpdateGroup (empty) and the class's default
 //                                                            action bar (transcript section 2.2, pkt#597-607)
-//                       ServerUpdateAccountCombatSettings    the nine CombatSettings values of pkt#620 as the
+//                       ServerUpdateAccountCombatSettings    all 50 CombatSettings values of the request as the
 //                                                            client's own, on the PlayerController's
 //                                                            CharacterInGameSettings (below)
 //    pawn               ServerClientIsReadyToPhaseIn         the phase-in update, once (pkt#2523)
@@ -190,10 +190,13 @@
 //  over the last good position when its location or yaw differs from the record's, or when a hand-over was made before
 //  (the player may be back where it started).  A session that never moved saves nothing.
 //
-//  ServerUpdateAccountCombatSettings.  The original answered with a PlayerController property block holding the nine
-//  values that differ from the class defaults (pkt#620: eight equal the request's, PartyVFX does not).  The defaults are
-//  not known to worldd and the other 41 values of the request were never sent in a block, so exactly these nine paths
-//  are echoed, each with the request's value (an absent one is left out).  Not proven in game.
+//  ServerUpdateAccountCombatSettings.  The client keeps the combat and targeting options (the Options menu's auto-attack,
+//  held-ability, click-target, soft-lock, ability effect and PvP choices) in its own save and sends all 50 values at every
+//  login; the PlayerController's CharacterInGameSettings.CombatSettings is what the options page shows and what combat
+//  reads, and only the server's property updates fill it.  The original answered with a property block holding the values
+//  that differ from the class defaults (pkt#620: nine, of which eight equal the request's, PartyVFX does not).  The
+//  defaults are not known to worldd, so every value of the request goes back as the client's own (the nine of pkt#620
+//  among them; one that equals the default changes nothing on the client).  Not proven in game.
 //
 //  The world's other actors (plan E1, stage 1; world/actor_registry.h, session/actor_view.h, spawns/area_loader.h).  The session owns an
 //  ActorView on the world's registry: once the join and the phase-in are on the wire it gives the view the player's last good position
@@ -356,18 +359,9 @@ std::string url_option(std::string_view url, std::string_view key);
 bootstrap::LoginIdentity make_login_identity(const std::optional<LoginMessage>& message, const svc::Character& character,
                                              std::vector<std::string>* notes);
 
-/// The PlayerController properties ServerUpdateAccountCombatSettings is echoed on (pkt#620's nine).
-inline constexpr std::array<std::string_view, 9> kCombatEchoPaths = {
-    "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.MayHarmAngle",
-    "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.ProximityRadius",
-    "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.MaxDistance",
-    "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.ForwardOffset",
-    "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.TabTargetMethod",
-    "CharacterInGameSettings.CombatSettings.Targeting.bEnableHoverCasting",
-    "CharacterInGameSettings.CombatSettings.Targeting.SoftLock.VisualsMask",
-    "CharacterInGameSettings.CombatSettings.Input.BufferDuration",
-    "CharacterInGameSettings.CombatSettings.Rendering.PartyVFX",
-};
+/// The prefix of the PlayerController properties ServerUpdateAccountCombatSettings is echoed on: its request names each of the
+/// 50 values "CombatSettings.<path>", the PlayerController holds them as "CharacterInGameSettings.CombatSettings.<path>".
+inline constexpr std::string_view kCombatEchoPrefix = "CharacterInGameSettings.";
 
 class PlayerSession {
 public:

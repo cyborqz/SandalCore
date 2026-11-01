@@ -1108,7 +1108,7 @@ static void test_possession_bunch_and_requests() {
     CHECK(std::vector<std::string>(names.begin() + 1, names.end()) == rest, "then the four storage payloads, the group and the action bar");
 // ~ C-O-A & C.Y.B ~
 
-    // the echo: the nine values of pkt#620 as the request's own; eight equal the original's, PartyVFX is the client's
+    // the echo: all 50 values of the request as the client's own; the nine of pkt#620 among them: eight equal the original's, PartyVFX is the client's
     const auto blocks = repl::read_content_blocks(pc[0]->content.data(), pc[0]->content.bit_pos(), 0);
     std::optional<repl::RepState> echo;
     if (blocks && blocks->size() == 1) {
@@ -1122,10 +1122,22 @@ static void test_possession_bunch_and_requests() {
         size_t p = (*ob)[0].payload_pos;
         orig = repl::read_rep_block(pc_cls, original.data(), (*ob)[0].payload_pos + (*ob)[0].payload_bits, p);
     }
-    CHECK(echo && orig && echo->values().size() == 9 && pc[0]->reliable && pc[0]->exports.empty(), "the echo is one reliable PlayerController block of nine values");
+    CHECK(echo && orig && echo->values().size() == 50 && pc[0]->reliable && pc[0]->exports.empty(), "the echo is one reliable PlayerController block of the request's 50 values");
     if (echo && orig) {
+        // the nine values the original's reply (pkt#620) carries
+        constexpr std::array<std::string_view, 9> k_pkt620 = {
+            "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.MayHarmAngle",
+            "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.ProximityRadius",
+            "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.MaxDistance",
+            "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.ForwardOffset",
+            "CharacterInGameSettings.CombatSettings.Targeting.TabTarget.TabTargetMethod",
+            "CharacterInGameSettings.CombatSettings.Targeting.bEnableHoverCasting",
+            "CharacterInGameSettings.CombatSettings.Targeting.SoftLock.VisualsMask",
+            "CharacterInGameSettings.CombatSettings.Input.BufferDuration",
+            "CharacterInGameSettings.CombatSettings.Rendering.PartyVFX",
+        };
         int equal = 0, party_vfx_differs = 0;
-        for (const std::string_view path : kCombatEchoPaths) {
+        for (const std::string_view path : k_pkt620) {
             const repl::Value* mine = echo->get(pc_cls, path);
             const repl::Value* theirs = orig->get(pc_cls, path);
             if (mine && theirs && *mine == *theirs) ++equal;

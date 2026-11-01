@@ -293,7 +293,7 @@ bunch exported (`mark_exported`), so later chains name those objects without the
 |---|---|
 | PlayerController `ServerAcknowledgePossession` | logged |
 | `ServerRequestClientLoad` | the four storage payloads on the PlayerController (Backpack, Equipment, QuestStorage, resource, holding the character's items), `ClientUpdateGroup` (empty) and the default action bar (pkt#597-607) |
-| `ServerUpdateAccountCombatSettings` | the nine `CharacterInGameSettings.CombatSettings` values of pkt#620 with the request's values, as a PlayerController update (`kCombatEchoPaths`; the other 41 values are not echoed: the class defaults are not known to worldd) |
+| `ServerUpdateAccountCombatSettings` | all 50 `CharacterInGameSettings.CombatSettings` values of the request, as the client's own, in one PlayerController update (the nine values of pkt#620 are among them; the client keeps its combat and targeting options in its save and only this update fills the PlayerController's copy that the options page shows; the class defaults are not known to worldd, so values equal to them go back too) |
 | pawn `ServerClientIsReadyToPhaseIn` | the phase-in update (`bHidden` 0, `bIsPhasedOut` 0, `bClientIsReadyToPhaseIn` 1), once |
 | `ServerRequestStorageData` | the named container's storage payload, with its items, on the pawn (pkt#773) |
 | pawn `ServerItemUsed` | wears the item in a bag slot or takes off the item in an equipment slot (plan B2, below): the storage events and the gear's update in one packet, or, refused, the Backpack's and the Equipment's payloads |

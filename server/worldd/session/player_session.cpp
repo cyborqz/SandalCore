@@ -3396,26 +3396,33 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
 }
 
 void PlayerSession::on_combat_settings(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
-    constexpr std::string_view kPrefix = "CharacterInGameSettings.";
-    std::vector<bootstrap::PropertyValue> values;
+    // every value the request carries goes back as the PlayerController's own: the client's options page and its combat code read that block,
+    // and nothing but this update fills it (the paths are built here, so the lambda below owns them together with the values)
+    std::vector<std::string> paths;
+    std::vector<repl::Value> held;
     if (rpc.call.decoded) {
-        for (const std::string_view path : kCombatEchoPaths) {
-            const schema::RepCommand* c = repl::rpc_command(*rpc.call.rpc, path.substr(kPrefix.size()));
-            if (!c) continue;
-            const auto it = rpc.call.params.values.find(c->handle);
-            if (it != rpc.call.params.values.end()) values.push_back({path, it->second});
+        for (const schema::RepCommand& c : rpc.call.rpc->commands) {
+            const auto it = rpc.call.params.values.find(c.handle);
+            if (it == rpc.call.params.values.end()) continue;
+            paths.push_back(std::string(kCombatEchoPrefix) + c.path);
+            held.push_back(it->second);
         }
     }
-    if (values.empty()) {
-        spdlog::log(level_for(combat_empty_logged_), "[session] {}: the client's combat settings carry none of the {} values worldd echoes",
-                    name(), kCombatEchoPaths.size());
+    const size_t total = rpc.call.rpc ? rpc.call.rpc->commands.size() : 0;
+    if (paths.empty()) {
+        spdlog::log(level_for(combat_empty_logged_), "[session] {}: the client's combat settings carry no value worldd can echo", name());
         return;
     }
     if (!within_budget(combat_budget_, "ServerUpdateAccountCombatSettings", now) || !room_for(1)) return;
-    spdlog::log(level_for(combat_logged_), "[session] {}: the client's combat settings: echoing {} of the {} values worldd sends", name(),
-                values.size(), kCombatEchoPaths.size());
+    spdlog::log(level_for(combat_logged_), "[session] {}: the client's combat settings: echoing {} of the {} values", name(), paths.size(), total);
     queue("combat settings echo",
-          [values = std::move(values)](bootstrap::PlayerBootstrap& pb) { return pb.combat_settings_echo(values); }, conn);
+          [paths = std::move(paths), held = std::move(held)](bootstrap::PlayerBootstrap& pb) {
+              std::vector<bootstrap::PropertyValue> values;
+              values.reserve(paths.size());
+              for (size_t i = 0; i < paths.size(); ++i) values.push_back({paths[i], held[i]});
+              return pb.combat_settings_echo(values);
+          },
+          conn);
 }
 
 void PlayerSession::on_storage_request(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
