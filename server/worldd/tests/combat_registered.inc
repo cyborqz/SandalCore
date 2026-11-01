@@ -12,3 +12,8 @@
 #include "combat_forged_requests_tests.inc"
 #include "combat_table_errors_tests.inc"
 #include "combat_fire_notify_tests.inc"
+#include "combat_player_cast_tests.inc"
+#include "combat_npc_hits_tests.inc"
+#include "combat_creature_gates_tests.inc"
+#include "combat_creature_swing_tests.inc"
+#include "combat_humanoid_tests.inc"

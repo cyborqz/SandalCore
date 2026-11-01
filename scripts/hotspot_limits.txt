@@ -5,3 +5,6 @@
 # <most lines> <path from the repository root>
 1052 server/worldd/session/player_session.cpp
 1826 server/worldd/session/player_session.h
+296 server/worldd/tests/test_worldd_combat.cpp
+701 server/worldd/tests/test_worldd_session.cpp
+351 services/internal/content/content_test.go
