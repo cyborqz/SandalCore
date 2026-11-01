@@ -124,6 +124,20 @@ void put(adminv1::Position* out, const GmPosition& p) {
     out->set_z(p.z);
 }
 
+/// The stats of a character, as the answer carries them.
+void fill_stats(google::protobuf::RepeatedPtrField<adminv1::StatInfo>* out, const std::vector<GmStatInfo>& stats) {
+    for (const GmStatInfo& st : stats) {
+        adminv1::StatInfo* info = out->Add();
+        info->set_guid(st.guid);
+        info->set_name(st.name);
+        info->set_flags(st.flags);
+        info->set_value(st.value);
+        info->set_max(st.max);
+        info->set_has_override(st.has_override);
+        info->set_override(st.override);
+    }
+}
+
 }  // namespace
 
 struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
@@ -338,6 +352,52 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         resp->set_level(out.level);
         resp->set_points_earned(out.points_earned);
         resp->set_points_left(out.points_left);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status GetPlayerStats(grpc::ServerContext* ctx, const adminv1::GetPlayerStatsRequest* req,
+                             adminv1::GetPlayerStatsResponse* resp) override {
+        if (auto s = authorize(ctx, "GetPlayerStats"); !s.ok()) return s;
+        GmStatsResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.get_player_stats(req->character()); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        fill_stats(resp->mutable_stats(), out.stats);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status SetStatMods(grpc::ServerContext* ctx, const adminv1::SetStatModsRequest* req,
+                         adminv1::SetStatModsResponse* resp) override {
+        if (auto s = authorize(ctx, "SetStatMods"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        std::vector<std::pair<int64_t, double>> mods;
+        mods.reserve(req->mods_size());
+        for (const adminv1::StatMod& m : req->mods()) mods.emplace_back(m.stat(), m.value());
+        GmStatModsResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.set_stat_mods(req->character(), mods, by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        fill_stats(resp->mutable_stats(), out.stats);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ClearStatMods(grpc::ServerContext* ctx, const adminv1::ClearStatModsRequest* req,
+                           adminv1::ClearStatModsResponse* resp) override {
+        if (auto s = authorize(ctx, "ClearStatMods"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmStatModsResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.clear_stat_mods(req->character(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        fill_stats(resp->mutable_stats(), out.stats);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status SetCurrentStat(grpc::ServerContext* ctx, const adminv1::SetCurrentStatRequest* req,
+                            adminv1::SetCurrentStatResponse* resp) override {
+        if (auto s = authorize(ctx, "SetCurrentStat"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmCurrentStatResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.set_current_stat(req->character(), req->stat(), req->value(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_value(out.value);
         return grpc::Status::OK;
     }
 

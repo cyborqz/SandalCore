@@ -65,6 +65,16 @@ service WorldAdminService {
   // (refund them first). NotFound for a character that is not in the world or a line that is none; InvalidArgument for a name that fits several lines (the answer lists them) and for an amount outside
   // 1 to 25 (a level) or 0 to 5,718,160 (a total); FailedPrecondition for a refusal of the line's tree.
   rpc SetWeaponXp(SetWeaponXpRequest) returns (SetWeaponXpResponse);
+  // The bundle's stats with the player's current values and the game master's
+  // override on each. The catalog is the whole bundle, so the dashboard shows
+  // every stat the game has.
+  rpc GetPlayerStats(GetPlayerStatsRequest) returns (GetPlayerStatsResponse);
+  // The game master's stat mods on a player, replacing the ones already there.
+  rpc SetStatMods(SetStatModsRequest) returns (SetStatModsResponse);
+  // The game master's stat mods on a player are removed.
+  rpc ClearStatMods(ClearStatModsRequest) returns (ClearStatModsResponse);
+  // The current value of a stat the player holds (Health, Mana, Stamina).
+  rpc SetCurrentStat(SetCurrentStatRequest) returns (SetCurrentStatResponse);
 
   // ---- NPC actions: a game master's tools on one creature. Each takes the creature's actor id, as the world stream and Inspect give it, and is applied on the network thread like the
   // calls above. NotFound for an id that is not in the world; InvalidArgument for an actor that is not a creature (a player, a resource node, a mount, a station) and for a point
@@ -274,6 +284,37 @@ message SetWeaponXpResponse {
   int64 points_earned = 7;    // the Weapon talent points the line's level gives (1 for each level from 2)
   int64 points_left = 8;      // ... and what the ranks bought in the line's tree leave
 }
+
+// One stat of the bundle, with the player's current value.
+message StatInfo {
+  int64  guid    = 1;   // the stat's guid in the bundle
+  string name    = 2;   // the bundle's name (English)
+  uint32 flags   = 3;   // the bundle's kStat* flags
+  double value   = 4;   // the player's current value (0 when the player is offline)
+  double max     = 5;   // its maximum (0 when the stat has none)
+  bool   has_override = 6;
+  double override = 7;  // the game master's override on it (0 when there is none)
+}
+
+// A stat mod: a stat's guid and the value the game master gives it. The stat's
+// own rule decides what the value means: an additive stat adds it, a multiplying
+// one multiplies by it.
+message StatMod {
+  int64  stat  = 1;
+  double value = 2;
+}
+
+message GetPlayerStatsRequest  { string character = 1; }
+message GetPlayerStatsResponse { repeated StatInfo stats = 1; }
+
+message SetStatModsRequest  { string character = 1; repeated StatMod mods = 2; }
+message SetStatModsResponse { repeated StatInfo stats = 1; }   // the stats after the change
+
+message ClearStatModsRequest  { string character = 1; }
+message ClearStatModsResponse { repeated StatInfo stats = 1; }
+
+message SetCurrentStatRequest  { string character = 1; int64 stat = 2; double value = 3; }
+message SetCurrentStatResponse { double value = 1; }
 
 message GiveItemRequest {
   string character = 1;
