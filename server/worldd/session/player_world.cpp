@@ -5,6 +5,7 @@
 //  session/player_world.cpp
 // ============================================================================
 #include "session/player_world.h"
+#include "net/tick_profile.h"
 
 #include "combat/npc_replicator.h"
 #include "world/interaction_state.h"
@@ -1132,10 +1133,13 @@ void PlayerWorld::tick_props(double now_seconds) {
 void PlayerWorld::tick_world(double now_seconds) {
     world_clock_ = now_seconds;
     tick_props(now_seconds);
-    // (review A I2) the Endpoint ticks the world after every datagram it reads: the window is driven at the world's 20 Hz, not at that rate (the NPC world gates itself at 15 Hz)
+    // (review A I2) the window is driven at most every 45 ms, whatever the tick's rate (the old loop ticked the world after every datagram it read; the NPC world gates itself at 15 Hz)
+    TickProfile& profile = tick_profile();   // (--loop-stats: where the tick's time goes)
     if (nav_ && nav_->windowed() && npcs_ && now_seconds - last_window_drive_ >= kWindowPeriodSeconds) {
         last_window_drive_ = now_seconds;
+        const auto w = std::chrono::steady_clock::now();
         drive_window(now_seconds);
+        if (profile.on) profile.window_us += tick_profile_us_since(w);
     }
     const auto ms = [](std::chrono::steady_clock::time_point a) { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - a).count(); };
     auto t = std::chrono::steady_clock::now();
@@ -1145,17 +1149,27 @@ void PlayerWorld::tick_world(double now_seconds) {
     if (node_pops_) node_pops_->tick(now_seconds);
     if (!placed_stations_.empty() && city_nodes_ && placed_seen_version_ != city_nodes_->version()) reap_placed_stations();
     if (city_nodes_ && roads_.level_roads() != 0 && roads_seen_version_ != city_nodes_->version()) apply_road_levels();
-    window_cost_.max_people_ms = std::max(window_cost_.max_people_ms, ms(t));
+    const double people_ms = ms(t);
+    window_cost_.max_people_ms = std::max(window_cost_.max_people_ms, people_ms);
     t = std::chrono::steady_clock::now();
     if (npcs_) npcs_->tick(now_seconds);
     check_towns(now_seconds);
-    window_cost_.max_npcs_ms = std::max(window_cost_.max_npcs_ms, ms(t));
+    const double npcs_ms = ms(t);
+    window_cost_.max_npcs_ms = std::max(window_cost_.max_npcs_ms, npcs_ms);
     t = std::chrono::steady_clock::now();
     if (combat_) combat_->tick(now_seconds);
-    window_cost_.max_combat_ms = std::max(window_cost_.max_combat_ms, ms(t));
+    const double combat_ms = ms(t);
+    window_cost_.max_combat_ms = std::max(window_cost_.max_combat_ms, combat_ms);
     t = std::chrono::steady_clock::now();
     if (aftermath_) aftermath_->tick(now_seconds);
-    window_cost_.max_aftermath_ms = std::max(window_cost_.max_aftermath_ms, ms(t));
+    const double aftermath_ms = ms(t);
+    window_cost_.max_aftermath_ms = std::max(window_cost_.max_aftermath_ms, aftermath_ms);
+    if (profile.on) {
+        profile.people_us += people_ms * 1000.0;
+        profile.npcs_us += npcs_ms * 1000.0;
+        profile.combat_us += combat_ms * 1000.0;
+        profile.aftermath_us += aftermath_ms * 1000.0;
+    }
     if (scenery_) scenery_->tick();   // a town whose level changed gets a new full payload (every connection that holds its replicator is sent the update)
 }
 

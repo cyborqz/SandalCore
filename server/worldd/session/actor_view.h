@@ -213,6 +213,8 @@ private:
     };
 
     void     pass(Connection& conn, double x, double y, Clock::time_point now);
+    /// tick() without its timing (--loop-stats).
+    void     tick_unprofiled(Connection& conn, double x, double y, Clock::time_point now);
     /// The actor as this connection sees it: `a.actor`, or `scratch` made from it with the player's guid in the interaction state maps.
     const protocol::repl::Actor& view_of(const world::WorldActor& a, protocol::repl::Actor& scratch) const;
     /// The open of `a` on a new channel (the shadow `work` is reset first), with the exports its blocks need.

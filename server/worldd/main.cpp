@@ -20,6 +20,8 @@
 #include "login/login_worker.h"
 #include "net/cookie.h"
 #include "net/endpoint.h"
+#include "net/tick_loop.h"
+#include "net/tick_profile.h"
 #include "net/udp_socket.h"
 #include "protocol/server_guid_allocator.h"
 #include "session/player_world.h"
@@ -41,6 +43,8 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -52,6 +56,14 @@
 #include <thread>
 #include <utility>
 // CoA - C.Y.B
+
+#if defined(_MSC_VER)
+// The fixed-rate tick waits on the socket until its next tick is due: Windows ends such waits on its timer step, 15.6 ms unless the
+// process asks for 1 ms (timeapi.h's declarations, without windows.h in this file).
+#pragma comment(lib, "winmm.lib")
+extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned int period_ms);
+extern "C" __declspec(dllimport) unsigned int __stdcall timeEndPeriod(unsigned int period_ms);
+#endif
 
 using namespace aoc::worldd;
 
@@ -65,6 +77,54 @@ void sleep_unless_stopped(std::chrono::milliseconds d) {
     const auto until = Clock::now() + d;
     while (!g_stop && Clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
+
+double us_between(Clock::time_point a, Clock::time_point b) { return std::chrono::duration<double, std::micro>(b - a).count(); }
+
+// The loop's own numbers (--loop-stats <seconds>; off by default, it changes no behaviour).  Every interval one `[loop]` line in the form the load
+// test reads: the units of work (the ticks; with --tick-hz 0 the old loop's passes, a datagram and the tick after it), the share of the interval
+// spent working (the units and, with the tick, the datagrams), the p50, p99 and longest unit (a histogram of 8 buckets to the doubling from 1 us:
+// bucket i ends at 2^((i+1)/8) us, a longer unit lands in the last), the datagrams, the bytes and packets each way, the sessions and the position
+// saver's queue.
+struct LoopStats {
+    static constexpr int kBuckets = 8 * 24;   // up to 2^24 us, 16.8 s
+    std::array<uint32_t, kBuckets> hist{};
+    uint64_t units = 0, datagrams = 0, bytes_in = 0, bytes_out = 0, packets_out = 0;
+    double busy_us = 0, max_us = 0, unit_us = 0, receive_us = 0;
+
+    void note_datagram(size_t bytes, double us) {
+        ++datagrams;
+        bytes_in += bytes;
+        receive_us += us;
+    }
+    void note_unit(double us) {
+        ++units;
+        busy_us += us;
+        unit_us += us;
+        max_us = std::max(max_us, us);
+        int i = us < 1.0 ? 0 : static_cast<int>(8.0 * std::log2(us));
+        if (i >= kBuckets) i = kBuckets - 1;
+        ++hist[static_cast<size_t>(i)];
+    }
+    double percentile_us(double p) const {
+        if (units == 0) return 0;
+        const uint64_t want = std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(p * static_cast<double>(units))));
+        uint64_t seen = 0;
+        for (int i = 0; i < kBuckets; ++i) {
+            seen += hist[static_cast<size_t>(i)];
+            if (seen >= want) return std::min(std::exp2(static_cast<double>(i + 1) / 8.0), max_us);
+        }
+        return max_us;
+    }
+    std::string buckets() const {
+        std::string out;
+        for (int i = 0; i < kBuckets; ++i) {
+            if (hist[static_cast<size_t>(i)] == 0) continue;
+            if (!out.empty()) out += ',';
+            out += std::to_string(i) + ":" + std::to_string(hist[static_cast<size_t>(i)]);
+        }
+        return out;
+    }
+};
 
 }  // namespace
 
@@ -312,7 +372,28 @@ int main(int argc, char** argv) {
     app.add_option("--max-sessions", endpoint_config.max_sessions,
                    "the most client sessions at once; further handshakes are ignored (0: no limit)")
         ->capture_default_str();
+    // the server's tick at a fixed rate (net/tick_loop.h)
+    int tick_hz = 30;
+    double loop_stats_seconds = 0;
+    app.add_option("--tick-hz", tick_hz,
+                   "the server's tick, times a second (10 to 120): every session's due work and every client's packets; the original server sent every 33 ms, 30 times a second. "
+                   "The NPCs keep their 15 Hz step and each player's view of the world its 15 passes a second whatever the tick. 0: the old loop, a tick after every datagram")
+        ->envname("AOC_TICK_HZ")
+        ->capture_default_str();
+    app.add_option("--loop-stats", loop_stats_seconds,
+                   "every N seconds print a [loop] line (the ticks, the share of the time working, the p50/p99/longest tick, the datagrams and bytes each way, the sessions, the "
+                   "save queue) and a [tick] line (the rate, and where the tick's time went: the world, the sessions, their views, the sends, the costliest session); 0: off")
+        ->envname("AOC_LOOP_STATS_SECONDS")
+        ->capture_default_str();
     CLI11_PARSE(app, argc, argv);
+    if (tick_hz != 0 && (tick_hz < TickSchedule::kMinHz || tick_hz > TickSchedule::kMaxHz)) {
+        std::fprintf(stderr, "--tick-hz must be 0 (the old loop) or %d to %d, not %d\n", TickSchedule::kMinHz, TickSchedule::kMaxHz, tick_hz);
+        return 2;
+    }
+    if (!std::isfinite(loop_stats_seconds) || loop_stats_seconds < 0) {
+        std::fprintf(stderr, "--loop-stats must be a number of seconds, 0 or more, not %g\n", loop_stats_seconds);
+        return 2;
+    }
     // CLI11's Range lets a NaN through (every comparison with it is false), so the numbers that were range-checked are checked once more as numbers
     {
         const std::pair<const char*, double> checked[] = {
@@ -420,6 +501,17 @@ int main(int argc, char** argv) {
         spdlog::error("worldd refuses every login: {}", players.content_problem());
     }
     players.set_movement(movement);
+    if (tick_hz > 0) {
+        // each player's view pass and its Dormancy closes keep their lengths (67 ms, 134 ms) on the tick's grid
+        ActorView::Config view = players.view_config();
+        tick_view_timing(view.relevancy, TickSchedule::period_of(tick_hz));
+        players.set_view_config(view);
+        spdlog::info("[tick] the server ticks {} times a second (every {:.2f} ms): each tick runs every session's due work and sends every client's packets; the NPCs step 15 times a "
+                     "second and each player's view of the world passes every {} ms (Dormancy closes after {} ms)",
+                     tick_hz, std::chrono::duration<double, std::milli>(TickSchedule::period_of(tick_hz)).count(), view.relevancy.tick.count(), view.relevancy.dormancy_delay.count());
+    } else {
+        spdlog::info("[tick] --tick-hz 0: the old loop, every session's tick and sends after every datagram (and every 10 ms without one)");
+    }
     players.set_position_sink(&saver);
     players.set_gm_commands(gm_commands);
     players.set_reactions_enabled(!no_reactions);
@@ -688,8 +780,13 @@ int main(int argc, char** argv) {
     LoginWorker worker(login, reg.server_id, [&](uint64_t id, LoginResult r) {
         endpoint_ptr->post_login_result(id, std::move(r));
     });
+    LoopStats loop_stats;
     Endpoint endpoint(endpoint_config, signer, worker,
-                      [&](const Address& to, const std::vector<uint8_t>& pkt) { socket->send(to, pkt.data(), pkt.size()); },
+                      [&](const Address& to, const std::vector<uint8_t>& pkt) {
+                          loop_stats.bytes_out += pkt.size();
+                          ++loop_stats.packets_out;
+                          socket->send(to, pkt.data(), pkt.size());
+                      },
                       secure_random, Clock::now());
     endpoint_ptr = &endpoint;
 
@@ -752,23 +849,100 @@ int main(int argc, char** argv) {
         }
     };
 
+    // --loop-stats: the [loop] and [tick] lines of each interval
+    TickProfile& profile = tick_profile();
+    profile.on = loop_stats_seconds > 0;
+    std::optional<TickLoop> tick_loop;
+    if (tick_hz > 0) tick_loop.emplace(TickLoop::Config{tick_hz, 4, 256}, Clock::now());
+    auto window_start = Clock::now();
+    const auto log_stats = [&](Clock::time_point at) {
+        const double window_s = std::chrono::duration<double>(at - window_start).count();
+        if (loop_stats_seconds <= 0 || window_s < loop_stats_seconds) return;
+        const double busy_us = loop_stats.busy_us + (tick_loop ? loop_stats.receive_us : 0.0);   // (the old loop's passes hold their datagram)
+        spdlog::info("[loop] {:.1f} s: passes={} busy={:.2f}% p50={:.3f} p99={:.3f} max={:.3f} ms datagrams={} in={} out={} packets_out={} sessions={} save_queue={} saved={} save_failed={} "
+                     "save_dropped={} hist={}",
+                     window_s, loop_stats.units, busy_us / (window_s * 1e6) * 100.0, loop_stats.percentile_us(0.50) / 1000.0, loop_stats.percentile_us(0.99) / 1000.0,
+                     loop_stats.max_us / 1000.0, loop_stats.datagrams, loop_stats.bytes_in, loop_stats.bytes_out, loop_stats.packets_out, endpoint.session_count(), saver.queued(),
+                     saver.saved(), saver.failed(), saver.dropped(), loop_stats.buckets());
+        endpoint.take_costliest(profile);
+        const TickLoop::Stats ls = tick_loop ? tick_loop->take_stats() : TickLoop::Stats{};
+        const uint64_t ticks = tick_loop ? ls.ticks : loop_stats.units;
+        const double late_ms = tick_loop ? std::chrono::duration<double, std::milli>(tick_loop->schedule().late_max()).count() : 0.0;
+        spdlog::info("[tick] {:.1f} s: rate={} ticks={} ({:.1f}/s) datagrams={:.1f}/s ({:.2f} a tick, at most {} between two ticks, at most {} in one read); ms: receive={:.1f} tick={:.1f} "
+                     "world={:.1f} (npcs={:.1f} combat={:.1f} people={:.1f} window={:.1f} aftermath={:.1f}) sessions={:.1f} view={:.1f} (scan={:.1f}, {} passes) flush={:.1f}; late_max={:.1f} ms "
+                     "caught_up={} skipped={} restarts={}; costliest session: {} {:.1f} ms (view {:.1f}; {} awake, {} dormant)",
+                     window_s, tick_hz, ticks, static_cast<double>(ticks) / window_s, static_cast<double>(loop_stats.datagrams) / window_s,
+                     ticks ? static_cast<double>(loop_stats.datagrams) / static_cast<double>(ticks) : 0.0, ls.max_datagrams_per_tick, ls.max_batch, loop_stats.receive_us / 1000.0,
+                     loop_stats.unit_us / 1000.0, profile.world_us / 1000.0, profile.npcs_us / 1000.0, profile.combat_us / 1000.0, profile.people_us / 1000.0, profile.window_us / 1000.0,
+                     profile.aftermath_us / 1000.0, profile.sessions_us / 1000.0, profile.view_us / 1000.0, profile.view_scan_us / 1000.0, profile.view_passes, profile.flush_us / 1000.0,
+                     late_ms, tick_loop ? tick_loop->schedule().caught_up() : 0, tick_loop ? tick_loop->schedule().skipped() : 0, tick_loop ? tick_loop->schedule().restarts() : 0,
+                     profile.top_name.empty() ? std::string("none") : profile.top_name, profile.top_us / 1000.0, profile.top_view_us / 1000.0, profile.top_awake, profile.top_dormant);
+        if (tick_loop) tick_loop->schedule().reset_late_max();
+        loop_stats = LoopStats{};
+        profile.restart();
+        window_start = at;
+    };
+
     spdlog::info("listening on UDP {}", socket->local_address().to_string());
-    while (!g_stop) {
+    if (!tick_loop) {
+        // --tick-hz 0: the old loop, every session's tick after every datagram
+        while (!g_stop) {
+            Address from;
+            const auto n = socket->receive(buf.data(), buf.size(), from, std::chrono::milliseconds(10));
+            const auto now = Clock::now();
+            if (!n) {
+                spdlog::error("the UDP socket failed; stopping");
+                exit_code = 1;
+                break;
+            }
+            if (*n > 0) {
+                guarded_datagram(from, *n, now);
+                if (profile.on) loop_stats.note_datagram(*n, us_between(now, Clock::now()));
+            }
+            guarded_tick(now);
+            admin_queue.drain();
+            if (stream) {
+                stream->publish();
+                stream->note_loop(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - now));
+            }
+            if (profile.on) {
+                const auto done = Clock::now();
+                loop_stats.note_unit(us_between(now, done));
+                log_stats(done);
+            }
+        }
+    } else {
+#if defined(_MSC_VER)
+        timeBeginPeriod(1);
+#endif
         Address from;
-        const auto n = socket->receive(buf.data(), buf.size(), from, std::chrono::milliseconds(10));
-        const auto now = Clock::now();
-        if (!n) {
-            spdlog::error("the UDP socket failed; stopping");
-            exit_code = 1;
-            break;
+        TickLoop::Ports ports;
+        ports.now = [] { return Clock::now(); };
+        ports.receive = [&](std::chrono::microseconds timeout) { return socket->receive(buf.data(), buf.size(), from, timeout); };
+        ports.datagram = [&](size_t n, Clock::time_point now) {
+            guarded_datagram(from, n, now);
+            if (profile.on) loop_stats.note_datagram(n, us_between(now, Clock::now()));
+        };
+        ports.tick = [&](Clock::time_point t) {
+            const auto started = Clock::now();
+            guarded_tick(t);
+            admin_queue.drain();
+            if (stream) stream->publish();
+            const auto done = Clock::now();
+            if (stream) stream->note_loop(std::chrono::duration_cast<std::chrono::microseconds>(done - started));
+            if (profile.on) loop_stats.note_unit(us_between(started, done));
+        };
+        while (!g_stop) {
+            if (!tick_loop->run_once(ports)) {
+                spdlog::error("the UDP socket failed; stopping");
+                exit_code = 1;
+                break;
+            }
+            if (profile.on) log_stats(Clock::now());
         }
-        if (*n > 0) guarded_datagram(from, *n, now);
-        guarded_tick(now);
-        admin_queue.drain();
-        if (stream) {
-            stream->publish();
-            stream->note_loop(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - now));
-        }
+#if defined(_MSC_VER)
+        timeEndPeriod(1);
+#endif
     }
 
     if (stream) stream->stop();

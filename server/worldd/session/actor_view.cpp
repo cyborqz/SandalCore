@@ -7,6 +7,7 @@
 //  See actor_view.h.
 // ============================================================================
 #include "session/actor_view.h"
+#include "net/tick_profile.h"
 
 #include "gather/node_wire.h"
 #include "world/interaction_state.h"
@@ -490,6 +491,14 @@ bool ActorView::update_now(Connection& conn, uint64_t actor) {
 
 void ActorView::tick(Connection& conn, double x, double y, Clock::time_point now) {
     if (finished_) return;
+    TickProfile& profile = tick_profile();   // (--loop-stats: where the tick's time goes)
+    std::chrono::steady_clock::time_point started{};
+    if (profile.on) started = std::chrono::steady_clock::now();
+    tick_unprofiled(conn, x, y, now);
+    if (profile.on) profile.view_us += tick_profile_us_since(started);
+}
+
+void ActorView::tick_unprofiled(Connection& conn, double x, double y, Clock::time_point now) {
     flush_removed(conn);
     // the Dormancy closes whose time has come: the snapshots in the order they were opened (an actor with a delay of its own may be due after one opened later)
     for (size_t i = 0; i < pending_snapshots_.size();) {
@@ -520,6 +529,12 @@ void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now
         return;
     }
     const world::RelevancyConfig& cfg = config_.relevancy;
+    TickProfile& profile = tick_profile();   // (--loop-stats: the scan below, apart from the sends after it)
+    std::chrono::steady_clock::time_point scan_started{};
+    if (profile.on) {
+        scan_started = std::chrono::steady_clock::now();
+        ++profile.view_passes;
+    }
     scratch_.clear();
     registry_.query(x, y, world::query_radius(cfg, largest_awake_), scratch_);
     registry_.query_wide(x, y, cfg.hysteresis_cm, scratch_);   // the towns' replicators (1.45 km): beyond the grid query's reach
@@ -548,6 +563,7 @@ void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now
         if (a->awake_radius_cm > largest_awake_ && a->awake_radius_cm <= world::ActorRegistry::kWideCm) largest_awake_ = a->awake_radius_cm;
     }
     std::sort(cands.begin(), cands.end(), [](const Cand& l, const Cand& r) { return l.d != r.d ? l.d < r.d : l.id < r.id; });
+    if (profile.on) profile.view_scan_us += tick_profile_us_since(scan_started);
 
     size_t opens = 0;
     bool capped = false;

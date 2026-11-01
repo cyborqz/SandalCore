@@ -5,6 +5,7 @@
 //  net/endpoint.cpp
 // ============================================================================
 #include "net/endpoint.h"
+#include "net/tick_profile.h"
 #include "protocol/conn/handshake.h"
 #include "protocol/conn/nmt.h"
 #include "protocol/wire/ue5_primitives.h"
@@ -336,7 +337,12 @@ void Endpoint::log_refused_for_limit(Clock::time_point now) {
 
 void Endpoint::tick(Clock::time_point now) {
     signer_.update(seconds(now));
+    TickProfile& profile = tick_profile();   // (--loop-stats: where the tick's time goes; off, nothing is measured)
+    const bool timing = profile.on;
+    std::chrono::steady_clock::time_point t0{};
+    if (timing) t0 = std::chrono::steady_clock::now();
     if (cfg_.players) cfg_.players->tick_world(seconds(now));   // plan E1, stage 2: the NPCs walk
+    if (timing) profile.world_us += tick_profile_us_since(t0);
 
     std::vector<std::pair<uint64_t, LoginResult>> done;
     {
@@ -371,11 +377,25 @@ void Endpoint::tick(Clock::time_point now) {
             continue;
         }
         try {
+            std::chrono::steady_clock::time_point a{}, b{};
+            double view_before = 0;
+            if (timing) {
+                a = std::chrono::steady_clock::now();
+                view_before = profile.view_us;
+            }
             if (s->player && !s->closing) {
                 s->player->tick(s->connection, now);
                 if (s->player->failed()) apply(*s, s->control.kick(login_text::kLoginFailed), now);
             }
+            if (timing) b = std::chrono::steady_clock::now();
             for (auto& pkt : s->connection.flush(now)) send_(addr, pkt);
+            if (timing) {
+                const auto c = std::chrono::steady_clock::now();
+                profile.sessions_us += std::chrono::duration<double, std::micro>(b - a).count();
+                profile.flush_us += std::chrono::duration<double, std::micro>(c - b).count();
+                s->profile_us += std::chrono::duration<double, std::micro>(c - a).count();
+                s->profile_view_us += profile.view_us - view_before;
+            }
             if (s->player) s->player->take_acks(s->connection);   // what flush dropped counts as lost
             if (s->closing && (now >= s->close_by || s->connection.unacked_reliable(0) == 0))
                 drop.emplace_back(addr, "closed");
@@ -386,6 +406,25 @@ void Endpoint::tick(Clock::time_point now) {
         }
     }
     for (const auto& [addr, why] : drop) remove(addr, why);
+}
+
+void Endpoint::take_costliest(TickProfile& profile) {
+    const Session* top = nullptr;
+    for (auto& [addr, s] : sessions_) {
+        if (!top || s->profile_us > top->profile_us) top = s.get();
+    }
+    if (top && top->profile_us > 0) {
+        profile.top_name = top->player ? top->player->name() : top->character_name;
+        profile.top_us = top->profile_us;
+        profile.top_view_us = top->profile_view_us;
+        const ActorView* view = top->player ? top->player->actor_view() : nullptr;
+        profile.top_awake = view ? view->count(world::ClientState::Awake) : 0;
+        profile.top_dormant = view ? view->count(world::ClientState::Dormant) : 0;
+    }
+    for (auto& [addr, s] : sessions_) {
+        s->profile_us = 0;
+        s->profile_view_us = 0;
+    }
 }
 
 void Endpoint::kick_all(const std::string& text, Clock::time_point now) {

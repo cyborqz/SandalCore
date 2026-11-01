@@ -525,7 +525,7 @@ public:
 private:
     WindowCost window_cost_;
     static constexpr double kWindowBudgetMs = 3.0;
-    /// The window is driven at the world's 20 Hz, not once per network datagram (review A I2): ticks closer than this are skipped.
+    /// The window is driven at most this often, whatever the tick's rate (review A I2: the old loop ticked the world after every datagram): ticks closer than this are skipped.
     static constexpr double kWindowPeriodSeconds = 0.045;
     /// The window's state goes to the log at info this often (world seconds): the next in-game test can be read from it.
     static constexpr double kWindowLogSeconds = 30.0;

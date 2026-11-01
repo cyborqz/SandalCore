@@ -46,10 +46,10 @@ public:
     UdpSocket(const UdpSocket&) = delete;
     UdpSocket& operator=(const UdpSocket&) = delete;
 
-    /// Waits up to `timeout` for a datagram.  Returns its size (0 when none
-    /// came), or nullopt if the socket failed.
+    /// Waits up to `timeout` for a datagram (zero: does not wait).  Returns its
+    /// size (0 when none came), or nullopt if the socket failed.
     std::optional<size_t> receive(uint8_t* buf, size_t cap, Address& from,
-                                  std::chrono::milliseconds timeout);
+                                  std::chrono::microseconds timeout);
     bool send(const Address& to, const uint8_t* data, size_t len);
     /// The bound address (the port the system chose for port 0).
     Address local_address() const;

@@ -12,6 +12,7 @@
 #include "fake_client.h"
 #include "net/endpoint.h"
 #include "protocol/wire/ue5_primitives.h"
+#include "test_registry.h"
 #include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
 #include <cstdio>
@@ -742,6 +743,8 @@ static void test_protocol_breakers() {
     }
 }
 
+#include "endpoint_registered.inc"
+
 int main() {
     std::ostringstream& log = g_log;
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(log));
@@ -759,6 +762,7 @@ int main() {
     test_play_timeout_and_junk();
     test_rate_limit();
     test_protocol_breakers();
+    g_fail += aoc_tests::run();   // every check registered in endpoint_registered.inc
 
     logger->flush();
     CHECK(log.str().find(kTicket) == std::string::npos, "the ticket never appears in the log");

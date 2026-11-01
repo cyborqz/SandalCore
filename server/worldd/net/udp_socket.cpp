@@ -106,14 +106,15 @@ std::unique_ptr<UdpSocket> UdpSocket::open(const Address& local, std::string* er
 UdpSocket::~UdpSocket() { close_handle(handle_); }
 
 std::optional<size_t> UdpSocket::receive(uint8_t* buf, size_t cap, Address& from,
-                                         std::chrono::milliseconds timeout) {
+                                         std::chrono::microseconds timeout) {
     const auto s = static_cast<decltype(::socket(0, 0, 0))>(handle_);
     fd_set set;
     FD_ZERO(&set);
     FD_SET(s, &set);
     timeval tv{};
-    tv.tv_sec = static_cast<long>(timeout.count() / 1000);
-    tv.tv_usec = static_cast<long>((timeout.count() % 1000) * 1000);
+    const long long us = timeout.count() > 0 ? static_cast<long long>(timeout.count()) : 0;
+    tv.tv_sec = static_cast<long>(us / 1000000);
+    tv.tv_usec = static_cast<long>(us % 1000000);
     const int ready = ::select(static_cast<int>(s) + 1, &set, nullptr, nullptr, &tv);
     if (ready < 0) return std::nullopt;
     if (ready == 0) return size_t{0};

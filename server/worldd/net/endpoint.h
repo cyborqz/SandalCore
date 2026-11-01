@@ -63,6 +63,7 @@
 #include "net/connection.h"
 #include "net/control_channel.h"
 #include "net/cookie.h"
+#include "net/tick_profile.h"
 #include "net/udp_socket.h"
 #include "session/player_session.h"
 #include <array>
@@ -138,6 +139,9 @@ public:
     /// The players that have joined and are not closing, in the order their sessions began, with their connections: what the GM travel tools (session/gm_travel.h) act on.
     /// Network thread only, like everything of the Endpoint; the handles are good until the next tick or datagram.
     std::vector<PlayerHandle> players();
+    /// --loop-stats: puts the session whose ticks and sends took the most time since the last call into `profile` (its name, the time, its
+    /// view's share, the actors its view holds) and starts every session's count again.  Measured only while the profile is on.
+    void take_costliest(TickProfile& profile);
 
 private:
     struct Session {
@@ -161,6 +165,8 @@ private:
         Clock::time_point byte_at{};
         bool rate_started = false;
         size_t rate_dropped = 0;
+        double profile_us = 0;            // --loop-stats: its ticks and sends, and its view's part, since take_costliest
+        double profile_view_us = 0;
 
         Session(const ConnectionConfig& cc, Clock::time_point now, WorldInfo world, std::string challenge)
             : connection(cc, now), control(std::move(world), std::move(challenge)) {}
