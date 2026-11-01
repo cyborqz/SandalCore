@@ -13,6 +13,7 @@
 // ============================================================================
 #include "ability_rig.h"
 #include "combat_rig.h"
+#include "test_registry.h"
 #include "combat/combat_data.h"
 #include "combat/hit_resolver.h"
 #include "combat/npc_ability_data.h"
@@ -266,6 +267,7 @@ void test_captured_npcs(Fixture& f) {
 
 #include "combat_tests.inc"
 #include "combat_tests2.inc"
+#include "combat_registered.inc"
 
 }  // namespace
 
@@ -285,7 +287,7 @@ int main() {
     test_aspect();
     test_hit_rules(f);
     test_fight(f);
-    test_hostile(f);
+    g_fail += aoc_tests::run(f);   // every check registered in combat_registered.inc
     test_player_cast(f);
     test_weapon_finisher_picks(f);
     test_npc_hits_player(f);
