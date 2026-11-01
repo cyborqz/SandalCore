@@ -13,6 +13,8 @@
 
 #include <cmath>
 
+namespace aoc { namespace worldd {
+
 bool PlayerSession::set_gm_effects(const std::vector<stats::ActiveEffect>& effects, std::string& err) {
     if (!stats_ || !stats_->started()) { err = "the character has no stats"; return false; }
     const std::vector<stats::ActiveEffect> before = stats_->gm_effects();
@@ -63,3 +65,5 @@ bool PlayerSession::set_player_current_stat(int64_t guid, double value, std::str
     if (!set_current_value(guid, static_cast<float>(value))) { err = "the pawn does not take the value"; return false; }
     return true;
 }
+
+}}  // namespace aoc::worldd
