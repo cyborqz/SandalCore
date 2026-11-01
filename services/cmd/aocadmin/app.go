@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,48 +150,97 @@ func (a *App) Places() ([]*worldadminv1.Place, error) {
 	return out.GetPlaces(), nil
 }
 
+// StatRow: one stat of a character, in the shape the window's table wants.
+// The guid is a string: the bundle's guids are bigger than a JavaScript number
+// holds exactly, and a rounded guid names no stat.
+type StatRow struct {
+	Guid        string  `json:"guid"`
+	Name        string  `json:"name"`
+	Flags       uint32  `json:"flags"`
+	Value       float64 `json:"value"`
+	Max         float64 `json:"max"`
+	HasOverride bool    `json:"has_override"`
+	Override    float64 `json:"override"`
+}
+
+// StatModRow: one stat mod on its way to the server. The guid is a string,
+// for the same reason.
+type StatModRow struct {
+	Stat  string  `json:"stat"`
+	Value float64 `json:"value"`
+}
+
+// statRows: the stats in the shape the window's table wants.
+func statRows(stats []*worldadminv1.StatInfo) []StatRow {
+	rows := make([]StatRow, 0, len(stats))
+	for _, s := range stats {
+		rows = append(rows, StatRow{
+			Guid:        strconv.FormatInt(s.GetGuid(), 10),
+			Name:        s.GetName(),
+			Flags:       s.GetFlags(),
+			Value:       s.GetValue(),
+			Max:         s.GetMax(),
+			HasOverride: s.GetHasOverride(),
+			Override:    s.GetOverride(),
+		})
+	}
+	return rows
+}
+
 // Stats: the bundle's stats with the player's current values.
-func (a *App) Stats(character string) ([]*worldadminv1.StatInfo, error) {
+func (a *App) Stats(character string) ([]StatRow, error) {
 	out, err := call(a, func(ctx context.Context) (*worldadminv1.GetPlayerStatsResponse, error) {
 		return a.client.admin.GetPlayerStats(ctx, &worldadminv1.GetPlayerStatsRequest{Character: character})
 	})
 	if err != nil {
 		return nil, err
 	}
-	return out.GetStats(), nil
+	return statRows(out.GetStats()), nil
 }
 
 // SetStatMods: the game master's stat mods on a player, replacing the ones
 // there. The server refuses a guid that is not one of the character's stats.
-func (a *App) SetStatMods(character string, mods []*worldadminv1.StatMod) ([]*worldadminv1.StatInfo, error) {
+func (a *App) SetStatMods(character string, mods []StatModRow) ([]StatRow, error) {
+	items := make([]*worldadminv1.StatMod, 0, len(mods))
+	for _, m := range mods {
+		guid, err := strconv.ParseInt(m.Stat, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("the stat guid %q is not a number: %w", m.Stat, err)
+		}
+		items = append(items, &worldadminv1.StatMod{Stat: guid, Value: m.Value})
+	}
 	out, err := call(a, func(ctx context.Context) (*worldadminv1.SetStatModsResponse, error) {
-		return a.client.admin.SetStatMods(ctx, &worldadminv1.SetStatModsRequest{Character: character, Mods: mods})
+		return a.client.admin.SetStatMods(ctx, &worldadminv1.SetStatModsRequest{Character: character, Mods: items})
 	})
 	if err != nil {
 		return nil, err
 	}
-	return out.GetStats(), nil
+	return statRows(out.GetStats()), nil
 }
 
 // ClearStatMods: the overrides are removed.
-func (a *App) ClearStatMods(character string) ([]*worldadminv1.StatInfo, error) {
+func (a *App) ClearStatMods(character string) ([]StatRow, error) {
 	out, err := call(a, func(ctx context.Context) (*worldadminv1.ClearStatModsResponse, error) {
 		return a.client.admin.ClearStatMods(ctx, &worldadminv1.ClearStatModsRequest{Character: character})
 	})
 	if err != nil {
 		return nil, err
 	}
-	return out.GetStats(), nil
+	return statRows(out.GetStats()), nil
 }
 
 // SetCurrentStat: the current value of a stat the player holds (Health,
 // Mana, Stamina). The server refuses a value above the stat's maximum; it
 // does not cut it down.
-func (a *App) SetCurrentStat(character string, stat int64, value float64) (float64, error) {
+func (a *App) SetCurrentStat(character, stat string, value float64) (float64, error) {
+	guid, err := strconv.ParseInt(stat, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("the stat guid %q is not a number: %w", stat, err)
+	}
 	out, err := call(a, func(ctx context.Context) (*worldadminv1.SetCurrentStatResponse, error) {
 		return a.client.admin.SetCurrentStat(ctx, &worldadminv1.SetCurrentStatRequest{
 			Character: character,
-			Stat:      stat,
+			Stat:      guid,
 			Value:     value,
 		})
 	})

@@ -180,7 +180,7 @@ async function loadStats() {
     // (it does not cut it down), and the reason is shown.
     const current = row.querySelector(".current-input");
     current.addEventListener("change", async () => {
-      const value = await call("SetCurrentStat", state.selected, Number(current.dataset.guid), Number(current.value));
+      const value = await call("SetCurrentStat", state.selected, current.dataset.guid, Number(current.value));
       if (value !== null) {
         current.value = value;
         toast("القيمة صارت " + value);
@@ -194,13 +194,25 @@ async function loadStats() {
 
 document.getElementById("save-stats").addEventListener("click", async () => {
   if (!state.selected) { toast("اختر لاعباً أول", true); return; }
-  // The server replaces every override with the ones sent, so the values
-  // already on the stats go with them; a cleared field drops that override.
-  const mods = [];
+  // The server replaces every override with the ones sent, so the mods must
+  // cover every stat of the character - not only the rows the filter shows, or
+  // a filtered save would drop the other overrides.
+  const typed = new Map();
   document.querySelectorAll("#stats-table tbody input.stat-input").forEach((input) => {
-    if (input.value.trim() === "") return;
-    mods.push({ stat: Number(input.dataset.guid), value: Number(input.value) });
+    typed.set(String(input.dataset.guid), input.value.trim());
   });
+  const mods = [];
+  for (const stat of state.stats) {
+    const guid = String(stat.guid);
+    if (typed.has(guid)) {
+      // on the screen: what is in the field wins, an emptied field drops it
+      const value = typed.get(guid);
+      if (value !== "") mods.push({ stat: guid, value: Number(value) });
+    } else if (stat.has_override === true) {
+      // hidden by the filter: keep the override it has
+      mods.push({ stat: guid, value: num(stat.override) });
+    }
+  }
   if (!mods.length) { toast("ما فيه تعديلات للحفظ", true); return; }
   const stats = await call("SetStatMods", state.selected, mods);
   if (stats) { toast("حُفظت التعديلات"); await loadStats(); }
@@ -217,6 +229,50 @@ document.getElementById("fill-health").addEventListener("click", async () => {
   if (!health) { toast("ما لقيت stat الدم", true); return; }
   const value = await call("SetCurrentStat", state.selected, health.guid, num(health.max) || num(health.value));
   if (value !== null) toast("الدم صار " + value);
+});
+
+// "املأ الكل بالحد الأقصى": every stat that declares a maximum goes to it. The
+// override is what the stat's own rule applies, so the number that is sent is
+// the one the engine needs: an additive stat takes the missing amount (plus
+// what it already has), a multiplying one takes the factor (times what it
+// already has). A stat with no declared maximum (max = 0) is left alone, and
+// the overrides the game master set by hand are kept.
+document.getElementById("max-all-stats").addEventListener("click", async () => {
+  if (!state.selected) { toast("اختر لاعباً أول", true); return; }
+  const stats = await call("Stats", state.selected);
+  if (!stats) return;
+  const mods = [];
+  let filled = 0;
+  for (const stat of stats) {
+    const max = num(stat.max);
+    const value = num(stat.value);
+    const current = stat.has_override === true ? num(stat.override) : 0;
+    const flags = num(stat.flags);
+    if (max > 0 && max > value) {
+      // The number is the one the engine needs: an additive stat takes the
+      // missing amount (plus the override it has), a multiplying one takes the
+      // factor (times the override it has), and a complement one (kStatMulCompl,
+      // the engine multiplies it by one minus the override) takes one minus
+      // that factor.
+      let override = null;
+      if ((flags & kStatMulMods) === 0) {
+        override = max - value + current;
+      } else if (value > 0) {
+        const factor = max / value;
+        override = (flags & kStatMulCompl) !== 0 ? 1 - factor * (1 - current) : factor * (current || 1);
+      }
+      if (override !== null) {
+        mods.push({ stat: stat.guid, value: override });
+        filled++;
+      }
+    } else if (stat.has_override === true) {
+      // a stat that is not filled keeps the override it has
+      mods.push({ stat: stat.guid, value: current });
+    }
+  }
+  if (!filled) { toast("كل الإحصائيات عندها حدها الأقصى بالفعل"); return; }
+  const after = await call("SetStatMods", state.selected, mods);
+  if (after) { toast("ملّأت " + filled + " stat بالحد الأقصى"); await loadStats(); }
 });
 
 document.getElementById("stats-filter").addEventListener("input", loadStats);
