@@ -36,7 +36,6 @@
 #include "stats/gather_host.h"
 #include "world/city_nodes.h"
 
-#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -44,28 +43,6 @@
 #include <vector>
 
 namespace aoc::worldd::combat {
-
-/// The most one rolled line gives: more than the largest stack the data holds (999,999), and a power of two (the inventory's own cap of one stack is 1,000,000).
-inline constexpr int64_t kMaxRolledQuantity = 1 << 20;
-
-/// A rolled quantity as a count: rounded down, never past kMaxRolledQuantity, and nothing for a negative number or one that is no number.  (A formula of bad data must not turn into
-/// a billion stacks, or into an undefined conversion.)
-inline int64_t rolled_quantity(double v) {
-    if (!std::isfinite(v)) return 0;
-    const double whole = std::floor(v + 1e-9);
-    if (whole <= 0.0) return 0;
-    return whole >= static_cast<double>(kMaxRolledQuantity) ? kMaxRolledQuantity : static_cast<int64_t>(whole);
-}
-
-/// The most one rolled experience line gives: more than the largest level curve of the data (624,000,000).
-inline constexpr int64_t kMaxRolledXp = 1'000'000'000;
-
-/// A rolled experience amount as a count: rounded, never past kMaxRolledXp, and nothing for a number that is none, infinite or negative.  (The same guard as rolled_quantity:
-/// converting an enormous double is undefined.)
-inline int64_t rolled_xp(double v) {
-    if (!std::isfinite(v) || v <= 0.0) return 0;
-    return v >= static_cast<double>(kMaxRolledXp) ? kMaxRolledXp : static_cast<int64_t>(std::llround(v));
-}
 
 struct RolledItem {
     int64_t item = 0;
@@ -92,6 +69,7 @@ struct Rolled {
     size_t quality_rolls = 0;
     size_t quality_failures = 0;
     size_t boost_redraws = 0;
+    size_t quality_floor_lifts = 0;         // how many qualities the game master's floor lifted (RollContext::quality_floor; 0 at 0)
 };
 // (C-O-A : Cyb)
 
@@ -127,6 +105,10 @@ struct RollContext {
     /// odds among themselves stay the data's.  Never a quantity, a percentage or which Glint tier drops.  1: the data's own odds, the formula runs once and nothing else is drawn
     /// (worldd --loot-rarity-boost / AOC_LOOT_RARITY_BOOST).
     double  rarity_boost = 1.0;
+    /// The rarity every drop is at least, as a rarity ordinal (Common 0 ... Artifact 6; 0: the game's own odds): a rolled quality below it is lifted to the lowest quality at which the
+    /// item shows that rarity (the item's own record decides what it can show; an item the data caps below the floor keeps its quality).  A kill only (never a harvest).
+    /// (worldd --loot-quality-floor / AOC_LOOT_QUALITY_FLOOR).
+    int      quality_floor = 0;
     stats::SplitMix* rng = nullptr;
     /// Nodes 1, stage 1: where the kill is.  The node reads of the tables' expressions (GetNodeBiome, GetCurrentNode, GetNodeRecord, Node_GetLevel ...) are
     /// answered over `nodes` (null: a world with no nodes) in the zone of influence of the creature's body: `node` is the rank of that zone's node (-1:

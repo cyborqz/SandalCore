@@ -13,7 +13,8 @@
 //    * A call arrives on a gRPC thread.  It is NOT applied there: it is put on the AdminQueue and applied on worldd's network thread, between two ticks of the world, by
 //      AdminQueue::drain (main's loop), where the sessions live; no session state is touched off-thread.  The gRPC thread waits for the answer (call_timeout, 5 s) and a call
 //      the network thread did not start by then ends with Unavailable and is never applied (a call that was started is waited for).
-//    * The work itself is GmTravel (session/gm_travel.h); this file is the door: the token, the queue, the mapping of its answers to gRPC's.
+//    * The work itself is GmTravel (session/gm_travel.h); this file is the door: the token, the queue, the mapping of its answers to gRPC's.  Among the calls are the game master's
+//      stat tools (GetPlayerStats, SetStatMods, ClearStatMods, SetCurrentStat): the stats of a character, the overrides on them and the current value of a held stat.
 // ============================================================================
 #pragma once
 

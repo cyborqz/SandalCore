@@ -12,8 +12,11 @@
 //    run speed     the pawn's MoveSpeedMult stat, the move checker's limits scaled (accepts moves at the multiplied speed, still refuses beyond it), the Sprint on top, the grace after
 //                  the speed goes down, the reset; on a mount the mount's MoveSpeedMult and limit; survives the dismount; a new session starts at 1
 //    client RPCs   ServerTeleportXYZ, ServerTeleport and ServerTeleportPlayer: received and logged with the switch off, answered with it on
+//    GM stats      the game master's stat overrides: the stats the session holds change, the override is remembered and cleared, a refused change leaves nothing behind; the current value of a
+//                  held stat goes to the client
 //    admin API     WorldAdminService over a real gRPC server: the service token (no token, a wrong one, a bare Bearer, the token without Bearer: refused), the queue (every call is
-//                  applied on the draining thread, never the gRPC thread; a call the network thread does not take in time is Unavailable and never applied)
+//                  applied on the draining thread, never the gRPC thread; a call the network thread does not take in time is Unavailable and never applied), the game master's stat
+//                  calls (the token is still the door, an unknown character is refused, a player's stats come back with the override on them)
 // ============================================================================
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
@@ -56,6 +59,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -1533,6 +1537,269 @@ static void test_client_text_in_the_log() {
     spdlog::set_default_logger(previous);
 }
 
+// ---- the game master's stat overrides -------------------------------------------------------------------------------------------------------------
+
+/// The guid of a stat of the real graph, by its name (0 when the graph does not have it).
+static int64_t guid_named(const Harness& h, const char* name) {
+    const stats::StatBundle* bundle = h.fx.world->stat_bundle();
+    if (!bundle) return 0;
+    for (size_t i = 0; i < bundle->stats.size(); ++i) {
+        if (bundle->stat_name(i) == name) return bundle->stats[i].guid;
+    }
+    return 0;
+}
+
+/// The value the session holds for a stat (NaN when it has none).
+static double session_value_of(const Harness& h, int64_t guid) {
+    const stats::CharacterStats* cs = h.s->character_stats();
+    const stats::StatValue* v = cs ? cs->find(guid) : nullptr;
+    return v ? v->value : std::numeric_limits<double>::quiet_NaN();
+}
+
+/// The value the client has for a stat (NaN when it has none): the stat's item in the pawn's stat arrays, as the last chain that carried it.
+static float client_stat(const Harness& h, int64_t guid) {
+    float value = std::numeric_limits<float>::quiet_NaN();
+    const bs::SessionGuids& guids = h.s->bootstrap().setup().guids;
+    const repl::Subobject* stats = h.s->bootstrap().pawn().find(guids.stats);
+    const stats::StatBundle* bundle = h.fx.world->stat_bundle();
+    if (!stats || !stats->obj.schema || !bundle) return value;
+    const schema::ClassSchema& cls = *stats->obj.schema;
+    repl::CodecOptions opts;
+    // the client's stat table is not on the wire: the stats that carry base and equipment are the bundle's bucket ones
+    opts.stat_int32_extended = [bundle](int64_t record) {
+        const auto it = bundle->by_guid.find(record);
+        return it != bundle->by_guid.end() && (bundle->stats[it->second].flags & stats::kStatBuckets) != 0;
+    };
+    for (const fake::Delivered* d : chains_on(h, h.pawn_ch, 0)) {
+        const auto blocks = repl::read_content_blocks(d->content.data(), d->content.bit_pos(), 0);
+        if (!blocks) continue;
+        for (const repl::BlockView& b : *blocks) {
+            if (b.header.is_actor || b.header.object != guids.stats) continue;
+            size_t p = b.payload_pos;
+            const size_t end = b.payload_pos + b.payload_bits;
+            if (b.header.has_rep_layout && !repl::read_rep_block(cls, d->content.data(), end, p, opts)) continue;
+            if (p >= end) continue;
+            const auto fields = repl::read_fast_array_fields(cls, d->content.data(), end, p, opts);
+            if (!fields) continue;
+            for (const repl::FastArrayField& f : *fields) {
+                for (const auto& c : f.delta.changed) {
+                    const auto it = c.values.values.find(1);
+                    const auto* s = it != c.values.values.end() ? it->second.get_if<repl::StatInt32Inst>() : nullptr;
+                    if (s && s->record == guid) value = std::bit_cast<float>(s->value);
+                }
+            }
+        }
+    }
+    return value;
+}
+
+/// Takes the item of a stat out of the pawn's arrays: the pawn then refuses every change of that stat.
+static bool drop_stat_item(const Harness& h, int64_t record) {
+    repl::Subobject* stats = const_cast<repl::Subobject*>(h.s->bootstrap().pawn().find(h.s->bootstrap().setup().guids.stats));
+    for (const char* field : {"StatRepInt32Owner", "StatRepInt32OwnerProxy", "StatRepInt32EveryoneProxy"}) {
+        repl::FastArrayState* a = stats ? stats->obj.arrays.get(*stats->obj.schema, field) : nullptr;
+        if (!a) continue;
+        int32_t id = 0;
+        for (const repl::FastArrayItem& it : a->items()) {
+            const auto found = it.values.values.find(1);
+            const auto* t = found != it.values.values.end() ? found->second.get_if<repl::StatInt32Inst>() : nullptr;
+            if (t && t->record == record) id = it.id;
+        }
+        if (id != 0 && a->remove(id)) return true;
+    }
+    return false;
+}
+
+// The game master's stat overrides reach the character: the stats the session
+// holds change, and the override is remembered.
+static void test_gm_effects(Harness& h) {
+    std::printf("the game master's stat overrides: the stats the session holds change, and the override is remembered\n");
+    PlayerSession* session = h.s.get();
+    if (!session || !session->character_stats()) { std::printf("  [SKIP] the session has no stats\n"); return; }
+
+    // the stats by name, not by their place in the list: MaxHealth is additive (the override adds to it), Health is the held one
+    // (it has a current value), MaxHealth is not
+    const int64_t max_health = guid_named(h, "MaxHealth");
+    const int64_t health = guid_named(h, "Health");
+    CHECK(max_health != 0 && health != 0, "(MaxHealth and Health are in the real graph)");
+    const stats::StatValue* before = session->character_stats()->find(max_health);
+    CHECK(before != nullptr, "the character has MaxHealth");
+    const float value = before ? before->value : 0.0f;
+
+    // the override travels as an effect: one stack, one mod on the stat
+    stats::ActiveEffect effect;
+    effect.effect = {stats::kRefTypeEffect, 0};
+    effect.stacks = 1;
+    effect.mods = {{max_health, 5.0}};
+
+    std::string err;
+    CHECK(session->set_gm_effects({effect}, err), "the override is accepted");
+    CHECK(session->gm_effects().size() == 1, "the override is remembered");
+    const stats::StatValue* after = session->character_stats()->find(max_health);
+    CHECK(after != nullptr && std::fabs(after->value - (value + 5.0f)) < 0.001f, "the value grew");
+    h.run(milliseconds(100));
+    CHECK(std::fabs(client_stat(h, max_health) - (value + 5.0f)) < 0.001f, "and the client has the new value");
+
+    session->clear_gm_effects();
+    CHECK(session->gm_effects().empty(), "the override is cleared");
+    const stats::StatValue* cleared = session->character_stats()->find(max_health);
+    CHECK(cleared != nullptr && cleared->value == value, "and the stat is what it was");
+
+    // a stat the character does not have, and one it holds no current value for, are refused
+    std::string err_missing;
+    CHECK(!session->set_player_current_stat(424242424242ll, 10.0, err_missing) && !err_missing.empty(),
+          "a stat the character does not have is refused");
+    std::string err_not_held;
+    CHECK(!session->set_player_current_stat(max_health, 10.0, err_not_held) && !err_not_held.empty(),
+          "a stat with no current value to set is refused");
+    const stats::StatValue* untouched = session->character_stats()->find(max_health);
+    CHECK(untouched != nullptr && untouched->value == value, "and the stat is untouched");
+
+    // the current value of a held stat goes to the client, like a gear change does
+    const stats::StatValue* held = session->character_stats()->find(health);
+    CHECK(held != nullptr && held->held(), "(Health is a held stat: it has a current value)");
+    const float want = held ? held->value / 2.0f : 0.0f;
+    std::string err_current;
+    CHECK(session->set_player_current_stat(health, want, err_current), "the current value is set");
+    const stats::StatValue* now = session->character_stats()->find(health);
+    CHECK(now != nullptr && std::fabs(now->value - want) < 0.001f, "the session's Health is the new value");
+    h.run(milliseconds(100));
+    const stats::StatValue* ticked = session->character_stats()->find(health);
+    const float client = client_stat(h, health);
+    CHECK(ticked != nullptr && std::fabs(client - ticked->value) < 0.001f, "and the client has it too (the client's Health is the session's)");
+    CHECK(client >= want - 0.001f && client < want + 20.0f, "and it is the value that was set (a regeneration tick may have added a little)");
+
+    // a change the pawn refuses leaves the overrides as they were: nothing is left behind
+    std::string err_again;
+    CHECK(session->set_gm_effects({effect}, err_again), "the override is set again");
+    CHECK(drop_stat_item(h, max_health), "(the pawn's array lost the stat's item)");
+    stats::ActiveEffect other;
+    other.effect = {stats::kRefTypeEffect, 0};
+    other.stacks = 1;
+    other.mods = {{max_health, 7.0}};
+    const size_t failed = session->stat_updates_failed();
+    std::string err_refused;
+    CHECK(!session->set_gm_effects({other}, err_refused) && !err_refused.empty(), "the change the pawn refuses is refused");
+    CHECK(session->stat_updates_failed() == failed + 1, "(the session counted the refusal)");
+    CHECK(session->gm_effects().size() == 1 && session->gm_effects()[0].mods[0].value == 5.0,
+          "and the override that was there is still there: nothing is left behind");
+}
+
+// The GM's stat tools: the catalog, the overrides and the current value.
+static void test_stat_tools(Harness& h, GmTravel& gm, const std::string& name) {
+    const GmStatsResult stats = gm.get_player_stats(name);
+    CHECK(stats.status == GmStatus::Ok, "the stats are read");
+    CHECK(stats.character == name, "the answer names the character");
+    CHECK(!stats.stats.empty(), "the character has stats");
+
+    // a stat is named as the graph names it, and its value is the session's
+    const int64_t max_health = guid_named(h, "MaxHealth");
+    const GmStatInfo* info = nullptr;
+    for (const GmStatInfo& s : stats.stats) {
+        if (s.guid == max_health) info = &s;
+    }
+    CHECK(info != nullptr && info->name == "MaxHealth", "the stat is named as the graph names it");
+    CHECK(info != nullptr && std::fabs(info->value - session_value_of(h, max_health)) < 0.001, "its value is the session's");
+
+    if (!stats.stats.empty()) {
+        const int64_t guid = stats.stats.front().guid;
+        const GmStatModsResult set = gm.set_stat_mods(name, {{guid, 3.0}}, "the test");
+        CHECK(set.status == GmStatus::Ok, "the override is accepted");
+        bool found = false;
+        for (const GmStatInfo& s : set.stats) {
+            if (s.guid == guid) { found = true; CHECK(s.has_override, "the override shows"); }
+        }
+        CHECK(found, "the overridden stat is in the answer");
+
+        const GmStatModsResult cleared = gm.clear_stat_mods(name, "the test");
+        CHECK(cleared.status == GmStatus::Ok, "the clear is accepted");
+        for (const GmStatInfo& s : cleared.stats) {
+            if (s.guid == guid) CHECK(!s.has_override, "the override is gone");
+        }
+    }
+
+    // the override's value is the one asked for, a set replaces the overrides that were there, and the override reaches the client
+    const double base_value = session_value_of(h, max_health);
+    GmStatModsResult set = gm.set_stat_mods(name, {{max_health, 3.0}}, "the test");
+    CHECK(set.status == GmStatus::Ok, "the override on MaxHealth is accepted");
+    bool shows = false;
+    for (const GmStatInfo& s : set.stats) {
+        if (s.guid != max_health) continue;
+        shows = true;
+        CHECK(s.has_override, "the override shows");
+        CHECK(std::fabs(s.override - 3.0) < 0.0001, "and it is the value that was asked for");
+    }
+    CHECK(shows, "the overridden stat is in the answer");
+    CHECK(std::fabs(session_value_of(h, max_health) - (base_value + 3.0)) < 0.001, "and the stat grew by it (MaxHealth is additive)");
+    h.run(milliseconds(100));
+    CHECK(std::fabs(client_stat(h, max_health) - (base_value + 3.0)) < 0.001, "and the client has it");
+
+    // a set replaces the overrides that were there: the old one is gone
+    set = gm.set_stat_mods(name, {{max_health, 5.0}}, "the test");
+    CHECK(set.status == GmStatus::Ok, "the second override is accepted");
+    int overrides = 0;
+    double applied = 0;
+    for (const GmStatInfo& s : set.stats) {
+        if (s.guid != max_health) continue;
+        if (s.has_override) ++overrides;
+        applied = s.override;
+    }
+    CHECK(overrides == 1 && std::fabs(applied - 5.0) < 0.0001, "the set replaced the overrides that were there (one, worth 5)");
+    CHECK(std::fabs(session_value_of(h, max_health) - (base_value + 5.0)) < 0.001, "and the stat follows the new one");
+    CHECK(gm.clear_stat_mods(name, "the test").status == GmStatus::Ok, "the clear is accepted");
+    CHECK(std::fabs(session_value_of(h, max_health) - base_value) < 0.001, "and the stat is what it was");
+
+    // a guid the character does not have is refused, and the answer says which character it was about
+    const GmStatModsResult unknown = gm.set_stat_mods(name, {{424242424242ll, 1.0}}, "the test");
+    CHECK(unknown.status == GmStatus::FailedPrecondition, "a stat the character does not have is refused");
+    CHECK(unknown.message.find("424242424242") != std::string::npos, "and the message names the guid");
+    CHECK(unknown.character == name, "and the answer names the character");
+
+    // a guid named twice is refused: two mods on one stat would compound, and the answer would report only one
+    const GmStatModsResult twice = gm.set_stat_mods(name, {{max_health, 1.0}, {max_health, 2.0}}, "the test");
+    CHECK(twice.status == GmStatus::InvalidArgument, "a guid named twice is refused");
+    CHECK(twice.message.find("MaxHealth") != std::string::npos, "and the message names the stat");
+    CHECK(std::fabs(session_value_of(h, max_health) - base_value) < 0.001, "and the stat is untouched");
+    bool leftover = false;
+    for (const GmStatInfo& s : gm.get_player_stats(name).stats) {
+        if (s.guid == max_health && s.has_override) leftover = true;
+    }
+    CHECK(!leftover, "and no override was left behind");
+
+    // the current value of a held stat: it is taken as it is, and a value above the stat's maximum is refused, not clamped
+    const GmStatInfo* limited = nullptr;
+    for (const GmStatInfo& s : stats.stats) {
+        if (s.max > 0.0) { limited = &s; break; }
+    }
+    CHECK(limited != nullptr, "(a stat of this character declares a maximum)");
+    if (limited) {
+        const double half = limited->max / 2.0;
+        const GmCurrentStatResult at = gm.set_current_stat(name, limited->guid, half, "the test");
+        CHECK(at.status == GmStatus::Ok && std::fabs(at.value - half) < 0.001, "a value under the maximum is taken as it is");
+        CHECK(std::fabs(session_value_of(h, limited->guid) - half) < 0.001, "and the session's stat holds it");
+        const GmCurrentStatResult over = gm.set_current_stat(name, limited->guid, limited->max + 1.0, "the test");
+        CHECK(over.status == GmStatus::InvalidArgument, "a value above the maximum is refused, not clamped");
+        CHECK(std::fabs(session_value_of(h, limited->guid) - half) < 0.001, "and the refused value changed nothing");
+    }
+
+    // a stat the character does not have is refused
+    const GmCurrentStatResult none = gm.set_current_stat(name, 424242424242ll, 10.0, "the test");
+    CHECK(none.status == GmStatus::FailedPrecondition, "a stat the character does not have is refused");
+
+    // the current value of Health goes to the client with the next update
+    const int64_t health = guid_named(h, "Health");
+    if (health != 0) {
+        const GmCurrentStatResult r = gm.set_current_stat(name, health, 1.0, "the test");
+        CHECK(r.status == GmStatus::Ok, "the current value of Health is set");
+        h.run(milliseconds(100));
+        const float client = client_stat(h, health);
+        CHECK(client >= 1.0f - 0.001f && client < 1.0f + 20.0f, "and the client has it with the next update");
+    }
+
+    const GmStatsResult missing = gm.get_player_stats("nobody at all");
+    CHECK(missing.status == GmStatus::NotFound, "an unknown character is not found");
+}
+
 // ---- the admin API ------------------------------------------------------------------------------------------------------------------------------
 
 namespace adminv1 = ::aoc::worldadmin::v1;
@@ -1698,6 +1965,106 @@ static void test_admin_api() {
     CHECK(!a.directory_off_thread, "(no call touched the sessions off the network thread)");
 }
 
+// The new administrative calls: the token is still the door, an unknown character
+// is refused, and a player's stats come back with the game master's override on them.
+static void test_admin_stat_calls() {
+    std::printf("the administrative stat calls: the token, an unknown character, a player\n");
+    Harness h(cyb_record());
+    h.play();
+    Admin a(h);
+
+    // no token: refused
+    {
+        grpc::ClientContext ctx;
+        adminv1::GetPlayerStatsRequest rq;
+        rq.set_character("cyb");
+        adminv1::GetPlayerStatsResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetPlayerStats(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::UNAUTHENTICATED, "GetPlayerStats without the token is refused (Unauthenticated)");
+    }
+    // with the token, a character that is not there: NotFound
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetPlayerStatsRequest rq;
+        rq.set_character("nobody at all");
+        adminv1::GetPlayerStatsResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetPlayerStats(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::NOT_FOUND, "an unknown character: NotFound");
+    }
+    // with the token, a player: the stats come back
+    adminv1::GetPlayerStatsResponse stat_list;
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetPlayerStatsRequest rq;
+        rq.set_character("cyb");
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetPlayerStats(&ctx, rq, &stat_list); });
+        CHECK(s.ok() && stat_list.stats_size() > 0, "GetPlayerStats: the player's stats come back");
+        CHECK(!a.directory_off_thread, "(read on the network thread)");
+    }
+    const int64_t max_health = guid_named(h, "MaxHealth");
+    bool have_max_health = false;
+    for (const adminv1::StatInfo& st : stat_list.stats()) {
+        if (st.guid() == max_health) {
+            have_max_health = true;
+            CHECK(st.name() == "MaxHealth", "the stat is named as the graph names it");
+            CHECK(std::fabs(st.value() - session_value_of(h, max_health)) < 0.001, "its value is the session's");
+        }
+    }
+    CHECK(have_max_health, "the answer holds the stat by its guid");
+
+    // the overrides: set, shown, and taken off again
+    if (max_health != 0) {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetStatModsRequest rq;
+        rq.set_character("cyb");
+        adminv1::StatMod* mod = rq.add_mods();
+        mod->set_stat(max_health);
+        mod->set_value(5.0);
+        adminv1::SetStatModsResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetStatMods(&ctx, rq, &rs); });
+        bool overridden = false;
+        for (const adminv1::StatInfo& st : rs.stats()) {
+            if (st.guid() == max_health) overridden = st.has_override() && std::fabs(st.override() - 5.0) < 0.0001;
+        }
+        CHECK(s.ok() && overridden, "SetStatMods: the override is on the stat in the answer");
+
+        grpc::ClientContext ctx2;
+        Admin::authorize(ctx2, kToken);
+        adminv1::ClearStatModsRequest crq;
+        crq.set_character("cyb");
+        adminv1::ClearStatModsResponse crs;
+        const grpc::Status s2 = a.via_net_thread([&] { return a.stub->ClearStatMods(&ctx2, crq, &crs); });
+        bool cleared = !crs.stats().empty();
+        for (const adminv1::StatInfo& st : crs.stats()) {
+            if (st.has_override()) cleared = false;
+        }
+        CHECK(s2.ok() && cleared, "ClearStatMods: the override is gone");
+    }
+
+    // the current value of a stat the character holds: a stat with a maximum takes a value under it
+    const adminv1::StatInfo* limited = nullptr;
+    for (const adminv1::StatInfo& st : stat_list.stats()) {
+        if (st.max() > 0.0) { limited = &st; break; }
+    }
+    CHECK(limited != nullptr, "(a stat of this character declares a maximum)");
+    if (limited) {
+        const double half = limited->max() / 2.0;
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetCurrentStatRequest rq;
+        rq.set_character("cyb");
+        rq.set_stat(limited->guid());
+        rq.set_value(half);
+        adminv1::SetCurrentStatResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetCurrentStat(&ctx, rq, &rs); });
+        CHECK(s.ok() && std::fabs(rs.value() - half) < 0.001, "SetCurrentStat: the value comes back");
+        CHECK(std::fabs(session_value_of(h, limited->guid()) - half) < 0.001, "and the session's stat holds it");
+    }
+}
+
 static void test_admin_queue() {
     std::printf("the admin queue: a call the network thread does not take is not applied\n");
     {
@@ -1743,6 +2110,134 @@ static void test_admin_queue() {
 }
 // C-Y-B and C O A
 
+// The world's drop rules: the game master reads them, sets them, and a value outside its
+// range is refused with a reason (the rules stay as they were).
+static void test_admin_loot_rules() {
+    std::printf("the administrative drop rules: read, set, refuse\n");
+    Harness h(cyb_record());
+    h.play();
+    Admin a(h);
+
+    // the rules as they stand
+    adminv1::GetLootRulesResponse rules;
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetLootRulesRequest rq;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetLootRules(&ctx, rq, &rules); });
+        CHECK(s.ok(), "GetLootRules: the rules come back");
+        CHECK(rules.chance_mult() == 1.0 && rules.rarity_boost() == 1.0, "the rules are the data's own to start with");
+        CHECK(rules.quality_floor() == 0, "no floor to start with");
+        CHECK(!a.directory_off_thread, "(read on the network thread)");
+    }
+
+    // the game master sets them
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(5.0);
+        rq.set_rarity_boost(20.0);
+        rq.set_quality_floor(5);   // Legendary
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok(), "SetLootRules: the rules are set");
+        CHECK(rs.chance_mult() == 5.0 && rs.rarity_boost() == 20.0 && rs.quality_floor() == 5, "the answer carries the rules now in force");
+    }
+
+    // they stay
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetLootRulesRequest rq;
+        adminv1::GetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok() && rs.chance_mult() == 5.0 && rs.rarity_boost() == 20.0 && rs.quality_floor() == 5, "the rules are in force until they are changed");
+    }
+
+    // a value outside its range is refused, and the rules stay as they were
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(9);   // past Artifact
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a floor past Artifact: InvalidArgument");
+        CHECK(std::string(s.error_message()).find("quality floor") != std::string::npos, "the refusal says which value is wrong");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(0.5);   // under 1: the data's own odds are the floor
+        rq.set_quality_floor(1);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a boost under 1: InvalidArgument");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(2000.0);   // past 1000
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(1);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a chance multiplier past 1000: InvalidArgument");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetLootRulesRequest rq;
+        adminv1::GetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok() && rs.chance_mult() == 5.0 && rs.quality_floor() == 5, "a refused call changes nothing");
+    }
+
+    // a number that is not a number: the calls refuse it and say why
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(std::numeric_limits<double>::quiet_NaN());
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(0);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a NaN chance multiplier: InvalidArgument");
+        CHECK(std::string(s.error_message()).find("chance multiplier") != std::string::npos, "the refusal names the value that is wrong");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(std::numeric_limits<double>::quiet_NaN());
+        rq.set_quality_floor(0);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a NaN rarity boost: InvalidArgument");
+    }
+
+    // back to the data's own odds
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(0);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok() && rs.quality_floor() == 0, "the rules go back to the data's own odds");
+    }
+}
+
 int main() {
     spdlog::set_level(std::getenv("AOC_TEST_LOG") ? spdlog::level::debug : spdlog::level::off);
     std::string error;
@@ -1780,7 +2275,20 @@ int main() {
     test_speed_before_mounting();
     test_client_rpcs();
     test_client_text_in_the_log();
+    {
+        Harness h(cyb_record());
+        h.play();
+        test_gm_effects(h);
+    }
+    {
+        Harness h(cyb_record());
+        h.play();
+        GmTravel travel = make_travel(h);
+        test_stat_tools(h, travel, "cyb");
+    }
     test_admin_api();
+    test_admin_stat_calls();
+    test_admin_loot_rules();
     test_admin_queue();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

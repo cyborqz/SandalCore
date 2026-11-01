@@ -145,8 +145,23 @@ private:
                 continue;
             }
             ++out_.quality_rolls;
-            return quality;
+            return floor_quality(it, quality);
         }
+    }
+
+    /// The game master's floor: the rarity every drop is at least (RollContext::quality_floor).  A quality below it is lifted to the lowest quality at which the item shows that rarity;
+    /// an item the data caps below the floor keeps its own quality, because the client reads the rarity from the item's own record.  0: the game's own odds.
+    int floor_quality(const content::LootItem& it, int quality) {
+        const int floor = ctx_.quality_floor;
+        if (floor <= 0 || floor >= items::kRarityCount) return quality;
+        if (book_.rarity_of(it.item, quality) >= floor) return quality;
+        for (int q = items::first_quality_of(floor); q <= items::kMaxQuality; ++q) {
+            if (book_.rarity_of(it.item, q) >= floor) {
+                ++out_.quality_floor_lifts;
+                return q;
+            }
+        }
+        return quality;   // the item's own record never shows that rarity
     }
 
     double weight_at(const std::vector<double>& w, size_t i) { return i < w.size() ? std::max(0.0, w[i]) : 1.0; }
@@ -209,7 +224,7 @@ private:
             const content::LootReward& r = c.rewards[i];
             for (const content::LootXp& x : r.xp) {
                 const std::optional<double> v = value(x.expr);
-                if (v && *v > 0) out_.xp.push_back({x.type, rolled_xp(*v)});
+                if (v && *v > 0) out_.xp.push_back({x.type, static_cast<int64_t>(std::llround(*v))});
             }
             for (const content::LootItem& it : r.items) {
                 // a harvest: the item's variation rolls its quality first (the quantity formula reads what it gave)
@@ -249,7 +264,7 @@ private:
                 const std::optional<double> q = value(it.qty);
                 if (borrowed) ctx_.gather->context = saved;
                 // a line the design data gives no Quantity (the quests' rewards: the medallion a guard hands over, a reward box) is one item; a formula that does not run is none
-                const int64_t qty = it.qty == 0 ? 1 : q ? rolled_quantity(*q) : 0;
+                const int64_t qty = it.qty == 0 ? 1 : q ? static_cast<int64_t>(std::floor(*q + 1e-9)) : 0;
                 if (qty <= 0 || it.item == 0) continue;
                 add(c.grant == "Auto" ? out_.direct : out_.loot, {it.item, it.variation, qty, quality});
             }

@@ -158,6 +158,8 @@ bool CharacterStats::compute(std::span<const WornItem> worn, Next& next, std::st
     // the engine applies them after the equipment, each in its stat's form
     in.effects = passives_;
     in.effects.insert(in.effects.end(), effects_.begin(), effects_.end());
+    // the game master's overrides are effects too: they follow the stat's own form (an additive stat adds them, a multiplying one multiplies by them)
+    in.effects.insert(in.effects.end(), gm_effects_.begin(), gm_effects_.end());
     in.ranks = ranks_;
     for (const StatValue& v : values_) {
         if (v.resource()) in.current.emplace_back(v.guid, static_cast<double>(v.value));
@@ -278,6 +280,8 @@ std::unique_ptr<CharacterStats::Evaluation> CharacterStats::evaluation(std::span
     in.equipped = g.equipped;
     in.effects = passives_;
     in.effects.insert(in.effects.end(), effects_.begin(), effects_.end());
+    // the game master's overrides are effects too: the formulas read the overridden numbers
+    in.effects.insert(in.effects.end(), gm_effects_.begin(), gm_effects_.end());
     in.ranks = ranks_;
     for (const StatValue& v : values_) {
         if (v.resource() || (live_vitals && v.held() && !v.float_array())) in.current.emplace_back(v.guid, static_cast<double>(v.value));

@@ -37,6 +37,12 @@ const (
 	WorldAdminService_ListTaughtRecipes_FullMethodName = "/aoc.worldadmin.v1.WorldAdminService/ListTaughtRecipes"
 	WorldAdminService_ResetTutorials_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/ResetTutorials"
 	WorldAdminService_SetWeaponXp_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/SetWeaponXp"
+	WorldAdminService_GetPlayerStats_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/GetPlayerStats"
+	WorldAdminService_SetStatMods_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/SetStatMods"
+	WorldAdminService_ClearStatMods_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/ClearStatMods"
+	WorldAdminService_SetCurrentStat_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/SetCurrentStat"
+	WorldAdminService_GetLootRules_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/GetLootRules"
+	WorldAdminService_SetLootRules_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/SetLootRules"
 	WorldAdminService_KillNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
 	WorldAdminService_RespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
 	WorldAdminService_ResetNpc_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
@@ -107,6 +113,25 @@ type WorldAdminServiceClient interface {
 	// (refund them first). NotFound for a character that is not in the world or a line that is none; InvalidArgument for a name that fits several lines (the answer lists them) and for an amount outside
 	// 1 to 25 (a level) or 0 to 5,718,160 (a total); FailedPrecondition for a refusal of the line's tree.
 	SetWeaponXp(ctx context.Context, in *SetWeaponXpRequest, opts ...grpc.CallOption) (*SetWeaponXpResponse, error)
+	// The bundle's stats with the player's current values and the game master's
+	// override on each. The catalog is the whole bundle, so the dashboard shows
+	// every stat the game has.
+	GetPlayerStats(ctx context.Context, in *GetPlayerStatsRequest, opts ...grpc.CallOption) (*GetPlayerStatsResponse, error)
+	// The game master's stat mods on a player, replacing the ones already there.
+	SetStatMods(ctx context.Context, in *SetStatModsRequest, opts ...grpc.CallOption) (*SetStatModsResponse, error)
+	// The game master's stat mods on a player are removed.
+	ClearStatMods(ctx context.Context, in *ClearStatModsRequest, opts ...grpc.CallOption) (*ClearStatModsResponse, error)
+	// The current value of a stat the player holds (Health, Mana, Stamina).
+	SetCurrentStat(ctx context.Context, in *SetCurrentStatRequest, opts ...grpc.CallOption) (*SetCurrentStatResponse, error)
+	// The world's drop rules as they stand now: how likely every loot draw is rolled at, how
+	// strongly the outcomes above Common are weighted in a kill's rarity rolls, and the rarity
+	// every drop is at least. 0 for the floor is the game's own odds.
+	GetLootRules(ctx context.Context, in *GetLootRulesRequest, opts ...grpc.CallOption) (*GetLootRulesResponse, error)
+	// The game master's drop rules, in force from the next kill: how likely every loot draw is
+	// rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls,
+	// and the rarity every drop is at least (the quality floor). 0 for the floor is the game's
+	// own odds. InvalidArgument for a value outside its range.
+	SetLootRules(ctx context.Context, in *SetLootRulesRequest, opts ...grpc.CallOption) (*SetLootRulesResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -273,6 +298,66 @@ func (c *worldAdminServiceClient) SetWeaponXp(ctx context.Context, in *SetWeapon
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) GetPlayerStats(ctx context.Context, in *GetPlayerStatsRequest, opts ...grpc.CallOption) (*GetPlayerStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPlayerStatsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_GetPlayerStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) SetStatMods(ctx context.Context, in *SetStatModsRequest, opts ...grpc.CallOption) (*SetStatModsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetStatModsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_SetStatMods_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) ClearStatMods(ctx context.Context, in *ClearStatModsRequest, opts ...grpc.CallOption) (*ClearStatModsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClearStatModsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ClearStatMods_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) SetCurrentStat(ctx context.Context, in *SetCurrentStatRequest, opts ...grpc.CallOption) (*SetCurrentStatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetCurrentStatResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_SetCurrentStat_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) GetLootRules(ctx context.Context, in *GetLootRulesRequest, opts ...grpc.CallOption) (*GetLootRulesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLootRulesResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_GetLootRules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) SetLootRules(ctx context.Context, in *SetLootRulesRequest, opts ...grpc.CallOption) (*SetLootRulesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetLootRulesResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_SetLootRules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldAdminServiceClient) KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillNpcResponse)
@@ -395,6 +480,25 @@ type WorldAdminServiceServer interface {
 	// (refund them first). NotFound for a character that is not in the world or a line that is none; InvalidArgument for a name that fits several lines (the answer lists them) and for an amount outside
 	// 1 to 25 (a level) or 0 to 5,718,160 (a total); FailedPrecondition for a refusal of the line's tree.
 	SetWeaponXp(context.Context, *SetWeaponXpRequest) (*SetWeaponXpResponse, error)
+	// The bundle's stats with the player's current values and the game master's
+	// override on each. The catalog is the whole bundle, so the dashboard shows
+	// every stat the game has.
+	GetPlayerStats(context.Context, *GetPlayerStatsRequest) (*GetPlayerStatsResponse, error)
+	// The game master's stat mods on a player, replacing the ones already there.
+	SetStatMods(context.Context, *SetStatModsRequest) (*SetStatModsResponse, error)
+	// The game master's stat mods on a player are removed.
+	ClearStatMods(context.Context, *ClearStatModsRequest) (*ClearStatModsResponse, error)
+	// The current value of a stat the player holds (Health, Mana, Stamina).
+	SetCurrentStat(context.Context, *SetCurrentStatRequest) (*SetCurrentStatResponse, error)
+	// The world's drop rules as they stand now: how likely every loot draw is rolled at, how
+	// strongly the outcomes above Common are weighted in a kill's rarity rolls, and the rarity
+	// every drop is at least. 0 for the floor is the game's own odds.
+	GetLootRules(context.Context, *GetLootRulesRequest) (*GetLootRulesResponse, error)
+	// The game master's drop rules, in force from the next kill: how likely every loot draw is
+	// rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls,
+	// and the rarity every drop is at least (the quality floor). 0 for the floor is the game's
+	// own odds. InvalidArgument for a value outside its range.
+	SetLootRules(context.Context, *SetLootRulesRequest) (*SetLootRulesResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -462,6 +566,24 @@ func (UnimplementedWorldAdminServiceServer) ResetTutorials(context.Context, *Res
 }
 func (UnimplementedWorldAdminServiceServer) SetWeaponXp(context.Context, *SetWeaponXpRequest) (*SetWeaponXpResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetWeaponXp not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) GetPlayerStats(context.Context, *GetPlayerStatsRequest) (*GetPlayerStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPlayerStats not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) SetStatMods(context.Context, *SetStatModsRequest) (*SetStatModsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetStatMods not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ClearStatMods(context.Context, *ClearStatModsRequest) (*ClearStatModsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClearStatMods not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) SetCurrentStat(context.Context, *SetCurrentStatRequest) (*SetCurrentStatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetCurrentStat not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) GetLootRules(context.Context, *GetLootRulesRequest) (*GetLootRulesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLootRules not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) SetLootRules(context.Context, *SetLootRulesRequest) (*SetLootRulesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetLootRules not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
@@ -754,6 +876,114 @@ func _WorldAdminService_SetWeaponXp_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_GetPlayerStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPlayerStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).GetPlayerStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_GetPlayerStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).GetPlayerStats(ctx, req.(*GetPlayerStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_SetStatMods_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetStatModsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).SetStatMods(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_SetStatMods_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).SetStatMods(ctx, req.(*SetStatModsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_ClearStatMods_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClearStatModsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ClearStatMods(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ClearStatMods_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ClearStatMods(ctx, req.(*ClearStatModsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_SetCurrentStat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetCurrentStatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).SetCurrentStat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_SetCurrentStat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).SetCurrentStat(ctx, req.(*SetCurrentStatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_GetLootRules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLootRulesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).GetLootRules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_GetLootRules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).GetLootRules(ctx, req.(*GetLootRulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_SetLootRules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetLootRulesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).SetLootRules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_SetLootRules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).SetLootRules(ctx, req.(*SetLootRulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillNpcRequest)
 	if err := dec(in); err != nil {
@@ -924,6 +1154,30 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetWeaponXp",
 			Handler:    _WorldAdminService_SetWeaponXp_Handler,
+		},
+		{
+			MethodName: "GetPlayerStats",
+			Handler:    _WorldAdminService_GetPlayerStats_Handler,
+		},
+		{
+			MethodName: "SetStatMods",
+			Handler:    _WorldAdminService_SetStatMods_Handler,
+		},
+		{
+			MethodName: "ClearStatMods",
+			Handler:    _WorldAdminService_ClearStatMods_Handler,
+		},
+		{
+			MethodName: "SetCurrentStat",
+			Handler:    _WorldAdminService_SetCurrentStat_Handler,
+		},
+		{
+			MethodName: "GetLootRules",
+			Handler:    _WorldAdminService_GetLootRules_Handler,
+		},
+		{
+			MethodName: "SetLootRules",
+			Handler:    _WorldAdminService_SetLootRules_Handler,
 		},
 		{
 			MethodName: "KillNpc",

@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace aoc { namespace worldd {
@@ -159,6 +160,41 @@ struct GmTutorialResult {
     uint32_t    cleared = 0;   // the finished tutorials put back
 };
 
+/// The game master's stat tools: one stat of a character as the tools show it.
+struct GmStatInfo {
+    int64_t     guid = 0;
+    std::string name;           // the stat's name in the graph ("MaxHealth")
+    uint32_t    flags = 0;      // the bundle's kStat... flags (kStatSpawnMax: the stat has a current value)
+    double      value = 0;      // its value now
+    double      max = 0;        // its maximum, when the graph declares one (0: no maximum is declared, not a maximum of 0)
+    bool        has_override = false;
+    double      override = 0;   // the game master's override on it (the value its mod carries)
+};
+
+/// The stats of a character as they are now.
+struct GmStatsResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    std::vector<GmStatInfo> stats;
+};
+
+/// The stats of a character after the game master's overrides changed.
+struct GmStatModsResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    std::vector<GmStatInfo> stats;      // the stats after the change
+};
+
+/// The current value of one stat of a character.
+struct GmCurrentStatResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string character;
+    double      value = 0;              // the value that was set
+};
+
 /// Weapon XP: the test command that sets a weapon line's experience (by level or by total).
 struct GmWeaponXpResult {
     GmStatus    status = GmStatus::Ok;
@@ -168,6 +204,16 @@ struct GmWeaponXpResult {
     int64_t     xp_before = 0, xp = 0;
     int32_t     level_before = 1, level = 1;
     int64_t     points_earned = 0, points_left = 0;   // the Weapon talent points the line's level gives, and what the ranks bought in its tree leave
+};
+
+/// The world's drop rules: how likely every loot draw is rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls, and the rarity every drop is at
+/// least (0: the game's own odds).
+struct GmLootRulesResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;         // why it was refused
+    double      chance_mult = 1.0;
+    double      rarity_boost = 1.0;
+    int         quality_floor = 0;   // the rarity ordinal (Common 0 ... Artifact 6)
 };
 
 /// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
@@ -237,6 +283,24 @@ public:
 
     /// The player named `name` (case does not count), or an empty handle.
     PlayerHandle find_player(const std::string& name);
+
+    /// The world's drop rules (the game master's): how likely every loot draw is rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls, and the
+    /// rarity every drop is at least (the quality floor: the rarity ordinal, Common 0 to Artifact 6; 0 is the game's own odds).  The rules are in force from the next kill.
+    GmLootRulesResult set_loot_rules(double chance_mult, double rarity_boost, int quality_floor, const std::string& by);
+    /// The drop rules as they stand now.
+    GmLootRulesResult loot_rules();
+
+    // ---- the game master's stat tools
+    /// The stats of a character as they are now: the name in the graph, the value, the maximum and the game master's override on it.
+    GmStatsResult      get_player_stats(const std::string& character);
+    /// Puts the game master's overrides on the stats named (a stat's guid and the value of its mod): they replace the overrides that were there.  The value follows the stat's own
+    /// form: an additive stat adds it, a multiplying one multiplies by it.  A guid the character does not have, or one named twice in the same call, is refused.
+    GmStatModsResult   set_stat_mods(const std::string& character, const std::vector<std::pair<int64_t, double>>& mods, const std::string& by);
+    /// Takes the game master's overrides off (the stats are what the engine says again).
+    GmStatModsResult   clear_stat_mods(const std::string& character, const std::string& by);
+    /// Sets the current value of a stat the character holds (Health, Mana): the value is taken as it is, and a value above the stat's maximum (when the graph declares one) is
+    /// refused, not clamped.
+    GmCurrentStatResult set_current_stat(const std::string& character, int64_t stat, double value, const std::string& by);
 
 private:
     PlayerWorld& world_;

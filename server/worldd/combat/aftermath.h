@@ -59,6 +59,7 @@ struct AftermathConfig {
     double default_respawn_seconds = 60.0;  // [modelled] a data NPC whose instance says 0
     double loot_chance_mult = 1.0;          // [modelled] x the chance of every RollEachByPercent loot draw (never the quantities): worldd --loot-chance-mult, AOC_LOOT_CHANCE_MULT
     double loot_rarity_boost = 1.0;         // [modelled, test only] x the weight of every outcome above Common in a kill's rarity rolls (RollContext::rarity_boost; never a harvest): worldd --loot-rarity-boost, AOC_LOOT_RARITY_BOOST
+    int    loot_quality_floor = 0;          // [modelled] the rarity every drop is at least, as a rarity ordinal (Common 0 ... Artifact 6): a rolled quality below it is lifted to the lowest quality at which the item shows that rarity (RollContext::quality_floor; never a harvest): worldd --loot-quality-floor, AOC_LOOT_QUALITY_FLOOR
     double min_respawn_seconds = 1.0;       // [R] the shortest retail respawn: 1.07 s
     uint64_t seed = 1;
 };
@@ -124,6 +125,14 @@ public:
     /// answer the reward tables' GetNodeBiome and the other node reads.  Without them (null) the node reads answer as in a world with no nodes.  Outlives the module.
     void set_city_nodes(const world::CityNodes* nodes) { nodes_ = nodes; }
 
+    /// The drop rules (the game master's): the chance every loot draw is rolled at, the weight of every outcome above Common in a kill's rarity rolls and the rarity every drop is at least
+    /// (0: the game's own odds).  The world's net thread calls this and reads the rules: the aftermath's tick and the admin tools share it.
+    void set_loot_rules(double chance_mult, double rarity_boost, int quality_floor) {
+        cfg_.loot_chance_mult = chance_mult;
+        cfg_.loot_rarity_boost = rarity_boost;
+        cfg_.loot_quality_floor = quality_floor;
+    }
+
     /// Which creatures are huntable (their corpse is hunted, not looted): the predicate sees the NpcInfo of the creature that died.  Without one every creature is looted.
     using HuntablePredicate = std::function<bool(const world::NpcInfo&)>;
     void set_huntable(HuntablePredicate fn) { huntable_ = std::move(fn); }
@@ -134,8 +143,8 @@ public:
     bool hunt_started(uint64_t npc, double now, double seconds);
     /// The hunt ended without a reward (the player moved, the client interrupted, a disconnect): a living creature is just alive again, its record goes; a corpse keeps its own.
     void hunt_cancelled(uint64_t npc);
-    /// The hunt is done: the creature is dead for its clients now (the done update), goes hunt_done_seconds after `now`, and its spawn point refills it as after a kill.  A creature whose record
-    /// went before the hunt completed (the completion came more than 5 s late) but that still stands huntable gets its record again.  False when `npc` has no hunt record and is no such creature.
+    /// The hunt is done: the creature is dead for its clients now (the done update), goes hunt_done_seconds after `now`, and its spawn point refills it as after a kill.  False when `npc` has no
+    /// hunt record.
     bool hunt_done(uint64_t npc, double now);
 
     /// Takes the death hook of the combat world.

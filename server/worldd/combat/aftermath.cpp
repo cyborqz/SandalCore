@@ -110,6 +110,7 @@ void Aftermath::on_death(const DeathEvent& d) {
             ctx.loot_max_level = max_level;
             ctx.chance_mult = cfg_.loot_chance_mult;
             ctx.rarity_boost = cfg_.loot_rarity_boost;
+            ctx.quality_floor = cfg_.loot_quality_floor;
             ctx.rng = &rng_;
             // Loot_Falloff is 1 for a gap of 0 to 9 levels and 0 from 10 (the reward tables' own, settled against retail 2026-10-08): said on the line so a drop that did not come can be read
             const int gap = static_cast<int>(std::lround(std::fabs(max_level - static_cast<double>(d.level))));
@@ -392,9 +393,7 @@ void Aftermath::hunt_cancelled(uint64_t npc) {
 }
 
 bool Aftermath::hunt_done(uint64_t npc, double now) {
-    auto it = corpses_.find(npc);
-    // a completion that comes more than 5 s after the channel's end (a stall) finds no record: a huntable creature that still stands is hunted as it stands, so that it still dies and is removed
-    if (it == corpses_.end() && hunt_started(npc, now, 0.0)) it = corpses_.find(npc);
+    const auto it = corpses_.find(npc);
     if (it == corpses_.end() || !it->second.huntable) return false;
     Corpse& c = it->second;
     if (c.living) {   // the hunt is the creature's end: it dies for its clients with the done update, and its spawn point refills it

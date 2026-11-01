@@ -117,6 +117,16 @@ public:
     void set_passives(std::vector<ActiveEffect> passives) { passives_ = std::move(passives); }
     void set_effects(std::vector<ActiveEffect> effects) { effects_ = std::move(effects); }
     void set_ranks(std::vector<SkillRank> ranks) { ranks_ = std::move(ranks); }
+    /// The game master's overrides: the stat mods applied on top of the computed
+    /// stats (the gear's, the level's, the effects'). They are part of the next
+    /// prepare(), so the client sees them like any other stat change. They go
+    /// through the effects path, so a value follows the stat's own rule: an
+    /// additive stat adds it, a multiplying one multiplies by it (2 doubles,
+    /// 0.5 halves). Each override is one effect of one stack, with no tags and
+    /// the Effect record of the guid 0, which no real Effect record has: no
+    /// formula's GetEffectCount counts them.
+    void set_gm_effects(std::vector<ActiveEffect> effects) { gm_effects_ = std::move(effects); }
+    const std::vector<ActiveEffect>& gm_effects() const { return gm_effects_; }
     const std::vector<ActiveEffect>& passives() const { return passives_; }
     const std::vector<ActiveEffect>& effects() const { return effects_; }
     const std::vector<SkillRank>&    ranks() const { return ranks_; }
@@ -204,6 +214,7 @@ private:
     bool               started_ = false;
     std::vector<ActiveEffect> passives_;   // plan D1 (as effects since plan D2)
     std::vector<ActiveEffect> effects_;    // plan D2
+    std::vector<ActiveEffect> gm_effects_; // the game master's overrides
     std::vector<SkillRank>    ranks_;      // plan D2
     std::set<int64_t>         resources_;  // plan D2, stage 2: the class resources (set_resources)
     std::map<std::string, int> profession_levels_;   // Gathering stage 2
