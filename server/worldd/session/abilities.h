@@ -237,6 +237,8 @@ public:
 
     // ---- state, for the log and the tests ------------------------------------------------------------------------
     double stamina() const { return stat(content::kGuidStamina); }
+    /// A level gained: Stamina back at its maximum.
+    void refill_stamina(bootstrap::AbilityChange& c) { set_stat(c, content::kGuidStamina, max_stamina()); }
     double max_stamina() const { return stat(content::kGuidMaxStamina); }
     double stat(int64_t record) const {
         const auto it = stats_.find(record);

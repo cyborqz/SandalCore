@@ -81,7 +81,7 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
         // plan D2: the generic runtime beside it (Health and Mana's regeneration runs there even without the ability tables)
         if (stats_ && stats_->started()) {
             pipeline_.emplace(world_ ? world_->ability_catalog() : nullptr, *stats_, *abilities_,
-                              [this] { return bootstrap::worn_items_of(inventory_); }, pb_.setup().world_time, static_cast<uint64_t>(pb_.setup().player_id) * 7919u + 1u);
+                              [this] { return bootstrap::worn_items_of(inventory_); }, pb_.setup().world_time, combat::session_dice_seed(world_ ? world_->dice_seed() : 0, static_cast<uint64_t>(pb_.setup().player_id)));
             pipeline_->set_known(known_);
             if (book_) pipeline_->set_reaction_carriers(book_->reaction_carriers(wielded_line_));
             if (world_) pipeline_->set_reactions_enabled(world_->reactions_enabled());

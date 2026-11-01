@@ -391,6 +391,9 @@ public:
     /// The game's reactions (a weapon's finisher effects, the Bard's Resonance and melodies) run unless this is turned off (--no-reactions / AOC_NO_REACTIONS=1).
     void set_reactions_enabled(bool on) { reactions_enabled_ = on; }
     bool reactions_enabled() const { return reactions_enabled_; }
+    /// The number every session's dice are made from (combat::session_dice_seed); 0, the default of a test's world, keeps them a plain function of the player id.
+    void set_dice_seed(uint64_t seed) { dice_seed_ = seed; }
+    uint64_t dice_seed() const { return dice_seed_; }
     /// What a session asks of the rest of the world for a GM command that names other characters (ServerTeleportPlayer); null: only the session itself can be moved.  Not owned.
     void   set_gm_port(GmPort* port) { gm_port_ = port; }
     GmPort* gm_port() const { return gm_port_; }
@@ -629,6 +632,7 @@ private:
     bool                                 reactions_enabled_ = true;
     GmPort*                              gm_port_ = nullptr;
     uint64_t                             respawns_made_ = 0;
+    uint64_t                             dice_seed_ = 0;
     mutable std::map<int64_t, int>       quality_cache_;
     mutable std::map<int64_t, items::ItemRarityFacts> rarity_cache_;
     mutable std::map<int64_t, std::string> name_cache_;

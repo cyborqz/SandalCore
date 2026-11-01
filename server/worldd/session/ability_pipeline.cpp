@@ -2066,10 +2066,7 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
 bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held_seconds) {
     advance(now);
     cancel_timed(client_instance_id, now);
-    // a held ability (Guard, Reflect) ends with the key's release: its effects go kHeldEndDelay later
-    for (Held& h : held_) {
-        if (h.client_id == client_instance_id && !h.end_due) h.end_due = now_ + kHeldEndDelay;
-    }
+    release_held(client_instance_id, now_);
     // a cast that a talent made a held one (Scatter Shot with Concentrated) goes on from the key's release [R: 99 and 121 ms later the montage jumped]
     for (Cast& cast : casts_) {
         if (cast.client_id != client_instance_id || !cast.held || cast.charged || !cast.branched || !cast.branch_due) continue;
@@ -2241,6 +2238,7 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     }
     for (Instance& i : instances_) {
         if (i.server_id != server_instance_id || i.end_due) continue;
+        release_held(i.client_id, now_);
         i.end_due = now_ + kEndDelay;
         return true;
     }
@@ -3213,6 +3211,8 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
 void AbilityPipeline::step_own(Cast& cast, double t) {
     const AbilityDef& def = *cast.def;
     const ConsumedScope consumed(*this, cast.item_cast);
+    // A quick tap may be released before this delayed step ever creates a Held entry.
+    if (cast.held_release_due && *cast.held_release_due <= t) return;
     AbilityChange c;
     for (const EffectDef* e : cast.own_effects) {
         // an effect the character's talents gate (the Salvo's Expeditious) starts only when its requirement holds
@@ -3225,11 +3225,23 @@ void AbilityPipeline::step_own(Cast& cast, double t) {
     // a held ability (the key stays down: Guard, Reflect) ends with the client's cancel
     if (def.row.hold_animation) {
         held_.erase(std::remove_if(held_.begin(), held_.end(), [&](const Held& h) { return h.ability == def.row.guid; }), held_.end());
-        held_.push_back({cast.client_id, def.row.guid, std::nullopt});
+        held_.push_back({cast.client_id, def.row.guid, cast.held_release_due});
         if (held_.size() > 16) held_.erase(held_.begin());
     }
     recompute(c);
     emit({std::move(c), std::nullopt, t, "the own effects of " + def.row.name + " start"});
+}
+
+void AbilityPipeline::release_held(int32_t client_id, double t) {
+    const double due = t + kHeldEndDelay;   // a held ability (Guard, Reflect) ends with the key's release: its effects go kHeldEndDelay later
+    for (Held& h : held_) {
+        if (h.client_id == client_id && !h.end_due) h.end_due = due;
+    }
+    for (Cast& cast : casts_) {
+        if (cast.client_id == client_id && cast.def->row.hold_animation && cast.own_due && !cast.held_release_due) {
+            cast.held_release_due = due;
+        }
+    }
 }
 
 void AbilityPipeline::end_held(size_t index, double t) {

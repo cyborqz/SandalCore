@@ -635,6 +635,7 @@ private:
         bootstrap::ActiveAbilityItem          item;
         std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
+        std::optional<double>                 held_release_due;   // a release heard before the held effect's delayed start
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires
         int64_t                               instance = -1;
@@ -812,6 +813,7 @@ private:
     void   end_zone_effects(bootstrap::AbilityChange& c, int64_t zone_id, double t);
 
     void   step_own(Cast& cast, double t);
+    void   release_held(int32_t client_id, double t);
     void   end_held(size_t index, double t);
     /// The effects some hit of the ability's closure applies (to its caster or its targets).
     std::set<int64_t> effects_applied_by_hits(const abilities::AbilityDef& def) const;
