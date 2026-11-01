@@ -8,6 +8,7 @@
 // ============================================================================
 #include "session/actor_view.h"
 #include "net/tick_profile.h"
+#include "session/scan_order.h"
 
 #include "gather/node_wire.h"
 #include "world/interaction_state.h"
@@ -550,6 +551,82 @@ void ActorView::tick_unprofiled(Connection& conn, double x, double y, Clock::tim
 }
 // (C-Y-B) (C.O.A)
 
+/// The actors a pass looks at, in cands_: what the registry finds round (x, y) (the grid's, and the wide ones), and every actor the view holds, in range or not; each once, with its
+/// ring and its distance; nearest first, a tie by id.
+///
+/// Two passes 67 ms apart see nearly the same order: the player walks 40 cm, a creature a little more, and a few actors change places.  So the list is not sorted from nothing: an
+/// Entry remembers the place its actor had in the list of the pass that visited it (scan_rank), the actors are put at those places, and sort_after_small_changes puts right what
+/// moved; the actors the view did not hold then (a new one in range) are ordered on their own and merged in.  The comparison is a strict total order, so the list is the one a sort
+/// of everything gives, at every pass (the emissions follow this order: the opens' cap takes the nearest, and the channel numbers follow the opens).  The ids are not sorted to find
+/// the actors listed twice: an Entry says which scan listed it, and the only actor that can come twice without one is a wide actor that the grid finds too.
+void ActorView::scan(double x, double y) {
+    const world::RelevancyConfig& cfg = config_.relevancy;
+    if (++scan_gen_ == 0) {   // (the counter wrapped: no stamp may be taken for the scan's)
+        for (auto& [id, e] : entries_) e.scan_stamp = 0;
+        scan_gen_ = 1;
+    }
+    const uint32_t gen = scan_gen_;
+    scratch_.clear();
+    registry_.query(x, y, world::query_radius(cfg, largest_awake_), scratch_);
+    const size_t from_grid = scratch_.size();
+    registry_.query_wide(x, y, cfg.hysteresis_cm, scratch_);   // the towns' replicators (1.45 km): beyond the grid query's reach
+    cands_.clear();
+    // `id` as this connection sees it, if it is listed at all (`entry`: what the view holds of it)
+    const auto consider = [&](uint64_t id, const Entry* entry) {
+        const world::WorldActor* a = registry_.find(id);
+        if (!a) return;   // removed: flush_removed deals with it
+        if (a->owner != 0 && a->owner != config_.player_id) return;   // another player's (its lingering zones): not for this connection
+        const ClientState prior = entry ? entry->state : ClientState::None;
+        const double d = world::horizontal_distance(a->x, a->y, x, y);
+        world::Ring ring = world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, prior);
+        if (a->snapshot_only && ring == world::Ring::Awake) ring = world::Ring::Snapshot;   // never awake: a snapshot wherever it is in range
+        cands_.push_back({d, id, ring, entry ? entry->scan_rank : kNoRank});
+        // a wide actor (a town's replicator, 1.45 km) is found by query_wide: raising the grid query's radius to it would make every view visit a quarter of the world's cells for good
+        if (a->awake_radius_cm > largest_awake_ && a->awake_radius_cm <= world::ActorRegistry::kWideCm) largest_awake_ = a->awake_radius_cm;
+    };
+    for (size_t i = 0; i < scratch_.size(); ++i) {   // what the registry found
+        const uint64_t id = scratch_[i];
+        const auto it = entries_.find(id);
+        if (it != entries_.end()) {
+            if (it->second.scan_stamp == gen) continue;   // listed already: a wide actor is in both queries
+            it->second.scan_stamp = gen;
+            consider(id, &it->second);
+        } else {
+            if (i >= from_grid && std::any_of(cands_.begin(), cands_.end(), [id](const Cand& c) { return c.id == id; })) continue;   // (a wide actor the grid found too)
+            consider(id, nullptr);
+        }
+    }
+    for (auto& [id, e] : entries_) {   // what the view holds that the registry did not find: out of range, or removed
+        if (e.scan_stamp == gen) continue;
+        e.scan_stamp = gen;
+        consider(id, &e);
+    }
+    const auto nearer = [](const Cand& l, const Cand& r) { return l.d != r.d ? l.d < r.d : l.id < r.id; };
+    if (!std::isfinite(x) || !std::isfinite(y)) {   // no distance to compare (a position that is not a number): the plain sort, which was always there
+        std::sort(cands_.begin(), cands_.end(), nearer);
+        scan_listed_ = cands_.size();
+        return;
+    }
+    // the actors the last pass had, at their old places (a place taken twice, or beyond the last list: the actor is treated as new), then the new ones
+    place_.assign(scan_listed_, kNoRank);
+    for (uint32_t j = 0; j < cands_.size(); ++j) {
+        const uint32_t r = cands_[j].rank;
+        if (r < place_.size() && place_[r] == kNoRank) place_[r] = j;
+    }
+    sorted_.clear();
+    for (const uint32_t j : place_) {
+        if (j != kNoRank) sorted_.push_back(cands_[j]);
+    }
+    const size_t ordered = sorted_.size();
+    for (uint32_t j = 0; j < cands_.size(); ++j) {
+        const uint32_t r = cands_[j].rank;
+        if (!(r < place_.size() && place_[r] == j)) sorted_.push_back(cands_[j]);
+    }
+    sort_after_small_changes(sorted_, ordered, nearer, merged_);
+    cands_.swap(sorted_);
+    scan_listed_ = cands_.size();
+}
+
 void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now) {
     ++stats_.passes;
     if (conn.packets_in_flight() > config_.max_packets_in_flight || conn.queued_bunches() > config_.max_queued_bunches) {
@@ -563,39 +640,13 @@ void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now
         scan_started = std::chrono::steady_clock::now();
         ++profile.view_passes;
     }
-    scratch_.clear();
-    registry_.query(x, y, world::query_radius(cfg, largest_awake_), scratch_);
-    registry_.query_wide(x, y, cfg.hysteresis_cm, scratch_);   // the towns' replicators (1.45 km): beyond the grid query's reach
-    for (const auto& [id, e] : entries_) scratch_.push_back(id);   // what the view tracks, in range or not
-    std::sort(scratch_.begin(), scratch_.end());
-    scratch_.erase(std::unique(scratch_.begin(), scratch_.end()), scratch_.end());
-
-    struct Cand {
-        double   d;
-        uint64_t id;
-        Ring     ring;
-    };
-    std::vector<Cand> cands;
-    cands.reserve(scratch_.size());
-    for (const uint64_t id : scratch_) {
-        const world::WorldActor* a = registry_.find(id);
-        if (!a) continue;   // removed: flush_removed deals with it
-        if (a->owner != 0 && a->owner != config_.player_id) continue;   // another player's (its lingering zones): not for this connection
-        const auto it = entries_.find(id);
-        const ClientState prior = it == entries_.end() ? ClientState::None : it->second.state;
-        const double d = world::horizontal_distance(a->x, a->y, x, y);
-        world::Ring ring = world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, prior);
-        if (a->snapshot_only && ring == Ring::Awake) ring = Ring::Snapshot;   // never awake: a snapshot wherever it is in range
-        cands.push_back({d, id, ring});
-        // a wide actor (a town's replicator, 1.45 km) is found by query_wide: raising the grid query's radius to it would make every view visit a quarter of the world's cells for good
-        if (a->awake_radius_cm > largest_awake_ && a->awake_radius_cm <= world::ActorRegistry::kWideCm) largest_awake_ = a->awake_radius_cm;
-    }
-    std::sort(cands.begin(), cands.end(), [](const Cand& l, const Cand& r) { return l.d != r.d ? l.d < r.d : l.id < r.id; });
+    scan(x, y);
     if (profile.on) profile.view_scan_us += tick_profile_us_since(scan_started);
 
     size_t opens = 0;
     bool capped = false;
-    for (const Cand& c : cands) {
+    for (size_t index = 0; index < cands_.size(); ++index) {
+        const Cand& c = cands_[index];
         world::WorldActor* a = registry_.find(c.id);
         if (!a) continue;
         if (conn.queued_bunches() > config_.max_queued_bunches) {   // this pass's own sends filled the queue
@@ -608,6 +659,7 @@ void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now
             it = entries_.emplace(c.id, Entry{}).first;
         }
         Entry& e = it->second;
+        e.scan_rank = static_cast<uint32_t>(index);   // (the next scan starts from this order)
         if (e.broken) continue;
         switch (e.state) {
             case ClientState::None:

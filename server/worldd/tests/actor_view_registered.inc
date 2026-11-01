@@ -7,3 +7,4 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "actor_view_update_stream_tests.inc"
+#include "actor_view_scan_tests.inc"

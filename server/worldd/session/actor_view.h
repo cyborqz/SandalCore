@@ -190,9 +190,14 @@ public:
     void set_chain_trace(std::function<void(ChainId, uint64_t, bool, size_t, size_t)> trace) { chain_trace_ = std::move(trace); }
 
 private:
+    /// An Entry's place in the list of the scan that visited it last: none.
+    static constexpr uint32_t kNoRank = ~0u;
+
     struct Entry {
         world::ClientState        state = world::ClientState::None;
         uint32_t                  channel = 0;
+        uint32_t                  scan_stamp = 0;        // the scan that last listed this actor (scan_gen_)
+        uint32_t                  scan_rank = kNoRank;   // its place in the list of the pass that visited it last: the next scan starts from that order
         protocol::repl::ActorShadow shadow;
         uint32_t                  sent_version = 0;
         uint32_t                  sent_reliable = 0;
@@ -223,6 +228,9 @@ private:
     };
 
     void     pass(Connection& conn, double x, double y, Clock::time_point now);
+    /// The actors a pass looks at (what the registry finds round (x, y), the wide ones and every actor the view holds), each once, with its ring and its distance, nearest first
+    /// (a tie by id), in cands_.  The order of the last pass is its starting point (see actor_view.cpp).
+    void     scan(double x, double y);
     /// tick() without its timing (--loop-stats).
     void     tick_unprofiled(Connection& conn, double x, double y, Clock::time_point now);
     /// The actor as this connection sees it: `a.actor`, or `scratch` made from it with the player's guid in the interaction state maps.
@@ -266,6 +274,17 @@ private:
     std::deque<uint64_t>                pending_snapshots_;   // opened as snapshots, their Dormancy close not sent yet, in the order they were opened
     double                              largest_awake_ = 0;   // the largest awake radius of any actor seen (the registry query must reach it)
     std::vector<uint64_t>               scratch_;
+    /// One actor of a scan: its distance from the player, its ring, and the place it had in the list of the pass that visited it last (kNoRank: the view did not hold it).
+    struct Cand {
+        double      d;
+        uint64_t    id;
+        world::Ring ring;
+        uint32_t    rank;
+    };
+    std::vector<Cand>                   cands_, sorted_, merged_;   // the scan's list, and the two buffers that its ordering works in
+    std::vector<uint32_t>               place_;                     // by rank: the index in cands_ of the actor that had it
+    uint32_t                            scan_gen_ = 0;              // counts the scans: an Entry's scan_stamp names the one that listed it
+    size_t                              scan_listed_ = 0;           // the length of the last scan's list (the ranks run to it)
     std::function<void(uint32_t, bool, bool, size_t)> trace_;
     std::function<void(ChainId, uint64_t, bool, size_t, size_t)> chain_trace_;
 };
