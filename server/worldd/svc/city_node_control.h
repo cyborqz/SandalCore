@@ -12,8 +12,8 @@
 //      [gm] ServerGMGetNodeData by Cyb: Joeva (Verra_RVR_Joeva) level 4 (Town), 0 XP, 0 %, lord none
 //      [gm] ... refused: <the service's reason>        (NotFound, InvalidArgument), or "the node service is unavailable" when it cannot be reached
 //
-//  A change comes back through CityNodeFeed to the registry and from there to every client's GameState; this class only asks.  The queue holds at most 64 calls (the
-//  oldest is dropped, said once).
+//  A change comes back through CityNodeFeed to the registry and from there to every client's GameState; this class only asks.  The queue holds at most 64 calls (a call
+//  past them is refused, and said once until the queue has emptied).
 // ============================================================================
 #pragma once
 

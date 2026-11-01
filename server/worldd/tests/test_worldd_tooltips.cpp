@@ -68,11 +68,11 @@ const char* const R_PROGRESS = "the generator reads a tooltip with no ability in
                                "cast, with the cast in progress; the key states no value";
 const char* const R_REF = "the text states a number of, or an effect applied by, a hit that none of the ability's HitsIds, projectiles or zones fires: a hit fired by a "
                           "REACTION of the ability's effect (ReactionsIds: the Rogue poisons' on-hit application, the Mage's Elemental Empowerment hits), or another "
-                          "ability's (a summoned pet's attack). Reactions are stored and not run (the backlog's E1 stage 3 fix line); pets are outside E1 (the spec's section 5)";
+                          "ability's (a summoned pet's attack). Reactions are stored and not run yet; pets are outside E1";
 const char* const R_DISABLE = "a crowd-control status (Stunned, Incapacitated, Tripped, Snared, Rooted, Silenced, Disarmed, Chilled, Exhausted ...) whose duration is N x the "
                               "DisableDuration formula, whose term calls GetEffect(...), a host function the stat program does not have: the client evaluates it for the "
                               "player, the generator and the runtime cannot. These are the statuses a hit puts on an ENEMY, which stage 3 does not apply to NPCs "
-                              "(test_worldd_ability_npc's R_NPCFX); in the backlog with the reactions";
+                              "(test_worldd_ability_npc's R_NPCFX); they come with the reactions";
 const char* const R_TERM = "the record's EffectDuration is a bare GetTerm(...) of a term record outside any formula (ab_expr 1085, the three Hunt marks' RangerMark term, whose "
                            "DefaultValue is empty): the stat program refuses it (\"GetTerm outside a formula\"), the generator has no value for it, and the runtime does not "
                            "apply an effect whose duration does not run; a mark the hit puts on an ENEMY, which stage 3 does not apply to NPCs";
@@ -82,7 +82,7 @@ const char* const R_DUMMY = "a dummy hit: its stat mod has no Value expression (
                             "\"1,000% Magical\" (the threat reduction's placeholder in the data)";
 const char* const R_HOSTFN = "the activation requirement is no number the tooltip states; its host functions (GetLastProjectileFireTime, GetLastAbility, "
                              "HasPVPForceFlag, HasValidEquipment) are not in the stat program, so the runtime refuses the cast (NoFormula): no retail capture holds a "
-                             "cast of the ability (0 of the 482 + 358 cases), and pets, PvP and harvesting are outside E1 (the spec's section 5); in the backlog";
+                             "cast of the ability (0 of the 482 + 358 cases), and pets, PvP and harvesting are outside E1; not done yet";
 // -- CoA x C Y B --
 
 struct Known {

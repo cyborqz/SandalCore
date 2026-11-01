@@ -45,10 +45,12 @@
 #include <cctype>
 #include <cmath>
 #include <csignal>
+#include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <optional>
 #include <thread>
+#include <utility>
 // CoA - C.Y.B
 
 using namespace aoc::worldd;
@@ -311,6 +313,19 @@ int main(int argc, char** argv) {
                    "the most client sessions at once; further handshakes are ignored (0: no limit)")
         ->capture_default_str();
     CLI11_PARSE(app, argc, argv);
+    // CLI11's Range lets a NaN through (every comparison with it is false), so the numbers that were range-checked are checked once more as numbers
+    {
+        const std::pair<const char*, double> checked[] = {
+            {"--area-radius", area_radius_m},         {"--scenery-radius", scenery_radius_m},   {"--spawn-hour", spawn_hour},
+            {"--npc-damage-mult", npc_damage_mult},   {"--loot-chance-mult", loot_chance_mult}, {"--loot-rarity-boost", loot_rarity_boost},
+            {"--gather-respawn-mult", gather_respawn_mult}, {"--foliage-regrow-mult", foliage_regrow_mult}};
+        for (const auto& [flag, value] : checked) {
+            if (!std::isfinite(value)) {
+                std::fprintf(stderr, "%s must be a number, not %g\n", flag, value);
+                return 2;
+            }
+        }
+    }
 // (C.Y.B | CoA)
 
     std::vector<spdlog::sink_ptr> sinks{std::make_shared<spdlog::sinks::stderr_color_sink_mt>()};

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -32,7 +33,7 @@ func TestValidateCredentials(t *testing.T) {
 		{"bad name", "pass", false}, // space
 		{"cyb", "abc", false},       // password too short
 		{string(make([]byte, 33)), "pass", false},
-		{"cyb", strings.Repeat("p", 72), true},  // bcrypt takes at most 72 bytes
+		{"cyb", strings.Repeat("p", 72), true},  // 72 bytes is the longest password
 		{"cyb", strings.Repeat("p", 73), false}, // one byte over
 	} {
 		err := ValidateCredentials(tc.user, tc.pass)
@@ -229,23 +230,130 @@ func TestFindByUsername(t *testing.T) {
 	}
 }
 
-func TestPasswordsAreStoredAsBcrypt(t *testing.T) {
+func storedHash(t *testing.T, s *Store, id int64) string {
+	t.Helper()
+	var hash string
+	if err := s.pool.QueryRow(context.Background(), "SELECT password_hash FROM accounts WHERE id = $1", id).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	return hash
+}
+
+func TestPasswordsAreStoredAsArgon2id(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	acc, err := s.Register(ctx, "cyb", "secret1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var hash string
-	if err := s.pool.QueryRow(ctx, "SELECT password_hash FROM accounts WHERE id = $1", acc.ID).Scan(&hash); err != nil {
+	other, err := s.Register(ctx, "kyle", "secret1") // the same password
+	if err != nil {
 		t.Fatal(err)
 	}
+	hash, otherHash := storedHash(t, s, acc.ID), storedHash(t, s, other.ID)
 	if hash == "secret1" || strings.Contains(hash, "secret1") {
 		t.Errorf("password stored in the clear: %q", hash)
 	}
-	cost, err := bcrypt.Cost([]byte(hash))
-	if err != nil || cost != bcrypt.DefaultCost {
-		t.Errorf("bcrypt.Cost(%q) = %d, %v; want %d", hash, cost, err, bcrypt.DefaultCost)
+	if want := "$argon2id$v=19$m=19456,t=2,p=1$"; !strings.HasPrefix(hash, want) {
+		t.Errorf("stored hash %q does not start with %q", hash, want)
+	}
+	if _, _, _, err := parseArgon2id(hash); err != nil {
+		t.Errorf("the stored hash does not read back: %v", err)
+	}
+	if hash == otherHash {
+		t.Error("two accounts with the same password share a hash: the salt is missing")
+	}
+}
+
+// An account made when passwords were bcrypt hashes still signs in, and its hash is
+// rewritten as Argon2id by the first successful sign-in, not by a failed one.
+func TestBcryptHashSignsInAndIsUpgraded(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	acc, err := s.Register(ctx, "cyb", "secret1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := bcrypt.GenerateFromPassword([]byte("secret1"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, "UPDATE accounts SET password_hash = $1 WHERE id = $2", string(legacy), acc.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Authenticate(ctx, "cyb", "wrong-pw"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("wrong password on a bcrypt hash: %v", err)
+	}
+	if got := storedHash(t, s, acc.ID); got != string(legacy) {
+		t.Fatalf("a failed sign-in changed the stored hash to %q", got)
+	}
+	if _, err := s.Authenticate(ctx, "cyb", "secret1"); err != nil {
+		t.Fatalf("sign-in with a bcrypt hash: %v", err)
+	}
+	upgraded := storedHash(t, s, acc.ID)
+	if !strings.HasPrefix(upgraded, "$argon2id$") {
+		t.Fatalf("after the sign-in the stored hash is %q, want an Argon2id hash", upgraded)
+	}
+	if _, err := s.Authenticate(ctx, "cyb", "secret1"); err != nil {
+		t.Errorf("sign-in with the upgraded hash: %v", err)
+	}
+	if got := storedHash(t, s, acc.ID); got != upgraded {
+		t.Errorf("a hash in today's form was rewritten: %q", got)
+	}
+	if _, err := s.Authenticate(ctx, "cyb", "wrong-pw"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("wrong password on the upgraded hash: %v", err)
+	}
+}
+
+// checkPassword needs no database: what it accepts, what it asks to be upgraded, and what it refuses before it allocates.
+func TestCheckPassword(t *testing.T) {
+	hash, err := hashPassword("secret1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, upgrade, err := checkPassword(hash, "secret1"); !match || upgrade || err != nil {
+		t.Errorf("right password on a new hash: match=%v upgrade=%v err=%v", match, upgrade, err)
+	}
+	if match, _, err := checkPassword(hash, "secret2"); match || err != nil {
+		t.Errorf("wrong password on a new hash: match=%v err=%v", match, err)
+	}
+	// a weaker Argon2id hash (less memory than today's) matches and is to be upgraded
+	salt := []byte("0123456789abcdef")
+	weak := argonParams{memory: 8 * 1024, time: 2, threads: 1}
+	weakHash := fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", weak.memory, weak.time, weak.threads,
+		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(argonKey([]byte("secret1"), salt, weak, 32)))
+	if match, upgrade, err := checkPassword(weakHash, "secret1"); !match || !upgrade || err != nil {
+		t.Errorf("weaker Argon2id hash: match=%v upgrade=%v err=%v, want a match that asks for the upgrade", match, upgrade, err)
+	}
+	legacy, err := bcrypt.GenerateFromPassword([]byte("secret1"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match, upgrade, err := checkPassword(string(legacy), "secret1"); !match || !upgrade || err != nil {
+		t.Errorf("bcrypt hash: match=%v upgrade=%v err=%v, want a match that asks for the upgrade", match, upgrade, err)
+	}
+	if match, upgrade, err := checkPassword(string(legacy), "secret2"); match || upgrade || err != nil {
+		t.Errorf("wrong password on a bcrypt hash: match=%v upgrade=%v err=%v", match, upgrade, err)
+	}
+
+	// what is refused without hashing: a stored text that asks for gigabytes, and texts that are no hash
+	b64 := base64.RawStdEncoding.EncodeToString
+	for name, stored := range map[string]string{
+		"4 GiB of memory":          "$argon2id$v=19$m=4194304,t=2,p=1$" + b64(salt) + "$" + b64(make([]byte, 32)),
+		"600 passes":               "$argon2id$v=19$m=19456,t=600,p=1$" + b64(salt) + "$" + b64(make([]byte, 32)),
+		"no lanes":                 "$argon2id$v=19$m=19456,t=2,p=0$" + b64(salt) + "$" + b64(make([]byte, 32)),
+		"a parameter lost":         "$argon2id$v=19$m=19456,t=2$" + b64(salt) + "$" + b64(make([]byte, 32)),
+		"another version":          "$argon2id$v=16$m=19456,t=2,p=1$" + b64(salt) + "$" + b64(make([]byte, 32)),
+		"a short salt":             "$argon2id$v=19$m=19456,t=2,p=1$" + b64(salt[:4]) + "$" + b64(make([]byte, 32)),
+		"a salt that is no base64": "$argon2id$v=19$m=19456,t=2,p=1$!!!$" + b64(make([]byte, 32)),
+		"no key":                   "$argon2id$v=19$m=19456,t=2,p=1$" + b64(salt) + "$",
+		"plain text":               "not-a-bcrypt-hash",
+		"empty":                    "",
+	} {
+		if match, upgrade, err := checkPassword(stored, "secret1"); match || upgrade || err == nil {
+			t.Errorf("%s: match=%v upgrade=%v err=%v, want an error", name, match, upgrade, err)
+		}
 	}
 }
 
@@ -286,23 +394,23 @@ func TestTokensAreStoredHashedAndUnique(t *testing.T) {
 	}
 }
 
-// An unknown username must cost about one bcrypt comparison, like a wrong
+// An unknown username must cost about one Argon2id comparison, like a wrong
 // password does. Without the dummy compare the lookup alone takes well under a
 // millisecond.
-func TestAuthenticateUnknownUserCostsABcryptCompare(t *testing.T) {
+func TestAuthenticateUnknownUserCostsAHashCompare(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	if _, err := s.Register(ctx, "cyb", "secret1"); err != nil {
 		t.Fatal(err)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("secret1"), bcrypt.DefaultCost)
+	hash, err := hashPassword("secret1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if bcrypt.CompareHashAndPassword(hash, []byte("wrong-pw")) == nil {
-		t.Fatal("wrong password matched")
+	if match, _, err := checkPassword(hash, "wrong-pw"); match || err != nil {
+		t.Fatalf("wrong password: match=%v err=%v", match, err)
 	}
 	cost := time.Since(start)
 
@@ -312,7 +420,7 @@ func TestAuthenticateUnknownUserCostsABcryptCompare(t *testing.T) {
 		t.Fatalf("unknown user: %v", err)
 	}
 	if took := time.Since(start); took < cost/2 {
-		t.Errorf("unknown user took %v, want at least half of one bcrypt compare (%v): the dummy compare is missing", took, cost)
+		t.Errorf("unknown user took %v, want at least half of one hash compare (%v): the dummy compare is missing", took, cost)
 	}
 }
 

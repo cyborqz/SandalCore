@@ -45,7 +45,7 @@
 
 namespace aoc::worldd::combat {
 
-/// The most one rolled line gives: more than the largest stack the data holds (999,999), a power of two like the inventory's own cap of a stack.
+/// The most one rolled line gives: more than the largest stack the data holds (999,999), and a power of two (the inventory's own cap of one stack is 1,000,000).
 inline constexpr int64_t kMaxRolledQuantity = 1 << 20;
 
 /// A rolled quantity as a count: rounded down, never past kMaxRolledQuantity, and nothing for a negative number or one that is no number.  (A formula of bad data must not turn into
@@ -55,6 +55,16 @@ inline int64_t rolled_quantity(double v) {
     const double whole = std::floor(v + 1e-9);
     if (whole <= 0.0) return 0;
     return whole >= static_cast<double>(kMaxRolledQuantity) ? kMaxRolledQuantity : static_cast<int64_t>(whole);
+}
+
+/// The most one rolled experience line gives: more than the largest level curve of the data (624,000,000).
+inline constexpr int64_t kMaxRolledXp = 1'000'000'000;
+
+/// A rolled experience amount as a count: rounded, never past kMaxRolledXp, and nothing for a number that is none, infinite or negative.  (The same guard as rolled_quantity:
+/// converting an enormous double is undefined.)
+inline int64_t rolled_xp(double v) {
+    if (!std::isfinite(v) || v <= 0.0) return 0;
+    return v >= static_cast<double>(kMaxRolledXp) ? kMaxRolledXp : static_cast<int64_t>(std::llround(v));
 }
 
 struct RolledItem {

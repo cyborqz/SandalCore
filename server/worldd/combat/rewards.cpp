@@ -209,7 +209,7 @@ private:
             const content::LootReward& r = c.rewards[i];
             for (const content::LootXp& x : r.xp) {
                 const std::optional<double> v = value(x.expr);
-                if (v && *v > 0) out_.xp.push_back({x.type, static_cast<int64_t>(std::llround(*v))});
+                if (v && *v > 0) out_.xp.push_back({x.type, rolled_xp(*v)});
             }
             for (const content::LootItem& it : r.items) {
                 // a harvest: the item's variation rolls its quality first (the quantity formula reads what it gave)

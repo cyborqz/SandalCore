@@ -39,6 +39,7 @@
 #include "world/node_wire.h"
 
 #include <grpcpp/grpcpp.h>
+#include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -55,6 +56,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1157,6 +1159,38 @@ static void test_control_busy() {
             for (const std::string& l : lines) refused += l.find("a node GM call was not sent") != std::string::npos ? 1 : 0;
         }
         CHECKF(refused == 5 && control.calls_made() == 65, "the five calls past the 64 that wait were refused, and said so (%zu refused, %llu made)", refused, static_cast<unsigned long long>(control.calls_made()));
+        // the refusal is told once for a burst: when the queue has emptied, the next burst is told again (the log line is the only trace when no console callback is set)
+        std::ostringstream logged;
+        const auto previous_logger = spdlog::default_logger();
+        auto capture = std::make_shared<spdlog::logger>("capture", std::make_shared<spdlog::sinks::ostream_sink_mt>(logged));
+        capture->set_level(spdlog::level::warn);
+        spdlog::set_default_logger(capture);
+        {
+            std::lock_guard<std::mutex> lock(service.gate_mu);
+            service.hold = true;
+        }
+        size_t calls_before = 0;
+        {
+            std::lock_guard<std::mutex> lock(service.mu);
+            calls_before = service.calls.size();
+        }
+        control.set_level("Verra_RVR_Joeva", 101, false, "ServerSetNodeLevel by cyb");
+        for (int i = 0; i < 500; ++i) {   // the worker is inside the service with the first call of the second burst
+            {
+                std::lock_guard<std::mutex> lock(service.mu);
+                if (service.calls.size() > calls_before) break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int level = 102; level <= 170; ++level) control.set_level("Verra_RVR_Joeva", level, false, "ServerSetNodeLevel by cyb");
+        {
+            std::lock_guard<std::mutex> lock(service.gate_mu);
+            service.hold = false;
+        }
+        service.gate_cv.notify_all();
+        control.drain();
+        spdlog::set_default_logger(previous_logger);
+        CHECK(logged.str().find("the newest is refused") != std::string::npos, "the second burst is told in the log again, once the queue had emptied");
         // a node name from the console is shown without its control characters (a newline would start a log line of the sender's making)
         control.set_level("Atlantis\nforged [gm] line", 2, false, "ServerSetNodeLevel by cyb");
         control.drain();

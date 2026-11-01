@@ -9,7 +9,7 @@
 .DESCRIPTION
   install.bat runs this as its first step, then makes the game data and builds the programs.
   Checks: winget, Visual Studio 2022 Build Tools (C++ workload), CMake, Git, vcpkg, Go, the .NET 8 SDK (mapc), Python 3.10 or newer (the
-  generators of scripts\extract_game_data.ps1) and Docker Desktop (PostgreSQL + NATS for the Go services).
+  generators of scripts\extract_game_data.ps1) and Docker Desktop (PostgreSQL for the Go services).
   Missing items are installed with winget after you confirm each one (or all at once with -Yes).
   vcpkg is cloned to %USERPROFILE%\vcpkg and VCPKG_ROOT is set for your user.
   The C++ libraries themselves (grpc, protobuf, openssl, ...) are installed by vcpkg during the first build;
@@ -20,7 +20,7 @@
 .PARAMETER Yes
   Install everything missing without asking.
 .PARAMETER SkipDocker
-  Do not offer Docker Desktop (you run PostgreSQL and NATS some other way).
+  Do not offer Docker Desktop (you run PostgreSQL some other way).
 .PARAMETER NoHints
   Leave out the lines at the end that say what to run next (install.bat says it itself).
 #>
@@ -213,9 +213,9 @@ if (-not $missing.Count) {
 
 # ---------------------------------------------------------------- install
 if (-not $script:winget) {
-    # Docker only runs the servers (PostgreSQL and NATS): when it is the one thing missing, the build can go on without it
+    # Docker only runs the database (PostgreSQL): when it is the one thing missing, the build can go on without it
     if ($missing.Count -eq 1 -and $missing[0] -eq 'Docker') {
-        Write-Host 'Docker Desktop is missing and winget is not here to install it, so the install goes on without it. Run PostgreSQL and NATS yourself, or install Docker Desktop and run this again. -SkipDocker leaves this note out.' -ForegroundColor Yellow
+        Write-Host 'Docker Desktop is missing and winget is not here to install it, so the install goes on without it. Run PostgreSQL yourself, or install Docker Desktop and run this again. -SkipDocker leaves this note out.' -ForegroundColor Yellow
         exit 0
     }
     Write-Warning 'winget is missing. Install "App Installer" from the Microsoft Store, then run this script again.'
@@ -255,7 +255,7 @@ if (-not $items['Go'] -and (Confirm-Install "Go $goNeed or newer")) {
     [void](Install-Winget 'GoLang.Go' 'Go')
 }
 if (-not $SkipDocker -and -not $items['Docker'] -and
-    (Confirm-Install 'Docker Desktop (runs PostgreSQL and NATS for the Go services; may need WSL2 and a reboot)')) {
+    (Confirm-Install 'Docker Desktop (runs PostgreSQL for the Go services; may need WSL2 and a reboot)')) {
     [void](Install-Winget 'Docker.DockerDesktop' 'Docker Desktop')
 }
 if (-not $items['.NET 8 SDK'] -and (Confirm-Install '.NET 8 SDK (builds mapc, which reads your game files)')) {

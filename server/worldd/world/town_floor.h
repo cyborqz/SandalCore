@@ -25,7 +25,7 @@
 //                            town) is taken for the bowl, and 67 to 76 % of the 500 m round a node's place is within the 75 m reach of a person of the floor (the rest of the pit keeps the baked ground).
 //
 //  Not a navmesh: the people of a bowl stand where the data puts them and do not walk (npc/npc_world.h).  A GM teleport (PlayerWorld::ground_at), a login (lift_out_of_bowl) and the
-//  position saved for a rider in the air (PlayerSession::ground_below) are corrected by this height and nothing else is.  The follow-ups (docs/backlog.md): the correction in every other
+//  position saved for a rider in the air (PlayerSession::ground_below) are corrected by this height and nothing else is.  Not done yet: the correction in every other
 //  ground query (a mount's summon and landing, a respawn), a navmesh on the town floor so the people can walk.
 // ============================================================================
 #pragma once

@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sync"
 	"time"
@@ -19,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -42,18 +42,18 @@ type Token struct {
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,32}$`)
 
-// maxPasswordBytes is bcrypt's limit: it ignores everything past 72 bytes.
+// maxPasswordBytes is the longest password accepted. It was bcrypt's limit (bcrypt ignores everything past 72 bytes), and the hashes made then are still read that way.
 const maxPasswordBytes = 72
 
 // -- C:Y:B . CoA --
 
 // dummyHash is compared against when a username is unknown, so that unknown
-// users and wrong passwords cost the same bcrypt time. It is computed on first
+// users and wrong passwords cost the same Argon2id time. It is computed on first
 // use so importers do not pay for it at init. Generating it can only fail on
-// a constant we control, so a failure panics rather than silently turning the
-// unknown-user path back into a fast one.
-var dummyHash = sync.OnceValue(func() []byte {
-	h, err := bcrypt.GenerateFromPassword([]byte("timing-equaliser"), bcrypt.DefaultCost)
+// the random number source, so a failure panics rather than silently turning
+// the unknown-user path back into a fast one.
+var dummyHash = sync.OnceValue(func() string {
+	h, err := hashPassword("timing-equaliser")
 	if err != nil {
 		panic(err)
 	}
@@ -89,14 +89,14 @@ func (s *Store) Register(ctx context.Context, username, password string) (Accoun
 	if err := ValidateCredentials(username, password); err != nil {
 		return Account{}, err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := hashPassword(password)
 	if err != nil {
 		return Account{}, err
 	}
 	var id int64
 	err = s.pool.QueryRow(ctx,
 		"INSERT INTO accounts (username, password_hash) VALUES ($1, $2) RETURNING id",
-		username, string(hash)).Scan(&id)
+		username, hash).Scan(&id)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "accounts_username_lower" {
 		return Account{}, ErrUsernameTaken
@@ -109,7 +109,9 @@ func (s *Store) Register(ctx context.Context, username, password string) (Accoun
 
 // Authenticate checks a username and password. Input that cannot belong to any
 // account is rejected before the database is queried; an unknown username
-// still pays one bcrypt comparison so it is not distinguishable by timing.
+// still pays one Argon2id comparison so it is not distinguishable by timing.
+// An account whose hash is not in today's form (bcrypt, from before Argon2id)
+// has it rewritten after a successful sign-in.
 func (s *Store) Authenticate(ctx context.Context, username, password string) (Account, error) {
 	if !usernamePattern.MatchString(username) || len(password) > maxPasswordBytes {
 		return Account{}, ErrInvalidCredentials
@@ -120,19 +122,35 @@ func (s *Store) Authenticate(ctx context.Context, username, password string) (Ac
 		"SELECT id, username, password_hash FROM accounts WHERE lower(username) = lower($1)",
 		username).Scan(&acc.ID, &acc.Username, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
-		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(password))
+		_, _, _ = checkPassword(dummyHash(), password)
 		return Account{}, ErrInvalidCredentials
 	}
 	if err != nil {
 		return Account{}, err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-			return Account{}, ErrInvalidCredentials
-		}
+	match, upgrade, err := checkPassword(hash, password)
+	if err != nil {
 		return Account{}, fmt.Errorf("account %d: password hash: %w", acc.ID, err)
 	}
+	if !match {
+		return Account{}, ErrInvalidCredentials
+	}
+	if upgrade {
+		s.upgradeHash(ctx, acc.ID, hash, password)
+	}
 	return acc, nil
+}
+
+// upgradeHash rewrites a stored hash in today's form after a sign-in that matched it. The row changes only if it still holds the hash that was checked (a password
+// changed in between stays). The sign-in has already succeeded, so a failure only loses the upgrade: it is logged, not returned.
+func (s *Store) upgradeHash(ctx context.Context, accountID int64, old, password string) {
+	fresh, err := hashPassword(password)
+	if err == nil {
+		_, err = s.pool.Exec(ctx, "UPDATE accounts SET password_hash = $1 WHERE id = $2 AND password_hash = $3", fresh, accountID, old)
+	}
+	if err != nil {
+		slog.Warn("account: password hash not upgraded", "account_id", accountID, "error", err)
+	}
 }
 
 // FindByUsername resolves an account without a password (admin tools).

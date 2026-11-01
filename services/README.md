@@ -24,7 +24,7 @@ gateway and worldd send it. The game client's ICS stream does not use it.
 ## Run
 
 ```powershell
-scripts\services.ps1 up      # PostgreSQL + NATS in Docker
+scripts\services.ps1 up      # PostgreSQL in Docker
 scripts\services.ps1 build   # build auth, character, citynode, nodectl, worldctl, charimport, mesh and gateway into dist\services
 scripts\services.ps1 run     # build, then start auth, character, citynode, mesh, gateway and dist\Release\worldd.exe hidden, logging to files
 scripts\services.ps1 stop    # stop those processes (worldd included)
@@ -135,6 +135,12 @@ on create and on every save), so a record's level above 25 is imported as 25.
 
 `-file` defaults to `dist/Release/data/characters.json` relative to the current directory: run
 `charimport` from the repo root, and pass `-file` explicitly from a worktree or anywhere else.
+
+## Messaging (later)
+
+The services and worldd talk to each other over gRPC; no message bus runs, and the compose file starts PostgreSQL alone (a NATS container used to start with it, but no program ever
+connected to it). When the world spans several world servers (server meshing), a bus can carry what has to reach many servers at once: core NATS for the fan-out events (a player
+moving between servers, chat, a node changing level), and JetStream only for streams that must survive a restart. Until then nothing is added.
 
 ## Character creation: race, gender, class (plan B1)
 

@@ -67,8 +67,8 @@ flowchart LR
 
 | Step | Run | What it does |
 |:-:|---|---|
-| **1** | `install.bat` | Checks the tools below and offers to install what is missing (through winget, asking before each item), makes the game data from your own game, then builds `tether_server`, `launcher` and `worldd` into `dist\Release`. **The first run** takes about 10 minutes for the game data on a fast PC, plus the first build of the C++ libraries through vcpkg (grpc compiles from source, so this part can take a long time). **Later runs** take seconds when nothing changed; run it again after a game patch or an update. `install.bat -CheckOnly` only reports (the tools, the game data, whether the programs are built) and changes nothing; `-SkipDocker` leaves Docker out (if you run PostgreSQL 15+ and NATS yourself) and `-Yes` installs every missing tool without asking. |
-| **2** | `launch.bat` | Starts PostgreSQL and NATS (Docker), the Go services, the `worldd` world server, the tether and the launcher window. Sign in (or let "Keep me signed in" do it) and press **LAUNCH GAME**, which starts the game. |
+| **1** | `install.bat` | Checks the tools below and offers to install what is missing (through winget, asking before each item), makes the game data from your own game, then builds `tether_server`, `launcher` and `worldd` into `dist\Release`. **The first run** takes about 10 minutes for the game data on a fast PC, plus the first build of the C++ libraries through vcpkg (grpc compiles from source, so this part can take a long time). **Later runs** take seconds when nothing changed; run it again after a game patch or an update. `install.bat -CheckOnly` only reports (the tools, the game data, whether the programs are built) and changes nothing; `-SkipDocker` leaves Docker out (if you run PostgreSQL 15+ yourself) and `-Yes` installs every missing tool without asking. |
+| **2** | `launch.bat` | Starts PostgreSQL (Docker), the Go services, the `worldd` world server, the tether and the launcher window. Sign in (or let "Keep me signed in" do it) and press **LAUNCH GAME**, which starts the game. |
 
 > [!TIP]
 > On the first launch your own TLS certificates are created in `certs\`: Windows asks you once to trust the local CA. Choose **Yes**.
@@ -87,7 +87,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 | **Go** | 1.27 or newer (`services/go.mod`) | the backend services and `contentc` |
 | **.NET SDK** | 8.0 (any 8.x; with the 8.0 runtime) | `tools/mapc`, `tools/itemnames` and `tools/npcabilities`, which read the game's files |
 | **Python** | 3.10 or newer | the generators that `scripts\extract_game_data.ps1` runs |
-| **Docker Desktop** | current | PostgreSQL and NATS, to run the servers (not needed to build); or run PostgreSQL 15+ and NATS yourself |
+| **Docker Desktop** | current | PostgreSQL, to run the servers (not needed to build); or run PostgreSQL 15+ yourself |
 
 - 💾 **Disk:** about 20 GB free on the repository's drive for the first build. The game data is 1.5 GB and the finished C++ build about 12 GB; vcpkg needs more while it compiles the libraries.
 - 🧠 **Memory:** at least 6 GB free while the game data is built (the biggest program uses about 4 GB).
@@ -205,7 +205,7 @@ cmake --build build\x64 --config Release
 
 **Backend services only:**
 ```powershell
-powershell -File scripts\services.ps1 up     # PostgreSQL + NATS (Docker), waits until healthy
+powershell -File scripts\services.ps1 up     # PostgreSQL (Docker), waits until healthy
 powershell -File scripts\services.ps1 stop
 ```
 

@@ -3,7 +3,7 @@ REM SPDX-License-Identifier: AGPL-3.0-only
 REM Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 REM GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
-REM Starts Sandal Core with worldd as the world server: the Go services (PostgreSQL + NATS through Docker),
+REM Starts Sandal Core with worldd as the world server: the Go services (PostgreSQL through Docker),
 REM worldd, the tether and the launcher window. Sign in and press LAUNCH GAME. It takes no arguments.
 setlocal
 set "MISSING="

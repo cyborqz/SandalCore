@@ -102,7 +102,7 @@ void GrpcNodeControl::post(std::function<void()> job) {
         }
     }
     if (refused) {
-        if (first) spdlog::warn("[gm] the node GM calls are queued faster than the node service answers: the newest is refused (said once)");
+        if (first) spdlog::warn("[gm] the node GM calls are queued faster than the node service answers: the newest is refused (said once until the queue has emptied)");
         if (report_) report_("a node GM call was not sent: " + std::to_string(kMaxQueued) + " are waiting for the node service");
         return;
     }
@@ -119,6 +119,7 @@ void GrpcNodeControl::run() {
             job = std::move(queue_.front());
             queue_.pop_front();
             busy_ = true;
+            if (queue_.empty()) overflow_said_ = false;   // the burst is over: the next refusal is told again
         }
         job();
         {
