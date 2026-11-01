@@ -22,6 +22,7 @@ import (
 
 	citynodev1 "aocrop/services/gen/aoc/citynode/v1"
 	worldadminv1 "aocrop/services/gen/aoc/worldadmin/v1"
+	"aocrop/services/internal/content"
 )
 
 // App: the window's backend.
@@ -274,6 +275,49 @@ func (a *App) GiveItem(character, item string, count int32) (string, error) {
 		return "", err
 	}
 	return out.GetItem(), nil
+}
+
+// ItemName: one item of the game's catalog: the record's name (what the
+// server takes) and what it is called (what the game master reads).
+type ItemName struct {
+	Key  string `json:"key"`
+	Text string `json:"text"`
+}
+
+// ItemNames: the items the extracted game data knows, so the window can offer
+// them to click instead of asking for a record name. The record's name is what
+// the server's GiveItem takes (the UI names in item_names.tsv are not).
+func (a *App) ItemNames() []ItemName {
+	root := repoRoot()
+	if root == "" {
+		return []ItemName{}
+	}
+	db, err := content.Open(filepath.Join(root, "dist", "content", "content.db"))
+	if err != nil {
+		return []ItemName{}
+	}
+	defer db.Close()
+
+	var typeID int64
+	if err := db.SQL().QueryRow("SELECT type_id FROM record_table WHERE schema = 'ItemRecordBase'").Scan(&typeID); err != nil {
+		return []ItemName{}
+	}
+	rows, err := db.SQL().Query(
+		"SELECT name FROM record WHERE type_id = ? AND name <> '' AND name NOT LIKE 'NOTUSED%' ORDER BY name", typeID)
+	if err != nil {
+		return []ItemName{}
+	}
+	defer rows.Close()
+
+	out := make([]ItemName, 0, 4096)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		out = append(out, ItemName{Key: name, Text: name})
+	}
+	return out
 }
 
 // Teleport: the player to a place (by its name) or to a point.

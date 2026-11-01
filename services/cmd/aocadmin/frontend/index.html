@@ -40,6 +40,7 @@
         <input id="stats-filter" placeholder="ابحث عن stat…">
         <button id="refresh-stats">تحديث</button>
         <button id="save-stats">احفظ</button>
+        <button id="max-all-stats">املأ الكل بالحد الأقصى</button>
         <button id="clear-stats">امسح الكل</button>
         <button id="fill-health">املأ الدم</button>
       </div>
@@ -77,6 +78,18 @@
       <pre id="log-view"></pre>
     </section>
   </main>
+
+  <!-- the picker: a searchable list of the places or the items to click -->
+  <div id="picker" class="picker" hidden>
+    <div class="picker-box">
+      <div class="picker-head">
+        <span id="picker-title" class="picker-title"></span>
+        <button id="picker-close">إغلاق</button>
+      </div>
+      <input id="picker-search" placeholder="ابحث…">
+      <div id="picker-list" class="picker-list"></div>
+    </div>
+  </div>
 
   <div id="toast" class="toast"></div>
   <script src="app.js"></script>

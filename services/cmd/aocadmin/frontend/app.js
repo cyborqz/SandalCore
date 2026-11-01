@@ -1,6 +1,6 @@
 // app.js: the dashboard's calls and tables. The Go side is the window's
 // bindings: window.go.main.App.<Method>().
-const state = { players: [], selected: "", stats: [], places: [], tab: "players" };
+const state = { players: [], selected: "", stats: [], places: [], items: null, tab: "players" };
 
 // The bound methods: the Go package (main) and the App struct.
 function backend() {
@@ -96,15 +96,56 @@ async function loadPlayers() {
   }
 }
 
+// ── the picker: a searchable list to click, instead of typing a record name ──
+// The places and the items have names in English inside the game's data, so the
+// window offers them in a list the game master can search and click.
+function openPicker(title, items, onPick) {
+  const overlay = document.getElementById("picker");
+  document.getElementById("picker-title").textContent = title;
+  const list = document.getElementById("picker-list");
+  const search = document.getElementById("picker-search");
+  search.value = "";
+  const render = () => {
+    const q = search.value.trim().toLowerCase();
+    list.innerHTML = "";
+    let shown = 0;
+    for (const item of items) {
+      if (q && !item.label.toLowerCase().includes(q) && !item.key.toLowerCase().includes(q)) continue;
+      const row = document.createElement("button");
+      row.className = "picker-row";
+      row.textContent = item.label;
+      row.title = item.key;
+      row.addEventListener("click", () => { closePicker(); onPick(item); });
+      list.appendChild(row);
+      if (++shown >= 400) break;
+    }
+    if (!shown) {
+      const empty = document.createElement("div");
+      empty.className = "picker-empty";
+      empty.textContent = "ما فيه نتائج";
+      list.appendChild(empty);
+    }
+  };
+  search.oninput = render;
+  overlay.hidden = false;
+  render();
+  search.focus();
+}
+
+function closePicker() {
+  document.getElementById("picker").hidden = true;
+}
+
+document.getElementById("picker-close").addEventListener("click", closePicker);
+
+// ── the teleport: pick a place and go there ──────────────────────────────
 async function teleport(p) {
   if (!state.places.length) state.places = (await call("Places")) || [];
-  const names = state.places.map((x) => x.display_name || x.name);
-  const where = prompt("انقل إلى:\n" + names.join("\n"));
-  if (!where) return;
-  const place = state.places.find((x) => (x.display_name || x.name) === where);
-  if (!place) { toast("ما فيه مكان بهذا الاسم", true); return; }
-  const out = await call("Teleport", p.name, place.name, 0, 0, 0, false);
-  if (out) toast("انتقل " + p.name + " إلى " + (place.display_name || place.name));
+  const items = state.places.map((x) => ({ label: x.display_name || x.name, key: x.name }));
+  openPicker("انقل " + p.name + " إلى", items, async (item) => {
+    const out = await call("Teleport", p.name, item.key, 0, 0, 0, false);
+    if (out) toast("انتقل " + p.name + " إلى " + item.label);
+  });
 }
 
 async function setSpeed(p) {
@@ -121,11 +162,15 @@ async function giveMoney(p) {
   if (out !== null) toast("الرصيد صار " + out);
 }
 
+// ── the items: pick one from the game's catalog ─────────────────────────
 async function giveItem(p) {
-  const name = prompt("اسم الـ item (أو الـ Guid):");
-  if (!name) return;
-  const out = await call("GiveItem", p.name, name, 1);
-  if (out) toast("أُعطي " + p.name + " " + out);
+  if (!state.items) state.items = (await call("ItemNames")) || [];
+  if (!state.items.length) { toast("ما فيه كتالوج items", true); return; }
+  const items = state.items.map((x) => ({ label: x.text, key: x.key }));
+  openPicker("أعطِ " + p.name + " item", items, async (item) => {
+    const out = await call("GiveItem", p.name, item.key, 1);
+    if (out) toast("أُعطي " + p.name + " " + out);
+  });
 }
 
 // ── the stats tab ───────────────────────────────────────────────────────────────
@@ -344,10 +389,15 @@ async function loadCities() {
       <td>${node.xp} (${node.percent}%)</td>
       <td class="mono">${escape(node.clock)}</td>
       <td class="actions">
-        <button data-act="xp">أضف خبرة</button>
+        <button data-act="tp">انقل إليه</button>
+           <button data-act="xp">أضف خبرة</button>
         <button data-act="clock">زِد ساعة</button>
       </td>`;
-    tr.querySelector('[data-act="xp"]').addEventListener("click", async () => {
+    tr.querySelector('[data-act="tp"]').addEventListener("click", async () => {
+      if (!state.selected) { toast("اختر لاعباً من تبويب اللاعبين أول", true); return; }
+      const out = await call("Teleport", state.selected, node.name, 0, 0, 0, false);
+      if (out) toast("انتقل " + state.selected + " إلى " + (node.display_name || node.name));
+    });    tr.querySelector('[data-act="xp"]').addEventListener("click", async () => {
       const value = prompt("كم خبرة؟", "100000");
       if (!value) return;
       const out = await call("NodeXp", node.name, Number(value));

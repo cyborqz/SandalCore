@@ -79,3 +79,29 @@ pre#log-view {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { border-color: var(--bad); color: #ffd7d7; }
+
+/* the picker: the places or the items, searchable and clickable */
+.picker {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(8, 9, 12, 0.72);
+  display: flex; align-items: center; justify-content: center;
+}
+.picker-box {
+  width: min(560px, 90vw); max-height: 80vh;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+.picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.picker-title { font-size: 15px; font-weight: 600; }
+.picker-list {
+  overflow-y: auto; max-height: 56vh; display: flex; flex-direction: column; gap: 4px;
+  border-top: 1px solid var(--line); padding-top: 8px;
+}
+.picker-row {
+  background: #1d222d; border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 10px; text-align: right; cursor: pointer; font-size: 13px;
+  color: var(--text); direction: ltr; text-align: left;
+}
+.picker-row:hover { border-color: var(--accent); background: #232936; }
+.picker-empty { color: var(--muted); padding: 12px; text-align: center; }
