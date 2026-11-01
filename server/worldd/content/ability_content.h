@@ -230,6 +230,13 @@ struct ReactionRow {
 struct RecursiveHitRow {
     int     ord = 0;
     int64_t child_hit = 0, targeting = 0;
+    double  radius_cm = 0;   // the record's sphere (0: it names one actor, or its shape is another)
+};
+
+/// ab_modify_cooldown: what a hit does to the cooldowns of abilities (delta_expr: seconds, added to what is left).
+struct ModifyCooldownRow {
+    int64_t     guid = 0, delta_expr = 0;
+    std::string name, abilities;   // abilities: JSON, the ability guids
 };
 
 class AbilityContent {
@@ -286,6 +293,8 @@ public:
     std::optional<ReactionRow> reaction(int64_t guid, std::string& error) const;
     /// ab_hit_recursive: the hits a hit fires when it lands, in order (empty without the reaction tables).
     bool hit_recursive(int64_t hit, std::vector<RecursiveHitRow>& out, std::string& error) const;
+    /// Every row of ab_modify_cooldown (empty without the reaction tables, or in a file older than the table).
+    void modify_cooldowns(std::vector<ModifyCooldownRow>& out) const;
 
     /// The guids of every ability, hit, effect, projectile or zone of the tables, in guid order (what a catalog that holds them all loads).
     /// Reaction lists the reactions (empty without the reaction tables).

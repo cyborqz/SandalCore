@@ -8,6 +8,7 @@
 //  the lingering zones, and the consumables that cast an ability.
 // ============================================================================
 #include "session/player_session.h"
+#include "session/summoner_pets.h"
 
 #include "bootstrap/character_setup.h"
 #include "combat/combat_world.h"
@@ -149,6 +150,10 @@ void PlayerSession::take_ability_events() {
                 return;
             }
             abilities_dirty_ = true;
+        }
+        for (const int64_t id : e.change.effects_removed) pet_effects_.erase(id);
+        for (const auto& effect : e.change.effects_added) {
+            if (pets::for_effect(effect.effect_guid)) pet_effects_[effect.effect_id] = effect.effect_guid;
         }
         for (bootstrap::HitConfirm& h : e.confirmations) {
             if (pending_confirms_.size() >= kMaxPendingConfirms) pending_confirms_.pop_front();
@@ -411,8 +416,10 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     int32_t item_slot = -1;
     uint32_t item_location = 0;
     TriggerInfo info;
+    std::optional<nav::Vec3> trigger_place;
     if (const auto t = repl::parse_trigger_ability(rpc.call)) {
         ability = t->ability_guid;
+        if (t->first_target_place) trigger_place = nav::Vec3{t->first_target_place->x, t->first_target_place->y, t->first_target_place->z};
         instance = t->client_instance_id;
         pb_.note_trigger_pvp_flag(instance, t->pvp_force);   // (the item this trigger makes carries the flag the trigger carried)
         item_slot = t->item_slot;
@@ -454,12 +461,14 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
             return;
         }
     }
+    if (pet_takes_trigger(conn, ability, instance, info, now)) return;
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
     if (pipeline_ && pipeline_->handles(ability)) {
         if (item_slot != -1) info.item_cast = consumable_cast(ability, item_slot, item_location);   // consumables: the item whose numbers the ability reads
         const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
         if (accepted == Refusal::None && info.item_cast) take_consumable(info.item_cast, instance);
+        if (accepted == Refusal::None && !info.target_actors.empty()) pet_joins_owners_cast(info.target_actors.front());
         // Drop Crate: the cast plays its montage and the crate leaves the back at the montage's notify, whatever the place (the original drops nothing at a place a crate cannot lie)
         if (ability == content::kGuidDropCrate && accepted == Refusal::None) {
             crate_drop_due_ = now + kCrateDropDelay;
@@ -470,6 +479,9 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     }
     take_ability_events();
     flush_abilities(conn);
+    if (const int64_t command = pets::command_of_ability(ability); command != 0 && pet_actor_) {
+        pet_command(conn, command, info.target_actors.empty() ? 0 : info.target_actors.front(), trigger_place, now);
+    }
 }
 // C_Y_B x CoA
 

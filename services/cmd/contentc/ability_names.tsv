@@ -603,3 +603,7 @@ Wolf_Bite	npc
 Wolf_Howl	npc
 Wolf_Pounce	npc
 Wolf_RageHowl	npc
+Summoner_Pet_Guardian_Attack	npc
+Summoner_Pet_Hunter_Attack_Melee	npc
+Summoner_Pet_Hunter_Attack_Ranged	npc
+Summoner_Pet_Mystic_Attack	npc

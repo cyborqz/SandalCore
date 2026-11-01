@@ -138,6 +138,7 @@
 #include "combat/hit_resolver.h"
 #include "session/abilities.h"
 #include "session/ability_catalog.h"
+#include "session/summoner_pets.h"
 #include "stats/character_stats.h"
 
 #include <cstdint>
@@ -447,6 +448,37 @@ public:
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
+    // ---- a Summoner's pet (session/ability_pipeline_pets.cpp)
+    /// A pet ability, on its owner's side.  It pays the ability's `_OwnerCost` hit (false, and nothing paid: the Essence is not there) and says its cooldown.
+    bool pay_pet_ability(int64_t ability, double now, double& cooldown);
+    /// A pet's ability's cooldown shows on its owner's Cooldowns, where the bar's slot reads it [R: the Stance Swap, 476, 477: CD 0.1, charges 0].
+    void start_pet_cooldown(int64_t ability, double seconds, double now);
+    /// A hit of the character's pet that lands on the character (a heal, a cleanse).
+    void land_pet_hit(int64_t hit_guid, int64_t ability, double now);
+    /// The confirmation of a hit the character's pet or a reaction of his dealt: the client draws its floating number from it.
+    void confirm_dealt(const combat::DealtHit& dealt, double now);
+    /// The actor Transpose wants to change places with (0: none), once.
+    uint64_t take_transpose() {
+        const uint64_t id = transpose_with_;
+        transpose_with_ = 0;
+        return id;
+    }
+    /// Where Dimensional Bolt's second press sends the pet (target 0: nowhere), once.
+    struct BoltRecall {
+        uint64_t target = 0;
+        bool     behind = false;   // a Hunter lands behind the creature
+    };
+    BoltRecall take_bolt_recall() {
+        const BoltRecall recall = bolt_recall_;
+        bolt_recall_ = {};
+        return recall;
+    }
+    /// Puts an effect on the character (a Hunter's stance reference).
+    bool grant_effect(int64_t effect_guid, double now);
+    /// A stat as it is now.
+    double stat_of(int64_t guid) const { return stat_now(guid); }
+    /// Whether the character holds a debuff that can be dispelled.
+    bool holds_dispellable() const;
     /// The mounts milestone, stage 3: the same hit, but it landed on the character's mount (the rider is on it: hits aimed at a mounted rider land on the mount's Health, and
     /// the rider's own is untouched). The session took `taken` of the mount's Health; this makes only the confirmation, naming `target` (the mount's actor) with the stat mods as
     /// the client draws them. Lethal when `lethal`. Nothing changes on the character.
@@ -576,6 +608,7 @@ private:
         double                   last_request = -1e9;
         std::vector<Pending>     due;          // when a request's application runs
         bool                     applied = false;   // the server applied it by itself (no request came by the deadline)
+        bool                     server_self_use = false;   // a pet summon: applied by the server after its cost, never by a request
         bool                     fired = false;     // the projectiles the hit fires have left: they leave once a cast, however often the client asks for the hit
     };
     /// A cast that takes hit requests until its window ends.
@@ -796,6 +829,18 @@ private:
 
     // hits and effects
     void   apply_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t, bool skip_resource, const HitSource& src);
+    void   apply_hit_here(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t, bool skip_resource, const HitSource& src);   // the same, whoever its mask names
+    uint64_t   transpose_with_ = 0;
+    BoltRecall bolt_recall_;
+    void   land_bolt_recall(int32_t client_id, uint64_t target, double t);
+    /// The hit's ModifyCooldownsIds: seconds added to what is left of each ability's cooldown; one that is not running starts, and spends no charge [R: Bolt, CD charges 1].
+    void   modify_cooldowns(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t);
+    /// The reactions a hit's own record carries (ReactionsIds): Extract's heal, Siphon's Mana, Bond on the caster, Spirit Shred's stacks on the pet.
+    void   fire_carried_reactions(bootstrap::AbilityChange& c, const HitEvent& ev, double t);
+    /// The group of the ability's cooldown.
+    static std::string cooldown_group_of(const content::AbilityRow& row);
+    int    carried_depth_ = 0;
+    const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
                         int64_t owner = 0);

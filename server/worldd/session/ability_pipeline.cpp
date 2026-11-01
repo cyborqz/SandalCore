@@ -9,6 +9,7 @@
 #include "bootstrap/constants.h"
 #include "content/content_db.h"
 #include "session/ability_timings.h"
+#include "session/summoner_pets.h"
 #include "session/consumable_timings.h"
 
 #include <spdlog/spdlog.h>
@@ -431,7 +432,7 @@ private:
 // progress (songs are stage 2) or of a hit event (the defaults).
 class AbilityPipeline::Host final : public combat::ContextHost {
 public:
-    explicit Host(AbilityPipeline& p) : p_(p) {}
+    explicit Host(AbilityPipeline& p) : p_(p), rc_(p.active_reaction_) {}
     double effect_count_by_instigator(const stats::RecordRef& r) override { return p_.stacks_of(r.guid); }
     double rand_double() override { return p_.rng_.rand_double(); }
     double ability_progress(const std::string& group) override { return p_.progress_of(group); }
@@ -523,6 +524,8 @@ void AbilityPipeline::set_known(std::vector<int64_t> known) { known_ = std::set<
 bool AbilityPipeline::handles(int64_t ability) const { return catalog_ && catalog_->ability(ability) != nullptr && !a7_.enabled(ability); }
 
 double AbilityPipeline::sync(double t) const { return bootstrap::effect_clock(world_time_at_zero_ + t); }
+
+std::string AbilityPipeline::cooldown_group_of(const content::AbilityRow& row) { return group_key(row); }
 
 void AbilityPipeline::emit(AbilityEvent e) {
     // the hits this step made are confirmed with it (the client draws its floating numbers from them)
@@ -803,6 +806,11 @@ bool AbilityPipeline::remove_effect(int64_t effect_guid, double now) {
 void AbilityPipeline::set_moving(bool moving) {
     moving_ = moving;
     stats_.set_moving(moving);
+    if (moving) {
+        for (size_t i = casts_.size(); i-- > 0;) {
+            if (pets::for_ability(casts_[i].def->row.guid) && casts_[i].cost_due) abort_cast(i, now_, "the summoner moved before completion");
+        }
+    }
 }
 
 double AbilityPipeline::progress_of(const std::string& group) const {
@@ -1081,9 +1089,9 @@ void AbilityPipeline::sync_engine_effects() {
 
 void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
     int left = hit.max_remove > 0 ? hit.max_remove : 1 << 20;
-    for (const int64_t guid : hit.remove_effects) {
+    const auto remove_where = [&](auto&& wanted) {
         for (size_t i = 0; i < effects_.size() && left > 0;) {
-            if (effects_[i].def->row.guid != guid) {
+            if (!wanted(*effects_[i].def)) {
                 ++i;
                 continue;
             }
@@ -1098,7 +1106,10 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
                 ++i;
             }
         }
-    }
+    };
+    for (const int64_t guid : hit.remove_effects) remove_where([&](const EffectDef& e) { return e.row.guid == guid; });
+    // a cleanse names no effect: its filter chooses them [R: Purify, capture 141: an effect item goes with the hit's confirmation]
+    if (hit.remove_effects.empty()) remove_where([&](const EffectDef& e) { return hit.removes(e); });
     sync_engine_effects();
 }
 // C:Y:B with C-O-A
@@ -1271,8 +1282,14 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on another actor: {}", hit.row.name, why);
             continue;
         }
-        const combat::Delivery d = combat_->deliver(id, r, t);
+        combat::HitOrigin origin;
+        origin.hit = &hit;
+        origin.source_type = src.type;
+        origin.source_guid = src.guid;
+        origin.ability_tags = meta.ability_tags;
+        const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
+        if (hit.row.name == "Summoner_Transpose") transpose_with_ = id;   // (TeleportId: bSwapLocationWithTarget; the session moves the two)
         event.targets.push_back(id);
         event.flags = static_cast<uint8_t>(event.flags | d.flags);
         for (size_t i = 0; i < r.mods.size(); ++i) {
@@ -1305,6 +1322,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         outs.push_back(std::move(out));
         // what the hit applies to its target: a shield goes to the target (an effect's other mods are the NPC world's to take, part 2)
         if (!r.miss()) {
+            // what a Summoner's hit takes off its target (the other classes' removals on a creature are not followed yet)
+            if (!hit.remove_effects.empty() && hit.row.name.rfind("Summoner_", 0) == 0) combat_->remove_effects(id, hit, t);
             for (const content::HitEffectRow& row : hit.effects) {
                 if (row.kind == "self") continue;
                 const EffectDef* def = catalog_->effect(row.effect_guid);
@@ -1356,6 +1375,19 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             }
             apply_effect(c, *def, static_cast<int>(std::clamp(stacks, 1.0, 4096.0)), duration, t);
             sync_engine_effects();
+        }
+        // a hit on the pet goes on to the next of its own (Phase Out's Unyielding)
+        HitSource fired = src;
+        fired.confirm = false;
+        for (const content::RecursiveHitRow& r : hit.recursive) {
+            const HitDef* child = catalog_->hit(r.child_hit);
+            if (!child || child->row.applicable_targets != 4 || carried_depth_ >= 2) continue;
+            const uint64_t pet = combat_->own_pet();
+            if (pet != 0 && std::find(event.targets.begin(), event.targets.end(), pet) != event.targets.end()) {
+                ++carried_depth_;
+                apply_hit_on_targets(c, *child, {pet}, t, fired, nullptr);
+                --carried_depth_;
+            }
         }
     }
     drop_evaluation();
@@ -1499,10 +1531,16 @@ void AbilityPipeline::confirm_effect_hit(const combat::EffectHitNote& note, doub
 
 void AbilityPipeline::apply_hit(AbilityChange& c, const HitDef& hit, double t, bool skip_resource, const HitSource& src) {
     if (!hits_caster(hit.row)) return;
+    apply_hit_here(c, hit, t, skip_resource, src);
+}
+
+void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double t, bool skip_resource, const HitSource& src) {
     bool ok = true;
     std::string why;
     if (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok) return;
-    if (!hit.remove_effects.empty()) remove_by_hit(c, hit);   // (what the hit takes off goes before what it applies)
+    // (what the hit takes off goes before what it applies)
+    if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) remove_by_hit(c, hit);
+    modify_cooldowns(c, hit, t);
     for (const content::HitEffectRow& row : hit.effects) {
         bool applies = true;
         if (!eval_bool(row.requirement_expr, true, applies, why) || !applies) continue;
@@ -1547,6 +1585,20 @@ void AbilityPipeline::apply_hit(AbilityChange& c, const HitDef& hit, double t, b
         h.predicted_simulated = src.simulated;
         h.response = src.response;
         confirmations_.push_back(std::move(h));
+    }
+    // what it fires at the pet through Default_TargetPet (Bond's tick, Phase Out), whichever way the pet stands
+    if (combat_ && carried_depth_ < 2) {
+        for (const content::RecursiveHitRow& r : hit.recursive) {
+            const HitDef* child = catalog_->hit(r.child_hit);
+            if (!child || child->row.applicable_targets != 4) continue;
+            const uint64_t pet = combat_->own_pet();
+            if (pet == 0) continue;
+            HitSource fired = src;
+            fired.confirm = false;
+            ++carried_depth_;
+            apply_hit_on_targets(c, *child, {pet}, t, fired, nullptr);
+            --carried_depth_;
+        }
     }
     // reactions: the hit landed on the caster (after its confirmation is queued, so a reaction's follows it)
     event.hit = &hit;
@@ -1853,7 +1905,7 @@ void AbilityPipeline::run_due(double t) {
                 if (s.due[i].at > t) continue;
                 const Pending p = s.due[i];
                 s.due.erase(s.due.begin() + static_cast<std::ptrdiff_t>(i));
-                return run_slot(rec, s, t, true, p.found, p.targets);
+                return run_slot(rec, s, t, !s.server_self_use, p.found, p.targets);
             }
         }
     }
@@ -2001,6 +2053,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
     }
     // (the targeting record the client names is not checked against the ability's key map: 122 of 1,854 retail requests name another record than the
     // map's, and the hit is what decides what happens)
+    if (slot->server_self_use) return HitVerdict::Quiet;
     if (slot->requests >= max_requests || now - slot->last_request < rec->min_gap) return HitVerdict::TooMany;
     ++slot->requests;
     slot->last_request = now;
@@ -2235,6 +2288,10 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     // answered like every other one (ClientEndAbility kEndDelay later, below): the cancel is not the whole answer
     for (size_t i = 0; i < casts_.size(); ++i) {
         const Cast& cast = casts_[i];
+        if (cast.instance == server_instance_id && pets::for_ability(cast.def->row.guid) && cast.cost_due) {
+            abort_cast(i, now_, "the client ended the summon before completion");
+            break;
+        }
         if (cast.instance != server_instance_id || !cast.branched || !cast.branched->cancels || cast.held || cast.request_heard || !cast.branch_due) continue;
         abort_cast(i, now_, "the client ended the cast bar");
         break;
@@ -2436,7 +2493,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             const combat::TargetInfo ti = combat_->inspect(id);
             if (!ti.exists || !ti.alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
             const bool hostile = ti.relation == combat::Relation::Hostile;
-            if (hostile ? (row.applicable_targets & 2) == 0 : (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
+            // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493])
+            if (hostile ? (row.applicable_targets & 2) == 0 : row.applicable_targets != 0 && (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
             if (ti.surface_distance_cm > combat_->reach_cm(melee) + combat_->data().activation_leeway_cm()) return refused(Refusal::OutOfRange);
             // Line of sight is NOT a refusal for a player's cast (E1 review I4): `TargetInfo::in_line_of_sight` is the navmesh's 2D raycast, which a
             // bank, a ledge or a gap in the walkable ground stops as a wall would; the client enforces its own sight rules, and retail's server refused
@@ -2445,6 +2503,23 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
     }
 // CoA + C Y B
+
+    // Dimensional Bolt's select expressions: a key held down sends a trigger about every 20 ms [R: 451], and only one of them may do anything
+    if (ability == pets::kBolt) {
+        const uint64_t aim = target_actors.empty() ? 0 : target_actors.front();
+        const bool marked = aim != 0 && combat_ && combat_->effect_remaining(aim, pets::kBoltMark, t) > 0;
+        bool pet_out = false;
+        for (const pets::Definition& d : pets::kDefinitions) pet_out = pet_out || stacks_of(d.effect) > 0;
+        if (const auto g = groups_.find(group_key(row)); g != groups_.end() && g->second.timer_end >= 0) return refused(Refusal::Charges);
+        if (marked && pet_out) {
+            land_bolt_recall(client_id, aim, t);
+            return Refusal::None;
+        }
+        for (const Cast& other : casts_) {
+            if (other.def == def && other.cost_due) return refused(Refusal::Busy);
+        }
+        if (marked || stacks_of(pets::kBoltLockout) > 0 || stacks_of(pets::kBoltLockout2) > 0) return refused(Refusal::Busy, " (its lockout)");
+    }
 
     // the formulas
     Cast cast;
@@ -2539,6 +2614,13 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         for (const content::MontageRow& m : def->montages) {
             if (m.anim_index == cast.animation_index) table_end = consumable_montage_end(m.soft_path);
         }
+    }
+    if (pets::for_ability(ability)) {
+        // These casts have no branch notify. Keep the hit request window open
+        // through completion, and let the server apply the summon exactly once.
+        cost_delay = pets::kSummonSeconds;
+        hit_delay = 0;
+        if (table_end < 0) table_end = pets::kSummonSeconds + 0.38;
     }
     bool has_montage = false;   // (an ability with no montage has a row with an empty path: Fortissimo)
     for (const content::MontageRow& m : def->montages) has_montage = has_montage || !m.soft_path.empty();
@@ -2708,6 +2790,10 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         slot.targeting = tg;
         slot.reaches = hits_caster(hit->row);
         slot.aims_others = combat_ != nullptr && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0;
+        if (pets::for_ability(ability) && hit->row.applicable_targets == 1 && hit->row.fallback_target.find("SelfOnly") != std::string::npos) {
+            // A pet summon is applied at the cost step, once, even if the client's hit request is delayed or absent: a later request cannot repeat it.
+            slot.server_self_use = true;
+        }
         rec.slots.push_back(std::move(slot));
     }
     records_.push_back(std::move(rec));
@@ -3148,6 +3234,14 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         cast.branch_due.reset();   // (a held cast's charged shot has its jump due with its cost: a cast that cannot pay launches nothing)
         events_.push_back(std::move(e));
         return;
+    }
+    if (CastRecord* rec = record_of(cast.client_id)) {
+        for (HitSlot& slot : rec->slots) {
+            if (slot.server_self_use && !slot.applied) {
+                slot.applied = true;
+                slot.due.push_back({t + rec->hit_delay, true, {}});
+            }
+        }
     }
     bool spent_mana = false;
     for (const auto& [stat, amount] : cast.stat_costs) {

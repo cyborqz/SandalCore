@@ -167,8 +167,10 @@ add_library(worldd_core STATIC
     combat/aftermath.h
     combat/combat_data.cpp
     combat/combat_data.h
+    combat/combat_pets.cpp
     combat/combat_world.cpp
     combat/combat_world.h
+    combat/combat_world_npc.h
     combat/fighter.h
     combat/hit_context.cpp
     combat/hit_context.h

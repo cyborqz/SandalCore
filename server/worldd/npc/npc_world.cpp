@@ -681,6 +681,22 @@ void NpcWorld::advance_npc(Npc& n, double t) {
     }
 }
 
+bool NpcWorld::warp(uint64_t id, double x, double y, double ground_z) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    Npc& n = it->second;
+    if (n.rm) finish_root_motion(n, now_);
+    n.turning = false;
+    n.pursue = nullptr;
+    n.track = nullptr;
+    n.mover.stop();
+    n.mover.place(x, y, ground_z, n.mover.yaw_degrees());
+    n.mode = Mode::Stand;
+    n.ordered_return = false;
+    commit(n, now_, true);
+    return true;
+}
+
 bool NpcWorld::order_move(uint64_t id, const nav::Vec3& dest, double speed_cm_s, double stop_distance) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end()) return false;

@@ -537,6 +537,12 @@ public:
     /// UseActionbarSlot 0x6b12700 and CanEverUseActionbarSlot 0x6a91a10 take GetActionbarInstigator 0x6aba180 -> the player character's GetMountablePet): without it the
     /// mount's dash (bank 18) cannot be used, nothing is sent and nothing is said (stage 3 fix 3).  The InteractInfo must exist (ensure_interact_info).  One pawn update.
     std::optional<Send> pawn_mountable_pet(const emit::FIntrepidNetworkGUID& mount);
+    /// The player's summoned combat pet, tracked by its spawning effect instance.
+    /// An empty GUID clears PetArray. Requires ensure_interact_info().
+    std::optional<Send> pawn_combat_pet(const emit::FIntrepidNetworkGUID& pet, int64_t effect_id);
+    /// The stance of the player's pets, on the owner's InteractInfo beside PetArray [the client's code].
+    /// Requires ensure_interact_info().
+    std::optional<Send> pawn_pet_stance(int64_t stance);
     /// Gathering stage 2 (the fix after the user's test 1): the pawn's InteractInfo.ChannelingData = `data` [R: 1427 packet 67 sets it with the node's wake, packet 674 clears it
     /// 2 ms after the result frame; nine more harvests and a corpse harvest the same].  The client plays the gather animation and shows the bar from it, and sends its own
     /// ServerInterruptChannel when the player moves.  The InteractInfo must exist (ensure_interact_info).  One pawn update; nothing when `data` is what the client holds.

@@ -295,6 +295,36 @@ bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attack
     return true;
 }
 
+double HitResolver::effect_shield(Fighter& attacker, Fighter& holder, const abilities::EffectDef& effect) {
+    std::string err;
+    auto a = attacker.stats().evaluation(attacker.worn(), err, true);
+    auto h = holder.stats().evaluation(holder.worn(), err, true);
+    if (!a || !h || !a->set_actor(stats::kRoleTarget, *h, err)) return 0;
+    ResolverHost host(rng_);
+    double total = 0;
+    for (const content::ModRow& m : effect.mods) {
+        if (m.stat_guid != content::kGuidTempHealth || m.value_expr == 0) continue;
+        const content::ExprRow* e = catalog_.expr(m.value_expr);
+        if (!e || e->program < 0) continue;
+        const bool holders = e->text.find("GetOwner(") != std::string::npos;
+        double v = 0;
+        if ((holders ? h->eval(e->program, host, v, err) : a->eval(e->program, host, v, err)) && std::isfinite(v)) total += std::max(0.0, v);
+    }
+    a->clear_actors();
+    return total;
+}
+
+bool HitResolver::holds(Fighter& fighter, int64_t expr, bool none) {
+    const content::ExprRow* row = expr ? catalog_.expr(expr) : nullptr;
+    if (!row || row->program < 0) return none;
+    std::string err;
+    auto a = fighter.stats().evaluation(fighter.worn(), err, true);
+    if (!a) return none;
+    ResolverHost host(rng_);
+    double v = 0;
+    return a->eval(row->program, host, v, err) ? v != 0.0 : none;
+}
+
 bool HitResolver::requirement_holds(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta) {
     if (hit.row.requirement_expr == 0) return true;
     std::string err;

@@ -7,6 +7,7 @@
 #include "combat/combat_world.h"
 
 #include "bootstrap/constants.h"
+#include "combat/combat_world_npc.h"
 #include "combat/npc_ability_replicator.h"
 #include "combat/npc_kits.h"
 #include "combat/npc_replicator.h"
@@ -64,81 +65,6 @@ const npc_kits::Kit* kit_of(const std::string& leaf_in) {
 
 }  // namespace
 // [CoA ~ C:Y:B]
-
-// ---- one NPC's combat state ----------------------------------------------------------------------------------------------------------
-
-class CombatWorld::Npc final : public Fighter {
-public:
-    Npc(CombatWorld& w, uint64_t actor, npc::MotionStats bp_in, std::string leaf_in, int level_in)
-        : world(w), actor_id(actor), bp(std::move(bp_in)), leaf(std::move(leaf_in)), lvl(level_in) {}
-
-    uint64_t id() const override { return actor_id; }
-    bool     is_player() const override { return false; }
-    int      level() const override { return lvl; }
-    Vec3     position() const override {
-        const world::WorldActor* a = world.registry_.find(actor_id);
-        return a ? Vec3{a->x, a->y, a->z} : Vec3{};
-    }
-    double radius_cm() const override { return bp.radius; }
-    bool   alive() const override { return !dead; }
-    const std::vector<int64_t>& alignments() const override { return aligns; }
-    stats::CharacterStats&      stats() override { return *cs; }
-
-    double health() const {
-        const stats::StatValue* v = cs ? cs->find(content::kGuidHealth) : nullptr;
-        return v ? v->value : 0.0;
-    }
-    double max_health() const {
-        const stats::StatValue* v = cs ? cs->find(content::kGuidMaxHealth) : nullptr;
-        return v ? v->value : 0.0;
-    }
-
-    CombatWorld&                           world;
-    uint64_t                               actor_id;
-    npc::MotionStats                       bp;
-    std::string                            leaf;
-    int                                    lvl;
-    std::vector<int64_t>                   aligns;
-    std::unique_ptr<stats::CharacterStats> cs;
-    npc::ai::NpcAi                         ai;
-    bool                                   hostile = false;
-    bool                                   dead = false;
-    bool                                   flags_in_combat = false;
-    uint64_t                               flags_target = 0;
-    bool                                   returning = false;
-    const npc_kits::Kit*                   kit = nullptr;
-    CombatWorld::Attack                    next;
-    double                                 next_attack_at = 0;
-    std::string                            archetype;
-    const std::vector<CreatureAbility>*    anim = nullptr;   // the Blueprint's use-ability tasks when the creature attacks with its own animation
-    NpcCastState                           cast;             // the attack the client is shown (combat/npc_ability_replicator.h)
-    std::map<std::string, double>          cooldown_until;   // the name of a task's cooldown -> when it is over
-    double                                 hold_until = 0;   // the creature stands still, facing as it does, until then (the montage of an attack it stands for)
-    double                                 stand_off_cm = -1;   // a creature whose attacks launch projectiles closes in on its target to this distance (its tree's arrival distance) between two casts; -1: it does not
-    double                                 shot_reach_cm = -1;  // ... and starts casting once its target is within this reach (the distance its tree lets it cast from)
-    double                                 fight_began = 0;  // when its fight began (the tree asks how long it has gone on)
-    std::map<std::string, double>          fight_rolls;      // the numbers its tree rolled when this fight began, by the tree's variable (a first special attack comes only after one of them)
-    uint64_t                               killer = 0;
-    std::set<uint64_t>                     attackers;
-    struct Shield {
-        double amount = 0;
-        double until = 0;   // 0: until used up
-    };
-    std::vector<Shield>                    shields;
-    effects::Book                          book;             // the effects it holds (a burn, a bleed ...): the world runs their hits and shows them as its CurrentEffects
-    EffectItemIds                          item_ids;         // the CurrentEffects array's item for each effect of the book
-
-    /// A loss goes through the shields first (the oldest first); what is left reaches Health.
-    double absorb(double loss, double now) {
-        shields.erase(std::remove_if(shields.begin(), shields.end(), [&](const Shield& s) { return s.amount <= 0 || (s.until > 0 && s.until <= now); }), shields.end());
-        for (Shield& s : shields) {
-            const double take = std::min(s.amount, loss);
-            s.amount -= take;
-            loss -= take;
-        }
-        return loss;
-    }
-};
 
 CombatWorld::CombatWorld(world::ActorRegistry& registry, npc::NpcWorld* npcs, const nav::AreaNav* nav, const CombatData& data, const abilities::Catalog& catalog,
                          const NpcStatBook& book, const npc::MotionTable& motion, CombatWorldConfig config)
@@ -1249,17 +1175,17 @@ void CombatWorld::advance_flights(double now) {
 // ---- hits from a player -------------------------------------------------------------------------------------------------------------
 // -- C.Y.B & CoA --
 
-Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, const Resolved& r, double now) {
+Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, const Resolved& r, double now, uint64_t threat_to, const HitOrigin* origin) {
     Npc* n = combatant(npc_actor);
     if (!n || n->dead) {
         Delivery d;
         d.target_object = hit_component_of(npc_actor);
         return d;
     }
-    return land_hit(*n, attacker, r, now, true);
+    return land_hit(*n, attacker, r, now, true, threat_to, origin);
 }
 
-Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, double now, bool log) {
+Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, double now, bool log, uint64_t threat_to, const HitOrigin* origin) {
     Npc* n = &nn;
     const uint64_t npc_actor = n->actor_id;
     Delivery d;
@@ -1306,6 +1232,18 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
         }
     }
     const bool lethal = n->health() <= 0.0;
+    const HolderEvent event = event_of_hit(*n, attacker, r, d, lethal, origin);   // (what reacts to the hit is read now: a death takes the effects off)
+    // the owner's hand on its own pet (Extract, Reconstruct): no fight comes of it, and a pet that runs out of Health is gone, for its session to see
+    if (is_pet(npc_actor)) {
+        n->attackers.erase(attacker);
+        if (lethal) {
+            n->dead = true;
+            d.lethal = true;
+            d.flags |= stats::kHitLethal;
+            pet_stop(npc_actor);
+        }
+        return d;
+    }
     // the threat: what the hit says, else what it took
     double threat = r.threat;
     if (threat <= 0 && !r.miss()) {
@@ -1325,7 +1263,10 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
             spdlog::info("[combat] {} ({}) is burning: {:.1f} fire damage to burn over {:.1f} s (it was {:.1f} over {:.1f} s)", n->leaf, npc_actor, pool->value, dur->value, burn_before, burn_dur_before);
         }
     }
-    if (!lethal) n->ai.notice(attacker, std::max(threat, 1.0), now);
+    if (!lethal) {
+        n->ai.notice(threat_to != 0 ? threat_to : attacker, std::max(threat, 1.0), now);
+        if (threat_to != 0) n->ai.notice(attacker, 0.01, now);
+    }
     player_exchange(attacker, now);
     if (lethal) {
         d.lethal = true;
@@ -1334,6 +1275,7 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
     } else {
         think(*n, now);   // the fight starts in this step: the flags go up with the first exchange
     }
+    hit_reacts(npc_actor, event, threat_to, origin, now);
     return d;
 }
 
@@ -1418,6 +1360,7 @@ void CombatWorld::send_effects(Npc& n, const effects::Book::Changes& changes) {
     write_effect_items(registry_, n.actor_id, n.item_ids, changes.removed, added, changed);
     if (n.book.empty()) effect_holders_.erase(n.actor_id);
     else effect_holders_.insert(n.actor_id);
+    if (is_pet(n.actor_id)) pet_effects_changed(n);
 }
 
 void CombatWorld::clear_effects(Npc& n) {
@@ -1523,7 +1466,12 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
             continue;
         }
         const double health_before = n.health();
-        const Delivery d = land_hit(n, e.instigator, r, at, false);
+        HitOrigin origin;
+        origin.hit = hit;
+        origin.source_type = content::kSourceTypeEffect;
+        origin.source_guid = e.def->row.guid;
+        origin.landed_here = true;
+        const Delivery d = land_hit(n, e.instigator, r, at, false, 0, &origin);
         if (!d.applied) return;
         // what the hit took or gave, in the log and as the number the client draws; a hit with nothing to show is not confirmed
         EffectHitNote note;
@@ -1551,6 +1499,7 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
             note.at = at;
             port->confirm_effect_hit(note, at);
         }
+        if (!n.dead) effect_hit_fires(n, e.instigator, *hit, e.def->row.guid, at);
         if (n.dead || r.miss()) continue;
         // the effects the hit puts on the creature in its turn (the burn's damage keeps its aura on, its last step ends the chain)
         Resolved gate;
@@ -1704,7 +1653,7 @@ void CombatWorld::think(Npc& n, double now) {
         c.pos = f.position();
         c.radius_cm = f.radius_cm();
         c.alive = f.alive();
-        c.hostile = true;
+        c.hostile = !is_pet(c.id);   // (a creature does not notice a pet by itself: the pet gets on its table by hurting it)
         s.known.push_back(c);
     }
     if (nav_) {
@@ -1869,9 +1818,11 @@ void CombatWorld::tick(double now) {
         }
     }
     for (const uint64_t id : todo) {
+        if (is_pet(id)) continue;   // (a pet's fight is its owner's order, not its AI's)
         Npc* n = combatant(id);
         if (n) think(*n, now);
     }
+    tick_pets(now);
 }
 
 }  // namespace aoc::worldd::combat

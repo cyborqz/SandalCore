@@ -1019,6 +1019,27 @@ func (b *abBuilder) targetingName(guid int64) string {
 	return ""
 }
 
+// effectRemovalKind reads a hit's EffectRemovalFilter, the expression that says which of the target's effects it may take off when EffectsToRemoveIds names
+// none: "debuff" or "buff" for the filters that ask only the effect's category, "none" for no filter, "other" for any other (a tag, an instigator, a record).
+func effectRemovalKind(filter string) string {
+	var code strings.Builder
+	for _, line := range strings.Split(filter, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code.WriteString(strings.Join(strings.Fields(line), ""))
+	}
+	switch code.String() {
+	case "":
+		return "none"
+	case "IsDebuff(GetEffect())":
+		return "debuff"
+	case "IsBuff(GetEffect())", "GetEffectCategory(GetEffect())==EEffectCategory::EFFECT_Buff":
+		return "buff"
+	}
+	return "other"
+}
+
 func (b *abBuilder) writeHit(r *designdb.Row) error {
 	f := newFields(fmt.Sprintf("AbilityHit %s (%d)", r.Name, r.Guid), r.Fields)
 	mask, types := f.int("ApplicableTargets"), f.int("ApplicableTypes")
@@ -1037,6 +1058,7 @@ func (b *abBuilder) writeHit(r *designdb.Row) error {
 		"HitFX": hitFX != 0 || activateFX != 0, "MaxNumEffectsToRemove": f.int("MaxNumEffectsToRemove"),
 		"ModifyCooldownsIds": refGuids(f, "ModifyCooldownsIds"), "ModifyEffectsIds": refGuids(f, "ModifyEffectsIds"),
 		"EffectsToRemoveIds": refGuids(f, "EffectsToRemoveIds"), "ReactionsIds": refGuids(f, "ReactionsIds"),
+		"EffectRemoval": effectRemovalKind(f.str("EffectRemovalFilter")), "RemoveAsDispel": f.boolean("bRemoveAsDispel"),
 		"TeleportId": teleport, "ResurrectId": resurrect,
 		"LingeringZonesIds": zones, // the zones the hit spawns (also in ab_hit_zone)
 	}
@@ -1379,6 +1401,9 @@ func (b *abBuilder) writeReaction(r *designdb.Row) error {
 // abilityByName matches GetAbilityRecordByName("Name") in a ModifyCooldownRecord's TargetCooldownAbility.
 var abilityByName = regexp.MustCompile(`GetAbilityRecordByName\(\s*"([^"]+)"\s*\)`)
 
+// abilityByRef matches the other form TargetCooldownAbility is written in, a reference: $#<type>:<guid>$.
+var abilityByRef = regexp.MustCompile(`^\s*\$#\d+:(\d+)\$\s*$`)
+
 // writeModifyCooldown writes a ModifyCooldownRecordBase: the abilities it names (the design data writes them as GetAbilityRecordByName("Name")) are
 // resolved to guids.
 func (b *abBuilder) writeModifyCooldown(r *designdb.Row) error {
@@ -1397,6 +1422,10 @@ func (b *abBuilder) writeModifyCooldown(r *designdb.Row) error {
 		g := int64(0)
 		if m := abilityByName.FindStringSubmatch(s); m != nil {
 			g = b.exprs.named["Ability"][m[1]]
+		} else if m := abilityByRef.FindStringSubmatch(s); m != nil {
+			if parsed, err := strconv.ParseInt(m[1], 10, 64); err == nil && b.abilities[parsed] != nil {
+				g = parsed
+			}
 		}
 		guids = append(guids, g)
 	}

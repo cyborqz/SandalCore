@@ -89,7 +89,9 @@ $lastLog   = Join-Path $stampDir 'last_run.log'
 $NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Content/DesignAssets/Population/NPC/Beast/Canine', 'AOC/Content/DesignAssets/Population/NPC/Beast/Bear',
                'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin',
                # the bandits (raiders, captains, archers, mages, healers: their Blueprints, trees and animation montages) and the one raider montage that lives beside the raider's animations
-               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider')
+               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider',
+               # the Summoner's pets
+               'AOC/Content/DesignAssets/Population/NPC/TestNPCs/Pets')
 # The folders whose montages also export the time of their animation end notify (the montage table's anim_end): where an ability's task is done and its cooldowns start (the bandits').
 # The other creatures' abilities are done when their montage is over.
 $NpcAnimEndFolders = @('AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider')

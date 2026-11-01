@@ -91,6 +91,7 @@ func completeFields(src *source) {
 		"ProjectilesToFire": list{}, "ProjectilesToSpawn": list{}, "LingeringZonesIds": list{}, "RecursiveHit": list{},
 		"TeleportId": idv(0, 1, "None"), "ResurrectId": idv(0, 2, "None"),
 		"ModifyCooldownsIds": list{}, "ModifyEffectsIds": list{}, "EffectsToRemoveIds": list{}, "ReactionsIds": list{},
+		"EffectRemovalFilter": "", "bRemoveAsDispel": false,
 		// plan E1, stage 3: what the damage rules read
 		"EventTags": list{}, "ApplicableLifeStates": int64(1), "CritRate": "", "BlockRate": "", "MissRate": "",
 		"bForceCantCrit": false, "bForceCantBlock": false, "bForceCantMiss": false, "bForceRollCrit": false, "bForceRollBlock": false, "bForceRollMiss": false,

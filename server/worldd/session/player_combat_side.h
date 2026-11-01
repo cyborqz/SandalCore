@@ -76,6 +76,12 @@ public:
     void confirm_effect_hit(const combat::EffectHitNote& note, double) override {
         if (effect_notes.size() < 256) effect_notes.push_back(note);
     }
+    void hit_dealt(const combat::DealtHit& hit, double) override {
+        if (dealt.size() < 64) dealt.push_back(hit);
+    }
+    void hit_from_pet(int64_t hit_guid, int64_t ability, double) override {
+        if (pet_hits.size() < 16) pet_hits.emplace_back(hit_guid, ability);
+    }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }
@@ -98,6 +104,8 @@ public:
     std::vector<combat::IncomingHit> inbox;
     std::vector<combat::KillReward>  kills;
     std::vector<combat::EffectHitNote> effect_notes;   // the hits of the effects this player put on creatures, to confirm to his client
+    std::vector<combat::DealtHit>      dealt;          // the hits of his pet and his reactions on creatures, to confirm to his client
+    std::vector<std::pair<int64_t, int64_t>> pet_hits; // the hits of his pet that land on him: (hit record, ability)
     bool                             wants_in_combat = false;
 
 private:

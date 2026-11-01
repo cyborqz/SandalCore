@@ -3,7 +3,7 @@
 # Raise a limit by hand, in the commit that needs it, so that a reviewer sees it.
 #
 # <most lines> <path from the repository root>
-1052 server/worldd/session/player_session.cpp
+1055 server/worldd/session/player_session.cpp
 1826 server/worldd/session/player_session.h
 296 server/worldd/tests/test_worldd_combat.cpp
 701 server/worldd/tests/test_worldd_session.cpp

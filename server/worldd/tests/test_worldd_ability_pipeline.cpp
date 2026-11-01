@@ -20,6 +20,8 @@
 //    A7                 Sprint's speed from its formula (1.3 at level 25) and on top of a buff, Dodge's cooldown beside the generic ones, no key collides
 //  Without a content.db the test says so and is skipped.
 // ============================================================================
+#include "test_registry.h"
+#include "session/summoner_pets.h"
 #include "ability_rig.h"
 
 #include <cmath>
@@ -1155,6 +1157,8 @@ void test_dance_zones() {
     CHECK(m.pawn.broken.empty() && m.pawn.effect(shielding_aura) == nullptr, "(the pawn took every change; no Aura is left)");
 }
 
+#include "ability_pipeline_registered.inc"
+
 int main() {
     if (!real_db_present()) {
         std::printf("no content.db at %s (cd services && go run ./cmd/contentc): the generic ability runtime's tests are skipped\n", real_db_path().c_str());
@@ -1183,6 +1187,7 @@ int main() {
     test_class_resources();
     test_mend_chain();
     test_end_request();
+    g_fail += aoc_tests::run();   // every check registered in ability_pipeline_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
