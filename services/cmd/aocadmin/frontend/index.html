@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>Sandal Core — لوحة تحكم الخادم</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>لوحة تحكم الخادم</h1>
+    <div class="status-area">
+      <div id="status" class="status">…</div>
+      <button id="start-stack" hidden>شغّل الستاك</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="players">اللاعبون</button>
+    <button class="tab" data-tab="stats">الإحصائيات</button>
+    <button class="tab" data-tab="world">العالم</button>
+    <button class="tab" data-tab="cities">المدن</button>
+    <button class="tab" data-tab="logs">السجل</button>
+  </nav>
+
+  <main>
+    <section id="players" class="panel active">
+      <div class="row">
+        <input id="player-filter" placeholder="ابحث عن لاعب…">
+        <button id="refresh-players">تحديث</button>
+      </div>
+      <table id="players-table">
+        <thead><tr><th>الاسم</th><th>المعرّف</th><th>الموقع</th><th>مركب</th><th>السرعة</th><th>إجراءات</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="stats" class="panel">
+      <div class="row">
+        <span id="stats-player">اختر لاعباً من تبويب اللاعبين</span>
+        <input id="stats-filter" placeholder="ابحث عن stat…">
+        <button id="refresh-stats">تحديث</button>
+        <button id="save-stats">احفظ</button>
+        <button id="clear-stats">امسح الكل</button>
+        <button id="fill-health">املأ الدم</button>
+      </div>
+      <p class="note">
+        الخادم يطبّق التعديل فوراً، لكن اللعبة (العميل) لا تعرفه إلا في تحديث القدرات التالي:
+        لو تأخّر شريط الصحة لحظة، هذا هو السبب.
+        القيمة الحالية تُرفض إن كانت فوق الأقصى (لا تُقطع)، وأقصى «بلا حد» يعني أن اللعبة لم تعلن حداً.
+      </p>
+      <table id="stats-table">
+        <thead><tr><th>Stat</th><th>النوع</th><th>الحالي</th><th>الأقصى</th><th>التعديل</th><th>قيمة جديدة</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="world" class="panel">
+      <div class="row">
+        <input id="world-filter" placeholder="ابحث في العالم (حرفان على الأقل)…" value="a">
+        <button id="refresh-world">تحديث</button>
+      </div>
+      <table id="world-table">
+        <thead><tr><th>الاسم</th><th>النوع</th><th>المستوى</th><th>الصحة</th><th>الموقع</th><th>إجراءات</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="world-detail" class="detail"></div>
+    </section>
+
+    <section id="cities" class="panel">
+      <table id="cities-table">
+        <thead><tr><th>المدينة</th><th>المستوى</th><th>الخبرة</th><th>الساعة</th><th>إجراءات</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="logs" class="panel">
+      <pre id="log-view"></pre>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

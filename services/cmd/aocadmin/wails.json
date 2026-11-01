@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "aocadmin",
+  "outputfilename": "aocadmin",
+  "frontend:dir": "frontend",
+  "frontend:install": "",
+  "frontend:build": "",
+  "wailsjsdir": "../../build/wailsjs",
+  "build:dir": "../../build",
+  "author": {
+    "name": "Cyb"
+  },
+  "info": {
+    "companyName": "Cyb",
+    "productName": "Sandal Core — لوحة تحكم الخادم",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright (C) 2026 Cyb and contributors"
+  }
+}
