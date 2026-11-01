@@ -1548,6 +1548,13 @@ static int64_t guid_named(const Harness& h, const char* name) {
     return 0;
 }
 
+/// The value the session holds for a stat (NaN when it has none).
+static double session_value_of(const Harness& h, int64_t guid) {
+    const stats::CharacterStats* cs = h.s->character_stats();
+    const stats::StatValue* v = cs ? cs->find(guid) : nullptr;
+    return v ? v->value : std::numeric_limits<double>::quiet_NaN();
+}
+
 /// The value the client has for a stat (NaN when it has none): the stat's item in the pawn's stat arrays, as the last chain that carried it.
 static float client_stat(const Harness& h, int64_t guid) {
     float value = std::numeric_limits<float>::quiet_NaN();
@@ -1675,6 +1682,73 @@ static void test_gm_effects(Harness& h) {
     CHECK(session->stat_updates_failed() == failed + 1, "(the session counted the refusal)");
     CHECK(session->gm_effects().size() == 1 && session->gm_effects()[0].mods[0].value == 5.0,
           "and the override that was there is still there: nothing is left behind");
+}
+
+// The GM's stat tools: the catalog, the overrides and the current value.
+static void test_stat_tools(Harness& h, GmTravel& gm, const std::string& name) {
+    const GmStatsResult stats = gm.get_player_stats(name);
+    CHECK(stats.status == GmStatus::Ok, "the stats are read");
+    CHECK(stats.character == name, "the answer names the character");
+    CHECK(!stats.stats.empty(), "the character has stats");
+
+    // a stat is named as the graph names it, and its value is the session's
+    const int64_t max_health = guid_named(h, "MaxHealth");
+    const GmStatInfo* info = nullptr;
+    for (const GmStatInfo& s : stats.stats) {
+        if (s.guid == max_health) info = &s;
+    }
+    CHECK(info != nullptr && info->name == "MaxHealth", "the stat is named as the graph names it");
+    CHECK(info != nullptr && std::fabs(info->value - session_value_of(h, max_health)) < 0.001, "its value is the session's");
+
+    if (!stats.stats.empty()) {
+        const int64_t guid = stats.stats.front().guid;
+        const GmStatModsResult set = gm.set_stat_mods(name, {{guid, 3.0}}, "the test");
+        CHECK(set.status == GmStatus::Ok, "the override is accepted");
+        bool found = false;
+        for (const GmStatInfo& s : set.stats) {
+            if (s.guid == guid) { found = true; CHECK(s.has_override, "the override shows"); }
+        }
+        CHECK(found, "the overridden stat is in the answer");
+
+        const GmStatModsResult cleared = gm.clear_stat_mods(name, "the test");
+        CHECK(cleared.status == GmStatus::Ok, "the clear is accepted");
+        for (const GmStatInfo& s : cleared.stats) {
+            if (s.guid == guid) CHECK(!s.has_override, "the override is gone");
+        }
+    }
+
+    // the current value of a held stat: it is taken as it is, and a value above the stat's maximum is refused, not clamped
+    const GmStatInfo* limited = nullptr;
+    for (const GmStatInfo& s : stats.stats) {
+        if (s.max > 0.0) { limited = &s; break; }
+    }
+    CHECK(limited != nullptr, "(a stat of this character declares a maximum)");
+    if (limited) {
+        const double half = limited->max / 2.0;
+        const GmCurrentStatResult at = gm.set_current_stat(name, limited->guid, half, "the test");
+        CHECK(at.status == GmStatus::Ok && std::fabs(at.value - half) < 0.001, "a value under the maximum is taken as it is");
+        CHECK(std::fabs(session_value_of(h, limited->guid) - half) < 0.001, "and the session's stat holds it");
+        const GmCurrentStatResult over = gm.set_current_stat(name, limited->guid, limited->max + 1.0, "the test");
+        CHECK(over.status == GmStatus::InvalidArgument, "a value above the maximum is refused, not clamped");
+        CHECK(std::fabs(session_value_of(h, limited->guid) - half) < 0.001, "and the refused value changed nothing");
+    }
+
+    // a stat the character does not have is refused
+    const GmCurrentStatResult none = gm.set_current_stat(name, 424242424242ll, 10.0, "the test");
+    CHECK(none.status == GmStatus::FailedPrecondition, "a stat the character does not have is refused");
+
+    // the current value of Health goes to the client with the next update
+    const int64_t health = guid_named(h, "Health");
+    if (health != 0) {
+        const GmCurrentStatResult r = gm.set_current_stat(name, health, 1.0, "the test");
+        CHECK(r.status == GmStatus::Ok, "the current value of Health is set");
+        h.run(milliseconds(100));
+        const float client = client_stat(h, health);
+        CHECK(client >= 1.0f - 0.001f && client < 1.0f + 20.0f, "and the client has it with the next update");
+    }
+
+    const GmStatsResult missing = gm.get_player_stats("nobody at all");
+    CHECK(missing.status == GmStatus::NotFound, "an unknown character is not found");
 }
 
 // ---- the admin API ------------------------------------------------------------------------------------------------------------------------------
@@ -1928,6 +2002,12 @@ int main() {
         Harness h(cyb_record());
         h.play();
         test_gm_effects(h);
+    }
+    {
+        Harness h(cyb_record());
+        h.play();
+        GmTravel travel = make_travel(h);
+        test_stat_tools(h, travel, "cyb");
     }
     test_admin_api();
     test_admin_queue();

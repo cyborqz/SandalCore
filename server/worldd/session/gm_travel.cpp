@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 
 namespace aoc { namespace worldd {
 
@@ -464,6 +465,156 @@ GmItemGrant GmTravel::give_item(const std::string& character, const std::string&
         out.status = r.item_name.empty() ? GmStatus::NotFound : (r.bad_request ? GmStatus::InvalidArgument : GmStatus::FailedPrecondition);
         out.message = r.refusal;
     }
+    return out;
+}
+
+// ---- the game master's stat tools ---------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+/// The names of the bundle's stats, by guid: the world's stat context holds the bundle.
+std::map<int64_t, std::string> stat_names(const PlayerWorld& world) {
+    std::map<int64_t, std::string> names;
+    const stats::StatBundle* bundle = world.stat_bundle();
+    if (!bundle) return names;
+    for (size_t i = 0; i < bundle->stats.size(); ++i) names[bundle->stats[i].guid] = bundle->stat_name(i);
+    return names;
+}
+
+/// The stats of a player as the game master's tools show them: the name in the graph, the value, the maximum and the override on it.
+std::vector<GmStatInfo> stat_infos(const PlayerHandle& h, const std::map<int64_t, std::string>& names) {
+    std::vector<GmStatInfo> out;
+    for (const stats::StatValue& v : h.player->player_stats()) {
+        GmStatInfo info;
+        info.guid = v.guid;
+        info.flags = v.flags;
+        info.value = v.value;
+        info.max = v.has_max ? v.max : 0.0;
+        const auto it = names.find(v.guid);
+        if (it != names.end()) info.name = it->second;
+        for (const stats::ActiveEffect& e : h.player->gm_effects()) {
+            for (const stats::EffectMod& m : e.mods) {
+                if (m.stat == v.guid) {
+                    info.has_override = true;
+                    info.override = m.value;
+                }
+            }
+        }
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+}  // namespace
+
+GmStatsResult GmTravel::get_player_stats(const std::string& character) {
+    GmStatsResult out;
+    const PlayerHandle h = find_player(character);
+    if (!h) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    out.character = h.player->name();
+    out.stats = stat_infos(h, stat_names(world_));
+    return out;
+}
+
+GmStatModsResult GmTravel::set_stat_mods(const std::string& character,
+                                          const std::vector<std::pair<int64_t, double>>& mods,
+                                          const std::string& by) {
+    GmStatModsResult out;
+    const PlayerHandle h = find_player(character);
+    if (!h) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    std::vector<stats::ActiveEffect> list;
+    list.reserve(mods.size());
+    for (const auto& m : mods) {
+        // one effect per stat: the game master's own (no Effect record, no tags), one stack, one mod on the stat.  The engine applies it in the stat's own form: an additive
+        // stat adds the value, a multiplying one multiplies by it.
+        stats::ActiveEffect effect;
+        effect.effect = {stats::kRefTypeEffect, 0};
+        effect.stacks = 1;
+        effect.mods = {{m.first, m.second}};
+        list.push_back(std::move(effect));
+    }
+    std::string err;
+    if (!h.player->set_gm_effects(list, err)) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = err;
+        return out;
+    }
+    out.character = h.player->name();
+    const std::map<int64_t, std::string> names = stat_names(world_);
+    out.stats = stat_infos(h, names);
+    // the log says which stats were overridden, by the names the graph gives them
+    std::string said;
+    for (const auto& m : mods) {
+        if (!said.empty()) said += ", ";
+        const auto it = names.find(m.first);
+        said += it != names.end() ? it->second : std::to_string(m.first);
+    }
+    spdlog::info("[gm] {}: the stat overrides set by {}: {}", out.character, by, said);
+    return out;
+}
+
+GmStatModsResult GmTravel::clear_stat_mods(const std::string& character, const std::string& by) {
+    GmStatModsResult out;
+    const PlayerHandle h = find_player(character);
+    if (!h) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    h.player->clear_gm_effects();
+    if (!h.player->gm_effects().empty()) {   // the client refused the change: the overrides stay
+        out.status = GmStatus::FailedPrecondition;
+        out.message = "the client refused the change: the overrides stay";
+        return out;
+    }
+    out.character = h.player->name();
+    out.stats = stat_infos(h, stat_names(world_));
+    spdlog::info("[gm] {}: the stat overrides taken off by {}", out.character, by);
+    return out;
+}
+
+GmCurrentStatResult GmTravel::set_current_stat(const std::string& character, int64_t stat, double value, const std::string& by) {
+    GmCurrentStatResult out;
+    const PlayerHandle h = find_player(character);
+    if (!h) {
+        out.status = GmStatus::NotFound;
+        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        return out;
+    }
+    if (!std::isfinite(value)) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "the value is not a number";
+        return out;
+    }
+    // the value is taken as it is: a value above the stat's maximum (when the graph declares one) is refused, not clamped, so the game master's number is the number that is set
+    for (const stats::StatValue& v : h.player->player_stats()) {
+        if (v.guid != stat) continue;
+        if (v.has_max && value > v.max) {
+            out.status = GmStatus::InvalidArgument;
+            out.message = "the value is above the stat's maximum (" + std::to_string(v.max) + ")";
+            return out;
+        }
+        break;
+    }
+    std::string err;
+    if (!h.player->set_player_current_stat(stat, value, err)) {
+        out.status = GmStatus::FailedPrecondition;
+        out.message = err;
+        return out;
+    }
+    out.character = h.player->name();
+    out.value = value;
+    const std::map<int64_t, std::string> names = stat_names(world_);
+    const auto it = names.find(stat);
+    spdlog::info("[gm] {}: the current value of {} set to {} by {}", out.character, it != names.end() ? it->second : std::to_string(stat), value, by);
     return out;
 }
 
