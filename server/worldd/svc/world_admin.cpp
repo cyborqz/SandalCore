@@ -401,6 +401,28 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         return grpc::Status::OK;
     }
 
+    grpc::Status GetLootRules(grpc::ServerContext* ctx, const adminv1::GetLootRulesRequest*, adminv1::GetLootRulesResponse* resp) override {
+        if (auto s = authorize(ctx, "GetLootRules"); !s.ok()) return s;
+        GmLootRulesResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.loot_rules(); }); !s.ok()) return s;
+        resp->set_chance_mult(out.chance_mult);
+        resp->set_rarity_boost(out.rarity_boost);
+        resp->set_quality_floor(out.quality_floor);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status SetLootRules(grpc::ServerContext* ctx, const adminv1::SetLootRulesRequest* req, adminv1::SetLootRulesResponse* resp) override {
+        if (auto s = authorize(ctx, "SetLootRules"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        GmLootRulesResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.set_loot_rules(req->chance_mult(), req->rarity_boost(), req->quality_floor(), by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_chance_mult(out.chance_mult);
+        resp->set_rarity_boost(out.rarity_boost);
+        resp->set_quality_floor(out.quality_floor);
+        return grpc::Status::OK;
+    }
+
     grpc::Status ListTaughtRecipes(grpc::ServerContext* ctx, const adminv1::ListTaughtRecipesRequest* req, adminv1::ListTaughtRecipesResponse* resp) override {
         if (auto s = authorize(ctx, "ListTaughtRecipes"); !s.ok()) return s;
         GmTaughtList out;

@@ -206,6 +206,16 @@ struct GmWeaponXpResult {
     int64_t     points_earned = 0, points_left = 0;   // the Weapon talent points the line's level gives, and what the ranks bought in its tree leave
 };
 
+/// The world's drop rules: how likely every loot draw is rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls, and the rarity every drop is at
+/// least (0: the game's own odds).
+struct GmLootRulesResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;         // why it was refused
+    double      chance_mult = 1.0;
+    double      rarity_boost = 1.0;
+    int         quality_floor = 0;   // the rarity ordinal (Common 0 ... Artifact 6)
+};
+
 /// The NPC actions: a game master's tools on one creature, named by its actor id.  One shape serves all six; the fields an action does not fill stay empty.
 struct GmNpcResult {
     GmStatus    status = GmStatus::Ok;
@@ -273,6 +283,12 @@ public:
 
     /// The player named `name` (case does not count), or an empty handle.
     PlayerHandle find_player(const std::string& name);
+
+    /// The world's drop rules (the game master's): how likely every loot draw is rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls, and the
+    /// rarity every drop is at least (the quality floor: the rarity ordinal, Common 0 to Artifact 6; 0 is the game's own odds).  The rules are in force from the next kill.
+    GmLootRulesResult set_loot_rules(double chance_mult, double rarity_boost, int quality_floor, const std::string& by);
+    /// The drop rules as they stand now.
+    GmLootRulesResult loot_rules();
 
     // ---- the game master's stat tools
     /// The stats of a character as they are now: the name in the graph, the value, the maximum and the game master's override on it.

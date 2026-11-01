@@ -69,6 +69,7 @@ struct Rolled {
     size_t quality_rolls = 0;
     size_t quality_failures = 0;
     size_t boost_redraws = 0;
+    size_t quality_floor_lifts = 0;         // how many qualities the game master's floor lifted (RollContext::quality_floor; 0 at 0)
 };
 // (C-O-A : Cyb)
 
@@ -104,6 +105,10 @@ struct RollContext {
     /// odds among themselves stay the data's.  Never a quantity, a percentage or which Glint tier drops.  1: the data's own odds, the formula runs once and nothing else is drawn
     /// (worldd --loot-rarity-boost / AOC_LOOT_RARITY_BOOST).
     double  rarity_boost = 1.0;
+    /// The rarity every drop is at least, as a rarity ordinal (Common 0 ... Artifact 6; 0: the game's own odds): a rolled quality below it is lifted to the lowest quality at which the
+    /// item shows that rarity (the item's own record decides what it can show; an item the data caps below the floor keeps its quality).  A kill only (never a harvest).
+    /// (worldd --loot-quality-floor / AOC_LOOT_QUALITY_FLOOR).
+    int      quality_floor = 0;
     stats::SplitMix* rng = nullptr;
     /// Nodes 1, stage 1: where the kill is.  The node reads of the tables' expressions (GetNodeBiome, GetCurrentNode, GetNodeRecord, Node_GetLevel ...) are
     /// answered over `nodes` (null: a world with no nodes) in the zone of influence of the creature's body: `node` is the rank of that zone's node (-1:

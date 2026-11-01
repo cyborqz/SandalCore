@@ -6,6 +6,8 @@
 // ============================================================================
 #include "session/gm_travel.h"
 
+#include "items/rarity.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -154,6 +156,38 @@ GmSpeedResult GmTravel::set_speed(const std::string& character, double multiplie
     out.previous = change.previous;
     out.multiplier = change.now;
     return out;
+}
+
+GmLootRulesResult GmTravel::loot_rules() {
+    GmLootRulesResult out;
+    const combat::AftermathConfig& cfg = world_.aftermath_config();
+    out.chance_mult = cfg.loot_chance_mult;
+    out.rarity_boost = cfg.loot_rarity_boost;
+    out.quality_floor = cfg.loot_quality_floor;
+    return out;
+}
+
+GmLootRulesResult GmTravel::set_loot_rules(double chance_mult, double rarity_boost, int quality_floor, const std::string& by) {
+    GmLootRulesResult out;
+    if (!std::isfinite(chance_mult) || chance_mult < 0.0 || chance_mult > 1000.0) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "the loot chance multiplier must be 0 to 1000 (1 is the data's own odds)";
+        return out;
+    }
+    if (!std::isfinite(rarity_boost) || rarity_boost < 1.0 || rarity_boost > 1000.0) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "the rarity boost must be 1 to 1000 (1 is the data's own odds)";
+        return out;
+    }
+    if (quality_floor < 0 || quality_floor >= items::kRarityCount) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "the quality floor must be 0 to 6 (Common to Artifact; 0 is the data's own odds)";
+        return out;
+    }
+    world_.set_loot_rules(chance_mult, rarity_boost, quality_floor);
+    spdlog::info("[gm] the drop rules set by {}: the loot chances x{}, the rarity odds x{}, every drop at least {}", by, chance_mult, rarity_boost,
+                items::rarity_name(quality_floor));
+    return loot_rules();
 }
 
 GmMoneyGrant GmTravel::give_money(const std::string& character, int64_t copper, const std::string& by) {

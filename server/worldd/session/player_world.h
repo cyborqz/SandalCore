@@ -307,6 +307,14 @@ public:
     /// (the kill switch `enabled`, the corpse's and the respawn's numbers); before load_ground.
     void set_aftermath_config(combat::AftermathConfig config) { aftermath_config_ = std::move(config); }
     const combat::AftermathConfig& aftermath_config() const { return aftermath_config_; }
+    /// The world's drop rules (the game master's): the chance every loot draw is rolled at, the weight of every outcome above Common in a kill's rarity rolls, and the rarity every drop is at
+    /// least (the quality floor: the rarity ordinal, Common 0 to Artifact 6; 0 is the game's own odds).  The aftermath's own copy of the config is set too, so the next kill uses them.
+    void set_loot_rules(double chance_mult, double rarity_boost, int quality_floor) {
+        aftermath_config_.loot_chance_mult = chance_mult;
+        aftermath_config_.loot_rarity_boost = rarity_boost;
+        aftermath_config_.loot_quality_floor = quality_floor;
+        if (aftermath_) aftermath_->set_loot_rules(chance_mult, rarity_boost, quality_floor);
+    }
     /// Nodes 1, stage 1: the city node registry (world/city_nodes.h), set by main before load_ground; null in a world with no nodes.  The loot rolls in the zone of
     /// influence where the creature died.  The pointer must outlive this object.
     void set_city_nodes(world::CityNodes* nodes) { city_nodes_ = nodes; }

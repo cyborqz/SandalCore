@@ -2110,6 +2110,109 @@ static void test_admin_queue() {
 }
 // C-Y-B and C O A
 
+// The world's drop rules: the game master reads them, sets them, and a value outside its
+// range is refused with a reason (the rules stay as they were).
+static void test_admin_loot_rules() {
+    std::printf("the administrative drop rules: read, set, refuse\n");
+    Harness h(cyb_record());
+    h.play();
+    Admin a(h);
+
+    // the rules as they stand
+    adminv1::GetLootRulesResponse rules;
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetLootRulesRequest rq;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetLootRules(&ctx, rq, &rules); });
+        CHECK(s.ok(), "GetLootRules: the rules come back");
+        CHECK(rules.chance_mult() == 1.0 && rules.rarity_boost() == 1.0, "the rules are the data's own to start with");
+        CHECK(rules.quality_floor() == 0, "no floor to start with");
+        CHECK(!a.directory_off_thread, "(read on the network thread)");
+    }
+
+    // the game master sets them
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(5.0);
+        rq.set_rarity_boost(20.0);
+        rq.set_quality_floor(5);   // Legendary
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok(), "SetLootRules: the rules are set");
+        CHECK(rs.chance_mult() == 5.0 && rs.rarity_boost() == 20.0 && rs.quality_floor() == 5, "the answer carries the rules now in force");
+    }
+
+    // they stay
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetLootRulesRequest rq;
+        adminv1::GetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok() && rs.chance_mult() == 5.0 && rs.rarity_boost() == 20.0 && rs.quality_floor() == 5, "the rules are in force until they are changed");
+    }
+
+    // a value outside its range is refused, and the rules stay as they were
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(9);   // past Artifact
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a floor past Artifact: InvalidArgument");
+        CHECK(std::string(s.error_message()).find("quality floor") != std::string::npos, "the refusal says which value is wrong");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(0.5);   // under 1: the data's own odds are the floor
+        rq.set_quality_floor(1);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a boost under 1: InvalidArgument");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(2000.0);   // past 1000
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(1);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.error_code() == grpc::StatusCode::INVALID_ARGUMENT, "a chance multiplier past 1000: InvalidArgument");
+    }
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::GetLootRulesRequest rq;
+        adminv1::GetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->GetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok() && rs.chance_mult() == 5.0 && rs.quality_floor() == 5, "a refused call changes nothing");
+    }
+
+    // back to the data's own odds
+    {
+        grpc::ClientContext ctx;
+        Admin::authorize(ctx, kToken);
+        adminv1::SetLootRulesRequest rq;
+        rq.set_chance_mult(1.0);
+        rq.set_rarity_boost(1.0);
+        rq.set_quality_floor(0);
+        adminv1::SetLootRulesResponse rs;
+        const grpc::Status s = a.via_net_thread([&] { return a.stub->SetLootRules(&ctx, rq, &rs); });
+        CHECK(s.ok() && rs.quality_floor() == 0, "the rules go back to the data's own odds");
+    }
+}
+
 int main() {
     spdlog::set_level(std::getenv("AOC_TEST_LOG") ? spdlog::level::debug : spdlog::level::off);
     std::string error;
@@ -2160,6 +2263,7 @@ int main() {
     }
     test_admin_api();
     test_admin_stat_calls();
+    test_admin_loot_rules();
     test_admin_queue();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

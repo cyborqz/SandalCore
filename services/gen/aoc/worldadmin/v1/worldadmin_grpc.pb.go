@@ -41,6 +41,8 @@ const (
 	WorldAdminService_SetStatMods_FullMethodName       = "/aoc.worldadmin.v1.WorldAdminService/SetStatMods"
 	WorldAdminService_ClearStatMods_FullMethodName     = "/aoc.worldadmin.v1.WorldAdminService/ClearStatMods"
 	WorldAdminService_SetCurrentStat_FullMethodName    = "/aoc.worldadmin.v1.WorldAdminService/SetCurrentStat"
+	WorldAdminService_GetLootRules_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/GetLootRules"
+	WorldAdminService_SetLootRules_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/SetLootRules"
 	WorldAdminService_KillNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/KillNpc"
 	WorldAdminService_RespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/RespawnNpc"
 	WorldAdminService_ResetNpc_FullMethodName          = "/aoc.worldadmin.v1.WorldAdminService/ResetNpc"
@@ -121,6 +123,15 @@ type WorldAdminServiceClient interface {
 	ClearStatMods(ctx context.Context, in *ClearStatModsRequest, opts ...grpc.CallOption) (*ClearStatModsResponse, error)
 	// The current value of a stat the player holds (Health, Mana, Stamina).
 	SetCurrentStat(ctx context.Context, in *SetCurrentStatRequest, opts ...grpc.CallOption) (*SetCurrentStatResponse, error)
+	// The world's drop rules as they stand now: how likely every loot draw is rolled at, how
+	// strongly the outcomes above Common are weighted in a kill's rarity rolls, and the rarity
+	// every drop is at least. 0 for the floor is the game's own odds.
+	GetLootRules(ctx context.Context, in *GetLootRulesRequest, opts ...grpc.CallOption) (*GetLootRulesResponse, error)
+	// The game master's drop rules, in force from the next kill: how likely every loot draw is
+	// rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls,
+	// and the rarity every drop is at least (the quality floor). 0 for the floor is the game's
+	// own odds. InvalidArgument for a value outside its range.
+	SetLootRules(ctx context.Context, in *SetLootRulesRequest, opts ...grpc.CallOption) (*SetLootRulesResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -327,6 +338,26 @@ func (c *worldAdminServiceClient) SetCurrentStat(ctx context.Context, in *SetCur
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) GetLootRules(ctx context.Context, in *GetLootRulesRequest, opts ...grpc.CallOption) (*GetLootRulesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLootRulesResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_GetLootRules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) SetLootRules(ctx context.Context, in *SetLootRulesRequest, opts ...grpc.CallOption) (*SetLootRulesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetLootRulesResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_SetLootRules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldAdminServiceClient) KillNpc(ctx context.Context, in *KillNpcRequest, opts ...grpc.CallOption) (*KillNpcResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(KillNpcResponse)
@@ -459,6 +490,15 @@ type WorldAdminServiceServer interface {
 	ClearStatMods(context.Context, *ClearStatModsRequest) (*ClearStatModsResponse, error)
 	// The current value of a stat the player holds (Health, Mana, Stamina).
 	SetCurrentStat(context.Context, *SetCurrentStatRequest) (*SetCurrentStatResponse, error)
+	// The world's drop rules as they stand now: how likely every loot draw is rolled at, how
+	// strongly the outcomes above Common are weighted in a kill's rarity rolls, and the rarity
+	// every drop is at least. 0 for the floor is the game's own odds.
+	GetLootRules(context.Context, *GetLootRulesRequest) (*GetLootRulesResponse, error)
+	// The game master's drop rules, in force from the next kill: how likely every loot draw is
+	// rolled at, how strongly the outcomes above Common are weighted in a kill's rarity rolls,
+	// and the rarity every drop is at least (the quality floor). 0 for the floor is the game's
+	// own odds. InvalidArgument for a value outside its range.
+	SetLootRules(context.Context, *SetLootRulesRequest) (*SetLootRulesResponse, error)
 	// Kills a creature as a player's blow would: the same death, a corpse that stays as long as any corpse does, the loot a kill gives, and its spawn point makes it again on its usual
 	// respawn timer. Nobody fought it, so the loot is open to every player in the world at that moment, rolled as for a player of the creature's own level, and nobody is given
 	// experience.
@@ -538,6 +578,12 @@ func (UnimplementedWorldAdminServiceServer) ClearStatMods(context.Context, *Clea
 }
 func (UnimplementedWorldAdminServiceServer) SetCurrentStat(context.Context, *SetCurrentStatRequest) (*SetCurrentStatResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetCurrentStat not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) GetLootRules(context.Context, *GetLootRulesRequest) (*GetLootRulesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLootRules not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) SetLootRules(context.Context, *SetLootRulesRequest) (*SetLootRulesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetLootRules not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) KillNpc(context.Context, *KillNpcRequest) (*KillNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method KillNpc not implemented")
@@ -902,6 +948,42 @@ func _WorldAdminService_SetCurrentStat_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_GetLootRules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLootRulesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).GetLootRules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_GetLootRules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).GetLootRules(ctx, req.(*GetLootRulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_SetLootRules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetLootRulesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).SetLootRules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_SetLootRules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).SetLootRules(ctx, req.(*SetLootRulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldAdminService_KillNpc_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(KillNpcRequest)
 	if err := dec(in); err != nil {
@@ -1088,6 +1170,14 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetCurrentStat",
 			Handler:    _WorldAdminService_SetCurrentStat_Handler,
+		},
+		{
+			MethodName: "GetLootRules",
+			Handler:    _WorldAdminService_GetLootRules_Handler,
+		},
+		{
+			MethodName: "SetLootRules",
+			Handler:    _WorldAdminService_SetLootRules_Handler,
 		},
 		{
 			MethodName: "KillNpc",

@@ -20,6 +20,7 @@
     <button class="tab" data-tab="world">العالم</button>
     <button class="tab" data-tab="cities">المدن</button>
     <button class="tab" data-tab="embers">Embersprings</button>
+    <button class="tab" data-tab="loot">الدروب</button>
     <button class="tab" data-tab="logs">السجل</button>
   </nav>
 
@@ -89,6 +90,36 @@
         <thead><tr><th>الاسم</th><th>الرقم</th><th>الرمز</th><th>الموقع</th><th>إجراءات</th></tr></thead>
         <tbody></tbody>
       </table>
+    </section>
+
+    <section id="loot" class="panel">
+      <div class="row">
+        <button id="refresh-loot">تحديث</button>
+        <button id="apply-loot">طبّق</button>
+      </div>
+      <p class="note">
+        قواعد السقوط في العالم: كم مرة يُرسم القطع، وكم وزن النتائج فوق Common في رميات
+        الجودة، وأقل جودة تخرج بها أي قطرة. الحد الأدنى 5 = كل قطرة Legendary، لكن القطرة
+        التي سجلها في بيانات اللعبة نفسه لا يتجاوز أبداً (قطرة غرضها Rare تبقى Rare: اللعبة
+        تقرأ الندرة من سجل القطعة نفسه). الحد الأدنى يسري على نواقل القتل فقط (لاHarvest).
+      </p>
+      <div class="row">
+        <label for="loot-chance">مضاعف فرصة القطع</label>
+        <input id="loot-chance" type="number" min="0" max="1000" step="0.1" value="1">
+        <label for="loot-boost">مضاعف الندر (فوق Common)</label>
+        <input id="loot-boost" type="number" min="1" max="1000" step="1" value="1">
+        <label for="loot-floor">أقل جودة</label>
+        <select id="loot-floor">
+          <option value="0">بلا حد (قواعد اللعبة)</option>
+          <option value="1">Uncommon</option>
+          <option value="2">Rare</option>
+          <option value="3">Heroic</option>
+          <option value="4">Epic</option>
+          <option value="5">Legendary</option>
+          <option value="6">Artifact</option>
+        </select>
+      </div>
+      <p id="loot-state" class="note">…</p>
     </section>
 
     <section id="logs" class="panel">

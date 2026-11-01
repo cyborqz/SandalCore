@@ -59,6 +59,7 @@ struct AftermathConfig {
     double default_respawn_seconds = 60.0;  // [modelled] a data NPC whose instance says 0
     double loot_chance_mult = 1.0;          // [modelled] x the chance of every RollEachByPercent loot draw (never the quantities): worldd --loot-chance-mult, AOC_LOOT_CHANCE_MULT
     double loot_rarity_boost = 1.0;         // [modelled, test only] x the weight of every outcome above Common in a kill's rarity rolls (RollContext::rarity_boost; never a harvest): worldd --loot-rarity-boost, AOC_LOOT_RARITY_BOOST
+    int    loot_quality_floor = 0;          // [modelled] the rarity every drop is at least, as a rarity ordinal (Common 0 ... Artifact 6): a rolled quality below it is lifted to the lowest quality at which the item shows that rarity (RollContext::quality_floor; never a harvest): worldd --loot-quality-floor, AOC_LOOT_QUALITY_FLOOR
     double min_respawn_seconds = 1.0;       // [R] the shortest retail respawn: 1.07 s
     uint64_t seed = 1;
 };
@@ -123,6 +124,14 @@ public:
     /// Nodes 1, stage 1: the city nodes.  A death is rolled in the zone of influence of its position (world/city_nodes.h node_at): its biome and node
     /// answer the reward tables' GetNodeBiome and the other node reads.  Without them (null) the node reads answer as in a world with no nodes.  Outlives the module.
     void set_city_nodes(const world::CityNodes* nodes) { nodes_ = nodes; }
+
+    /// The drop rules (the game master's): the chance every loot draw is rolled at, the weight of every outcome above Common in a kill's rarity rolls and the rarity every drop is at least
+    /// (0: the game's own odds).  The world's net thread calls this and reads the rules: the aftermath's tick and the admin tools share it.
+    void set_loot_rules(double chance_mult, double rarity_boost, int quality_floor) {
+        cfg_.loot_chance_mult = chance_mult;
+        cfg_.loot_rarity_boost = rarity_boost;
+        cfg_.loot_quality_floor = quality_floor;
+    }
 
     /// Which creatures are huntable (their corpse is hunted, not looted): the predicate sees the NpcInfo of the creature that died.  Without one every creature is looted.
     using HuntablePredicate = std::function<bool(const world::NpcInfo&)>;

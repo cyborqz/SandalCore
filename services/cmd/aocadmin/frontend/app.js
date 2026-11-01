@@ -54,6 +54,10 @@ document.querySelectorAll(".tab").forEach((button) => {
     document.getElementById(button.dataset.tab).classList.add("active");
     state.tab = button.dataset.tab;
     refresh();
+    // The stats and the drop rules hold what the game master is typing, so
+    // the loop does not touch them; they load when they are opened.
+    if (state.tab === "stats") loadStats();
+    if (state.tab === "loot") loadLoot();
   });
 });
 
@@ -468,6 +472,38 @@ function regionOf(name) {
 
 document.getElementById("embers-filter").addEventListener("input", loadEmbers);
 document.getElementById("refresh-embers").addEventListener("click", loadEmbers);
+
+// ── the drop rules tab ────────────────────────────────────────────────────────
+// The world's drop rules: how likely every draw is, how strongly the outcomes
+// above Common are weighted, and the rarity every drop is at least.
+// The floor is the rarity ordinal (Common 0 ... Artifact 6), and 0 is the game's own odds:
+// the rarities the server counts start at Uncommon, because a Common floor is the game's own.
+const lootFloorNames = ["بلا حد (قواعد اللعبة)", "Uncommon", "Rare", "Heroic", "Epic", "Legendary", "Artifact"];
+
+async function loadLoot() {
+  const rules = await call("LootRules");
+  if (!rules) return;
+  document.getElementById("loot-chance").value = rules.chance_mult;
+  document.getElementById("loot-boost").value = rules.rarity_boost;
+  document.getElementById("loot-floor").value = String(rules.quality_floor);
+  document.getElementById("loot-state").textContent =
+    "الآن: فرصة القطع ×" + rules.chance_mult +
+    " · الندر فوق Common ×" + rules.rarity_boost +
+    " · أقل جودة " + (lootFloorNames[rules.quality_floor] || "—");
+}
+
+document.getElementById("refresh-loot").addEventListener("click", loadLoot);
+
+document.getElementById("apply-loot").addEventListener("click", async () => {
+  const chance = Number(document.getElementById("loot-chance").value);
+  const boost = Number(document.getElementById("loot-boost").value);
+  const floor = Number(document.getElementById("loot-floor").value);
+  const out = await call("SetLootRules", chance, boost, floor);
+  if (!out) return;
+  toast("طبّقت: فرصة ×" + out.chance_mult + " · ندر ×" + out.rarity_boost +
+        " · أقل جودة " + (lootFloorNames[out.quality_floor] || "—"));
+  await loadLoot();
+});
 
 // ── the log tab ────────────────────────────────────────────────────────────────
 async function loadLogs() {

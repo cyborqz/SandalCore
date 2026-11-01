@@ -41,6 +41,12 @@ input {
   background: #0e1015; color: var(--text); border: 1px solid var(--line);
   border-radius: 5px; padding: 6px 9px; min-width: 200px;
 }
+select {
+  background: #0e1015; color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 6px 9px; min-width: 160px; font-size: 13px;
+}
+label { color: var(--muted); font-size: 13px; }
+
 button {
   background: #232834; color: var(--text); border: 1px solid var(--line);
   border-radius: 5px; padding: 6px 12px; cursor: pointer;

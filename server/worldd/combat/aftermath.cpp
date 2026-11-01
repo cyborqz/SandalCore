@@ -110,6 +110,7 @@ void Aftermath::on_death(const DeathEvent& d) {
             ctx.loot_max_level = max_level;
             ctx.chance_mult = cfg_.loot_chance_mult;
             ctx.rarity_boost = cfg_.loot_rarity_boost;
+            ctx.quality_floor = cfg_.loot_quality_floor;
             ctx.rng = &rng_;
             // Loot_Falloff is 1 for a gap of 0 to 9 levels and 0 from 10 (the reward tables' own, settled against retail 2026-10-08): said on the line so a drop that did not come can be read
             const int gap = static_cast<int>(std::lround(std::fabs(max_level - static_cast<double>(d.level))));

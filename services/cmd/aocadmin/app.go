@@ -294,6 +294,53 @@ func (a *App) SetCurrentStat(character, stat string, value float64) (float64, er
 	return out.GetValue(), nil
 }
 
+// LootRules: the world's drop rules as they stand: how likely every loot
+// draw is, how strongly the outcomes above Common are weighted, and the
+// rarity every drop is at least.
+type LootRules struct {
+	ChanceMult   float64 `json:"chance_mult"`
+	RarityBoost  float64 `json:"rarity_boost"`
+	QualityFloor int     `json:"quality_floor"`
+}
+
+// LootRules: the rules now in force.
+func (a *App) LootRules() (LootRules, error) {
+	out, err := call(a, func(ctx context.Context) (*worldadminv1.GetLootRulesResponse, error) {
+		return a.client.admin.GetLootRules(ctx, &worldadminv1.GetLootRulesRequest{})
+	})
+	if err != nil {
+		return LootRules{}, err
+	}
+	return LootRules{
+		ChanceMult:   out.GetChanceMult(),
+		RarityBoost:  out.GetRarityBoost(),
+		QualityFloor: int(out.GetQualityFloor()),
+	}, nil
+}
+
+// SetLootRules: the game master's drop rules: how likely every loot draw is
+// (chance_mult), how strongly the outcomes above Common are weighted
+// (rarity_boost) and the rarity every drop is at least (quality_floor, the
+// rarity ordinal: 0 Common ... 5 Legendary, 6 Artifact; 0 is the game's own).
+// The server refuses a value outside its range and says why.
+func (a *App) SetLootRules(chanceMult, rarityBoost float64, qualityFloor int) (LootRules, error) {
+	out, err := call(a, func(ctx context.Context) (*worldadminv1.SetLootRulesResponse, error) {
+		return a.client.admin.SetLootRules(ctx, &worldadminv1.SetLootRulesRequest{
+			ChanceMult:   chanceMult,
+			RarityBoost:  rarityBoost,
+			QualityFloor: int32(qualityFloor),
+		})
+	})
+	if err != nil {
+		return LootRules{}, err
+	}
+	return LootRules{
+		ChanceMult:   out.GetChanceMult(),
+		RarityBoost:  out.GetRarityBoost(),
+		QualityFloor: int(out.GetQualityFloor()),
+	}, nil
+}
+
 // GiveMoney: copper into the player's purse. The answer is the balance.
 func (a *App) GiveMoney(character string, copper int64) (int64, error) {
 	out, err := call(a, func(ctx context.Context) (*worldadminv1.GiveMoneyResponse, error) {

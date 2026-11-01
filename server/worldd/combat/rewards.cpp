@@ -145,8 +145,23 @@ private:
                 continue;
             }
             ++out_.quality_rolls;
-            return quality;
+            return floor_quality(it, quality);
         }
+    }
+
+    /// The game master's floor: the rarity every drop is at least (RollContext::quality_floor).  A quality below it is lifted to the lowest quality at which the item shows that rarity;
+    /// an item the data caps below the floor keeps its own quality, because the client reads the rarity from the item's own record.  0: the game's own odds.
+    int floor_quality(const content::LootItem& it, int quality) {
+        const int floor = ctx_.quality_floor;
+        if (floor <= 0 || floor >= items::kRarityCount) return quality;
+        if (book_.rarity_of(it.item, quality) >= floor) return quality;
+        for (int q = items::first_quality_of(floor); q <= items::kMaxQuality; ++q) {
+            if (book_.rarity_of(it.item, q) >= floor) {
+                ++out_.quality_floor_lifts;
+                return q;
+            }
+        }
+        return quality;   // the item's own record never shows that rarity
     }
 
     double weight_at(const std::vector<double>& w, size_t i) { return i < w.size() ? std::max(0.0, w[i]) : 1.0; }
