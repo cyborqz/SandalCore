@@ -1336,6 +1336,7 @@ Create `services/cmd/aocadmin/frontend/index.html`:
         <span id="stats-player">اختر لاعباً من تبويب اللاعبين</span>
         <input id="stats-filter" placeholder="ابحث عن stat…">
         <button id="save-stats">احفظ</button>
+        <button id="max-all-stats">املأ الكل بالحد الأقصى</button>
         <button id="clear-stats">امسح الكل</button>
         <button id="fill-health">املأ الدم</button>
       </div>
@@ -1539,6 +1540,36 @@ document.getElementById("save-stats").addEventListener("click", async () => {
   });
   const stats = await call("SetStatMods", state.selected, mods);
   if (stats) { toast("حُفظت التعديلات"); await loadStats(); }
+});
+
+document.getElementById("max-all-stats").addEventListener("click", async () => {
+  if (!state.selected) { toast("اختر لاعباً أول", true); return; }
+  const stats = await call("Stats", state.selected);
+  if (!stats) return;
+  // Every stat that declares a maximum goes to it. The override is what the stat's
+  // own rule applies, so the number that is sent is the one the engine needs:
+  // an additive stat takes the missing amount (plus what it already has), a
+  // multiplying one takes the factor (times what it already has). A stat with no
+  // declared maximum (max = 0) is left alone.
+  const mods = [];
+  for (const stat of stats) {
+    const max = stat.max || 0;
+    const value = stat.value || 0;
+    const current = stat.has_override ? stat.override : 0;
+    const multiplicative = (stat.flags & kStatMulMods) !== 0;
+    if (max > 0 && max > value) {
+      if (multiplicative) {
+        if (value > 0) mods.push({ stat: stat.guid, value: (max * (current || 1)) / value });
+      } else {
+        mods.push({ stat: stat.guid, value: max - value + current });
+      }
+    } else if (stat.has_override) {
+      mods.push({ stat: stat.guid, value: current });   // keep the override it has
+    }
+  }
+  if (!mods.length) { toast("كل الإحصائيات عندها حدها الأقصى بالفعل"); return; }
+  const after = await call("SetStatMods", state.selected, mods);
+  if (after) { toast("ملّأت " + mods.length + " stat بالحد الأقصى"); await loadStats(); }
 });
 
 document.getElementById("clear-stats").addEventListener("click", async () => {
