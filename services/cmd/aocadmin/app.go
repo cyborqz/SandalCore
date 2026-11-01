@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +29,9 @@ import (
 type App struct {
 	ctx    context.Context
 	client *Client
+	// clientMu guards the client: the goroutine that connects sets it while
+	// the window's calls read it.
+	clientMu sync.RWMutex
 
 	// handleMu guards the window's own handle, found by its title.
 	handleMu sync.Mutex
@@ -47,18 +49,49 @@ func (a *App) startup(ctx context.Context) {
 	// the INSERT key comes up first: the dashboard must answer it even when the
 	// server is not there yet (the window then says so in its status line).
 	go a.watchHotkey()
-	c := NewClient(Options{TokenFile: tokenFile()})
-	if err := c.Dial(ctx); err != nil {
-		log.Printf("[aocadmin] the server is not reachable: %v", err)
+	// the server may not be there yet: the dashboard is started with the
+	// stack, and the services and their token come up a moment later.
+	go a.connect()
+}
+
+// connect: opens the connections to the server and keeps trying until it
+// answers. The stack script starts the dashboard with the services, and the
+// service token is written by the script that starts them: without it there
+// is nothing to dial with.
+func (a *App) connect() {
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		default:
+		}
+
+		c := NewClient(Options{TokenFile: tokenFile()})
+		if err := c.Dial(a.ctx); err != nil {
+			a.logf("the server is not reachable yet: %v", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		a.clientMu.Lock()
+		a.client = c
+		a.clientMu.Unlock()
+		a.logf("the server answers")
 		return
 	}
-	a.client = c
+}
+
+// server: the client, or nil while the server is not there yet.
+func (a *App) server() *Client {
+	a.clientMu.RLock()
+	defer a.clientMu.RUnlock()
+	return a.client
 }
 
 // shutdown: the window is closed: the connections go with it.
 func (a *App) shutdown(ctx context.Context) {
-	if a.client != nil {
-		a.client.Close()
+	if c := a.server(); c != nil {
+		c.Close()
 	}
 }
 
@@ -77,17 +110,18 @@ type Status struct {
 
 // Status: the server's answer.
 func (a *App) Status() Status {
-	if a.client == nil {
+	c := a.server()
+	if c == nil {
 		return Status{Error: "الخادم مو شغّال"}
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, CallTimeout)
 	defer cancel()
-	out, err := a.client.stream.GetStatus(a.client.WithToken(ctx), &worldadminv1.GetStatusRequest{})
+	out, err := c.stream.GetStatus(c.WithToken(ctx), &worldadminv1.GetStatusRequest{})
 	status := Status{
-		AdminAddr:     a.client.AdminAddr(),
-		CharacterAddr: a.client.CharacterAddr(),
-		StreamAddr:    a.client.WorldStreamAddr(),
-		CityNodeAddr:  a.client.CityNodeAddr(),
+		AdminAddr:     c.AdminAddr(),
+		CharacterAddr: c.CharacterAddr(),
+		StreamAddr:    c.WorldStreamAddr(),
+		CityNodeAddr:  c.CityNodeAddr(),
 	}
 	if err != nil {
 		status.Error = errText(err)
@@ -103,12 +137,13 @@ func (a *App) Status() Status {
 // the server's own message when it refuses.
 func call[T any](a *App, fn func(ctx context.Context) (T, error)) (T, error) {
 	var zero T
-	if a.client == nil {
+	c := a.server()
+	if c == nil {
 		return zero, serverError{errors.New("الخادم مو شغّال")}
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, CallTimeout)
 	defer cancel()
-	out, err := fn(a.client.WithToken(ctx))
+	out, err := fn(c.WithToken(ctx))
 	if err != nil {
 		return zero, serverError{err}
 	}

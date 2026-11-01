@@ -522,4 +522,6 @@ refresh();
 // The INSERT key lives on the Go side; it says here what it did.
 if (window.runtime && window.runtime.EventsOn) {
   window.runtime.EventsOn("toast", (message) => toast(message));
+  // the window comes to the front: the page asks the server again.
+  window.runtime.EventsOn("refresh", () => refresh());
 }

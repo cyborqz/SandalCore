@@ -30,6 +30,18 @@ var assets embed.FS
 // windowTitle: the title of the dashboard's window.
 const windowTitle = "Sandal Core — لوحة تحكم الخادم"
 
+// hiddenAtStart: the dashboard starts out of the way when the stack script
+// starts it: the game master wants it to come up with the INSERT key, not to
+// cover the game from the first moment.
+func hiddenAtStart() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "--hidden" || arg == "-hidden" {
+			return true
+		}
+	}
+	return false
+}
+
 // main: the window. The dashboard is a desktop window of its own, not a tab
 // in a browser.
 func main() {
@@ -42,6 +54,7 @@ func main() {
 		Bind:             []interface{}{app},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
+		StartHidden:      hiddenAtStart(),
 		BackgroundColour: &options.RGBA{R: 18, G: 20, B: 26, A: 1},
 	})
 	if err != nil {
@@ -201,6 +214,9 @@ func (a *App) raiseWindow(hwnd uintptr) {
 	procSetForeground.Call(hwnd)
 	a.logf("the dashboard is up")
 	a.notify("لوحة التحكم ظهرت — INSERT يخفيها")
+	// a window that was hidden slows its timers down, so the page asks for
+	// fresh data as soon as it is in front again.
+	wailsrt.EventsEmit(a.ctx, "refresh", "")
 }
 
 // windowHandle: the dashboard's own window. The window library keeps the
