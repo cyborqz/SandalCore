@@ -21,6 +21,7 @@
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
+#include "test_registry.h"
 #include "bootstrap/character_setup.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
@@ -1269,6 +1270,8 @@ static void test_levels() {
     CHECK(q.s->professions().level(id::kHerbalism) == 10 && q.s->professions().xp(id::kHerbalism) >= held && q.s->professions().xp(id::kHerbalism) <= 49999, "a Novice at level 10 stays at level 10; the XP is held below the Apprentice's first level");
 }
 
+#include "gather_session_registered.inc"
+
 int main() {
     {   // the lines of the log (info and above) go to g_log: the tests read what the user's test would
         auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
@@ -1296,6 +1299,7 @@ int main() {
     test_backpack_full_blocks_nothing();
     test_relog_keeps_the_resource_bag();
     test_levels();
+    g_fail += aoc_tests::run();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

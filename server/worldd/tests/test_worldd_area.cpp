@@ -23,6 +23,7 @@
 #include "combat/combat_world.h"
 #include "combat/hit_resolver.h"
 #include "content/content_db.h"
+#include "items/inventory.h"
 #include "protocol/repl/replicator.h"
 #include "protocol/schema/generated/index.h"
 #include "npc/area_npcs.h"
@@ -674,8 +675,17 @@ static void test_gm_vendors(const content::ContentDb& db) {
     plan = gm->plan_purchase(db, materials, mats, 70);
     CHECK(plan.ok && plan.stacks.size() == 3 && plan.stacks[0].quantity == max_stack && plan.stacks[1].quantity == max_stack && plan.stacks[2].quantity == 1,
           "a quantity of two stacks and one is three stacks: MaxStackSize, MaxStackSize, 1");
+    // the stacks of materials go to the material bags, which the item bag's free slots do not count (the grant checks the room those bags have); the stacks of items are counted
+    std::string material_error;
+    const auto material_rec = db.item(stackable, material_error);
+    CHECK(material_rec && material_rec->resource, "the item that stacks in the materials def is a material");
     plan = gm->plan_purchase(db, materials, mats, 2);
-    CHECK(!plan.ok && plan.stacks.empty() && plan.refusal.find("free slot") != std::string::npos, "a bag with two free slots refuses it whole");
+    CHECK(plan.ok && plan.stacks.size() == 3, "three stacks of materials are planned although the item bag has two free slots");
+    const auto gear_rec = db.item(gear_item, material_error);
+    repl::VendorPurchaseCart three = cart;
+    three.items[0].quantity = (gear_rec && gear_rec->max_stack_size > 1 ? gear_rec->max_stack_size : 1) * 2 + 1;
+    plan = gm->plan_purchase(db, gear, three, 2);
+    CHECK(!plan.ok && plan.stacks.empty() && plan.refusal.find("free slot") != std::string::npos, "three stacks of items do not fit two free slots: the cart is refused whole");
     // refusals
     repl::VendorPurchaseCart wrong = cart;
     wrong.vendor = materials.guid;
@@ -697,7 +707,8 @@ static void test_gm_vendors(const content::ContentDb& db) {
     repl::VendorPurchaseCart huge = mats;
     huge.items[0].quantity = vendor::kMaxQuantity;
     const auto big = gm->plan_purchase(db, materials, huge, 70);
-    CHECK(big.ok == (static_cast<int64_t>(vendor::kMaxQuantity + max_stack - 1) / max_stack <= 70), "the largest quantity costs stacks, never a loop over the quantity");
+    const int64_t material_cells = static_cast<int64_t>(items::kResourceContainers) * items::kMaxResourceCells;   // the most stacks of materials the material bags can hold
+    CHECK(big.ok == (static_cast<int64_t>(vendor::kMaxQuantity + max_stack - 1) / max_stack <= material_cells), "the largest quantity costs stacks, never a loop over the quantity");
     repl::VendorPurchaseCart zero = cart;
     CHECK(!gm->plan_purchase(db, gear, zero, 0).ok, "no free slot at all refuses even one item");
     // hidden listings are not sold

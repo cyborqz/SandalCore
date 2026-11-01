@@ -22,8 +22,8 @@
 //    price     none: the PTR defs list no offer, and the server takes no currency for these defs (the purse is for the towns' shops); a price the client's window
 //              would show is its own
 //    purchase  a cart of items of the open def, a quantity each; each becomes stacks of the record's MaxStackSize (the use of an item
-//              grants in the same way: session/item_use.h) in the lowest free bag slots, an Add event each; a bag with too few free
-//              slots for the whole cart refuses it whole and the client's storages are sent again
+//              grants in the same way: session/item_use.h) in the lowest free bag slots, an Add event each; materials go to the material bags
+//              like every other grant; a bag with too few free slots for the whole cart refuses it whole and the client's storages are sent again
 //
 //  `GmVendors::load` reads the defs once at start.  It also counts the item records content.db names GM% or %PTR% against the stock of
 //  the defs, for the report: those no def lists cannot be bought (they are in the game's tables for other uses, e.g. a scroll's reward).
@@ -101,7 +101,8 @@ public:
     size_t mounts_total() const { return mounts_total_; }
     const std::string& mount_error() const { return mount_error_; }
 
-    /// Whether the cart is one `vendor` sells and the bag has room for. Pure: nothing is changed.
+    /// Whether the cart is one `vendor` sells and the item bag has room for: `free_slots` is the item bag's free slots and only the stacks of items count against it; the stacks
+    /// of materials go to the material bags and are checked against what those bags can hold at the most (the grant checks the room they have). Pure: nothing is changed.
     PurchasePlan plan_purchase(const content::ContentDb& db, const GmVendor& vendor, const protocol::repl::VendorPurchaseCart& cart, size_t free_slots) const;
 
 private:

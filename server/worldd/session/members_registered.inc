@@ -8,3 +8,5 @@
 //  own `public:` and `private:` and ends with `private:`.  Two branches that add a line at the same time both keep it (the merge=union rule of .gitattributes), so this list does
 //  not conflict.  The order of the lines does not matter.
 // ============================================================================
+#include "session/members/gather.inc"
+#include "session/members/craft.inc"

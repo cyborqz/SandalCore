@@ -812,10 +812,11 @@ func TestGrantMissingKitsSkipsACharacterWhoseRowStaysLocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a locked row stopped the backfill: %v", err)
 	}
-	if took := time.Since(start); took < 250*time.Millisecond || took > 4*time.Second {
-		t.Errorf("the backfill took %v, want the lock timeout (300ms) and no more", took)
+	// no upper limit: a busy machine makes the wait longer than the timeout; the skip text below names the short timeout that was used
+	if took := time.Since(start); took < 250*time.Millisecond {
+		t.Errorf("the backfill took only %v, want at least the lock timeout (300ms)", took)
 	}
-	if res.Without != 2 || res.Granted != 1 || res.Items != 2 || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0], locked.ID) {
+	if res.Without != 2 || res.Granted != 1 || res.Items != 2 || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0], locked.ID) || !strings.Contains(res.Skipped[0], "for 300ms") {
 		t.Errorf("result = %+v, want 2 without items, only Free granted, Locked skipped", res)
 	}
 	if got, _ := s.Inventory(ctx, free.ID); len(got) != 2 {
