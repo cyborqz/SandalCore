@@ -204,6 +204,7 @@ std::vector<stats::SkillRank> infer_talents(Rig& r, int capture) {
 /// Why a difference is listed (the groups: what is known, and what is not resolved).
 const char* const R_D1 = "a consumable is used through D1's item path (use_item), which sends no ability montage; the all-class test feeds it to the ability pipeline";
 const char* const R_A7 = "General_Guard, Dodge and Sprint are A7's rows (kept as they are by the brief); their stamina hits, shields and ends are A7's, not the generic pipeline's";
+const char* const R_TAP = "three Guard taps released 18 to 20 ms after the call: in 822 and 823 retail shows no Guard effect, in 821 it shows it for 32 ms, a race in retail with no effect on play; the pipeline never starts the effect of a tap released before its start";
 const char* const R_NPC = "the effect or hit depends on an enemy NPC, an incoming hit or a lingering zone (milestone E); there is no enemy in the replay";
 const char* const R_MOD = "retail's number carries a talent or gear modifier the capture does not name (the test infers talents only from cooldown and charges, and the level from the first cost)";
 const char* const R_SEQ = "the retail capture is one long mixed session; the state before this cast (mana, a charge, a running channel) comes from earlier modelled casts and differs from retail's, so the cast is refused, or over before its cost step";
@@ -336,6 +337,7 @@ const Known kKnown[] = {
     {"General_Sprint", 745, "END:missing", R_A7},
     {"General_Guard", 760, "CONF:extra General_Stamina_StamRegenDisable_EndHit", R_A7},
     {"General_Guard", 821, "EFF:missing General_Stamina_DisableRegen", R_A7},
+    {"General_Guard", 821, "EFF:missing General_Guard", R_TAP},
     {"General_Guard", 821, "CONF:missing General_Stamina_StamRegenDisable_ApplyHit", R_A7},
     {"General_Guard", 822, "EFF:missing General_Stamina_DisableRegen", R_A7},
     {"General_Guard", 822, "CONF:missing General_Stamina_StamRegenDisable_ApplyHit", R_A7},
