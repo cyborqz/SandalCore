@@ -49,14 +49,15 @@ func NewApp() *App { return &App{ctx: context.Background()} }
 // line asks the server itself whether it answers.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// the INSERT key comes up first: the dashboard must answer it even when the
+	// server is not there yet (the window then says so in its status line).
+	go a.watchHotkey()
 	c := NewClient(Options{TokenFile: tokenFile()})
 	if err := c.Dial(ctx); err != nil {
 		log.Printf("[aocadmin] the server is not reachable: %v", err)
 		return
 	}
 	a.client = c
-	// the INSERT key brings the window back over the game
-	go a.watchHotkey()
 }
 
 // shutdown: the window is closed: the connections go with it.
