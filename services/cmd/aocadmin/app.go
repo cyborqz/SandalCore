@@ -31,11 +31,6 @@ type App struct {
 	ctx    context.Context
 	client *Client
 
-	// windowMu guards the INSERT key's state: the dashboard is either in
-	// front of the game (raised) or out of the way.
-	windowMu     sync.Mutex
-	windowRaised bool
-
 	// handleMu guards the window's own handle, found by its title.
 	handleMu sync.Mutex
 	hwnd     uintptr

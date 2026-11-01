@@ -84,6 +84,8 @@ var (
 	procGetWindowThreadPid = user32.NewProc("GetWindowThreadProcessId")
 	procIsWindow           = user32.NewProc("IsWindow")
 	procIsWindowVisible    = user32.NewProc("IsWindowVisible")
+	procIsIconic           = user32.NewProc("IsIconic")
+	procGetForeground      = user32.NewProc("GetForegroundWindow")
 	procShowWindow         = user32.NewProc("ShowWindow")
 	procSetWindowPos       = user32.NewProc("SetWindowPos")
 	procBringWindowToTop   = user32.NewProc("BringWindowToTop")
@@ -155,9 +157,13 @@ func (a *App) watchHotkey() {
 	}
 }
 
-// toggleWindow: the INSERT key. The first press brings the dashboard over the
-// game and holds it there; the next one hides the dashboard and gives the
-// screen back to the game.
+// toggleWindow: the INSERT key. The dashboard comes over the game, and the
+// next press gives the screen back to the game.
+//
+// The decision is taken from the window's own state, not from a flag: the
+// full screen game minimizes the dashboard when it takes the focus back, so
+// a flag would say "the dashboard is up" while the window sits minimized,
+// and the next press would hide a window nobody can see.
 func (a *App) toggleWindow() {
 	hwnd := a.windowHandle()
 	if hwnd == 0 {
@@ -165,22 +171,29 @@ func (a *App) toggleWindow() {
 		return
 	}
 
-	a.windowMu.Lock()
-	raised := a.windowRaised
-	a.windowRaised = !raised
-	a.windowMu.Unlock()
+	visible, _, _ := procIsWindowVisible.Call(hwnd)
+	iconic, _, _ := procIsIconic.Call(hwnd)
+	foreground, _, _ := procGetForeground.Call()
 
-	if raised {
-		// the dashboard was in front: hide it and give the game the screen
+	switch {
+	case visible == 0 || iconic != 0:
+		// hidden or minimized: bring it back
+		a.raiseWindow(hwnd)
+	case foreground == hwnd:
+		// it is in front already: get it out of the way
 		procSetWindowPos.Call(hwnd, hwndNotopmost, 0, 0, 0, 0, swpNoSize|swpNoMove|swpNoActivate)
 		procShowWindow.Call(hwnd, swHide)
 		a.logf("the dashboard is away")
 		a.notify("اللوحة اختفت — اللعبة رجعت")
-		return
+	default:
+		// it is behind the game: bring it to the front
+		a.raiseWindow(hwnd)
 	}
+}
 
-	// the dashboard comes forward. The game is full screen, so the window has
-	// to sit above it, not only in front of it.
+// raiseWindow: the dashboard over the game. The game is full screen, so the
+// window has to sit above it, not only in front of it.
+func (a *App) raiseWindow(hwnd uintptr) {
 	procShowWindow.Call(hwnd, swRestore)
 	procShowWindow.Call(hwnd, swShow)
 	procSetWindowPos.Call(hwnd, hwndTopmost, 0, 0, 0, 0, swpNoSize|swpNoMove|swpShowWindow)
