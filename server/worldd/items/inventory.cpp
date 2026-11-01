@@ -962,15 +962,16 @@ bool Inventory::can_grant(const std::vector<svc::InventoryItem>& items, const It
 
 ResourceRepair Inventory::repair_resources(const ItemCatalog& catalog) {
     ResourceRepair out;
-    std::vector<svc::InventoryItem> candidates;
+    std::vector<std::pair<svc::InventoryItem, ItemInfo>> candidates;   // each with the answer of its one lookup (a second lookup could come back empty)
     for (int s = 0; s < kBackpackSlots; ++s) {
         const svc::InventoryItem* it = find(svc::ItemContainer::Backpack, s);
         if (!it) continue;
         const auto info = catalog.info(it->item_record_id);
-        if (info && info->resource) candidates.push_back(*it);
+        if (info && info->resource) candidates.emplace_back(*it, *info);
     }
-    for (svc::InventoryItem it : candidates) {
-        const ItemInfo info = *catalog.info(it.item_record_id);
+    for (const auto& candidate : candidates) {
+        svc::InventoryItem it = candidate.first;
+        const ItemInfo& info = candidate.second;
         bool placed = false;
         for (int i = 0; i < kResourceContainers && !placed; ++i) {
             const svc::ItemContainer c = resource_container(i);

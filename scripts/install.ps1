@@ -205,7 +205,7 @@ if ($script:rc -ne 0) {
 Write-Host ''
 Write-Host ("Install finished in {0}: the build tools are in place, the game data is up to date and the programs are built (dist\{1})." -f (Format-Elapsed $clock.Elapsed), $Config) -ForegroundColor Green
 if (-not $SkipDocker -and -not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Write-Host 'Docker Desktop is not installed, so nothing here starts PostgreSQL and NATS: run them yourself, or run install.bat again and accept Docker Desktop.' -ForegroundColor Yellow
+    Write-Host 'Docker Desktop is not installed, so nothing here starts PostgreSQL and NATS: run them yourself, or install Docker Desktop and run install.bat again.' -ForegroundColor Yellow
 }
 if ($Config -ne 'Release') { Write-Host 'launch.bat starts the Release build; this was a different configuration.' -ForegroundColor Yellow }
 Write-Host 'Next: launch.bat' -ForegroundColor Green

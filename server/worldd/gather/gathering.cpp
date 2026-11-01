@@ -20,6 +20,9 @@ namespace aoc::worldd::gather {
 
 namespace {
 
+/// No channel is longer than an hour (the data's are 5 to 30 s): a longer one is bad data and is cut, so that it cannot overflow the clocks it is turned into.
+constexpr double kMaxChannelSeconds = 3600.0;
+
 /// The host of the formulas that are not reward tables (the channel's length, the tool's wear): the harvest's reads and the random numbers.
 class FormulaHost final : public stats::ExprHost {
 public:
@@ -285,7 +288,13 @@ int Gathering::rarity_of(int64_t item, int quality) const {
 // C.O.A with Cyb
 
 std::optional<double> Gathering::channel_seconds(const content::GatherDefRow& def, stats::CharacterStats::Evaluation& player, std::string& why) {
-    if (def.duration_expr == 0) return def.base_duration;
+    if (def.duration_expr == 0) {
+        if (!std::isfinite(def.base_duration)) {
+            why = "the base duration of " + def.name + " is not a number";
+            return std::nullopt;
+        }
+        return std::clamp(def.base_duration, 0.0, kMaxChannelSeconds);
+    }
     const int program = catalog_->program(def.duration_expr);
     if (program < 0) {
         why = "the duration formula " + std::to_string(def.duration_expr) + " of " + def.name + " has no program";
@@ -298,7 +307,7 @@ std::optional<double> Gathering::channel_seconds(const content::GatherDefRow& de
         why = "the duration formula of " + def.name + " does not run" + (err.empty() ? std::string() : ": " + err);
         return std::nullopt;
     }
-    return std::max(0.0, out);
+    return std::clamp(out, 0.0, kMaxChannelSeconds);
 }
 
 std::optional<Harvest> Gathering::harvest(const content::GatherDefRow& def, stats::CharacterStats::Evaluation& player, double level, const world::NodeSite& site,

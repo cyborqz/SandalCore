@@ -134,8 +134,8 @@ public:
     bool hunt_started(uint64_t npc, double now, double seconds);
     /// The hunt ended without a reward (the player moved, the client interrupted, a disconnect): a living creature is just alive again, its record goes; a corpse keeps its own.
     void hunt_cancelled(uint64_t npc);
-    /// The hunt is done: the creature is dead for its clients now (the done update), goes hunt_done_seconds after `now`, and its spawn point refills it as after a kill.  False when `npc` has no
-    /// hunt record.
+    /// The hunt is done: the creature is dead for its clients now (the done update), goes hunt_done_seconds after `now`, and its spawn point refills it as after a kill.  A creature whose record
+    /// went before the hunt completed (the completion came more than 5 s late) but that still stands huntable gets its record again.  False when `npc` has no hunt record and is no such creature.
     bool hunt_done(uint64_t npc, double now);
 
     /// Takes the death hook of the combat world.

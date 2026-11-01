@@ -392,7 +392,9 @@ void Aftermath::hunt_cancelled(uint64_t npc) {
 }
 
 bool Aftermath::hunt_done(uint64_t npc, double now) {
-    const auto it = corpses_.find(npc);
+    auto it = corpses_.find(npc);
+    // a completion that comes more than 5 s after the channel's end (a stall) finds no record: a huntable creature that still stands is hunted as it stands, so that it still dies and is removed
+    if (it == corpses_.end() && hunt_started(npc, now, 0.0)) it = corpses_.find(npc);
     if (it == corpses_.end() || !it->second.huntable) return false;
     Corpse& c = it->second;
     if (c.living) {   // the hunt is the creature's end: it dies for its clients with the done update, and its spawn point refills it

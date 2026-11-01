@@ -325,7 +325,7 @@ static void test_population(const content::ContentDb& db, const spawns::Captured
     {   // a quest object made as a prop has a key of its own: the same Blueprint asked for as a pawn does not get the prop's open
         content::NpcAssetRow quest_object;
         quest_object.guid = 9000001;
-        quest_object.archetype_path = "/Game/DesignAssets/Interactables/Quest/CSQ_INT_BacklogCheck.CSQ_INT_BacklogCheck_C";
+        quest_object.archetype_path = "/Game/DesignAssets/Interactables/Quest/CSQ_INT_PropKeyCheck.CSQ_INT_PropKeyCheck_C";
         spawns::Verdict v_prop = spawns::Verdict::Generic, v_pawn = spawns::Verdict::Generic;
         const spawns::OpenTemplate* as_prop = generic.prop_template(quest_object, &v_prop);
         const spawns::OpenTemplate* as_pawn = generic.template_for(quest_object, &v_pawn);

@@ -587,7 +587,7 @@ private:
         if (s.empty()) return false;
         const auto r = std::from_chars(s.data(), s.data() + s.size(), out);
         if (r.ec != std::errc() || r.ptr != s.data() + s.size()) return false;
-        if constexpr (std::is_floating_point_v<T>) return std::isfinite(out);   // (from_chars reads "nan" and "inf": a NaN length froze a creature and an infinite angle looped)
+        if constexpr (std::is_floating_point_v<T>) return std::isfinite(out);   // (from_chars reads "nan" and "inf": a NaN length would freeze a creature and an infinite angle would loop)
         return true;
     }
     /// A flag column is exactly "0" or "1"; anything else is a table this build does not read, not a silent 0.

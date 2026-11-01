@@ -36,6 +36,7 @@
 #include "stats/gather_host.h"
 #include "world/city_nodes.h"
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -43,6 +44,18 @@
 #include <vector>
 
 namespace aoc::worldd::combat {
+
+/// The most one rolled line gives: more than the largest stack the data holds (999,999), a power of two like the inventory's own cap of a stack.
+inline constexpr int64_t kMaxRolledQuantity = 1 << 20;
+
+/// A rolled quantity as a count: rounded down, never past kMaxRolledQuantity, and nothing for a negative number or one that is no number.  (A formula of bad data must not turn into
+/// a billion stacks, or into an undefined conversion.)
+inline int64_t rolled_quantity(double v) {
+    if (!std::isfinite(v)) return 0;
+    const double whole = std::floor(v + 1e-9);
+    if (whole <= 0.0) return 0;
+    return whole >= static_cast<double>(kMaxRolledQuantity) ? kMaxRolledQuantity : static_cast<int64_t>(whole);
+}
 
 struct RolledItem {
     int64_t item = 0;

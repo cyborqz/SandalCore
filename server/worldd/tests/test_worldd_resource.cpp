@@ -439,6 +439,17 @@ static void test_consume() {
     CHECK(o.ok && o.events.size() == 1 && !inv->at(R0, 0), "taking the rest empties the slot");
 }
 
+/// A catalog that counts how often each record is asked for.
+struct CountingCatalog : items::ItemCatalog {
+    const items::ItemCatalog& inner;
+    mutable std::map<int64_t, int> asked;
+    explicit CountingCatalog(const items::ItemCatalog& c) : inner(c) {}
+    std::optional<items::ItemInfo> info(int64_t record) const override {
+        ++asked[record];
+        return inner.info(record);
+    }
+};
+
 static void test_repair() {
     std::printf("the login's repair: resource items found in the Backpack\n");
     std::vector<svc::InventoryItem> v = worn_kit();
@@ -458,6 +469,11 @@ static void test_repair() {
     CHECK(second.moved.empty() && second.stayed.size() == 2, "a second repair moves nothing");
     auto empty = build(worn_kit());
     CHECK(empty->repair_resources(*g_catalog).moved.empty(), "an inventory with no resource item in the Backpack changes nothing");
+    // a record is looked up once: the daffodil finds no room, so it is asked about once, not again when it is placed (a second answer could be empty)
+    CountingCatalog counting(*g_catalog);
+    auto counted = build(v);
+    counted->repair_resources(counting);
+    CHECK(counting.asked[fr::kDaffodil] == 1, "the daffodil's record is looked up once by the repair");
 }
 
 static void test_round_trip() {

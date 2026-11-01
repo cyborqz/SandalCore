@@ -513,6 +513,14 @@ void test_quest_start_tables(Fixture& f) {
     CHECKF(extracts == 1, "the extract's table gives exactly one Heartwood Extract (%lld)", static_cast<long long>(extracts));
 }
 
+/// A rolled quantity is a count that cannot grow without bound (a formula of bad data).
+void test_rolled_quantity() {
+    std::printf("a rolled quantity is bounded\n");
+    CHECK(combat::rolled_quantity(3.0) == 3 && combat::rolled_quantity(2.9999999999) == 3 && combat::rolled_quantity(0.4) == 0, "an ordinary roll is its whole number");
+    CHECK(combat::rolled_quantity(1.0e9) == combat::kMaxRolledQuantity && combat::rolled_quantity(1.0e30) == combat::kMaxRolledQuantity, "a billion is cut to the largest stack");
+    CHECK(combat::rolled_quantity(std::nan("")) == 0 && combat::rolled_quantity(HUGE_VAL) == 0 && combat::rolled_quantity(-5.0) == 0, "a number that is none, an infinite one and a negative one give nothing");
+}
+
 int main() {
     if (!real_db_present()) {
         std::printf("test_worldd_rewards: no content.db at %s (set AOC_CONTENT_DB): skipped\n", real_db_path().c_str());
@@ -530,6 +538,7 @@ int main() {
     test_rules(f);
     test_biome(f);
     test_quest_start_tables(f);
+    test_rolled_quantity();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

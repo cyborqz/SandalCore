@@ -439,6 +439,28 @@ void test_huntable(Fixture& f) {
     // a hunt that never comes: the 120 s
     CHECK(s.w.registry.find(plain) == nullptr, "(the plain corpses are long gone)");
 
+    // a hunt that completes late: the channel of 14 s and the record's 5 s more are over (19 s) and the completion comes at 25 s; the creature still dies for its clients, goes 4 s later
+    // and its spawn point refills it
+    {
+        Scene l(f, 12);
+        if (!l.ok()) {
+            CHECK(false, "the scene");
+            return;
+        }
+        l.after->set_huntable([](const world::NpcInfo& i) { return i.interact_def == kHuntDef; });
+        const uint64_t id = make_huntable(l, 10, 15000.0);   // (150 m from the player: out of any creature's notice)
+        CHECK(id != 0 && l.after->hunt_started(id, l.now, 14.0), "a hunt starts on a living huntable");
+        l.run(25.0);
+        CHECK(l.after->corpse_of(id) == nullptr && l.w.registry.find(id) != nullptr, "25 s on, its record is gone and the creature still stands");
+        CHECK(l.after->hunt_done(id, l.now), "the hunt completes 6 s late and is still done");
+        const combat::Corpse* late = l.after->corpse_of(id);
+        CHECK(late && late->hunted && !late->living && near(late->close_at, l.now + 4.0, 0.01), "the creature is a hunted corpse that goes 4 s later");
+        l.run(4.5);
+        CHECK(l.w.registry.find(id) == nullptr && l.after->corpse_of(id) == nullptr, "4.5 s on it is gone");
+        l.run(10.0);
+        CHECK(l.respawns.size() == 1 && l.respawns[0] == 5, "and its spawn point refilled it");
+    }
+
     // the kill switch: the corpse is still hunted
     {
         combat::AftermathConfig cfg;

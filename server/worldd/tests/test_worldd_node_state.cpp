@@ -45,6 +45,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -974,6 +975,13 @@ struct FakeService final : nodev1::CityNodeService::Service {
     std::mutex mu;
     std::string token_seen;
     std::vector<std::string> calls;
+    std::mutex gate_mu;
+    std::condition_variable gate_cv;
+    bool hold = false;   // while true, SetNodeLevel waits: a service that answers slowly
+    void wait_for_gate() {
+        std::unique_lock<std::mutex> lock(gate_mu);
+        gate_cv.wait(lock, [this] { return !hold; });
+    }
 
     static nodev1::Node node(const std::string& name, uint32_t level, int64_t xp) {
         nodev1::Node n;
@@ -994,7 +1002,8 @@ struct FakeService final : nodev1::CityNodeService::Service {
     }
     grpc::Status SetNodeLevel(grpc::ServerContext* ctx, const nodev1::SetNodeLevelRequest* req, nodev1::SetNodeLevelResponse* resp) override {
         note(ctx, "SetNodeLevel " + req->node().name() + " " + std::to_string(req->level()) + (req->disable_vassalship() ? " dv" : ""));
-        if (req->node().name() == "Atlantis") return grpc::Status(grpc::StatusCode::NOT_FOUND, "no node named Atlantis");
+        wait_for_gate();
+        if (req->node().name().rfind("Atlantis", 0) == 0) return grpc::Status(grpc::StatusCode::NOT_FOUND, "no node named Atlantis");
         if (req->level() > 4) return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "level 9 is above the highest, 4");
         *resp->mutable_node() = node("Joeva", static_cast<uint32_t>(req->level()), 0);
         resp->set_changed(true);
@@ -1094,6 +1103,70 @@ static void test_control() {
     CHECK(dead_lines.size() == 1 && dead_lines[0].find("the node service is unavailable") != std::string::npos, "with the service unreachable the console says \"the node service is unavailable\"");
 }
 
+/// The node service answers slowly: 64 calls wait behind the one it is answering, a call past them is refused (never one of those waiting dropped, so two level changes of one node
+/// keep their order), and the lines of the console carry no control character from a node name.
+static void test_control_busy() {
+    std::printf("the GM control while the node service is slow\n");
+    FakeService service;
+    grpc::ServerBuilder builder;
+    int port = 0;
+    builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(), &port);
+    builder.RegisterService(&service);
+    std::unique_ptr<grpc::Server> server = builder.BuildAndStart();
+    if (!server || port == 0) {
+        std::printf("  [FAIL] the fake service does not start\n");
+        ++g_fail;
+        return;
+    }
+    service.hold = true;
+    std::mutex lines_mu;
+    std::vector<std::string> lines;
+    svc::GrpcNodeControl::Options o;
+    o.address = "127.0.0.1:" + std::to_string(port);
+    o.token = std::string(64, 'c');
+    o.deadline_ms = 20000;
+    {
+        svc::GrpcNodeControl control(o, [&](const std::string& l) {
+            std::lock_guard<std::mutex> lock(lines_mu);
+            lines.push_back(l);
+        });
+        control.set_level("Verra_RVR_Joeva", 1, false, "ServerSetNodeLevel by cyb");
+        for (int i = 0; i < 500; ++i) {   // the worker is inside the service with the first call: the queue is empty from here
+            {
+                std::lock_guard<std::mutex> lock(service.mu);
+                if (!service.calls.empty()) break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        for (int level = 2; level <= 70; ++level) control.set_level("Verra_RVR_Joeva", level, false, "ServerSetNodeLevel by cyb");
+        {
+            std::lock_guard<std::mutex> lock(service.gate_mu);
+            service.hold = false;
+        }
+        service.gate_cv.notify_all();
+        control.drain();
+        bool in_order = true;
+        {
+            std::lock_guard<std::mutex> lock(service.mu);
+            for (size_t i = 0; i < service.calls.size(); ++i) in_order = in_order && service.calls[i] == "SetNodeLevel Verra_RVR_Joeva " + std::to_string(i + 1);
+            CHECKF(service.calls.size() == 65 && in_order, "the service got the first 65 calls, 1 to 65, in order (%zu calls)", service.calls.size());
+        }
+        size_t refused = 0;
+        {
+            std::lock_guard<std::mutex> lock(lines_mu);
+            for (const std::string& l : lines) refused += l.find("a node GM call was not sent") != std::string::npos ? 1 : 0;
+        }
+        CHECKF(refused == 5 && control.calls_made() == 65, "the five calls past the 64 that wait were refused, and said so (%zu refused, %llu made)", refused, static_cast<unsigned long long>(control.calls_made()));
+        // a node name from the console is shown without its control characters (a newline would start a log line of the sender's making)
+        control.set_level("Atlantis\nforged [gm] line", 2, false, "ServerSetNodeLevel by cyb");
+        control.drain();
+        std::lock_guard<std::mutex> lock(lines_mu);
+        const std::string& last = lines.empty() ? std::string() : lines.back();
+        CHECK(last.find("Atlantis?forged [gm] line") != std::string::npos && last.find('\n') == std::string::npos, "a node name with a newline is shown with a '?' instead");
+    }
+    server->Shutdown();
+}
+
 int main() {
     spdlog::set_level(std::getenv("AOC_TEST_LOG") ? spdlog::level::debug : spdlog::level::off);
     std::string error;
@@ -1115,6 +1188,7 @@ int main() {
     test_restore();
     test_console();
     test_control();
+    test_control_busy();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

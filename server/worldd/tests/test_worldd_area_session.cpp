@@ -954,6 +954,10 @@ static void test_crowd_moving() {
         std::printf("  [skip] %s: %s (tools/mapc: mapc build)\n", nav_path.c_str(), err.c_str());
         return;
     }
+    // the ground file is chunked and loads with no tile: an NPC whose chunk is not resident sleeps where it stands, so the chunks round the crowd are brought in first
+    const bool ground = !nav->windowed() || nav->load_around(kCx, kCy, 2, 120);
+    CHECK(ground, "the ground round the crowd loads");
+    if (!ground) return;
     CrowdHarness h(300);
     npc::NpcWorld npcs(h.fx.world->registry(), nav.get());
     std::vector<uint64_t> ids;

@@ -33,6 +33,14 @@ std::string with_commas(int64_t v) {
     return v < 0 ? "-" + s : s;
 }
 
+/// A line for the log and the console: a control character (a newline would start a log line of someone's making) becomes '?'.
+std::string plain(std::string s) {
+    for (char& c : s) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = '?';
+    }
+    return s;
+}
+
 std::string describe(const nodev1::Node& n) {
     char buf[320];
     std::snprintf(buf, sizeof buf, "%s (%s) level %u (%s), %s XP, %u %%, lord %s", n.display_name().c_str(), n.name().c_str(), n.level(), n.level_name().c_str(),
@@ -76,21 +84,27 @@ GrpcNodeControl::~GrpcNodeControl() {
 }
 
 void GrpcNodeControl::say(const std::string& line) {
-    spdlog::info("[gm] {}", line);
-    if (report_) report_(line);
+    const std::string clean = plain(line);
+    spdlog::info("[gm] {}", clean);
+    if (report_) report_(clean);
 }
 
 void GrpcNodeControl::post(std::function<void()> job) {
+    bool refused = false, first = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (queue_.size() >= kMaxQueued) {
-            queue_.pop_front();
-            if (!overflow_said_) {
-                overflow_said_ = true;
-                spdlog::warn("[gm] the node GM calls are queued faster than the node service answers: the oldest is dropped (said once)");
-            }
+            refused = true;   // the newest call is the one refused: dropping the oldest could turn two level changes of one node round
+            first = !overflow_said_;
+            overflow_said_ = true;
+        } else {
+            queue_.push_back(std::move(job));
         }
-        queue_.push_back(std::move(job));
+    }
+    if (refused) {
+        if (first) spdlog::warn("[gm] the node GM calls are queued faster than the node service answers: the newest is refused (said once)");
+        if (report_) report_("a node GM call was not sent: " + std::to_string(kMaxQueued) + " are waiting for the node service");
+        return;
     }
     cv_.notify_one();
 }
