@@ -181,6 +181,10 @@ int main(int argc, char** argv) {
         ->envname("AOC_GM_COMMANDS");
     app.add_flag("--no-reactions", no_reactions, "the game's reactions do not run (the extra effects of a weapon's finisher, the Bard's Resonance and melodies): abilities and hits land as before reactions were built")
         ->envname("AOC_NO_REACTIONS");
+    uint64_t combat_seed = 0;
+    app.add_option("--combat-seed", combat_seed,
+                   "the number the hit, block and critical rolls start from: 0 (the default) takes a new one on every start, so each run rolls differently; any other number repeats the same rolls for the same fights")
+        ->envname("AOC_COMBAT_SEED")->capture_default_str();
     app.add_option("--service-token-file", token_file, "the internal services' shared token");
     app.add_option("--log-file", log_file, "also write the log to this file");
     app.add_option("--content-db", content_db_path,
@@ -516,6 +520,9 @@ int main(int argc, char** argv) {
     players.set_gm_commands(gm_commands);
     players.set_reactions_enabled(!no_reactions);
     if (no_reactions) spdlog::info("[abilities] the game's reactions are OFF (--no-reactions)");
+    const uint64_t dice_seed = combat_seed != 0 ? combat_seed : gather::fresh_seed();
+    players.set_dice_seed(dice_seed);
+    spdlog::info("[combat] the hit, block and critical rolls start from seed {}{}", dice_seed, combat_seed != 0 ? " (--combat-seed: the same rolls for the same fights)" : " (new on every start)");
     players.set_quest_worker(&quest_worker);
     spdlog::info("[gm] the client's own GM teleport commands are {}", gm_commands ? "ON (--gm-commands)" : "off (--gm-commands, or AOC_GM_COMMANDS=1, turns them on); each one the client sends is logged");
     // Nodes 1, stage 1: the registry from content.db, the seed's levels at once (login never waits for the service), then the stream.  The feed is declared
@@ -629,6 +636,7 @@ int main(int argc, char** argv) {
             players.set_spawn_context(std::move(context));
             combat::CombatWorldConfig combat_config;
             combat_config.enabled = !no_combat;
+            combat_config.seed = dice_seed;
             combat_config.default_aggro_cm = npc_aggro_cm;
             combat_config.default_leash_cm = npc_leash_cm;
             combat_config.npc_damage_mult = npc_damage_mult;
