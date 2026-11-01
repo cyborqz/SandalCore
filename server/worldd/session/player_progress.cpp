@@ -194,6 +194,19 @@ void PlayerSession::finish_level_up(const leveling::XpResult& xp, bool class_cha
     if (leveled) {
         if (!pb_.mark_temp_health()) spdlog::debug("[session] {}: no TempHealth item to mark", name());
     }
+    if (leveled && !dead_ && stats_) {   // a level gained gives Health, Mana and Stamina back, at the new maximums (a dead player gets them from the respawn)
+        if (const stats::StatValue* hp = stats_->find(content::kGuidMaxHealth)) set_current_value(content::kGuidHealth, hp->value);
+        if (const stats::StatValue* mp = stats_->find(content::kGuidMaxMana)) set_current_value(content::kGuidMana, mp->value);
+        if (abilities_) {
+            bootstrap::AbilityChange refill;
+            abilities_->refill_stamina(refill);
+            stats_->set_current(content::kGuidStamina, static_cast<float>(abilities_->stamina()));   // (the engine's copy agrees with the runtime's)
+            if (pb_.apply_ability_change(refill)) abilities_dirty_ = true;
+            else spdlog::warn("[session] {}: the pawn does not take the Stamina of the new level", name());
+        } else if (const stats::StatValue* sp = stats_->find(content::kGuidMaxStamina)) {
+            set_current_value(content::kGuidStamina, sp->value);
+        }
+    }
     if (!rank_effects.empty() && !pb_.apply_ability_change(rank_effects)) {
         spdlog::warn("[session] {}: the pawn does not take the granted passives' effect items ({})", name(), pb_.error().empty() ? "keys disagree" : pb_.error());
         for (const bootstrap::EffectItem& e : rank_effects.effects_added) {
