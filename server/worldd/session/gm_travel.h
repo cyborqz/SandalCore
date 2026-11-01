@@ -166,7 +166,7 @@ struct GmStatInfo {
     std::string name;           // the stat's name in the graph ("MaxHealth")
     uint32_t    flags = 0;      // the bundle's kStat... flags (kStatSpawnMax: the stat has a current value)
     double      value = 0;      // its value now
-    double      max = 0;        // its maximum, when the graph declares one (0: it declares none)
+    double      max = 0;        // its maximum, when the graph declares one (0: no maximum is declared, not a maximum of 0)
     bool        has_override = false;
     double      override = 0;   // the game master's override on it (the value its mod carries)
 };
@@ -278,7 +278,7 @@ public:
     /// The stats of a character as they are now: the name in the graph, the value, the maximum and the game master's override on it.
     GmStatsResult      get_player_stats(const std::string& character);
     /// Puts the game master's overrides on the stats named (a stat's guid and the value of its mod): they replace the overrides that were there.  The value follows the stat's own
-    /// form: an additive stat adds it, a multiplying one multiplies by it.
+    /// form: an additive stat adds it, a multiplying one multiplies by it.  A guid the character does not have, or one named twice in the same call, is refused.
     GmStatModsResult   set_stat_mods(const std::string& character, const std::vector<std::pair<int64_t, double>>& mods, const std::string& by);
     /// Takes the game master's overrides off (the stats are what the engine says again).
     GmStatModsResult   clear_stat_mods(const std::string& character, const std::string& by);

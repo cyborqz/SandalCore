@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <set>
 
 namespace aoc { namespace worldd {
 
@@ -481,6 +482,13 @@ std::map<int64_t, std::string> stat_names(const PlayerWorld& world) {
     return names;
 }
 
+/// A number as the log shows it (the digits that matter, no trailing zeros).
+std::string number_of(double v) {
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%g", v);
+    return buf;
+}
+
 /// The stats of a player as the game master's tools show them: the name in the graph, the value, the maximum and the override on it.
 std::vector<GmStatInfo> stat_infos(const PlayerHandle& h, const std::map<int64_t, std::string>& names) {
     std::vector<GmStatInfo> out;
@@ -530,6 +538,27 @@ GmStatModsResult GmTravel::set_stat_mods(const std::string& character,
         out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
         return out;
     }
+    out.character = h.player->name();
+    const std::map<int64_t, std::string> names = stat_names(world_);
+    const std::vector<stats::StatValue> owned = h.player->player_stats();
+    // every mod must name one of the character's own stats (a mistyped guid, or one of another class, would change nothing) and it must name it once (two mods on one stat compound, and
+    // the answer would report only one of them)
+    std::set<int64_t> named;
+    for (const auto& m : mods) {
+        const auto it = names.find(m.first);
+        const bool known = std::any_of(owned.begin(), owned.end(), [&m](const stats::StatValue& v) { return v.guid == m.first; });
+        if (!known) {
+            out.status = GmStatus::FailedPrecondition;
+            out.message = it != names.end() ? "the character has no stat " + it->second + " (the guid " + std::to_string(m.first) + " is not one of its stats)"
+                                            : "there is no stat with the guid " + std::to_string(m.first) + " in the graph";
+            return out;
+        }
+        if (!named.insert(m.first).second) {
+            out.status = GmStatus::InvalidArgument;
+            out.message = "the stat " + (it != names.end() ? it->second : std::to_string(m.first)) + " (the guid " + std::to_string(m.first) + ") is named twice: one mod per stat";
+            return out;
+        }
+    }
     std::vector<stats::ActiveEffect> list;
     list.reserve(mods.size());
     for (const auto& m : mods) {
@@ -547,17 +576,16 @@ GmStatModsResult GmTravel::set_stat_mods(const std::string& character,
         out.message = err;
         return out;
     }
-    out.character = h.player->name();
-    const std::map<int64_t, std::string> names = stat_names(world_);
     out.stats = stat_infos(h, names);
-    // the log says which stats were overridden, by the names the graph gives them
+    // the log says which stats were overridden and to what
     std::string said;
     for (const auto& m : mods) {
         if (!said.empty()) said += ", ";
         const auto it = names.find(m.first);
         said += it != names.end() ? it->second : std::to_string(m.first);
+        said += " = " + number_of(m.second);
     }
-    spdlog::info("[gm] {}: the stat overrides set by {}: {}", out.character, by, said);
+    spdlog::info("[gm] {}: the stat overrides set by {} ({})", out.character, by, said);
     return out;
 }
 
@@ -569,13 +597,13 @@ GmStatModsResult GmTravel::clear_stat_mods(const std::string& character, const s
         out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
         return out;
     }
+    out.character = h.player->name();
     h.player->clear_gm_effects();
     if (!h.player->gm_effects().empty()) {   // the client refused the change: the overrides stay
         out.status = GmStatus::FailedPrecondition;
         out.message = "the client refused the change: the overrides stay";
         return out;
     }
-    out.character = h.player->name();
     out.stats = stat_infos(h, stat_names(world_));
     spdlog::info("[gm] {}: the stat overrides taken off by {}", out.character, by);
     return out;
@@ -589,6 +617,7 @@ GmCurrentStatResult GmTravel::set_current_stat(const std::string& character, int
         out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
         return out;
     }
+    out.character = h.player->name();
     if (!std::isfinite(value)) {
         out.status = GmStatus::InvalidArgument;
         out.message = "the value is not a number";
@@ -610,7 +639,6 @@ GmCurrentStatResult GmTravel::set_current_stat(const std::string& character, int
         out.message = err;
         return out;
     }
-    out.character = h.player->name();
     out.value = value;
     const std::map<int64_t, std::string> names = stat_names(world_);
     const auto it = names.find(stat);
