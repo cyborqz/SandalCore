@@ -127,13 +127,13 @@ function openPicker(title, items, onPick) {
     }
   };
   search.oninput = render;
-  overlay.hidden = false;
+  overlay.classList.add("open");
   render();
   search.focus();
 }
 
 function closePicker() {
-  document.getElementById("picker").hidden = true;
+  document.getElementById("picker").classList.remove("open");
 }
 
 document.getElementById("picker-close").addEventListener("click", closePicker);

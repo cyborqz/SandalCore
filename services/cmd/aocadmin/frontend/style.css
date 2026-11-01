@@ -81,11 +81,19 @@ pre#log-view {
 .toast.error { border-color: var(--bad); color: #ffd7d7; }
 
 /* the picker: the places or the items, searchable and clickable */
+
+/* the picker covers the whole window when it is open, so the hidden attribute
+   has to beat the display above: without this the picker stays on top of the
+   window for good and swallows every click. */
 .picker {
   position: fixed; inset: 0; z-index: 50;
   background: rgba(8, 9, 12, 0.72);
-  display: flex; align-items: center; justify-content: center;
+  /* the picker is closed by default: the hidden attribute loses against a
+     display rule, so the overlay would stay on top of the window for good
+     and swallow every click. The open class opens it. */
+  display: none;
 }
+.picker.open { display: flex; align-items: center; justify-content: center; }
 .picker-box {
   width: min(560px, 90vw); max-height: 80vh;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
