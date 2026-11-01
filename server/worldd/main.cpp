@@ -318,7 +318,8 @@ int main(int argc, char** argv) {
         const std::pair<const char*, double> checked[] = {
             {"--area-radius", area_radius_m},         {"--scenery-radius", scenery_radius_m},   {"--spawn-hour", spawn_hour},
             {"--npc-damage-mult", npc_damage_mult},   {"--loot-chance-mult", loot_chance_mult}, {"--loot-rarity-boost", loot_rarity_boost},
-            {"--gather-respawn-mult", gather_respawn_mult}, {"--foliage-regrow-mult", foliage_regrow_mult}};
+            {"--gather-respawn-mult", gather_respawn_mult}, {"--foliage-regrow-mult", foliage_regrow_mult},
+            {"--max-move-speed", movement.limits.max_speed}};
         for (const auto& [flag, value] : checked) {
             if (!std::isfinite(value)) {
                 std::fprintf(stderr, "%s must be a number, not %g\n", flag, value);
