@@ -541,6 +541,6 @@ void test_shared_updates_a_copy_of_an_actor_starts_without_the_kept_update() {
     sharing.publish(*a, 1, {}, repl::SentRecord{}, repl::ShadowRedo{});
     world::WorldActor copied = *a;
     world::WorldActor moved = std::move(*a);
-    CHECK(sharing.find(*a, 1) == nullptr && moved.update_memo.ptr != nullptr && copied.update_memo.ptr == nullptr, "...the copy has none, a moved actor keeps its own");
+    CHECK(sharing.find(*a, 1) == nullptr && moved.update_memo[0].ptr != nullptr && copied.update_memo[0].ptr == nullptr, "...the copy has none, a moved actor keeps its own");
 }
 AOC_REGISTER_TEST(test_shared_updates_a_copy_of_an_actor_starts_without_the_kept_update);

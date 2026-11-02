@@ -35,6 +35,7 @@
 //                                  older position after a newer one, every character ends with its last
 // ============================================================================
 #include "bootstrap/captured_setup.h"
+#include "bootstrap/constants.h"
 #include "capture_blocks.h"
 #include "capture_bootstrap.h"
 #include "capture_moves.h"

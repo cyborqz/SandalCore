@@ -48,10 +48,30 @@ struct TickProfile {
         *this = TickProfile{};
         on = keep;
     }
+
+    /// Adds the figures a player's view writes (the view's time and its parts, the passes, the opens and updates) of `o`, a worker thread's profile, to this one.
+    void add_view(const TickProfile& o) {
+        view_us += o.view_us;
+        view_scan_us += o.view_scan_us;
+        view_passes += o.view_passes;
+        open_us += o.open_us;
+        opens += o.opens;
+        update_us += o.update_us;
+        update_build_us += o.update_build_us;
+        updates += o.updates;
+    }
 };
 
-/// The network thread's profile (one per process).
+/// The profile a thread writes to instead of the network thread's, while one is set (see tick_profile()); none by default.
+inline TickProfile*& tick_profile_redirect() {
+    thread_local TickProfile* redirect = nullptr;
+    return redirect;
+}
+
+/// The network thread's profile (one per process).  A worker thread that runs players' view passes (session/view_pool.h) writes to a profile of its own instead, which the pool adds to this
+/// one when the passes are done: no two threads write the same figures.
 inline TickProfile& tick_profile() {
+    if (TickProfile* mine = tick_profile_redirect()) return *mine;
     static TickProfile profile;
     return profile;
 }

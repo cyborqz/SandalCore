@@ -66,7 +66,7 @@ std::shared_ptr<SharedUpdates> SharedUpdates::from_test_environment() {
 }
 
 const UpdateMemo::Variant* SharedUpdates::find(const world::WorldActor& actor, uint32_t from_version) const {
-    const UpdateMemo* memo = actor.update_memo.ptr.get();
+    const UpdateMemo* memo = actor.update_memo[view_worker()].ptr.get();
     if (!memo || memo->version != actor.version || memo->shape_epoch != actor.shape_epoch) return nullptr;
     for (const UpdateMemo::Variant& v : memo->variants) {
         if (v.from_version == from_version) return &v;
@@ -74,13 +74,14 @@ const UpdateMemo::Variant* SharedUpdates::find(const world::WorldActor& actor, u
     return nullptr;
 }
 
-const UpdateMemo::Variant& SharedUpdates::publish(world::WorldActor& actor, uint32_t from_version, std::vector<repl::ContentBlock>&& blocks, repl::SentRecord&& record,
+const UpdateMemo::Variant& SharedUpdates::publish(const world::WorldActor& actor, uint32_t from_version, std::vector<repl::ContentBlock>&& blocks, repl::SentRecord&& record,
                                                   repl::ShadowRedo&& redo) {
-    if (!actor.update_memo.ptr) {
-        actor.update_memo.ptr = std::make_shared<UpdateMemo>();
-        actor.update_memo.ptr->variants.reserve(UpdateMemo::kMaxVariants);
+    world::UpdateMemoSlot& slot = actor.update_memo[view_worker()];
+    if (!slot.ptr) {
+        slot.ptr = std::make_shared<UpdateMemo>();
+        slot.ptr->variants.reserve(UpdateMemo::kMaxVariants);
     }
-    UpdateMemo& memo = *actor.update_memo.ptr;
+    UpdateMemo& memo = *slot.ptr;
     if (memo.version != actor.version || memo.shape_epoch != actor.shape_epoch) {   // the actor changed: what was built is for a state it has left
         memo.variants.clear();
         memo.version = actor.version;
@@ -103,15 +104,26 @@ const UpdateMemo::Variant& SharedUpdates::publish(world::WorldActor& actor, uint
             break;
         }
     }
-    ++stats_.builds;
+    ++mine().builds;
     return v;
 }
 
+SharedUpdates::Stats SharedUpdates::stats() const {
+    Stats sum;
+    for (const Local& l : local_) {
+        sum.hits += l.stats.hits;
+        sum.builds += l.stats.builds;
+        sum.private_builds += l.stats.private_builds;
+        sum.verified += l.stats.verified;
+        sum.mismatches += l.stats.mismatches;
+    }
+    return sum;
+}
+
 void SharedUpdates::mismatch(uint64_t actor, const char* what) {
-    ++stats_.mismatches;
-    if (mode_ == ShareMode::Off) return;
+    ++mine().mismatches;
+    if (mode_.exchange(ShareMode::Off) == ShareMode::Off) return;   // (only the first thread to find it says so)
     spdlog::error("[share-updates] actor {}: {}; sharing is turned off for the rest of the run", actor, what);
-    mode_ = ShareMode::Off;
 }
 
 }  // namespace aoc::worldd

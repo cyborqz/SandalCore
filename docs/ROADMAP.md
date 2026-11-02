@@ -50,7 +50,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Weapon line experience: kills and the game master level scrolls pay every weapon you wear, each of the 21 weapon lines levels up to 25 on its own, the Skill Tree shows a line's level, bar and talent points, the weapon talents are bought with them, and the free Accuracy passives arrive at levels 5, 10, 15, 20 and 25.
 - Burning mobs: the Burning debuff takes a fire number from a mob every second for 8 seconds (up to 24), shows the fire and the Burning icon, follows it home after a reset and ends with its death or the burner's leaving.
 - Debuffs on mobs: the bleeds (Bleeding, Hemorrhage), the poisons and the stat debuffs of a hit take effect on a mob. Bleeds and poisons take Health at their ticks (one Bleeding debuff for each attacker, a poison's stacks make its ticks bigger), Shaken and Volatile make a mob take more physical and magical damage, Demoralized makes it hit softer and Blinded makes it miss more.
-- Server speed with many players: a fixed-rate server tick, the players' views of the world taking turns, cheaper updates and move answers at the original server's pace.
+- Server speed with many players: a fixed-rate server tick, the players' views of the world taking turns, cheaper updates, one update built for all the players who see the same mob in the same state, the players' views worked out on several processor cores, and move answers at the original server's pace. In a load test with simulated players that walk, the server held its 30 updates a second with about twice as many of them as before.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

@@ -1649,6 +1649,26 @@ player.
   casts, a value taken away and interactable mobs, byte for byte the same datagrams with and without sharing, a damaged shared update found
   by `verify`, and the cost of an update). The test programs of the other suites run with sharing in `verify` mode (every shared update is also
   built the plain way and compared; `AOC_TEST_SHARE_UPDATES=off|on|verify` changes it), and each one fails when a shared update differed.
+- **The players' view passes on several threads (`--view-threads N`, 0 to 8, 4 by default).** A player's view pass reads the world's registry and
+  writes nothing but its own view and its own connection, so the passes of different players can run at the same time. With `N` of 1 or more
+  the tick (`net/endpoint_phases.cpp`) runs three phases: (1) every session's own work in turn (`PlayerSession::tick_logic`: the abilities,
+  mounts, quests and the rest, up to the view; it also decides, in turn, whether the view's pass is due, because the views share a count of
+  phases); (2) all the due passes at once on a pool of `N` threads (`session/view_pool.h`: the tick's own thread and `N - 1` workers that sleep
+  between ticks) while the registry is frozen (any call that changes it throws); (3) every session's rest in turn (`tick_after`, the flush, the
+  acknowledgements). A call of the pool ends with its jobs, not with its workers, so a thread that the system holds back for a while delays the
+  tick by no more than the job it is in. A session's own work, its pass and its flush keep their order, and the sessions keep theirs in phases 1
+  and 3; what changes is that a pass now sees what the sessions after its own did in the same tick (they ran after it before). `1` runs the passes
+  in order on the tick's own thread, which is the reference: 2, 4 and 8 threads send every connection exactly the datagrams 1 does (200 runs with a
+  random wait before every pass, the updates shared between the views and not, are in `test_worldd_actor_view`); `0` is the loop as it was. Each
+  thread keeps its own profile (added up when the passes end, so `view=` in the `[tick]` line is the threads' time added up, not wall time), its
+  own memos and counters for the shared updates, and a pass that throws drops its session as a throwing tick does. The default is 4 threads, and
+  a machine never gets more than it has cores less two (at least one): with 4 cores that is 2 threads, with 3 or fewer 1, and 1 runs the passes
+  in order on the tick's own thread. Needs `--tick-hz 10` or more: with `--tick-hz 0` (the old loop) no thread runs, the default gives way, and
+  asking for 1 or more threads is refused. Log lines of different sessions in one tick are no longer in the sessions' order.
+  Tests: `test_worldd_actor_view` (`actor_view_view_threads_tests.inc`: the frozen registry, the pool with every worker at work and with every
+  worker held back, the 200 runs, 24 players around 650 mobs, the cost of the passes on one thread and on four), `test_worldd_movement`
+  (`movement_view_threads_tests.inc`: a joined player and a mob through the Endpoint with no pool, one thread and three: the same datagrams) and
+  the Endpoint-level programs run with `AOC_TEST_VIEW_THREADS` set.
 - **`--tick-hz 0`** keeps the old loop (a tick after every datagram, and every 10 ms without one), for comparing the two.
 - **`--loop-stats N`** prints every N seconds a `[loop]` line (the ticks, the share of the time spent working, the p50, p99 and longest tick,
   the datagrams and bytes each way, the sessions, the position saver's queue) and a `[tick]` line: the rate, the datagrams per second and per
@@ -1682,7 +1702,7 @@ worldd --bind 127.0.0.1:7777 --public-address 127.0.0.1:7777 --mesh 127.0.0.1:50
        [--content-db dist/content/content.db] [--gamestate-mode tier1|tier2|tier3|captured] [--max-move-speed 2135]
        [--area-radius -1|1000] [--gm-garden] [--no-zone-filter]
        [--world-admin 127.0.0.1:50056] [--no-world-admin] [--gm-commands]
-       [--world-stream 127.0.0.1:50057] [--no-world-stream] [--tick-hz 30] [--loop-stats 0] [--no-view-spread] [--move-ack-gap-ms 100] [--share-updates on|off|verify]
+       [--world-stream 127.0.0.1:50057] [--no-world-stream] [--tick-hz 30] [--loop-stats 0] [--no-view-spread] [--move-ack-gap-ms 100] [--share-updates on|off|verify] [--view-threads 4]
 ```
 
 At start it binds the UDP port, registers with mesh (retrying until mesh answers) and sends

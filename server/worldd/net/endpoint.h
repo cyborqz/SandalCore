@@ -66,7 +66,9 @@
 #include "net/tick_profile.h"
 #include "net/udp_socket.h"
 #include "session/player_session.h"
+#include "session/view_pool.h"
 #include <array>
+#include <cstdlib>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -78,6 +80,14 @@
 #include <vector>
 
 namespace aoc { namespace worldd {
+
+/// The number of view threads the test programs run the tick with: AOC_TEST_VIEW_THREADS (0 to 8), 0 without it.  worldd never reads it (main.cpp sets EndpointConfig::view_threads from --view-threads).
+inline unsigned view_threads_from_test_environment() {
+    const char* text = std::getenv("AOC_TEST_VIEW_THREADS");
+    if (!text || !*text) return 0;
+    const long n = std::strtol(text, nullptr, 10);
+    return n < 0 ? 0u : n > static_cast<long>(kViewWorkers) ? static_cast<unsigned>(kViewWorkers) : static_cast<unsigned>(n);
+}
 
 struct EndpointConfig {
     WorldInfo world;
@@ -97,6 +107,10 @@ struct EndpointConfig {
     /// The most bytes a session's datagrams may bring a second (a token bucket; 0 is no limit) and how many seconds' worth it holds.
     uint32_t max_session_bytes_per_second = 262144;
     uint32_t session_burst_seconds = 2;
+    /// The threads that run the players' view passes side by side (session/view_pool.h, worldd --view-threads).  0: the tick runs each session's work, its view and its flush in turn.  1 or more:
+    /// the tick runs every session's own work, then all the due passes at once on the pool with the registry frozen, then every flush; 1 runs the passes on the tick's own thread, in order.
+    /// The test programs take the number AOC_TEST_VIEW_THREADS names (none without it); worldd sets it from the option.
+    unsigned view_threads = view_threads_from_test_environment();
 };
 
 class Endpoint {
@@ -142,6 +156,10 @@ public:
     /// --loop-stats: puts the session whose ticks and sends took the most time since the last call into `profile` (its name, the time, its
     /// view's share, the actors its view holds) and starts every session's count again.  Measured only while the profile is on.
     void take_costliest(TickProfile& profile);
+    /// The threads of the view passes (EndpointConfig::view_threads; 0: none), the seconds they spent in passes and the passes they ran since the Endpoint began.
+    unsigned view_threads() const { return view_pool_ ? view_pool_->threads() : 0; }
+    double   view_busy_seconds() const { return view_pool_ ? view_pool_->busy_seconds() : 0.0; }
+    uint64_t view_jobs() const { return view_pool_ ? view_pool_->jobs_run() : 0; }
 
 private:
     struct Session {
@@ -187,6 +205,9 @@ private:
     /// Writes one line for the handshakes refused for the cap since the last line, at most one every
     /// kLimitLogInterval; tick calls it too, so the last refusals of a burst are not left out.
     void log_refused_for_limit(Clock::time_point now);
+    /// The sessions part of the tick when the view passes run on the pool (EndpointConfig::view_threads): every session's own work in turn, all the due passes at once with the registry frozen, then
+    /// every session's flush in turn.  Appends the sessions to drop to `drop`, as the loop of tick() does.  (net/endpoint_phases.cpp)
+    void tick_in_phases(Clock::time_point now, std::vector<std::pair<Address, const char*>>& drop);
     double seconds(Clock::time_point t) const;
     std::string random_challenge();
     /// Takes `len` bytes from the session's bucket (refilled for the time since the last datagram); false when it holds fewer.
@@ -206,6 +227,7 @@ private:
     size_t refused_for_limit_ = 0;                 // handshakes refused for the cap, not in a log line yet
     size_t rate_dropped_ = 0;                      // datagrams dropped for the rate limit, all sessions
     std::optional<Clock::time_point> limit_logged_;
+    std::unique_ptr<ViewPool> view_pool_;           // the threads of the view passes (EndpointConfig::view_threads); none for 0
 
     std::mutex results_mu_;
     std::vector<std::pair<uint64_t, LoginResult>> results_;

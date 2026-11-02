@@ -31,8 +31,11 @@
 // C.O.A ~ C-Y-B
 
 #include "protocol/repl/replicator.h"
+#include "session/view_worker.h"
 #include "world/actor_registry.h"
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -75,10 +78,12 @@ public:
     /// `verify_every`: in verify mode one shared update in this many is checked.
     explicit SharedUpdates(ShareMode mode, unsigned verify_every = 8) : mode_(mode), verify_every_(verify_every == 0 ? 1 : verify_every) {}
 
-    ShareMode mode() const { return mode_; }
-    bool      active() const { return mode_ != ShareMode::Off; }
-    const Stats& stats() const { return stats_; }
-    Stats&       stats() { return stats_; }
+    ShareMode mode() const { return mode_.load(std::memory_order_relaxed); }
+    bool      active() const { return mode() != ShareMode::Off; }
+    /// The counts of all the threads that run view passes, added up (read it when no pass runs).
+    Stats stats() const;
+    /// The calling thread's own counts: the figures are written without a lock, one set for each thread (view_worker()).
+    Stats& mine() { return local_[view_worker()].stats; }
 
     /// "off", "on" or "verify"; false (and Off) for another text.
     static ShareMode parse(std::string_view text, bool* ok = nullptr);
@@ -92,10 +97,10 @@ public:
     /// The update kept for the actor's present state that a view with a shadow at `from_version` can take, or null.
     const UpdateMemo::Variant* find(const world::WorldActor& actor, uint32_t from_version) const;
     /// Keeps the update a view built (from a shadow at `from_version`) for the actor's present state; returns it.
-    const UpdateMemo::Variant& publish(world::WorldActor& actor, uint32_t from_version, std::vector<repl::ContentBlock>&& blocks, repl::SentRecord&& record, repl::ShadowRedo&& redo);
+    const UpdateMemo::Variant& publish(const world::WorldActor& actor, uint32_t from_version, std::vector<repl::ContentBlock>&& blocks, repl::SentRecord&& record, repl::ShadowRedo&& redo);
 
     /// In verify mode: true for one call in `verify_every`.
-    bool verify_due() { return mode_ == ShareMode::Verify && ++verify_calls_ % verify_every_ == 0; }
+    bool verify_due() { return mode() == ShareMode::Verify && ++local_[view_worker()].verify_calls % verify_every_ == 0; }
     /// A shared update was not what the plain build gave (or the actor's shape changed unseen): says so, counts it and turns sharing off.
     void mismatch(uint64_t actor, const char* what);
 
@@ -104,11 +109,14 @@ public:
     void fault_for_test(Fault f) { fault_ = f; }
 
 private:
-    ShareMode mode_;
+    std::atomic<ShareMode> mode_;
     unsigned  verify_every_;
-    uint64_t  verify_calls_ = 0;
+    struct alignas(64) Local {
+        Stats    stats;
+        uint64_t verify_calls = 0;
+    };
+    std::array<Local, kViewWorkers> local_;
     Fault     fault_ = Fault::None;
-    Stats     stats_;
 };
 
 }  // namespace aoc::worldd

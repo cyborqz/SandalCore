@@ -491,70 +491,10 @@ void PlayerSession::pump(Connection& conn) {
 void PlayerSession::tick(Connection& conn) { pump(conn); }
 
 void PlayerSession::tick(Connection& conn, Clock::time_point now) {
-    last_now_ = now;
-    pump(conn); send_move_ack(conn, now);   // (the held answer to the latest good move, session/player_move_ack.cpp)
-    if (finished_ || failed_) return;
-    session_seconds(now);   // the clock starts at the first tick
-    run_abilities(conn, now);
-    run_mounts(conn, now);
-    run_ride(conn, now);
-    run_timers(conn, now);
-    run_gather(conn, now);
-    run_foliage(conn, now);
-    run_floor_net(conn, now);
-    run_embersprings(conn, now);   // Embersprings: a shrine whose radius holds the player is discovered
-    run_props(conn, now);          // quests part 3: a use of a quest object that takes time
-    run_dialogue(conn, now);
-    run_quests(conn, now);
-    run_warehouse(conn, now);
-    run_crafting(conn, now);
-    run_quick_make(conn, now);
-    run_cargo(conn, now);
-    run_nodes(conn);
-    sync_item_abilities(conn);
-    // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
-    if (phase_in_done_ && !time_syncs_.empty() && now >= time_syncs_.front() && room_for(1)) {
-        time_syncs_.pop_front();
-        if (time_syncs_.empty()) time_syncs_.push_back(now + kTimeSyncInterval);
-        const double world_time = pb_.setup().world_time + session_seconds(now);
-        ++time_syncs_sent_;
-        queue("clock", [world_time](bootstrap::PlayerBootstrap& pb) { return pb.set_time(world_time); }, conn);
-    }
-    // A town's scenery (its ANodeLayoutReplicator) is opened in the join, before the phase-in.  The client's pawn phases in when a 10 m trace down finds a blocking object, or after 120 s,
-    // and in a town's bowl the only ground the client has is what the replicator builds: opened by the pass below, after the phase-in, it left the player waiting out the cap
-    // (about two minutes, against about 30 s without a bowl).  Every join asks, whether or not it stands in a bowl: the replicator is relevant within its own radius
-    // (1.45 km) and a join farther from every town finds none, so nothing changes there.  Only the scenery: the NPCs and every other actor keep waiting for the phase-in (below).
-    if (view_ && !phase_in_done_ && !scenery_done_ && join_.empty()) {
-        const GoodPosition at = checker_.good();
-        size_t opened = 0;
-        scenery_done_ = view_->open_scenery(conn, at.x, at.y, now, &opened);
-        if (opened > 0) {   // (each open has its own "[scenery] open for player" line; the join's one line is the phase-in's below)
-            scenery_opened_ += opened;
-            scenery_at_ = session_seconds(now);
-        }
-    }
-    // plan E1: the other actors, once the join and the phase-in are out (their opens need the client's world to exist)
-    if (view_ && phase_in_done_ && join_.empty() && replies_.empty() && delayed_.empty()) {
-        const GoodPosition at = checker_.good();
-        view_->tick(conn, at.x, at.y, now);
-        if (npc_world_) npc_world_->note_player(static_cast<uint64_t>(pb_.setup().player_id), at.x, at.y);   // the NPCs near the player are awake
-        if (!position_log_started_) {
-            position_log_started_ = true;
-            last_position_log_ = now;
-        } else if (now - last_position_log_ >= kPositionLogInterval) {
-            last_position_log_ = now;
-            log_position(now);
-        }
-    }
-    if (!save_clock_started_) {
-        save_clock_started_ = true;
-        last_save_ = now;
-        return;
-    }
-    if (now - last_save_ < save_interval_) return;
-    last_save_ = now;
-    if (position_changed(/*with_yaw=*/false)) hand_over("periodic save", /*periodic=*/true);
-    if (inventory_dirty_) hand_over_inventory("periodic save", /*periodic=*/true);
+    const TickPlan plan = tick_logic(conn, now, /*plan_view=*/false);   // (the three parts are in session/player_view_phases.cpp)
+    if (plan.stopped) return;
+    if (plan.view) view_->tick(conn, plan.x, plan.y, now);
+    tick_after(now, plan);
 }
 // -- C Y B & CoA --
 

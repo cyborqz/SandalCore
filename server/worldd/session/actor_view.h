@@ -142,6 +142,12 @@ public:
     /// around (x, y). Chains that the connection cannot take now are tried again next call.
     void tick(Connection& conn, double x, double y, Clock::time_point now);
 
+    /// The same tick in two halves, for a server that runs the players' passes on several threads (net/endpoint.h).  `plan` is the serial half: it decides whether a relevancy pass is due now and,
+    /// if the view has a phase (ViewPhases, shared by the views), takes or moves it, so it is never called by two threads at once.  `run` is the half that can run on any thread, alone for its
+    /// view: the due Dormancy closes, then the pass when `pass_is_due`.  `plan` then `run` do what `tick` does.
+    bool plan(Clock::time_point now);
+    void run(Connection& conn, double x, double y, Clock::time_point now, bool pass_is_due);
+
     /// Opens, now, the towns' scenery around (x, y) and nothing else (the login fix).  Every ActorKind::NodeLayout actor (a town's replicator, awake within
     /// 1.45 km) whose radius holds the point and that the view does not hold yet is opened awake, nearest first, on the first free channel, by the pass's own rules for it (the opens cap,
     /// the pacing of a busy connection).  The NPCs and every other actor are left to tick(), which the session runs after the phase-in; when it does, it finds the replicators open and
@@ -242,6 +248,10 @@ private:
     void     scan(double x, double y);
     /// tick() without its timing (--loop-stats).
     void     tick_unprofiled(Connection& conn, double x, double y, Clock::time_point now);
+    /// The pending destroys and the Dormancy closes whose time has come.
+    void     run_due_closes(Connection& conn, Clock::time_point now);
+    /// Whether the relevancy pass is due at `now` (and, if it is, counts it and takes the phase).
+    bool     pass_due(Clock::time_point now);
     /// The actor as this connection sees it: `a.actor`, or `scratch` made from it with the player's guid in the interaction state maps.
     const protocol::repl::Actor& view_of(const world::WorldActor& a, protocol::repl::Actor& scratch) const;
     /// The open of `a` on a new channel (the shadow `work` is reset first), with the exports its blocks need.
@@ -251,8 +261,8 @@ private:
     uint32_t allocate_channel(const Connection& conn) const;
     void     release(Entry& e);
     /// Sends the open of `a` on a fresh channel (`snapshot`: its Dormancy close is due after the delay). False when it could not go out now.
-    bool     open(Connection& conn, world::WorldActor& a, Entry& e, bool snapshot, Clock::time_point now);
-    bool     send_update(Connection& conn, world::WorldActor& a, Entry& e);
+    bool     open(Connection& conn, const world::WorldActor& a, Entry& e, bool snapshot, Clock::time_point now);
+    bool     send_update(Connection& conn, const world::WorldActor& a, Entry& e);
     /// How send_update's update was made (below).
     struct Built {
         std::optional<protocol::repl::Emission> em;      // none: nothing changed (or `failed`)
@@ -265,8 +275,8 @@ private:
     };
     /// The update of `a` for this connection: made from the shadow here, or, with sharing (shared_updates.h) and a shadow that stands where another view's did, from the blocks that view
     /// built.
-    void     build_update(world::WorldActor& a, Entry& e, Built& built);
-    void     build_update_shared(SharedUpdates& sharing, world::WorldActor& a, Entry& e, Built& built);
+    void     build_update(const world::WorldActor& a, Entry& e, Built& built);
+    void     build_update_shared(SharedUpdates& sharing, const world::WorldActor& a, Entry& e, Built& built);
     /// Verify mode: the shared update `hit` against the plain build of the same update on a copy of the shadow; true when they are the same bytes, the same record and the same shadow after.
     bool     shared_update_holds(const world::WorldActor& a, const Entry& e, const UpdateMemo::Variant& hit);
     bool     close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, world::ClientState next);
@@ -276,6 +286,8 @@ private:
     void     on_removed(const world::WorldActor& a);
     void     flush_removed(Connection& conn);
 
+    /// The registry as the view reads it: a pass changes nothing in it (it is frozen while the passes run on several threads, world/actor_registry.h).
+    const world::ActorRegistry& reg() const { return registry_; }
     world::ActorRegistry&               registry_;
     Config                              config_;
     std::function<bool(uint32_t)>       reserved_;
