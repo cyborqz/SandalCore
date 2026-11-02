@@ -16,7 +16,8 @@
 //    - a limit on how often a reaction may fire (GlobalProcLimit, InstigatorProcLimit) is counted per reaction here (one holder), and a carrier that is a
 //      pipeline effect is taken off when its reaction reached it.
 //
-//  What this file serves: the events Hit (OwnerHits) and Ability (Consume), the instigator Owner, and the targets Owner (the holder) and Targets (the hit's).
+//  What this file serves: the events Hit (OwnerHits) and Ability (Consume), the instigator Owner, and the targets Owner (the holder) and Targets (the hit's); and the reactions a hit's own
+//  record carries (ReactionsIds), which land on its caster, its targets or the caster's pet.
 //  The rest of the bindings, instigators and targets of the 335 records are left alone and said once in the log when a reaction would need them.
 // ============================================================================
 #include "session/ability_pipeline.h"
@@ -40,6 +41,8 @@ namespace {
 // The EReactionTarget bits of a reaction's TargetsBitmask.
 constexpr int kTargetOwner = 1;
 constexpr int kTargetTargets = 8;
+constexpr int kTargetInstigator = 2;
+constexpr int kTargetInstigatorsPet = 8192;
 
 // The event kinds (the byte of the binding the reaction listens with) and the bits this file serves.
 constexpr int kKindHit = 0;
@@ -61,7 +64,50 @@ void AbilityPipeline::set_reaction_carriers(std::vector<int64_t> effect_guids) {
     reaction_carriers_ = std::move(effect_guids);
 }
 
+void AbilityPipeline::fire_carried_reactions(AbilityChange& c, const HitEvent& ev, double t) {
+    if (!reactions_enabled_ || carried_depth_ >= 2 || !catalog_ || !ev.hit || ev.hit->reactions.empty() || (ev.targets.empty() && !ev.on_self)) return;
+    ReactionContext rc;
+    rc.hit = &ev;
+    for (const int64_t guid : ev.hit->reactions) {
+        const ReactionDef* r = catalog_->reaction(guid);
+        if (!r) continue;
+        const content::ReactionRow& row = r->row;
+        if (row.trigger_expr != 0) {
+            double v = 0;
+            std::string why;
+            if (!eval_in_event(row.trigger_expr, rc, v, why)) {
+                if (reaction_noted_.insert(guid).second) spdlog::info("[abilities] the reaction {} stays inert: {}", row.name, why);
+                continue;
+            }
+            if (v == 0) continue;
+        }
+        HitSource src;
+        src.type = content::kSourceTypeReaction;
+        src.guid = guid;
+        src.actor = false;
+        src.confirm = true;
+        ++carried_depth_;
+        const ReactionContext* const outer = active_reaction_;
+        active_reaction_ = &rc;
+        for (const int64_t hit_guid : row.hits) {
+            const HitDef* hit = catalog_->hit(hit_guid);
+            if (!hit) continue;
+            if ((row.targets_mask & (kTargetOwner | kTargetInstigator)) != 0) apply_hit_here(c, *hit, t, true, src);   // (the caster's: its own mask speaks of whoever casts it)
+            if ((row.targets_mask & kTargetTargets) != 0 && !ev.targets.empty()) apply_hit_on_targets(c, *hit, ev.targets, t, src, nullptr);
+            if ((row.targets_mask & kTargetInstigatorsPet) != 0 && combat_) {
+                if (const uint64_t pet = combat_->own_pet()) apply_hit_on_targets(c, *hit, {pet}, t, src, nullptr);
+            }
+        }
+        active_reaction_ = outer;
+        drop_evaluation();
+        --carried_depth_;
+        ++reactions_fired_;
+        spdlog::log(reactions_fired_ <= 40 ? spdlog::level::info : spdlog::level::debug, "[abilities] the reaction {} of the hit {} fired", row.name, ev.hit->row.name);
+    }
+}
+
 void AbilityPipeline::raise_hit_event(AbilityChange& c, const HitEvent& ev, double t) {
+    fire_carried_reactions(c, ev, t);
     if (!reactions_enabled_ || reaction_depth_ > 0 || !catalog_ || catalog_->reactions() == 0 || !ev.hit) return;
     // a hit with no event tags and no stat mods raises no event [the game's code: the hit's record is tested for tags, mods and the force flag]
     if (ev.hit->tags.empty() && ev.hit->mods.empty()) return;

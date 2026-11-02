@@ -103,6 +103,10 @@ public:
         rig_.take();
     }
     std::vector<combat::EffectHitNote>       effect_notes, confirmed_notes;
+    void hit_dealt(const combat::DealtHit& hit, double) override { dealt.push_back(hit); }
+    void hit_from_pet(int64_t hit_guid, int64_t, double) override { from_pet.push_back(hit_guid); }
+    std::vector<combat::DealtHit>            dealt;
+    std::vector<int64_t>                     from_pet;
     std::array<uint32_t, 4>                  guid = {0x11111111u, 0x22222222u, 0x33333333u, 0x44444444u};
     std::vector<combat::KillReward>          kills;
     std::vector<combat::IncomingHit>         hits;

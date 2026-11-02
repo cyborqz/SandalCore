@@ -56,6 +56,7 @@
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
 #include "protocol/schema/generated/index.h"
+#include "session/summoner_pets.h"
 #include "session/player_session.h"
 #include "spawns/area.h"
 #include "world/relevancy.h"

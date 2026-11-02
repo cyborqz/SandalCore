@@ -68,6 +68,18 @@ std::optional<TriggerAbility> parse_trigger_ability(const RpcCall& call) {
         }
     }
     t.target_transform_count = count_param(call, "TargetTransforms");
+    if (const Value* v = param(call, "TargetTransforms")) {
+        const ArrayValue* a = v->get_if<ArrayValue>();
+        if (a && !a->elements.empty()) {
+            for (const auto& [handle, value] : a->elements.front().values) {   // (in handle order: the rotation is no vector, the translation comes before the scale)
+                (void)handle;
+                if (const auto* place = value.get_if<Vec3d>()) {
+                    t.first_target_place = *place;
+                    break;
+                }
+            }
+        }
+    }
     t.item_slot = static_cast<int32_t>(int_param(call, "ItemData.Slot", -1));
     if (const Value* v = param(call, "ItemData.Location")) {
         const uint64_t* u = v->get_if<uint64_t>();

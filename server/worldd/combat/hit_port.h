@@ -27,11 +27,18 @@ public:
     virtual const CombatData& data() const = 0;
     /// Applies a resolved hit to the target (see CombatWorld::apply_hit_to_npc).
     virtual Delivery deliver(uint64_t target_actor, const Resolved& hit, double now) = 0;
+    /// The same, saying which hit it is: what reacts to it on the target reads that.
+    virtual Delivery deliver_from(uint64_t target_actor, const Resolved& hit, double now, const HitOrigin& /*origin*/) { return deliver(target_actor, hit, now); }
     /// A shield (a TempHealth effect's amount) on the target for `seconds` (0: until it is used up).
     virtual void shield(uint64_t target_actor, double amount, double seconds, double now) = 0;
     /// Puts the effects a resolved hit applies on the target, each with its numbers worked out (HitResolver::resolve_effects): the world keeps them on the target, runs their hits
     /// and ticks and shows them to the clients.  A port that has no effect lists ignores them.
     virtual void apply_effects(uint64_t /*target_actor*/, const std::vector<effects::Applied>& /*effects*/, double /*now*/) {}
+    /// What a hit takes off the target (its EffectsToRemoveIds, or its filter), and every instance of one effect (Dimensional Bolt's mark).
+    virtual void remove_effects(uint64_t /*target_actor*/, const abilities::HitDef& /*hit*/, double /*now*/) {}
+    virtual void remove_effect(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) {}
+    /// The player's pet in the world (0: none).
+    virtual uint64_t own_pet() const { return 0; }
     /// Seconds left of an effect record on the target (0: it is not on): what GetEffectRemainingDuration(GetTarget(), effect) reads.
     virtual double effect_remaining(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) const { return 0; }
     /// The target's NetGUID and its HitComp (the collision cylinder) for a confirmation.
@@ -70,7 +77,13 @@ public:
     Delivery deliver(uint64_t target_actor, const Resolved& hit, double now) override {
         return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now));
     }
+    Delivery deliver_from(uint64_t target_actor, const Resolved& hit, double now, const HitOrigin& origin) override {
+        return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now), 0, &origin);
+    }
     void shield(uint64_t target_actor, double amount, double seconds, double now) override { world_.add_shield(target_actor, amount, seconds, world_time(now)); }
+    void remove_effects(uint64_t target_actor, const abilities::HitDef& hit, double now) override { world_.remove_effects_from_npc(target_actor, hit, world_time(now)); }
+    void remove_effect(uint64_t target_actor, int64_t effect_guid, double now) override { world_.remove_npc_effect(target_actor, effect_guid, world_time(now)); }
+    uint64_t own_pet() const override { return world_.pet_of(self_.id()); }
     void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now) override { world_.apply_effects(target_actor, self_.id(), effects, world_time(now)); }
     double effect_remaining(uint64_t target_actor, int64_t effect_guid, double now) const override { return world_.effect_remaining(target_actor, effect_guid, world_time(now)); }
     /// The world's clock for a time of the runtime's.

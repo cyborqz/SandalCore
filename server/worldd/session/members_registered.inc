@@ -11,5 +11,6 @@
 #include "session/members/gather.inc"
 #include "session/members/craft.inc"
 #include "session/members/move_ack.inc"
+#include "session/members/pets.inc"
 #include "session/members/based_move.inc"
 #include "session/members/view_phases.inc"

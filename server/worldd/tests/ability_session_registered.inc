@@ -7,3 +7,4 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "ability_session_log_window_tests.inc"
+#include "ability_session_summoner_tests.inc"

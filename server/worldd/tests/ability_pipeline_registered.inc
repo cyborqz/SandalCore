@@ -5,4 +5,5 @@
 //  tests/ability_pipeline_registered.inc: the check files of test_worldd_ability_pipeline that register their tests with AOC_REGISTER_TEST (see tests/README.md).
 // ============================================================================
 
+#include "ability_pipeline_summon_tests.inc"
 #include "ability_pipeline_guard_tests.inc"

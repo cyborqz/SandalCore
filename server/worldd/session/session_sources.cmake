@@ -17,6 +17,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_objects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_quests2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/respawn/session_embersprings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/ability_pipeline_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_abilities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_based_move.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat.cpp
@@ -29,6 +30,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_move_ack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_movement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_nodes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_processing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_quests.cpp

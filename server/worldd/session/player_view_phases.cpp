@@ -23,6 +23,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     }
     session_seconds(now);   // the clock starts at the first tick
     run_abilities(conn, now);
+    run_pets(conn, now);
     run_mounts(conn, now);
     run_ride(conn, now);
     run_timers(conn, now);

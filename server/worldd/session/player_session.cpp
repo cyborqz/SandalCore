@@ -151,6 +151,7 @@ bool PlayerSession::allocate_channels(const Connection& conn) {
 }
 
 PlayerSession::~PlayerSession() {
+    clear_pet();
     cancel_quick_make(nullptr, "the session is destroyed");
     cancel_gather(nullptr, "the session is destroyed");
     leave_combat();
@@ -566,6 +567,7 @@ void PlayerSession::hand_over(const char* why, bool periodic) {
 void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
+    clear_pet();
     cancel_quick_make(nullptr, why);   // Crafting, step 3: nothing was taken, so nothing is given back
     end_gathering(why);   // Gathering stage 2: a node this player channels is available again, and the pile a full bag made is made now if it still waits
     // this player's lingering zones leave the world with it (the actor system closes them for a connection that is still there)

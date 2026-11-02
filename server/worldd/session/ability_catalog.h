@@ -16,6 +16,7 @@
 #include "content/ability_content.h"
 #include "stats/stat_program.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -41,6 +42,22 @@ struct HitDef {
     std::vector<content::ModRow>       mods;      // the hit's own stat mods (a heal: Health +amount)
     std::vector<int64_t>               remove_effects;   // plan D2, stage 2: the effects it takes off its targets (EffectsToRemoveIds)
     int                                max_remove = 0;   // MaxNumEffectsToRemove (0: no limit)
+    /// What EffectRemovalFilter lets the hit take off when it names no effect. Unknown: a content.db from before contentc read the filter; Other: a filter that is not served.
+    enum class Removal : uint8_t { Unknown, None, Debuff, Buff, Other };
+    Removal                            removal = Removal::Unknown;
+    bool                               remove_as_dispel = false;   // bRemoveAsDispel: it takes only what can be dispelled [modelled: the flag's name; no recording shows one refused]
+    /// Whether the hit may take this effect off its holder.
+    bool removes(const EffectDef& e) const {
+        if (!remove_effects.empty()) return std::find(remove_effects.begin(), remove_effects.end(), e.row.guid) != remove_effects.end();
+        if (remove_as_dispel && !e.row.dispellable) return false;
+        const bool debuff = e.row.category.find("Debuff") != std::string::npos;
+        switch (removal) {
+            case Removal::Unknown:
+            case Removal::Debuff: return debuff;
+            case Removal::Buff: return e.row.category.find("EFFECT_Buff") != std::string::npos;
+            default: return false;
+        }
+    }
     std::vector<int64_t>               zones;            // the lingering zones the hit spawns (LingeringZonesIds)
     std::vector<int64_t>               fires;            // E1 stage 3 fix 2: the projectiles the hit fires when it lands (ab_hit_projectile "fire": the book's Split hits)
     // plan E1, stage 3: what the damage rules read of the hit (extra's EventTags ...)
@@ -53,6 +70,7 @@ struct HitDef {
     /// contentc version 35: the reactions this hit carries on its own (extra's ReactionsIds) and the hits it fires when it lands (RecursiveHit).
     std::vector<int64_t>               reactions;
     std::vector<content::RecursiveHitRow> recursive;
+    std::vector<int64_t>               modify_cooldowns;   // extra's ModifyCooldownsIds
 };
 
 /// A reaction (contentc version 35): when an event of the kinds it is bound to happens to its holder and its trigger is true, it applies its hits.
@@ -92,6 +110,16 @@ public:
     const HitDef*     hit(int64_t guid) const;
     /// A reaction by its guid; null for one the tables do not have (and for any guid in a file without the reaction tables).
     const ReactionDef* reaction(int64_t guid) const;
+    /// ab_modify_cooldown's record, with its abilities read.
+    struct ModifyCooldownDef {
+        std::string          name;
+        int64_t              delta_expr = 0;
+        std::vector<int64_t> abilities;
+    };
+    const ModifyCooldownDef* modify_cooldown(int64_t guid) const {
+        const auto it = modify_cooldowns_.find(guid);
+        return it == modify_cooldowns_.end() ? nullptr : &it->second;
+    }
     /// A hit by its record name (the tooltip's `hit:Name` tokens name hits so; plan E1, stage 3 fix, Part C).
     const HitDef*     hit_named(std::string_view name) const;
     /// A lingering zone (ab_zone: its lifetime and tick rate; the hits are the ones the abilities list).
@@ -118,6 +146,7 @@ private:
     std::map<int64_t, EffectDef>          effects_;
     std::map<int64_t, HitDef>             hits_;
     std::map<int64_t, ReactionDef>        reactions_;
+    std::map<int64_t, ModifyCooldownDef>  modify_cooldowns_;
     std::map<int64_t, content::ZoneRow>   zones_;
     std::map<int64_t, content::ProjectileRow> projectiles_;
     std::map<int64_t, content::ExprRow>   exprs_;
