@@ -9,6 +9,8 @@
 #include "protocol/repl/codecs.h"
 #include "protocol/repl/rep_block.h"
 
+#include <algorithm>
+
 namespace aoc { namespace protocol { namespace repl {
 
 using schema::PropType;
@@ -33,6 +35,21 @@ bool array_matches(const RepCommand& cmd, std::span<const RepCommand> table, con
         }
     }
     return true;
+}
+
+/// True when `now` leaves out an element value that `before` had at the same element (nested arrays included): a value that is gone from an array that stays.
+bool array_lost_a_value(const ArrayValue& before, const ArrayValue& now) {
+    const size_t shared = std::min(before.elements.size(), now.elements.size());
+    for (size_t i = 0; i < shared; ++i) {
+        for (const auto& [local, was] : before.elements[i].values) {
+            const auto it = now.elements[i].values.find(local);
+            if (it == now.elements[i].values.end()) return true;
+            const ArrayValue* inner_was = was.get_if<ArrayValue>();
+            const ArrayValue* inner_now = it->second.get_if<ArrayValue>();
+            if (inner_was && inner_now && array_lost_a_value(*inner_was, *inner_now)) return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -98,7 +115,12 @@ bool value_matches(const RepCommand& cmd, std::span<const RepCommand> table, con
 bool RepState::set(const schema::ClassSchema& schema, uint32_t handle, Value v) {
     const RepCommand* cmd = schema.command(handle);
     if (!cmd || (cmd->flags & schema::kRepCustomDelta) || !value_matches(*cmd, schema.element_commands, v)) return false;
-    values_[static_cast<uint16_t>(handle)] = std::move(v);
+    Value& slot = values_[static_cast<uint16_t>(handle)];
+    // an array that loses an element value it had counts as an erasure (erasures() in rep_state.h): a shadow that was sent the value as a zero keeps it
+    const ArrayValue* before = slot.get_if<ArrayValue>();
+    const ArrayValue* now = v.get_if<ArrayValue>();
+    if (before && now && array_lost_a_value(*before, *now)) ++erasures_;
+    slot = std::move(v);
     return true;
 }
 

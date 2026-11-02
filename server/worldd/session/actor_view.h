@@ -66,6 +66,7 @@
 #include "net/connection.h"
 #include "protocol/repl/replicator.h"
 #include "protocol/repl/send_ledger.h"
+#include "session/shared_updates.h"
 #include "session/view_phases.h"
 #include "world/actor_registry.h"
 #include "world/relevancy.h"
@@ -102,6 +103,9 @@ public:
         /// The tick of the cycle each view passes on, shared by the views of one server (session/view_phases.h): the server gives it when its tick passes every n-th tick, so that the
         /// players' passes do not all land on one tick.  None: a pass is due once the relevancy config's tick has gone by since the last (the tests, and the old loop).
         std::shared_ptr<ViewPhases> phases;
+        /// The update built once for the views that hold an actor in the same state (session/shared_updates.h), shared by the views of one server.  None: every view builds its own.  The test
+        /// programs get the sharing AOC_TEST_SHARE_UPDATES names (verify without it); worldd sets this from `--share-updates`.
+        std::shared_ptr<SharedUpdates> shared = SharedUpdates::from_test_environment();
     };
 
     /// What the view did, for the log and the tests.
@@ -111,6 +115,7 @@ public:
         size_t snapshots = 0;        // opens that close with Dormancy
         size_t wakes = 0;            // a dormant actor opened again, awake or as a new snapshot
         size_t updates = 0, updates_unreliable = 0;
+        size_t shared_updates = 0;   // of them, the ones sent from blocks another view built (Config::shared)
         size_t naks = 0;             // update chains the client lost (an unreliable chain with a lost part) that put something back
         size_t nak_entries = 0;      // handles, fast-array items and subobject blocks put back by them
         size_t stale_snapshots = 0;  // dormant actors whose last update was lost: opened again at the next chance
@@ -210,6 +215,10 @@ private:
         size_t                    open_parts_left = 0;
         bool                      open_acked = true;
         std::vector<ChainId>      chains;    // the chains the ledger was given and the view routes events of (chain_owner_)
+        /// Shared updates (shared_updates.h): what the shadow lacks to stand where the other views' shadows of the same version do.
+        uint32_t                  shape_epoch = 0;        // the actor's shape epoch when this shadow was started by the open
+        bool                      private_form = false;   // the shadow holds the per-connection form of an interactable actor, not the registry's
+        bool                      tainted = false;        // the ledger put a lost chain's values back after the last update (it dropped the oldest chain as a NAK): the next update sends them
     };
 // [C_Y_B + C-O-A]
 
@@ -237,12 +246,29 @@ private:
     const protocol::repl::Actor& view_of(const world::WorldActor& a, protocol::repl::Actor& scratch) const;
     /// The open of `a` on a new channel (the shadow `work` is reset first), with the exports its blocks need.
     /// `first`: the connection has never had the actor (a kept shadow is what it had), so the actor's `first_open_form` is what it is shown.
-    std::optional<protocol::repl::Emission> build_open(const world::WorldActor& a, protocol::repl::ActorShadow& work, bool first = true);
+    /// `private_form` (when given) is set to whether the open shows this connection a form of the actor of its own (the interaction state, the first-open form), not the registry's.
+    std::optional<protocol::repl::Emission> build_open(const world::WorldActor& a, protocol::repl::ActorShadow& work, bool first = true, bool* private_form = nullptr);
     uint32_t allocate_channel(const Connection& conn) const;
     void     release(Entry& e);
     /// Sends the open of `a` on a fresh channel (`snapshot`: its Dormancy close is due after the delay). False when it could not go out now.
     bool     open(Connection& conn, world::WorldActor& a, Entry& e, bool snapshot, Clock::time_point now);
     bool     send_update(Connection& conn, world::WorldActor& a, Entry& e);
+    /// How send_update's update was made (below).
+    struct Built {
+        std::optional<protocol::repl::Emission> em;      // none: nothing changed (or `failed`)
+        bool                                    failed = false;
+        bool                                    private_form = false;   // made from this connection's own form of the actor: the shadow then holds that form
+        protocol::repl::SentRecord              record;                  // what the chain carries, when it was made here
+        const protocol::repl::SentRecord*       shared_record = nullptr; // ... or the shared update's
+        protocol::repl::ShadowUndo              undo;                    // the shadow was changed: put back when the connection refuses the chain
+        const protocol::repl::ShadowRedo*       redo = nullptr;          // the shadow was not: given the update's outcome once the connection takes the chain
+    };
+    /// The update of `a` for this connection: made from the shadow here, or, with sharing (shared_updates.h) and a shadow that stands where another view's did, from the blocks that view
+    /// built.
+    void     build_update(world::WorldActor& a, Entry& e, Built& built);
+    void     build_update_shared(SharedUpdates& sharing, world::WorldActor& a, Entry& e, Built& built);
+    /// Verify mode: the shared update `hit` against the plain build of the same update on a copy of the shadow; true when they are the same bytes, the same record and the same shadow after.
+    bool     shared_update_holds(const world::WorldActor& a, const Entry& e, const UpdateMemo::Variant& hit);
     bool     close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, world::ClientState next);
     bool     send(Connection& conn, uint32_t channel, bool open, bool reliable, protocol::repl::Emission& em, ChainId* id = nullptr, size_t* parts = nullptr);
     /// Drops what the ledger and the routing of events hold for an entry: its channel closed for good or opens anew.

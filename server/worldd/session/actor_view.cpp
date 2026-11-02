@@ -41,9 +41,9 @@ void add_ability_exports(std::vector<repl::ContentBlock>& blocks, const std::vec
 /// repl::update_actor with the exports of a creature's attack added to the AbilityComponent's block, collected on the shadow itself and not on a copy of it (the copy of every
 /// actor's whole shadow, for every update of every player's view, was the larger part of an update's cost).  `undo` receives what the collect changed: the caller puts the shadow
 /// back with undo.rollback when the connection does not take the chain.  A failure, or an update with nothing to send, leaves the shadow as it was.  The emission is the one
-/// repl::update_actor builds from the same shadow.
+/// repl::update_actor builds from the same shadow.  `keep_blocks` (when given) receives the content blocks the emission was assembled from, for the views that share the update.
 std::optional<repl::Emission> update_in_place(const repl::Actor& actor, repl::ActorShadow& shadow, const repl::ExportAcks& acks, const std::vector<repl::ExportChain>& exports,
-                                              bool* failed, repl::SentRecord* record, repl::ShadowUndo& undo) {
+                                              bool* failed, repl::SentRecord* record, repl::ShadowUndo& undo, std::vector<repl::ContentBlock>* keep_blocks = nullptr) {
     *failed = false;
     std::vector<repl::ContentBlock> blocks;
     if (!repl::collect_update_blocks(actor, shadow, blocks, &undo)) {   // (it put the shadow back itself)
@@ -59,8 +59,9 @@ std::optional<repl::Emission> update_in_place(const repl::Actor& actor, repl::Ac
     if (!e) {
         undo.rollback(shadow);
         *failed = true;
-    } else if (record) {
-        *record = repl::sent_record(undo, shadow);
+    } else {
+        if (record) *record = repl::sent_record(undo, shadow);
+        if (keep_blocks) *keep_blocks = std::move(blocks);
     }
     return e;
 }
@@ -174,7 +175,7 @@ const repl::Actor& ActorView::view_of(const world::WorldActor& a, repl::Actor& s
     return scratch;
 }
 
-std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, repl::ActorShadow& work, bool first) {
+std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, repl::ActorShadow& work, bool first, bool* private_form) {
     bool failed = false;
     repl::Actor scratch;
     const repl::Actor* shown = &view_of(a, scratch);
@@ -183,6 +184,7 @@ std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, 
         a.first_open_form(scratch);
         shown = &scratch;
     }
+    if (private_form) *private_form = shown != &a.actor;
     const repl::Actor& actor = *shown;
     if (a.open_exports.empty() && a.ability_exports.empty()) return repl::open_actor(actor, work, acks_, &failed);
     // the blocks by hand: the actor's block carries the exports its values name by path, the AbilityComponent's those of the attack it shows
@@ -220,7 +222,8 @@ bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snap
             first = false;
         }
     }
-    auto em = build_open(a, work, first);
+    bool private_form = false;
+    auto em = build_open(a, work, first, &private_form);
     if (!em) {
         e.broken = true;
         ++stats_.broken;
@@ -257,6 +260,9 @@ bool ActorView::open(Connection& conn, world::WorldActor& a, Entry& e, bool snap
     e.channel = channel;
     e.sent_version = a.version;
     e.sent_reliable = a.reliable_version;
+    e.shape_epoch = a.shape_epoch;   // (shared updates: this shadow is started now, from the values the actor has now)
+    e.private_form = private_form;
+    e.tainted = false;
     e.state = snapshot ? ClientState::Snapshot : ClientState::Awake;
     e.close_due = now + (a.dormancy_delay.count() > 0 ? a.dormancy_delay : config_.relevancy.dormancy_delay);
     channel_owner_[channel] = a.id;
@@ -275,14 +281,12 @@ bool ActorView::send_update(Connection& conn, world::WorldActor& a, Entry& e) {
         ++profile.updates;
         t1 = std::chrono::steady_clock::now();
     }
-    // the change is collected on the shadow itself (no copy of it per update); `undo` puts it back if the connection does not take the chain
-    bool failed = false;
-    repl::SentRecord record;
-    repl::Actor scratch;
-    repl::ShadowUndo undo;
-    auto em = update_in_place(view_of(a, scratch), e.shadow, acks_, a.ability_exports, &failed, &record, undo);
+    // the change is collected on the shadow itself (no copy of it per update); `built.undo` puts it back if the connection does not take the chain.  With sharing (shared_updates.h) a view whose
+    // shadow stands where another view's did takes that view's blocks and gives its shadow the outcome (`built.redo`) once the connection has taken the chain.
+    Built built;
+    build_update(a, e, built);
     if (profile.on) profile.update_build_us += tick_profile_us_since(t1);
-    if (failed) {
+    if (built.failed) {
         e.broken = true;
         ++stats_.broken;
         spdlog::warn("[actors] an update of actor {} does not build: it is not updated again", a.id);
@@ -291,21 +295,31 @@ bool ActorView::send_update(Connection& conn, world::WorldActor& a, Entry& e) {
     // reliably when the change must not be lost, when the client may not have the channel yet (open_acked), and while an earlier reliable chain
     // is in flight: its resend would otherwise land after this chain and overwrite it with older values (send_ledger.h)
     const bool reliable = a.reliable_version != e.sent_reliable || !e.open_acked || e.ledger.reliable_pending();
-    if (!em) {   // the version moved but no handle changed (a value set to what it was)
+    if (!built.em) {   // the version moved but no handle changed (a value set to what it was)
         e.sent_version = a.version;
         e.sent_reliable = a.reliable_version;
+        e.private_form = built.private_form;
+        e.tainted = false;
         return true;
     }
     ChainId chain = 0;
     size_t parts = 1;
-    if (!send(conn, e.channel, /*open=*/false, reliable, *em, &chain, &parts)) {
+    if (!send(conn, e.channel, /*open=*/false, reliable, *built.em, &chain, &parts)) {
         ++stats_.refused_updates;
-        undo.rollback(e.shadow);   // the connection did not take the chain: the client has what it had
+        built.undo.rollback(e.shadow);   // the connection did not take the chain: the client has what it had
         return false;
+    }
+    if (built.redo) {   // a shared update: the shadow is given what the update wrote
+        built.redo->apply(e.shadow);
+        ++stats_.shared_updates;
     }
     e.sent_version = a.version;
     e.sent_reliable = a.reliable_version;
-    e.ledger.sent(chain, reliable, parts, record, e.shadow);
+    e.private_form = built.private_form;
+    e.tainted = false;
+    const size_t naks_before = e.ledger.naks();
+    e.ledger.sent(chain, reliable, parts, built.shared_record ? *built.shared_record : built.record, e.shadow);
+    if (e.ledger.naks() > naks_before) e.tainted = true;   // it dropped its oldest chain as a NAK: values went back into the shadow, so it is no copy of the others until the next update
     if (chain_trace_) chain_trace_(chain, a.id, reliable, parts, e.ledger.entries());
     if (e.ledger.tracks(chain)) {
         e.chains.push_back(chain);
@@ -323,6 +337,76 @@ bool ActorView::send_update(Connection& conn, world::WorldActor& a, Entry& e) {
                      a.scenery.node, a.scenery.level, a.scenery.items, a.scenery.plot_version);
     }
     return true;
+}
+
+void ActorView::build_update(world::WorldActor& a, Entry& e, Built& built) {
+    SharedUpdates* sharing = config_.shared.get();
+    if (sharing && sharing->active()) {
+        build_update_shared(*sharing, a, e, built);
+        return;
+    }
+    repl::Actor scratch;
+    const repl::Actor& shown = view_of(a, scratch);
+    built.private_form = &shown != &a.actor;
+    built.em = update_in_place(shown, e.shadow, acks_, a.ability_exports, &built.failed, &built.record, built.undo);
+}
+
+void ActorView::build_update_shared(SharedUpdates& sharing, world::WorldActor& a, Entry& e, Built& built) {
+    SharedUpdates::Stats& stats = sharing.stats();
+    if (sharing.mode() == ShareMode::Verify && !(repl::shape_of(a.actor) == a.shape)) sharing.mismatch(a.id, "the actor lost a value or a subobject without a counted change");
+    // Does this shadow stand where the other views' shadows of its version do?  Every condition is listed in shared_updates.h.
+    const bool clean = sharing.active() && e.sent_version != 0 && !e.tainted && !e.private_form && e.shape_epoch == a.shape_epoch && !a.keep_fast_shadow && !a.first_open_form && a.owner == 0   // (an actor with an owner is sent to its owner alone)
+                       && e.shadow.all_active();   // (a shadow that holds a property back from this connection writes other blocks than the others: the views never do that today)
+    if (clean) {
+        if (const UpdateMemo::Variant* hit = sharing.find(a, e.sent_version)) {
+            const bool check = sharing.verify_due();
+            if (check) ++stats.verified;
+            if (!check || shared_update_holds(a, e, *hit)) {
+                built.private_form = false;
+                if (!hit->blocks.empty()) {   // (the exports differ by connection: they are assembled around the shared blocks)
+                    built.em = repl::assemble_blocks(a.actor, hit->blocks, acks_);
+                    if (!built.em) {
+                        built.failed = true;
+                        return;
+                    }
+                }
+                built.shared_record = &hit->record;
+                built.redo = &hit->redo;
+                ++stats.hits;
+                return;
+            }
+            sharing.mismatch(a.id, "a shared update differs from the update built from the view's own shadow");
+        }
+    }
+    repl::Actor scratch;
+    const repl::Actor& shown = view_of(a, scratch);
+    built.private_form = &shown != &a.actor;
+    // the update is kept for the other views when this shadow is a clean copy and the actor is drawn as the registry has it for every connection (not interactable)
+    const bool publish = sharing.active() && clean && !built.private_form && (config_.player_guid.has_value() || !world::is_interactable(a.actor));
+    std::vector<repl::ContentBlock> blocks;
+    built.em = update_in_place(shown, e.shadow, acks_, a.ability_exports, &built.failed, &built.record, built.undo, publish ? &blocks : nullptr);
+    if (!publish || built.failed) {
+        ++stats.private_builds;
+        return;
+    }
+    repl::ShadowRedo redo = repl::make_redo(built.undo, e.shadow);   // (before the connection can refuse the chain and the shadow goes back)
+    built.shared_record = &sharing.publish(a, e.sent_version, std::move(blocks), std::move(built.record), std::move(redo)).record;
+}
+
+bool ActorView::shared_update_holds(const world::WorldActor& a, const Entry& e, const UpdateMemo::Variant& hit) {
+    // the update built the plain way, from a copy of the shadow
+    repl::ActorShadow copy = e.shadow;
+    repl::ShadowUndo undo;
+    repl::SentRecord record;
+    bool failed = false;
+    const auto plain = update_in_place(a.actor, copy, acks_, a.ability_exports, &failed, &record, undo);
+    std::optional<repl::Emission> shared;
+    if (!hit.blocks.empty()) shared = repl::assemble_blocks(a.actor, hit.blocks, acks_);
+    if (failed || plain.has_value() != shared.has_value()) return false;
+    if (plain && (!repl::same_emission(*plain, *shared) || !repl::same_record(record, hit.record))) return false;
+    repl::ActorShadow after = e.shadow;
+    hit.redo.apply(after);
+    return repl::shadows_equal(copy, after);
 }
 
 bool ActorView::close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, ClientState next) {

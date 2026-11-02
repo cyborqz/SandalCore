@@ -177,6 +177,15 @@ struct ActorShadow {
     /// something that was sent, so an open keeps it.
     bool                        keep_fast = false;
 
+    /// True when no object of the shadow holds a property back from the connection (every ParentMask is all-active): what a shared update's blocks (shared_updates.h) are made for.
+    bool all_active() const {
+        if (!actor.active.all_active()) return false;
+        for (const auto& [id, sub] : subobjects) {
+            if (!sub.active.all_active()) return false;
+        }
+        return true;
+    }
+
     /// A new channel: the client has nothing.  A subobject's entry goes unless the caller gave it a mask (then it stays,
     /// forgotten).  Entries of subobjects the actor no longer has linger until then (a few KB each): the map is bounded by
     /// the subobjects the actor ever had.  With `keep_fast` every entry stays, forgotten but for its fast arrays.
@@ -235,6 +244,50 @@ struct SentRecord {
 /// The record of an update: `undo` is what collect_update_blocks recorded (what the update touched), `after` the shadow once it was written.
 SentRecord sent_record(const ShadowUndo& undo, const ActorShadow& after);
 
+/// True when the two records name the same handles, fast-array items and first blocks.
+bool same_record(const SentRecord& a, const SentRecord& b);
+
+// ---- one update for several connections --------------------------------------------
+
+/// What an update left in the shadow, entry for entry as the ShadowUndo records what it overwrote: the values AFTER the update.  A second connection whose shadow is where the
+/// first one's was before the update gets the update's blocks as they are (the blocks depend on the actor and the shadow, not on the connection) and `apply` puts its shadow where the
+/// first one's went, without diffing the actor against it again: the work is the handles the update carried, not all the actor's.
+struct ShadowRedo {
+    struct Object {
+        uint64_t id = 0;               // a subobject's ObjectId
+        bool     is_actor = false;
+        bool     opened = false;       // the entry's `opened` after the update (a subobject's first block sets it)
+        std::vector<std::pair<uint16_t, Value>>           rep;    // handle -> the value sent
+        std::vector<std::pair<uint32_t, FastArrayShadow>> fast;   // field -> the shadow of the array after the write
+    };
+    std::vector<Object> objects;
+
+    bool empty() const { return objects.empty(); }
+    /// Gives `shadow` the entries the update wrote (an entry the update created is created).  A shadow that held what the builder's held before the update is then the builder's.
+    void apply(ActorShadow& shadow) const;
+};
+
+/// The redo of an update: `undo` is what collect_update_blocks recorded, `after` the shadow once it was written.
+ShadowRedo make_redo(const ShadowUndo& undo, const ActorShadow& after);
+
+/// True when the two shadows hold the same entries with the same values (the masks compared as active or not).  What a check of a shared update compares; not used on the hot path.
+bool shadows_equal(const ActorShadow& a, const ActorShadow& b);
+
+/// What decides whether two connections' shadows of an actor can differ in a way its values do not show.  A shadow keeps an entry for a handle that was sent once, and the update
+/// compares a value set again against that entry; an actor that lost a value (RepState::erase) or a subobject since a shadow was started can have an entry another shadow lacks, and then
+/// the two diff the same value differently.  An actor whose shape did not change since two shadows were started cannot.
+struct ActorShape {
+    uint64_t erasures = 0;   // RepState::erasures over the actor and its subobjects
+    uint64_t ids = 0;        // a hash of the subobjects' ObjectIds, in order
+    uint32_t count = 0;      // how many subobjects
+    bool operator==(const ActorShape&) const = default;
+};
+
+ActorShape shape_of(const Actor& actor);
+
+/// The hash `ActorShape::ids` holds, over the first `n` subobjects only: an actor that gained subobjects has the hash of the shape before in the hash of its first `count` ones.
+uint64_t subobject_ids_hash(const Actor& actor, size_t n);
+
 // ---- what goes out --------------------------------------------------------------
 
 /// One Chain's worth: its export bunches and its payload.
@@ -253,6 +306,9 @@ struct Emission {
     bool                                    reliable = true;
 };
 // C O A.C-Y-B
+
+/// True when the two emissions put the same bits on the wire: the same export bunches and payload, the same GUIDs named, the same reliability.
+bool same_emission(const Emission& a, const Emission& b);
 
 /// One content block before it goes into the bunch.
 struct ContentBlock {

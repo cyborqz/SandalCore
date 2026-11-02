@@ -8,3 +8,5 @@
 // ============================================================================
 #include "actor_view_update_stream_tests.inc"
 #include "actor_view_scan_tests.inc"
+#include "actor_view_shadow_redo_tests.inc"
+#include "actor_view_shared_updates_tests.inc"

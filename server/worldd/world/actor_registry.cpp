@@ -37,6 +37,8 @@ bool ActorRegistry::add(WorldActor actor) {
     if (actor.npc.interact_component != 0 && by_component_.count(actor.npc.interact_component) != 0) return false;
     if (actor.npc.collision_cylinder != 0 && (by_component_.count(actor.npc.collision_cylinder) != 0 || actors_.count(actor.npc.collision_cylinder) != 0)) return false;
     const uint64_t id = actor.id;
+    actor.shape = repl::shape_of(actor.actor);   // (what it lost before it was added is lost to every connection alike)
+    actor.shape_epoch = 0;
     const auto it = actors_.emplace(id, std::move(actor)).first;
     grid_add(it->second);
     if (it->second.awake_radius_cm > kWideCm) wide_.push_back(id);
@@ -92,9 +94,21 @@ size_t ActorRegistry::count(ActorKind kind) const {
     return n;
 }
 
+void ActorRegistry::note_shape(WorldActor& a) {
+    const repl::ActorShape now = repl::shape_of(a.actor);
+    if (now == a.shape) return;
+    // subobjects added after the old ones (the old ones' ids are the first of the new list) and nothing erased: no shadow can hold an entry another lacks
+    const bool only_added = now.erasures == a.shape.erasures && now.count > a.shape.count && repl::subobject_ids_hash(a.actor, a.shape.count) == a.shape.ids;
+    a.shape = now;
+    if (!only_added) ++a.shape_epoch;
+}
+
 void ActorRegistry::touch(WorldActor& a, Change kind) {
     ++a.version;
-    if (kind != Change::Movement) ++a.reliable_version;
+    if (kind != Change::Movement) {
+        ++a.reliable_version;
+        note_shape(a);
+    }
     if (observer_) observer_->touched(a);
 }
 

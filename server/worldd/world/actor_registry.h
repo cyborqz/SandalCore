@@ -32,9 +32,14 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+namespace aoc::worldd {
+struct UpdateMemo;   // session/shared_updates.h: the update built for one state of an actor, shared by the views that hold it
+}
 
 namespace aoc::worldd::world {
 
@@ -160,6 +165,21 @@ struct GatherSeen {
     bool                             show = false;
 };
 
+/// The place on an actor for the update that the views share (session/shared_updates.h).  A copy of an actor starts without one: what it holds describes the actor it was made for.
+class UpdateMemoSlot {
+public:
+    UpdateMemoSlot() = default;
+    UpdateMemoSlot(const UpdateMemoSlot&) {}
+    UpdateMemoSlot& operator=(const UpdateMemoSlot&) {
+        ptr.reset();
+        return *this;
+    }
+    UpdateMemoSlot(UpdateMemoSlot&&) noexcept = default;
+    UpdateMemoSlot& operator=(UpdateMemoSlot&&) noexcept = default;
+
+    std::shared_ptr<UpdateMemo> ptr;
+};
+
 struct WorldActor {
     uint64_t   id = 0;                    // = actor.guid.ObjectId
     ActorKind  kind = ActorKind::Npc;
@@ -186,6 +206,12 @@ struct WorldActor {
     std::vector<repl::ExportChain> ability_exports;
     uint32_t   version = 1;               // every change of the replicated state
     uint32_t   reliable_version = 1;      // the changes that must not be lost
+    /// Shared updates (session/shared_updates.h).  `shape` is the actor's shape (repl::shape_of) as the registry last counted it and `shape_epoch` counts the changes of it that can leave two
+    /// connections' shadows holding different entries (a value or a subobject taken away; a subobject added is not one).  A view remembers the epoch its shadow was started under: shadows
+    /// of one epoch and one sent version give the same next update.  Counted by `touch` for every change but a Movement one (a position alone takes nothing away).
+    uint32_t   shape_epoch = 0;
+    repl::ActorShape shape;
+    UpdateMemoSlot update_memo;
     NpcInfo    npc;
     StationInfo station;                  // ActorKind::Station only
     ShrineInfo  shrine;                   // ActorKind::Shrine only
@@ -279,6 +305,8 @@ private:
     int32_t        cell_of(double v) const;
     void           grid_add(const WorldActor& a);
     void           grid_remove(const WorldActor& a);
+    /// Counts a change of the actor's shape (WorldActor::shape_epoch): a value or a subobject taken away.  A subobject only added is not counted.
+    static void    note_shape(WorldActor& a);
 
     RegistryConfig                                config_;
     std::unordered_map<uint64_t, WorldActor>      actors_;

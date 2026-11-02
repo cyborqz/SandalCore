@@ -14,6 +14,7 @@
 
 #include "protocol/emit/intrepid_netguid.h"
 
+#include <cstring>
 #include <map>
 #include <set>
 
@@ -310,6 +311,117 @@ SentRecord sent_record(const ShadowUndo& undo, const ActorShadow& after) {
     return out;
 }
 // -- C | O | A x C.Y.B --
+
+bool same_record(const SentRecord& a, const SentRecord& b) {
+    if (a.objects.size() != b.objects.size()) return false;
+    for (size_t i = 0; i < a.objects.size(); ++i) {
+        const SentObject& x = a.objects[i];
+        const SentObject& y = b.objects[i];
+        if (x.id != y.id || x.is_actor != y.is_actor || x.introduced != y.introduced || x.handles != y.handles || x.fast.size() != y.fast.size()) return false;
+        for (size_t k = 0; k < x.fast.size(); ++k) {
+            if (x.fast[k].field != y.fast[k].field || x.fast[k].changed != y.fast[k].changed || x.fast[k].removed != y.fast[k].removed) return false;
+        }
+    }
+    return true;
+}
+
+ShadowRedo make_redo(const ShadowUndo& undo, const ActorShadow& after) {
+    ShadowRedo out;
+    out.objects.reserve(undo.objects.size());
+    for (const ShadowUndo::Object& u : undo.objects) {
+        const ObjectShadow* now = nullptr;
+        if (u.is_actor) {
+            now = &after.actor;
+        } else {
+            const auto it = after.subobjects.find(u.id);
+            if (it != after.subobjects.end()) now = &it->second;
+        }
+        if (!now) continue;
+        ShadowRedo::Object o;
+        o.id = u.is_actor ? 0 : u.id;
+        o.is_actor = u.is_actor;
+        o.opened = now->opened;
+        o.rep.reserve(u.rep.entries.size());
+        for (const auto& [handle, before] : u.rep.entries) {
+            const auto cur = now->rep.sent.find(handle);
+            if (cur != now->rep.sent.end()) o.rep.emplace_back(handle, cur->second);
+        }
+        for (const auto& [field, before] : u.fast.entries) {
+            const auto cur = now->fast.by_field.find(field);
+            if (cur != now->fast.by_field.end()) o.fast.emplace_back(field, cur->second);
+        }
+        out.objects.push_back(std::move(o));
+    }
+    return out;
+}
+
+void ShadowRedo::apply(ActorShadow& shadow) const {
+    for (const Object& o : objects) {
+        ObjectShadow& sh = o.is_actor ? shadow.actor : shadow.subobjects[o.id];
+        sh.opened = o.opened;
+        for (const auto& [handle, value] : o.rep) sh.rep.sent[handle] = value;
+        for (const auto& [field, array] : o.fast) sh.fast.by_field[field] = array;
+    }
+}
+
+namespace {
+
+bool same_fast_shadow(const FastArrayShadow& a, const FastArrayShadow& b) { return a.array_key == b.array_key && a.items == b.items && a.resend == b.resend; }
+
+bool same_object_shadow(const ObjectShadow& a, const ObjectShadow& b) {
+    if (a.opened != b.opened || a.active.all_active() != b.active.all_active() || !(a.rep.sent == b.rep.sent)) return false;
+    if (a.fast.by_field.size() != b.fast.by_field.size()) return false;
+    for (auto x = a.fast.by_field.begin(), y = b.fast.by_field.begin(); x != a.fast.by_field.end(); ++x, ++y) {
+        if (x->first != y->first || !same_fast_shadow(x->second, y->second)) return false;
+    }
+    return true;
+}
+
+bool same_writer(const BunchWriter& a, const BunchWriter& b) {
+    const size_t bits = a.bit_pos();
+    if (bits != b.bit_pos()) return false;
+    const size_t whole = bits / 8;
+    if (whole != 0 && std::memcmp(a.data(), b.data(), whole) != 0) return false;
+    const size_t rest = bits % 8;   // (the bits are LSB first: the last byte's low bits are the valid ones)
+    if (rest == 0) return true;
+    const uint8_t mask = static_cast<uint8_t>((1u << rest) - 1u);
+    return (a.data()[whole] & mask) == (b.data()[whole] & mask);
+}
+
+}  // namespace
+
+bool shadows_equal(const ActorShadow& a, const ActorShadow& b) {
+    if (a.keep_fast != b.keep_fast || !same_object_shadow(a.actor, b.actor) || a.subobjects.size() != b.subobjects.size()) return false;
+    for (auto x = a.subobjects.begin(), y = b.subobjects.begin(); x != a.subobjects.end(); ++x, ++y) {
+        if (x->first != y->first || !same_object_shadow(x->second, y->second)) return false;
+    }
+    return true;
+}
+
+bool same_emission(const Emission& a, const Emission& b) {
+    if (a.reliable != b.reliable || a.exports.size() != b.exports.size() || !same_writer(a.payload, b.payload) || !(a.exported == b.exported) ||
+        !(a.exported_by_bunch == b.exported_by_bunch))
+        return false;
+    for (size_t i = 0; i < a.exports.size(); ++i) {
+        if (!same_writer(a.exports[i], b.exports[i])) return false;
+    }
+    return true;
+}
+
+ActorShape shape_of(const Actor& actor) {
+    ActorShape s;
+    s.erasures = actor.obj.state.erasures();
+    s.count = static_cast<uint32_t>(actor.subobjects.size());
+    for (const Subobject& sub : actor.subobjects) s.erasures += sub.obj.state.erasures();
+    s.ids = subobject_ids_hash(actor, actor.subobjects.size());
+    return s;
+}
+
+uint64_t subobject_ids_hash(const Actor& actor, size_t n) {
+    uint64_t h = 14695981039346656037ull;
+    for (size_t i = 0; i < n && i < actor.subobjects.size(); ++i) h = (h ^ actor.subobjects[i].guid.ObjectId) * 1099511628211ull;
+    return h;
+}
 
 std::optional<Emission> update_actor(const Actor& actor, ActorShadow& shadow, const ExportAcks& acks, bool* failed, SentRecord* record) {
     if (failed) *failed = false;

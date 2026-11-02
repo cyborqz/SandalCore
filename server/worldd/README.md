@@ -1627,6 +1627,28 @@ player.
   to the TimeStamp it is given, so a move that was not answered is answered for by the next. worldd now does the same
   (`session/player_move_ack.cpp`): a good move holds its TimeStamp, the session's tick sends it when the pace allows, a refused move drops the
   held one (its correction goes out with the datagram, as before). `--move-ack-gap-ms N` is the 100 ms; 0 answers every move at once.
+- **One update for the players who hold a mob in the same state (`--share-updates on|off|verify`, on by default).** When a mob
+  changes, each player's view compares the mob's values with the record of what that player's connection was last sent and writes the
+  handles that differ; the players around one place hold the same mobs, and that comparison does not depend on who looks. With
+  `on` the first view to build the change keeps it on the mob (`session/shared_updates.h`: the content blocks, the list of what they
+  carry and what they write into the record), and a view whose record stands at the same version takes the blocks as they are, assembles its
+  own exports around them (what its client has acknowledged differs), chooses reliable or not for itself, and gives its record what the change
+  wrote, so the work that is left for it is the handles that changed. A view takes a shared update only while its record is a clean copy of
+  that version: no lost packet's values were put back into it, it holds no per-player form of an interactable mob, it was started under
+  the mob's present shape (`WorldActor::shape_epoch`: a value or a subobject taken away since, or an array that lost an element value, leaves
+  an entry in one record that another lacks, so the same value set again is sent by one and skipped by the other; the registry counts those),
+  the mob has no first-open form and keeps no fast-array state between opens, and it belongs to nobody in particular. Any doubt builds the
+  change for that view alone. `verify` shares, and also builds one shared update in eight the plain way on a copy of the record and compares
+  the bytes, the list of what was carried and the record afterwards; a difference logs the mob and turns sharing off for the run. `off`
+  sends what every view builds for itself, as before sharing existed. With `--loop-stats` a `[share]` line follows the `[tick]` line (the
+  updates taken from another view's blocks, the ones built for sharing, the ones built for one view only, the ones checked). It pays where
+  many players hold the same mobs in the same state; players spread over a big area share little. Tests: `test_worldd_actor_view`
+  (`actor_view_shadow_redo_tests.inc`: random changes against two records of one mob at the same version, one started by an open and
+  one by updates, with the schemas of the mobs the loader builds, and the case of an array that loses an element value that was sent as a
+  zero; `actor_view_shared_updates_tests.inc`: six and forty players around 16 and 650 mobs with lost packets, silent stretches, refusals,
+  casts, a value taken away and interactable mobs, byte for byte the same datagrams with and without sharing, a damaged shared update found
+  by `verify`, and the cost of an update). The test programs of the other suites run with sharing in `verify` mode (every shared update is also
+  built the plain way and compared; `AOC_TEST_SHARE_UPDATES=off|on|verify` changes it), and each one fails when a shared update differed.
 - **`--tick-hz 0`** keeps the old loop (a tick after every datagram, and every 10 ms without one), for comparing the two.
 - **`--loop-stats N`** prints every N seconds a `[loop]` line (the ticks, the share of the time spent working, the p50, p99 and longest tick,
   the datagrams and bytes each way, the sessions, the position saver's queue) and a `[tick]` line: the rate, the datagrams per second and per
@@ -1660,7 +1682,7 @@ worldd --bind 127.0.0.1:7777 --public-address 127.0.0.1:7777 --mesh 127.0.0.1:50
        [--content-db dist/content/content.db] [--gamestate-mode tier1|tier2|tier3|captured] [--max-move-speed 2135]
        [--area-radius -1|1000] [--gm-garden] [--no-zone-filter]
        [--world-admin 127.0.0.1:50056] [--no-world-admin] [--gm-commands]
-       [--world-stream 127.0.0.1:50057] [--no-world-stream] [--tick-hz 30] [--loop-stats 0] [--no-view-spread] [--move-ack-gap-ms 100]
+       [--world-stream 127.0.0.1:50057] [--no-world-stream] [--tick-hz 30] [--loop-stats 0] [--no-view-spread] [--move-ack-gap-ms 100] [--share-updates on|off|verify]
 ```
 
 At start it binds the UDP port, registers with mesh (retrying until mesh answers) and sends

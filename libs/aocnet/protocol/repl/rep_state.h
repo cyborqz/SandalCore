@@ -53,8 +53,18 @@ public:
     /// connection that never had it.  False when the handle was not set.  (A connection that already holds it keeps what it has: UE has no
     /// "unset" either.)
     bool erase(uint32_t handle) {
-        return handle <= UINT16_MAX && values_.erase(static_cast<uint16_t>(handle)) != 0;
+        const bool erased = handle <= UINT16_MAX && values_.erase(static_cast<uint16_t>(handle)) != 0;
+        if (erased) ++erasures_;
+        return erased;
     }
+
+    /// How many values were erased so far (a count that only rises: a copy carries it, a state built from nothing starts at 0).  A connection's shadow can hold an entry for a
+    /// handle that was erased since, and then compares a value set again against it instead of sending it as new; the actor registry counts the erasures to tell the shadows
+    /// that cannot differ in that way from the ones that can (shape_of in replicator.h).  A set that puts an array over an array and leaves out an element value the old one
+    /// had at the same element counts as one erasure too: a shadow that was sent that value as a zero keeps it, since the zero is not sent again when the value goes
+    /// (rep_block.h), and a shadow started later has no entry for it.  (Elements that are gone from the end of the array are not counted: the next update of a shadow that saw the
+    /// count change writes the array again, so the shadow keeps nothing of them.)
+    uint64_t erasures() const { return erasures_; }
 
     const Value* get(uint32_t handle) const;
     const Value* get(const schema::ClassSchema& schema, std::string_view path) const;
@@ -67,6 +77,7 @@ public:
 
 private:
     std::map<uint16_t, Value> values_;
+    uint64_t                  erasures_ = 0;
 };
 
 }}}  // namespace aoc::protocol::repl

@@ -25,6 +25,7 @@
 #include "net/udp_socket.h"
 #include "protocol/server_guid_allocator.h"
 #include "session/player_world.h"
+#include "session/shared_updates.h"
 #include "session/gm_travel.h"
 #include "quest/quest_service.h"
 #include "session/position_saver.h"
@@ -389,6 +390,11 @@ int main(int argc, char** argv) {
     app.add_flag("--no-view-spread", no_view_spread,
                  "the kill switch for the spread of the players' view passes: each player's passes land on the tick its first pass fell on (players who join together then pass together)")
         ->envname("AOC_NO_VIEW_SPREAD");
+    std::string share_updates_text = "on";
+    app.add_option("--share-updates", share_updates_text,
+                   "on, off or verify: build the change of a mob once for every player who holds it in the same state, and send each of them that update (session/shared_updates.h); "
+                   "verify also builds one shared update in eight the plain way and compares the bytes (a difference is logged and turns sharing off). Off sends what every player's own update builds")
+        ->envname("AOC_SHARE_UPDATES")->check(CLI::IsMember({"on", "off", "verify"}))->capture_default_str();
     int move_ack_gap_ms = 100;
     app.add_option("--move-ack-gap-ms", move_ack_gap_ms,
                    "the pace of the answers to a player's good moves: the latest good move of a tick is answered when more than this many milliseconds have gone by since the last answer, "
@@ -532,6 +538,18 @@ int main(int argc, char** argv) {
     } else {
         spdlog::info("[tick] --tick-hz 0: the old loop, every session's tick and sends after every datagram (and every 10 ms without one)");
     }
+    // the update of a mob built once for the players who hold it in the same state (session/shared_updates.h); on unless --share-updates says otherwise
+    const ShareMode share_mode = SharedUpdates::parse(share_updates_text);
+    std::shared_ptr<SharedUpdates> shared_updates;
+    if (share_mode != ShareMode::Off) shared_updates = std::make_shared<SharedUpdates>(share_mode);
+    {
+        ActorView::Config view = players.view_config();
+        view.shared = shared_updates;   // (none for off: the test programs' environment switch is not read here)
+        players.set_view_config(view);
+    }
+    spdlog::info("[share-updates] {}", share_mode == ShareMode::Off ? "off (--share-updates off): every player's view builds the changes it sends (the default, on, builds a mob's change once for the players who hold it in the same state)"
+                 : share_mode == ShareMode::On ? "on: a mob's change is built once for the players who hold it in the same state (--share-updates off: every player's view builds its own)"
+                                               : "verify: shared, and one shared update in eight is built the plain way as well and compared; a difference turns sharing off");
     players.set_position_sink(&saver);
     players.set_gm_commands(gm_commands);
     players.set_reactions_enabled(!no_reactions);
@@ -879,6 +897,7 @@ int main(int argc, char** argv) {
     std::optional<TickLoop> tick_loop;
     if (tick_hz > 0) tick_loop.emplace(TickLoop::Config{tick_hz, 4, 256}, Clock::now());
     auto window_start = Clock::now();
+    SharedUpdates::Stats share_before;   // (--share-updates: the counts of the interval are the difference to these)
     const auto log_stats = [&](Clock::time_point at) {
         const double window_s = std::chrono::duration<double>(at - window_start).count();
         if (loop_stats_seconds <= 0 || window_s < loop_stats_seconds) return;
@@ -903,6 +922,13 @@ int main(int argc, char** argv) {
                      profile.opens, profile.update_us / 1000.0, profile.updates, profile.update_build_us / 1000.0, profile.flush_us / 1000.0,
                      late_ms, ls.caught_up, ls.skipped, ls.restarts,
                      profile.top_name.empty() ? std::string("none") : profile.top_name, profile.top_us / 1000.0, profile.top_view_us / 1000.0, profile.top_awake, profile.top_dormant);
+        if (shared_updates) {
+            const SharedUpdates::Stats now = shared_updates->stats();
+            spdlog::info("[share] {:.1f} s: mode={} updates built once for several players: used={} built={}; built for one player only={}; checked={} differed={}", window_s,
+                         SharedUpdates::name(shared_updates->mode()), now.hits - share_before.hits, now.builds - share_before.builds, now.private_builds - share_before.private_builds,
+                         now.verified - share_before.verified, now.mismatches - share_before.mismatches);
+            share_before = now;
+        }
         if (tick_loop) tick_loop->schedule().reset_late_max();
         loop_stats = LoopStats{};
         profile.restart();
