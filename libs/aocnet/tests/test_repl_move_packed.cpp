@@ -599,10 +599,13 @@ static void test_hostile_parameters() {
 }
 // [CoA :: C.Y.B]
 
+#include "move_base_inline.inc"
+
 int main() {
     test_captures();
     test_first_move();
     test_made_moves();
+    test_move_base_inline();
     test_refusals();
     test_buffer_bounds();
     test_hostile_parameters();

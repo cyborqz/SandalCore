@@ -59,8 +59,8 @@
 //                       ServerRequestStorageData             the storage payload of the container named
 //                                                            (pkt#773)
 //                       ServerMovePacked                     checked (below); a plausible move gets
-//                                                            ClientMoveResponsePacked, unreliable, with its
-//                                                            TimeStamp, an implausible one ClientAdjustPosition
+//                                                            ClientMoveResponsePacked, unreliable, with its TimeStamp,
+//                                                            paced (see session/members/move_ack.inc); an implausible one ClientAdjustPosition
 //    AbilityComponent   ServerTriggerAbility                 Sprint, Dodge and Rest start (plan A7, below); anything
 //                                                            else, and a refused one, is answered with ClientEndAbility
 //                       ServerNotifyHeldAbilityCancelled     releases a running Sprint or Rest
@@ -169,8 +169,8 @@
 //  judged by the player's MoveChecker (session/move_checker.h) against the last good position: finite numbers, inside
 //  Verra, a rising TimeStamp, no more distance than the speed limits allow.  The older moves of a packet are judged
 //  first (oldest first, those already seen skipped), then the new one, whose verdict is the reply: accepted, then
-//  ClientMoveResponsePacked with its TimeStamp (as in A5), and the move is the player's last good position and yaw;
-//  refused, then PlayerBootstrap::correction, ClientAdjustPosition with the refused move's TimeStamp and the last good
+//  ClientMoveResponsePacked with its TimeStamp, paced (session/members/move_ack.inc), and the move is the player's last good
+//  position and yaw; refused, then PlayerBootstrap::correction, ClientAdjustPosition with its TimeStamp and the last good
 //  position, so that the client snaps back and the next move is measured from there.  Nobody is kicked.  The checker is
 //  given the Endpoint's clock (the `now` of on_bunch): the TimeStamp is the client's own clock and is paced against
 //  the server's (move_checker.h), so moves that arrive together share one `now` and one bank of time.  A parameter

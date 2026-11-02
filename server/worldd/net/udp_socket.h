@@ -53,10 +53,15 @@ public:
     bool send(const Address& to, const uint8_t* data, size_t len);
     /// The bound address (the port the system chose for port 0).
     Address local_address() const;
+    /// The size of the system's receive buffer in bytes, as the system granted it when the socket opened (open asks for kReceiveBufferBytes); 0 when it could not be read.
+    int receive_buffer_bytes() const { return receive_buffer_; }
+    /// What open asks the system for: datagrams that arrive while a tick runs long wait in it (the default on Windows is about 64 KB, a few hundred packets of a full server).
+    static constexpr int kReceiveBufferBytes = 1 << 20;
 
 private:
     explicit UdpSocket(intptr_t handle) : handle_(handle) {}
     intptr_t handle_;
+    int receive_buffer_ = 0;
 };
 
 }} // namespace aoc::worldd

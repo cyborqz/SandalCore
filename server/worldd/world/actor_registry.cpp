@@ -31,12 +31,15 @@ void ActorRegistry::grid_remove(const WorldActor& a) {
 }
 
 bool ActorRegistry::add(WorldActor actor) {
+    check_not_frozen("add");
     if (actor.id == 0 || (actor.id & 1) != 0 || actor.id != actor.actor.guid.ObjectId) return false;
     if (!std::isfinite(actor.x) || !std::isfinite(actor.y) || !std::isfinite(actor.z) || !std::isfinite(actor.yaw_degrees)) return false;
     if (actors_.count(actor.id) != 0) return false;
     if (actor.npc.interact_component != 0 && by_component_.count(actor.npc.interact_component) != 0) return false;
     if (actor.npc.collision_cylinder != 0 && (by_component_.count(actor.npc.collision_cylinder) != 0 || actors_.count(actor.npc.collision_cylinder) != 0)) return false;
     const uint64_t id = actor.id;
+    actor.shape = repl::shape_of(actor.actor);   // (what it lost before it was added is lost to every connection alike)
+    actor.shape_epoch = 0;
     const auto it = actors_.emplace(id, std::move(actor)).first;
     grid_add(it->second);
     if (it->second.awake_radius_cm > kWideCm) wide_.push_back(id);
@@ -48,6 +51,7 @@ bool ActorRegistry::add(WorldActor actor) {
 // ~ C | Y | B - C.O.A ~
 
 bool ActorRegistry::remove(uint64_t id) {
+    check_not_frozen("remove");
     const auto it = actors_.find(id);
     if (it == actors_.end()) return false;
     // a listener may add or remove listeners (a session ending): walk a copy
@@ -63,6 +67,7 @@ bool ActorRegistry::remove(uint64_t id) {
 }
 
 bool ActorRegistry::set_interact_component(uint64_t id, uint64_t component) {
+    check_not_frozen("set_interact_component");
     WorldActor* a = find(id);
     if (!a || component == 0 || by_component_.count(component) != 0) return false;
     if (a->npc.interact_component != 0) by_component_.erase(a->npc.interact_component);
@@ -92,13 +97,27 @@ size_t ActorRegistry::count(ActorKind kind) const {
     return n;
 }
 
+void ActorRegistry::note_shape(WorldActor& a) {
+    const repl::ActorShape now = repl::shape_of(a.actor);
+    if (now == a.shape) return;
+    // subobjects added after the old ones (the old ones' ids are the first of the new list) and nothing erased: no shadow can hold an entry another lacks
+    const bool only_added = now.erasures == a.shape.erasures && now.count > a.shape.count && repl::subobject_ids_hash(a.actor, a.shape.count) == a.shape.ids;
+    a.shape = now;
+    if (!only_added) ++a.shape_epoch;
+}
+
 void ActorRegistry::touch(WorldActor& a, Change kind) {
+    check_not_frozen("touch");
     ++a.version;
-    if (kind != Change::Movement) ++a.reliable_version;
+    if (kind != Change::Movement) {
+        ++a.reliable_version;
+        note_shape(a);
+    }
     if (observer_) observer_->touched(a);
 }
 
 bool ActorRegistry::move(uint64_t id, double x, double y, double z, double yaw_degrees) {
+    check_not_frozen("move");
     WorldActor* a = find(id);
     if (!a || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(yaw_degrees)) return false;
     const int32_t ocx = cell_of(a->x), ocy = cell_of(a->y), ncx = cell_of(x), ncy = cell_of(y);
@@ -151,12 +170,14 @@ void ActorRegistry::query_wide(double x, double y, double margin_cm, std::vector
 }
 
 uint32_t ActorRegistry::on_remove(Listener l) {
+    check_not_frozen("on_remove");
     const uint32_t handle = next_listener_++;
     listeners_.emplace_back(handle, std::move(l));
     return handle;
 }
 
 void ActorRegistry::off_remove(uint32_t handle) {
+    check_not_frozen("off_remove");
     listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(), [handle](const auto& p) { return p.first == handle; }), listeners_.end());
 }
 

@@ -300,6 +300,55 @@ void test_real(const std::string& path) {
     CHECK(!gm.empty() && gm[0].stat_name == "Mitigation" && eval(gm[0].value_expr, v) && std::fabs(v - 0.02) < 1e-6, "Glee is 0.02 without Merriment (0.03 with it)");
 }
 
+// contentc version 39: what the effect engine reads of an effect record besides its older columns, and the records an effect names to control its holder
+void test_effect_control(const std::string& path) {
+    std::printf("the effect-control columns and tables\n");
+    std::string err;
+    auto opened = AbilityContent::open(path, err);
+    CHECKF(opened.has_value(), "open: %s", err.c_str());
+    if (!opened) return;
+    const AbilityContent& db = *opened;
+    CHECK(db.contentc_version() >= 39, "contentc version 39 or later");
+
+    auto bleeding = db.effect_by_name("Status_Bleeding", err);
+    CHECK(bleeding && bleeding->compare_source && bleeding->recalc_on_tick && !bleeding->stacks_lost_on_elapse && bleeding->extension_expr == 0, "Bleeding compares sources and recalculates its tick hits, and has no extension");
+    auto hemorrhage = db.effect_by_name("Status_Hemorrhage", err);
+    CHECK(hemorrhage && hemorrhage->compare_source && hemorrhage->recalc_on_tick, "Hemorrhage does too");
+    auto shaken = db.effect_by_name("Status_Shaken", err);
+    CHECK(shaken && !shaken->compare_source && shaken->extended_max == 15.0 && shaken->extension_expr != 0, "Shaken does not compare sources, extends up to 15 s and has an extension amount");
+    if (shaken && shaken->extension_expr != 0) {
+        auto amount = db.expr(shaken->extension_expr, err);
+        CHECK(amount && amount->program >= 0 && contains(amount->text, "GetEffectRemainingDuration") && contains(amount->text, "Max(6.0 - dur, 3.0)"), "...the amount is max(6 s less what is left, 3 s), and it compiles");
+    }
+    auto aura = db.effect_by_name("Status_BurningAura", err);
+    CHECK(aura && aura->extended_max == 120.0 && aura->extension_expr != 0, "the Burning aura extends up to 120 s");
+    if (aura && aura->extension_expr != 0) {
+        auto amount = db.expr(aura->extension_expr, err);
+        CHECK(amount && amount->program < 0, "...with an amount that does not compile (a term of another formula)");
+    }
+
+    // the crowd-control records of the slow, the stun and the sleep
+    auto snared = db.effect_by_name("Status_Snared", err);
+    auto snare = snared ? db.crowd_control(snared->crowd_control_guid, err) : std::nullopt;
+    CHECK(snare && snare->name == "General_Snare" && snare->applied_status == 16 && snare->snare_strength == 0.25 && snare->disable_guid == 0 && snare->animation_request == "ECrowdControlAnimationRequest::None",
+          "Snared names General_Snare: status 16, a quarter of the speed, nothing disabled");
+    auto stunned = db.effect_by_name("Status_Stunned", err);
+    auto stun = stunned ? db.crowd_control(stunned->crowd_control_guid, err) : std::nullopt;
+    CHECK(stun && stun->name == "General_Stun" && stun->applied_status == 7 && stun->priority == 200 && stun->animation_request == "ECrowdControlAnimationRequest::Stunned" && stun->disable_guid != 0,
+          "Stunned names General_Stun: status 7, priority 200, the stunned animation and a record of the abilities it stops");
+    auto disable = stun ? db.ability_disable(stun->disable_guid, err) : std::nullopt;
+    CHECK(disable && disable->name == "AbilityDisable_All" && disable->filter == "true", "...which stops every ability");
+    auto sleep = db.effect_by_name("Status_Incapacitated", err);
+    std::vector<int64_t> fragilities;
+    CHECK(sleep && db.effect_fragilities(sleep->guid, fragilities, err) && fragilities.size() == 1, "the sleep lists one fragility record");
+    if (fragilities.size() == 1) {
+        auto frag = db.fragility(fragilities[0], err);
+        CHECK(frag && frag->name == "InstantBreak" && frag->fragility_type == "EEffectFragilityType::FRAGILITY_Proc" && contains(frag->bindings, "HitEvents"), "...InstantBreak, checked when its holder is hit");
+    }
+    err.clear();
+    CHECK(!db.crowd_control(1, err) && contains(err, "no crowd-control record"), "a crowd-control record that is not there says so");
+}
+
 }  // namespace
 
 int main() {
@@ -309,6 +358,7 @@ int main() {
     std::error_code ec;
     if (std::filesystem::is_regular_file(std::filesystem::path(path), ec)) {
         test_real(path);
+        test_effect_control(path);
     } else {
         std::printf("no content.db at %s (cd services && go run ./cmd/contentc): the real-data half is skipped\n", path.c_str());
     }

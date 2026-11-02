@@ -8,6 +8,8 @@
 // ============================================================================
 #include "vendor/gm_vendor.h"
 
+#include "items/inventory.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -16,6 +18,10 @@ namespace aoc::worldd::vendor {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+/// The most stacks of materials a cart may need: what the material bags of a character hold at the most. A cart over it can never fit; whether the rest fits is for the inventory's
+/// grant to say (it takes the whole cart or none of it).
+constexpr size_t kMaxMaterialStacks = static_cast<size_t>(items::kResourceContainers) * static_cast<size_t>(items::kMaxResourceCells);
 
 std::string after_prefix(const std::string& def_name) {
     const std::string p = kGmVendorPrefix;
@@ -121,7 +127,8 @@ PurchasePlan GmVendors::plan_purchase(const content::ContentDb& db, const GmVend
     if (cart.items.empty()) return refuse("the cart is empty");
     if (cart.items.size() > kMaxCartItems) return refuse("the cart holds " + std::to_string(cart.items.size()) + " items (at most " + std::to_string(kMaxCartItems) + ")");
     std::string error;
-    size_t total_stacks = 0;
+    size_t total_stacks = 0;      // the stacks that go to the item bag
+    size_t material_stacks = 0;   // the stacks of materials: they go to the material bags, which the item bag's free slots do not count
     for (const protocol::repl::VendorCartItem& e : cart.items) {
         if (e.quantity < 1 || e.quantity > kMaxQuantity) return refuse("an item of the cart asks for a quantity of " + std::to_string(e.quantity));
         if (!vendor.items.count(e.item_record)) return refuse("item " + std::to_string(e.item_record) + " is not one of " + vendor.name + "'s listings");
@@ -129,9 +136,16 @@ PurchasePlan GmVendors::plan_purchase(const content::ContentDb& db, const GmVend
         if (!rec) return refuse(error.empty() ? "content.db has no item record " + std::to_string(e.item_record) : "content.db failed: " + error);
         const int32_t stack = rec->max_stack_size > 0 ? rec->max_stack_size : 1;
         const size_t stacks = static_cast<size_t>((static_cast<int64_t>(e.quantity) + stack - 1) / stack);
-        total_stacks += stacks;
-        if (total_stacks > free_slots) {
-            return refuse("the bag has " + std::to_string(free_slots) + " free slot(s) and the cart needs more (" + std::to_string(total_stacks) + " stack(s) so far)");
+        if (rec->resource) {
+            material_stacks += stacks;
+            if (material_stacks > kMaxMaterialStacks) {
+                return refuse("the material bags hold at most " + std::to_string(kMaxMaterialStacks) + " stack(s) and the cart needs more (" + std::to_string(material_stacks) + " stack(s) of materials so far)");
+            }
+        } else {
+            total_stacks += stacks;
+            if (total_stacks > free_slots) {
+                return refuse("the bag has " + std::to_string(free_slots) + " free slot(s) and the cart needs more (" + std::to_string(total_stacks) + " stack(s) so far)");
+            }
         }
         int32_t left = e.quantity;
         while (left > 0) {

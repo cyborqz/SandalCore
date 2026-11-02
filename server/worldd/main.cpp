@@ -25,6 +25,7 @@
 #include "net/udp_socket.h"
 #include "protocol/server_guid_allocator.h"
 #include "session/player_world.h"
+#include "session/shared_updates.h"
 #include "session/gm_travel.h"
 #include "quest/quest_service.h"
 #include "session/position_saver.h"
@@ -181,6 +182,10 @@ int main(int argc, char** argv) {
         ->envname("AOC_GM_COMMANDS");
     app.add_flag("--no-reactions", no_reactions, "the game's reactions do not run (the extra effects of a weapon's finisher, the Bard's Resonance and melodies): abilities and hits land as before reactions were built")
         ->envname("AOC_NO_REACTIONS");
+    uint64_t combat_seed = 0;
+    app.add_option("--combat-seed", combat_seed,
+                   "the number the hit, block and critical rolls start from: 0 (the default) takes a new one on every start, so each run rolls differently; any other number repeats the same rolls for the same fights")
+        ->envname("AOC_COMBAT_SEED")->capture_default_str();
     app.add_option("--service-token-file", token_file, "the internal services' shared token");
     app.add_option("--log-file", log_file, "also write the log to this file");
     app.add_option("--content-db", content_db_path,
@@ -375,23 +380,52 @@ int main(int argc, char** argv) {
     // the server's tick at a fixed rate (net/tick_loop.h)
     int tick_hz = 30;
     double loop_stats_seconds = 0;
+    bool no_view_spread = false;
     app.add_option("--tick-hz", tick_hz,
                    "the server's tick, times a second (10 to 120): every session's due work and every client's packets; the original server sent every 33 ms, 30 times a second. "
-                   "The NPCs keep their 15 Hz step and each player's view of the world its 15 passes a second whatever the tick. 0: the old loop, a tick after every datagram")
+                   "The NPCs keep their 15 Hz step and each player's view of the world about 15 passes a second (the length of 67 ms in whole ticks: 20 a second at 20 Hz, 12.5 at 25 Hz, "
+                   "10 at 10 Hz). 0: the old loop, a tick after every datagram")
         ->envname("AOC_TICK_HZ")
         ->capture_default_str();
+    app.add_flag("--no-view-spread", no_view_spread,
+                 "the kill switch for the spread of the players' view passes: each player's passes land on the tick its first pass fell on (players who join together then pass together)")
+        ->envname("AOC_NO_VIEW_SPREAD");
+    unsigned view_threads = 4;
+    CLI::Option* view_threads_option = app.add_option("--view-threads", view_threads,
+                   "the threads that run the players' view passes side by side, the tick's own included (0 to 8): with 1 or more the tick runs every session's own work, then all the due passes at once "
+                   "with the world's registry frozen, then every session's flush (session/view_pool.h); 1 runs the passes in order on the tick's own thread. 0: each session's work, view and "
+                   "flush in turn, as before. The default is 4. Needs --tick-hz 10 or more (--tick-hz 0, the old loop, runs no threads and refuses an asked-for number); more threads than the machine has "
+                   "cores less two are not started (at least one is)")
+        ->envname("AOC_VIEW_THREADS")->check(CLI::Range(0, static_cast<int>(kViewWorkers)))->capture_default_str();
+    std::string share_updates_text = "on";
+    app.add_option("--share-updates", share_updates_text,
+                   "on, off or verify: build the change of a mob once for every player who holds it in the same state, and send each of them that update (session/shared_updates.h); "
+                   "verify also builds one shared update in eight the plain way and compares the bytes (a difference is logged and turns sharing off). Off sends what every player's own update builds")
+        ->envname("AOC_SHARE_UPDATES")->check(CLI::IsMember({"on", "off", "verify"}))->capture_default_str();
+    int move_ack_gap_ms = 100;
+    app.add_option("--move-ack-gap-ms", move_ack_gap_ms,
+                   "the pace of the answers to a player's good moves: the latest good move of a tick is answered when more than this many milliseconds have gone by since the last answer, "
+                   "as the original server did (about every second move of a walking player); 0 answers every move at once")
+        ->envname("AOC_MOVE_ACK_GAP_MS")->check(CLI::Range(0, 1000))->capture_default_str();
     app.add_option("--loop-stats", loop_stats_seconds,
-                   "every N seconds print a [loop] line (the ticks, the share of the time working, the p50/p99/longest tick, the datagrams and bytes each way, the sessions, the "
+                   "every N seconds (1 or more) print a [loop] line (the ticks, the share of the time working, the p50/p99/longest tick, the datagrams and bytes each way, the sessions, the "
                    "save queue) and a [tick] line (the rate, and where the tick's time went: the world, the sessions, their views, the sends, the costliest session); 0: off")
         ->envname("AOC_LOOP_STATS_SECONDS")
         ->capture_default_str();
     CLI11_PARSE(app, argc, argv);
+    if (view_threads > 0 && tick_hz == 0) {
+        if (view_threads_option->count() > 0) {   // asked for, on the command line or in AOC_VIEW_THREADS: the old loop has no phases to run the passes in
+            std::fprintf(stderr, "--view-threads needs the fixed-rate tick (--tick-hz 10 or more): the old loop (--tick-hz 0) has no phases to run the passes in\n");
+            return 2;
+        }
+        view_threads = 0;   // (the default gives way to the old loop that --tick-hz 0 asks for)
+    }
     if (tick_hz != 0 && (tick_hz < TickSchedule::kMinHz || tick_hz > TickSchedule::kMaxHz)) {
         std::fprintf(stderr, "--tick-hz must be 0 (the old loop) or %d to %d, not %d\n", TickSchedule::kMinHz, TickSchedule::kMaxHz, tick_hz);
         return 2;
     }
-    if (!std::isfinite(loop_stats_seconds) || loop_stats_seconds < 0) {
-        std::fprintf(stderr, "--loop-stats must be a number of seconds, 0 or more, not %g\n", loop_stats_seconds);
+    if (!std::isfinite(loop_stats_seconds) || (loop_stats_seconds != 0 && loop_stats_seconds < 1)) {
+        std::fprintf(stderr, "--loop-stats must be 0 (off) or a number of seconds, 1 or more, not %g\n", loop_stats_seconds);
         return 2;
     }
     // CLI11's Range lets a NaN through (every comparison with it is false), so the numbers that were range-checked are checked once more as numbers
@@ -501,21 +535,42 @@ int main(int argc, char** argv) {
         spdlog::error("worldd refuses every login: {}", players.content_problem());
     }
     players.set_movement(movement);
+    players.set_move_ack_gap(std::chrono::milliseconds(move_ack_gap_ms));
+    spdlog::info("[movement] {}", move_ack_gap_ms > 0 ? "a player's good moves are answered at the original server's pace: the latest one of a tick, at most one in " + std::to_string(move_ack_gap_ms) + " ms"
+                                                       : std::string("every good move of a player is answered at once (--move-ack-gap-ms 0)"));
     if (tick_hz > 0) {
         // each player's view pass and its Dormancy closes keep their lengths (67 ms, 134 ms) on the tick's grid
         ActorView::Config view = players.view_config();
-        tick_view_timing(view.relevancy, TickSchedule::period_of(tick_hz));
+        const int64_t ticks_per_pass = tick_view_timing(view.relevancy, TickSchedule::period_of(tick_hz));
+        // the players' passes take turns on the ticks of their cycle instead of all landing on the tick their first pass fell on (session/view_phases.h)
+        if (ticks_per_pass > 1 && !no_view_spread) view.phases = std::make_shared<ViewPhases>(static_cast<unsigned>(ticks_per_pass));
         players.set_view_config(view);
         spdlog::info("[tick] the server ticks {} times a second (every {:.2f} ms): each tick runs every session's due work and sends every client's packets; the NPCs step 15 times a "
-                     "second and each player's view of the world passes every {} ms (Dormancy closes after {} ms)",
-                     tick_hz, std::chrono::duration<double, std::milli>(TickSchedule::period_of(tick_hz)).count(), view.relevancy.tick.count(), view.relevancy.dormancy_delay.count());
+                     "second and each player's view of the world passes every {} ms (Dormancy closes after {} ms){}",
+                     tick_hz, std::chrono::duration<double, std::milli>(TickSchedule::period_of(tick_hz)).count(), view.relevancy.tick.count(), view.relevancy.dormancy_delay.count(),
+                     view.phases ? ", the players' passes spread over " + std::to_string(ticks_per_pass) + " ticks" : std::string());
     } else {
         spdlog::info("[tick] --tick-hz 0: the old loop, every session's tick and sends after every datagram (and every 10 ms without one)");
     }
+    // the update of a mob built once for the players who hold it in the same state (session/shared_updates.h); on unless --share-updates says otherwise
+    const ShareMode share_mode = SharedUpdates::parse(share_updates_text);
+    std::shared_ptr<SharedUpdates> shared_updates;
+    if (share_mode != ShareMode::Off) shared_updates = std::make_shared<SharedUpdates>(share_mode);
+    {
+        ActorView::Config view = players.view_config();
+        view.shared = shared_updates;   // (none for off: the test programs' environment switch is not read here)
+        players.set_view_config(view);
+    }
+    spdlog::info("[share-updates] {}", share_mode == ShareMode::Off ? "off (--share-updates off): every player's view builds the changes it sends (the default, on, builds a mob's change once for the players who hold it in the same state)"
+                 : share_mode == ShareMode::On ? "on: a mob's change is built once for the players who hold it in the same state (--share-updates off: every player's view builds its own)"
+                                               : "verify: shared, and one shared update in eight is built the plain way as well and compared; a difference turns sharing off");
     players.set_position_sink(&saver);
     players.set_gm_commands(gm_commands);
     players.set_reactions_enabled(!no_reactions);
     if (no_reactions) spdlog::info("[abilities] the game's reactions are OFF (--no-reactions)");
+    const uint64_t dice_seed = combat_seed != 0 ? combat_seed : gather::fresh_seed();
+    players.set_dice_seed(dice_seed);
+    spdlog::info("[combat] the hit, block and critical rolls start from seed {}{}", dice_seed, combat_seed != 0 ? " (--combat-seed: the same rolls for the same fights)" : " (new on every start)");
     players.set_quest_worker(&quest_worker);
     spdlog::info("[gm] the client's own GM teleport commands are {}", gm_commands ? "ON (--gm-commands)" : "off (--gm-commands, or AOC_GM_COMMANDS=1, turns them on); each one the client sends is logged");
     // Nodes 1, stage 1: the registry from content.db, the seed's levels at once (login never waits for the service), then the stream.  The feed is declared
@@ -629,6 +684,7 @@ int main(int argc, char** argv) {
             players.set_spawn_context(std::move(context));
             combat::CombatWorldConfig combat_config;
             combat_config.enabled = !no_combat;
+            combat_config.seed = dice_seed;
             combat_config.default_aggro_cm = npc_aggro_cm;
             combat_config.default_leash_cm = npc_leash_cm;
             combat_config.npc_damage_mult = npc_damage_mult;
@@ -753,6 +809,21 @@ int main(int argc, char** argv) {
     spdlog::info("moves are checked: at most {:.0f} cm/s along the ground; positions are saved every {} s and when a session ends",
                  movement.limits.max_speed, movement.save_interval.count());
     endpoint_config.players = &players;
+    {   // the players' view passes on several threads (session/view_pool.h): never more threads than the machine has cores less two (the network thread and the game's)
+        const unsigned cores = std::thread::hardware_concurrency();
+        const unsigned room = cores > 3 ? cores - 2 : 1;
+        endpoint_config.view_threads = std::min(view_threads, std::max(room, 1u));
+        if (endpoint_config.view_threads != view_threads) {
+            if (view_threads_option->count() > 0) spdlog::warn("[view-threads] {} asked for, {} used: this machine has {} cores", view_threads, endpoint_config.view_threads, cores);
+            else spdlog::info("[view-threads] the default of {} is lowered to {}: this machine has {} cores, and the passes get no more threads than its cores less two (at least one)", view_threads, endpoint_config.view_threads, cores);
+        }
+        if (endpoint_config.view_threads == 0) {
+            spdlog::info("[view-threads] off: each session's work, view and flush run in turn on the network thread (--view-threads 0, or --tick-hz 0; --view-threads N runs the passes of the players' views on N threads)");
+        } else {
+            spdlog::info("[view-threads] {}: the tick runs every session's own work, then all the due passes of the players' views at once on {} thread(s), the network thread's included, then every flush{}",
+                         endpoint_config.view_threads, endpoint_config.view_threads, endpoint_config.view_threads == 1 ? " (one thread: the passes run in order here)" : "");
+        }
+    }
 // C-Y-B and C-O-A
 
     std::atomic<int> exit_code{0};
@@ -855,6 +926,9 @@ int main(int argc, char** argv) {
     std::optional<TickLoop> tick_loop;
     if (tick_hz > 0) tick_loop.emplace(TickLoop::Config{tick_hz, 4, 256}, Clock::now());
     auto window_start = Clock::now();
+    SharedUpdates::Stats share_before;   // (--share-updates: the counts of the interval are the difference to these)
+    double   view_busy_before = 0;       // (--view-threads: the same for the threads' time in passes)
+    uint64_t view_jobs_before = 0;
     const auto log_stats = [&](Clock::time_point at) {
         const double window_s = std::chrono::duration<double>(at - window_start).count();
         if (loop_stats_seconds <= 0 || window_s < loop_stats_seconds) return;
@@ -869,21 +943,38 @@ int main(int argc, char** argv) {
         const uint64_t ticks = tick_loop ? ls.ticks : loop_stats.units;
         const double late_ms = tick_loop ? std::chrono::duration<double, std::milli>(tick_loop->schedule().late_max()).count() : 0.0;
         spdlog::info("[tick] {:.1f} s: rate={} ticks={} ({:.1f}/s) datagrams={:.1f}/s ({:.2f} a tick, at most {} between two ticks, at most {} in one read); ms: receive={:.1f} tick={:.1f} "
-                     "world={:.1f} (npcs={:.1f} combat={:.1f} people={:.1f} window={:.1f} aftermath={:.1f}) sessions={:.1f} view={:.1f} (scan={:.1f}, {} passes) flush={:.1f}; late_max={:.1f} ms "
+                     "world={:.1f} (npcs={:.1f} combat={:.1f} people={:.1f} window={:.1f} aftermath={:.1f}) sessions={:.1f} view={:.1f} (scan={:.1f}, {} passes; opens={:.1f}, {}; updates={:.1f}, {}: "
+                     "build={:.1f}) flush={:.1f}; late_max={:.1f} ms "
                      "caught_up={} skipped={} restarts={}; costliest session: {} {:.1f} ms (view {:.1f}; {} awake, {} dormant)",
                      window_s, tick_hz, ticks, static_cast<double>(ticks) / window_s, static_cast<double>(loop_stats.datagrams) / window_s,
                      ticks ? static_cast<double>(loop_stats.datagrams) / static_cast<double>(ticks) : 0.0, ls.max_datagrams_per_tick, ls.max_batch, loop_stats.receive_us / 1000.0,
                      loop_stats.unit_us / 1000.0, profile.world_us / 1000.0, profile.npcs_us / 1000.0, profile.combat_us / 1000.0, profile.people_us / 1000.0, profile.window_us / 1000.0,
-                     profile.aftermath_us / 1000.0, profile.sessions_us / 1000.0, profile.view_us / 1000.0, profile.view_scan_us / 1000.0, profile.view_passes, profile.flush_us / 1000.0,
-                     late_ms, tick_loop ? tick_loop->schedule().caught_up() : 0, tick_loop ? tick_loop->schedule().skipped() : 0, tick_loop ? tick_loop->schedule().restarts() : 0,
+                     profile.aftermath_us / 1000.0, profile.sessions_us / 1000.0, profile.view_us / 1000.0, profile.view_scan_us / 1000.0, profile.view_passes, profile.open_us / 1000.0,
+                     profile.opens, profile.update_us / 1000.0, profile.updates, profile.update_build_us / 1000.0, profile.flush_us / 1000.0,
+                     late_ms, ls.caught_up, ls.skipped, ls.restarts,
                      profile.top_name.empty() ? std::string("none") : profile.top_name, profile.top_us / 1000.0, profile.top_view_us / 1000.0, profile.top_awake, profile.top_dormant);
+        if (shared_updates) {
+            const SharedUpdates::Stats now = shared_updates->stats();
+            spdlog::info("[share] {:.1f} s: mode={} updates built once for several players: used={} built={}; built for one player only={}; checked={} differed={}", window_s,
+                         SharedUpdates::name(shared_updates->mode()), now.hits - share_before.hits, now.builds - share_before.builds, now.private_builds - share_before.private_builds,
+                         now.verified - share_before.verified, now.mismatches - share_before.mismatches);
+            share_before = now;
+        }
+        if (endpoint.view_threads() > 0) {
+            const double busy = endpoint.view_busy_seconds();
+            const uint64_t jobs = endpoint.view_jobs();
+            spdlog::info("[view-threads] {:.1f} s: {} thread(s) ran the players' views: {:.1f} ms of thread time in {} jobs ({:.1f} us each; view= in the [tick] line is this time added up, not wall time)", window_s,
+                         endpoint.view_threads(), (busy - view_busy_before) * 1000.0, jobs - view_jobs_before, jobs > view_jobs_before ? (busy - view_busy_before) * 1e6 / static_cast<double>(jobs - view_jobs_before) : 0.0);
+            view_busy_before = busy;
+            view_jobs_before = jobs;
+        }
         if (tick_loop) tick_loop->schedule().reset_late_max();
         loop_stats = LoopStats{};
         profile.restart();
         window_start = at;
     };
 
-    spdlog::info("listening on UDP {}", socket->local_address().to_string());
+    spdlog::info("listening on UDP {} (receive buffer {} KB)", socket->local_address().to_string(), socket->receive_buffer_bytes() / 1024);
     if (!tick_loop) {
         // --tick-hz 0: the old loop, every session's tick after every datagram
         while (!g_stop) {

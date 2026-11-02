@@ -456,7 +456,13 @@ func TestMigration0003FailsOnAHeldLockAndTheRetryWorks(t *testing.T) {
 		t.Fatalf("the migration has no %q to shorten for this test", timeout)
 	}
 	files := upTo(t, 4)
-	files["0003_character_race_class.sql"] = &fstest.MapFile{Data: bytes.Replace(original, []byte(timeout), []byte("SET LOCAL lock_timeout = '200ms';"), 1)}
+	const short = "SET LOCAL lock_timeout = '200ms';"
+	shortened := bytes.Replace(original, []byte(timeout), []byte(short), 1)
+	// the copy holds the short timeout: that, not the measured time, shows the wait below is the short one (its time is only checked from below)
+	if !bytes.Contains(shortened, []byte(short)) || bytes.Contains(shortened, []byte(timeout)) {
+		t.Fatal("the copy this test runs does not hold the 200 ms timeout")
+	}
+	files["0003_character_race_class.sql"] = &fstest.MapFile{Data: shortened}
 
 	// another transaction has a row of characters locked for update, as a running service's save would
 	holder, err := pool.Begin(ctx)
@@ -473,8 +479,9 @@ func TestMigration0003FailsOnAHeldLockAndTheRetryWorks(t *testing.T) {
 	if err == nil || !asPg(err, &pgErr) || pgErr.Code != "55P03" {
 		t.Fatalf("migrate with the table locked: %v, want SQLSTATE 55P03 (lock_not_available)", err)
 	}
-	if waited := time.Since(start); waited < 150*time.Millisecond || waited > 5*time.Second {
-		t.Errorf("the migration waited %s for the lock, want about 200 ms", waited)
+	// no upper limit: a busy machine, and the other tests' migrations that the call queues behind, make the wait longer than the timeout
+	if waited := time.Since(start); waited < 150*time.Millisecond {
+		t.Errorf("the migration waited only %s for the lock, want at least about 200 ms", waited)
 	}
 	var recorded, columns int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version = 3`).Scan(&recorded); err != nil {

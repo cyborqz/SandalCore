@@ -11,12 +11,14 @@
 #  here does not make the extractor build the mesh again.
 # ============================================================================
 target_sources(worldd_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/net/endpoint_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_givers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_handin.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_objects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_quests2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/respawn/session_embersprings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_abilities.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_based_move.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat_side.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_craft.cpp
@@ -24,6 +26,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_interact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_items.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_mounts.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_move_ack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_movement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_nodes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_processing.cpp
@@ -33,6 +36,12 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_session_util.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_talents.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_vendors.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_view_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rpc_table.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/shared_updates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/shared_updates.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view_pool.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view_pool.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view_worker.h
     ${CMAKE_CURRENT_SOURCE_DIR}/warehouse/player_warehouse.cpp
 )

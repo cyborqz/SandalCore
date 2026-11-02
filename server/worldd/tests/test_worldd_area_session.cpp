@@ -27,11 +27,13 @@
 #include "cyb_appearance.h"
 #include "dialogue/talk.h"
 #include "fake_client.h"
+#include "test_registry.h"
 #include "bootstrap/character_setup.h"
 #include "items/inventory.h"
 #include "nav/area_nav.h"
 #include "net/endpoint.h"
 #include "npc/npc_world.h"
+#include "protocol/repl/craft_rpc.h"
 #include "protocol/repl/dialogue_rpc.h"
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/repl/vendor_rpc.h"
@@ -1345,6 +1347,8 @@ static BunchWriter dialogue_choice(const repl::DialogueResponse& response) {
 #include "dialogue_session_tests.inc"
 #include "quest_session_tests.inc"
 
+#include "area_session_registered.inc"
+
 int main() {
     spdlog::set_level(spdlog::level::off);
     test_view();
@@ -1368,6 +1372,7 @@ int main() {
     test_quest_zone();
     test_quest_hand_in();   // quests part 3, slice 2
     test_quest_hand_in_engine();
+    g_fail += aoc_tests::run();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

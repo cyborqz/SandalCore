@@ -97,16 +97,20 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
         return;
     }
     std::string why;
-    const auto moves = repl::read_move_packed(bunch.data.data(), bunch.data.size(), rpc.call.param_pos,
-                                              rpc.call.param_pos + rpc.call.param_bits, &why);
+    auto moves = repl::read_move_packed(bunch.data.data(), bunch.data.size(), rpc.call.param_pos,
+                                        rpc.call.param_pos + rpc.call.param_bits, &why);
     if (!moves) {
-        if (!unreadable_move_logged_) {
+        ++moves_unreadable_;
+        if (!unreadable_move_logged_ || moves_unreadable_ % 100 == 0) {
             unreadable_move_logged_ = true;
-            spdlog::warn("[session] {}: a ServerMovePacked does not read ({}; {} parameter bits): not acknowledged (further ones are not logged)",
-                         name(), why, rpc.call.param_bits);
+            spdlog::warn("[session] {}: a ServerMovePacked does not read ({}; {} parameter bits): not acknowledged ({} such moves so far; the first and every 100th are said)",
+                         name(), log_text(why), rpc.call.param_bits, moves_unreadable_);
         }
         return;
     }
+    // A move that stands on a movement base gives its place relative to the base: it is put in the world before it is judged (session/player_based_move.cpp).  False: a run of moves on
+    // bases worldd cannot follow ended in a correction.
+    if (!stand_on_bases(*moves)) return;
 
     // The older moves of the packet first, oldest first, unless they were judged already (every packet repeats the last
     // frame's move as its pending move).  Their verdicts only move the last good position; the reply is the new move's.
@@ -171,11 +175,8 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
             if (pipeline_) pipeline_->set_moving(moving);
             if (!on_mount) tally_speed(before, checker_.good(), abilities->sprinting(), abilities->evading());
         }
-        auto ack = on_mount ? mount_ack(move.time_stamp) : pb_.good_move_ack(move.time_stamp);
-        if (!ack) return;
-        if (send(conn, *ack) != Outcome::Sent) return;   // the actor's channel is not open yet: the client resends its moves
-        if (on_mount) ++mount_moves_acked_;
-        if (++moves_acked_ == 1) spdlog::info("[session] {}: the first move is acknowledged (TimeStamp {})", name(), move.time_stamp);
+        // the answer: at once, or (PlayerWorld::move_ack_gap, the original server's pace) the latest good move's at the tick (session/player_move_ack.cpp)
+        if (!hold_move_ack(move.time_stamp, on_mount)) answer_move(conn, move.time_stamp, on_mount);
         return;
     }
 // C O A and Cyb
@@ -200,6 +201,7 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
     // The correction goes out once the datagram's bunches are all judged (end_of_datagram), the latest refusal's.
     // (a TimeStamp that is NaN or infinite names no saved move: the client ignores it, so 0 goes out instead)
     pending_fix_ = std::isfinite(move.time_stamp) ? move.time_stamp : 0.0f;
+    held_move_ack_.reset();   // the correction wins over the answer held for the move before it (the original server's one pending adjustment)
 }
 
 bool PlayerSession::is_moving(const GoodPosition& before, const repl::NetworkMove& move) const {
@@ -285,6 +287,7 @@ PlayerSession::GmMoveResult PlayerSession::move_to(Connection& conn, double x, d
     const double yaw = checker_.good().yaw_degrees;
     checker_.teleport(x, y, z, yaw);
     pending_fix_.reset();   // a correction a refused move left would put the client back where it was
+    based_fix_.reset();
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
     constexpr uint8_t mode = repl::kMoveFalling;   // the client lands and walks again by itself
     queue(gm ? "GM teleport" : "floor net teleport", [ts, x, y, z, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{x, y, z}, repl::Vec3d{}, mode); }, conn, /*must_build=*/true);

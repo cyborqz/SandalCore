@@ -35,6 +35,7 @@
 //                                  older position after a newer one, every character ends with its last
 // ============================================================================
 #include "bootstrap/captured_setup.h"
+#include "bootstrap/constants.h"
 #include "capture_blocks.h"
 #include "capture_bootstrap.h"
 #include "capture_moves.h"
@@ -49,6 +50,7 @@
 #include "protocol/wire/packet_reader.h"
 #include "session/player_session.h"
 #include "session/position_saver.h"
+#include "test_registry.h"
 
 #include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
@@ -1386,6 +1388,8 @@ static void test_saver_ordering() {
           "and every character ends with the last position submitted (latest wins; nothing dropped or given up)");
 }
 
+#include "movement_registered.inc"
+
 int main() {
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
     logger->set_level(spdlog::level::debug);
@@ -1404,6 +1408,7 @@ int main() {
     test_saving_in_the_session();
     test_endpoint_saves();
     test_saver_ordering();
+    g_fail += aoc_tests::run();   // every check registered in movement_registered.inc
 
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

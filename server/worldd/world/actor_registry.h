@@ -28,13 +28,21 @@
 #pragma once
 
 #include "protocol/repl/replicator.h"
+#include "session/view_worker.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+namespace aoc::worldd {
+struct UpdateMemo;   // session/shared_updates.h: the update built for one state of an actor, shared by the views that hold it
+}
 
 namespace aoc::worldd::world {
 
@@ -160,6 +168,21 @@ struct GatherSeen {
     bool                             show = false;
 };
 
+/// The place on an actor for the update that the views share (session/shared_updates.h).  A copy of an actor starts without one: what it holds describes the actor it was made for.
+class UpdateMemoSlot {
+public:
+    UpdateMemoSlot() = default;
+    UpdateMemoSlot(const UpdateMemoSlot&) {}
+    UpdateMemoSlot& operator=(const UpdateMemoSlot&) {
+        ptr.reset();
+        return *this;
+    }
+    UpdateMemoSlot(UpdateMemoSlot&&) noexcept = default;
+    UpdateMemoSlot& operator=(UpdateMemoSlot&&) noexcept = default;
+
+    std::shared_ptr<UpdateMemo> ptr;
+};
+
 struct WorldActor {
     uint64_t   id = 0;                    // = actor.guid.ObjectId
     ActorKind  kind = ActorKind::Npc;
@@ -186,6 +209,13 @@ struct WorldActor {
     std::vector<repl::ExportChain> ability_exports;
     uint32_t   version = 1;               // every change of the replicated state
     uint32_t   reliable_version = 1;      // the changes that must not be lost
+    /// Shared updates (session/shared_updates.h).  `shape` is the actor's shape (repl::shape_of) as the registry last counted it and `shape_epoch` counts the changes of it that can leave two
+    /// connections' shadows holding different entries (a value or a subobject taken away; a subobject added is not one).  A view remembers the epoch its shadow was started under: shadows
+    /// of one epoch and one sent version give the same next update.  Counted by `touch` for every change but a Movement one (a position alone takes nothing away).
+    uint32_t   shape_epoch = 0;
+    repl::ActorShape shape;
+    /// The update kept for the views, one slot for each thread that runs view passes (a view uses its thread's: view_worker()).  The one thing a view writes on an actor.
+    mutable std::array<UpdateMemoSlot, kViewWorkers> update_memo;
     NpcInfo    npc;
     StationInfo station;                  // ActorKind::Station only
     ShrineInfo  shrine;                   // ActorKind::Shrine only
@@ -221,6 +251,7 @@ public:
     /// an actor that is not held (`fn` is not run).
     template <class F>
     bool modify(uint64_t id, Change kind, F&& fn) {
+        check_not_frozen("modify");
         WorldActor* a = find(id);
         if (!a) return false;
         fn(*a);
@@ -274,11 +305,21 @@ public:
 
     double cell_cm() const { return config_.cell_cm; }
 
+    /// While the players' view passes run on several threads (net/endpoint.cpp) the registry is read by all of them and written by none: every call that changes it (add, remove, modify, move,
+    /// touch, set_interact_component, on_remove, off_remove) throws std::logic_error while it is frozen.  Set and cleared by the thread that starts and joins the passes.
+    void freeze(bool on) { frozen_ = on; }
+    bool frozen() const { return frozen_; }
+
 private:
+    void check_not_frozen(const char* what) const {
+        if (frozen_) throw std::logic_error(std::string("the actor registry was changed (") + what + ") while the players' views read it");
+    }
     static int64_t cell_key(int32_t cx, int32_t cy) { return (static_cast<int64_t>(cx) << 32) ^ static_cast<uint32_t>(cy); }
     int32_t        cell_of(double v) const;
     void           grid_add(const WorldActor& a);
     void           grid_remove(const WorldActor& a);
+    /// Counts a change of the actor's shape (WorldActor::shape_epoch): a value or a subobject taken away.  A subobject only added is not counted.
+    static void    note_shape(WorldActor& a);
 
     RegistryConfig                                config_;
     std::unordered_map<uint64_t, WorldActor>      actors_;
@@ -288,6 +329,7 @@ private:
     std::vector<std::pair<uint32_t, Listener>>    listeners_;
     uint32_t                                      next_listener_ = 1;
     Observer*                                     observer_ = nullptr;
+    bool                                          frozen_ = false;
 };
 
 }  // namespace aoc::worldd::world

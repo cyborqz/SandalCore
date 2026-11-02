@@ -1132,6 +1132,7 @@ void PlayerWorld::tick_props(double now_seconds) {
 
 void PlayerWorld::tick_world(double now_seconds) {
     world_clock_ = now_seconds;
+    if (view_config_.phases) view_config_.phases->begin_tick();   // (the endpoint's tick count: the tick each player's view passes on, view_phases.h)
     tick_props(now_seconds);
     // (review A I2) the window is driven at most every 45 ms, whatever the tick's rate (the old loop ticked the world after every datagram it read; the NPC world gates itself at 15 Hz)
     TickProfile& profile = tick_profile();   // (--loop-stats: where the tick's time goes)

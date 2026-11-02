@@ -31,6 +31,11 @@ struct TickProfile {
     double view_us = 0;        // ActorView::tick (the view of the world of every player)
     double view_scan_us = 0;   // of which the passes' registry queries, rings and ordering (the rest is opens, updates and closes)
     uint64_t view_passes = 0;
+    double open_us = 0;        // of which the opens (an actor's whole state, new to the client, and its exports)
+    uint64_t opens = 0;
+    double update_us = 0;      // of which the updates of actors the client holds awake that changed
+    double update_build_us = 0;  // ... of which the building of what changed (the rest: the sending)
+    uint64_t updates = 0;
     double flush_us = 0;       // Connection::flush of every session: the packets built and sent
     // the session that cost the most since the profile started (its tick and its sends)
     std::string top_name;
@@ -43,10 +48,30 @@ struct TickProfile {
         *this = TickProfile{};
         on = keep;
     }
+
+    /// Adds the figures a player's view writes (the view's time and its parts, the passes, the opens and updates) of `o`, a worker thread's profile, to this one.
+    void add_view(const TickProfile& o) {
+        view_us += o.view_us;
+        view_scan_us += o.view_scan_us;
+        view_passes += o.view_passes;
+        open_us += o.open_us;
+        opens += o.opens;
+        update_us += o.update_us;
+        update_build_us += o.update_build_us;
+        updates += o.updates;
+    }
 };
 
-/// The network thread's profile (one per process).
+/// The profile a thread writes to instead of the network thread's, while one is set (see tick_profile()); none by default.
+inline TickProfile*& tick_profile_redirect() {
+    thread_local TickProfile* redirect = nullptr;
+    return redirect;
+}
+
+/// The network thread's profile (one per process).  A worker thread that runs players' view passes (session/view_pool.h) writes to a profile of its own instead, which the pool adds to this
+/// one when the passes are done: no two threads write the same figures.
 inline TickProfile& tick_profile() {
+    if (TickProfile* mine = tick_profile_redirect()) return *mine;
     static TickProfile profile;
     return profile;
 }
@@ -55,5 +80,22 @@ inline TickProfile& tick_profile() {
 inline double tick_profile_us_since(std::chrono::steady_clock::time_point from) {
     return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - from).count();
 }
+
+/// Adds the time of its scope to `*slot` while the profile is on.
+class TickProfileSpan {
+public:
+    explicit TickProfileSpan(double* slot) : slot_(tick_profile().on ? slot : nullptr) {
+        if (slot_) started_ = std::chrono::steady_clock::now();
+    }
+    ~TickProfileSpan() {
+        if (slot_) *slot_ += tick_profile_us_since(started_);
+    }
+    TickProfileSpan(const TickProfileSpan&) = delete;
+    TickProfileSpan& operator=(const TickProfileSpan&) = delete;
+
+private:
+    double* slot_;
+    std::chrono::steady_clock::time_point started_{};
+};
 
 }}  // namespace aoc::worldd

@@ -466,6 +466,8 @@ private:
     int                    effect_depth_ = 0; // how many effects deep an effect's Apply hit is applying further effects
     size_t                 effect_hits_logged_ = 0;                  // the effect hits written to the log so far (the first kLoggedEffectHits)
     static constexpr size_t kLoggedEffectHits = 120;
+    size_t                 effects_logged_ = 0;                      // the effects put on a mob that the log named so far (the first kLoggedEffects)
+    static constexpr size_t kLoggedEffects = 80;
     static constexpr int    kMaxEffectDepth = 4;                     // as deep as the player's own effects go
     static constexpr size_t kMaxEffectSteps = 4096;                  // the most ends and ticks one creature runs in one step (a long stall)
     double                 next_stats_ = 0;

@@ -122,13 +122,17 @@ constexpr const char* kHitProjectilesSql = "SELECT projectile_guid FROM ab_hit_p
 constexpr const char* kEffectByGuidSql =
     "SELECT e.guid, e.name, e.display_name, e.category, e.tags, e.effect_tags, e.infinite_duration, e.duration_expr, e.tick_timer, e.ignore_initial_tick, e.stack_type, "
     "e.global_stack_limit, e.in_place_stack_limit_expr, e.stack_duration_refresh, e.persists_through_death, e.persists_relog, e.dispellable, e.significant, "
-    "e.requirement_expr, e.crowd_control_guid, e.extra, e.group_guid, COALESCE(g.name, ''), COALESCE(g.stack_type, ''), COALESCE(g.global_stack_limit, 0) "
-    "FROM ab_effect e LEFT JOIN ab_effect_group g ON g.guid = e.group_guid WHERE e.guid = ?1";
+    "e.requirement_expr, e.crowd_control_guid, e.extra, e.group_guid, COALESCE(g.name, ''), COALESCE(g.stack_type, ''), COALESCE(g.global_stack_limit, 0), "
+    "COALESCE(c.compare_source, 0), COALESCE(c.recalc_on_tick, 0), COALESCE(c.stacks_lost_on_elapse, 0), COALESCE(c.stacks_lost_expr, 0), COALESCE(c.extended_max, 0), "
+    "COALESCE(c.extension_expr, 0) "
+    "FROM ab_effect e LEFT JOIN ab_effect_group g ON g.guid = e.group_guid LEFT JOIN ab_effect_control c ON c.effect_guid = e.guid WHERE e.guid = ?1";
 constexpr const char* kEffectByNameSql =
     "SELECT e.guid, e.name, e.display_name, e.category, e.tags, e.effect_tags, e.infinite_duration, e.duration_expr, e.tick_timer, e.ignore_initial_tick, e.stack_type, "
     "e.global_stack_limit, e.in_place_stack_limit_expr, e.stack_duration_refresh, e.persists_through_death, e.persists_relog, e.dispellable, e.significant, "
-    "e.requirement_expr, e.crowd_control_guid, e.extra, e.group_guid, COALESCE(g.name, ''), COALESCE(g.stack_type, ''), COALESCE(g.global_stack_limit, 0) "
-    "FROM ab_effect e LEFT JOIN ab_effect_group g ON g.guid = e.group_guid WHERE e.name = ?1";
+    "e.requirement_expr, e.crowd_control_guid, e.extra, e.group_guid, COALESCE(g.name, ''), COALESCE(g.stack_type, ''), COALESCE(g.global_stack_limit, 0), "
+    "COALESCE(c.compare_source, 0), COALESCE(c.recalc_on_tick, 0), COALESCE(c.stacks_lost_on_elapse, 0), COALESCE(c.stacks_lost_expr, 0), COALESCE(c.extended_max, 0), "
+    "COALESCE(c.extension_expr, 0) "
+    "FROM ab_effect e LEFT JOIN ab_effect_group g ON g.guid = e.group_guid LEFT JOIN ab_effect_control c ON c.effect_guid = e.guid WHERE e.name = ?1";
 constexpr const char* kEffectHitsSql = "SELECT phase, ord, hit_guid FROM ab_effect_hit WHERE effect_guid = ?1 ORDER BY phase, ord";
 constexpr const char* kModsSql = "SELECT ord, stat_mod_guid, stat_guid, stat_name, value_expr, shield_absorb FROM ab_mod WHERE owner_kind = ?1 AND owner_guid = ?2 ORDER BY ord";
 constexpr const char* kProjectileSql = "SELECT guid, name, projectile_type, speed, range, life_time, max_hits, chain_hit_count, chain_radius, sphere_radius "
@@ -146,6 +150,14 @@ constexpr const char* kReactionSql = "SELECT guid, name, instigator, targets_mas
                                      "bind_fishing, bind_stat, global_limit, instigator_limit, eval_applying_hit, proc_on_apply, trigger_expr FROM ab_reaction WHERE guid = ?1";
 constexpr const char* kReactionHitsSql = "SELECT hit_guid FROM ab_reaction_hit WHERE reaction_guid = ?1 ORDER BY ord";
 constexpr const char* kHitRecursiveSql = "SELECT ord, child_hit_guid, targeting_guid FROM ab_hit_recursive WHERE hit_guid = ?1 ORDER BY ord";
+// contentc version 39: the records the effects name to control their holder (ab_effect_control itself is joined into the effect statements above)
+constexpr const char* kCrowdControlSql =
+    "SELECT guid, name, applied_status, snare_strength, animation_request, priority, disable_guid, face_source, ignore_non_combatant, restart_montage, override_client_move, "
+    "push_parameterization, push_magnitude, push_duration, push_dir_x, push_dir_y, push_dir_z, push_arrival_distance, end_push_at_arrival FROM ab_crowd_control WHERE guid = ?1";
+constexpr const char* kAbilityDisableSql = "SELECT guid, name, filter FROM ab_ability_disable WHERE guid = ?1";
+constexpr const char* kFragilitySql = "SELECT guid, name, fragility_type, break_threshold, accumulation_rate, tick_frequency, break_immediately, evaluate_accumulation, bindings "
+                                      "FROM ab_fragility WHERE guid = ?1";
+constexpr const char* kEffectFragilitiesSql = "SELECT fragility_guid FROM ab_effect_fragility WHERE effect_guid = ?1 ORDER BY ord";
 
 }  // namespace
 
@@ -207,7 +219,7 @@ std::optional<AbilityContent> AbilityContent::open(const std::string& path, std:
     for (const char* sql : {kStatProgramSql, kExprSql, kClassAbilitiesSql, kAutoRanksSql, kAbilityByGuidSql, kAbilityByNameSql, kCostsSql, kEffectCostsSql,
                             kMontagesSql, kAbilityHitsSql, kAbilityEffectsSql, kHitSql, kHitEffectsSql, kEffectByGuidSql, kEffectByNameSql, kEffectHitsSql,
                             kModsSql, kProjectileSql, kProjectileHitsSql, kZoneSql, kZoneHitsSql, kAllExprsSql, kGuidListSql[0], kGuidListSql[1], kGuidListSql[2],
-                            kGuidListSql[3], kGuidListSql[4]}) {
+                            kGuidListSql[3], kGuidListSql[4], kCrowdControlSql, kAbilityDisableSql, kFragilitySql, kEffectFragilitiesSql}) {
         Stmt q(c.db_, sql);
         if (!q.ok()) {
             error = path + " lacks a table or column the ability reader uses: " + db_message(c.db_);
@@ -353,6 +365,12 @@ bool read_effect(sqlite3_stmt* s, EffectRow& e, std::string& error) {
     e.group_name = col_text(s, 22);
     e.group_stack_type = col_text(s, 23);
     e.group_limit = col_int(s, 24);
+    e.compare_source = col_bool(s, 25);
+    e.recalc_on_tick = col_bool(s, 26);
+    e.stacks_lost_on_elapse = col_bool(s, 27);
+    e.stacks_lost_expr = col_i64(s, 28);
+    e.extended_max = col_f64(s, 29);
+    e.extension_expr = col_i64(s, 30);
     return true;
 }
 // Cyb with C | O | A
@@ -552,6 +570,81 @@ bool AbilityContent::effect_hits(int64_t effect, std::vector<EffectHitRow>& out,
         h.ord = col_int(s, 1);
         h.hit_guid = col_i64(s, 2);
         out.push_back(std::move(h));
+        return true;
+    }, error);
+}
+
+std::optional<CrowdControlRow> AbilityContent::crowd_control(int64_t guid, std::string& error) const {
+    std::optional<CrowdControlRow> out;
+    if (!run(db_, kCrowdControlSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            CrowdControlRow r;
+            r.guid = col_i64(s, 0);
+            r.name = col_text(s, 1);
+            r.applied_status = col_i64(s, 2);
+            r.snare_strength = col_f64(s, 3);
+            r.animation_request = col_text(s, 4);
+            r.priority = col_int(s, 5);
+            r.disable_guid = col_i64(s, 6);
+            r.face_source = col_bool(s, 7);
+            r.ignore_non_combatant = col_bool(s, 8);
+            r.restart_montage = col_bool(s, 9);
+            r.override_client_move = col_bool(s, 10);
+            r.push_parameterization = col_text(s, 11);
+            r.push_magnitude = col_text(s, 12);
+            r.push_duration = col_text(s, 13);
+            r.push_dir_x = col_f64(s, 14);
+            r.push_dir_y = col_f64(s, 15);
+            r.push_dir_z = col_f64(s, 16);
+            r.push_arrival_distance = col_f64(s, 17);
+            r.end_push_at_arrival = col_bool(s, 18);
+            out = std::move(r);
+            return true;
+        }, error))
+        return std::nullopt;
+    if (!out) error = "content.db has no crowd-control record " + std::to_string(guid);
+    return out;
+}
+
+std::optional<AbilityDisableRow> AbilityContent::ability_disable(int64_t guid, std::string& error) const {
+    std::optional<AbilityDisableRow> out;
+    if (!run(db_, kAbilityDisableSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            AbilityDisableRow r;
+            r.guid = col_i64(s, 0);
+            r.name = col_text(s, 1);
+            r.filter = col_text(s, 2);
+            out = std::move(r);
+            return true;
+        }, error))
+        return std::nullopt;
+    if (!out) error = "content.db has no ability-disable record " + std::to_string(guid);
+    return out;
+}
+
+std::optional<FragilityRow> AbilityContent::fragility(int64_t guid, std::string& error) const {
+    std::optional<FragilityRow> out;
+    if (!run(db_, kFragilitySql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            FragilityRow r;
+            r.guid = col_i64(s, 0);
+            r.name = col_text(s, 1);
+            r.fragility_type = col_text(s, 2);
+            r.break_threshold = col_text(s, 3);
+            r.accumulation_rate = col_text(s, 4);
+            r.tick_frequency = col_f64(s, 5);
+            r.break_immediately = col_text(s, 6);
+            r.evaluate_accumulation = col_text(s, 7);
+            r.bindings = col_text(s, 8);
+            out = std::move(r);
+            return true;
+        }, error))
+        return std::nullopt;
+    if (!out) error = "content.db has no fragility record " + std::to_string(guid);
+    return out;
+}
+
+bool AbilityContent::effect_fragilities(int64_t effect, std::vector<int64_t>& out, std::string& error) const {
+    out.clear();
+    return run(db_, kEffectFragilitiesSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, effect); }, [&](sqlite3_stmt* s) {
+        out.push_back(col_i64(s, 0));
         return true;
     }, error);
 }

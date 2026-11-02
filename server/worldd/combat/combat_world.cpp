@@ -1406,6 +1406,8 @@ bootstrap::EffectItem item_of(const effects::Instance& e) {
 
 void CombatWorld::send_effects(Npc& n, const effects::Book::Changes& changes) {
     if (changes.empty()) return;
+    // the creature's own stats read what it holds from now on: the stat mods of Shaken, Volatile, Demoralized and the rest, and the counts the conditions of other effects ask
+    n.cs->set_effects(n.book.engine_effects());
     const auto write_of = [&](const effects::Instance& e) {
         EffectItemWrite w;
         w.item = item_of(e);
@@ -1459,6 +1461,10 @@ void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instig
     effects::Instance created;
     const bool made = n.book.apply(a, instigator, now, changes, &created);
     send_effects(n, changes);
+    if (!changes.empty() && a.def->row.category.find("Hidden") == std::string::npos) {   // (the hidden one-second effects are not named)
+        spdlog::log(effects_logged_++ < kLoggedEffects ? spdlog::level::info : spdlog::level::debug, "[effects] {} ({}) takes {}: {} stack(s), {:.1f} s left, from player {}", n.leaf, n.actor_id,
+                    a.def->row.name, n.book.stacks_of(a.def->row.guid), n.book.remaining(a.def->row.guid, now), instigator);
+    }
     if (made && effect_depth_ < kMaxEffectDepth) {   // its Apply hits run now that it is on
         ++effect_depth_;
         run_effect_hits(n, created, kApplyPhases, 1, now);
@@ -1521,6 +1527,12 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
         if (!resolver_.resolve(from, n, *hit, meta, r, why)) {
             spdlog::debug("[combat] {} ({}): the hit {} of {} does not run: {}", n.leaf, n.actor_id, hit->row.name, e.def->row.name, why);
             continue;
+        }
+        // the tick of an effect that recalculates its hits is worked out for one stack and counts for all the stacks it holds now: a poison of five stacks takes five times what one stack
+        // takes [M: how a poison's ticks grow with its stacks is not known; each tick counts every stack]
+        if (tick_phase && e.def->row.recalc_on_tick && e.stacks > 1 && !r.miss()) {
+            for (ResolvedMod& m : r.mods) m.value *= static_cast<double>(e.stacks);
+            r.threat *= static_cast<double>(e.stacks);
         }
         const double health_before = n.health();
         const Delivery d = land_hit(n, e.instigator, r, at, false);

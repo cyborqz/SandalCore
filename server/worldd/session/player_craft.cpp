@@ -112,18 +112,18 @@ void PlayerSession::on_start_craft(Connection& conn, const repl::ClientRpc& rpc,
     if (dead_) return;
     const auto req = repl::parse_start_craft(rpc.call);
     if (!req) {
-        if (!vendor_unreadable_logged_) {
-            vendor_unreadable_logged_ = true;
+        if (!craft_unreadable_logged_) {
+            craft_unreadable_logged_ = true;
             spdlog::warn("[session] {}: a ServerStartCraft does not read ({} parameter bits): ignored, and the client is told to stop crafting (further ones are not logged)", name(), rpc.call.param_bits);
         }
         // (a quick make's client marked itself as crafting when it sent the start, and a start this server cannot read, such as one that names materials by tags, never answers: it is told to stop)
-        if (!quick_.active && within_budget(vendor_budget_, "ServerStartCraft", now) && room_for(2)) {
+        if (!quick_.active && within_budget(craft_budget_, "ServerStartCraft", now) && room_for(2)) {
             queue("ClientInterruptCraft", [](bootstrap::PlayerBootstrap& pb) { return pb.craft_interrupted(); }, conn, /*must_build=*/true);
         }
         return;
     }
-    if (!within_budget(vendor_budget_, "ServerStartCraft", now) || !room_for(8)) return;
-    bool quick = false;   // the station crafts at once (set below): its refusals also stop the client's own craft
+    if (!within_budget(craft_budget_, "ServerStartCraft", now) || !room_for(8)) return;
+    bool quick = true;   // until the station is known, and when it crafts at once (set below): a refusal also stops the client's own craft
     const auto refuse = [&](const std::string& why) {
         if (quick) {   // (the quick make has its own count and its own log lines)
             ++quick_refused_;
@@ -331,7 +331,7 @@ bool PlayerSession::cancel_quick_make(Connection* conn, const std::string& why) 
 }
 
 void PlayerSession::on_interrupt_station_craft(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now) {
-    if (!within_budget(vendor_budget_, "ServerInterruptStationCraft", now)) return;
+    if (!within_budget(craft_budget_, "ServerInterruptStationCraft", now)) return;
     const auto station = repl::parse_interrupt_craft(rpc.call);
     if (!station) {
         if (!interrupt_unreadable_logged_) {

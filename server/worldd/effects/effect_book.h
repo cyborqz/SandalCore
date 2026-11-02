@@ -16,9 +16,12 @@
 //    StackInPlace      one instance whose stacks grow up to the in-place limit; every application refreshes it
 //    StackSeperate     a new instance per application, up to the record's global limit
 //    OverrideDuration  one instance; an application refreshes it
-//  A record that never refreshes keeps its times (a new stack still counts).  An effect that extends its duration is refreshed to its full duration: the amounts
-//  the data gives for extending it (and the longest it may be extended to) are not read yet.
+//  A record that never refreshes keeps its times (a new stack still counts).  An effect that extends its duration (ExtendDuration) grows its time left by the amount the
+//  application worked out (`Applied::extension`) and never past the record's longest (`extended_max`); one whose amount is not known is refreshed to its full duration.
+//  A record that compares sources keeps one instance per instigator: an application refreshes, stacks or replaces the instance of the SAME instigator, and another instigator's
+//  makes an instance of its own (up to the record's global limit, 0 for no limit).
 //  A hit's effect that works out to no stacks is never applied: that is the data's way to make an effect conditional.
+//  The instances also answer the stat engine: `engine_effects()` is the list a character's stats read (the stat mods of its stacks, GetEffectCount, GetEffectCountByTag).
 // ============================================================================
 #pragma once
 
@@ -43,6 +46,8 @@ struct Applied {
     double                        duration = kForever;   // seconds; kForever: it does not end by itself
     int                           in_place_limit = 1;    // the most stacks one instance holds (StackInPlace)
     std::vector<stats::EffectMod> mods;                  // one stack's stat mod values
+    double                        extension = -1;        // seconds one more application adds under ExtendDuration; negative: the record gives none, the duration is refreshed in full
+    double                        extended_max = 0;      // the most seconds an extended instance has left; 0: no limit
 };
 
 /// An effect on its holder.
@@ -89,20 +94,30 @@ public:
         if (!a.def || a.stacks < 1) return false;
         const content::EffectRow& row = a.def->row;
         const bool never_refresh = row.stack_duration_refresh.find("NeverRefresh") != std::string::npos;
+        const bool extend = row.stack_duration_refresh.find("ExtendDuration") != std::string::npos;
         const bool in_place = row.stack_type.find("StackInPlace") != std::string::npos;
         const bool separate = row.stack_type.find("StackSeperate") != std::string::npos;
         const bool override_duration = row.stack_type.find("OverrideDuration") != std::string::npos;
+        // the instance this application is for: the first of the record, or (a record that compares sources) the first of the same instigator
         Instance* existing = nullptr;
         int same = 0;
         for (Instance& e : items_) {
             if (e.def != a.def) continue;
             ++same;
-            if (!existing) existing = &e;
+            if (!existing && (!row.compare_source || e.instigator == instigator)) existing = &e;
         }
         const auto refresh = [&](Instance& e) {
             e.mods = a.mods;
-            e.instigator = instigator;
+            e.instigator = instigator;   // (a record that compares sources only reaches an instance of this same instigator)
             if (never_refresh) return;
+            if (extend && a.extension >= 0 && !std::isinf(e.end) && !std::isinf(a.duration)) {
+                // the time left grows by the amount the application worked out, up to the longest the record allows (what is left already is never cut)
+                double end = e.end + a.extension;
+                if (a.extended_max > 0) end = std::min(end, t + a.extended_max);
+                e.start = t;
+                e.end = std::max(end, e.end);
+                return;
+            }
             e.start = t;
             e.end = std::isinf(a.duration) ? kForever : t + a.duration;
         };
@@ -122,7 +137,11 @@ public:
             if (created) *created = e;
             return true;
         };
-        if (!existing) return fresh(in_place ? std::min(a.stacks, std::max(1, a.in_place_limit)) : 1);
+        if (!existing) {
+            // a record that compares sources and is on the holder already from other instigators: one more instance only up to the record's global limit (0: no limit)
+            if (row.compare_source && same > 0 && row.global_stack_limit > 0 && same >= row.global_stack_limit) return false;
+            return fresh(in_place ? std::min(a.stacks, std::max(1, a.in_place_limit)) : 1);
+        }
         if (in_place) {
             existing->stacks = std::min(std::max(1, a.in_place_limit), existing->stacks + a.stacks);
             refresh(*existing);
@@ -215,6 +234,23 @@ public:
             if (e.def->row.guid == effect_guid) n += e.stacks;
         }
         return n;
+    }
+
+    /// The instances as the stat engine takes them: what a holder's stats read (the stat mods of each stack, GetEffectCount, GetEffectCountByTag; a tag is one of the record's
+    /// Tags or EffectTags, as the player's list gives them).
+    std::vector<stats::ActiveEffect> engine_effects() const {
+        std::vector<stats::ActiveEffect> out;
+        out.reserve(items_.size());
+        for (const Instance& e : items_) {
+            stats::ActiveEffect a;
+            a.effect = {stats::kRefTypeEffect, e.def->row.guid};
+            a.stacks = e.stacks;
+            a.tags = e.def->row.tags;
+            a.tags.insert(a.tags.end(), e.def->row.effect_tags.begin(), e.def->row.effect_tags.end());
+            a.mods = e.mods;
+            out.push_back(std::move(a));
+        }
+        return out;
     }
 
 private:

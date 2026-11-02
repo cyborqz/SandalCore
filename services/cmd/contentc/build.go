@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "38"
+const Version = "39"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -138,7 +138,11 @@ var keep = map[string]bool{
 	"AbilityHitRecordBase":          true,
 	"EffectRecordBase":              true,
 	"EffectGroupRecordBase":         true, // version 38: the consumables' effect groups (one effect of a group at a time)
-	"StatModRecordBase":             true,
+	// version 39: the effect-control records the written effects name (crowd control, the abilities it stops, when an effect breaks)
+	"CrowdControlRecordBase":     true,
+	"AbilityDisableRecordBase":   true,
+	"FragileEffectDefRecordBase": true,
+	"StatModRecordBase":          true,
 	// plan B2: the item tables
 	"ItemRecordBase":              true,
 	"ItemStatBlockRecordBase":     true,

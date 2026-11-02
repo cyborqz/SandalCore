@@ -64,6 +64,7 @@ public:
     Clock::time_point take(Clock::time_point now) {
         Clock::time_point t = next_;
         if (now > t) {
+            late_max_ = std::max(late_max_, now - t);   // (before a restart moves `t` to `now`: the tick that starts the grid again is the latest one)
             const int64_t behind = static_cast<int64_t>((now - t) / period_);   // whole periods
             if (behind > max_catch_up_) {
                 skipped_ += static_cast<uint64_t>(behind);
@@ -74,7 +75,6 @@ public:
             } else if (behind >= 1) {
                 ++caught_up_;
             }
-            late_max_ = std::max(late_max_, now - t);
         }
         ++k_;
         next_ = origin_ + period_ * k_;
@@ -84,7 +84,10 @@ public:
 
     /// Drops the ticks due by `now` (counted as skipped) and starts the grid again at `now`: the next tick is due a period later.
     void restart(Clock::time_point now) {
-        if (now >= next_) skipped_ += static_cast<uint64_t>((now - next_) / period_) + 1;
+        if (now >= next_) {
+            skipped_ += static_cast<uint64_t>((now - next_) / period_) + 1;
+            late_max_ = std::max(late_max_, now - next_);   // the tick that was due and is dropped ran this late, at best
+        }
         ++restarts_;
         origin_ = now;
         k_ = 1;
@@ -115,7 +118,8 @@ private:
 /// (the config's: 67 ms, 134 ms) on the tick's grid.  The pass runs every n-th tick, n = the pass's length in ticks, rounded, at least 1
 /// (every tick at 15 and 20 Hz, every second tick at 30 Hz: 15 a second, the original server's), and a Dormancy close goes out at the
 /// tick nearest its length.  The gates are set half a period short of those ticks, so a tick on the grid always meets them.
-inline void tick_view_timing(world::RelevancyConfig& r, Clock::duration period) {
+/// Returns n, the ticks between two passes (session/view_phases.h spreads the players' passes over them).
+inline int64_t tick_view_timing(world::RelevancyConfig& r, Clock::duration period) {
     using std::chrono::duration;
     using std::chrono::milliseconds;
     const double ratio = duration<double>(r.tick).count() / duration<double>(period).count();
@@ -123,6 +127,7 @@ inline void tick_view_timing(world::RelevancyConfig& r, Clock::duration period) 
     r.tick = std::chrono::duration_cast<milliseconds>(period * n - period / 2);
     const Clock::duration close = std::chrono::duration_cast<Clock::duration>(r.dormancy_delay) - period / 2;
     r.dormancy_delay = std::chrono::duration_cast<milliseconds>(std::max(close, Clock::duration::zero()));
+    return n;
 }
 
 /// The loop (a pass above).
@@ -154,6 +159,9 @@ public:
         uint64_t datagrams = 0;
         size_t max_batch = 0;                // the most datagrams one pass read
         size_t max_datagrams_per_tick = 0;   // the most datagrams handled between two ticks
+        uint64_t caught_up = 0;              // ticks that ran a whole period or more late, ticks dropped, and restarts of the grid: since the last take_stats
+        uint64_t skipped = 0;                //   (the schedule itself counts them since the start)
+        uint64_t restarts = 0;
     };
 
     TickLoop(Config config, Clock::time_point start) : config_(config), schedule_(config.hz, start, config.max_catch_up) {}
@@ -183,7 +191,13 @@ public:
     const TickSchedule& schedule() const { return schedule_; }
     TickSchedule& schedule() { return schedule_; }
     Stats take_stats() {
-        const Stats s = stats_;
+        Stats s = stats_;
+        s.caught_up = schedule_.caught_up() - taken_caught_up_;
+        s.skipped = schedule_.skipped() - taken_skipped_;
+        s.restarts = schedule_.restarts() - taken_restarts_;
+        taken_caught_up_ = schedule_.caught_up();
+        taken_skipped_ = schedule_.skipped();
+        taken_restarts_ = schedule_.restarts();
         stats_ = Stats{};
         return s;
     }
@@ -213,6 +227,7 @@ private:
     TickSchedule schedule_;
     Stats stats_;
     size_t since_tick_ = 0;
+    uint64_t taken_caught_up_ = 0, taken_skipped_ = 0, taken_restarts_ = 0;   // the schedule's counts at the last take_stats
 };
 
 }}  // namespace aoc::worldd

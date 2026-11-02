@@ -21,7 +21,9 @@ namespace conn = protocol::conn;
 Endpoint::Endpoint(EndpointConfig cfg, CookieSigner& signer, LoginQueue& logins, Send send,
                    CookieSigner::RandomFill random, Clock::time_point start)
     : cfg_(std::move(cfg)), signer_(signer), logins_(logins), send_(std::move(send)),
-      random_(std::move(random)), start_(start) {}
+      random_(std::move(random)), start_(start) {
+    if (cfg_.view_threads >= 1 && cfg_.players) view_pool_ = std::make_unique<ViewPool>(cfg_.view_threads);
+}
 
 double Endpoint::seconds(Clock::time_point t) const {
     return std::chrono::duration<double>(t - start_).count();
@@ -359,6 +361,11 @@ void Endpoint::tick(Clock::time_point now) {
 // [C_Y_B - CoA]
 
     std::vector<std::pair<Address, const char*>> drop;
+    if (view_pool_) {   // the view passes on several threads: the same work in three phases (net/endpoint_phases.cpp)
+        tick_in_phases(now, drop);
+        for (const auto& [addr, why] : drop) remove(addr, why);
+        return;
+    }
     for (auto& [addr, s] : sessions_) {
         if (s->connection.closed_by_client()) {
             drop.emplace_back(addr, "the client quit");

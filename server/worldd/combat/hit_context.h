@@ -19,6 +19,7 @@
 #include "stats/damage.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,13 @@ struct HitContext {
     bool                        active_in_hit = false;      // ... is among the targets of the hit
     bool                        target_is_closest = false;  // the target is the one of the hit nearest the caster (GetClosestTargetToActorInHit)
     const TargetEffects*        target_effects = nullptr;   // the effects the target holds (null: the target's effect list is not known here and reads as empty)
+    /// The effect whose numbers are being worked out (its duration, requirement, stack limit, the values of its stat mods): what EffectHasTag(GetEffect(), tag) and
+    /// GetEffect() == <effect> ask.  0: none in progress, and those two are left to whoever runs the cast.
+    int64_t                     effect_guid = 0;
+    const std::vector<std::string>* effect_tags = nullptr;   // its Tags and EffectTags
+    /// CalcEffectDuration(<effect>): the seconds each effect record named by the expression being run lasts if it were applied now, worked out by whoever resolves the hit (null: asked
+    /// of whoever runs the cast).
+    const std::map<int64_t, double>* effect_durations = nullptr;
 // C.O.A.Cyb
 
     /// CheckForDamageTag / HitHasTag: the hit carries the tag.

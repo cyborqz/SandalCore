@@ -263,20 +263,7 @@ void PlayerSession::run_gather(Connection& conn, Clock::time_point now) {
     while (!gather_piles_.empty() && now >= gather_piles_.front().due) {
         GatherPile pile = std::move(gather_piles_.front());
         gather_piles_.pop_front();
-        std::string error;
-        uint64_t actor = 0;
-        if (npc_world_) {
-            const auto& cg = pb_.setup().character_guid;
-            actor = npc_world_->drop_harvest_pile(pile.x, pile.y, pile.z, repl::GuidValue{cg[0], cg[1], cg[2], cg[3]}, pb_.setup().name, pile.stacks, error);
-        } else {
-            error = "the session has no world";
-        }
-        if (actor != 0) {
-            ++harvest_piles_;
-            spdlog::log(level_for(gather_done_logged_, 20), "[gather] {}: the bag was full: {} stack(s) of the harvest of {} are in a pile where it stands", name(), pile.stacks.size(), pile.node_name);
-        } else {
-            spdlog::warn("[gather] {}: the pile for {} stack(s) of the harvest of {} is not made ({}): they are lost", name(), pile.stacks.size(), pile.node_name, error);
-        }
+        make_gather_pile(pile);
     }
     while (!gather_callouts_.empty() && now >= gather_callouts_.front().due) {
         if (!room_for(1)) break;
@@ -312,6 +299,33 @@ void PlayerSession::run_gather(Connection& conn, Clock::time_point now) {
     // the heartbeat: the harvester's own client hears of it at once
     if (g->board().beat(gather_.node, now)) view_->update_now(conn, gather_.node);
     if (now >= ch->completes) complete_gather(conn, now);
+}
+
+void PlayerSession::make_gather_pile(GatherPile& pile) {
+    std::string error;
+    uint64_t actor = 0;
+    if (npc_world_) {
+        const auto& cg = pb_.setup().character_guid;
+        actor = npc_world_->drop_harvest_pile(pile.x, pile.y, pile.z, repl::GuidValue{cg[0], cg[1], cg[2], cg[3]}, pb_.setup().name, pile.stacks, error);
+    } else {
+        error = "the session has no world";
+    }
+    if (actor != 0) {
+        ++harvest_piles_;
+        spdlog::log(level_for(gather_done_logged_, 20), "[gather] {}: the bag was full: {} stack(s) of the harvest of {} are in a pile where it stands", name(), pile.stacks.size(), pile.node_name);
+    } else {
+        spdlog::warn("[gather] {}: the pile for {} stack(s) of the harvest of {} is not made ({}): they are lost", name(), pile.stacks.size(), pile.node_name, error);
+    }
+}
+
+void PlayerSession::end_gathering(const char* why) {
+    cancel_gather(nullptr, why);   // Gathering stage 2: a node this player channels is available again
+    // a pile that still waits for its time is made now: the stacks a full bag could not take are not lost with the session
+    while (!gather_piles_.empty()) {
+        GatherPile pile = std::move(gather_piles_.front());
+        gather_piles_.pop_front();
+        make_gather_pile(pile);
+    }
 }
 
 bool PlayerSession::complete_gather(Connection& conn, Clock::time_point now) {

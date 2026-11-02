@@ -37,6 +37,7 @@
 //                                a new maximum are clamped, below it they stay; nothing is sent when no stat moves; the deltas wait for a full window
 //                                with the rest of the update; a stat of the ability runtime goes through it (MaxStamina clamps Stamina)
 // ============================================================================
+#include "test_registry.h"
 #include "capture_leveling.h"
 #include "capture_packets.h"
 #include "content_db_fixture.h"
@@ -4768,6 +4769,8 @@ static void test_consumables_item_gone_and_death() {
     CHECK(cs->find(gc::kProcessingXpRating)->value == xp_before && pipe->stacks_of(gc::kProcessingXpEffect) == 0, "the hit the client asked for before the death gave no buff");
 }
 
+#include "items_session_registered.inc"
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);   // (a crash must not take the last results with it)
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
@@ -4843,6 +4846,7 @@ int main() {
     test_resource_no_room_at_login();
     test_real_content_db();
 
+    g_fail += aoc_tests::run();   // every check registered in items_session_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

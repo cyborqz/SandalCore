@@ -7,3 +7,5 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "endpoint_fixed_tick_tests.inc"
+#include "endpoint_view_spread_tests.inc"
+#include "endpoint_loop_stats_tests.inc"

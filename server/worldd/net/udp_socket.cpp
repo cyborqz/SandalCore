@@ -99,7 +99,15 @@ std::unique_ptr<UdpSocket> UdpSocket::open(const Address& local, std::string* er
         close_handle(h);
         return nullptr;
     }
-    return std::unique_ptr<UdpSocket>(new UdpSocket(h));
+    std::unique_ptr<UdpSocket> sock(new UdpSocket(h));
+    // Datagrams that arrive while a tick runs long wait in the system's buffer; when it is full the system drops them.  Ask for a bigger one than the default and keep what was granted.
+    const auto s = static_cast<decltype(::socket(0, 0, 0))>(h);
+    int want = kReceiveBufferBytes;
+    ::setsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&want), sizeof(want));
+    int got = 0;
+    socklen_t got_len = sizeof(got);
+    if (::getsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char*>(&got), &got_len) == 0) sock->receive_buffer_ = got;
+    return sock;
 }
 // Cyb captures, C-O-A code
 
