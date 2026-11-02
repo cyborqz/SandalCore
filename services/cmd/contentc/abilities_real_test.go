@@ -30,14 +30,17 @@ func TestRealAbilityTables(t *testing.T) {
 		// version 38: the ability every consumable item casts comes into the tables (150 more abilities: ab_ability 827 -> 977, ab_hit 1,631 -> 1,784, ab_effect 1,213 -> 1,361) with
 		// 65 more expressions of the abilities' (ab.exprs 1,658 -> 1,723; ab_expr 2,229 -> 2,294);
 		// version 39: the effect-control export adds the effects' extension and stack-loss texts after every other table (13 more expressions, ab_expr 2,294 -> 2,307; meta ab.exprs is
-		// the abilities' own count and stays 1,723), and one row of ab_effect_control per effect
-		"ab_ability": 977, "ab_hit": 1784, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2307, "ab_effect_control": 1361,
+		// the abilities' own count and stays 1,723), and one row of ab_effect_control per effect;
+		// ability_names.tsv names the attacks of every creature family (429 more abilities: ab_ability 977 -> 1,406, ab_hit 1,784 -> 2,383, ab_effect 1,361 -> 1,521,
+		// ab_projectile 215 -> 307, ab_zone 62 -> 109) with 241 more expressions of the abilities' (ab.exprs 1,723 -> 1,964); two texts the reward tables used to add are met
+		// among them first (loot.exprs 536 -> 534), and the effect-control export adds one more (ab_expr 2,307 -> 2,547)
+		"ab_ability": 1406, "ab_hit": 2383, "ab_projectile": 307, "ab_zone": 109, "ab_effect": 1521, "ab_expr": 2547, "ab_effect_control": 1521,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "977", "ab.hits": "1784", "ab.effects": "1361", "ab.projectiles": "215", "ab.zones": "62", "ab.exprs": "1723", "loot.exprs": "536", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "1406", "ab.hits": "2383", "ab.effects": "1521", "ab.projectiles": "307", "ab.zones": "109", "ab.exprs": "1964", "loot.exprs": "534", "gather.exprs": "35"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
 		}
