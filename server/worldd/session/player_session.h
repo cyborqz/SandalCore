@@ -577,6 +577,7 @@ public:
     /// the session's stats, sent with the next update. False for a stat that is not a current value, has no item, or when abilities are off.
     bool set_current_value(int64_t record, float value);
     /// Plan D2: the generic ability runtime (null before the first tick or when abilities are off).
+    AbilityPipeline* pipeline() { return pipeline_ ? &*pipeline_ : nullptr; }
     const AbilityPipeline* pipeline() const { return pipeline_ ? &*pipeline_ : nullptr; }
     size_t ability_triggers() const { return ability_triggers_; }
     size_t ability_triggers_dropped() const { return ability_dropped_; }

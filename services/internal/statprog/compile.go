@@ -1837,6 +1837,27 @@ func (f *fnc) call(e aocexpr.Call) (val, error) {
 		v, _ := ctx(OpConsumed, tNum, i)
 		v.float = true
 		return v, nil
+	case "GetAbilityItemInstance":
+		// the item the ability being run was cast from (a potion's HealingMod reads its Health): a marker, not a record; the stat's read is OpConsumed, the same
+		// op GetConsumedItemStat compiles to.  A formula that passes it anywhere else still fails at that function, as it did before.
+		if err := check(); err != nil {
+			return val{}, err
+		}
+		return val{t: tRef, ref: aocexpr.AbilityItemRef}, nil
+	case "GetItemInstanceStat":
+		if err := check(tRef, tRef); err != nil {
+			return val{}, err
+		}
+		if args[0].ref != aocexpr.AbilityItemRef {
+			return val{}, unsupportedAt(e.Args[0].Pos(), "GetItemInstanceStat of an item other than GetAbilityItemInstance()")
+		}
+		i, err := f.c.ref(args[1].ref)
+		if err != nil {
+			return val{}, errAt(e.At, "%v", err)
+		}
+		v, _ := ctx(OpConsumed, tNum, i)
+		v.float = true
+		return v, nil
 	case "GetNpcEliteRank":
 		if err := check(tObj); err != nil {
 			return val{}, err

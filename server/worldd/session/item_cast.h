@@ -14,6 +14,7 @@
 #include "stats/stat_engine.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,9 @@ struct ItemCast {
     int64_t                      ability = 0;      // the ability the item casts
     int                          quality = 1;      // the item's quality: the rarity band its stat block is read at
     std::vector<stats::StatMod>  stats;            // the stat block's values at that quality, by stat guid (what GetConsumedItemStat answers)
+    /// Modelled client-data gaps: an effect mod on a stat of this map is applied to the other stat (Might Potion: its ability reads MagicalPowerRating, its item carries
+    /// PhysicalPowerRating).  `stats` holds the item's value under the key the ability reads.
+    std::map<int64_t, int64_t>   effect_stat_remap;
     int                          container = 0;    // the bag the item lay in (svc::ItemContainer as a number)
     int32_t                      slot = -1;        // ... and its slot there
     std::string                  instance_guid;    // ... and its instance

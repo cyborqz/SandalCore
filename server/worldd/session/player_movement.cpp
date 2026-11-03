@@ -172,7 +172,10 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
         if (AbilityRuntime* abilities = ability_runtime(now)) {
             const bool moving = is_moving(before, move);
             abilities->set_moving(moving, ability_seconds(now));
-            if (pipeline_) pipeline_->set_moving(moving);
+            if (pipeline_) {
+                pipeline_->set_moving(moving);
+                if (moving) pipeline_->end_item_casts(ability_seconds(now), "the player moves");   // eating/drinking is interrupted by walking
+            }
             if (!on_mount) tally_speed(before, checker_.good(), abilities->sprinting(), abilities->evading());
         }
         // the answer: at once, or (PlayerWorld::move_ack_gap, the original server's pace) the latest good move's at the tick (session/player_move_ack.cpp)

@@ -679,9 +679,9 @@ static void test_rest(const Rules& r) {
     CHECK(s.rt.rest_effect_on(), "the effect is still on");
     s.run_to(2.1);
     const auto gone = s.with("the Rest effect ends");
-    CHECK(!s.rt.rest_effect_on() && gone.size() == 1 && gone[0]->change.effects_removed == std::vector<int64_t>{0} && gone[0]->change.stats.size() == 2 &&
-              gone[0]->change.stats[0].value == k06 && gone[0]->change.stats[1].value == k06,
-          "0.067 s later the effect is removed and the regeneration is back to 0.6 (pkt#8318 -> #8320)");
+    CHECK(!s.rt.rest_effect_on() && gone.size() == 1 && gone[0]->change.effects_removed == std::vector<int64_t>{0} && gone[0]->change.abilities_removed.empty() &&
+              gone[0]->change.stats.size() == 2 && gone[0]->change.stats[0].value == k06 && gone[0]->change.stats[1].value == k06,
+          "0.067 s later the effect is removed and the regeneration is back to 0.6 (pkt#8318 -> #8320; a client-side end leaves the item, as the capture does)");
 
     // a second Rest replaces the first in one step (pkt#8240), the item with a new AnimationCounter
     Sim again(r.rules);

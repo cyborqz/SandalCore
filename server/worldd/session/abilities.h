@@ -229,6 +229,12 @@ public:
     /// is ignored.
     bool cancel(int32_t client_instance_id, double now);
 
+    /// Ends a running Rest (the player moves or starts another ability): the montage jumps to its end section and the
+    /// effect follows kRestEndEffectDelay later.  A Rest that is not running changes nothing.
+    void end_rest(double now, const char* why, bool drop_item = false) {
+        if (rest_ && !rest_->ended) release_rest(now, why, drop_item);
+    }
+
     /// Runs the timers that fell due up to `now`.
     void tick(double now);
 
@@ -284,10 +290,11 @@ private:
     struct Rest {
         int32_t                 client_id;
         int64_t                 instance;
-        bool                    ended = false;               // cancelled, or replaced: the item stays, the effect goes
+        bool                    ended = false;               // cancelled, or replaced: the item is taken off when the montage's end has played
+        bool                    drop_item = false;          // a server-side end (the player moved or started another ability): the item leaves with the effect
         std::optional<double>   effect_due;                  // the Rest effect is added then
         std::optional<int64_t>  effect_key;                  // the Rest effect, once added
-        std::optional<double>   remove_due;                  // and removed then
+        std::optional<double>   remove_due;                  // the effect goes (and a server-side end's item leaves) then
     };
     struct PendingEnd {
         int32_t client_id;
@@ -322,7 +329,7 @@ private:
     void   end_evasion(double t);
     void   end_dodge_items(double t);
     void   start_rest(int32_t id, double t);
-    void   release_rest(double t, const char* why);
+    void   release_rest(double t, const char* why, bool drop_item = false);
     void   add_rest_effect(double t);
     void   remove_rest_effect(double t);
     void   regenerate(double t);
