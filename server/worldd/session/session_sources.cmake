@@ -8,9 +8,11 @@
 #  list, and one line to session/rpc_registered.inc when it answers client calls (session/rpc_table.h).
 #
 #  The list is a file of its own and part of worldd_core only.  The navigation mesh builder (aoc_navbuild) links worldd_nav, which holds none of these files, so a line added
-#  here does not make the extractor build the mesh again.
+#  here does not make the extractor build the mesh again.  The pets' combat files are listed here for the same reason.
 # ============================================================================
 target_sources(worldd_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_pets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_world_npc.h
     ${CMAKE_CURRENT_SOURCE_DIR}/net/endpoint_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_givers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_handin.cpp

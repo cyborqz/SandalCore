@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// Summoner pets: contributed by MrJambix in #13.
 // ============================================================================
 //  tests/ability_npc_pets_tests.inc: a Summoner's pet in the combat world: its fights, its abilities, its owner's abilities on it, Dimensional Bolt and what reacts to a hit
 //  (registered with AOC_REGISTER_TEST: test_worldd_ability_npc.cpp runs it through aoc_tests::run; it is included from ability_npc_registered.inc)
@@ -20,6 +21,12 @@ struct PetTestData {
         }
     }
 };
+
+/// The effect the first of a hit's effects puts on its target; 0 when the hit or its effects are not there (a check on that effect's stacks then fails, and the run goes on).
+static int64_t first_effect_of(const abilities::Catalog& catalog, int64_t hit) {
+    const abilities::HitDef* found = catalog.hit(hit);
+    return found && !found->effects.empty() ? found->effects.front().effect_guid : 0;
+}
 
 void test_pet_rules() {
     PetTestData shared;
@@ -139,7 +146,7 @@ std::printf("the rules of a creature's effects, from the data\n");
         const double pet_shield = cw.shield_of(pet, now);
         CHECK(cw.pet_use(pet, 77, 6064634403600334848ll, 0, guardian.reach_cm), "the pet braces");
         run(1.5);
-        CHECK(cw.effect_stacks(pet, r.catalog->hit(6064634403610624001ll)->effects.front().effect_guid) == 1, "Brace lands on the Guardian");
+        CHECK(cw.effect_stacks(pet, first_effect_of(*r.catalog, 6064634403610624001ll)) == 1, "Brace lands on the Guardian");
         std::printf("  [info] Brace: shield %.0f -> %.0f\n", pet_shield, cw.shield_of(pet, now));
         const uint64_t striker = w.spawn(wolf_path, 300, 0, 25, 1.0);
         cw.fighter_of(striker);
@@ -253,7 +260,7 @@ for (const pets::PetAbility& use : pets::kPetAbilities) {
     if (name.find("Eviscerate") != std::string::npos || name.find("Lunge") != std::string::npos) CHECK(cw.health_of(prey) < full, "its hit hurts the creature");
     if (name.find("Eruption") != std::string::npos) CHECK(cw.health_of(prey) < full, "Essence Eruption hurts around its target");
     if (name.find("Recreate") != std::string::npos || name.find("Cleanse") != std::string::npos) CHECK(!player.from_pet.empty(), "the Mystic's help lands on its owner");
-    if (name.find("Brace") != std::string::npos) CHECK(cw.effect_stacks(pet, r.catalog->hit(6064634403610624001ll)->effects.front().effect_guid) == 1, "Brace lands on the Guardian");
+    if (name.find("Brace") != std::string::npos) CHECK(cw.effect_stacks(pet, first_effect_of(*r.catalog, 6064634403610624001ll)) == 1, "Brace lands on the Guardian");
     CHECK(!cw.pet_use(pet, 77, 987654, prey, def->reach_cm), "a pet plays no ability that is not there");
 }
 
@@ -376,7 +383,7 @@ std::printf("a Summoner's abilities on its pet, as the client asks for them\n");
                 w.npcs->tick(t);
                 cw.tick(t);
             }
-            CHECK(cw.effect_stacks(prey, r.catalog->hit(kShredHit)->effects.front().effect_guid) == 1 || cw.health_of(prey) < cw.max_health_of(prey), "(it landed on the creature)");
+            CHECK(cw.effect_stacks(prey, first_effect_of(*r.catalog, kShredHit)) == 1 || cw.health_of(prey) < cw.max_health_of(prey), "(it landed on the creature)");
             t += 40.0;
         }
         std::printf("  [info] Spirit Shred: Fortitude on the Guardian %d\n", cw.effect_stacks(pet, kFortitude));
@@ -386,10 +393,11 @@ std::printf("a Summoner's abilities on its pet, as the client asks for them\n");
         CHECK(cast(kReconstruct, kReconstructHit, {pet}) == Refusal::None, "Reconstruct is taken");
         refill();
         CHECK(cast(kAmplify, kAmplifyHit, {pet}) == Refusal::None, "Amplify is taken");
-        CHECK(cw.effect_stacks(pet, r.catalog->hit(kAmplifyHit)->effects.front().effect_guid) == 1, "Amplify lands on the pet");
+        CHECK(cw.effect_stacks(pet, first_effect_of(*r.catalog, kAmplifyHit)) == 1, "Amplify lands on the pet");
         refill();
         CHECK(cast(kPhaseOut, kPhaseOutPet, {pet}) == Refusal::None, "Phase Out is taken");
-        CHECK(cw.effect_stacks(pet, r.catalog->hit(kPhaseOutPet)->effects.front().effect_guid) == 0, "Phase Out's effect on the pet is a crowd control: it stays off");
+        CHECK(first_effect_of(*r.catalog, kPhaseOutPet) != 0, "(Phase Out's hit puts an effect on the pet)");
+        CHECK(cw.effect_stacks(pet, first_effect_of(*r.catalog, kPhaseOutPet)) == 0, "Phase Out's effect on the pet is a crowd control: it stays off");
 
         // a pet's ability: its Essence, and its cooldown where the owner's bar reads it
         refill();

@@ -359,6 +359,7 @@ void CombatWorld::stop_cast(Npc& n) {
 }
 
 void CombatWorld::forget(uint64_t actor_id) {
+    if (is_pet(actor_id)) pet_cleanup(actor_id);   // a pet's port holds its combatant by reference and stands in players_: a game master's despawn must not leave it there
     if (const auto it = npcs_.find(actor_id); it != npcs_.end()) stop_cast(*it->second);
     flights_.erase(std::remove_if(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.npc == actor_id; }), flights_.end());
     npcs_.erase(actor_id);
@@ -1296,7 +1297,7 @@ void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
     n.hold_until = 0;
     pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return p.npc == n.actor_id; }), pending_.end());
     ++stats_.kills;
-    if (death_hook_) {
+    if (death_hook_ && !is_pet(n.actor_id)) {   // (a pet leaves no corpse and no loot, whoever killed it: its session sees dead() and takes it away)
         const world::WorldActor* a = registry_.find(n.actor_id);
         DeathEvent e;
         e.npc = n.actor_id;

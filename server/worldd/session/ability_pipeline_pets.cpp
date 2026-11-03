@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// Summoner pets: contributed by MrJambix in #13.
 // ============================================================================
 //  session/ability_pipeline_pets.cpp (see ability_pipeline.h): a Summoner's pet on its owner's side: what its abilities cost and the cooldowns they start, its hits that land on its owner and their
 //  confirmations, Dimensional Bolt's second press, and what a hit does to the cooldowns of abilities (ModifyCooldownsIds: Hex's reset on a kill, Amplify's recharge, the Bolt's 12 s).
@@ -25,31 +26,51 @@ using abilities::EffectDef;
 using abilities::HitDef;
 using bootstrap::AbilityChange;
 
-bool AbilityPipeline::pay_pet_ability(int64_t ability, double now, double& cooldown) {
+bool AbilityPipeline::can_pay_pet_ability(int64_t ability, double now, PetPayment& out) {
     advance(now);
+    out = {};
     const AbilityDef* def = catalog_ ? catalog_->ability(ability) : nullptr;
     if (!def) return false;
     std::string why;
-    cooldown = 0;
-    if (def->row.cooldown_expr != 0 && eval(def->row.cooldown_expr, cooldown, why)) cooldown = std::max(0.0, cooldown);
-    AbilityChange c;
-    std::vector<std::pair<int64_t, double>> costs;
+    double cooldown = 0;
+    if (def->row.cooldown_expr != 0 && eval(def->row.cooldown_expr, cooldown, why)) out.cooldown = std::max(0.0, cooldown);
+    std::vector<std::pair<int64_t, double>> each;
+    std::vector<int64_t> counted;   // (a cost hit the ability lists under more than one key is one cost)
     for (const content::AbilityHitRow& h : def->hits) {
         const HitDef* hit = catalog_->hit(h.hit_guid);
-        if (!hit || !hit->row.name.ends_with("_OwnerCost")) continue;
+        if (!hit || !hit->row.name.ends_with("_OwnerCost") || std::find(counted.begin(), counted.end(), h.hit_guid) != counted.end()) continue;
+        counted.push_back(h.hit_guid);
         for (const content::ModRow& m : hit->mods) {
             double amount = 0;
             if (m.value_expr == 0 || !eval(m.value_expr, amount, why) || !std::isfinite(amount)) continue;
-            if (stat_now(m.stat_guid) + amount < 0) return false;   // the Essence is not there
-            costs.emplace_back(m.stat_guid, amount);
+            each.emplace_back(m.stat_guid, amount);
         }
-        break;
     }
-    for (const auto& [stat, amount] : costs) apply_delta(c, stat, amount);
+    out.costs = pets::sum_by_stat(each);
+    for (const auto& [stat, amount] : out.costs) {
+        if (stat_now(stat) + amount < 0) return false;   // the Essence is not there
+    }
+    return true;
+}
+
+void AbilityPipeline::commit_pet_payment(int64_t ability, const PetPayment& pay, double now) {
+    advance(now);
+    const AbilityDef* def = catalog_ ? catalog_->ability(ability) : nullptr;
+    if (!def) return;
+    AbilityChange c;
+    for (const auto& [stat, amount] : pay.costs) apply_delta(c, stat, amount);
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, now, "the Essence of " + def->row.name});
-    start_pet_cooldown(ability, cooldown, now);
+    start_pet_cooldown(ability, pay.cooldown, now);
+}
+
+bool AbilityPipeline::pay_pet_ability(int64_t ability, double now, double& cooldown) {
+    PetPayment pay;
+    cooldown = 0;
+    if (!can_pay_pet_ability(ability, now, pay)) return false;
+    commit_pet_payment(ability, pay, now);
+    cooldown = pay.cooldown;
     return true;
 }
 
@@ -181,13 +202,13 @@ void AbilityPipeline::modify_cooldowns(AbilityChange& c, const HitDef& hit, doub
 }
 
 void AbilityPipeline::land_bolt_recall(int32_t client_id, uint64_t target, double t) {
-    combat_->remove_effect(target, pets::kBoltMark, t);
+    if (combat_) combat_->remove_effect(target, pets::kBoltMark, t);
     AbilityChange c;
     HitSource src;
     src.type = content::kSourceTypeAbility;
     src.guid = pets::kBolt;
-    if (const HitDef* remove = catalog_->hit(pets::kBoltRemoveHit)) apply_hit_here(c, *remove, t, true, src);
-    if (const HitDef* cooldown = catalog_->hit(pets::kBoltCooldownHit)) apply_hit_here(c, *cooldown, t, true, src);   // (the data's: taking Lockout_2 off fires it)
+    if (const HitDef* remove = catalog_ ? catalog_->hit(pets::kBoltRemoveHit) : nullptr) apply_hit_here(c, *remove, t, true, src);
+    if (const HitDef* cooldown = catalog_ ? catalog_->hit(pets::kBoltCooldownHit) : nullptr) apply_hit_here(c, *cooldown, t, true, src);   // (the data's: taking Lockout_2 off fires it)
     drop_evaluation();
     recompute(c);
     bolt_recall_ = {target, stacks_of(pets::kHunterEffect) > 0};

@@ -30,14 +30,16 @@ func TestRealAbilityTables(t *testing.T) {
 		// version 38: the ability every consumable item casts comes into the tables (150 more abilities: ab_ability 827 -> 977, ab_hit 1,631 -> 1,784, ab_effect 1,213 -> 1,361) with
 		// 65 more expressions of the abilities' (ab.exprs 1,658 -> 1,723; ab_expr 2,229 -> 2,294);
 		// version 39: the effect-control export adds the effects' extension and stack-loss texts after every other table (13 more expressions, ab_expr 2,294 -> 2,307; meta ab.exprs is
-		// the abilities' own count and stays 1,723), and one row of ab_effect_control per effect
-		"ab_ability": 977, "ab_hit": 1784, "ab_projectile": 215, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2307, "ab_effect_control": 1361,
+		// the abilities' own count and stays 1,723), and one row of ab_effect_control per effect;
+		// version 40: the four pet attacks and TargetCooldownAbility, written as a reference, come into the tables (ab_ability 977 -> 981, ab_hit 1,784 -> 1,790, ab_projectile 215 -> 217)
+		// with 5 more expressions of the abilities' (ab.exprs 1,723 -> 1,728; ab_expr 2,307 -> 2,312)
+		"ab_ability": 981, "ab_hit": 1790, "ab_projectile": 217, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2312, "ab_effect_control": 1361,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "977", "ab.hits": "1784", "ab.effects": "1361", "ab.projectiles": "215", "ab.zones": "62", "ab.exprs": "1723", "loot.exprs": "536", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "981", "ab.hits": "1790", "ab.effects": "1361", "ab.projectiles": "217", "ab.zones": "62", "ab.exprs": "1728", "loot.exprs": "536", "gather.exprs": "35"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
 		}

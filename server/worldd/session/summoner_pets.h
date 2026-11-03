@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// Summoner pets: contributed by MrJambix in #13.
 // ============================================================================
 //  session/summoner_pets.h: the Summoner's three pets, by their records in the design data
 // ============================================================================
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace aoc::worldd::pets {
 
@@ -42,6 +46,7 @@ inline constexpr int64_t kFollow = 6064633690279903233ll;
 inline constexpr int64_t kStay = 6064633774860402690ll;
 inline constexpr int64_t kAttack = 6064633690276102144ll;
 inline constexpr int64_t kGoTo = 6064633723838726145ll;
+inline constexpr int64_t kGoToAbility = 6064633723849342980ll;   // Summoner_PetCommand_GotoLocation: its AreaRange is the farthest place it may name
 inline constexpr int64_t kAggressive = 6064633724790243328ll;
 inline constexpr int64_t kDefensive = 6064633724791750657ll;
 inline constexpr int64_t kPassive = 6064633724791816194ll;
@@ -132,6 +137,16 @@ inline int64_t bar_command_of(int64_t ability) {
 inline int64_t pet_of_ability(int64_t ability) {
     for (const PetAbility& a : kPetAbilities) if (a.ability == ability) return a.pet_effect;
     return 0;
+}
+/// What an ability costs, by stat: the amounts of all its cost hits added up, so that the Essence is tested once against the whole cost.
+inline std::vector<std::pair<int64_t, double>> sum_by_stat(const std::vector<std::pair<int64_t, double>>& each) {
+    std::vector<std::pair<int64_t, double>> total;
+    for (const auto& [stat, amount] : each) {
+        const auto held = std::find_if(total.begin(), total.end(), [stat = stat](const std::pair<int64_t, double>& c) { return c.first == stat; });
+        if (held == total.end()) total.emplace_back(stat, amount);
+        else held->second += amount;
+    }
+    return total;
 }
 /// Where a hit of a pet's ability lands, when that is more than its one target: the sizes are its targeting records'.
 struct HitArea {

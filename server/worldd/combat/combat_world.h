@@ -311,6 +311,11 @@ public:
     /// The pet plays one of its abilities (its owner has paid for it): it goes within `reach_cm` of a hostile target when the ability is aimed at one, plays the montage and lands the ability's hits
     /// at its notifies, on the creatures, on itself and on its owner as each hit's mask says.  False when it cannot.
     bool pet_use(uint64_t pet, uint64_t owner, int64_t ability, uint64_t target, double reach_cm);
+    /// Whether the pet may play `ability` at `target` (0: none named), asked before its owner pays and before pet_use: the rule of AbilityPipeline::trigger for a cast at a named target.  It
+    /// changes nothing and makes no combatant (the target is read from the registry, as pet_attack reads it).  The target is an actor of the registry and alive, and of a side the ability
+    /// reaches (a creature the owner may harm needs the Enemy bit, any other needs Self, Ally, Party or Raid; the owner and the pet are of the friendly side), and within the distance a pet's
+    /// fight is held to from its owner.  With no target named nothing is asked: the ability is played where the pet stands, as the pipeline casts a player's at the air.  `why`: what refused it.
+    bool pet_can_use(uint64_t pet, uint64_t owner, int64_t ability, uint64_t target, std::string* why = nullptr);
     bool pet_casting(uint64_t pet) const { return pet_casts_.count(pet) != 0; }
     /// What the pet is fighting (0: nothing), and whom a creature is after (0: nobody).
     uint64_t pet_target(uint64_t pet) const {
@@ -509,6 +514,8 @@ private:
         std::vector<std::pair<double, int64_t>> due;   // (when, hit record)
     };
     bool  pet_join(uint64_t pet, uint64_t owner);
+    /// Takes the pet's fight, cast, owner and port off the world's tables (not its combatant): its port holds the combatant by reference, so it goes before the combatant does.
+    void  pet_cleanup(uint64_t pet);
     void  tick_pets(double now);
     void  tick_pet_casts(double now);
     void  pet_start_cast(Npc& pet, PetCast& cast, double now);

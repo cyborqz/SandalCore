@@ -464,9 +464,11 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     if (pet_takes_trigger(conn, ability, instance, info, now)) return;
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
+    bool accepted_cast = true;   // (the generic runtime has no refusal to give back: a pet's command goes on as before)
     if (pipeline_ && pipeline_->handles(ability)) {
         if (item_slot != -1) info.item_cast = consumable_cast(ability, item_slot, item_location);   // consumables: the item whose numbers the ability reads
         const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
+        accepted_cast = accepted == Refusal::None;
         if (accepted == Refusal::None && info.item_cast) take_consumable(info.item_cast, instance);
         if (accepted == Refusal::None && !info.target_actors.empty()) pet_joins_owners_cast(info.target_actors.front());
         // Drop Crate: the cast plays its montage and the crate leaves the back at the montage's notify, whatever the place (the original drops nothing at a place a crate cannot lie)
@@ -479,7 +481,8 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     }
     take_ability_events();
     flush_abilities(conn);
-    if (const int64_t command = pets::command_of_ability(ability); command != 0 && pet_actor_) {
+    // a pet's command is the ability's: the pet obeys only when the pipeline took the cast (a refused Go To, still on its cooldown, orders nothing)
+    if (const int64_t command = pets::command_of_ability(ability); command != 0 && pet_actor_ && accepted_cast) {
         pet_command(conn, command, info.target_actors.empty() ? 0 : info.target_actors.front(), trigger_place, now);
     }
 }

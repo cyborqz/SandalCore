@@ -2,7 +2,7 @@
 
 This document lists the known issues of the current SandalCore main in one place: what happens, a workaround when there is one, and the status. What is still to be built is in [ROADMAP.md](ROADMAP.md), under "Achieved and left".
 
-**Last updated:** 2 November 2026
+**Last updated:** 4 November 2026
 
 ---
 
@@ -40,7 +40,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **Ranger / Air Strike** | Air Strike hurts the enemies where its arrows land, but does not root (CC) one that a slow debuff is on (mobs do not slow down or stop for a slow, snare or CC yet). | None. | Open. |
 | **Mage / Ball Lightning** | Ball Lightning plays and takes its cost, but does no damage: its slow ball, which hurts what it passes over, is not moved. | None. | Planned: the ball's path. |
 | **Bard / Saga** | The Saga's projectiles (the heals and buffs of its stories that fly to allies) are not sent. | None. | Open. |
-| **Summoner / Pets** | Summoner pets are not implemented yet: summoning does not bring out a pet. | None. | Planned: Summoner pets. |
+| **Summoner / Pets** | Guardian, Hunter and Mystic come when the 8 s summon finishes, follow you, fight, take your commands and stances (Attack, Follow, Stay, Go To up to 40 m from you, Aggressive, Defensive, Passive, Dismiss), come back to your side when they are more than 40 m from you, play their ten abilities from the pet bar or by the auto mode, and take your abilities on them. Mobs refuse crowd control, so a pet's stun, root, slow or knockback does not land (Stomp's talents, Incapacitate's hold); effects that do land change no stat of a mob, and a pet's hits do not shorten a Hex. A pet ability that needs a target (Taunt, Eviscerate, Lunge, Incapacitate, Essence Eruption) is still played where the pet stands, and its Essence paid, when nothing is targeted. Dismiss sends the pet away at once. A pet more than 40 m from you is brought back by a teleport next to you, which is likely not how the original game did it. Taking a summon out of the Skill Tree leaves that pet out. | None. | Planned: crowd control on mobs. To consider: refusing a pet ability that needs a target when nothing is targeted, as the game's data asks; Dismiss's own timing; how a pet left behind comes back; sending the pet away when its summon leaves the Skill Tree. |
 | **Gathering / Speed** | Gathering takes longer than on retail. | None. | Investigating how the gathering speed ratings (skills, talents, tools and gear) apply. |
 | **Gathering / Full bag** | When the resource bag is full, the extra items drop in an ash pile, the look used for death piles. | Make room in the resource bag before gathering. | Open: dropped items need a look of their own. |
 | **Gathering / Restart** | Cut trees and hunted animals reset when the server restarts. | None. | Open: their state is not saved between runs. |

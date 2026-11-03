@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// Summoner pets: contributed by MrJambix in #13.
 // ============================================================================
 //  combat/combat_pets.cpp (see combat_world.h): the fights of a player's pet, the abilities it plays, and what reacts to a hit on what a creature holds.
 //
@@ -561,6 +562,33 @@ bool CombatWorld::pet_use(uint64_t pet, uint64_t owner, int64_t ability, uint64_
     return true;
 }
 
+bool CombatWorld::pet_can_use(uint64_t pet, uint64_t owner, int64_t ability, uint64_t target, std::string* why) {
+    const auto refuse = [&](const char* text) {
+        if (why) *why = text;
+        return false;
+    };
+    const abilities::AbilityDef* def = catalog_.ability(ability);
+    PlayerPort* port = player(owner);
+    if (!def || !port) return refuse("the ability or its owner is not there");
+    if (!pet_can_act(pet)) return refuse("the pet cannot act");
+    constexpr int kFriendly = 1 | 4 | 8 | 16;   // Self, Ally, Party, Raid
+    const int mask = def->row.applicable_targets;
+    if (target == 0) return true;   // none named: it is played where the pet stands or on its owner, as the pipeline casts a player's ability at the air when it has no target
+    if (target == pet || target == owner) {   // the friendly side
+        if (mask != 0 && (mask & kFriendly) == 0) return refuse("it does not help allies");
+        return true;
+    }
+    const world::WorldActor* t = registry_.find(target);
+    if (!t || t->kind != world::ActorKind::Npc) return refuse("the target is not there");
+    const auto fighting = npcs_.find(target);
+    if (fighting != npcs_.end() && fighting->second->dead) return refuse("the target is dead");
+    const npc::MotionStats bp = motion_.get(t->npc.archetype);
+    const bool hostile = data_.relation(port->fighter().alignments(), std::vector<int64_t>(bp.alignments.begin(), bp.alignments.end())) == Relation::Hostile;
+    if (hostile ? (mask & 2) == 0 : mask != 0 && (mask & kFriendly) == 0) return refuse(hostile ? "it does not harm enemies" : "it does not help allies");
+    if (distance_xy_cm(port->fighter().position(), Vec3{t->x, t->y, t->z}) > kOwnerLeftCm) return refuse("the target is too far from its owner");
+    return true;
+}
+
 void CombatWorld::pet_start_cast(Npc& pet, PetCast& cast, double now) {
     const abilities::AbilityDef& def = *cast.ability;
     PlayerPort* owner = player(cast.owner);
@@ -595,11 +623,10 @@ void CombatWorld::pet_start_cast(Npc& pet, PetCast& cast, double now) {
             played = true;
         }
         const auto add = [&](double delay, int key, const char* source) {
-            for (const content::AbilityHitRow& r : def.hits) {
+            for (const content::AbilityHitRow& r : def.hits) {   // (every hit the key names lands at its notify)
                 if (r.source != source || r.key != key) continue;
                 cast.due.emplace_back(now + delay, r.hit_guid);
                 timed = true;
-                break;
             }
         };
         for (const MontageData::Hit& h : montage->hits) add(h.time / montage->rate_scale, static_cast<int>(h.key), "hit");
@@ -804,7 +831,7 @@ void CombatWorld::pet_stop(uint64_t pet) {
     if (npcs_world_) npcs_world_->halt(pet);
 }
 
-void CombatWorld::pet_gone(uint64_t pet) {
+void CombatWorld::pet_cleanup(uint64_t pet) {
     pet_stop(pet);
     pet_stand_downs_.erase(pet);
     pet_casts_.erase(pet);
@@ -813,6 +840,10 @@ void CombatWorld::pet_gone(uint64_t pet) {
         remove_player(it->second.get());
         pet_ports_.erase(it);
     }
+}
+
+void CombatWorld::pet_gone(uint64_t pet) {
+    pet_cleanup(pet);
     forget(pet);
 }
 
@@ -850,9 +881,8 @@ void CombatWorld::pet_swing(Npc& pet, PetFight& fight, const Npc& target, double
                 if (r.source != source || r.key != key) continue;
                 const abilities::HitDef* hit = catalog_.hit(r.hit_guid);
                 if (!hit || (hit->row.applicable_targets & 2) == 0 || hit->mods.empty()) continue;
-                fight.due.emplace_back(now + delay, r.hit_guid);
+                fight.due.emplace_back(now + delay, r.hit_guid);   // (every hit the key names lands at its notify)
                 timed = true;
-                break;
             }
         };
         for (const MontageData::Hit& h : montage->hits) add(h.time / montage->rate_scale, static_cast<int>(h.key), "hit");
@@ -952,8 +982,14 @@ void CombatWorld::tick_pets(double now) {
             origin.ability_tags = meta.ability_tags;
             const Delivery d = apply_hit_to_npc(target_id, owner_id, r, now, id, &origin);
             if (d.applied) {
-                DealtHit dealt{guid, meta.source_type, meta.source_guid, id, target_id, d.flags, r.mods, d.effective};
-                owner->hit_dealt(dealt, now);
+                // what the client draws is Health and Mana: a status stat's move is not told, as in land_for_player
+                DealtHit dealt{guid, meta.source_type, meta.source_guid, id, target_id, d.flags, {}, {}};
+                for (size_t i = 0; i < r.mods.size(); ++i) {
+                    if (data_.ids().is_status_stat(r.mods[i].stat_guid)) continue;
+                    dealt.mods.push_back(r.mods[i]);
+                    dealt.effective.push_back(d.effective[i]);
+                }
+                if (!dealt.mods.empty() || hit->row.has_fx || r.miss()) owner->hit_dealt(dealt, now);
             }
         }
         if (fight.swinging && now >= fight.end_at) {

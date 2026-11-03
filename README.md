@@ -37,7 +37,7 @@ flowchart LR
 | 🧙 **Your character** | ✅ | **4 · Stats** | The game's own stat formulas, updated as your gear changes |
 | | ✅ | **5 · Mounts** | Ground, flying and swimming mounts, sprinting and roads |
 | | 🛠️ | **6 · Progression and items** | XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. *Still to come: splitting and joining stacks, food and potions.* |
-| | 🛠️ | **7 · Combat and abilities** | Most classes' abilities, weapon combos and finishers, buffs, death and respawn. *Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit. Still to come: slows, snares and CC on mobs (roots, stuns; the weapon finisher talents' slows among them) and Summoner pets.* |
+| | 🛠️ | **7 · Combat and abilities** | Most classes' abilities, weapon combos and finishers, buffs, death and respawn. *Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: slows, snares and CC on mobs (roots, stuns; the weapon finisher talents' slows among them).* |
 | 🌍 **The world** | 🛠️ | **8 · Gathering and professions** | Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. *Still to come: fishing and the rest of the 22 professions.* |
 | | 🛠️ | **9 · Living world** | Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. *Still to come: the other mob families, flying mobs, and day and night spawns.* |
 | | 🛠️ | **10 · City nodes** | Node levels and XP, and the five towns with their people, buildings and crafting stations. *Still to come: citizenship, mayors, taxes and vassal nodes.* |

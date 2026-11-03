@@ -25,6 +25,7 @@
 // ============================================================================
 #include "ability_rig.h"
 #include "capture_npc_casts.h"
+#include "combat/aftermath.h"
 #include "combat/combat_data.h"
 #include "combat/npc_stats.h"
 #include "combat_rig.h"

@@ -11,8 +11,11 @@ To keep the repository clean, legal, and safe for everyone, all contributors mus
 1. **No Proprietary Game Assets**: Never submit game client binaries, game paks, copyrighted audio, 3D meshes, textures, or official game assets.
 2. **No Unreal Engine Source Code**: Never copy code from the proprietary Unreal Engine source tree into this repository.
 3. **No Personal Data or Secrets**: Never include personal identification, real names, personal file paths, non-loopback IP addresses, MAC addresses, credentials, private keys, or session tokens in code, comments, test fixtures, or pull request descriptions.
-4. **Focused Pull Requests**: Keep pull requests focused on a single logical change or bug fix. Avoid massive indiscriminate refactors.
+4. **One Feature or Fix at a Time**: If you can, keep a pull request to one feature or one fix. This is a preference, not a rule: several fixes in one pull request are fine when the description names each one. Avoid massive indiscriminate refactors.
 5. **License Agreement**: All contributions are submitted under and licensed pursuant to the **GNU Affero General Public License version 3 (AGPL-3.0-only)** along with the additional terms specified in [`NOTICE`](../NOTICE).
+6. **Only What Is in the Repository**: Code comments, commit messages and pull request descriptions refer only to what is in this repository. Do not cite ids or numbers of outside recordings or logs, local file paths or private notes.
+7. **Several Pull Requests That Fit Together**: If you open more than one pull request, make sure they do not conflict when they are applied one by one. Base each on `main`; when one is merged, rebase the others onto the new `main` and check that they still build and pass the tests. If one depends on another, say so in its description.
+8. **Modular Code**: Build each feature as a module as much as possible: new files of its own, a small entry point into the shared code, and as few edits to shared files as possible (see "Where New Code Goes"). Modular changes are easier to review, and they keep pull requests from conflicting with each other.
 
 ---
 
@@ -44,7 +47,7 @@ Pull requests are built and tested by two GitHub Actions workflows (`.github/wor
 - **Go** (`go.yml`): `gofmt`, `go vet`, `go build`, `go test` against a PostgreSQL service container, and `govulncheck`. The build uses the tag `aoc_standin`, which replaces the one Go file made from a game install (`services/internal/citynode/constants_gen.go`) with placeholder values. The few tests that need the real values skip themselves and print why.
 - **C++** (`cpp.yml`): builds everything with MSVC and runs the test programs that need no game data. `scripts/ci_standin_data.ps1` writes placeholder files where the extractor writes the game-derived headers and test files, and it refuses to run on a machine that has game data. `scripts/ci_run_tests.ps1` runs the test programs and lists the ones it does not run (`scripts/ci_needs_game_data.txt`).
 
-A green run means the code builds and the tests that need no game data pass. It does not cover what needs a machine with the game installed: the test programs in `scripts/ci_needs_game_data.txt`, the tests that read the content database, the walking map or recorded packets, the checks of the generated files, and the runs in the game itself. The maintainer runs those before a change is merged.
+A green run means the code builds and the tests that need no game data pass. It does not cover what needs a machine with the game installed: the test programs in `scripts/ci_needs_game_data.txt`, the tests that read the content database, the walking map or recorded packets, the checks of the generated files, and the runs in the game itself. Those checks are not part of the pull request run.
 
 When you add a test that needs the game data, add its program to `scripts/ci_needs_game_data.txt` (C++) or call `standin.Skip` in it (Go). When a generated Go constant or header is added or renamed, update its placeholder too: `services/internal/citynode/constants_standin.go` and `scripts/ci_standin_data.ps1`.
 
@@ -55,12 +58,13 @@ To try the Go job on a machine without game data: `cd services && go test -tags 
 Put a new feature into source files of its own and register it the way the existing features do, instead of growing the big files:
 
 - The world server's player session has one file per feature (`server/worldd/session/player_<feature>.cpp`). A feature registers the client calls it answers in its own file (`register_<feature>_rpcs`, listed once in `server/worldd/session/rpc_registered.inc`) and lists its file in `server/worldd/session/session_sources.cmake`.
+- `server/worldd/CMakeLists.txt` is also an input of the walking map build, so a change there makes every player rebuild the map. List new world-server files in `server/worldd/session/session_sources.cmake` instead (with `${CMAKE_CURRENT_SOURCE_DIR}/<folder>/<file>`).
 - Tests are registered from files of their own (`server/worldd/tests/README.md`).
 - `scripts/hotspot_limits.txt` lists the files that were split and the most lines each may have; `scripts/check_hotspots.ps1` reports a file that grew past its limit (CI runs it).
 
 ### Commit Messages
 
-- Use clear, past-tense commit titles, as the project's own history does: e.g., `Fixed harvest channel cancel state`, `Added validation for mount possession RPC`.
+- Use clear, past-tense commit titles and body lines, as the project's own history does: e.g., `Fixed harvest channel cancel state`, `Added validation for mount possession RPC`.
 - Include the rationale behind non-obvious fixes.
 
 ---

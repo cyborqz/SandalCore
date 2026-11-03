@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// Summoner pets: contributed by MrJambix in #13.
 // ============================================================================
 //  tests/ability_pipeline_summon_tests.inc: a Summoner's cast: applied once by the server when it completes, cancelled by moving or by the client
 //  (registered with AOC_REGISTER_TEST: test_worldd_ability_pipeline.cpp runs it through aoc_tests::run; it is included from ability_pipeline_registered.inc)
@@ -20,6 +21,8 @@ void test_summoner_completion() {
         if (!d) continue;
         CHECK(r.trigger(name, 1.0, false) == Refusal::None, "the summon cast is accepted");
         const auto* ability = r.catalog->ability(d->ability);
+        CHECK(ability != nullptr && !ability->hits.empty(), "the summon has a record with a hit");
+        if (!ability || ability->hits.empty()) continue;
         const int64_t hit = ability->hits.front().hit_guid;
         CHECK(r.pipe->hit_request(d->ability, content::kTargetingDefaultSelf, hit, 1, 1, 1.2) == AbilityPipeline::HitVerdict::Quiet,
               "a premature client hit cannot complete a summon");

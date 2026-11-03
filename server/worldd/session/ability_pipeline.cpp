@@ -1108,7 +1108,7 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
         }
     };
     for (const int64_t guid : hit.remove_effects) remove_where([&](const EffectDef& e) { return e.row.guid == guid; });
-    // a cleanse names no effect: its filter chooses them [R: Purify, capture 141: an effect item goes with the hit's confirmation]
+    // a cleanse names no effect: its filter chooses them, and an effect item goes with the hit's confirmation [R: Purify, 141]
     if (hit.remove_effects.empty()) remove_where([&](const EffectDef& e) { return hit.removes(e); });
     sync_engine_effects();
 }

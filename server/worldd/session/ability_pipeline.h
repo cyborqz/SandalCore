@@ -449,7 +449,16 @@ public:
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
     // ---- a Summoner's pet (session/ability_pipeline_pets.cpp)
-    /// A pet ability, on its owner's side.  It pays the ability's `_OwnerCost` hit (false, and nothing paid: the Essence is not there) and says its cooldown.
+    /// What a pet's ability costs its owner: the Essence it takes from each stat (all the ability's cost hits added up) and the cooldown it starts.
+    struct PetPayment {
+        std::vector<std::pair<int64_t, double>> costs;   // (stat, amount)
+        double                                  cooldown = 0;
+    };
+    /// Whether the owner can pay for a pet's ability now (the Essence is there), and what it costs.  It pays and starts nothing, so a cast the world then refuses costs nothing.
+    bool can_pay_pet_ability(int64_t ability, double now, PetPayment& out);
+    /// Takes what can_pay_pet_ability worked out: the Essence, and the cooldown the ability starts on its owner.
+    void commit_pet_payment(int64_t ability, const PetPayment& pay, double now);
+    /// A pet ability, on its owner's side.  It pays the ability's `_OwnerCost` hits (false, and nothing paid: the Essence is not there) and says its cooldown: can_pay_pet_ability, then commit_pet_payment.
     bool pay_pet_ability(int64_t ability, double now, double& cooldown);
     /// A pet's ability's cooldown shows on its owner's Cooldowns, where the bar's slot reads it [R: the Stance Swap, 476, 477: CD 0.1, charges 0].
     void start_pet_cooldown(int64_t ability, double seconds, double now);
