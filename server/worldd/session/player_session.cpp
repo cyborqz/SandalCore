@@ -27,6 +27,7 @@
 #include "session/gm_travel.h"
 #include "protocol/repl/rpc_fields.h"
 #include "items/acquired.h"
+#include "spawns/mount_state.h"
 #include "vendor/node_tax.h"
 #include "vendor/sell_rules.h"
 #include "quest/quest_wire.h"
@@ -155,6 +156,7 @@ PlayerSession::~PlayerSession() {
     cancel_quick_make(nullptr, "the session is destroyed");
     cancel_gather(nullptr, "the session is destroyed");
     leave_combat();
+    leave_presence("the session is destroyed");   // (a session dropped without finish(): the other players' views still close it)
 }
 
 std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld& world, const svc::Character& character,
@@ -281,6 +283,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         PlayerSession* self = p.get();
         ActorView::Config view_config = world.view_config();
         view_config.player_id = static_cast<uint64_t>(p->pb_.setup().player_id);
+        view_config.player_name = p->pb_.setup().name;
         {
             // the player's own interaction state: its CharacterGuid goes in the maps of every interactable actor the view opens for this connection
             const auto& g = p->pb_.setup().character_guid;
@@ -494,10 +497,110 @@ void PlayerSession::tick(Connection& conn) { pump(conn); }
 void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     const TickPlan plan = tick_logic(conn, now, /*plan_view=*/false);   // (the three parts are in session/player_view_phases.cpp)
     if (plan.stopped) return;
+    sync_presence(now);   // multiplayer visibility: this player as the others see it
     if (plan.view) view_->tick(conn, plan.x, plan.y, now);
     tick_after(now, plan);
 }
 // -- C Y B & CoA --
+
+namespace {
+/// Multiplayer visibility: a step whose speed is above this is a jump (a teleport, a respawn, the floor net), shown without a velocity.  Twice the fastest
+/// ground speed the move checker lets a pawn have (a mount's dash: 1,741.5 cm/s): a bound of ours, not a retail number.
+constexpr double kPresenceJumpCmPerS = 3500.0;
+/// ... and the moves that stopped: with no new place for this long, the pawn is shown standing (its velocity 0), so another client does not run it on in place.
+/// INFERRED: a client sends a move every frame while it walks; 200 ms is three of the view's passes.
+constexpr auto kPresenceStill = std::chrono::milliseconds(200);
+}  // namespace
+
+void PlayerSession::sync_presence(Clock::time_point now) {
+    if (!registry_ || finished_ || failed_ || !phase_in_done_ || presence_failed_) return;
+    const GoodPosition g = checker_.good();
+    const double stamp = pb_.setup().world_time + session_seconds(now);   // ReplicatedServerLastTransformUpdateTimeStamp: the world's clock, as an NPC's
+    if (world_pawn_ == 0) {
+        auto pawn = pb_.observer_pawn();
+        auto state = pb_.observer_player_state();
+        world::WorldActor p, s;
+        if (pawn && state) {
+            p.id = pawn->guid.ObjectId;
+            p.kind = world::ActorKind::Player;
+            p.actor = std::move(*pawn);
+            p.never_dormant = true;   // a player is never dormancy-closed (evidence 4): awake within the NPCs' 150 m, closed beyond
+            p.owner = static_cast<uint64_t>(pb_.setup().player_id);
+            p.player.name = name();
+            p.player.pawn = true;
+            p.label = name();
+            p.x = g.x, p.y = g.y, p.z = g.z, p.yaw_degrees = g.yaw_degrees;
+            spawns::write_motion(p, g.x, g.y, g.z, g.yaw_degrees, 0, 0, false, stamp);
+            // the PlayerState stands where the pawn does and moves with it, so that every view opens and closes the two together.  INFERRED: UE makes a PlayerState
+            // always relevant; that would tell every player who is online, so it follows its pawn's relevancy instead (the PlayerState's lower id opens it first)
+            s.id = state->guid.ObjectId;
+            s.kind = world::ActorKind::Player;
+            s.actor = std::move(*state);
+            s.never_dormant = true;
+            s.owner = p.owner;
+            s.player.name = name();
+            s.player.pawn = false;
+            s.label = name();
+            s.x = g.x, s.y = g.y, s.z = g.z, s.yaw_degrees = g.yaw_degrees;
+        }
+        const uint64_t pid = p.id, sid = s.id;
+        if (!pawn || !state || !registry_->add(std::move(s))) {
+            presence_failed_ = true;
+            spdlog::warn("[players] {}: the pawn and PlayerState the other players are shown do not build or are refused by the registry: nobody sees this player", name());
+            return;
+        }
+        if (!registry_->add(std::move(p))) {
+            registry_->remove(sid);
+            presence_failed_ = true;
+            spdlog::warn("[players] {}: the registry refuses the pawn the other players are shown: nobody sees this player", name());
+            return;
+        }
+        world_pawn_ = pid;
+        world_player_state_ = sid;
+        presence_at_ = g;
+        presence_moving_ = false;
+        presence_moved_at_ = now;
+        spdlog::info("[players] {}: in the world for the other players (pawn {}, PlayerState {}) at ({:.0f}, {:.0f}, {:.0f}) cm", name(), pid, sid, g.x, g.y, g.z);
+        return;
+    }
+    const bool moved = g.x != presence_at_.x || g.y != presence_at_.y || g.z != presence_at_.z || g.yaw_degrees != presence_at_.yaw_degrees ||
+                       g.movement_mode != presence_at_.movement_mode;
+    if (!moved) {
+        if (presence_moving_ && now - presence_moved_at_ >= kPresenceStill) {   // the moves stopped: shown standing where it is
+            presence_moving_ = false;
+            registry_->modify(world_pawn_, world::Change::Movement, [&](world::WorldActor& a) { spawns::write_motion(a, g.x, g.y, g.z, g.yaw_degrees, 0, 0, false, stamp); });
+        }
+        return;
+    }
+    // the velocity of the step, from the client's own clock (the moves' TimeStamps); none for a jump or a step with no time between
+    double vx = 0, vy = 0;
+    const double dt = (g.has_time_stamp && presence_at_.has_time_stamp) ? static_cast<double>(g.time_stamp) - static_cast<double>(presence_at_.time_stamp) : 0.0;
+    if (dt > 0 && dt < 1.0) {
+        vx = (g.x - presence_at_.x) / dt;
+        vy = (g.y - presence_at_.y) / dt;
+        if (std::hypot(vx, vy) > kPresenceJumpCmPerS) vx = vy = 0;
+    }
+    const bool moving = vx != 0 || vy != 0;
+    presence_at_ = g;
+    presence_moving_ = moving;
+    presence_moved_at_ = now;
+    registry_->move(world_pawn_, g.x, g.y, g.z, g.yaw_degrees);
+    registry_->modify(world_pawn_, world::Change::Movement, [&](world::WorldActor& a) {
+        spawns::write_motion(a, g.x, g.y, g.z, g.yaw_degrees, vx, vy, moving, stamp);
+        repl::ObjectState& obj = a.actor.obj;
+        obj.state.set(*obj.schema, "ReplicatedMovementMode", repl::Value::u64(g.movement_mode == 0 ? repl::kMoveWalking : g.movement_mode));
+    });
+    registry_->move(world_player_state_, g.x, g.y, g.z, g.yaw_degrees);   // (no value of it changes: no view sends anything for it)
+}
+
+void PlayerSession::leave_presence(const char* why) {
+    if (!registry_ || (world_pawn_ == 0 && world_player_state_ == 0)) return;
+    // the pawn first: a view closes what it holds of each (Destroyed), and a client that has the pawn drops it before its PlayerState
+    if (world_pawn_ != 0) registry_->remove(world_pawn_);
+    if (world_player_state_ != 0) registry_->remove(world_player_state_);
+    spdlog::info("[players] {}: out of the world for the other players ({})", name(), why);
+    world_pawn_ = world_player_state_ = 0;
+}
 
 void PlayerSession::log_position(Clock::time_point) {
     // The investigation of 2026-10-10: the periodic save logs its first three at info, so a 5-minute stretch of a test had no position in the log.  This line is every 30 s and says what
@@ -575,6 +678,7 @@ void PlayerSession::finish(const char* why) {
         for (const auto& [id, za] : zone_actors_) registry_->remove(za.actor);
     }
     zone_actors_.clear();
+    leave_presence(why);   // the other players' views close this player's pawn and PlayerState (Destroyed)
     if (mounts_) {
         // the mount leaves the world with its owner; its item keeps the Health it had
         if (const auto kept = mounts_->shutdown()) apply_persist(nullptr, *kept);

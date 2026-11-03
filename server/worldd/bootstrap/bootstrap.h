@@ -687,6 +687,23 @@ public:
     /// The actor as the bootstrap holds it (for tests); null when there is none.
     const repl::Actor* lingering_actor(uint64_t actor_id) const;
 
+    // ---- multiplayer visibility, stage A: the player as the OTHER players see it ----------------------------------------
+
+    /// The pawn as another player's connection is sent it: the world's registry holds it (ActorKind::Player) and every other player's actor view opens it, the
+    /// same NetGUID and component GUIDs as the owner's pawn.  A simulated proxy: RemoteRole 1, Instigator the pawn, PlayerState the player's (observer_player_state);
+    /// no Owner and no Controller (objects only the owner's connection has).  Its components are the ones that show the character, with the values the owner's pawn
+    /// holds now: AlignmentComponent (Alignments), BaseCharacterInfo (CharacterGuid, CharacterName, Race, Gender, Level, ServerId, bHasBeenPossessed and HeldItems, the
+    /// visible gear), CombatInfo (bIsDead, PrimaryClassId), StatsComponent (the two EveryoneProxy arrays alone: the stat audience other players get, character_setup.h)
+    /// and Character Appearance (SharedAppearanceInfoId, CharacterCustomization, AppearanceIDs).  Left out as the owner's own: OwnerInfo, the item storages, the
+    /// resource containers, the AbilityComponent, the Owner/OwnerProxy stat arrays, WorldAttunements and the breathing time.  INFERRED: no retail capture in the
+    /// repository holds another player's pawn open, so the choice of components follows UE's conditions (OwnerOnly properties, RemoteRole) and the classes' names,
+    /// not a golden.  ReplicatedMovement is the caller's (spawns::write_motion on the registry's copy).  nullopt before the second state is added (the pawn has no
+    /// components to show yet) or when a value does not fit.
+    std::optional<repl::Actor> observer_pawn() const;
+    /// The PlayerState as another player's connection is sent it: PlayerId, PlayerNamePrivate and StartTime, RemoteRole 1, no Owner and no UniqueId (the login's
+    /// id is the account's, not something another player is shown: INFERRED, as UE replicates it to everyone).  nullopt when a value does not fit.
+    std::optional<repl::Actor> observer_player_state() const;
+
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 
     /// The GUIDs whose export the client acknowledged (Emission::exported_by_bunch[i] of a delivered export part).

@@ -1635,6 +1635,17 @@ private:
     std::unique_ptr<MountController> mounts_;
     size_t                         mount_item_uses_ = 0, mount_summon_requests_ = 0, mount_desummon_requests_ = 0, mount_ignored_ = 0, mount_logged_ = 0;
     bool                           phase_in_done_ = false;       // the phase-in is built: the view may start
+    // Multiplayer visibility, stage A: this player in the world's registry, as the other players' views open it (ActorKind::Player; 0: not there)
+    uint64_t                       world_pawn_ = 0, world_player_state_ = 0;
+    bool                           presence_failed_ = false;     // the observer's actors do not build: the other players never see this one (said once)
+    GoodPosition                   presence_at_;                 // the place the registry's pawn was last put
+    bool                           presence_moving_ = false;     // ... with a velocity (an update with none follows when the moves stop)
+    Clock::time_point              presence_moved_at_{};
+    /// Puts the player's pawn and PlayerState into the world's registry once the phase-in is built, then keeps the pawn where the last good position is
+    /// (ReplicatedMovement with the velocity of the step, unreliable as an NPC's walk).  Every tick and after every accepted move of the pawn.
+    void sync_presence(Clock::time_point now);
+    /// Takes the pawn and PlayerState out of the registry: every view that holds them closes them (Destroyed).
+    void leave_presence(const char* why);
     // The towns' scenery is opened in the join, before the phase-in (the rest of the view waits for it, as before)
     bool                           scenery_done_ = false;        // nothing is left for open_scenery to open (none within reach of the join, or all opened)
     size_t                         scenery_opened_ = 0;          // replicators the join opened
