@@ -830,7 +830,12 @@ static void test_refusals() {
     for (Player* p : {&bare, &novice, &apprentice}) play(*p);
     CHECK(novice.s->actor_view()->state_of(far_node) == world::ClientState::Awake && novice.s->actor_view()->state_of(dormant) != world::ClientState::Awake,
           "the 10 m node is open on the client, the 250 m node is only dormant there");
-    const size_t pc_before = pc_calls_since(novice, 0).size();
+    // (#14: the clock sync, ClientSetTime 1 s and 5 s after a phase-in, is the server's own and answers none of these requests; with the players seeing each other the joins settle a little later and the 5 s sync falls in this window, so it is not counted)
+    const auto pc_answers = [&] {
+        const auto calls = pc_calls_since(novice, 0);
+        return calls.size() - count_calls(calls, "ClientSetTime");
+    };
+    const size_t pc_before = pc_answers();
     // no tool
     bare.send_now(interact(rig.component_of(daffodil)), bare.pawn_ch);
     CHECK(refusal_count(bare, "no tool") == 1 && bare.s->harvests_started() == 0 && rig.board().state_of(daffodil) == gather::NodeState::Available, "nothing worn in the Sickle's slot: refused (no tool)");
@@ -848,7 +853,7 @@ static void test_refusals() {
     // a node that is not one: the component of an NPC would be ignored; an id no actor has is ignored by the generic path
     novice.send_now(interact(999999999), novice.pawn_ch);
     CHECK(novice.s->harvests_started() == 0 && novice.s->interactions_ignored() >= 1, "a component no actor owns is ignored");
-    CHECK(pc_calls_since(novice, 0).size() == pc_before, "and none of this sent the PlayerController a call");
+    CHECK(pc_answers() == pc_before, "and none of this sent the PlayerController a call");
     std::string all = "bare: " + refusals_of(bare) + "; novice: " + refusals_of(novice) + "; apprentice: " + refusals_of(apprentice);
     std::printf("      (%s)\n", all.c_str());
     // the positive controls: a Journeyman Herbalist with the T3 sickle harvests the Apprentice node (the tool is a higher tier)

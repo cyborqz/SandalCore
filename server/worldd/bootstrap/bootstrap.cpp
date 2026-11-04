@@ -26,7 +26,6 @@
 #include "protocol/repl/ability_rpc.h"
 #include "protocol/repl/dialogue_rpc.h"
 #include "protocol/repl/hit_rpc.h"
-#include "protocol/repl/move_packed.h"
 #include "protocol/schema/generated/index.h"
 
 #include <algorithm>
@@ -2722,104 +2721,6 @@ void PlayerBootstrap::lingering_remove(uint64_t actor_id) { effect_actors_.erase
 const repl::Actor* PlayerBootstrap::lingering_actor(uint64_t actor_id) const {
     const auto it = effect_actors_.find(actor_id);
     return it == effect_actors_.end() ? nullptr : &it->second.actor;
-}
-
-// ============================================================================================================================
-//  multiplayer visibility, stage A: the player as the other players see it
-// ============================================================================================================================
-
-namespace {
-
-/// A component of the owner's pawn as another player is shown it: the same GUID, name and checksum (or dynamic class), with only `paths` of its values and only
-/// `arrays` of its fast arrays (their items and keys as they are).  False when a value or an item does not fit (never: they came from the same class).
-bool observer_component(const repl::Subobject& from, const std::vector<std::string_view>& paths, const std::vector<std::string_view>& arrays, repl::Subobject& out) {
-    out = repl::Subobject{};
-    out.guid = from.guid;
-    out.name = from.name;
-    out.checksum = from.checksum;
-    out.dynamic_class = from.dynamic_class;
-    out.outer = from.outer;
-    out.obj.schema = from.obj.schema;
-    out.obj.opts = from.obj.opts;
-    if (!from.obj.schema) return false;
-    const schema::ClassSchema& cls = *from.obj.schema;
-    for (const std::string_view path : paths) {
-        const Value* v = from.obj.state.get(cls, path);
-        if (v && !out.obj.state.set(cls, path, *v)) return false;   // (a value the owner's pawn never set stays the class default)
-    }
-    repl::FastArrays source = from.obj.arrays;   // (FastArrays::get creates an array on first use: a copy, to read it)
-    for (const std::string_view name : arrays) {
-        const repl::FastArrayState* src = source.get(cls, name);
-        repl::FastArrayState* dst = out.obj.arrays.get(cls, name);
-        if (!src || !dst) return false;
-        for (const repl::FastArrayItem& it : src->items()) {
-            if (!dst->insert(it.id, it.values)) return false;
-        }
-        dst->set_array_key(src->array_key());
-    }
-    return true;
-}
-
-}  // namespace
-
-std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
-    if (!ok_ || !second_state_added_ || !pawn_.obj.schema) return std::nullopt;
-    const SessionGuids& g = setup_.guids;
-    repl::Actor a;
-    a.guid = pawn_.guid;
-    a.obj.schema = pawn_.obj.schema;
-    a.obj.opts = pawn_.obj.opts;
-    a.open = pawn_.open;   // the archetype, the level, where it spawned (the caller's write_motion puts it where the player is)
-    bool ok = true;
-    const auto set = [&](std::string_view path, Value v) { ok = a.obj.state.set(*a.obj.schema, path, std::move(v)) && ok; };
-    set("AuthServerIDReplicated", Value::u64(kAuthServerIdReplicated));
-    set("RemoteRole", Value::u64(1));   // SimulatedProxy: what every connection but the owner's is
-    set("Role", Value::u64(4));         // Authority
-    set("Instigator", object(g.pawn));
-    set("PlayerState", object(g.player_state));
-    set("ReplicatedMovementMode", Value::u64(repl::kMoveWalking));
-    // the components that show the character, in the owner's block order (Alignment, BaseCharacterInfo, CombatInfo, Stats, Appearance)
-    struct Want {
-        const FIntrepidNetworkGUID*            guid;
-        std::initializer_list<std::string_view> paths, arrays;
-    };
-    const Want wants[] = {
-        {&g.alignment, {"Alignments"}, {}},
-        {&g.base_character_info,
-         {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D", "CharacterName", "Race", "Gender", "Level", "ServerId", "bHasBeenPossessed"},
-         {"HeldItems"}},
-        {&g.combat_info, {"bIsDead", "PrimaryClassId.Guid"}, {}},
-        {&g.stats, {}, {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}},
-        {&g.appearance, {"SharedAppearanceInfoId.Guid", "CharacterCustomization", "AppearanceIDs"}, {}},
-    };
-    for (const Want& w : wants) {
-        const repl::Subobject* from = pawn_.find(*w.guid);
-        if (!from) return std::nullopt;
-        repl::Subobject sub;
-        if (!observer_component(*from, w.paths, w.arrays, sub)) return std::nullopt;
-        a.subobjects.push_back(std::move(sub));
-    }
-    if (!ok) return std::nullopt;
-    return a;
-}
-
-std::optional<repl::Actor> PlayerBootstrap::observer_player_state() const {
-    if (!ok_ || !ps_.obj.schema) return std::nullopt;
-    repl::Actor a;
-    a.guid = ps_.guid;
-    a.obj.schema = ps_.obj.schema;
-    a.obj.opts = ps_.obj.opts;
-    a.open = ps_.open;
-    bool ok = true;
-    const auto set = [&](std::string_view path, Value v) { ok = a.obj.state.set(*a.obj.schema, path, std::move(v)) && ok; };
-    set("AuthServerIDReplicated", Value::u64(kAuthServerIdReplicated));
-    set("RemoteRole", Value::u64(1));
-    set("Role", Value::u64(4));
-    for (const char* path : {"PlayerId", "StartTime", "PlayerNamePrivate"}) {
-        if (const Value* v = ps_.obj.state.get(*ps_.obj.schema, path)) set(path, *v);
-    }
-    if (!ok) return std::nullopt;
-    return a;
 }
 
 std::optional<Send> PlayerBootstrap::hit_confirmations(const std::vector<HitConfirm>& confirms, const repl::Vec3d& at) {

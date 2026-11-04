@@ -59,8 +59,9 @@ enum class ActorKind : uint8_t {
     Station,     // a crafting or processing station (crafting, step 0): an ACraftingStationBase actor of a node's building, opened like any other actor, used for its window
     Shrine,      // an Emberspring (AAoCAttunablePlayerSpawner): a respawn point a player discovers by coming close and attunes to by using it (respawn/embersprings.h)
     Prop,        // an object of a quest (an AInteractableStateMachineBase actor: a body, a crate, a root, a building site): used by its interactable component, it can leave and come back
-    Player,      // multiplayer visibility, stage A: a logged-in player as the OTHER players see it, its pawn (PlayerPawn_C, a simulated proxy) or its PlayerState; `owner` is its
+    Player,      // multiplayer visibility, stage A: a logged-in player as the OTHER players see it, its pawn (PlayerPawn_C, a simulated proxy); `owner` is its
                  // PlayerId: that player's own view never sends it (its own four actors are the session's), every other view does, by the NPCs' rings, never dormant
+                 // (#14 review: the pawn alone, there is no PlayerState actor for a player)
 };
 // [C | Y | B ~ C-O-A]
 
@@ -188,7 +189,7 @@ public:
 /// Multiplayer visibility, stage A: what a player's actor (ActorKind::Player) is to the server.
 struct PlayerInfo {
     std::string name;             // the character's name (the log's "X now sees Y")
-    bool        pawn = true;      // its pawn; false: its PlayerState
+    // #14 review: `pawn` (its pawn, or false for its PlayerState) is gone: a Player actor is always the pawn
 };
 
 struct WorldActor {

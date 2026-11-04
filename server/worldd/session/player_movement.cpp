@@ -169,7 +169,7 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
     if (verdict.accepted) {
         pending_fix_.reset();   // the client is where the server has it now: an earlier refusal of this datagram needs no correction
         if (!on_mount && is_moving(before, move)) moved_at_ = now;   // Gathering stage 3: a tree is not cut while walking
-        if (!on_mount) sync_presence(now);   // multiplayer visibility: the other players' views follow the pawn (their next pass sends it)
+        // #14 review: the presence sync (the other players' views follow the pawn) is not called from here any more: tick_logic does it once a tick, after the moves and the teleports of the tick.
         if (AbilityRuntime* abilities = ability_runtime(now)) {
             const bool moving = is_moving(before, move);
             abilities->set_moving(moving, ability_seconds(now));

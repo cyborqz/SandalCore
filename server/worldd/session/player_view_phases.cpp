@@ -40,6 +40,10 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_cargo(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);
+    // Players seeing each other (stage A, unspike's #14): this player's pawn in the registry, for the other players' views.  #14 review: once a tick, here and nowhere else.  This is the first part of the
+    // server's tick (before every view pass of the tick), after everything that can move the player (the moves, a teleport, a respawn, the floor net), so the registry is never written while the views
+    // read it, and it makes no difference whether the server runs the view passes on threads.
+    sync_presence(now);
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
     if (phase_in_done_ && !time_syncs_.empty() && now >= time_syncs_.front() && room_for(1)) {
         time_syncs_.pop_front();

@@ -454,7 +454,9 @@ struct WorldStreamServer::Impl final : wsv1::WorldStreamService::Service {
     /// Network thread: fills the answer for the entity `id`; false when there is none.
     bool inspect(uint64_t id, wsv1::InspectResponse* resp) {
         namespace sd = stream_detail;
-        if (const world::WorldActor* a = world.registry().find(id)) {
+        // #14 review: a Player actor is the registry's copy of a player's pawn, under the id the player's own row has (the pawn's ObjectId).  The map does not show it as an actor (kind_of has no kind for
+        // it), so the lookup ended here with "no entity" for a player; the registry's Player actors are skipped, and the player branch below answers for the player.
+        if (const world::WorldActor* a = world.registry().find(id); a && a->kind != world::ActorKind::Player) {
             uint8_t kind = 0;
             if (!mstream::kind_of(a->kind, kind)) return false;
             std::vector<mstream::Overlay> ov;

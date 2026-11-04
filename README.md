@@ -12,16 +12,16 @@ An independent, open-source server emulator compatible with the Ashes of Creatio
 
 ## 🗺️ Roadmap
 
-**5 of 16 phases done** · 7 in progress · 4 planned
+**5 of 16 phases done** · 8 in progress · 3 planned
 
-🟩🟩🟩🟩🟩🟨🟨🟨🟨🟨🟨🟨⬜⬜⬜⬜
+🟩🟩🟩🟩🟩🟨🟨🟨🟨🟨🟨🟨🟨⬜⬜⬜
 
 ```mermaid
 flowchart LR
     A["🔌 Getting in<br/>3 of 3 done"]:::done
     B["🧙 Your character<br/>2 of 4 done · 2 in progress"]:::wip
     C["🌍 The world<br/>4 in progress"]:::wip
-    D["🤝 Playing together<br/>1 in progress · 1 planned"]:::wip
+    D["🤝 Playing together<br/>2 in progress"]:::wip
     E["⚔️ Wars and world events<br/>3 planned"]:::todo
     A --> B --> C --> D --> E
     classDef done fill:#1a7f37,stroke:#116329,color:#ffffff
@@ -43,7 +43,7 @@ flowchart LR
 | | 🛠️ | **10 · City nodes** | Node levels and XP, and the five towns with their people, buildings and crafting stations. *Still to come: citizenship, mayors, taxes and vassal nodes.* |
 | | 🛠️ | **11 · Quests** | NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. *Still to come: more quests, group quests and events.* |
 | 🤝 **Playing together** | 🛠️ | **12 · Economy** | Gold, silver, copper and Glint, the NPC vendors, crates and storage. *Still to come: node currencies and more crates.* |
-| | ⬜ | **13 · Social** | Seeing other players, guilds, parties and raids, chat and mail, player trading and the marketplace |
+| | 🛠️ | **13 · Social** | Players within 150 m of each other see each other as their characters, standing, walking and stopping. *Still to come: riders on their mounts, gear and level changes, live Health and Mana, death and combat stances, abilities and hits on other players, guilds, parties and raids, chat and mail, player trading and the marketplace.* |
 | ⚔️ **Wars and world events** | ⬜ | **14 · Node sieges** | Node sieges and territory wars |
 | | ⬜ | **15 · Caravans** | Caravans and trade routes |
 | | ⬜ | **16 · World events** | Corruption events and other world events |

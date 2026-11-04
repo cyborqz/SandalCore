@@ -9,3 +9,7 @@
 #include "movement_move_ack_tests.inc"
 #include "movement_based_move_tests.inc"
 #include "movement_view_threads_tests.inc"
+#include "movement_presence_join_tests.inc"
+#include "movement_presence_walk_tests.inc"
+#include "movement_presence_wire_tests.inc"
+#include "movement_presence_mode_tests.inc"

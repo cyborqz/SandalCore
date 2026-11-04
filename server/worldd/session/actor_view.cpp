@@ -244,7 +244,7 @@ bool ActorView::open(Connection& conn, const world::WorldActor& a, Entry& e, boo
         spdlog::info("[scenery] open for player {} on channel {}: {} (node {}), level {}, {} items, PlotChangeVersion {}, {} payload bits, {} bits in the open", config_.player_id, channel,
                      a.scenery.name, a.scenery.node, a.scenery.level, a.scenery.items, a.scenery.plot_version, a.scenery.payload_bits, open_bits);
     }
-    if (a.kind == world::ActorKind::Player && a.player.pawn) log_player(a, true, nullptr);
+    if (a.kind == world::ActorKind::Player) log_player(a, true, nullptr);   // #14 review: every Player actor is a pawn now (it was `&& a.player.pawn`)
     if (a.kind == world::ActorKind::Foliage) {   // Gathering stage 3: the user's test reads these (the cell actor's states are what hides a cut tree; its mere presence is what lets the client offer one)
         // every cell has an actor from the start, so the opens are many: the first 100 first looks are said, and every open of a cell that was ever cut or grew (its version moved) always is
         const bool changed = a.version > 1;
@@ -424,7 +424,7 @@ bool ActorView::close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, 
             spdlog::info("[scenery] close for player {} on channel {}: {} (node {}), {}", config_.player_id, e.channel, a->scenery.name, a->scenery.node,
                          reason == kCloseRelevancy ? "out of range" : "destroyed");
         }
-        if (a && a->kind == world::ActorKind::Player && a->player.pawn) log_player(*a, false, reason == kCloseRelevancy ? "out of range" : "destroyed");
+        if (a && a->kind == world::ActorKind::Player) log_player(*a, false, reason == kCloseRelevancy ? "out of range" : "destroyed");   // #14 review: every Player actor is a pawn now
     }
     release(e);
     if (const world::WorldActor* held = reg().find(id); held && held->keep_fast_shadow) {
@@ -453,11 +453,11 @@ void ActorView::on_removed(const world::WorldActor& a) {
     if (it->second.state == ClientState::Dormant) r.actor = a.actor;   // opened once more, to be destroyed
     removed_.push_back(std::move(r));
     // (the close itself is flush_removed's, when the actor is no longer in the registry to be named)
-    if (a.kind == world::ActorKind::Player && a.player.pawn && !finished_) log_player(a, false, "left the world");
+    if (a.kind == world::ActorKind::Player && !finished_) log_player(a, false, "left the world");   // #14 review: every Player actor is a pawn now
 }
 
 bool ActorView::for_this_player(const world::WorldActor& a) const {
-    if (a.kind == world::ActorKind::Player) return a.owner != config_.player_id;   // another player's pawn and PlayerState; never this player's own
+    if (a.kind == world::ActorKind::Player) return a.owner != config_.player_id;   // another player's pawn; never this player's own   (#14 review: it said "and PlayerState")
     return a.owner == 0 || a.owner == config_.player_id;                           // (another player's lingering zones and mount are not for this connection)
 }
 

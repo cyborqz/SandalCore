@@ -690,8 +690,8 @@ public:
     // ---- multiplayer visibility, stage A: the player as the OTHER players see it ----------------------------------------
 
     /// The pawn as another player's connection is sent it: the world's registry holds it (ActorKind::Player) and every other player's actor view opens it, the
-    /// same NetGUID and component GUIDs as the owner's pawn.  A simulated proxy: RemoteRole 1, Instigator the pawn, PlayerState the player's (observer_player_state);
-    /// no Owner and no Controller (objects only the owner's connection has).  Its components are the ones that show the character, with the values the owner's pawn
+    /// same NetGUID and component GUIDs as the owner's pawn.  A simulated proxy: RemoteRole 1, Instigator the pawn;
+    /// no Owner, no Controller and no PlayerState (objects only the owner's connection has).  Its components are the ones that show the character, with the values the owner's pawn
     /// holds now: AlignmentComponent (Alignments), BaseCharacterInfo (CharacterGuid, CharacterName, Race, Gender, Level, ServerId, bHasBeenPossessed and HeldItems, the
     /// visible gear), CombatInfo (bIsDead, PrimaryClassId), StatsComponent (the two EveryoneProxy arrays alone: the stat audience other players get, character_setup.h)
     /// and Character Appearance (SharedAppearanceInfoId, CharacterCustomization, AppearanceIDs).  Left out as the owner's own: OwnerInfo, the item storages, the
@@ -699,10 +699,9 @@ public:
     /// repository holds another player's pawn open, so the choice of components follows UE's conditions (OwnerOnly properties, RemoteRole) and the classes' names,
     /// not a golden.  ReplicatedMovement is the caller's (spawns::write_motion on the registry's copy).  nullopt before the second state is added (the pawn has no
     /// components to show yet) or when a value does not fit.
+    /// #14 review: the pawn names no PlayerState any more, and the PlayerState that was built for the other players (observer_player_state) is gone: its PlayerNamePrivate was the login's
+    /// ?Name= text, which the client chooses and which names the player's PC, and no other player's client is sent it.  Defined in bootstrap/observer_actor.cpp.
     std::optional<repl::Actor> observer_pawn() const;
-    /// The PlayerState as another player's connection is sent it: PlayerId, PlayerNamePrivate and StartTime, RemoteRole 1, no Owner and no UniqueId (the login's
-    /// id is the account's, not something another player is shown: INFERRED, as UE replicates it to everyone).  nullopt when a value does not fit.
-    std::optional<repl::Actor> observer_player_state() const;
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 
