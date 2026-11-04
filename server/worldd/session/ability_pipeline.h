@@ -21,7 +21,7 @@
 //               does not compile refuses the ability (NoFormula), logged. A ClientInstanceId the pipeline has seen lately is dropped with no answer.
 //    cast       one trigger makes up to four steps, each at its own time after the trigger (the montage's notifies):
 //                 item       the ability item (ReplicatedActiveAbilities): the ability, a ServerInstanceId from the pawn's counter, the montage's
-//                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid), PlayRate 1.0, MontageGroup (DefaultGroup;
+//                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid), PlayRate (the character's speed stat for an ability whose table rows say which one, else 1.0), MontageGroup (DefaultGroup;
 //                            Flourish EmoteGroup, the songs SongGroup), Targets the caster when the call named one; the previous item
 //                            of the pipeline goes in the same update (every retail reply says "deleted 1"). The median of the recorded casts where
 //                            ability_timings.h has the ability (50 to 110 ms for most, per kind of cast), else about 300 ms after the trigger
@@ -56,9 +56,9 @@
 //               the ability put on its caster off (kLoopedCasts in ability_pipeline.cpp has the offsets).
 //    launches   an ability whose montage launches projectiles at moments of its own (the Ranger's Air Strike, Raining Death and Barrage) is played by the SERVER: every launch is a step of the cast at the
 //               time of the montage's notify and what it launches lands after its flight (kTimedCasts in ability_pipeline.cpp has the table). A hit the client asks for that fires projectiles (Maim's wave) sends them.
-//    flights    an ordinary cast with one projectile (the charged shots and the bolts, the Bard's Mock and its heals, the Sleep Dart, the Throw, the Mend) lands its hit when the projectile gets to the
+//    flights    an ordinary cast with one projectile (the charged shots and the bolts, the Bard's Mock and its heals, the Sleep Dart, the Throw, the Mend, a ranged weapon swing) lands its hit when the projectile gets to the
 //               target: the montage's launch notify over the client's play rate, plus the target's distance over the projectile's speed (kShotCasts); a cast at the caster himself has no flight.
-//               One that sends several projectiles (the Discordance's three notes, kNoteCasts) does so for each of them, and a hit that fires a bounce when it lands (kBounces) sends the
+//               One that sends several projectiles (the Discordance's three notes, a Shortbow volley, kNoteCasts) does so for each of them, and a hit that fires a bounce when it lands (kBounces) sends the
 //               projectile on from the enemy just hit to another one near it, where it lands its hits when it gets there.
 //    hits       a hit applies to the caster when its mask names Self (1) and its requirement holds: the ability's own hits (ab_ability_hit "hit"), the
 //               hits of the projectiles it fires when it has a target (the caster), the first overlap of the zones it spawns (the Initial and
@@ -257,6 +257,7 @@ struct NoteCast {
     int         key;          // the key (in the ability's ProjectilesIds) of the projectile this launch sends
     double      fire;         // the montage time of its FireProjectile notify, seconds
     bool        magical;      // the client plays the montage at MagicalSpeed (else at PhysicalSpeed)
+    int         animation = -1;   // the AnimationIndex of the montage this launch is for (-1: any); a weapon swing has a row for each arrow of each step
 };
 
 /// A hit that fires further hits when it lands (its RecursiveHit child, which fires a projectile): the projectile flies on from the enemy just hit to another enemy near it, and its hits land there
@@ -812,6 +813,11 @@ private:
     bool   can_pay(const Cast& cast) const;                       // whether the character holds what the cast's cost step takes (stats, effect stacks, a charge of its group): asked at the cost step and by a jump that comes before it
     void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
     void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
+    /// Whether the montage of `def` plays at the caster's MagicalSpeed (else PhysicalSpeed): an ability of a class says so in its table row (`row_magical`); a weapon swing belongs to no class, so the CHARACTER's class says (a Cleric's
+    /// shortbow swing plays at MagicalSpeed, a Fighter's wand swing at PhysicalSpeed).
+    bool   plays_at_magical(const abilities::AbilityDef& def, bool row_magical) const;
+    /// The play rate the ability item carries: the character's speed stat for an ability whose table rows say which stat its montage plays at (the ordinary shots, the notes, the Salvo, the ranged weapon swings), else 1.0.
+    double item_rate(const abilities::AbilityDef& def) const;
     double client_rate(bool magical) const;                       // the speed the client plays a montage at: its MagicalSpeed or PhysicalSpeed stat (1.0 when the stat is not there)
     void   plan_shot(Cast& cast, const ShotCast& shot, double t); // an ordinary cast with one projectile: when it leaves (the montage's notify over the client's play rate)
     void   launch_shot(Cast& cast, double t);                     // ... it leaves now: it lands after its flight over the target's distance (kShotCasts)

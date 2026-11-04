@@ -2324,7 +2324,7 @@ repl::ElementState ability_state(const PlayerSetup& s, const ActiveAbilityItem& 
     v[10] = Value(repl::NameValue::plain(a.montage_group));
     const std::optional<MontageRef> montage = a.montage_guid != 0 ? montage_for(a.montage_path, a.montage_guid) : montage_for(a.montage_path);
     v[11] = Value(montage ? montage->guid : FIntrepidNetworkGUID{});
-    v[12] = Value::f32(1.0f);           // PlayRate
+    v[12] = Value::f32(a.play_rate);    // PlayRate
     v[13] = Value::f32(a.montage_position);
     v[14] = Value::boolean(a.may_jump_to_position);
     v[15] = Value::i64(a.animation_counter);
