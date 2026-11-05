@@ -2,7 +2,7 @@
 
 This document lists the known issues of the current SandalCore main in one place: what happens, a workaround when there is one, and the status. What is still to be built is in [ROADMAP.md](ROADMAP.md), under "Achieved and left".
 
-**Last updated:** 4 November 2026
+**Last updated:** 5 November 2026
 
 ---
 
@@ -34,6 +34,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **World / Biomes** | `GetNodeBiome()` returns undefined on certain boundary cells at the edge of the Riverlands, preventing regional reagent drops on edge spawns. | Stay within central Riverlands zone coordinates for node harvesting. | Adding boundary cell interpolation in region mapping. |
 | **Inventory** | Dragging a stack onto another stack of the same item (to merge them) is refused, and so is splitting a stack. | Keep the stacks apart. | Planned: joining and splitting stacks. |
 | **Towns** | The floor and the buildings of the five towns are in the walking map, but doors, stairs with high steps and thin awnings are not, a mount summoned indoors is not checked for room, and a town changed to another level keeps the buildings of the level it started at until the walking map is made again. Some guards and townspeople may still stand in the wrong place, and trees inside towns can't be cut. Nearby town NPCs of a kind with no attack animation yet can hit you with no visible attack (no animation or projectile); the town's wolves, Grems and ravens animate theirs. A long teleport into a town falls about 140 m before the safety net puts the player back, 4.5 to 6 seconds later. | Walk into a town from outside, or teleport to a point close to its streets. | Open: doors and stairs; swapping the walking map when a town changes level. |
+| **NPCs / Looks** | The people whose records randomize their face take one of a small set of recorded faces, so the Dunir, Nikua and Vaelune among them have a plain face of their own race. A few outfits have no mesh for some bodies: about one in three female mercenaries wears an outfit whose back, feet, hands, shoulders, waist and forearm pieces have no model for her, and those slots show bare, as the game's data pairs them. | None. | Open: faces for the other races; the game's own rule for the outfits without a model. |
 | **Combat / Falling** | A fall does no damage, however far. | None. | Planned: fall damage. |
 | **Abilities** | Chilling Laminate shows a placeholder blue circle on the ground below the player. | None. | Investigating which visual effect is sent for it. |
 | **Ranger / Scatter Shot** | Scatter Shot can miss an enemy across a stream, a ledge or a bank: the server's line-of-sight check fails on such ground, so that enemy takes no damage. | Shoot from the same ground as the enemy. | Open. |

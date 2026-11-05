@@ -17,6 +17,9 @@
 //    * the customization: Race and Gender (the Blueprint's, or one of the pairs the shared info allows when the record says to randomize them), a fresh RandomSeed and
 //      the colours, hair and eyes.  Modelled: the game fills the colours with its character creator's randomizer, which is not ported; the faces are taken from the
 //      customizations the retail captures hold for the same shared info, race and gender (a pool), and a race the captures hold none of gets the plain defaults.
+//      A record that does not randomize its customization and pins a customization preset is the exception: its NPCs wear the preset's saved face, hair, eyes, colours and body
+//      sections exactly (npc_appearances.tsv, the P lines); a record that randomizes ignores the preset it pins.  An NPC wearing a preset takes the preset's race and gender, so the
+//      face and the body match (with the shared appearance info that has a body for them: the A line's last field).
 //  The weight curves are the data's: the weights are the curve sampled at the item's place in the list (the list spread over the curve's keys), moved up to be
 //  non-negative, and the draw is over their running sum; a curve with no keys weighs every item the same.
 //
@@ -117,7 +120,7 @@ public:
     size_t pool_kinds() const { return pool_.size(); }
     /// The counts of dress() since the start.
     struct Counts {
-        mutable size_t dressed = 0, no_component = 0, no_record = 0, named = 0, blueprint_named = 0, unnamed = 0, from_pool = 0, plain_customization = 0;
+        mutable size_t dressed = 0, no_component = 0, no_record = 0, named = 0, blueprint_named = 0, unnamed = 0, from_pool = 0, plain_customization = 0, from_preset = 0, preset_body = 0;
     };
     const Counts& counts() const { return counts_; }
 
@@ -135,6 +138,14 @@ public:
         int64_t              seed = 0;
         LookCurve            curve;
         std::vector<int64_t> outfits;
+        int64_t              preset = 0;   // the customization preset the record pins (0 none); used only when the record does not randomize its customization
+        int64_t              body_shared = 0;   // the shared info to send with the preset's race and gender (the record's own, or one that equals it but for the body map); 0: the NPC keeps its own body
+    };
+    /// A customization preset's saved face, hair, eyes, colours, decals and body sections as the wire carries them, and the race and gender the NPC that wears it takes (-1: not known).
+    struct Preset {
+        std::string                     name;
+        repl::CharacterCustomization    customization;
+        int                             race = -1, gender = -1;
     };
     struct Outfit {
         std::string                          name;
@@ -144,6 +155,8 @@ public:
         std::map<int, LookCurve>             slot_curves;
     };
     const Appearance*    appearance(int64_t guid) const;
+    const Preset*        preset(int64_t guid) const;
+    size_t               presets() const { return presets_.size(); }
     const Outfit*        outfit(int64_t guid) const;
     const BlueprintLook* blueprint(const std::string& archetype_path) const;
     /// The AppearanceIDs entries (record, slot) the NPC drawn by `seed` of `guid` wears; empty for a record that dresses nobody.
@@ -164,6 +177,8 @@ private:
     std::map<std::pair<int64_t, int64_t>, std::vector<std::string>> set_names_;
     std::set<int64_t>                                    hostile_alignments_;
     std::map<std::tuple<int64_t, int, int>, std::vector<repl::CharacterCustomization>> pool_;   // (shared info, race, gender) -> recorded customizations
+    std::map<int64_t, Preset>                            presets_;      // customization preset -> its saved customization
+    size_t                                               preset_errors_ = 0;   // preset lines the file holds that the wire cannot carry (left out)
     mutable Counts                                       counts_;
 };
 
