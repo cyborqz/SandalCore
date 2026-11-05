@@ -4561,6 +4561,9 @@ inline constexpr int64_t kAlchemicalAmber = 6064632586725298067ll, kAlchemicalAm
 inline constexpr int64_t kHealthPotion = 6064629336879989989ll, kHealthPotionAbility = 6064629336911381734ll, kHealthPotionHit = 6064629336937923816ll;
 inline constexpr int64_t kMightPotion = 6064634675081576599ll, kMightAbility = 6064632316175778136ll, kMightHit = 6064632316175778137ll,
                          kMightEffect = 6064632316175778138ll;   // the client's Arcane Surge ability and effect; the server remaps its MagicalPowerRating mod to PhysicalPowerRating
+inline constexpr int64_t kArcaneSurgePotion = 6064632111124054069ll;   // the same Arcane Surge ability: its effect must stay its own
+inline constexpr int64_t kSurgingMightPotion = 6064632111115337779ll, kSurgingMightAbility = 6064632316168765774ll,
+                         kSurgingMightHit = 6064632316168765775ll, kSurgingMightEffect = 6064632316168765776ll;   // the record the Might Potion is shown as
 inline constexpr int64_t kHealthSalve = 6064632105621258242ll, kHealthSalveAbility = 6064632316126953734ll, kHealthSalveHit = 6064632316126953735ll,
                          kHealthSalveEffect = 6064632316126953736ll;
 inline constexpr int64_t kRations = 6064632586725298082ll, kRationsAbility = 6064632587347886421ll, kRationsEffect = 6064632587347886424ll;
@@ -4763,6 +4766,31 @@ static std::pair<float, float> might_effect(const char* path) {
     return {cs->find(gc::kPhysicalPowerRating)->value - physical_before, cs->find(gc::kMagicalPowerRating)->value - magical_before};
 }
 
+/// The effect record the client is shown a potion's buff as: the one effect the mirror carries after the use (-1: not exactly one, so the check fails loudly).
+static int64_t shown_effect_guid(const char* path, int64_t item_guid, int64_t ability, int64_t hit, uint32_t instance, int32_t client_id) {
+    svc::Character rec = cyb_record();
+    rec.level = 25;
+    std::vector<svc::InventoryItem> items;
+    for (const auto& it : rec.items)
+        if (it.container == Worn) items.push_back(it);
+    svc::InventoryItem potion = make_item(Bag, 4, item_guid, instance, 1);
+    potion.quality = 1;
+    items.push_back(potion);
+    rec.items = items;
+    Harness h(rec, true, true, path);
+    const bs::PlayerSetup& setup = h.s->bootstrap().setup();
+    const svc::InventoryItem* item = h.s->inventory().at(Bag, 4);
+    if (!item) return 0;
+    std::vector<fake::Bunch> sent;
+    sent.push_back(h.client.actor(h.pawn_ch, item_used(3, 4, guid_n(instance)), true));
+    sent.push_back(h.client.actor(h.pawn_ch, trigger_with_item(setup.guids.ability, ability, client_id, 4, items::to_instance(*item), 3), true));
+    sent.push_back(h.client.actor(h.pawn_ch, hit_request_for(setup, ability, gc::kSelfTargeting, hit), true));
+    h.client_sends(std::move(sent));
+    for (int i = 0; i < 25; ++i) h.step();
+    if (h.mirror.effect_items.size() != 1) return -1;
+    return h.mirror.effect_items.begin()->second.guid;
+}
+
 static std::pair<float, float> elixir_gain(const char* path, const char* name, int64_t item, int64_t ability, int64_t hit, int64_t s1, int64_t s2) {
     svc::Character rec = cyb_record();
     rec.level = 25;
@@ -4896,6 +4924,13 @@ static void test_consumables_meal_drink_potion_salve() {
     std::printf("    the Might Potion changed PhysicalPowerRating by %.1f and MagicalPowerRating by %.1f\n", might.first, might.second);
     CHECK(might.first == 50.0f, "the Might Potion raises PhysicalPowerRating by its Common 50");
     CHECK(might.second == 0.0f, "... and leaves MagicalPowerRating alone (the ability's stat is remapped, not misapplied)");
+    // the display only: the client draws the buff from the physical-power record (Surging Might's), while the effect applied and its stat stay Arcane Surge's remapped
+    CHECK(shown_effect_guid(path, gc::kMightPotion, gc::kMightAbility, gc::kMightHit, 720, 80) == gc::kSurgingMightEffect,
+          "the Might Potion's buff is drawn as the physical-power effect (Surging Might's record), not \"Arcane Surge Potion\"");
+    CHECK(shown_effect_guid(path, gc::kArcaneSurgePotion, gc::kMightAbility, gc::kMightHit, 721, 81) == gc::kMightEffect,
+          "the Arcane Surge Potion keeps its own effect: the display fix is the item's, not the ability's");
+    CHECK(shown_effect_guid(path, gc::kSurgingMightPotion, gc::kSurgingMightAbility, gc::kSurgingMightHit, 722, 82) == gc::kSurgingMightEffect,
+          "the Surging Might Potion shows its own effect (nothing is remapped for it)");
     // (the elixirs the live run reported, plus the two whose ability reads a stat their block carries under another name)
     const std::pair<float, float> carpentry = elixir_gain(path, "Carpentry", 6064632106055368744ll, 6064632320025952411ll, 6064632320025952412ll,
                                                           6064630248357101597ll, 0);

@@ -726,6 +726,9 @@ private:
         /// The consumable whose stat block the effect's hits read (GetConsumedItemStat) when they run later (a meal's tick, a salve's tick): the item of the cast that
         /// applied the effect. null for an effect that no item cast applied.
         std::shared_ptr<const ItemCast> item;
+        /// The record the client draws this effect from (0: its own, `def->row.guid`).  A consumable may name another record for the display only (Might Potion shows
+        /// the physical-power buff): the effect applied, its mods and its stacking stay the definition's own.
+        int64_t                     display_guid = 0;
     };
     /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect) and the infinite effects its overlap hits
     /// put on the caster, which end with the dance.

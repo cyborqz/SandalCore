@@ -28,6 +28,10 @@ struct ItemCast {
     /// Modelled client-data gaps: an effect mod on a stat of this map is applied to the other stat (Might Potion: its ability reads MagicalPowerRating, its item carries
     /// PhysicalPowerRating).  `stats` holds the item's value under the key the ability reads.
     std::map<int64_t, int64_t>   effect_stat_remap;
+    /// Display-only gaps: an effect of this key is shown to the client as the effect of the value (Might Potion: the client's item names Arcane Surge's ability, so its
+    /// buff would read "Arcane Surge Potion"; the physical-power buff's record is shown instead).  Only the guid the client draws the buff from changes; the effect
+    /// applied, its mods and its stacking stay the ability's own.
+    std::map<int64_t, int64_t>   effect_display_remap;
     int                          container = 0;    // the bag the item lay in (svc::ItemContainer as a number)
     int32_t                      slot = -1;        // ... and its slot there
     std::string                  instance_guid;    // ... and its instance

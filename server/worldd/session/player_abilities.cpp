@@ -74,6 +74,16 @@ constexpr ConsumableStatFix kConsumableStatFixes[] = {
     // Elixir of Hunting: the ability reads Artisan_Gathering_Hunting_Rarity_Rating; the item carries Artisan_Gathering_Hunting_Quantity_Rating.
     {6064632105783263255ll, 6064630299332247618ll, 6064630299331854394ll, 6064630299331854394ll},
 };
+// Display-only gaps: the client names an ability of its own for the item, and the buff that ability shows is not the item's.  The cast tells the client the effect record
+// to draw the buff from; the effect applied, its mods and its stacking stay the ability's own (the numbers are the item's already: the mods ask GetConsumedItemStat).
+struct ConsumableEffectFix {
+    int64_t item, effect, display;
+};
+constexpr ConsumableEffectFix kConsumableEffectFixes[] = {
+    // Might Potion: its item casts Arcane Surge's ability, so the client would show "Arcane Surge Potion"; the effect it is shown as is the physical-power buff
+    // (Surging Might's record, whose mod also asks the consumed item for PhysicalPowerRating).  The Arcane Surge and Arcane potions keep their own effect.
+    {6064634675081576599ll, 6064632316175778138ll, 6064632316168765776ll},
+};
 }  // namespace
 
 // ============================================================================================================================
@@ -672,6 +682,10 @@ std::shared_ptr<const ItemCast> PlayerSession::consumable_cast(int64_t ability, 
         }
         if (!had_read) cast->stats.push_back({fix.read_stat, value});
         if (fix.read_stat != fix.target_stat) cast->effect_stat_remap[fix.read_stat] = fix.target_stat;
+    }
+    for (const ConsumableEffectFix& fix : kConsumableEffectFixes) {
+        if (fix.item != cast->record) continue;
+        cast->effect_display_remap[fix.effect] = fix.display;   // display only: the effect applied and its mods stay the ability's
     }
     cast->container = static_cast<int>(*container);
     cast->slot = slot;
