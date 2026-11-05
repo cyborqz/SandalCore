@@ -21,7 +21,7 @@
 //               does not compile refuses the ability (NoFormula), logged. A ClientInstanceId the pipeline has seen lately is dropped with no answer.
 //    cast       one trigger makes up to four steps, each at its own time after the trigger (the montage's notifies):
 //                 item       the ability item (ReplicatedActiveAbilities): the ability, a ServerInstanceId from the pawn's counter, the montage's
-//                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid), PlayRate 1.0, MontageGroup (DefaultGroup;
+//                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid), PlayRate (the character's speed stat for an ability whose table rows say which one, else 1.0), MontageGroup (DefaultGroup;
 //                            Flourish EmoteGroup, the songs SongGroup), Targets the caster when the call named one; the previous item
 //                            of the pipeline goes in the same update (every retail reply says "deleted 1"). The median of the recorded casts where
 //                            ability_timings.h has the ability (50 to 110 ms for most, per kind of cast), else about 300 ms after the trigger
@@ -56,9 +56,9 @@
 //               the ability put on its caster off (kLoopedCasts in ability_pipeline.cpp has the offsets).
 //    launches   an ability whose montage launches projectiles at moments of its own (the Ranger's Air Strike, Raining Death and Barrage) is played by the SERVER: every launch is a step of the cast at the
 //               time of the montage's notify and what it launches lands after its flight (kTimedCasts in ability_pipeline.cpp has the table). A hit the client asks for that fires projectiles (Maim's wave) sends them.
-//    flights    an ordinary cast with one projectile (the charged shots and the bolts, the Bard's Mock and its heals, the Sleep Dart, the Throw, the Mend) lands its hit when the projectile gets to the
+//    flights    an ordinary cast with one projectile (the charged shots and the bolts, the Bard's Mock and its heals, the Sleep Dart, the Throw, the Mend, a ranged weapon swing) lands its hit when the projectile gets to the
 //               target: the montage's launch notify over the client's play rate, plus the target's distance over the projectile's speed (kShotCasts); a cast at the caster himself has no flight.
-//               One that sends several projectiles (the Discordance's three notes, kNoteCasts) does so for each of them, and a hit that fires a bounce when it lands (kBounces) sends the
+//               One that sends several projectiles (the Discordance's three notes, a Shortbow volley, kNoteCasts) does so for each of them, and a hit that fires a bounce when it lands (kBounces) sends the
 //               projectile on from the enemy just hit to another one near it, where it lands its hits when it gets there.
 //    hits       a hit applies to the caster when its mask names Self (1) and its requirement holds: the ability's own hits (ab_ability_hit "hit"), the
 //               hits of the projectiles it fires when it has a target (the caster), the first overlap of the zones it spawns (the Initial and
@@ -138,6 +138,7 @@
 #include "combat/hit_resolver.h"
 #include "session/abilities.h"
 #include "session/ability_catalog.h"
+#include "session/summoner_pets.h"
 #include "stats/character_stats.h"
 
 #include <cstdint>
@@ -256,6 +257,7 @@ struct NoteCast {
     int         key;          // the key (in the ability's ProjectilesIds) of the projectile this launch sends
     double      fire;         // the montage time of its FireProjectile notify, seconds
     bool        magical;      // the client plays the montage at MagicalSpeed (else at PhysicalSpeed)
+    int         animation = -1;   // the AnimationIndex of the montage this launch is for (-1: any); a weapon swing has a row for each arrow of each step
 };
 
 /// A hit that fires further hits when it lands (its RecursiveHit child, which fires a projectile): the projectile flies on from the enemy just hit to another enemy near it, and its hits land there
@@ -451,6 +453,46 @@ public:
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
+    // ---- a Summoner's pet (session/ability_pipeline_pets.cpp)
+    /// What a pet's ability costs its owner: the Essence it takes from each stat (all the ability's cost hits added up) and the cooldown it starts.
+    struct PetPayment {
+        std::vector<std::pair<int64_t, double>> costs;   // (stat, amount)
+        double                                  cooldown = 0;
+    };
+    /// Whether the owner can pay for a pet's ability now (the Essence is there), and what it costs.  It pays and starts nothing, so a cast the world then refuses costs nothing.
+    bool can_pay_pet_ability(int64_t ability, double now, PetPayment& out);
+    /// Takes what can_pay_pet_ability worked out: the Essence, and the cooldown the ability starts on its owner.
+    void commit_pet_payment(int64_t ability, const PetPayment& pay, double now);
+    /// A pet ability, on its owner's side.  It pays the ability's `_OwnerCost` hits (false, and nothing paid: the Essence is not there) and says its cooldown: can_pay_pet_ability, then commit_pet_payment.
+    bool pay_pet_ability(int64_t ability, double now, double& cooldown);
+    /// A pet's ability's cooldown shows on its owner's Cooldowns, where the bar's slot reads it [R: the Stance Swap, 476, 477: CD 0.1, charges 0].
+    void start_pet_cooldown(int64_t ability, double seconds, double now);
+    /// A hit of the character's pet that lands on the character (a heal, a cleanse).
+    void land_pet_hit(int64_t hit_guid, int64_t ability, double now);
+    /// The confirmation of a hit the character's pet or a reaction of his dealt: the client draws its floating number from it.
+    void confirm_dealt(const combat::DealtHit& dealt, double now);
+    /// The actor Transpose wants to change places with (0: none), once.
+    uint64_t take_transpose() {
+        const uint64_t id = transpose_with_;
+        transpose_with_ = 0;
+        return id;
+    }
+    /// Where Dimensional Bolt's second press sends the pet (target 0: nowhere), once.
+    struct BoltRecall {
+        uint64_t target = 0;
+        bool     behind = false;   // a Hunter lands behind the creature
+    };
+    BoltRecall take_bolt_recall() {
+        const BoltRecall recall = bolt_recall_;
+        bolt_recall_ = {};
+        return recall;
+    }
+    /// Puts an effect on the character (a Hunter's stance reference).
+    bool grant_effect(int64_t effect_guid, double now);
+    /// A stat as it is now.
+    double stat_of(int64_t guid) const { return stat_now(guid); }
+    /// Whether the character holds a debuff that can be dispelled.
+    bool holds_dispellable() const;
     /// The mounts milestone, stage 3: the same hit, but it landed on the character's mount (the rider is on it: hits aimed at a mounted rider land on the mount's Health, and
     /// the rider's own is untouched). The session took `taken` of the mount's Health; this makes only the confirmation, naming `target` (the mount's actor) with the stat mods as
     /// the client draws them. Lethal when `lethal`. Nothing changes on the character.
@@ -580,6 +622,7 @@ private:
         double                   last_request = -1e9;
         std::vector<Pending>     due;          // when a request's application runs
         bool                     applied = false;   // the server applied it by itself (no request came by the deadline)
+        bool                     server_self_use = false;   // a pet summon: applied by the server after its cost, never by a request
         bool                     fired = false;     // the projectiles the hit fires have left: they leave once a cast, however often the client asks for the hit
     };
     /// A cast that takes hit requests until its window ends.
@@ -781,6 +824,11 @@ private:
     bool   can_pay(const Cast& cast) const;                       // whether the character holds what the cast's cost step takes (stats, effect stacks, a charge of its group): asked at the cost step and by a jump that comes before it
     void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
     void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
+    /// Whether the montage of `def` plays at the caster's MagicalSpeed (else PhysicalSpeed): an ability of a class says so in its table row (`row_magical`); a weapon swing belongs to no class, so the CHARACTER's class says (a Cleric's
+    /// shortbow swing plays at MagicalSpeed, a Fighter's wand swing at PhysicalSpeed).
+    bool   plays_at_magical(const abilities::AbilityDef& def, bool row_magical) const;
+    /// The play rate the ability item carries: the character's speed stat for an ability whose table rows say which stat its montage plays at (the ordinary shots, the notes, the Salvo, the ranged weapon swings), else 1.0.
+    double item_rate(const abilities::AbilityDef& def) const;
     double client_rate(bool magical) const;                       // the speed the client plays a montage at: its MagicalSpeed or PhysicalSpeed stat (1.0 when the stat is not there)
     void   plan_shot(Cast& cast, const ShotCast& shot, double t); // an ordinary cast with one projectile: when it leaves (the montage's notify over the client's play rate)
     void   launch_shot(Cast& cast, double t);                     // ... it leaves now: it lands after its flight over the target's distance (kShotCasts)
@@ -816,6 +864,18 @@ private:
 
     // hits and effects
     void   apply_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t, bool skip_resource, const HitSource& src);
+    void   apply_hit_here(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t, bool skip_resource, const HitSource& src);   // the same, whoever its mask names
+    uint64_t   transpose_with_ = 0;
+    BoltRecall bolt_recall_;
+    void   land_bolt_recall(int32_t client_id, uint64_t target, double t);
+    /// The hit's ModifyCooldownsIds: seconds added to what is left of each ability's cooldown; one that is not running starts, and spends no charge [R: Bolt, CD charges 1].
+    void   modify_cooldowns(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t);
+    /// The reactions a hit's own record carries (ReactionsIds): Extract's heal, Siphon's Mana, Bond on the caster, Spirit Shred's stacks on the pet.
+    void   fire_carried_reactions(bootstrap::AbilityChange& c, const HitEvent& ev, double t);
+    /// The group of the ability's cooldown.
+    static std::string cooldown_group_of(const content::AbilityRow& row);
+    int    carried_depth_ = 0;
+    const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
                         int64_t owner = 0);

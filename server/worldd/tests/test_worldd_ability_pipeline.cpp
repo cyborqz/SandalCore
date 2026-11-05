@@ -21,6 +21,7 @@
 //  Without a content.db the test says so and is skipped.
 // ============================================================================
 #include "test_registry.h"
+#include "session/summoner_pets.h"
 #include "ability_rig.h"
 
 #include <cmath>

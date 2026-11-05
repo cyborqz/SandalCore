@@ -8,15 +8,19 @@
 #  list, and one line to session/rpc_registered.inc when it answers client calls (session/rpc_table.h).
 #
 #  The list is a file of its own and part of worldd_core only.  The navigation mesh builder (aoc_navbuild) links worldd_nav, which holds none of these files, so a line added
-#  here does not make the extractor build the mesh again.
+#  here does not make the extractor build the mesh again.  The pets' combat files are listed here for the same reason.
 # ============================================================================
 target_sources(worldd_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/bootstrap/observer_actor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_pets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_world_npc.h
     ${CMAKE_CURRENT_SOURCE_DIR}/net/endpoint_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_givers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_handin.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_objects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_quests2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/respawn/session_embersprings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/ability_pipeline_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_abilities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_based_move.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat.cpp
@@ -29,6 +33,8 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_move_ack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_movement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_nodes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_pets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_presence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_processing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_quests.cpp

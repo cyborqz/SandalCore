@@ -3,17 +3,17 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 2 November 2026
+**Last updated:** 4 November 2026
 
 ---
 
 ## Where We Are Now
 
-**5 of 16 phases are done** (1-5), **7 are in progress** (6-12) and 4 are planned (13-16).
+**5 of 16 phases are done** (1-5), **8 are in progress** (6-13) and 3 are planned (14-16).
 
-**Current phases:** `6- Progression and items`, `7- Combat and abilities`, `8- Gathering and professions`, `9- Living world`, `10- City nodes`, `11- Quests` and `12- Economy` (all in progress)
+**Current phases:** `6- Progression and items`, `7- Combat and abilities`, `8- Gathering and professions`, `9- Living world`, `10- City nodes`, `11- Quests`, `12- Economy` and `13- Social` (all in progress)
 
-Phases 1-5 (the network protocol, login, entering the world, stats and mounts) are complete and validated against retail captures and test suites in `server/worldd/tests`. Phases 6-12 work in their first parts, and what is left of each is named in its line below and under "Achieved and left". Since the first phases the server gained NPC conversations and the first part of quests, vendors and currency, crafting at the towns' stations, item rarities, weapon combo finishers, magic weapon scaling, mobs that notice and chase by their own settings, storage, NPC looks and names, and the Embersprings.
+Phases 1-5 (the network protocol, login, entering the world, stats and mounts) are complete and validated against retail captures and test suites in `server/worldd/tests`. Phases 6-13 work in their first parts, and what is left of each is named in its line below and under "Achieved and left". Since the first phases the server gained NPC conversations and the first part of quests, vendors and currency, crafting at the towns' stations, item rarities, weapon combo finishers, magic weapon scaling, mobs that notice and chase by their own settings, storage, NPC looks and names, and the Embersprings.
 
 ---
 
@@ -56,11 +56,12 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Node stages: building sites below Village, and the Wilderness camp.
 - Reactions (first iteration): the game's reactions run for your own hits and for paying an ability's cost. The Bard's Resonance follows the game's rule (the Resonant Weapon passive from level 5) and its Menacing and Cathartic melodies add their damage at a combo finisher and spend up to 3 Resonance. The weapon talents that react at a finisher (the wand's Burning, Chilled and Volatile, the axes' Bleed, Snare and Wound, and the like) fire at the deadly finishing hit of the weapon in hand, the wand's Burning puts the Burning debuff on the mob, and the damage talents of the weapon trees count for its hits. The other classes' reactions run from the game's data and are not checked against the game yet.
 - Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot, which slows the carrier; a trade crate's rarity follows its materials, a quest can give a crate, and the Drop Crate ability takes the crate off the back. Next: the crate lying on the ground for others to pick up, then putting crates into building sites and selling them. The other crate types stay under Left.
+- Summoner pets: the Guardian, Hunter and Mystic come with the summon, follow, fight, take commands and stances, play their ten abilities and come back when more than 40 m away.
+- Seeing other players (first part): players within 150 m of each other are shown to each other as their characters, standing, walking and stopping, and leave each other's world when they log out. Still to come: riders on their mounts, gear and level changes, live Health and Mana, death, combat stances, and abilities and hits on other players.
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; the choose-one reward window and the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, the slows the weapon finishers put on a mob, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
-- Summoner pets.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
@@ -73,7 +74,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The world: spawns that follow node levels, a world clock with day and night spawns, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
 - Economy: player trading, marketplaces, node currency and crates.
-- Social: seeing other players, guilds, parties and raids, chat and mail.
+- Social: guilds, parties and raids, chat and mail.
 - Node sieges and territory wars.
 - Caravans and trade routes.
 - Conversations: NPC voice and animation while they talk.
@@ -89,13 +90,13 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 4. **4- Stats** — [Done] The game's own stat formulas, updated as your gear changes.
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
 6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: splitting and joining stacks, food and potions.
-7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit. Still to come: slows, snares and CC on mobs (roots, stuns; the weapon finisher talents' slows among them) and Summoner pets.
+7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: slows, snares and CC on mobs (roots, stuns; the weapon finisher talents' slows among them).
 8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.
 11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events.
 12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC vendors, crates and storage. Still to come: node currencies and more crates.
-13. **13- Social** — [Planned] Seeing other players, guilds, parties and raids, chat and mail, player trading and the marketplace.
+13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking and stopping. Still to come: riders on their mounts, gear and level changes, live Health and Mana, death and combat stances, abilities and hits on other players, guilds, parties and raids, chat and mail, player trading and the marketplace.
 14. **14- Node sieges** — [Planned] Node sieges and territory wars.
 15. **15- Caravans** — [Planned] Caravans and trade routes.
 16. **16- World events** — [Planned] Corruption events and other world events.

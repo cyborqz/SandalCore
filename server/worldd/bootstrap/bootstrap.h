@@ -537,6 +537,12 @@ public:
     /// UseActionbarSlot 0x6b12700 and CanEverUseActionbarSlot 0x6a91a10 take GetActionbarInstigator 0x6aba180 -> the player character's GetMountablePet): without it the
     /// mount's dash (bank 18) cannot be used, nothing is sent and nothing is said (stage 3 fix 3).  The InteractInfo must exist (ensure_interact_info).  One pawn update.
     std::optional<Send> pawn_mountable_pet(const emit::FIntrepidNetworkGUID& mount);
+    /// The player's summoned combat pet, tracked by its spawning effect instance.
+    /// An empty GUID clears PetArray. Requires ensure_interact_info().
+    std::optional<Send> pawn_combat_pet(const emit::FIntrepidNetworkGUID& pet, int64_t effect_id);
+    /// The stance of the player's pets, on the owner's InteractInfo beside PetArray [the client's code].
+    /// Requires ensure_interact_info().
+    std::optional<Send> pawn_pet_stance(int64_t stance);
     /// Gathering stage 2 (the fix after the user's test 1): the pawn's InteractInfo.ChannelingData = `data` [R: 1427 packet 67 sets it with the node's wake, packet 674 clears it
     /// 2 ms after the result frame; nine more harvests and a corpse harvest the same].  The client plays the gather animation and shows the bar from it, and sends its own
     /// ServerInterruptChannel when the player moves.  The InteractInfo must exist (ensure_interact_info).  One pawn update; nothing when `data` is what the client holds.
@@ -680,6 +686,22 @@ public:
     size_t lingering_count() const { return effect_actors_.size(); }
     /// The actor as the bootstrap holds it (for tests); null when there is none.
     const repl::Actor* lingering_actor(uint64_t actor_id) const;
+
+    // ---- multiplayer visibility, stage A: the player as the OTHER players see it ----------------------------------------
+
+    /// The pawn as another player's connection is sent it: the world's registry holds it (ActorKind::Player) and every other player's actor view opens it, the
+    /// same NetGUID and component GUIDs as the owner's pawn.  A simulated proxy: RemoteRole 1, Instigator the pawn;
+    /// no Owner, no Controller and no PlayerState (objects only the owner's connection has).  Its components are the ones that show the character, with the values the owner's pawn
+    /// holds now: AlignmentComponent (Alignments), BaseCharacterInfo (CharacterGuid, CharacterName, Race, Gender, Level, ServerId, bHasBeenPossessed and HeldItems, the
+    /// visible gear), CombatInfo (bIsDead, PrimaryClassId), StatsComponent (the two EveryoneProxy arrays alone: the stat audience other players get, character_setup.h)
+    /// and Character Appearance (SharedAppearanceInfoId, CharacterCustomization, AppearanceIDs).  Left out as the owner's own: OwnerInfo, the item storages, the
+    /// resource containers, the AbilityComponent, the Owner/OwnerProxy stat arrays, WorldAttunements and the breathing time.  INFERRED: no retail capture in the
+    /// repository holds another player's pawn open, so the choice of components follows UE's conditions (OwnerOnly properties, RemoteRole) and the classes' names,
+    /// not a golden.  ReplicatedMovement is the caller's (spawns::write_motion on the registry's copy).  nullopt before the second state is added (the pawn has no
+    /// components to show yet) or when a value does not fit.
+    /// #14 review: the pawn names no PlayerState any more, and the PlayerState that was built for the other players (observer_player_state) is gone: its PlayerNamePrivate was the login's
+    /// ?Name= text, which the client chooses and which names the player's PC, and no other player's client is sent it.  Defined in bootstrap/observer_actor.cpp.
+    std::optional<repl::Actor> observer_pawn() const;
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 

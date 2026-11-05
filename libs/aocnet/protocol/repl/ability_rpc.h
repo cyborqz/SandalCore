@@ -64,6 +64,8 @@ struct TriggerAbility {
     std::vector<emit::FIntrepidNetworkGUID> targets;
     std::vector<InlineObject>               inline_targets;
     uint32_t target_transform_count = 0;
+    /// Where the first of TargetTransforms stands (a cast aimed at a place: a pet's Go To).
+    std::optional<Vec3d> first_target_place;
     int32_t  item_slot = -1;            // ItemData.Slot: -1 is "no item"
     uint32_t item_location = 0;         // ItemData.Location (EItemLocation)
 };

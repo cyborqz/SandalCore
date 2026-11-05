@@ -126,6 +126,11 @@ public:
     /// The same with the caller's own evaluation of the attacker and ContextHost (see resolve_with); `target` must be the target's evaluation as it is after the hit.
     bool resolve_effects_with(stats::CharacterStats::Evaluation& attacker, ContextHost& host, const stats::CharacterStats::Evaluation* target, double distance_cm, bool enemy,
                               bool neutral, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why);
+    /// The shield (the TempHealth mods) one application of an effect gives its holder, worked out for the two as they are now; a mod that reads GetOwner() reads the holder (Brace's shield is a
+    /// share of the pet's own Health, not its summoner's).  0 when it gives none or does not run.
+    double effect_shield(Fighter& attacker, Fighter& holder, const abilities::EffectDef& effect);
+    /// Whether an expression (a montage's choice) holds for the fighter as it is now; `none` for no expression, and for one that does not run.
+    bool holds(Fighter& fighter, int64_t expr, bool none);
     /// Whether the hit's own requirement holds for the two (true when it has none, false when it does not run).
     bool requirement_holds(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta);
 

@@ -28,6 +28,9 @@ using world::Ring;
 namespace {
 /// The update chains whose events the view waits for, over all actors, before it sweeps the routes of ones it no longer holds.
 constexpr size_t kMaxRoutes = 4096;
+/// Multiplayer visibility: how many "X now sees Y" / "X no longer sees Y" lines a view says at info (two players walking in and out of each other's ring all day
+/// would fill the log); the rest go to debug.
+constexpr size_t kPlayersLogged = 200;
 
 /// A creature's attack names its montage by an id the client knows only from the montage's export: the export goes with the AbilityComponent's block, and with the actor's own
 /// (the creature's RepRootMotion names the montage too, and an update may carry that block alone; a chain the connection acknowledged is left out, one named twice is written once).
@@ -241,6 +244,7 @@ bool ActorView::open(Connection& conn, const world::WorldActor& a, Entry& e, boo
         spdlog::info("[scenery] open for player {} on channel {}: {} (node {}), level {}, {} items, PlotChangeVersion {}, {} payload bits, {} bits in the open", config_.player_id, channel,
                      a.scenery.name, a.scenery.node, a.scenery.level, a.scenery.items, a.scenery.plot_version, a.scenery.payload_bits, open_bits);
     }
+    if (a.kind == world::ActorKind::Player) log_player(a, true, nullptr);   // #14 review: every Player actor is a pawn now (it was `&& a.player.pawn`)
     if (a.kind == world::ActorKind::Foliage) {   // Gathering stage 3: the user's test reads these (the cell actor's states are what hides a cut tree; its mere presence is what lets the client offer one)
         // every cell has an actor from the start, so the opens are many: the first 100 first looks are said, and every open of a cell that was ever cut or grew (its version moved) always is
         const bool changed = a.version > 1;
@@ -420,6 +424,7 @@ bool ActorView::close(Connection& conn, uint64_t id, Entry& e, uint32_t reason, 
             spdlog::info("[scenery] close for player {} on channel {}: {} (node {}), {}", config_.player_id, e.channel, a->scenery.name, a->scenery.node,
                          reason == kCloseRelevancy ? "out of range" : "destroyed");
         }
+        if (a && a->kind == world::ActorKind::Player) log_player(*a, false, reason == kCloseRelevancy ? "out of range" : "destroyed");   // #14 review: every Player actor is a pawn now
     }
     release(e);
     if (const world::WorldActor* held = reg().find(id); held && held->keep_fast_shadow) {
@@ -447,6 +452,21 @@ void ActorView::on_removed(const world::WorldActor& a) {
     r.state = it->second.state;
     if (it->second.state == ClientState::Dormant) r.actor = a.actor;   // opened once more, to be destroyed
     removed_.push_back(std::move(r));
+    // (the close itself is flush_removed's, when the actor is no longer in the registry to be named)
+    if (a.kind == world::ActorKind::Player && !finished_) log_player(a, false, "left the world");   // #14 review: every Player actor is a pawn now
+}
+
+bool ActorView::for_this_player(const world::WorldActor& a) const {
+    if (a.kind == world::ActorKind::Player) return a.owner != config_.player_id;   // another player's pawn; never this player's own   (#14 review: it said "and PlayerState")
+    return a.owner == 0 || a.owner == config_.player_id;                           // (another player's lingering zones and mount are not for this connection)
+}
+
+void ActorView::log_player(const world::WorldActor& a, bool sees, const char* why) {
+    const spdlog::level::level_enum level = players_logged_ < kPlayersLogged ? spdlog::level::info : spdlog::level::debug;
+    ++players_logged_;
+    const std::string me = config_.player_name.empty() ? "player " + std::to_string(config_.player_id) : config_.player_name;
+    if (sees) spdlog::log(level, "[players] {} now sees {} (PlayerId {}, pawn {}) at ({:.0f}, {:.0f}, {:.0f}) cm", me, a.player.name, a.owner, a.id, a.x, a.y, a.z);
+    else spdlog::log(level, "[players] {} no longer sees {} (PlayerId {}, pawn {}): {}", me, a.player.name, a.owner, a.id, why);
 }
 
 void ActorView::flush_removed(Connection& conn) {
@@ -545,7 +565,7 @@ bool ActorView::open_scenery(Connection& conn, double x, double y, Clock::time_p
     for (const uint64_t id : scratch_) {
         const world::WorldActor* a = reg().find(id);
         if (!a || a->kind != world::ActorKind::NodeLayout) continue;
-        if (a->owner != 0 && a->owner != config_.player_id) continue;
+        if (!for_this_player(*a)) continue;
         if (entries_.count(id) != 0) continue;   // the view has it already (open, or given up as broken): the passes look after it
         const double d = world::horizontal_distance(a->x, a->y, x, y);
         if (world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, ClientState::None) != Ring::Awake) continue;   // (a replicator is awake or nothing)
@@ -679,7 +699,7 @@ void ActorView::scan(double x, double y) {
     const auto consider = [&](uint64_t id, const Entry* entry) {
         const world::WorldActor* a = reg().find(id);
         if (!a) return;   // removed: flush_removed deals with it
-        if (a->owner != 0 && a->owner != config_.player_id) return;   // another player's (its lingering zones): not for this connection
+        if (!for_this_player(*a)) return;   // another player's lingering zones and mount; this player's own pawn and PlayerState
         const ClientState prior = entry ? entry->state : ClientState::None;
         const double d = world::horizontal_distance(a->x, a->y, x, y);
         world::Ring ring = world::classify(cfg, d, a->awake_radius_cm, a->never_dormant, prior);

@@ -149,7 +149,8 @@ constexpr const char* kGuidListSql[] = {"SELECT guid FROM ab_ability ORDER BY gu
 constexpr const char* kReactionSql = "SELECT guid, name, instigator, targets_mask, bind_hit, bind_effect, bind_ability, bind_projectile, bind_zone, bind_movement, "
                                      "bind_fishing, bind_stat, global_limit, instigator_limit, eval_applying_hit, proc_on_apply, trigger_expr FROM ab_reaction WHERE guid = ?1";
 constexpr const char* kReactionHitsSql = "SELECT hit_guid FROM ab_reaction_hit WHERE reaction_guid = ?1 ORDER BY ord";
-constexpr const char* kHitRecursiveSql = "SELECT ord, child_hit_guid, targeting_guid FROM ab_hit_recursive WHERE hit_guid = ?1 ORDER BY ord";
+constexpr const char* kHitRecursiveSql = "SELECT r.ord, r.child_hit_guid, r.targeting_guid, COALESCE(t.radius, 0) FROM ab_hit_recursive r LEFT JOIN ab_targeting_def t ON t.guid = r.targeting_guid "
+                                         "WHERE r.hit_guid = ?1 ORDER BY r.ord";
 // contentc version 39: the records the effects name to control their holder (ab_effect_control itself is joined into the effect statements above)
 constexpr const char* kCrowdControlSql =
     "SELECT guid, name, applied_status, snare_strength, animation_request, priority, disable_guid, face_source, ignore_non_combatant, restart_montage, override_client_move, "
@@ -779,9 +780,28 @@ bool AbilityContent::hit_recursive(int64_t hit, std::vector<RecursiveHitRow>& ou
         r.ord = col_int(s, 0);
         r.child_hit = col_i64(s, 1);
         r.targeting = col_i64(s, 2);
+        r.radius_cm = sqlite3_column_double(s, 3);
         out.push_back(r);
         return true;
     }, error);
+}
+
+void AbilityContent::modify_cooldowns(std::vector<ModifyCooldownRow>& out) const {
+    out.clear();
+    if (!reactions_) return;
+    std::string error;
+    constexpr const char* sql = "SELECT guid, name, delta_expr, abilities FROM ab_modify_cooldown";
+    if (!run(db_, sql, nullptr, [&](sqlite3_stmt* s) {
+            ModifyCooldownRow r;
+            r.guid = col_i64(s, 0);
+            r.name = col_text(s, 1);
+            r.delta_expr = col_i64(s, 2);
+            r.abilities = col_text(s, 3);
+            out.push_back(std::move(r));
+            return true;
+        }, error)) {
+        out.clear();
+    }
 }
 
 bool AbilityContent::guids(Table table, std::vector<int64_t>& out, std::string& error) const {

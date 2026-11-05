@@ -452,8 +452,9 @@ func TestRealGatherExpressions(t *testing.T) {
 	// None of the 24 expressions that failed on the five gathering reads fails now (ab_expr ids are the order the build met the texts in; the gathering
 	// ones are appended after the reward tables', so the older ids did not move; the ids are 14 higher since the creature tables' 38 abilities brought 14 expressions of the abilities';
 	// and 335 higher again in version 35: the reactions bring 336 more expressions of the abilities' ahead of the reward tables', and one text the reward tables used to add is met among them first;
-	// and 65 higher again in version 38: the consumables' abilities bring 65 more expressions of the abilities' ahead of the reward tables')
-	for _, id := range []int{1726, 1727, 1728, 1729, 1735, 1769, 1770, 1771, 1772, 1773, 1774, 1975, 1976, 1978, 1979, 2044, 2046, 2047, 2048, 2049, 2050, 2063, 2064, 2070} {
+	// and 65 higher again in version 38: the consumables' abilities bring 65 more expressions of the abilities' ahead of the reward tables';
+	// and 5 higher again in version 40: the pet attacks written as a reference bring 5 more expressions of the abilities' ahead of the reward tables')
+	for _, id := range []int{1731, 1732, 1733, 1734, 1740, 1774, 1775, 1776, 1777, 1778, 1779, 1980, 1981, 1983, 1984, 2049, 2051, 2052, 2053, 2054, 2055, 2068, 2069, 2075} {
 		var program int
 		var errText string
 		if err := db.SQL().QueryRow(`SELECT program, error FROM ab_expr WHERE id = ?`, id).Scan(&program, &errText); err != nil || program < 0 || errText != "" {

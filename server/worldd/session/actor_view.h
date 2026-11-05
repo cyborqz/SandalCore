@@ -90,8 +90,11 @@ public:
         world::RelevancyConfig relevancy;
         /// The highest channel index the view may use (UE's default is far above; retail peaked at 324 and reached index 459).
         uint32_t max_channel = 4000;
-        /// The player this connection belongs to: an actor whose `owner` is another player's is never sent (a player's lingering zones).
+        /// The player this connection belongs to: an actor whose `owner` is another player's is never sent (a player's lingering zones), except another player's
+        /// own actors (ActorKind::Player: its pawn), which are; this player's own Player actors never are (the session has them on its own channels).  (#14 review: it said "pawn and PlayerState")
         uint64_t player_id = 0;
+        /// The player's name, for the log's "X now sees Y" lines.
+        std::string player_name;
         /// This player's CharacterGuid (its four words): put in the interaction state maps of every interactable actor the view draws. None: the
         /// actors are drawn as the registry has them.
         std::optional<protocol::repl::GuidValue> player_guid;
@@ -285,6 +288,10 @@ private:
     void     forget_chains(Entry& e);
     void     on_removed(const world::WorldActor& a);
     void     flush_removed(Connection& conn);
+    /// Whether this connection is sent `a` at all: an actor of nobody's, this player's own (its lingering zones), or another player's pawn.  (#14 review: it said "pawn or PlayerState")
+    bool     for_this_player(const world::WorldActor& a) const;
+    /// Multiplayer visibility: the info line of another player's pawn appearing (`sees`) or going (`why`), the first kPlayersLogged at info, the rest at debug.
+    void     log_player(const world::WorldActor& a, bool sees, const char* why);
 
     /// The registry as the view reads it: a pass changes nothing in it (it is frozen while the passes run on several threads, world/actor_registry.h).
     const world::ActorRegistry& reg() const { return registry_; }
@@ -298,6 +305,7 @@ private:
     /// the client keeps the actor and its list of cut instances).  Dropped with the actor.
     std::unordered_map<uint64_t, protocol::repl::ActorShadow> kept_;
     size_t                              foliage_opens_logged_ = 0;   // the state actors' opens of untouched cells said at info so far (the first 100)
+    size_t                              players_logged_ = 0;         // "X now sees Y" / "X no longer sees Y" lines said at info so far (kPlayersLogged; the rest at debug)
     std::map<uint32_t, uint64_t>        channel_owner_;      // channel -> actor ObjectId, while the view holds it (open, or closed and waiting)
     std::vector<Removed>                removed_;
     protocol::repl::ExportAcks          acks_;

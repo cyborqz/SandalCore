@@ -59,6 +59,9 @@ enum class ActorKind : uint8_t {
     Station,     // a crafting or processing station (crafting, step 0): an ACraftingStationBase actor of a node's building, opened like any other actor, used for its window
     Shrine,      // an Emberspring (AAoCAttunablePlayerSpawner): a respawn point a player discovers by coming close and attunes to by using it (respawn/embersprings.h)
     Prop,        // an object of a quest (an AInteractableStateMachineBase actor: a body, a crate, a root, a building site): used by its interactable component, it can leave and come back
+    Player,      // multiplayer visibility, stage A: a logged-in player as the OTHER players see it, its pawn (PlayerPawn_C, a simulated proxy); `owner` is its
+                 // PlayerId: that player's own view never sends it (its own four actors are the session's), every other view does, by the NPCs' rings, never dormant
+                 // (#14 review: the pawn alone, there is no PlayerState actor for a player)
 };
 // [C | Y | B ~ C-O-A]
 
@@ -183,6 +186,12 @@ public:
     std::shared_ptr<UpdateMemo> ptr;
 };
 
+/// Multiplayer visibility, stage A: what a player's actor (ActorKind::Player) is to the server.
+struct PlayerInfo {
+    std::string name;             // the character's name (the log's "X now sees Y")
+    // #14 review: `pawn` (its pawn, or false for its PlayerState) is gone: a Player actor is always the pawn
+};
+
 struct WorldActor {
     uint64_t   id = 0;                    // = actor.guid.ObjectId
     ActorKind  kind = ActorKind::Npc;
@@ -200,7 +209,7 @@ struct WorldActor {
     std::chrono::milliseconds dormancy_delay{0};
     bool       keep_fast_shadow = false;
     std::function<void(repl::Actor&)> first_open_form;
-    uint64_t   owner = 0;                 // the PlayerId an effect belongs to (0: nobody's): only that player's connection is sent it
+    uint64_t   owner = 0;                 // the PlayerId an effect belongs to (0: nobody's): only that player's connection is sent it (a Player actor: every connection but that one)
     /// Exports that go with the actor block of its open (an object its values name by path that the client has no other way to find: a lingering
     /// zone's AttachComponent, the pawn's CharacterMesh0).
     std::vector<repl::ExportChain> open_exports;
@@ -222,6 +231,7 @@ struct WorldActor {
     PropInfo    prop;                     // ActorKind::Prop only
     SceneryInfo scenery;                  // ActorKind::NodeLayout only
     GatherSeen gather;                    // ActorKind::Gatherable only (gather/node_wire.h)
+    PlayerInfo player;                    // ActorKind::Player only
 };
 
 struct RegistryConfig {

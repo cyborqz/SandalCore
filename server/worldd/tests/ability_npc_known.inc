@@ -216,6 +216,7 @@ const Known kKnown[] = {
     {"Summoner_DimensionalBolt", 451, "CD:missing", R_UNRES},
     {"Summoner_DimensionalBolt", 451, "END:missing", R_CHAN},
     {"Summoner_Disintegrate", 452, "CONF:extra Summoner_Disintegrate_Snare", R_CONFX},
+    {"Summoner_DimensionalBolt", 451, "refused:out of charges (its cooldown is running)", R_CHARGES},   // (the second presses: retail had a pet out, this replay has none, so the lockout has become the cooldown)
     {"Summoner_ExtractVessel", 457, "refused:not enough to pay its cost", R_STATE},
     {"Summoner_Disintegrate", 465, "COST:mana 109.189941 (113.750000)", R_MOD},
     {"Summoner_MortalBlast", 466, "CONF:missing Summoner_MortalBlast_Apply", R_AREA},

@@ -513,14 +513,18 @@ void test_quest_start_tables(Fixture& f) {
     CHECKF(extracts == 1, "the extract's table gives exactly one Heartwood Extract (%lld)", static_cast<long long>(extracts));
 }
 
-/// The roll itself cuts a quantity that is too big: a table made here has one item whose quantity formula is ab_expr 2130, a constant of the data (15,000,000), and one experience
+/// The roll itself cuts a quantity that is too big: a table made here has one item whose quantity formula is a constant of the data (15,000,000), and one experience
 /// line with the same formula.  The item is cut at the most one line gives; the experience (below its own cap) is the 15,000,000.
 void test_roll_cuts_a_huge_quantity(Fixture& f) {
     std::printf("a roll cuts a quantity that is too big\n");
-    constexpr int64_t kTable = 7000000001ll, kHugeConstant = 2130, kBread = 6064634776923734016ll;
-    const content::ExprRow* huge = f.catalog->expr(kHugeConstant);
-    CHECK(huge && huge->text == "15000000", "(ab_expr 2130 is the constant 15000000)");
-    if (!huge) return;
+    constexpr int64_t kTable = 7000000001ll, kBread = 6064634776923734016ll;
+    int64_t kHugeConstant = 0;   // (rows are numbered as the data is built: it is found by what it says)
+    for (int64_t id = 1; id < 40000 && kHugeConstant == 0; ++id) {
+        const content::ExprRow* row = f.catalog->expr(id);
+        if (row && row->text == "15000000") kHugeConstant = id;
+    }
+    CHECK(kHugeConstant != 0, "(the data holds the constant 15000000)");
+    if (kHugeConstant == 0) return;
     content::LootTable table;
     table.guid = kTable;
     content::LootContainer container;
@@ -548,14 +552,18 @@ void test_roll_cuts_a_huge_quantity(Fixture& f) {
 }
 
 /// The roll cuts an experience amount that is too big, too.  The cap sits above every amount the data gives, so a table made here has one experience line whose formula is a loot-chance
-/// formula of the data (ab_expr 1862: 0.15 x (1 + the players' average luck) x the falloff, which is 1 at the creature's own level).  The roller reads the average luck from its context: a luck
+/// formula of the data (0.15 x (1 + the players' average luck) x the falloff, which is 1 at the creature's own level).  The roller reads the average luck from its context: a luck
 /// of 100 gives 15.15, which the line hands out as 15, and a luck of 10^12 gives 1.5 x 10^11, which is cut at the most one line gives.
 void test_roll_cuts_a_huge_experience(Fixture& f) {
     std::printf("a roll cuts an experience amount that is too big\n");
-    constexpr int64_t kTable = 7000000002ll, kLuckFormula = 1862;
-    const content::ExprRow* formula = f.catalog->expr(kLuckFormula);
-    CHECK(formula && formula->text.find("GetPlayerLootAvgLuck()") != std::string::npos, "(ab_expr 1862 reads the players' average luck)");
-    if (!formula) return;
+    constexpr int64_t kTable = 7000000002ll;
+    int64_t kLuckFormula = 0;   // (rows are numbered as the data is built: it is found by what it says)
+    for (int64_t id = 1; id < 40000 && kLuckFormula == 0; ++id) {
+        const content::ExprRow* row = f.catalog->expr(id);
+        if (row && row->text.find("0.15 * (1 + GetPlayerLootAvgLuck())") != std::string::npos) kLuckFormula = id;
+    }
+    CHECK(kLuckFormula != 0, "(the data holds the formula that reads the players' average luck)");
+    if (kLuckFormula == 0) return;
     content::LootTable table;
     table.guid = kTable;
     content::LootContainer container;

@@ -77,6 +77,7 @@ struct ActiveAbilityItem {
     std::string montage_path;             // the soft path of the montage ("" or one worldd has no export for: Montage unset)
     uint64_t    montage_guid = 0;         // plan D2: the montage's static NetGUID where a capture names it and montage_for(path) does not know it (0: none)
     std::string montage_group = "DefaultGroup";   // MontageGroup: the Rest's and the Dodge's are "DefaultGroup", the Sprint's "Sprint"
+    float       play_rate = 1.0f;         // PlayRate: the character's animation speed for an ability whose speed stat is known (other clients play the montage at it), else 1
     float       montage_position = 0;
     bool        may_jump_to_position = false;
     bool        branch_predicted = true;   // bBranchPredictedOnAutonomous: the client took the branch itself (its cast bar); false for a branch the server decided (a loop's end)

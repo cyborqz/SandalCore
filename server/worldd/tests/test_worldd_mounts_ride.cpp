@@ -41,6 +41,7 @@
 #include "session/player_session.h"
 #include "spawns/mount_spawn.h"
 #include "spawns/mount_state.h"
+#include "test_registry.h"
 #include "world/actor_registry.h"
 #include "world/roads.h"
 // (C:Y:B | CoA)
@@ -2470,6 +2471,8 @@ static void test_real_roads() {
 }
 // -- Cyb x C | O | A --
 
+#include "mounts_ride_registered.inc"
+
 int main() {
     spdlog::set_level(std::getenv("AOC_TEST_LOG") ? spdlog::level::debug : spdlog::level::off);
     std::string error;
@@ -2519,6 +2522,7 @@ int main() {
     test_mounts_remain();
     test_distance_desummon();
     test_real_roads();
+    g_fail += aoc_tests::run();   // every check registered in mounts_ride_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

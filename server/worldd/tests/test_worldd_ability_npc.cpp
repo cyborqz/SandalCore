@@ -25,9 +25,12 @@
 // ============================================================================
 #include "ability_rig.h"
 #include "capture_npc_casts.h"
+#include "combat/aftermath.h"
 #include "combat/combat_data.h"
 #include "combat/npc_stats.h"
 #include "combat_rig.h"
+#include "session/summoner_pets.h"
+#include "test_registry.h"
 #include "npc/motion_table.h"
 
 #include <spdlog/spdlog.h>
@@ -272,6 +275,8 @@ struct Known {
     const char* why;
 };
 #include "ability_npc_known.inc"
+
+#include "ability_npc_registered.inc"
 
 }  // namespace
 
@@ -777,6 +782,7 @@ int main(int argc, char** argv) {
         CHECKF(accepted + refused_listed == total, "every cast is accepted, or its refusal is listed (%zu + %zu of %zu)", accepted, refused_listed, total);
         CHECKF(matched == total, "every accepted cast matches retail's reply (%zu of %zu)", matched, total);
     }
+    g_fail += aoc_tests::run();   // every check registered in ability_npc_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

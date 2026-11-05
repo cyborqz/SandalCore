@@ -15,16 +15,18 @@ namespace aoc::worldd::abilities {
 
 namespace {
 
-/// extra's ReactionsIds (the guids, in the listed order).
-void reaction_ids_of(const std::string& extra_json, std::vector<int64_t>& out) {
+/// A list of guids in extra (ReactionsIds, ModifyCooldownsIds), in the listed order.
+void ids_of(const std::string& extra_json, const char* key, std::vector<int64_t>& out) {
     const nlohmann::json extra = nlohmann::json::parse(extra_json, nullptr, false);
     if (!extra.is_object()) return;
-    const auto it = extra.find("ReactionsIds");
+    const auto it = extra.find(key);
     if (it == extra.end() || !it->is_array()) return;
     for (const auto& v : *it) {
         if (v.is_number_integer() && v.get<int64_t>() != 0) out.push_back(v.get<int64_t>());
     }
 }
+
+void reaction_ids_of(const std::string& extra_json, std::vector<int64_t>& out) { ids_of(extra_json, "ReactionsIds", out); }
 
 }  // namespace
 
@@ -55,6 +57,22 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
     }
 // ~ C Y B :: C-O-A ~
 
+    {
+        std::vector<content::ModifyCooldownRow> rows;
+        db->modify_cooldowns(rows);
+        for (content::ModifyCooldownRow& row : rows) {
+            ModifyCooldownDef def;
+            def.name = std::move(row.name);
+            def.delta_expr = row.delta_expr;
+            const nlohmann::json list = nlohmann::json::parse(row.abilities, nullptr, false);
+            if (list.is_array()) {
+                for (const auto& v : list) {
+                    if (v.is_number_integer() && v.get<int64_t>() != 0) def.abilities.push_back(v.get<int64_t>());
+                }
+            }
+            c.modify_cooldowns_.emplace(row.guid, std::move(def));
+        }
+    }
     std::vector<int64_t> guids;
     if (!db->guids(content::AbilityContent::Table::Effect, guids, error)) return std::nullopt;
     for (const int64_t g : guids) {
@@ -88,6 +106,13 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
             }
             const auto mx = extra.find("MaxNumEffectsToRemove");
             if (mx != extra.end() && mx->is_number_integer()) d.max_remove = mx->get<int>();
+            const auto rk = extra.find("EffectRemoval");
+            if (rk != extra.end() && rk->is_string()) {
+                const std::string kind = rk->get<std::string>();
+                d.removal = kind == "none" ? HitDef::Removal::None : kind == "debuff" ? HitDef::Removal::Debuff : kind == "buff" ? HitDef::Removal::Buff : HitDef::Removal::Other;
+            }
+            const auto rd = extra.find("RemoveAsDispel");
+            if (rd != extra.end() && rd->is_boolean()) d.remove_as_dispel = rd->get<bool>();
             const auto zs = extra.find("LingeringZonesIds");
             if (zs != extra.end() && zs->is_array()) {
                 for (const auto& v : *zs) {
@@ -122,6 +147,7 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         }
         if (db->has_reactions()) {
             reaction_ids_of(d.row.extra, d.reactions);
+            ids_of(d.row.extra, "ModifyCooldownsIds", d.modify_cooldowns);
             if (!db->hit_recursive(g, d.recursive, error)) return std::nullopt;
         }
         c.hit_names_[d.row.name] = g;

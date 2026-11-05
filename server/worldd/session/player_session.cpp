@@ -151,9 +151,11 @@ bool PlayerSession::allocate_channels(const Connection& conn) {
 }
 
 PlayerSession::~PlayerSession() {
+    clear_pet();
     cancel_quick_make(nullptr, "the session is destroyed");
     cancel_gather(nullptr, "the session is destroyed");
     leave_combat();
+    leave_presence("the session is destroyed");   // (a session dropped without finish(): the other players' views still close it)
 }
 
 std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld& world, const svc::Character& character,
@@ -280,6 +282,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         PlayerSession* self = p.get();
         ActorView::Config view_config = world.view_config();
         view_config.player_id = static_cast<uint64_t>(p->pb_.setup().player_id);
+        view_config.player_name = p->pb_.setup().name;
         {
             // the player's own interaction state: its CharacterGuid goes in the maps of every interactable actor the view opens for this connection
             const auto& g = p->pb_.setup().character_guid;
@@ -493,6 +496,8 @@ void PlayerSession::tick(Connection& conn) { pump(conn); }
 void PlayerSession::tick(Connection& conn, Clock::time_point now) {
     const TickPlan plan = tick_logic(conn, now, /*plan_view=*/false);   // (the three parts are in session/player_view_phases.cpp)
     if (plan.stopped) return;
+    // #14 review: the presence sync (this player as the others see it) is part of tick_logic now, once a tick, and runs there with the view passes on threads as well: the server does not call
+    // this function then.
     if (plan.view) view_->tick(conn, plan.x, plan.y, now);
     tick_after(now, plan);
 }
@@ -566,6 +571,7 @@ void PlayerSession::hand_over(const char* why, bool periodic) {
 void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
+    clear_pet();
     cancel_quick_make(nullptr, why);   // Crafting, step 3: nothing was taken, so nothing is given back
     end_gathering(why);   // Gathering stage 2: a node this player channels is available again, and the pile a full bag made is made now if it still waits
     // this player's lingering zones leave the world with it (the actor system closes them for a connection that is still there)
@@ -573,6 +579,7 @@ void PlayerSession::finish(const char* why) {
         for (const auto& [id, za] : zone_actors_) registry_->remove(za.actor);
     }
     zone_actors_.clear();
+    leave_presence(why);   // the other players' views close this player's pawn (Destroyed)   (#14 review: it had a PlayerState beside it, which is gone)
     if (mounts_) {
         // the mount leaves the world with its owner; its item keeps the Health it had
         if (const auto kept = mounts_->shutdown()) apply_persist(nullptr, *kept);
