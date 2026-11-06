@@ -18,6 +18,9 @@
 #include "spawns/captured_spawns.h"
 
 #include <memory>
+#include <spdlog/sinks/ostream_sink.h>   // (the tests of the crowd control read the log lines the world writes)
+#include <spdlog/spdlog.h>
+#include <sstream>
 #include <string>
 #include <vector>
 

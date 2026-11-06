@@ -85,6 +85,10 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         if (!db->effect_hits(g, hits, error)) return std::nullopt;
         for (const content::EffectHitRow& h : hits) d.hits.emplace_back(h.phase, h.hit_guid);
         if (db->has_reactions()) reaction_ids_of(d.row.extra, d.reactions);
+        if (d.row.crowd_control_guid != 0) {   // a record the file lacks leaves the effect without one: a creature then refuses the effect, as it refuses every crowd control it has no rule for
+            std::string skipped;
+            if (auto cc = db->crowd_control(d.row.crowd_control_guid, skipped)) d.cc = std::move(*cc);
+        }
         c.effect_names_[d.row.name] = g;
         c.effects_.emplace(g, std::move(d));
     }

@@ -19,3 +19,4 @@
 #include "combat_humanoid_tests.inc"
 #include "combat_dots_tests.inc"
 #include "combat_dice_tests.inc"
+#include "combat_cc_tests.inc"

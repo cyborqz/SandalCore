@@ -13,7 +13,7 @@
 //  (the capsule's half height times the actor's scale).
 //
 //  Turning is limited (the Blueprint's RotationRate); the speed is the one asked for, with no ramp: the retail captures show NPCs at one constant
-//  speed along a walk.
+//  speed along a walk.  A snare keeps part of it: the speed scale (set_speed_scale) multiplies the speed of every walk, at once.
 // ============================================================================
 #pragma once
 
@@ -43,6 +43,11 @@ public:
     void set_yaw_rate(double degrees_per_second) {
         if (degrees_per_second > 0 && degrees_per_second < 100000.0) yaw_rate_ = degrees_per_second;
     }
+    /// The share of the speed a walk is asked at that the NPC keeps (1: all of it; 0.5: half, as a snare of 0.5 leaves it).  It holds for the walk it is on and for every walk it is given, in every mode,
+    /// until it is set again; it is not part of any one order.  A value outside 0 to 1 is held to it, and one that is not a number leaves the scale as it was.  A montage that carries the NPC is not
+    /// a walk (`shift` moves it) and is not slowed.
+    void set_speed_scale(double scale);
+    double speed_scale() const { return speed_scale_; }
     /// Puts the NPC on the ground at (x, y) with its feet at `ground_z`.
     void place(double x, double y, double ground_z, double yaw_degrees);
     /// Turns the NPC where it stands to face `yaw_degrees` at once (a creature that turns to its target before it attacks).
@@ -93,6 +98,7 @@ private:
     const nav::AreaNav* nav_ = nullptr;
     double              foot_offset_ = 88.0;
     double              yaw_rate_ = 360.0;
+    double              speed_scale_ = 1.0;
     Vec3                ground_;
     double              yaw_ = 0;
     Vec3                velocity_;

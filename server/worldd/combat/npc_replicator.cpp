@@ -145,6 +145,19 @@ bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int ran
     return ok;
 }
 
+bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, int64_t flags, double snare) {
+    bool ok = false;
+    registry.modify(actor_id, world::Change::State, [&](world::WorldActor& a) {
+        repl::Subobject* st = find_sub(a, "UAoCStatsComponent");
+        if (!st || !st->obj.schema || !st->obj.schema->command("CrowdControlState.StatusFlags") || !st->obj.schema->command("CrowdControlState.SnareValue")) return;
+        repl::ObjectState& o = st->obj;
+        const bool flags_ok = o.state.set(*o.schema, "CrowdControlState.StatusFlags", repl::Value::u64(static_cast<uint64_t>(flags) & 0xffu));
+        const bool snare_ok = o.state.set(*o.schema, "CrowdControlState.SnareValue", repl::Value::f32(static_cast<float>(snare)));
+        ok = flags_ok && snare_ok;
+    });
+    return ok;
+}
+
 bool has_stats(const world::WorldActor& actor) {
     const repl::Subobject* st = find_sub(actor, "UAoCStatsComponent");
     return st && st->obj.schema && const_cast<repl::FastArrays&>(st->obj.arrays).get(*st->obj.schema, "StatRepInt32EveryoneProxy") != nullptr;

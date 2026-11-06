@@ -52,6 +52,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Debuffs on mobs: the bleeds (Bleeding, Hemorrhage), the poisons and the stat debuffs of a hit take effect on a mob. Bleeds and poisons take Health at their ticks (one Bleeding debuff for each attacker, a poison's stacks make its ticks bigger), Shaken and Volatile make a mob take more physical and magical damage, Demoralized makes it hit softer and Blinded makes it miss more.
 - Server speed with many players: a fixed-rate server tick, the players' views of the world taking turns, cheaper updates, one update built for all the players who see the same mob in the same state, the players' views worked out on several processor cores, and move answers at the original server's pace. In a load test with simulated players that walk, the server held its 30 updates a second with about twice as many of them as before.
 - Mob attack animations for the other families: the undead, Minotaurs, constructs, spiders, cultists and the rest of the Beast, Humanoid and Monster families play their own attack animations, as the goblins and bandits do.
+- Slowed mobs: a slow or snare on a mob (the Mage's Chilled, the Ranger's and Fighter's Snared, the Tank's Grapple, mud and webs) puts it at its speed times one minus the strongest snare on it, at once, in a chase, a wander and on the walk home, and the mob's crowd control state tells the game client so; the debuff ends with its time, the mob's death or the leaving of the player who put it on, and a mob's own attack leap is not slowed.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -62,7 +63,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; the choose-one reward window and the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
-- Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, the slows the weapon finishers put on a mob, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
+- Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
@@ -91,7 +92,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 4. **4- Stats** — [Done] The game's own stat formulas, updated as your gear changes.
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
 6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: splitting and joining stacks, food and potions.
-7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: slows, snares and CC on mobs (roots, stuns; the weapon finisher talents' slows among them).
+7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: CC on mobs (roots, stuns, knockbacks).
 8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.

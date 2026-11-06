@@ -172,6 +172,10 @@ public:
     bool order_move(uint64_t actor_id, const nav::Vec3& dest, double speed_cm_s, double stop_distance = 0);
     /// Changes the rate at which the NPC turns, in degrees a second (a creature that turns faster than its Blueprint says).  False for an NPC the world does not hold.
     bool set_yaw_rate(uint64_t actor_id, double degrees_per_second);
+    /// The crowd control on the NPC that binds its walk: it keeps `scale` (0 to 1) of the speed of every walk it makes from the next step on, whatever it is doing on foot (a wander, a patrol, a chase, the walk
+    /// home, a walk a game master gave it) and whatever order it was given before or is given after; 1 lifts it.  A montage that carries the NPC (an attack's lunge) is not a walk and is not slowed.
+    /// This is the one place the speed of a slowed NPC is held: no caller of a walk passes a slower speed.  False for an NPC the world does not hold.
+    bool set_speed_scale(uint64_t actor_id, double scale);
     /// Puts the NPC at (x, y) with its feet at `ground_z` at once, standing (a pet that changes places with its owner).  False for an NPC the world does not hold.
     bool warp(uint64_t actor_id, double x, double y, double ground_z);
     /// Gives the feet back to the NPC's own behaviour.

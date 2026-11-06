@@ -182,13 +182,47 @@ struct LungeWire {
     double  mv_yaw = 0, rrm_yaw = 0;   // the facing ReplicatedMovement (8 or 16 bits) and RepRootMotion.Rotation (16 bits) say, in degrees, as a client reads them
     bool    has_rrm_vz = false, has_rrm_z = false;
     double  rrm_vz = 0, rrm_z = 0;     // RepRootMotion.LinearVelocity's vertical part (cm/s) and RepRootMotion.Location's height (cm)
+    bool    has_mv_speed = false;      // ReplicatedMovement names a velocity ...
+    double  mv_speed = 0;              // ... and this is its length along the ground (cm/s)
+    // the update of the creature's stats component (a block of its own): the crowd control state it says and the CurrentEffects items it adds or changes
+    bool    stats_block = false;
+    int     cc_flags = -1;             // CrowdControlState.StatusFlags (-1: the update does not say)
+    bool    has_cc_snare = false;
+    double  cc_snare = 0;              // ... and its SnareValue
+    size_t  effect_items = 0;
+    size_t  cc_fields = 0;             // how many fields of CrowdControlState the update carries (a client is told only what changed)
 };
 
 void read_lunge_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow& shadow, double now, std::vector<LungeWire>& out) {
     std::vector<aoc::protocol::repl::ContentBlock> blocks;
     if (!aoc::protocol::repl::collect_update_blocks(actor.actor, shadow, blocks)) return;
     for (const aoc::protocol::repl::ContentBlock& b : blocks) {
-        if (b.sub || !b.has_rep_layout) continue;
+        if (b.sub) {   // the stats component's own block: its crowd control state, and the effect items that come with it
+            if (!b.has_rep_layout || !b.sub->obj.schema || std::string(b.sub->obj.schema->name) != "UAoCStatsComponent") continue;
+            const aoc::protocol::schema::ClassSchema& ss = *b.sub->obj.schema;
+            const auto sub_state = aoc::protocol::repl::load_object_state(ss, b.payload.data(), b.payload.bit_pos(), true);
+            if (!sub_state) continue;
+            LungeWire w;
+            w.t = now;
+            w.stats_block = true;
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.StatusFlags")) {
+                if (v->get_if<uint64_t>()) w.cc_flags = static_cast<int>(*v->get_if<uint64_t>());
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.SnareValue")) {
+                if (v->get_if<float>()) {
+                    w.has_cc_snare = true;
+                    w.cc_snare = *v->get_if<float>();
+                }
+            }
+            if (const aoc::protocol::repl::FastArrayState* items = const_cast<aoc::protocol::repl::FastArrays&>(sub_state->arrays).get(ss, "CurrentEffects")) w.effect_items = items->items().size();
+            for (const auto& [handle, value] : sub_state->state.values()) {
+                const aoc::protocol::schema::RepCommand* cmd = ss.command(handle);
+                if (cmd && std::string_view(cmd->path).rfind("CrowdControlState.", 0) == 0) ++w.cc_fields;
+            }
+            out.push_back(w);
+            continue;
+        }
+        if (!b.has_rep_layout) continue;
         const auto st = aoc::protocol::repl::load_object_state(*actor.actor.obj.schema, b.payload.data(), b.payload.bit_pos(), true);
         if (!st) continue;
         const aoc::protocol::schema::ClassSchema& sc = *actor.actor.obj.schema;
@@ -207,6 +241,9 @@ void read_lunge_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow&
             if (const auto* m = v->get_if<aoc::protocol::repl::RepMovement>()) {
                 w.has_mv_yaw = true;
                 w.mv_yaw = m->rotation.yaw * 360.0 / (st->opts.rep_movement_short_rotation ? 65536.0 : 256.0);
+                const aoc::protocol::repl::Vec3d velocity = aoc::protocol::repl::dequantize_velocity(st->opts, m->linear_velocity);
+                w.has_mv_speed = true;
+                w.mv_speed = std::hypot(velocity.x, velocity.y);
             }
         }
         if (const auto* v = st->state.get(sc, "RepRootMotion.Rotation")) {
@@ -247,7 +284,27 @@ struct LungeSample {
     double   rrm_vz = 0;                // ... and its vertical part (cm/s)
     // what the creature names by NetGUID at this tick, in full (ObjectId, ServerId, Randomizer): its cast element's first Target and Instigator, its CombatInfo's first ActiveTarget, and its own actor's NetGUID
     aoc::protocol::emit::FIntrepidNetworkGUID item_target, item_instigator, active_target, creature_guid;
+    // what this tick's updates say of the creature's walk and of the crowd control on it (the stats component's own block): the speed a client is sent (-1: no velocity in this tick's updates), the state's
+    // flags (-1: none said) and snare, the effect items that block adds or changes, and how many effects the world holds on the creature after the tick
+    double   wire_speed = -1;
+    int      cc_flags = -1;
+    bool     has_cc_snare = false;
+    double   cc_snare = 0;
+    size_t   cc_items = 0, held_effects = 0, cc_fields = 0;
 };
+
+/// What a test may do in a fight between two ticks (land an effect, send the creature home, take the player out of the world ...).  The step is called twice in every tick: first (`after` false, `sample`
+/// null) once the player has been steered and before the worlds move, then (`after` true) once they have moved and the sample of the tick has been made.
+struct LungeStepContext {
+    double now = 0;
+    bool   after = false;
+    const LungeSample*        sample = nullptr;
+    combat::CombatWorld&      world;
+    combat_rig::World&        w;
+    combat_rig::FakePlayer&   player;
+    uint64_t                  creature = 0;
+};
+using LungeStep = std::function<void(LungeStepContext&)>;
 
 static std::string creature_path(Fixture& f, const char* leaf) {
     std::string found;
@@ -264,7 +321,7 @@ using LungeSteer = std::function<bool(double now, const LungeSample* prev, doubl
 
 static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, const std::string& path, double seconds, double player_x, double player_y, const LungeSteer& steer,
                             std::vector<LungeSample>& out, std::vector<combat::IncomingHit>* hits = nullptr, bool timid = false, double provoke_at = -1, combat::CombatWorld::Stats* stats = nullptr,
-                            double leash_cm = 0, const spawns::OpenTemplate* made = nullptr, double creature_x = 0, double creature_y = 0) {
+                            double leash_cm = 0, const spawns::OpenTemplate* made = nullptr, double creature_x = 0, double creature_y = 0, const LungeStep& on_step = nullptr) {
     Rig rig(4, 20, {});
     if (!rig.ok()) return false;
     combat_rig::World w;
@@ -306,14 +363,20 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
             next_hit = now + 1.0;
             world.add_threat(creature, 77, 100.0, now);
         }
+        if (on_step) {
+            LungeStepContext c{now, false, nullptr, world, w, player, creature};
+            on_step(c);
+        }
         if (const stats::StatValue* max_hp = rig.cs->find(content::kGuidMaxHealth)) rig.cs->set_current(content::kGuidHealth, max_hp->value);   // (the fight is about the creature, not the player's life; asked afresh: a hit rebuilds the stats)
         w.npcs->note_player(77, px, py, now);
         w.npcs->tick(now);
         world.tick(now);
         std::vector<LungeWire> wire;
         read_lunge_wire(*actor, shadow, now, wire);
-        double position = -1, tick_vz = 0;
-        bool tick_has_vz = false;
+        double position = -1, tick_vz = 0, tick_speed = -1, tick_snare = 0;
+        bool tick_has_vz = false, tick_has_snare = false;
+        int tick_flags = -1;
+        size_t tick_items = 0, tick_fields = 0;
         for (const LungeWire& u : wire) {
             if (u.active >= 0) active = u.active;
             if (u.obstructed >= 0) obstructed = u.obstructed;
@@ -321,6 +384,13 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
             if (u.has_mv_yaw) mv_yaw = u.mv_yaw, has_mv_yaw = true;
             if (u.has_rrm_yaw) rrm_yaw = u.rrm_yaw, has_rrm_yaw = true;
             if (u.has_rrm_vz) tick_vz = u.rrm_vz, tick_has_vz = true;
+            if (u.has_mv_speed) tick_speed = u.mv_speed;
+            if (u.stats_block) {
+                if (u.cc_flags >= 0) tick_flags = u.cc_flags;
+                if (u.has_cc_snare) tick_snare = u.cc_snare, tick_has_snare = true;
+                tick_items += u.effect_items;
+                tick_fields += u.cc_fields;
+            }
         }
         const GremCastView view = grem_cast_view(w.registry, creature);
         const world::WorldActor* g = w.registry.find(creature);
@@ -348,10 +418,21 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
         s.item_instigator = view.instigator;
         s.active_target = combat_rig::active_target_guid(*g);
         s.creature_guid = g->actor.guid;
+        s.wire_speed = tick_speed;
+        s.cc_flags = tick_flags;
+        s.has_cc_snare = tick_has_snare;
+        s.cc_snare = tick_snare;
+        s.cc_items = tick_items;
+        s.cc_fields = tick_fields;
+        s.held_effects = world.effect_count(creature);
         last = view;
         out.push_back(s);
         prev = s;
         have_prev = true;
+        if (on_step) {
+            LungeStepContext c{now, true, &out.back(), world, w, player, creature};
+            on_step(c);
+        }
     }
     if (hits) *hits = player.hits;
     if (stats) *stats = world.stats();

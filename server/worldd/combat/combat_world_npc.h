@@ -85,6 +85,8 @@ public:
     std::vector<Shield>                    shields;
     effects::Book                          book;             // the effects it holds (a burn, a bleed ...): the world runs their hits and shows them as its CurrentEffects
     EffectItemIds                          item_ids;         // the CurrentEffects array's item for each effect of the book
+    effects::Book::Crowd                   cc;               // the crowd control the book held when the world last wrote it to the creature's state and to its walk
+    effects::Book::Crowd                   cc_logged;        // ... and the one the log last named
 
     /// A loss goes through the shields first (the oldest first); what is left reaches Health.
     double absorb(double loss, double now) {
