@@ -4288,6 +4288,287 @@ static void test_flight_leftovers() {
     }
 }
 
+/// A Wolf that stands still `ahead` cm in front of the player, along the way the player faces (the harness's moves face the control yaw kSpawnYaw).
+struct HeadingWolf {
+    uint64_t wolf = 0;
+    uint64_t next_actor_id = 5000000;
+    bool ground = false;
+    double ahead = 1000;
+    void prepare(PlayerWorld& w) {
+        std::string err;
+        if (!w.load_blueprints(NPC_MOTION_PATH, err)) {
+            std::printf("  [FAIL] the Blueprint table: %s\n", err.c_str());
+            return;
+        }
+        auto nav = nav::AreaNav::from_file(navfix::build_file(), &err);
+        ground = nav && w.adopt_ground(std::move(nav), err);
+        if (!ground) {
+            std::printf("  [FAIL] the ground: %s\n", err.c_str());
+            return;
+        }
+        auto captured = spawns::CapturedData::load(err);
+        if (!captured) {
+            std::printf("  [FAIL] the captured data: %s\n", err.c_str());
+            return;
+        }
+        std::string path;
+        for (const auto& [p, row] : w.blueprints().rows()) {
+            if (p.find("/Beast/Canine/Wolf.Default__Wolf_C") != std::string::npos) path = p;
+        }
+        const double yaw = static_cast<double>(kSpawnYaw) * 360.0 / 65536.0 * 3.14159265358979323846 / 180.0;
+        wolf = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead * std::cos(yaw), kY + ahead * std::sin(yaw), kZ, 25, 1);
+    }
+};
+
+/// Ball Lightning: its ball flies on after the Mage who cast it has died, and goes on hurting what it touches. A Mage casts it at nobody with a still Wolf 10 m ahead: the ball hits the Wolf every
+/// 0.5 s; in the second cast the Mage is killed as the first hit reaches the client, and the Wolf takes the same hits all the same, each one confirmed to the client.
+static void test_ball_lightning_after_death() {
+    std::printf("Ball Lightning: the ball keeps hitting after its caster dies\n");
+    const svc::Character mage = class25(8, "Mage", 17750);
+    struct Outcome {
+        bool   ok = false, died = false;
+        int    hits = 0;           // the confirmations of the ball's hit on the Wolf
+        int    after_death = 0;    // ... and the ones that came after the Mage was killed
+        double health_lost = 0;    // how much Health the Wolf lost at its lowest
+    };
+    const auto cast = [&](bool kill) {
+        Outcome out;
+        HeadingWolf hw;
+        Run r(0, true, &mage, [&](PlayerWorld& w) { hw.prepare(w); });
+        if (!hw.ground || hw.wolf == 0 || !r.h.fx.world->combat()) return out;
+        combat::CombatWorld& cw = *r.h.fx.world->combat();
+        r.play(0.5, false);
+        const bs::PlayerSetup setup = r.h.s->bootstrap().setup();
+        const abilities::Catalog* cat = r.h.fx.world->ability_catalog();
+        const abilities::AbilityDef* def = cat ? cat->ability_named("Mage_BallLightning") : nullptr;
+        if (!def) return out;
+        int64_t ball_hit = 0;
+        for (const content::AbilityHitRow& h : def->hits) {
+            if (h.source == "projectile") ball_hit = h.hit_guid;
+        }
+        r.h.s->teach_ability(def->row.guid);
+        r.h.fx.world->tick_world(r.now());
+        const int32_t id = r.next_id++;
+        const double base = r.now();
+        r.send_trigger(def->row.guid, id);   // (the client names no target for it, whatever is selected)
+        const double hp0 = cw.health_of(hw.wolf);
+        double hp_low = hp0;
+        size_t seen = r.m.hits.size();
+        bool requested = false, killed = false;
+        for (int i = 0; i < 220; ++i) {   // 11 s in steps of 50 ms: the ball is over 9.9 s after the trigger
+            if (!requested && r.now() - base >= 1.25 - 1e-9) {   // the client's cast bar ends and it asks for the branch
+                requested = true;
+                const schema::RpcSchema* rpc = class_named("UAoCAbilityComponent").rpc("ServerRequestBranchVerification");
+                repl::RpcParams bp;
+                bool ok = rpc && repl::set_rpc_param(*rpc, bp, "Request.Branch.BranchGuid", repl::Value::i64(6064629048751489028ll));
+                ok = ok && repl::set_rpc_param(*rpc, bp, "Request.Branch.MontageIndex", repl::Value::i64(0));
+                ok = ok && repl::set_rpc_param(*rpc, bp, "Request.Branch.MeshYaw", repl::Value::u64(0));
+                ok = ok && repl::set_rpc_param(*rpc, bp, "Request.Branch.Instigator", repl::Value(setup.guids.pawn));
+                ok = ok && repl::set_rpc_param(*rpc, bp, "ClientInstanceId", repl::Value::i64(id));
+                if (!ok) return out;
+                r.send_reliable(ability_rpc(setup.guids.ability, "ServerRequestBranchVerification", bp));
+            }
+            r.tick(false, std::chrono::milliseconds(50));
+            r.h.fx.world->tick_world(r.now());
+            hp_low = std::min(hp_low, cw.health_of(hw.wolf));
+            for (; seen < r.m.hits.size(); ++seen) {
+                const repl::HitInstance& h = r.m.hits[seen];
+                if (h.record_guid != ball_hit || h.targets.empty()) continue;
+                ++out.hits;
+                if (killed) ++out.after_death;
+            }
+            if (kill && !killed && out.hits >= 1) {   // the first hit has reached the client: the Wolf's bite takes all the Mage's Health
+                killed = true;
+                combat::IncomingHit lethal;
+                lethal.instigator = hw.wolf;
+                lethal.hit_guid = 1;
+                lethal.mods.push_back({1, content::kGuidHealth, -1.0e9});
+                lethal.at = r.now();
+                if (combat::PlayerPort* port = cw.find_player(setup.guids.pawn.ObjectId)) port->receive_hit(lethal, r.now());
+                r.ts = 0.0f;   // (the death's restart restarts the client's move clock)
+            }
+        }
+        out.ok = true;
+        out.died = r.h.s->dead();
+        out.health_lost = hp0 - hp_low;
+        return out;
+    };
+    const Outcome alive = cast(false);
+    const Outcome dead = cast(true);
+    CHECK(alive.ok && dead.ok, "a world with ground and a Wolf 10 m in front of a Mage");
+    if (!alive.ok || !dead.ok) return;
+    std::printf("  (a living Mage: %d hits on the Wolf, %.1f Health lost; the Mage killed at the first: %d hits, %d of them after the Mage's death, %.1f Health lost)\n", alive.hits, alive.health_lost, dead.hits,
+                dead.after_death, dead.health_lost);
+    CHECK(alive.hits >= 5 && !alive.died, "Ball Lightning at nobody: the ball hits the Wolf 10 m ahead again and again (every 0.5 s) while the Mage lives");
+    CHECK(dead.died, "the session read the Mage's Health at 0: the Mage is dead");
+    CHECK(dead.hits == alive.hits && dead.after_death == dead.hits - 1, "the ball keeps flying after its caster's death: the Wolf takes the same hits, all but the first after the Mage died, each confirmed to the client");
+    CHECK(dead.health_lost > 0.0 && dead.health_lost >= alive.health_lost * 0.5, "... and they hurt: the Wolf loses its Health to them all the same");
+}
+
+/// Whether the player's pawn is marked dead (CombatInfo.bIsDead), as the session holds it for its client: an update can only say what differs from it.
+static bool pawn_marked_dead(const PlayerSession& s) {
+    const repl::Subobject* combat = s.bootstrap().pawn().find(s.bootstrap().setup().guids.combat_info);
+    const repl::Value* v = combat && combat->obj.schema ? combat->obj.state.get(*combat->obj.schema, "bIsDead") : nullptr;
+    const bool* b = v ? v->get_if<bool>() : nullptr;
+    return b && *b;
+}
+
+static size_t calls_named(const std::vector<std::string>& calls, const char* name) {
+    return static_cast<size_t>(std::count(calls.begin(), calls.end(), std::string(name)));
+}
+
+/// A level-8 Mage one kill short of level 9 (the Mage's Adventuring XP is one below the next level's), with a bag for the loot, in a world of fourteen level-16 Wolves that stand still around the login
+/// spot (an aggro radius of 1 cm: none of them comes for the player; they are within nine levels of the Mage, so that they drop loot).
+struct LevelUpScene {
+    static constexpr int kLevel = 8, kWolfLevel = 16;
+    svc::Character       rec;
+    std::vector<uint64_t> wolves;
+    uint64_t             far_wolf = 0, next_actor_id = 5000000;
+    bool                 ground = false;
+    int64_t              xp_held = 0;   // the XP the Mage starts with
+    LevelUpScene() : rec(class25(8, "Mage", 17750)) {
+        rec.level = kLevel;
+        svc::InventoryItem bag = stack_of(kSanctusBag, 23, 1, 90001);
+        bag.container = svc::ItemContainer::Equipment;
+        rec.items.push_back(bag);
+    }
+    void prepare(PlayerWorld& w) {
+        spawn_wolves(w, wolves, far_wolf, 14, kWolfLevel, 1.0, ground, next_actor_id);
+        if (const leveling::LevelCurve* curve = w.level_curve()) {
+            xp_held = curve->xp_for(kLevel + 1) - 1;
+            rec.experience.push_back({content::kGuidAdventuring, xp_held, 0});
+        }
+    }
+    bool ready(const Run& r) const { return ground && wolves.size() == 14 && r.h.fx.world->combat() && r.h.fx.world->aftermath() && r.h.fx.world->level_curve(); }
+};
+
+/// A kill that levels up a player who is dead (the Mage's ball, or a burn the Mage put on a mob, goes on killing after the Mage died: the experience and the loot still go to the player): the level, the
+/// experience and the loot are the player's, but the level gives nothing back (no Health, Mana or Stamina) and does not bring the player back: the player stays dead, at 0 Health, until the respawn, and
+/// then comes back at the new level's maximums.
+static void test_level_up_of_a_dead_player() {
+    std::printf("A kill that levels up a dead player: the experience and the loot go to the player, Health, Mana and Stamina stay as they were and the player stays dead until the respawn\n");
+    {
+        LevelUpScene scene;
+        Run r(0, true, &scene.rec, [&](PlayerWorld& w) { scene.prepare(w); });
+        CHECK(scene.ready(r), "a world with ground, fourteen Wolves that stand still, the aftermath and the level curve");
+        if (!scene.ready(r)) return;
+        combat::CombatWorld& cw = *r.h.fx.world->combat();
+        combat::Aftermath& after = *r.h.fx.world->aftermath();
+        r.play(0.5, false);
+        phase_in(r);
+        world_play(r, 1.0);
+        const bs::PlayerSetup setup = r.h.s->bootstrap().setup();
+        const uint64_t pawn = setup.guids.pawn.ObjectId;
+        const int level0 = r.h.s->progress().level;
+        const int64_t xp0 = r.h.s->progress().xp;
+        const float max_health0 = r.m.stats[content::kGuidMaxHealth], max_mana0 = r.m.stats[content::kGuidMaxMana];
+        CHECK(level0 == LevelUpScene::kLevel && xp0 == scene.xp_held && r.h.s->kills_rewarded() == 0, "the Mage is one XP short of the next level and has killed nothing");
+        r.trigger(kDodge);   // (Stamina is spent: a level gained must not fill it up while the player is dead)
+        world_play(r, 0.1);
+        CHECK(r.h.s->abilities() && r.h.s->abilities()->stamina() < r.h.s->abilities()->max_stamina(), "(a Dodge spends Stamina)");
+        combat::PlayerPort* port = cw.find_player(pawn);
+        CHECK(port != nullptr, "the combat world knows the player");
+        if (!port) return;
+        combat::IncomingHit lethal;
+        lethal.instigator = scene.wolves[0];
+        lethal.hit_guid = 1;
+        lethal.mods.push_back({1, content::kGuidHealth, -1.0e9});
+        lethal.at = r.now();
+        port->receive_hit(lethal, r.now());
+        r.ts = 0.0f;   // (the death's restart restarts the client's move clock)
+        world_play(r, 0.3);
+        CHECK(r.h.s->dead() && r.h.s->deaths() == 1 && pawn_marked_dead(*r.h.s), "the player is dead: the session read the Health at 0 and the pawn is marked dead");
+        const size_t xp_updates0 = r.m.xp_updates, level_effects0 = calls_named(r.m.pawn_calls, "BroadcastPlayLevelUpEffects"), restarts0 = calls_named(r.m.pc_calls, "ClientRestart");
+        const int64_t debt_dead = r.h.s->progress().debt;
+        // ---- the kills: each Wolf pays its experience (the debt of the death first) until one gives the level
+        size_t kills = 0;
+        uint64_t looted = 0;
+        bool leveled = false;
+        for (size_t i = 1; i < scene.wolves.size() && !(leveled && looted); ++i) {
+            kill_npc(r, scene.wolves[i], pawn);
+            ++kills;
+            world_play(r, 0.2);
+            const combat::Corpse* c = after.corpse_of(scene.wolves[i]);
+            if (c && c->parts && !looted) looted = scene.wolves[i];
+            if (leveled || r.h.s->progress().level <= level0) continue;
+            leveled = true;
+            const stats::CharacterStats& cs = *r.h.s->character_stats();
+            std::printf("  (the kill that gave level %d was kill %zu, after a death debt of %lld XP; Health %.0f of %.0f, Mana %.0f of %.0f, Stamina %.2f of %.0f on the server)\n", r.h.s->progress().level, kills,
+                        static_cast<long long>(debt_dead), cs.find(content::kGuidHealth)->value, cs.find(content::kGuidMaxHealth)->value, cs.find(content::kGuidMana)->value, cs.find(content::kGuidMaxMana)->value,
+                        r.h.s->abilities()->stamina(), r.h.s->abilities()->max_stamina());
+            CHECK(r.h.s->progress().level == level0 + 1 && r.h.s->progress().xp > xp0 && r.h.s->levels_gained() == 1, "a kill made while the player is dead gave the experience and the level");
+            CHECK(calls_named(r.m.pawn_calls, "BroadcastPlayLevelUpEffects") == level_effects0 + 1 && r.m.xp_updates > xp_updates0, "... and the client was told: the XPTracker and the level-up effect");
+            CHECK(r.m.stats[content::kGuidMaxHealth] > max_health0 && cs.find(content::kGuidMaxHealth)->value > max_health0, "... and the stats of the new level went out: the maximum Health is higher");
+            CHECK(r.h.s->dead() && r.h.s->deaths() == 1 && r.h.s->respawns() == 0 && pawn_marked_dead(*r.h.s), "the player is still dead: the level did not bring the player back, on the server or in the pawn the client has");
+            CHECK(calls_named(r.m.pc_calls, "ClientRestart") == restarts0 && r.m.death_locations.size() == 1 && r.m.choices.empty(), "... and nothing of a respawn went out");
+            CHECK(cs.find(content::kGuidHealth)->value <= 0.0f && r.m.stats[content::kGuidHealth] <= 0.0f, "Health is still 0, on the server and on the client");
+            CHECK(cs.find(content::kGuidMana)->value <= 0.0f && r.m.stats[content::kGuidMana] <= 0.0f, "Mana is still 0, on the server and on the client");
+            CHECK(r.h.s->abilities()->stamina() < r.h.s->abilities()->max_stamina() && r.m.stamina_now() < r.m.stats[content::kGuidMaxStamina], "Stamina was not filled up: it is below the maximum, in the runtime and on the client");
+        }
+        CHECK(leveled, "one of the kills gave the dead player a level");
+        CHECK(r.h.s->kills_rewarded() == kills && after.stats().deaths >= kills, "every kill the dead player made was rewarded");
+        const combat::Corpse* corpse = looted ? after.corpse_of(looted) : nullptr;
+        CHECK(corpse != nullptr && corpse->rights.count(pawn) == 1 && corpse->parts && !corpse->loot.empty(), "a Wolf the dead player killed left loot, and the player has the right to it");
+        CHECK(r.h.s->dead() && r.h.s->progress().level == level0 + 1 && r.m.stats[content::kGuidHealth] <= 0.0f, "(after all the kills: dead at Health 0, at the new level)");
+        // ---- the respawn: the new level's maximums
+        send_on_pawn(r, respawn_choices_bunch());
+        world_play(r, 0.3);
+        CHECK(r.m.choices.size() == 1 && !r.m.choices[0].closest.empty(), "the dead player asks where to come back and is offered a place");
+        if (r.m.choices.empty() || r.m.choices[0].closest.empty() || !corpse || !corpse->parts) return;
+        send_on_pawn(r, respawn_choice_bunch(r.m.choices[0].closest[0]));
+        world_play(r, 0.5);
+        CHECK(!r.h.s->dead() && r.h.s->respawns() == 1 && !pawn_marked_dead(*r.h.s), "the offered place brings the player back, and the pawn is no longer dead");
+        const stats::CharacterStats& cs = *r.h.s->character_stats();
+        CHECK(cs.find(content::kGuidHealth)->value == cs.find(content::kGuidMaxHealth)->value && r.m.stats[content::kGuidHealth] >= r.m.stats[content::kGuidMaxHealth] - 0.5f &&
+              r.m.stats[content::kGuidMaxHealth] > max_health0, "after the respawn Health is the new level's maximum (higher than the old one), on the server and on the client");
+        CHECK(cs.find(content::kGuidMana)->value == cs.find(content::kGuidMaxMana)->value && r.m.stats[content::kGuidMana] >= r.m.stats[content::kGuidMaxMana] - 0.5f &&
+              r.m.stats[content::kGuidMaxMana] >= max_mana0, "... and Mana is the new level's maximum");
+        // ---- the loot: it waits for the player, who takes it after the respawn
+        const size_t windows = r.m.loot_windows.size();
+        send_on_pawn(r, interact_bunch(corpse->parts->interactable));
+        world_play(r, 0.3);
+        CHECK(r.m.loot_windows.size() == windows + 1 && r.m.loot_windows.back().data.storage.size() == corpse->loot.size(), "the loot of the Wolf the dead player killed opens for the player after the respawn, with every stack");
+        CHECK(!r.h.s->abilities_failed() && r.m.unreadable == 0, "(the session is fine, every chain reads)");
+    }
+}
+
+/// A player whose Health is already 0 in the tick of a kill that gives a level is dead for it too: the player's death is read at the end of the tick, after the tick's hits and kills, so the level must not
+/// give the Health back before that and let the player live.
+static void test_level_up_in_the_tick_of_the_death() {
+    std::printf("A kill that levels up a player in the tick of the player's death: the death is not undone\n");
+    {
+        LevelUpScene scene;
+        Run r(0, true, &scene.rec, [&](PlayerWorld& w) { scene.prepare(w); });
+        CHECK(scene.ready(r), "a world with ground, fourteen Wolves that stand still, the aftermath and the level curve");
+        if (!scene.ready(r)) return;
+        combat::CombatWorld& cw = *r.h.fx.world->combat();
+        r.play(0.5, false);
+        phase_in(r);
+        world_play(r, 1.0);
+        const uint64_t pawn = r.h.s->bootstrap().setup().guids.pawn.ObjectId;
+        const int level0 = r.h.s->progress().level;
+        const size_t rewards0 = r.h.s->kills_rewarded();
+        combat::PlayerPort* port = cw.find_player(pawn);
+        CHECK(port != nullptr && level0 == LevelUpScene::kLevel, "the combat world knows the Mage, who is one XP short of the next level");
+        if (!port) return;
+        combat::IncomingHit lethal;
+        lethal.instigator = scene.wolves[0];
+        lethal.hit_guid = 1;
+        lethal.mods.push_back({1, content::kGuidHealth, -1.0e9});
+        lethal.at = r.now();
+        port->receive_hit(lethal, r.now());   // (the lethal hit waits in the session's inbox ...)
+        kill_npc(r, scene.wolves[1], pawn);    // (... and the reward of a kill in its queue: one tick of the session reads the hit first, then the reward, then looks for a death)
+        r.tick(false);
+        CHECK(r.h.s->kills_rewarded() == rewards0 + 1 && r.h.s->progress().level == level0 + 1, "the one tick that read the lethal hit also paid the kill and gave the level");
+        CHECK(r.h.s->dead() && r.h.s->deaths() == 1 && pawn_marked_dead(*r.h.s), "the player died all the same: the level did not give the Health back before the death was read");
+        world_play(r, 0.3);
+        const stats::CharacterStats& cs = *r.h.s->character_stats();
+        CHECK(cs.find(content::kGuidHealth)->value <= 0.0f && r.m.stats[content::kGuidHealth] <= 0.0f && cs.find(content::kGuidMana)->value <= 0.0f && r.m.stats[content::kGuidMana] <= 0.0f,
+              "Health and Mana are 0, on the server and on the client");
+        CHECK(r.h.s->deaths() == 1 && r.h.s->respawns() == 0 && !r.h.s->abilities_failed() && r.m.unreadable == 0, "(one death, no respawn, the session is fine)");
+    }
+}
+
 #include "ability_session_registered.inc"
 
 int main() {
@@ -4338,6 +4619,7 @@ int main() {
         test_e1_one_clock();
         test_e1_ranged_book_at_wolf();
         test_flight_leftovers();
+        test_ball_lightning_after_death();
         test_e1_cylinder_in_own_block();
         test_e1_zone_abilities_export_rule();
         test_e1_clock_resync();
@@ -4345,6 +4627,8 @@ int main() {
         test_e1_loot_with_full_bag();
         test_e1_player_death();
         test_e1_death_without_loss();
+        test_level_up_of_a_dead_player();
+        test_level_up_in_the_tick_of_the_death();
     } else {
         std::printf("no content.db at %s: the plan D2 session tests are skipped\n", ability_rig::real_db_path().c_str());
     }

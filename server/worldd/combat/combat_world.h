@@ -270,6 +270,9 @@ public:
     /// The living enemies of `from` whose bodies touch the sphere of `radius_cm` around `centre` (the area where a projectile landed: the Ranger's Air Strike): a body counts when any part of it is
     /// inside and nothing on the ground stands between the centre and it (the navmesh's line, where both ends are on it).  Nearest to the centre first, at most `max`; the distance is from the centre.
     std::vector<GatheredTarget> enemies_around(const Fighter& from, const Vec3& centre, double radius_cm, size_t max);
+    /// The same as enemies_around, with nothing on the ground in the way: a body counts when any part of it is inside the sphere, whatever stands between (a ball that flies through walls: the Mage's
+    /// Ball Lightning).  Nearest to the centre first, at most `max`; the distance is from the centre.
+    std::vector<GatheredTarget> enemies_touching(const Fighter& from, const Vec3& centre, double radius_cm, size_t max);
     /// The height of the ground under (x, y): the walkable floor nearest to `z_hint`, or the landscape; false where the world knows none (no ground data).
     bool ground_height(double x, double y, double z_hint, double* z) const;
     /// The ObjectId of the NPC target's collision cylinder: what the ability items name as Targets and the confirmations export as the actor's

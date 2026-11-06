@@ -269,6 +269,17 @@ struct BounceRule {
     bool        random;       // the next enemy is drawn at random (else: the nearest one that this cast has not hit yet, to the enemy just hit and to the caster)
 };
 
+/// An ability whose projectile is a ball that flies on from where the caster stands and hurts every enemy its body touches, each again and again while it stays inside the ball (the Mage's Ball
+/// Lightning): the server flies it, a step every kBallStep, and lands its hits as the projectile's ordinary hits (ability_pipeline.cpp has the table).
+struct BallCast {
+    const char* ability;
+    double      bar;      // the montage time where the cast bar ends, seconds: the client plays the bar up to here, so this over the seconds the bar took is its play rate
+    double      fire;     // the montage launches the ball this long after the bar's end, in montage seconds
+    double      period;   // the least time between two hits on one enemy, seconds, counted from that enemy's last hit
+    double      ahead;    // the ball starts this far ahead of the caster, along the way the caster faces, cm ...
+    double      up;       // ... and this far above the middle of the caster's body
+};
+
 class AbilityPipeline {
 public:
     // ---- numbers that are not content.db's, each with its evidence (header) --------------------------------------------------------------
@@ -586,6 +597,8 @@ private:
         bool    source_is_target = false;
         /// The confirmation's Source is this actor, the enemy a bounce flew from (the child hit names it, the next enemy is its target); 0: no Source
         uint64_t source_actor = 0;
+        /// The hit reaches its targets wherever they stand: a ball that flew on from the caster hurts what it touches, however far from the caster that is by now. Every other check of the hit holds.
+        bool    reach_free = false;
     };
     /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
     struct HitEvent {
@@ -638,6 +651,23 @@ private:
         std::set<int64_t>            reach;            // every hit that belongs to the ability
         std::map<int64_t, std::pair<int, double>> asked;   // hit guid -> (requests, time of the last) for the hits that are no slot
     };
+    /// The flight of a ball (BallCast): where it started, which way it goes, how long it lasts and which enemies it has hurt, and when.
+    struct BallFlight {
+        struct Touch {
+            double next = 0;   // the earliest time the enemy is hurt again
+            int    hits = 0;   // how many times it was hurt
+        };
+        int64_t                   projectile = 0;       // the projectile record the ball is: its hits are the record's
+        double                    speed = 0;            // cm per second
+        double                    radius = 0;           // the ball's body, cm
+        double                    lasts = 0;            // how long it flies, seconds: its life, or its range over its speed when that comes first
+        double                    rate = 1.0;           // the play rate of the client's montage that launched it (for the log)
+        double                    launch_at = -1;       // when it left (negative: not yet)
+        double                    x = 0, y = 0, z = 0;  // where it started
+        double                    dx = 1, dy = 0;       // the way it goes: a unit vector along the ground (it flies level)
+        std::map<uint64_t, Touch> touched;              // every enemy its body has touched
+        int                       hits = 0;             // the hits it has sent, on all of them
+    };
     struct Cast {
         int32_t                               client_id = 0;
         const abilities::AbilityDef*          def = nullptr;
@@ -665,7 +695,8 @@ private:
             uint64_t target = 0;       // the one enemy it flies at (0: the cast's own targets)
             // A timed cast (kTimedCasts) has two more kinds of step in this list: a launch (launch `index` leaves) and, for a Strike, the landing of arrow `index` at (x, y, z).
             // A Fly is a projectile that leaves at `due` (kNoteCasts: a note; a bounce leaves the enemy just hit, at (x, y, z)) and lands a flight later on `target`; `depth` counts the bounces before it
-            enum class Kind : uint8_t { Land, Launch, Strike, Fly };
+            // A Ball is one step of a ball's flight (kBalls): `index` counts the steps, 0 is the launch; a step looks at what the ball touches and sends a Land at each enemy that is due a hit
+            enum class Kind : uint8_t { Land, Launch, Strike, Fly, Ball };
             Kind     kind = Kind::Land;
             int      index = 0;
             double   x = 0, y = 0, z = 0;
@@ -702,6 +733,8 @@ private:
         double                                launch_at = -1;             // ... when it leaves: the plan (the montage's notify at the client's play rate), then the client's own request
         bool                                  anchored = false;           // ... the client's request for the hit that goes with the launch came
         double                                flight = 0;                 // ... how long it flies, seconds (the target's distance over the projectile's speed)
+        const BallCast*                       ball = nullptr;             // a cast whose projectile is a ball that flies on (kBalls): planned at the montage's jump, in flight from its first step
+        BallFlight                            ball_flight;                // ... and its flight
     };
     struct EffectInst {
         int64_t                     owner = 0;                    // plan D2, stage 2: the looping ability whose effect this is (0: none)
@@ -813,6 +846,12 @@ private:
     bool   can_pay(const Cast& cast) const;                       // whether the character holds what the cast's cost step takes (stats, effect stacks, a charge of its group): asked at the cost step and by a jump that comes before it
     void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
     void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
+    /// The montage jumped and the ability's projectile is a ball (kBalls): the ball leaves when the montage's notify gets there at the client's play rate, never before the cost step. It is a Ball
+    /// step of the cast, due at the launch; a cast that cannot pay clears it with its other steps.
+    void   launch_ball(Cast& cast, double t);
+    /// One step of a ball's flight. The first (index 0) leaves the ball from where the caster stands now, along the way the caster faces; every step puts the ball where its flight has taken it and sends a hit
+    /// (a Land, through the projectile's ordinary hit path) at each enemy it touches that is due one, and the next step follows until the ball's life or range is over.
+    void   ball_step(Cast& cast, const Cast::Missile& step, double t);
     /// Whether the montage of `def` plays at the caster's MagicalSpeed (else PhysicalSpeed): an ability of a class says so in its table row (`row_magical`); a weapon swing belongs to no class, so the CHARACTER's class says (a Cleric's
     /// shortbow swing plays at MagicalSpeed, a Fighter's wand swing at PhysicalSpeed).
     bool   plays_at_magical(const abilities::AbilityDef& def, bool row_magical) const;

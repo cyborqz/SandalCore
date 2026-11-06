@@ -194,7 +194,11 @@ void PlayerSession::finish_level_up(const leveling::XpResult& xp, bool class_cha
     if (leveled) {
         if (!pb_.mark_temp_health()) spdlog::debug("[session] {}: no TempHealth item to mark", name());
     }
-    if (leveled && !dead_ && stats_) {   // a level gained gives Health, Mana and Stamina back, at the new maximums (a dead player gets them from the respawn)
+    // A level gained gives Health, Mana and Stamina back, at the new maximums, but not to a player who is dead: the respawn gives them back. A player at 0 Health is dead here too, although the death is only
+    // read at the end of the tick, after the tick's hits and kills: a kill that comes in the tick of the lethal hit must not give the Health back first.
+    const stats::StatValue* health = stats_ ? stats_->find(content::kGuidHealth) : nullptr;
+    const bool down = dead_ || (health && !(health->value > 0.0f));
+    if (leveled && !down && stats_) {
         if (const stats::StatValue* hp = stats_->find(content::kGuidMaxHealth)) set_current_value(content::kGuidHealth, hp->value);
         if (const stats::StatValue* mp = stats_->find(content::kGuidMaxMana)) set_current_value(content::kGuidMana, mp->value);
         if (abilities_) {
