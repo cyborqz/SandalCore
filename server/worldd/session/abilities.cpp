@@ -257,6 +257,9 @@ void AbilityRuntime::set_mounted(bool mounted, double now) {
 void AbilityRuntime::set_moving(bool moving, double now) {
     advance(now);
     if (mounted_) moving = false;   // a rider's moves are its mount's: nothing it does charges the pawn
+    // A player who starts walking stands up: the client would otherwise keep playing the sit montage and run with it, and the Rest effect would outlive the rest.
+    // An accepted move is the server's first sign of it (the client may send its own end later; ending twice changes nothing).
+    if (moving && rest_ && !rest_->ended) release_rest(now_, "the Rest ends: the player moves", /*drop_item=*/true);
     moving_ = moving;
     moving_at_ = std::max(now, now_);
     // the Sprint's regeneration stop depends on the player moving: the StaminaRegeneration item follows
@@ -397,8 +400,14 @@ bool AbilityRuntime::cancel(int32_t client_instance_id, double now) {
         end_sprint(now_, Tell::No, "the Sprint is released");
         return true;
     }
-    if (rest_ && !rest_->ended && rest_->client_id == client_instance_id) {
-        release_rest(now_, "the Rest is released");
+    if (rest_ && rest_->client_id == client_instance_id) {
+        if (!rest_->ended) {
+            release_rest(now_, "the Rest is released");
+        } else {
+            // The client ended the instance after the SitEnd jump (or before the effect's own removal): take the item and the effect now, so the client's sitting
+            // state ends with them.
+            remove_rest_effect(now_);
+        }
         return true;
     }
     return false;
@@ -560,19 +569,24 @@ void AbilityRuntime::start_rest(int32_t id, double t) {
     emit({std::move(c), std::nullopt, t, "the Rest starts"});
 }
 
-void AbilityRuntime::release_rest(double t, const char* why) {
+void AbilityRuntime::release_rest(double t, const char* why, bool drop_item) {
     if (!rest_ || rest_->ended) return;
     rest_->ended = true;
+    rest_->drop_item = drop_item;
     rest_->effect_due.reset();
     // The montage jumps to its end section (pkt#8318); the effect follows kRestEndEffectDelay later (pkt#8320).
     bootstrap::ActiveAbilityItem item = ability_item(rules_.rest, rest_->instance);
     item.montage_position = kRestSitEndPosition;
     item.may_jump_to_position = true;
     item.animation_counter = ++rest_animation_counter_;
-    if (rest_->effect_key) rest_->remove_due = t + kRestEndEffectDelay;
+    // The item leaves with the effect when the server ended the Rest itself (the player moved or started another ability): the client ignored the jump in those cases and
+    // kept its sitting state.  A client-side end is the capture's case and leaves the item, as pkt#8320 does.
+    if (drop_item || rest_->effect_key) rest_->remove_due = t + kRestEndEffectDelay;
     AbilityChange c;
     c.abilities_changed.push_back(item);
-    emit({std::move(c), std::nullopt, t, why});
+    AbilityEvent ev{std::move(c), std::nullopt, t, why};
+    if (drop_item) ev.end_ability = rest_->client_id;   // the server ended it (movement/another ability): the client must drop its instance too
+    emit(std::move(ev));
 }
 
 void AbilityRuntime::add_rest_effect(double t) {
@@ -587,13 +601,22 @@ void AbilityRuntime::add_rest_effect(double t) {
 }
 
 void AbilityRuntime::remove_rest_effect(double t) {
+    if (!rest_) return;
     rest_->remove_due.reset();
-    if (!rest_->effect_key) return;
     AbilityChange c;
-    c.effects_removed.push_back(*rest_->effect_key);
-    rest_->effect_key.reset();
-    revert_mods(c, *rules_.effect(rules_.rest.effect_guid));
-    emit({std::move(c), std::nullopt, t, "the Rest effect ends"});
+    bool had_effect = false;
+    if (rest_->effect_key) {
+        c.effects_removed.push_back(*rest_->effect_key);
+        rest_->effect_key.reset();
+        revert_mods(c, *rules_.effect(rules_.rest.effect_guid));
+        had_effect = true;
+    }
+    // A server-side end (the player moved or started another ability) takes the ability item too: the client ignored the SitEnd jump and kept its sitting state.
+    // A client-side end leaves the item, as the capture does (pkt#8320 removes only the effect; the client removes the item itself).
+    if (rest_->drop_item) c.abilities_removed.push_back(rest_->instance);
+    rest_.reset();
+    if (c.empty()) return;
+    emit({std::move(c), std::nullopt, t, had_effect ? "the Rest effect ends" : "the Rest ends"});
 }
 
 }}  // namespace aoc::worldd

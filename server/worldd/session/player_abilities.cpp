@@ -60,6 +60,32 @@ namespace wire = ::aoc::protocol::wire;
 using bootstrap::Role;
 using protocol::emit::FIntrepidNetworkGUID;
 
+namespace {
+// Client-data gaps the server models: an item's ability reads a stat its stat block does not carry, or names another stat than the buff must raise.  For each row the cast
+// gives the ability the item's `item_stat` value under the `read_stat` key the ability names and (when they differ) remaps the effect's mod to `target_stat`.
+struct ConsumableStatFix {
+    int64_t item, read_stat, item_stat, target_stat;
+};
+constexpr ConsumableStatFix kConsumableStatFixes[] = {
+    // Might Potion: Arcane Surge's ability reads MagicalPowerRating; the item carries PhysicalPowerRating.
+    {6064634675081576599ll, 109183607068297ll, 109183603267200ll, 109183603267200ll},
+    // Elixir of Crafting Quality: the ability reads Artisan_Crafting_Quality_Rating; the item carries the same number as Artisan_Crafting_Cost_Rating.
+    {6064632105766944786ll, 6064630316223889411ll, 6064630316223627265ll, 6064630316223889411ll},
+    // Elixir of Hunting: the ability reads Artisan_Gathering_Hunting_Rarity_Rating; the item carries Artisan_Gathering_Hunting_Quantity_Rating.
+    {6064632105783263255ll, 6064630299332247618ll, 6064630299331854394ll, 6064630299331854394ll},
+};
+// Display-only gaps: the client names an ability of its own for the item, and the buff that ability shows is not the item's.  The cast tells the client the effect record
+// to draw the buff from; the effect applied, its mods and its stacking stay the ability's own (the numbers are the item's already: the mods ask GetConsumedItemStat).
+struct ConsumableEffectFix {
+    int64_t item, effect, display;
+};
+constexpr ConsumableEffectFix kConsumableEffectFixes[] = {
+    // Might Potion: its item casts Arcane Surge's ability, so the client would show "Arcane Surge Potion"; the effect it is shown as is the physical-power buff
+    // (Surging Might's record, whose mod also asks the consumed item for PhysicalPowerRating).  The Arcane Surge and Arcane potions keep their own effect.
+    {6064634675081576599ll, 6064632316175778138ll, 6064632316168765776ll},
+};
+}  // namespace
+
 // ============================================================================================================================
 //  abilities (plan A7)
 // ============================================================================================================================
@@ -465,6 +491,11 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
     bool accepted_cast = true;   // (the generic runtime has no refusal to give back: a pet's command goes on as before)
+    // Starting anything but the Rest stands the character up: the client would otherwise keep the sit montage (running with it, and sitting again when it stops) and the
+    // Rest effect would outlive it.  The client usually sends its own end too; whichever comes first releases the Rest.
+    if (ability != content::kGuidRest && runtime->resting()) runtime->end_rest(ability_seconds(now), "the Rest ends: another ability starts", /*drop_item=*/true);
+    // An item use still running (a meal being eaten, a potion being drunk) ends too: its own lasting state (a meal's Resting) goes, its buff and timed effects stay.
+    if (pipeline_) pipeline_->end_item_casts(ability_seconds(now), "another ability starts");
     if (pipeline_ && pipeline_->handles(ability)) {
         if (item_slot != -1) info.item_cast = consumable_cast(ability, item_slot, item_location);   // consumables: the item whose numbers the ability reads
         const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
@@ -539,7 +570,8 @@ void PlayerSession::on_ability_end(Connection& conn, const repl::ClientRpc& rpc,
     const auto id = repl::parse_end_ability(rpc.call);
     if (!id) return;
     if (crate_drop_due_ && *id == crate_drop_instance_) crate_drop_due_.reset();   // (the same for an end request of that cast)
-    pipeline_->end_request(*id, ability_seconds(now));
+    // ServerEndAbility is also how a client stands up from a Rest and how it ends a Sprint; the runtime answers those, and the pipeline the rest.
+    if (!runtime->cancel(*id, ability_seconds(now)) && pipeline_) pipeline_->end_request(*id, ability_seconds(now));
     take_ability_events();
     flush_abilities(conn);
 }
@@ -630,6 +662,31 @@ std::shared_ptr<const ItemCast> PlayerSession::consumable_cast(int64_t ability, 
     cast->ability = ability;
     cast->quality = item->quality;
     cast->stats = stats_->item_stats(item->item_record_id, item->quality);
+    for (const ConsumableStatFix& fix : kConsumableStatFixes) {
+        if (fix.item != cast->record) continue;
+        double value = 0;
+        bool found = false;
+        for (const stats::StatMod& m : cast->stats) {
+            if (m.stat == fix.item_stat) {
+                value = m.value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) continue;
+        bool had_read = false;
+        for (stats::StatMod& m : cast->stats) {
+            if (m.stat != fix.read_stat) continue;
+            m.value = value;
+            had_read = true;
+        }
+        if (!had_read) cast->stats.push_back({fix.read_stat, value});
+        if (fix.read_stat != fix.target_stat) cast->effect_stat_remap[fix.read_stat] = fix.target_stat;
+    }
+    for (const ConsumableEffectFix& fix : kConsumableEffectFixes) {
+        if (fix.item != cast->record) continue;
+        cast->effect_display_remap[fix.effect] = fix.display;   // display only: the effect applied and its mods stay the ability's
+    }
     cast->container = static_cast<int>(*container);
     cast->slot = slot;
     cast->instance_guid = item->instance_guid;

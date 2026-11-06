@@ -1537,7 +1537,8 @@ public:
     std::optional<ItemUse> item_use(int64_t item_guid, std::string& error) const;
     /// Whether the item carries the gameplay tag `tag` or a child of it ("Item.Consumable.Scroll" matches itself and "Item.Consumable.Scroll.Anything").
     bool item_has_tag(int64_t item_guid, const std::string& tag, std::string& error) const;
-    /// The ability a consumable item casts when it is used, for the kinds the server runs (scrolls and elixirs); 0 for any other item, a meal, a potion or a mount among them.
+    /// The ability a consumable item casts when it is used, for the kinds the server runs (food, drink, elixir, potion, salve and scroll); 0 for any other item, a mount or
+    /// a consumable of a kind that is not modelled yet (a recipe, an enchanting scroll, a tempering kit, a survey pylon, a treasure map) among them.
     /// Using such an item is the ability's work: the item is taken from the bag when the ability's cost is paid.
     int64_t consumable_ability(int64_t item_guid, std::string& error) const;
     /// Plan D1: an ActionResponse; nullopt with `error` empty when there is none.

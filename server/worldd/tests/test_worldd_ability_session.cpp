@@ -697,6 +697,8 @@ struct Harness {
 };
 
 /// A harness and the client's view of it, with a move source and the client's own ClientInstanceId counter.
+static BunchWriter end_bunch(const emit::FIntrepidNetworkGUID& ability, int64_t server_instance);   // (defined below; ServerEndAbility)
+
 struct Run {
     Harness h;
     Mirror m;
@@ -741,6 +743,8 @@ struct Run {
         return id;
     }
     void cancel(int32_t id) { send_reliable(cancel_bunch(h.ability_guid(), id)); }
+    /// ServerEndAbility: the client's own end of an instance (how it stands up from a Rest).
+    void end(int32_t id) { send_reliable(end_bunch(h.ability_guid(), id)); }
     /// 100 ms of play: the client's move, then the server's tick.
     void tick(bool moving, milliseconds d = milliseconds(100)) {
         ts += static_cast<float>(d.count()) / 1000.0f;
@@ -920,6 +924,46 @@ static void test_rest() {
     // the montage's export is not repeated once acknowledged
     r.trigger(kRest);
     CHECK(r.m.chains_with_exports == 1, "a second Rest does not export the montage again: the first export was acknowledged");
+
+    // ServerEndAbility is how the client stands up: the Rest and its effect end, and the character is not sitting when it stops again
+    {
+        Run e;
+        e.play(0.5, false);
+        const int32_t id = e.trigger(kRest);
+        e.play(2.2, false);
+        CHECK(e.rt().resting() && e.m.has_effect(kRestEffect), "(the Rest is on)");
+        e.end(id);
+        e.play(0.3, false);
+        CHECK(!e.rt().resting() && !e.m.has_effect(kRestEffect) && e.m.stats[kHealthRegen] == 0.6f && e.m.stats[kManaRegen] == 0.6f,
+              "ServerEndAbility stands the character up: the Rest ends, the montage jumps to its end and the regeneration effect goes");
+        CHECK(!e.m.end_before_removal && !e.h.s->abilities_failed() && e.m.unreadable == 0, "(nothing failed)");
+    }
+    // a move stands the character up too (the client may not send an end for that): no running with the sit montage, no effect left on
+    {
+        Run m;
+        m.play(0.3, false);
+        const int32_t id = m.trigger(kRest);
+        m.play(2.2, false);
+        CHECK(m.rt().resting() && m.m.has_effect(kRestEffect), "(the Rest is on)");
+        m.play(0.2, true);
+        CHECK(!m.rt().resting() && !m.m.has_ability(kRest) && !m.m.has_effect(kRestEffect) && m.m.stats[kHealthRegen] == 0.6f,
+              "the first move ends the Rest, its item leaves and the effect does not outlive it: the sit montage and camera are free again");
+        CHECK(m.m.end_ids() == std::vector<int32_t>{id}, "... and the client is told ClientEndAbility(its instance)");
+        CHECK(!m.m.end_before_removal && !m.h.s->abilities_failed() && m.m.unreadable == 0, "(nothing failed)");
+    }
+    // starting another ability (an attack) stands the character up even when worldd does not run that ability itself
+    {
+        Run a;
+        a.play(0.3, false);
+        const int32_t id = a.trigger(kRest);
+        a.play(2.2, false);
+        CHECK(a.rt().resting() && a.m.has_effect(kRestEffect), "(the Rest is on)");
+        a.trigger(kScepterCombo);
+        a.play(0.3, false);
+        CHECK(!a.rt().resting() && !a.m.has_ability(kRest) && !a.m.has_effect(kRestEffect) && a.m.stats[kHealthRegen] == 0.6f,
+              "another ability stands the character up: the Rest, its item and its effect go before the attack");
+        CHECK(std::find(a.m.end_ids().begin(), a.m.end_ids().end(), id) != a.m.end_ids().end(), "... the client is told ClientEndAbility(its instance)");
+    }
 }
 
 /// Flips bit `bit` of a bunch.
