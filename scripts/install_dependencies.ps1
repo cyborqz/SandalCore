@@ -11,6 +11,7 @@
   Checks: winget, Visual Studio 2022 Build Tools (C++ workload), CMake, Git, vcpkg, Go, the .NET 8 SDK (mapc), Python 3.10 or newer (the
   generators of scripts\extract_game_data.ps1) and Docker Desktop (PostgreSQL for the Go services).
   Missing items are installed with winget after you confirm each one (or all at once with -Yes).
+  A Go older than services\go.mod asks for is upgraded with winget the same way; without winget the script points to the Windows installer at https://go.dev/dl/.
   vcpkg is cloned to %USERPROFILE%\vcpkg and VCPKG_ROOT is set for your user.
   The C++ libraries themselves (grpc, protobuf, openssl, ...) are installed by vcpkg during the first build;
   that first build takes a long time (grpc compiles from source).
@@ -104,7 +105,10 @@ function Find-Vcpkg {
 function Get-GoVersion {
     $go = Get-Command go -ErrorAction SilentlyContinue
     if (-not $go) { return $null }
-    $v = & go env GOVERSION 2>$null
+    # GOTOOLCHAIN=local: report the Go that is installed, never one that go would fetch for the go line of a go.mod in the current folder
+    $oldToolchain = $env:GOTOOLCHAIN
+    $env:GOTOOLCHAIN = 'local'
+    try { $v = & go env GOVERSION 2>$null } finally { $env:GOTOOLCHAIN = $oldToolchain }
     if ($v) { return $v.Trim() }
     return 'unknown'
 }
@@ -158,17 +162,26 @@ function Confirm-Install([string]$what) {
     return ($a -eq '' -or $a -match '^[Yy]')
 }
 
-function Install-Winget([string]$id, [string]$name, [string[]]$extra = @()) {
-    Write-Host "Installing $name (winget id $id) ..." -ForegroundColor Cyan
-    $wingetArgs = @('install', '--id', $id, '-e', '--source', 'winget',
+function Install-Winget([string]$id, [string]$name, [string[]]$extra = @(), [switch]$Upgrade) {
+    # -Upgrade: the package is installed but too old; "winget install" does not replace an installed version, "winget upgrade" does
+    $verb = if ($Upgrade) { 'upgrade' } else { 'install' }
+    Write-Host ("{0} {1} (winget id {2}) ..." -f $(if ($Upgrade) { 'Upgrading' } else { 'Installing' }), $name, $id) -ForegroundColor Cyan
+    $wingetArgs = @($verb, '--id', $id, '-e', '--source', 'winget',
               '--accept-package-agreements', '--accept-source-agreements') + $extra
     & $script:winget @wingetArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "winget could not install $name (exit $LASTEXITCODE). Install it by hand, then run this script again."
+        Write-Warning "winget could not $verb $name (exit $LASTEXITCODE). Do it by hand, then run this script again."
         return $false
     }
     Update-SessionPath
     return $true
+}
+
+# Go comes from go.dev: its Windows installer (.msi) replaces an older Go in place, so this works with or without winget
+function Show-GoByHand {
+    $have = if ($goHave) { " (this PC has $goHave)" } else { '' }
+    Write-Warning ("Go $goNeed or newer is needed$have. Download the Windows installer from https://go.dev/dl/ and run it (it replaces an older Go), " +
+                   'then open a new window and run this script again.')
 }
 
 # ---------------------------------------------------------------- check
@@ -182,6 +195,7 @@ $items['Git']           = [bool](Get-Command git -ErrorAction SilentlyContinue)
 $items['vcpkg']         = [bool](Find-Vcpkg)
 $goHave = Get-GoVersion
 $items['Go']            = [bool]($goHave -and (-not $goNeed -or (Test-VersionAtLeast $goHave $goNeed)))
+$goOld                  = [bool]($goHave -and -not $items['Go'])     # installed, but older than services\go.mod asks for
 $items['.NET 8 SDK']    = [bool](Find-DotnetSdk8)
 $items['Python 3.10+']  = [bool](Find-Python310)
 $items['Docker']        = [bool](Get-Command docker -ErrorAction SilentlyContinue)
@@ -218,6 +232,8 @@ if (-not $script:winget) {
         Write-Host 'Docker Desktop is missing and winget is not here to install it, so the install goes on without it. Run PostgreSQL yourself, or install Docker Desktop and run this again. -SkipDocker leaves this note out.' -ForegroundColor Yellow
         exit 0
     }
+    if (-not $items['Go']) { Show-GoByHand }
+    if ($missing.Count -eq 1 -and $missing[0] -eq 'Go') { exit 1 }
     Write-Warning 'winget is missing. Install "App Installer" from the Microsoft Store, then run this script again.'
     exit 1
 }
@@ -251,8 +267,13 @@ if (-not (Find-Vcpkg) -and (Confirm-Install "vcpkg (cloned to $env:USERPROFILE\v
     }
 }
 
-if (-not $items['Go'] -and (Confirm-Install "Go $goNeed or newer")) {
-    [void](Install-Winget 'GoLang.Go' 'Go')
+if (-not $items['Go'] -and (Confirm-Install $(if ($goOld) { "Go $goNeed or newer (it replaces the Go $goHave that is installed)" } else { "Go $goNeed or newer" }))) {
+    [void](Install-Winget 'GoLang.Go' 'Go' @() -Upgrade:$goOld)
+    if ($goOld) {
+        # an upgrade that reports success can still leave an older Go first on PATH (one that winget does not manage)
+        $goNow = Get-GoVersion
+        if (-not ($goNow -and (Test-VersionAtLeast $goNow $goNeed))) { Show-GoByHand }
+    }
 }
 if (-not $SkipDocker -and -not $items['Docker'] -and
     (Confirm-Install 'Docker Desktop (runs PostgreSQL for the Go services; may need WSL2 and a reboot)')) {
