@@ -701,6 +701,9 @@ struct RewardInstance {
     std::vector<ItemInstance> items;
     int32_t node_activity_experience = 0;
     int32_t guild_activity_experience = 0;
+    /// SourceRewardTableIds: the tables that produced the reward, in the order the client shows them.  Each entry is 128 bits on the wire: the table's id
+    /// and the 64-bit word the client pairs with it (the retail reward-selection capture carries the table id and a second word; 0 when not known).
+    std::vector<std::pair<uint64_t, uint64_t>> source_reward_tables;
     bool operator==(const RewardInstance&) const = default;
 };
 

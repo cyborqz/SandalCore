@@ -148,6 +148,10 @@ CREATE TABLE item_box (
     item_guid  INTEGER PRIMARY KEY,        -- (version 36) an item that opens the choose-one reward window (its activation loot box)
     table_guid INTEGER NOT NULL            -- ... the reward table it lists
 );
+CREATE TABLE item_reward_selection (
+    item_guid  INTEGER PRIMARY KEY,        -- (version 41) an item whose use opens the reward-selection window (Activation = OpenRewardSelection)
+    table_guid INTEGER NOT NULL            -- ... its RewardSelectionDataId: the reward table the window lists
+);
 CREATE TABLE dialogue_turnin (
     node_guid  INTEGER PRIMARY KEY,        -- (version 37) a TurnIn node: the conversation asks the player to hand items in for a quest
     quest_guid INTEGER NOT NULL,           -- its QuestId (0: none)
@@ -157,7 +161,7 @@ CREATE TABLE dialogue_turnin (
 `
 
 // QuestTables are the tables QuestDDL creates, in the DDL's order.
-var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box", "dialogue_turnin"}
+var QuestTables = []string{"quest", "quest_objective", "npc_offered_quest", "dialogue_accept", "zoi_quest", "item_quest", "item_crate", "shrine_icd", "quest_kill_set", "interactable", "interactable_actor_def", "instance_iad", "quest_item", "item_box", "item_reward_selection", "dialogue_turnin"}
 
 func createQuests(db *sql.DB) error {
 	if _, err := db.Exec(QuestDDL); err != nil {

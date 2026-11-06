@@ -286,6 +286,9 @@ public:
     std::optional<Send> item_durability(ItemStorage storage, int32_t slot, float durability);
     /// Plan E1, stage 3, part 2: a corpse's loot window.  ClientReceiveLootStoragePayload(LootActor = the corpse, its stacks as the window shows them).
     std::optional<Send> loot_payload(const emit::FIntrepidNetworkGUID& loot_actor, const repl::StoragePayload& data);
+    /// Chests: ClientOpenRewardSelection(InData = {ActivatedItemGuid, RewardInstance}).  `item` is the used item's instance guid; `reward.items` are the
+    /// options the window lists; `source_table` is the reward table that produced them (0: none).  The player answers with ServerSelectReward(Index).
+    std::optional<Send> reward_selection(const repl::GuidValue& item, const repl::RewardInstance& reward, uint64_t source_table);
     /// The stacks the player took out of the loot container `container`: a type-1 ClientReceiveStorageEvent for each (retail's order: the removal from the
     /// container, then the add to the bag).
     std::optional<Send> loot_removed(const emit::FIntrepidNetworkGUID& container, std::span<const LootRemoval> removed);

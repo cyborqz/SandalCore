@@ -1073,6 +1073,22 @@ private:
     void on_storage_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     // ---- plan B2 ----
     void on_item_used(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    // ---- chests: random coffers and choose-one selectors ----
+    /// A selector whose window is open: the box, where it was used, its selection table and the options in window order (the client answers with an index).
+    struct RewardSelection {
+        int64_t              item_record = 0;
+        std::string          instance_guid;
+        int                  container = 0;
+        int32_t              slot = -1;
+        int64_t              table = 0;
+        std::vector<int64_t> options;
+    };
+    /// True when the used item is a chest this session handles (a random coffer or a selector); the use then does not reach the generic item actions.
+    bool open_chest(Connection& conn, const protocol::repl::ItemUse& use, const svc::InventoryItem& item, Clock::time_point now);
+    bool open_reward_selection(Connection& conn, const protocol::repl::ItemUse& use, const svc::InventoryItem& item, int64_t table, Clock::time_point now);
+    bool open_coffer(Connection& conn, const protocol::repl::ItemUse& use, const svc::InventoryItem& item, int64_t table, Clock::time_point now);
+    void on_select_reward(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    void on_cancel_select_reward(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     void on_storage_event_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     /// Plan B3: recomputes the stats for the Equipment as it is now (and, plan D1, the level, class and rank mods the stats hold) and
     /// applies what changed to the pawn (nothing when nothing did). `what` names the cause for the log.
@@ -1582,6 +1598,8 @@ private:
     // plan E1, stage 3, part 2: the loot window and the kills
     RequestBudget                             loot_budget_{kLootBurst, kLootInterval};
     uint64_t                                  loot_actor_ = 0;
+    // chests: the selector whose reward-selection window is open (none: no window)
+    std::optional<RewardSelection>            reward_selection_;
     bool                                      dead_ = false;
     size_t                                    deaths_ = 0, respawns_ = 0, death_logged_ = 0;
     respawn::Attunements                      attunements_;          // Embersprings: the character's discovered places, home and the last use of the home respawn

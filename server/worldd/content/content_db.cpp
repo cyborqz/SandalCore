@@ -3591,7 +3591,47 @@ std::optional<ObjectData> ContentDb::object_data(std::string& error) const {
         while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.item_boxes[sqlite3_column_int64(q.get(), 0)] = sqlite3_column_int64(q.get(), 1);
         if (step != SQLITE_DONE) return failed("item_box");
     }
+    {
+        Stmt q(db_, "SELECT item_guid, table_guid FROM item_reward_selection");
+        if (!q.ok()) return failed("item_reward_selection");
+        int step;
+        while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.item_reward_selections[sqlite3_column_int64(q.get(), 0)] = sqlite3_column_int64(q.get(), 1);
+        if (step != SQLITE_DONE) return failed("item_reward_selection");
+    }
     return out;
+}
+
+ContentDb::ChestTable ContentDb::chest_table(int64_t item, std::string& error) const {
+    {
+        Stmt q(db_, "SELECT table_guid FROM item_reward_selection WHERE item_guid = ?1");
+        if (!q.ok()) {
+            error = "content.db item_reward_selection query failed: " + db_message(db_) +
+                    " (the chest selectors are contentc version 41's: rebuild the file with this checkout's contentc)";
+            return {};
+        }
+        sqlite3_bind_int64(q.get(), 1, item);
+        const int step = sqlite3_step(q.get());
+        if (step == SQLITE_ROW) return {ChestKind::Selector, sqlite3_column_int64(q.get(), 0)};
+        if (step != SQLITE_DONE) {
+            error = "content.db item_reward_selection query failed: " + db_message(db_);
+            return {};
+        }
+    }
+    {
+        Stmt q(db_, "SELECT table_guid FROM item_box WHERE item_guid = ?1");
+        if (!q.ok()) {
+            error = "content.db item_box query failed: " + db_message(db_);
+            return {};
+        }
+        sqlite3_bind_int64(q.get(), 1, item);
+        const int step = sqlite3_step(q.get());
+        if (step == SQLITE_ROW) return {ChestKind::Random, sqlite3_column_int64(q.get(), 0)};
+        if (step != SQLITE_DONE) {
+            error = "content.db item_box query failed: " + db_message(db_);
+            return {};
+        }
+    }
+    return {};
 }
 
 std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string& error) const {

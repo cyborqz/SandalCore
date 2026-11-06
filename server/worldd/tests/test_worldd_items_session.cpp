@@ -54,6 +54,7 @@
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/leveling.h"
 #include "protocol/repl/rep_block.h"
+#include "protocol/repl/rpc_fields.h"
 #include "protocol/repl/skill_rpc.h"
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/schema/generated/index.h"
@@ -274,6 +275,8 @@ struct Mirror {
     size_t appearance_updates = 0;
     std::vector<std::string> pc_calls;                    // the PlayerController's RPCs, in order
     std::vector<repl::ItemStorageEvent> events;           // every storage event received, in order
+    std::vector<repl::RewardInstance> reward_windows;     // each ClientOpenRewardSelection's RewardInstance
+    std::vector<repl::GuidValue> reward_window_items;     // ... and the ActivatedItemGuid of each
     size_t payloads = 0, stat_blocks = 0, unreadable = 0;
     // plan B3: the client's StatsComponent arrays, by field name and ReplicationID, and each update that changed them
     const schema::ClassSchema* stats_class = nullptr;
@@ -358,6 +361,27 @@ struct Mirror {
                             sequence.push_back("P");
                         } else {
                             ++unreadable;
+                        }
+                    }
+                    if (std::string(c.rpc->name) == "ClientOpenRewardSelection") {
+                        const repl::Value* value = repl::rpcf::value_of(*c.rpc, c.params, "InData.RewardInstance");
+                        const auto* reward = value ? value->get_if<repl::RewardInstance>() : nullptr;
+                        if (!reward) {
+                            ++unreadable;
+                        } else {
+                            reward_windows.push_back(*reward);
+                            repl::GuidValue activated;
+                            const auto word = [&](const char* path, uint32_t& out) {
+                                const repl::Value* v = repl::rpcf::value_of(*c.rpc, c.params, path);
+                                const int64_t* i = v ? v->get_if<int64_t>() : nullptr;
+                                if (i) out = static_cast<uint32_t>(*i);
+                            };
+                            word("InData.ActivatedItemGuid.A", activated.a);
+                            word("InData.ActivatedItemGuid.B", activated.b);
+                            word("InData.ActivatedItemGuid.C", activated.c);
+                            word("InData.ActivatedItemGuid.D", activated.d);
+                            reward_window_items.push_back(activated);
+                            sequence.push_back("W");
                         }
                     }
                     if (std::string(c.rpc->name) == "ClientReceiveStorageEvent") {
@@ -4769,6 +4793,149 @@ static void test_consumables_item_gone_and_death() {
     CHECK(cs->find(gc::kProcessingXpRating)->value == xp_before && pipe->stacks_of(gc::kProcessingXpEffect) == 0, "the hit the client asked for before the death gave no buff");
 }
 
+// ---- chests: the selector's window and choice, a cancel, and a random coffer (2026-11-06) ----
+
+static BunchWriter select_reward(int32_t index) {
+    const schema::ClassSchema& pc = class_named("AoCPlayerControllerBP_C");
+    const schema::RpcSchema* rpc = pc.rpc("ServerSelectReward");
+    repl::RpcParams p;
+    if (!rpc || !repl::set_rpc_param(*rpc, p, "Index", repl::Value::i64(index))) return BunchWriter();
+    return actor_rpc(pc, "ServerSelectReward", p);
+}
+
+static BunchWriter cancel_reward() {
+    const schema::ClassSchema& pc = class_named("AoCPlayerControllerBP_C");
+    return actor_rpc(pc, "ServerCancelSelectReward", {});
+}
+
+static void test_chests() {
+    const char* path = professions_db_path();
+    if (!path) {
+        std::printf("Chests: skipped (no real content.db)\n");
+        return;
+    }
+    std::printf("Chests: a selector's window and choice, a cancel, and a random coffer\n");
+    constexpr int64_t kSelector = 6064634654234247330ll, kSelectorTable = 6064634654246109347ll;
+    constexpr int64_t kLongbow = 6064634654088298644ll, kShortbow = 6064634654088364183ll,
+                      kWand = 6064634654088364185ll, kTome = 6064634654088298642ll;
+    constexpr int64_t kCoffer = 6064634008145100806ll;   // Lootbox_Commission_RVR_Cull_lvl1
+    const auto worn_only = [](const svc::Character& rec) {
+        std::vector<svc::InventoryItem> items;
+        for (const auto& it : rec.items) {
+            if (it.container == Worn) items.push_back(it);
+        }
+        return items;
+    };
+
+    // the selector: the window, the choice, the grant and the chest's removal
+    {
+        svc::Character rec = cyb_record();
+        rec.level = 25;
+        std::vector<svc::InventoryItem> items = worn_only(rec);
+        items.push_back(make_item(Bag, 4, kSelector, 900, 1));
+        rec.items = items;
+        Harness h(rec, true, true, path);
+        const size_t events_before = h.mirror.events.size();
+        h.client_sends({h.client.actor(h.pawn_ch, item_used(3, 4, guid_n(900)), true),
+                        h.client.actor(h.pawn_ch, item_activate(3, 4, guid_n(900)), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.reward_windows.size() == 1, "the selector opens ClientOpenRewardSelection");
+        if (h.mirror.reward_windows.size() == 1) {
+            const repl::RewardInstance& win = h.mirror.reward_windows.back();
+            CHECK(win.items.size() == 4, "the window lists its four options");
+            CHECK(win.items.size() == 4 && win.items[0].record_id == kLongbow && win.items[1].record_id == kShortbow &&
+                      win.items[2].record_id == kWand && win.items[3].record_id == kTome,
+                  "... in the table's order");
+            CHECK(win.source_reward_tables.size() == 1 && win.source_reward_tables[0].first == kSelectorTable,
+                  "... and names the selection table as their source");
+        }
+        CHECK(h.mirror.reward_window_items.size() == 1 && items::guid_hex(h.mirror.reward_window_items[0]) == guid_n(900),
+              "the window names the chest's own instance");
+        h.client_sends({h.client.actor(h.pc_ch, select_reward(2), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.events.size() == events_before + 2, "the choice sends one Add and one Remove");
+        if (h.mirror.events.size() >= events_before + 2) {
+            const auto& add = h.mirror.events[events_before];
+            const auto& remove = h.mirror.events[events_before + 1];
+            CHECK(add.type == static_cast<uint8_t>(repl::StorageEventType::Add) && add.item.record_id == kWand,
+                  "the chosen Wand is added");
+            CHECK(remove.type == static_cast<uint8_t>(repl::StorageEventType::Remove) && remove.item.record_id == kSelector,
+                  "the chest is removed");
+        }
+        CHECK(h.s->inventory().at(Bag, 4) == nullptr, "the chest left the bag");
+        bool wand = false;
+        for (const svc::InventoryItem& it : h.s->inventory().items()) wand = wand || it.item_record_id == kWand;
+        CHECK(wand, "the chosen item is in the bags");
+    }
+
+    // the first option: Index 0 is the default and is not on the wire; it must still be selectable
+    {
+        svc::Character rec = cyb_record();
+        rec.level = 25;
+        std::vector<svc::InventoryItem> items = worn_only(rec);
+        items.push_back(make_item(Bag, 4, kSelector, 903, 1));
+        rec.items = items;
+        Harness h(rec, true, true, path);
+        h.client_sends({h.client.actor(h.pawn_ch, item_used(3, 4, guid_n(903)), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.reward_windows.size() == 1, "(the window opens for the first-option test)");
+        const size_t before = h.mirror.events.size();
+        h.client_sends({h.client.actor(h.pc_ch, select_reward(0), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.events.size() == before + 2, "choosing index 0 sends the Add and the Remove");
+        if (h.mirror.events.size() >= before + 2) {
+            CHECK(h.mirror.events[before].type == static_cast<uint8_t>(repl::StorageEventType::Add) &&
+                  h.mirror.events[before].item.record_id == kLongbow,
+                  "the first option (Longbow) is granted");
+            CHECK(h.mirror.events[before + 1].type == static_cast<uint8_t>(repl::StorageEventType::Remove) &&
+                  h.mirror.events[before + 1].item.record_id == kSelector,
+                  "the chest is removed");
+        }
+        CHECK(h.s->inventory().at(Bag, 4) == nullptr, "the chest left the bag after index 0");
+    }
+
+    // a cancel leaves the chest and sends nothing
+    {
+        svc::Character rec = cyb_record();
+        rec.level = 25;
+        std::vector<svc::InventoryItem> items = worn_only(rec);
+        items.push_back(make_item(Bag, 4, kSelector, 901, 1));
+        rec.items = items;
+        Harness h(rec, true, true, path);
+        const size_t events_before = h.mirror.events.size();
+        h.client_sends({h.client.actor(h.pawn_ch, item_used(3, 4, guid_n(901)), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.reward_windows.size() == 1, "(the window opens)");
+        h.client_sends({h.client.actor(h.pc_ch, cancel_reward(), true)});
+        for (int i = 0; i < 5; ++i) h.step();
+        CHECK(h.mirror.events.size() == events_before && h.s->inventory().at(Bag, 4) != nullptr,
+              "a cancel leaves the chest and sends nothing");
+    }
+
+    // a random coffer: no window, the rolled items in the bags and the coffer consumed
+    {
+        svc::Character rec = cyb_record();
+        rec.level = 25;
+        std::vector<svc::InventoryItem> items = worn_only(rec);
+        items.push_back(make_item(Bag, 4, kCoffer, 902, 1));
+        rec.items = items;
+        Harness h(rec, true, true, path);
+        const size_t events_before = h.mirror.events.size();
+        h.client_sends({h.client.actor(h.pawn_ch, item_used(3, 4, guid_n(902)), true),
+                        h.client.actor(h.pawn_ch, item_activate(3, 4, guid_n(902)), true)});
+        for (int i = 0; i < 20; ++i) h.step();
+        CHECK(h.mirror.reward_windows.empty(), "a random coffer does not open the selection window");
+        CHECK(h.s->inventory().at(Bag, 4) == nullptr, "the coffer is consumed");
+        size_t adds = 0, removes = 0;
+        for (size_t i = events_before; i < h.mirror.events.size(); ++i) {
+            if (h.mirror.events[i].type == static_cast<uint8_t>(repl::StorageEventType::Add)) ++adds;
+            if (h.mirror.events[i].type == static_cast<uint8_t>(repl::StorageEventType::Remove)) ++removes;
+        }
+        CHECK(adds >= 1, "the rolled items arrive as Adds");
+        CHECK(removes == 1, "the coffer is removed");
+    }
+}
+
 #include "items_session_registered.inc"
 
 int main() {
@@ -4844,6 +5011,7 @@ int main() {
     test_resource_requests();
     test_resource_repair();
     test_resource_no_room_at_login();
+    test_chests();
     test_real_content_db();
 
     g_fail += aoc_tests::run();   // every check registered in items_session_registered.inc
