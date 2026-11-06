@@ -453,8 +453,10 @@ func TestRealGatherExpressions(t *testing.T) {
 	// ones are appended after the reward tables', so the older ids did not move; the ids are 14 higher since the creature tables' 38 abilities brought 14 expressions of the abilities';
 	// and 335 higher again in version 35: the reactions bring 336 more expressions of the abilities' ahead of the reward tables', and one text the reward tables used to add is met among them first;
 	// and 65 higher again in version 38: the consumables' abilities bring 65 more expressions of the abilities' ahead of the reward tables';
-	// and 5 higher again in version 40: the pet attacks written as a reference bring 5 more expressions of the abilities' ahead of the reward tables')
-	for _, id := range []int{1731, 1732, 1733, 1734, 1740, 1774, 1775, 1776, 1777, 1778, 1779, 1980, 1981, 1983, 1984, 2049, 2051, 2052, 2053, 2054, 2055, 2068, 2069, 2075} {
+	// and 5 higher again in version 40: the pet attacks written as a reference bring 5 more expressions of the abilities' ahead of the reward tables';
+	// and 240 higher again in version 41 (from PR #10 by MrJambix): the attacks of every creature family bring 241 more expressions of the abilities' ahead of the reward tables', and one of the
+	// two texts the reward tables used to add (loot.exprs 536 -> 534) is met among them first and stood ahead of these)
+	for _, id := range []int{1971, 1972, 1973, 1974, 1980, 2014, 2015, 2016, 2017, 2018, 2019, 2220, 2221, 2223, 2224, 2289, 2291, 2292, 2293, 2294, 2295, 2308, 2309, 2315} {
 		var program int
 		var errText string
 		if err := db.SQL().QueryRow(`SELECT program, error FROM ab_expr WHERE id = ?`, id).Scan(&program, &errText); err != nil || program < 0 || errText != "" {
@@ -466,8 +468,8 @@ func TestRealGatherExpressions(t *testing.T) {
 			t.Errorf("%d expressions still fail on %s", got, fn)
 		}
 	}
-	if got := scalarInt(t, db, `SELECT COUNT(*) FROM ab_expr WHERE program < 0`); got != 149 {
-		t.Errorf("%d expressions do not compile, want 149 (300 in version 12: 24 compile now on the gathering reads, 79 more on GetPlayerProfessionLevel(GetPlayer(), ...), and the Quality formula of the Hunting prototype variation, new in version 13, does not; 43 more in version 28 on GetNarrativeContentLevel, the quests' experience and Glint; 2 fewer in version 33 on HasValidEquipment, the Drop Crate requirement among them; 13 fewer in version 35: 32 of the 153 compile with the reactions' functions, GetEffect (22), GetStatBase (6) and GetEffectRecordByName among them, and the reactions' closure brings 19 expressions that do not, GetPrimaryArchetype (6) among them; 8 more in version 38, all on GetPrimaryArchetype: the class resources and apply conditions of the consumables; 1 more in version 39: the burn aura's ExtensionAmount reads GetTerm outside a formula)", got)
+	if got := scalarInt(t, db, `SELECT COUNT(*) FROM ab_expr WHERE program < 0`); got != 174 {
+		t.Errorf("%d expressions do not compile, want 174 (300 in version 12: 24 compile now on the gathering reads, 79 more on GetPlayerProfessionLevel(GetPlayer(), ...), and the Quality formula of the Hunting prototype variation, new in version 13, does not; 43 more in version 28 on GetNarrativeContentLevel, the quests' experience and Glint; 2 fewer in version 33 on HasValidEquipment, the Drop Crate requirement among them; 13 fewer in version 35: 32 of the 153 compile with the reactions' functions, GetEffect (22), GetStatBase (6) and GetEffectRecordByName among them, and the reactions' closure brings 19 expressions that do not, GetPrimaryArchetype (6) among them; 8 more in version 38, all on GetPrimaryArchetype: the class resources and apply conditions of the consumables; 1 more in version 39: the burn aura's ExtensionAmount reads GetTerm outside a formula; 25 more in version 41 with the attacks of every creature family (from PR #10 by MrJambix), all on functions of the creatures' own AI: GetBlackboardInt (15), GetBlackboardGuid (2), GetBlackboardBool, IsUsingAnyAbility (2), IsSeason (2), IsDead (2) and RandBool)", got)
 	}
 	// every gathering interaction's duration and durability formula compiles, as does every ItemVariation's Quality
 	if got := scalarInt(t, db, `SELECT COUNT(*) FROM gather_def g JOIN ab_expr e ON e.id = g.duration_expr WHERE e.program >= 0`); got != 339 {

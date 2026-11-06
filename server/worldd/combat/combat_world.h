@@ -432,8 +432,10 @@ private:
     };
     /// Why the tree allowed none of a creature's attacks from where it stands: its target is farther than the attacks reach, or the right distance but not within the angle of its facing.
     /// `reach_cm` is the shortest reach of the ready attacks that stopped for the distance (an attack that needs the target a minimum distance away, a gap closer, does not count): the creature walks up to it.
+    /// `waits_on_timers`: the tree allowed none, and every attack the creature can play is shut by the fight clock or the creature's health alone (the fight is too young, its health is not yet where
+    /// the attack wants it), whatever the range, the angle, the cooldowns and the rolls say.
     struct TreeWhy {
-        bool   too_far = false, off_angle = false;
+        bool   too_far = false, off_angle = false, waits_on_timers = false;
         double reach_cm = -1;
     };
     /// How an attack with its own animation plays: the montage, how long it runs and the hits it lands (seconds after it starts, hit record).
@@ -451,7 +453,8 @@ private:
     class Npc;
     Npc*  combatant(uint64_t actor_id);
     Npc*  make_combatant(const world::WorldActor& a);
-    Attack choose_attack(Npc& n);
+    /// `single_swing`: the attack every creature had before the trees (its kit's, else the generic slash), whatever animation the creature has.
+    Attack choose_attack(Npc& n, bool single_swing = false);
     Attack choose_animated(Npc& n, const Fighter* target, TreeWhy* why = nullptr);
     /// Whether a hit of `area` lands on `body` now (the creature as it stands and faces): see combat/bite_area.h.  `is_target`: the body is the one the record's target part finds.
     bool  hit_reaches(const Npc& n, const Fighter& body, const BiteArea& area, bool is_target) const;

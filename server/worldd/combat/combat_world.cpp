@@ -166,6 +166,7 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     n->anim = anim_ ? anim_->abilities_of(a.npc.archetype) : nullptr;
     // a creature whose tree has no attack it can play (a Blueprint with no open of its own, whose generic open lists none of the tree's abilities) keeps the single swing every creature had: the tree
     // would otherwise find nothing to use and the creature would stand and stare.  A tree that merely allows none right now (range, angle, cooldown, a roll) is not this: that creature waits.
+    // (A tree whose every attack waits on the fight clock or on the creature's health keeps its animation, and the creature swings the single swing until one of them opens: see think.)
     if (n->anim && !can_animate(*n)) n->anim = nullptr;
     stand_off_of(*n, n->stand_off_cm, n->shot_reach_cm);
     if (n->anim) {   // its attacks start only where its tree's conditions hold: the reach is not stretched once a fight begins, and it walks up to just inside it (a chase ends at 96 % of the reach)
@@ -474,11 +475,11 @@ double angle_between_degrees(double a, double b) {
 
 }  // namespace
 
-CombatWorld::Attack CombatWorld::choose_attack(Npc& n) {
+CombatWorld::Attack CombatWorld::choose_attack(Npc& n, bool single_swing) {
     Attack a;
     a.windup_ms = static_cast<int>(cfg_.default_windup * 1000);
     a.range_cm = static_cast<int>(cfg_.default_attack_range_cm);
-    if (n.anim) {
+    if (n.anim && !single_swing) {
         // a creature with its own animation uses what its Blueprint's tree says (the tasks with a condition the tables cannot say are left alone)
         const Attack b = choose_animated(n, nullptr);
         if (b.ability) return b;
@@ -553,11 +554,22 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         n.fight_rolls.emplace(a.name, v);
         return v;
     };
+    // PR #10 review: for each attack the creature can play, whether the fight clock or its health alone keep it shut now (every other condition counted as holding: no roll is drawn for this)
+    CondContext timers = ctx;
+    timers.timers_only = true;
+    size_t playable = 0, shut_by_timers = 0;
     // the tree is tried in order and the first task whose conditions hold is used
     for (const CreatureAbility& t : *n.anim) {
         if (t.unknown || t.off || !t.fight) continue;
         const abilities::AbilityDef* d = catalog_.ability(t.ability);
         if (!d || !is_attack(*d, catalog_, data_.ids().health) || !animates(n, *d)) continue;
+        ++playable;
+        for (const CondGroup& g : t.groups) {
+            if (!eval_group(g, timers)) {
+                ++shut_by_timers;
+                break;
+            }
+        }
         bool ready = true;
         for (const std::string& g : t.gates) {
             const auto until = n.cooldown_until.find(g);
@@ -594,6 +606,7 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         if (t.max_distance >= 0) a.range_cm = static_cast<int>(t.max_distance);
         return a;
     }
+    if (why) why->waits_on_timers = playable > 0 && shut_by_timers == playable;
     return a;
 }
 
@@ -828,7 +841,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
     CastPlan plan;
     bool animated = false;
     Vec3 at;
-    if (a.ability && n.anim && port && plan_cast(n, *a.ability, plan)) {
+    if (a.ability && n.anim && port && a.task && plan_cast(n, *a.ability, plan)) {   // (the single swing a creature with a timed tree falls back to has no task: it plays no montage)
         const auto montage = bootstrap::montage_for(plan.montage->path, plan.montage->guid, plan.montage->package_guid);
         if (montage) {
             NpcCast cast;
@@ -1750,7 +1763,21 @@ void CombatWorld::think(Npc& n, double now) {
                 picked = choose_animated(n, &port->fighter(), &why);
                 have_pick = picked.ability != nullptr;
             }
-            if (port && !have_pick) {
+            if (port && !have_pick && why.waits_on_timers) {
+                // PR #10 review: a creature whose every attack with its own animation waits on the fight clock or on its health (a fight that has just begun, health not yet low enough) swings the single swing
+                // every creature had until one of them opens, and then plays that attack.  A creature that is merely out of range, off the angle, on a cooldown or short of a roll still waits, as above.
+                picked = choose_attack(n, true);
+                const Vec3 at = port->fighter().position();
+                const double gap = distance_xy_cm(Vec3{a->x, a->y, a->z}, at) - n.radius_cm() - port->fighter().radius_cm();
+                if (!picked.ability) {
+                    allowed = false;
+                } else if (gap > picked.range_cm) {   // (the AI asks for an attack at the reach of the tree's attack: it walks up to the reach of the swing)
+                    allowed = false;
+                    pursue(n, o.target, n.ai.params().chase_speed_cm_s, std::max(0.0, picked.range_cm * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm());
+                } else {
+                    have_pick = true;
+                }
+            } else if (port && !have_pick) {
                 allowed = false;
                 const Vec3 at = port->fighter().position();
                 if (why.off_angle) {

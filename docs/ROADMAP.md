@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 4 November 2026
+**Last updated:** 6 November 2026
 
 ---
 
@@ -51,6 +51,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Burning mobs: the Burning debuff takes a fire number from a mob every second for 8 seconds (up to 24), shows the fire and the Burning icon, follows it home after a reset and ends with its death or the burner's leaving.
 - Debuffs on mobs: the bleeds (Bleeding, Hemorrhage), the poisons and the stat debuffs of a hit take effect on a mob. Bleeds and poisons take Health at their ticks (one Bleeding debuff for each attacker, a poison's stacks make its ticks bigger), Shaken and Volatile make a mob take more physical and magical damage, Demoralized makes it hit softer and Blinded makes it miss more.
 - Server speed with many players: a fixed-rate server tick, the players' views of the world taking turns, cheaper updates, one update built for all the players who see the same mob in the same state, the players' views worked out on several processor cores, and move answers at the original server's pace. In a load test with simulated players that walk, the server held its 30 updates a second with about twice as many of them as before.
+- Mob attack animations for the other families: the undead, Minotaurs, constructs, spiders, cultists and the rest of the Beast, Humanoid and Monster families play their own attack animations, as the goblins and bandits do.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

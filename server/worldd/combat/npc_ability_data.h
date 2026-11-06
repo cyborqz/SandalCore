@@ -79,7 +79,15 @@ struct CondContext {
     std::function<double()> roll;       // a fresh number in [0, 1)
     /// The number a FightRoll condition compares the fight's seconds with: rolled the first time it is asked in a fight and the same for the rest of that fight.  Null: the condition's own `value`.
     std::function<double(const CondAtom&)> fight_roll;
+    /// Asked only about the fight clock and the creature's health (hp, fc, fcr): every other condition counts as holding.  Tells whether those timers alone keep a task shut.
+    bool timers_only = false;
 };
+
+/// Whether a condition is about the fight clock or the creature's health, which the course of a fight changes (not about where the target stands, a cooldown, a roll or whether the creature sees).
+inline bool is_timer_atom(CondAtom::Kind kind) {
+    using K = CondAtom::Kind;
+    return kind == K::HealthUnder || kind == K::HealthNotUnder || kind == K::FightTime || kind == K::FightRoll;
+}
 
 /// Whether `x` compares as `op` with `y`.
 inline bool compare_values(int op, double x, double y) {
@@ -97,6 +105,7 @@ inline bool compare_values(int op, double x, double y) {
 /// Whether one condition holds.
 inline bool eval_atom(const CondAtom& a, const CondContext& c) {
     using K = CondAtom::Kind;
+    if (c.timers_only && !is_timer_atom(a.kind)) return true;
     switch (a.kind) {
         case K::True: return true;
         case K::False: return false;

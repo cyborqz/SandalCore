@@ -32,14 +32,18 @@ func TestRealAbilityTables(t *testing.T) {
 		// version 39: the effect-control export adds the effects' extension and stack-loss texts after every other table (13 more expressions, ab_expr 2,294 -> 2,307; meta ab.exprs is
 		// the abilities' own count and stays 1,723), and one row of ab_effect_control per effect;
 		// version 40: the four pet attacks and TargetCooldownAbility, written as a reference, come into the tables (ab_ability 977 -> 981, ab_hit 1,784 -> 1,790, ab_projectile 215 -> 217)
-		// with 5 more expressions of the abilities' (ab.exprs 1,723 -> 1,728; ab_expr 2,307 -> 2,312)
-		"ab_ability": 981, "ab_hit": 1790, "ab_projectile": 217, "ab_zone": 62, "ab_effect": 1361, "ab_expr": 2312, "ab_effect_control": 1361,
+		// with 5 more expressions of the abilities' (ab.exprs 1,723 -> 1,728; ab_expr 2,307 -> 2,312);
+		// version 41 (from PR #10 by MrJambix): ability_names.tsv names the attacks of every creature family (429 more abilities: ab_ability 981 -> 1,410, ab_hit 1,790 -> 2,389,
+		// ab_effect 1,361 -> 1,521, ab_projectile 217 -> 309, ab_zone 62 -> 109) with 241 more expressions of the abilities' (ab.exprs 1,728 -> 1,969); two texts the reward tables
+		// used to add are met among them first (loot.exprs 536 -> 534), and the effect-control export adds one more (ab_expr 2,312 -> 2,552)
+		// PR #10 review: his numbers (1,406 abilities, 2,383 hits and so on) were measured before the pet attacks of version 40; these include them
+		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1521, "ab_expr": 2552, "ab_effect_control": 1521,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "981", "ab.hits": "1790", "ab.effects": "1361", "ab.projectiles": "217", "ab.zones": "62", "ab.exprs": "1728", "loot.exprs": "536", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "1410", "ab.hits": "2389", "ab.effects": "1521", "ab.projectiles": "309", "ab.zones": "109", "ab.exprs": "1969", "loot.exprs": "534", "gather.exprs": "35"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
 		}

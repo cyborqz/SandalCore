@@ -443,3 +443,76 @@ void test_turn_to_a_player_behind(Fixture& f) {
 }
 
 AOC_REGISTER_TEST(test_turn_to_a_player_behind);
+
+// PR #10 review: a creature whose every attack with its own animation waits on the fight clock or on its health keeps the single swing every creature had until one of them opens; one with an attack
+// that waits on nothing plays it from the start, as before.  The Wolf's tree is cut to its Bite alone, under the condition the case names; the montages and the targeting are the real tables.
+void test_creature_swings_until_its_timed_attack_opens(Fixture& f) {
+    std::printf("a creature whose only animated attack waits on the fight clock (or on its health) swings its single swing until the attack may start, and plays the attack once the clock opens; one whose attack waits on nothing plays it at once\n");
+    namespace fs = std::filesystem;
+    combat::NpcAbilityData real;
+    if (!load_creature_tables(real)) return;
+    const std::string wolf_path = creature_path(f, "/Beast/Canine/Wolf.Default__Wolf_C");
+    const abilities::AbilityDef* bite = f.catalog->ability_named("Wolf_Bite");
+    CHECK(!wolf_path.empty() && f.motion.find(wolf_path) && real.abilities_of(wolf_path) && bite, "the Blueprint table has the Wolf, the creature tables list its abilities and the ability data has the Bite");
+    if (wolf_path.empty() || !f.motion.find(wolf_path) || !real.abilities_of(wolf_path) || !bite) return;
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    std::error_code ec;
+    const fs::path tmp = fs::temp_directory_path() / ("aoc_creature_timed_swing_" + unique_temp_suffix());   // (a folder of its own: two gates can run this program at once)
+    fs::create_directories(tmp, ec);
+    const std::string abilities_header =
+        "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
+
+    struct Run {
+        bool   ran = false;
+        double first_cast = -1, first_hit = -1;   // seconds into the fight: the first bite played, the first hit that reached the player
+        size_t casts = 0, hits_before_5s = 0, hits = 0;
+    };
+    // a 16 s fight against a player who stands 8 m from the Wolf, whose tree is the Bite alone under `conds` (the tree's condition text; empty: none)
+    const auto play = [&](const char* conds) {
+        Run r;
+        const std::string table = (tmp / "abilities.tsv").string();
+        {
+            std::ofstream out(table, std::ios::binary);
+            out << abilities_header << "\n" << wolf_path << "\t" << bite->row.guid << "\t\t0\t1\t37\t-1\t270\t45\tGlobal Cooldown\t0\t1\t" << conds << "\t\tGlobal Cooldown=0.5\t360:0\t-1\n";
+        }
+        combat::NpcAbilityData tables;
+        std::string err;
+        const bool loaded = tables.load(table, dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err);
+        CHECKF(loaded, "the Wolf's tree with its Bite under '%s' loads (%s)", conds, err.c_str());
+        if (!loaded) return r;
+        std::vector<LungeSample> samples;
+        std::vector<combat::IncomingHit> got;
+        r.ran = run_lunge_fight(f, tables, wolf_path, 16.0, 0, 800, nullptr, samples, &got, false, -1, nullptr, 40000.0);
+        if (!r.ran) return r;
+        for (const LungeSample& s : samples) {
+            if (!s.cast_began) continue;
+            ++r.casts;
+            if (r.first_cast < 0) r.first_cast = s.t;
+        }
+        for (const combat::IncomingHit& h : got) {
+            ++r.hits;
+            if (r.first_hit < 0) r.first_hit = h.at;
+            if (h.at < 5.0) ++r.hits_before_5s;
+        }
+        return r;
+    };
+    const Run timed = play("c0:fc(ge,6)");
+    const Run health = play("c0:hp(0.5)");
+    const Run plain = play("");
+    fs::remove_all(tmp, ec);
+    CHECK(timed.ran && health.ran && plain.ran, "the three fights run (the Wolf is made from its open and knows the Bite)");
+    if (!timed.ran || !health.ran || !plain.ran) return;
+    std::printf("  Bite under fc(ge,6): first bite played at %.2f s, first hit at %.2f s, %zu hits in the first 5 s, %zu bites in 16 s;  under hp(0.5): %zu bites, %zu hits;  under nothing: first bite at %.2f s, first hit "
+                "at %.2f s, %zu hits in the first 5 s\n", timed.first_cast, timed.first_hit, timed.hits_before_5s, timed.casts, health.casts, health.hits, plain.first_cast, plain.first_hit, plain.hits_before_5s);
+    // the Bite waits for the fight's sixth second: until then the Wolf swings its single swing (its hits reach the player), and the bite is played once the clock has opened
+    CHECKF(timed.hits_before_5s >= 2 && timed.first_hit >= 0 && timed.first_hit < 5.0, "the Wolf whose Bite waits for the fight's sixth second swings in the meantime (%zu hits in the first 5 s, the first at %.2f s)", timed.hits_before_5s, timed.first_hit);
+    CHECKF(timed.first_cast >= 6.0 && timed.first_cast < 12.0 && timed.casts >= 1, "... and plays the Bite once the clock allows it, never before (first bite at %.2f s, %zu bites in 16 s)", timed.first_cast, timed.casts);
+    // a Bite that waits for the Wolf's health to fall under half never opens against a player who does not hurt it: the Wolf swings the whole fight and plays nothing
+    CHECKF(health.casts == 0 && health.hits >= 4, "the Wolf whose Bite waits for its health to fall under half swings all the fight (%zu bites, %zu hits in 16 s)", health.casts, health.hits);
+    // a Bite that waits for nothing is played at once, with no swing before it
+    CHECKF(plain.first_cast > 0 && plain.first_cast < 4.0 && plain.first_hit >= plain.first_cast && plain.hits_before_5s >= 1,
+           "the Wolf whose Bite waits for nothing plays it from the start, with no swing before it (first bite at %.2f s, first hit at %.2f s)", plain.first_cast, plain.first_hit);
+}
+
+AOC_REGISTER_TEST(test_creature_swings_until_its_timed_attack_opens);
