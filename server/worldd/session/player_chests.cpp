@@ -195,8 +195,14 @@ void PlayerSession::on_select_reward(Connection& conn, const repl::ClientRpc& rp
         spdlog::debug("[chests] {}: ServerSelectReward with no window open: ignored", name());
         return;
     }
+    if (!rpc.call.decoded || !rpc.call.rpc) {
+        spdlog::warn("[chests] {}: a ServerSelectReward does not read: the window stays", name());
+        return;
+    }
+    // Index is an int32 with a default of 0, and UE writes a parameter at its default with a 0 send bit: choosing the FIRST option sends no
+    // Index at all.  An absent value is therefore index 0, not "no index" (only a value of another kind is refused).
     const repl::Value* value = repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "Index");
-    const std::optional<int64_t> index = repl::rpcf::int_or(value, -1);
+    const std::optional<int64_t> index = repl::rpcf::int_or(value, 0);
     if (!index || *index < 0 || static_cast<size_t>(*index) >= reward_selection_->options.size()) {
         spdlog::warn("[chests] {}: ServerSelectReward names no option of the window ({})", name(), index ? *index : -1);
         return;

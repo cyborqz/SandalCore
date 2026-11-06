@@ -4868,6 +4868,32 @@ static void test_chests() {
         CHECK(wand, "the chosen item is in the bags");
     }
 
+    // the first option: Index 0 is the default and is not on the wire; it must still be selectable
+    {
+        svc::Character rec = cyb_record();
+        rec.level = 25;
+        std::vector<svc::InventoryItem> items = worn_only(rec);
+        items.push_back(make_item(Bag, 4, kSelector, 903, 1));
+        rec.items = items;
+        Harness h(rec, true, true, path);
+        h.client_sends({h.client.actor(h.pawn_ch, item_used(3, 4, guid_n(903)), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.reward_windows.size() == 1, "(the window opens for the first-option test)");
+        const size_t before = h.mirror.events.size();
+        h.client_sends({h.client.actor(h.pc_ch, select_reward(0), true)});
+        for (int i = 0; i < 10; ++i) h.step();
+        CHECK(h.mirror.events.size() == before + 2, "choosing index 0 sends the Add and the Remove");
+        if (h.mirror.events.size() >= before + 2) {
+            CHECK(h.mirror.events[before].type == static_cast<uint8_t>(repl::StorageEventType::Add) &&
+                  h.mirror.events[before].item.record_id == kLongbow,
+                  "the first option (Longbow) is granted");
+            CHECK(h.mirror.events[before + 1].type == static_cast<uint8_t>(repl::StorageEventType::Remove) &&
+                  h.mirror.events[before + 1].item.record_id == kSelector,
+                  "the chest is removed");
+        }
+        CHECK(h.s->inventory().at(Bag, 4) == nullptr, "the chest left the bag after index 0");
+    }
+
     // a cancel leaves the chest and sends nothing
     {
         svc::Character rec = cyb_record();
