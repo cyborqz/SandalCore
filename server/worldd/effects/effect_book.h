@@ -253,21 +253,47 @@ public:
         return out;
     }
 
-    /// The crowd control the instances put on their holder: the status flags of every live instance's crowd-control record together (content::kCcSnare ...), and the strength of the strongest live snare.
-    /// Snares do not add up or multiply: a holder under two keeps the speed the stronger one leaves it (1 - snare).  Equal when two books hold the same crowd control.
+    /// The crowd control the instances put on their holder: the status flags of every live instance's crowd-control record together (content::kCcSnare ...), the strength of the strongest live snare, whether
+    /// a live record overrides the client's own movement, and the animation of the strongest live record that asks for one (a stun's, a trip's: the higher priority plays; of two equal, the one that lasts
+    /// longer).  Snares do not add up or multiply: a holder under two keeps the speed the stronger one leaves it (1 - snare).  Equal when two books hold the same crowd control.
     struct Crowd {
         int64_t flags = 0;
         double  snare = 0;
+        bool    override_move = false;                // bOverrideClientAuthMovement
+        int     anim = content::kCcAnimNone;          // content::kCcAnimStunned, kCcAnimTripped or none
+        int64_t anim_record = 0;                      // ... the crowd-control record to animate,
+        double  anim_start = 0;                       // ... when its effect began (this book's clock)
+        double  anim_seconds = 0;                     // ... and how long it lasts, as the effect's item states it (a float's worth)
         bool operator==(const Crowd&) const = default;
     };
     Crowd cc() const {
         Crowd out;
+        const Instance* shown = nullptr;
         for (const Instance& e : items_) {
             if (!e.def || !e.def->cc) continue;
-            out.flags |= e.def->cc->applied_status;
-            if (e.def->cc->applied_status & content::kCcSnare) out.snare = std::max(out.snare, e.def->cc->snare_strength);
+            const content::CrowdControlRow& r = *e.def->cc;
+            out.flags |= r.applied_status;
+            if (r.applied_status & content::kCcSnare) out.snare = std::max(out.snare, r.snare_strength);
+            out.override_move = out.override_move || r.override_client_move;
+            if (animation_of(r) == content::kCcAnimNone) continue;
+            if (!shown || r.priority > shown->def->cc->priority ||
+                (r.priority == shown->def->cc->priority && (e.end > shown->end || (e.end == shown->end && e.start > shown->start)))) {
+                shown = &e;
+            }
+        }
+        if (shown) {
+            out.anim = animation_of(*shown->def->cc);
+            out.anim_record = shown->def->cc->guid;
+            out.anim_start = shown->start;
+            out.anim_seconds = std::isinf(shown->end) ? static_cast<double>(std::numeric_limits<float>::max()) : static_cast<double>(static_cast<float>(shown->end - shown->start));
         }
         return out;
+    }
+    /// The animation a crowd-control record asks the client to play: content::kCcAnimStunned, kCcAnimTripped, or kCcAnimNone (a record that asks for none or for one of its own).
+    static int animation_of(const content::CrowdControlRow& r) {
+        if (r.animation_request.find("Stunned") != std::string::npos) return content::kCcAnimStunned;
+        if (r.animation_request.find("Tripped") != std::string::npos) return content::kCcAnimTripped;
+        return content::kCcAnimNone;
     }
 
 private:

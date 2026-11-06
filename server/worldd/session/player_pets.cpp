@@ -206,7 +206,7 @@ void PlayerSession::run_pets(Connection& conn, Clock::time_point now) {
             fights->pet_stop(pet_actor_);
             pet_incap_target_ = incapacitated;
         }
-        // (it lets go while the creature holds the effect; a crowd control is left off a creature, so with no effect on it the Hunter takes it up again at once)
+        // (it lets go while the creature holds the effect; a root, a stun, a trip and a sleep land on a creature now (knock-backs, a silence and a disarm do not yet), so with no effect on it the Hunter takes it up again at once)
         if (pet_incap_target_ != 0 && fights->effect_stacks(pet_incap_target_, pets::kHunterIncapMelee) == 0) pet_incap_target_ = 0;
     }
     // Defensive: what hurts its owner comes first, even when it is fighting something else (HandlePetOwnerOnHit's threat): it leaves a creature that is not on its owner for one that is

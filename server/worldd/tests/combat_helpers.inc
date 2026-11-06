@@ -191,6 +191,11 @@ struct LungeWire {
     double  cc_snare = 0;              // ... and its SnareValue
     size_t  effect_items = 0;
     size_t  cc_fields = 0;             // how many fields of CrowdControlState the update carries (a client is told only what changed)
+    // ... and the rest of the state a root, a freeze, a stun or a trip writes (-1 / false: the update does not say)
+    int     cc_ocam = -1, cc_rooted_by_other = -1, cc_anim_request = -1;   // bOverrideClientAuthMovement, bRootedByOther, CurrentAnimationRequest (Stunned 0, Tripped 1, none 255)
+    bool    has_cc_anim_record = false, has_cc_anim_start = false, has_cc_anim_duration = false, has_cc_anim_end = false;
+    int64_t cc_anim_record = 0;        // CrowdControlRecordToAnimate
+    double  cc_anim_start = 0, cc_anim_duration = 0, cc_anim_end = 0;   // SyncStartAnimTime, Duration, EndAnimTime
 };
 
 void read_lunge_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow& shadow, double now, std::vector<LungeWire>& out) {
@@ -212,6 +217,39 @@ void read_lunge_wire(world::WorldActor& actor, aoc::protocol::repl::ActorShadow&
                 if (v->get_if<float>()) {
                     w.has_cc_snare = true;
                     w.cc_snare = *v->get_if<float>();
+                }
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.bOverrideClientAuthMovement")) {
+                if (v->get_if<bool>()) w.cc_ocam = *v->get_if<bool>() ? 1 : 0;
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.bRootedByOther")) {
+                if (v->get_if<bool>()) w.cc_rooted_by_other = *v->get_if<bool>() ? 1 : 0;
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.CurrentAnimationRequest")) {
+                if (v->get_if<uint64_t>()) w.cc_anim_request = static_cast<int>(*v->get_if<uint64_t>());
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.CrowdControlRecordToAnimate")) {
+                if (v->get_if<int64_t>()) {
+                    w.has_cc_anim_record = true;
+                    w.cc_anim_record = *v->get_if<int64_t>();
+                }
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.SyncStartAnimTime")) {
+                if (v->get_if<double>()) {
+                    w.has_cc_anim_start = true;
+                    w.cc_anim_start = *v->get_if<double>();
+                }
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.Duration")) {
+                if (v->get_if<float>()) {
+                    w.has_cc_anim_duration = true;
+                    w.cc_anim_duration = *v->get_if<float>();
+                }
+            }
+            if (const auto* v = sub_state->state.get(ss, "CrowdControlState.EndAnimTime")) {
+                if (v->get_if<double>()) {
+                    w.has_cc_anim_end = true;
+                    w.cc_anim_end = *v->get_if<double>();
                 }
             }
             if (const aoc::protocol::repl::FastArrayState* items = const_cast<aoc::protocol::repl::FastArrays&>(sub_state->arrays).get(ss, "CurrentEffects")) w.effect_items = items->items().size();
@@ -291,6 +329,11 @@ struct LungeSample {
     bool     has_cc_snare = false;
     double   cc_snare = 0;
     size_t   cc_items = 0, held_effects = 0, cc_fields = 0;
+    // the rest of the crowd control state this tick's updates say (see LungeWire): the flags that tell the client its walk is overridden, the animation it plays and for how long
+    int      cc_ocam = -1, cc_rooted_by_other = -1, cc_anim_request = -1;
+    bool     has_cc_anim_record = false, has_cc_anim_start = false, has_cc_anim_duration = false, has_cc_anim_end = false;
+    int64_t  cc_anim_record = 0;
+    double   cc_anim_start = 0, cc_anim_duration = 0, cc_anim_end = 0;
 };
 
 /// What a test may do in a fight between two ticks (land an effect, send the creature home, take the player out of the world ...).  The step is called twice in every tick: first (`after` false, `sample`
@@ -377,6 +420,7 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
         bool tick_has_vz = false, tick_has_snare = false;
         int tick_flags = -1;
         size_t tick_items = 0, tick_fields = 0;
+        LungeWire cc_said;   // what this tick's updates say of the rest of the crowd control state (the last update that names a field wins)
         for (const LungeWire& u : wire) {
             if (u.active >= 0) active = u.active;
             if (u.obstructed >= 0) obstructed = u.obstructed;
@@ -390,6 +434,13 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
                 if (u.has_cc_snare) tick_snare = u.cc_snare, tick_has_snare = true;
                 tick_items += u.effect_items;
                 tick_fields += u.cc_fields;
+                if (u.cc_ocam >= 0) cc_said.cc_ocam = u.cc_ocam;
+                if (u.cc_rooted_by_other >= 0) cc_said.cc_rooted_by_other = u.cc_rooted_by_other;
+                if (u.cc_anim_request >= 0) cc_said.cc_anim_request = u.cc_anim_request;
+                if (u.has_cc_anim_record) cc_said.has_cc_anim_record = true, cc_said.cc_anim_record = u.cc_anim_record;
+                if (u.has_cc_anim_start) cc_said.has_cc_anim_start = true, cc_said.cc_anim_start = u.cc_anim_start;
+                if (u.has_cc_anim_duration) cc_said.has_cc_anim_duration = true, cc_said.cc_anim_duration = u.cc_anim_duration;
+                if (u.has_cc_anim_end) cc_said.has_cc_anim_end = true, cc_said.cc_anim_end = u.cc_anim_end;
             }
         }
         const GremCastView view = grem_cast_view(w.registry, creature);
@@ -424,6 +475,17 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
         s.cc_snare = tick_snare;
         s.cc_items = tick_items;
         s.cc_fields = tick_fields;
+        s.cc_ocam = cc_said.cc_ocam;
+        s.cc_rooted_by_other = cc_said.cc_rooted_by_other;
+        s.cc_anim_request = cc_said.cc_anim_request;
+        s.has_cc_anim_record = cc_said.has_cc_anim_record;
+        s.cc_anim_record = cc_said.cc_anim_record;
+        s.has_cc_anim_start = cc_said.has_cc_anim_start;
+        s.cc_anim_start = cc_said.cc_anim_start;
+        s.has_cc_anim_duration = cc_said.has_cc_anim_duration;
+        s.cc_anim_duration = cc_said.cc_anim_duration;
+        s.has_cc_anim_end = cc_said.has_cc_anim_end;
+        s.cc_anim_end = cc_said.cc_anim_end;
         s.held_effects = world.effect_count(creature);
         last = view;
         out.push_back(s);

@@ -145,14 +145,27 @@ bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int ran
     return ok;
 }
 
-bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, int64_t flags, double snare) {
+bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, const CcWire& w) {
     bool ok = false;
     registry.modify(actor_id, world::Change::State, [&](world::WorldActor& a) {
         repl::Subobject* st = find_sub(a, "UAoCStatsComponent");
         if (!st || !st->obj.schema || !st->obj.schema->command("CrowdControlState.StatusFlags") || !st->obj.schema->command("CrowdControlState.SnareValue")) return;
         repl::ObjectState& o = st->obj;
-        const bool flags_ok = o.state.set(*o.schema, "CrowdControlState.StatusFlags", repl::Value::u64(static_cast<uint64_t>(flags) & 0xffu));
-        const bool snare_ok = o.state.set(*o.schema, "CrowdControlState.SnareValue", repl::Value::f32(static_cast<float>(snare)));
+        // A client is told what changed: a field that was written before is written again (it has to go back to its default), and one that never was is left out while it is at the default the client holds.
+        const auto put = [&](const char* path, repl::Value v, bool at_default) {
+            if (!o.schema->command(path)) return false;
+            if (at_default && !o.state.get(*o.schema, path)) return true;
+            return o.state.set(*o.schema, path, std::move(v));
+        };
+        const bool flags_ok = put("CrowdControlState.StatusFlags", repl::Value::u64(static_cast<uint64_t>(w.flags) & 0xffu), (w.flags & 0xff) == 0);
+        const bool snare_ok = put("CrowdControlState.SnareValue", repl::Value::f32(static_cast<float>(w.snare)), w.snare == 0.0);
+        put("CrowdControlState.bRootedByOther", repl::Value::boolean(w.rooted_by_other), !w.rooted_by_other);
+        put("CrowdControlState.bOverrideClientAuthMovement", repl::Value::boolean(w.override_move), !w.override_move);
+        put("CrowdControlState.CurrentAnimationRequest", repl::Value::u64(static_cast<uint64_t>(w.anim_request) & 0xffu), w.anim_request == 255);
+        put("CrowdControlState.CrowdControlRecordToAnimate", repl::Value::i64(w.anim_record), w.anim_record == 0);
+        put("CrowdControlState.SyncStartAnimTime", repl::Value::f64(w.anim_start), w.anim_start == 0.0);
+        put("CrowdControlState.Duration", repl::Value::f32(static_cast<float>(w.anim_seconds)), w.anim_seconds == 0.0);
+        put("CrowdControlState.EndAnimTime", repl::Value::f64(w.anim_end), w.anim_end == -1.0);
         ok = flags_ok && snare_ok;
     });
     return ok;

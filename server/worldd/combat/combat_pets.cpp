@@ -6,8 +6,8 @@
 //  combat/combat_pets.cpp (see combat_world.h): the fights of a player's pet, the abilities it plays, and what reacts to a hit on what a creature holds.
 //
 //  A pet is an NPC combatant that stands in players_ through a PetPort, so the creatures' code sees a body on their tables that takes their hits; its AI does not run, its fight is its owner's order.
-//  What a pet holds is an effects::Book like any creature's, and what its hits leave goes through land_effect: a slow slows the creature, but any other crowd control is left off it, so a stun, a root or
-//  a knockback of a pet's ability does not land.  The ability still plays, and its other hits and effects do.
+//  What a pet holds is an effects::Book like any creature's, and what its hits leave goes through land_effect: a slow, a root, a stun, a trip and a sleep bind the creature, but a knockback, a pull or a
+//  silence is left off it and does not land.  The ability still plays, and its other hits and effects do.
 //
 //  Modelled, no recording shows them: both ways a pet's ability can be asked for, a pet's cooldowns, Lunge's leap (the record's 600 cm), a Taunt that puts the creature on the Guardian, the reach of a
 //  melee and of a ranged attack, its regeneration, and that its numbers are its owner's.
@@ -793,7 +793,7 @@ void CombatWorld::tick_pet_casts(double now) {
                 pet_land(*pet, held, *hit, now);
             }
         }
-        // the ranged Incapacitate is a channel: the pet holds it while its target holds the effect (a crowd control, which land_effect leaves off a creature: the channel ends with the montage)
+        // the ranged Incapacitate is a channel: the pet holds it while its target holds the effect (the sleep the cast puts on the creature)
         const bool channel = cast.ability->row.guid == pets::kHunterIncapacitate && cast.reach_cm >= 1000.0 && cast.target != 0 && effect_stacks(cast.target, pets::kHunterIncapRanged) > 0;
         if (cast.due.empty() && now >= cast.end_at && !channel) {
             stop_cast(*pet);

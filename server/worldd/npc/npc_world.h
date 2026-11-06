@@ -176,6 +176,11 @@ public:
     /// home, a walk a game master gave it) and whatever order it was given before or is given after; 1 lifts it.  A montage that carries the NPC (an attack's lunge) is not a walk and is not slowed.
     /// This is the one place the speed of a slowed NPC is held: no caller of a walk passes a slower speed.  False for an NPC the world does not hold.
     bool set_speed_scale(uint64_t actor_id, double scale);
+    /// The crowd control that holds the NPC where it is.  With `no_walk` (a root, a freeze, a stun) it takes no step of any walk, whatever it is doing on foot (a wander, a patrol, a chase, the walk home,
+    /// a walk a game master gave it) and whatever order it was given before or is given after: the walk it was on, and the order, are kept and go on from where it stands when the lock is lifted.  Its
+    /// own place goes out once, as standing still.  A montage that carries it (an attack's lunge) is not a walk, is not stopped and goes on to its end.  With `no_turn` (a freeze, a stun) it does not
+    /// turn either, on the spot or in a montage, and `face_toward` / `turn_toward` change nothing; what it was turning to is kept.  Both false lift the lock.  False for an NPC the world does not hold.
+    bool set_locks(uint64_t actor_id, bool no_walk, bool no_turn);
     /// Puts the NPC at (x, y) with its feet at `ground_z` at once, standing (a pet that changes places with its owner).  False for an NPC the world does not hold.
     bool warp(uint64_t actor_id, double x, double y, double ground_z);
     /// Gives the feet back to the NPC's own behaviour.
@@ -324,6 +329,7 @@ private:
         double       data_feet = 0;           // where the data put its feet at that grounding (the height the surface was searched around)
         double       ground_dz = 0;           // how far the surface it was stood on is from that (cm, over is positive)
         std::optional<RootMotion> rm;         // the montage that carries it now
+        bool         lock_walk = false, lock_turn = false;   // crowd control holds its feet / its facing (set_locks)
         bool         turning = false;         // it turns on the spot to `turn_yaw` (degrees) at `turn_rate` degrees a second (0: its own rate)
         double       turn_yaw = 0, turn_rate = 0;
         Where        track;                   // it keeps turning to this place ...

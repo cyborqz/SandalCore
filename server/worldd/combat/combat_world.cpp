@@ -379,6 +379,12 @@ void CombatWorld::stop_cast(Npc& n) {
     end_npc_cast(registry_, n.actor_id, n.cast);
 }
 
+void CombatWorld::drop_attack(Npc& n) {
+    stop_cast(n);
+    n.hold_until = 0;
+    pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return p.npc == n.actor_id; }), pending_.end());
+}
+
 void CombatWorld::forget(uint64_t actor_id) {
     if (is_pet(actor_id)) pet_cleanup(actor_id);   // a pet's port holds its combatant by reference and stands in players_: a game master's despawn must not leave it there
     if (const auto it = npcs_.find(actor_id); it != npcs_.end()) stop_cast(*it->second);
@@ -464,6 +470,10 @@ private:
 
 /// No hit lands sooner than this after its attack begins: the client has its animation by then, and the confirmation never overtakes it.
 constexpr double kMinHitDelay = 0.1;
+
+/// A stun's or a trip's animation ends this long before its effect does [modelled]: the client works the end out for itself from the length of the creature's end montage, so the end it is sent is
+/// only a first value for that.
+constexpr double kCcAnimEndMargin = 1.4;
 
 /// The angle between two directions in degrees, 0 to 180.
 double angle_between_degrees(double a, double b) {
@@ -1038,7 +1048,9 @@ void CombatWorld::resolve_pending(double now) {
             pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
             Npc& n = *it->second;
             PlayerPort* port = player(p.target);
-            while (p.next_hit < p.timed_hits.size() && p.timed_hits[p.next_hit].first <= now) {
+            // (a stun drops the attack when it goes on; this keeps one that lands inside the delivery of this attack's own hits from letting the rest of them through)
+            const auto stunned = [&n] { return (n.cc.flags & content::kCcNoAbilities) != 0; };
+            while (p.next_hit < p.timed_hits.size() && p.timed_hits[p.next_hit].first <= now && !stunned()) {
                 const size_t at_hit = p.next_hit++;
                 const int64_t guid = p.timed_hits[at_hit].second;
                 const BiteArea& area = p.timed_areas[at_hit];
@@ -1051,10 +1063,11 @@ void CombatWorld::resolve_pending(double now) {
                     deliver_hit(n, *q, *p.ability, guid, now);
                 }
             }
-            while (p.next_fire < p.timed_fires.size() && p.timed_fires[p.next_fire].first <= now) {
+            while (p.next_fire < p.timed_fires.size() && p.timed_fires[p.next_fire].first <= now && !stunned()) {
                 const PlannedFire fire = p.timed_fires[p.next_fire++].second;
                 launch(n, p.target, *p.ability, fire, now);
             }
+            if (stunned()) continue;   // (its cast was stopped and the rest of its hits are dropped)
             if (p.next_hit >= p.timed_hits.size() && p.next_fire >= p.timed_fires.size() && now >= p.end_at) {
                 if (p.logged && port) {   // where the lunge left the creature, as the server has it (what the client draws is for the client's log)
                     const world::WorldActor* w = registry_.find(n.actor_id);
@@ -1080,7 +1093,7 @@ void CombatWorld::resolve_pending(double now) {
         pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
         const auto it = npcs_.find(p.npc);
         PlayerPort* port = player(p.target);
-        if (it == npcs_.end() || it->second->dead || !port || !port->fighter().alive()) continue;
+        if (it == npcs_.end() || it->second->dead || (it->second->cc.flags & content::kCcNoAbilities) != 0 || !port || !port->fighter().alive()) continue;
         Npc& n = *it->second;
         // the target must still be near the swing (it may have run out of range during the windup)
         const double reach = static_cast<double>(n.next.range_cm) * 1.5 + 300.0;
@@ -1326,9 +1339,7 @@ void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
     n.flags_in_combat = false;
     n.flags_target = 0;
     if (npcs_world_) npcs_world_->halt(n.actor_id);
-    stop_cast(n);   // the animation of an attack under way stops with the creature
-    n.hold_until = 0;
-    pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return p.npc == n.actor_id; }), pending_.end());
+    drop_attack(n);   // the animation of an attack under way stops with the creature
     ++stats_.kills;
     if (death_hook_ && !is_pet(n.actor_id)) {   // (a pet leaves no corpse and no loot, whoever killed it: its session sees dead() and takes it away)
         const world::WorldActor* a = registry_.find(n.actor_id);
@@ -1403,11 +1414,32 @@ void CombatWorld::send_effects(Npc& n, const effects::Book::Changes& changes) {
 void CombatWorld::apply_crowd_control(Npc& n) {
     const effects::Book::Crowd cc = n.book.cc();
     if (cc == n.cc) return;
+    const effects::Book::Crowd was = n.cc;
     n.cc = cc;
-    write_cc_state(registry_, n.actor_id, cc.flags, cc.snare);
-    // its top speed is its speed times (1 - the strongest snare), at once and in every way it walks; the NPC world holds the share (no walk order passes a slower speed)
+    // the state the client is told: the flags and the snare, the override of its own movement, and the animation of the strongest stun or trip (it plays from the item's start for the item's length, and its
+    // end is that length less the end of the montage, which the client works out for itself)
+    CcWire wire;
+    wire.flags = cc.flags;
+    wire.snare = cc.snare;
+    wire.rooted_by_other = (cc.flags & content::kCcEmplace) != 0;   // [modelled: the flag follows the emplace bit]
+    wire.override_move = cc.override_move;
+    wire.anim_request = cc.anim;
+    if (cc.anim != content::kCcAnimNone) {
+        wire.anim_record = cc.anim_record;
+        wire.anim_start = bootstrap::effect_clock(cc.anim_start);
+        wire.anim_seconds = cc.anim_seconds;
+        wire.anim_end = wire.anim_start + cc.anim_seconds - kCcAnimEndMargin;
+    }
+    write_cc_state(registry_, n.actor_id, wire);
+    // its top speed is its speed times (1 - the strongest snare), at once and in every way it walks; a root, a freeze or a stun holds its feet, and a freeze or a stun its facing too.  The NPC world
+    // holds all three (no walk order passes a slower speed or a step)
     const double kept = std::clamp(1.0 - cc.snare, 0.0, 1.0);
-    if (npcs_world_) npcs_world_->set_speed_scale(n.actor_id, kept);
+    if (npcs_world_) {
+        npcs_world_->set_speed_scale(n.actor_id, kept);
+        npcs_world_->set_locks(n.actor_id, (cc.flags & content::kCcRoot) != 0, (cc.flags & content::kCcNoTurn) != 0);
+    }
+    // a stun puts its abilities off: the attack it had begun is over, and its hits that had not landed with it
+    if ((cc.flags & content::kCcNoAbilities) != 0 && (was.flags & content::kCcNoAbilities) == 0) drop_attack(n);
     cc_unlogged_.insert(n.actor_id);   // (the log names it at the next step: a snare that ends in the step another one takes over in, as the Grapple's do, never shows as free)
 }
 
@@ -1420,7 +1452,14 @@ void CombatWorld::log_crowd_control() {
         if (n.cc == n.cc_logged) continue;   // it came and went, or went and came back, within one step
         n.cc_logged = n.cc;
         const double kept = std::clamp(1.0 - n.cc.snare, 0.0, 1.0);
-        spdlog::log(cc_logged_++ < kLoggedCc ? spdlog::level::info : spdlog::level::debug, "[cc] {} ({}) snare {:.2f} speed {:.0f}", n.leaf, n.actor_id, n.cc.snare, n.ai.params().chase_speed_cm_s * kept);
+        const bool held = (n.cc.flags & content::kCcRoot) != 0;
+        std::string binds;   // what the flags hold of it, in words
+        if (held) binds += "no walk, ";
+        if (n.cc.flags & content::kCcNoTurn) binds += "no turn, ";
+        if (n.cc.flags & content::kCcNoAbilities) binds += "no attack, ";
+        if (!binds.empty()) binds = " (" + binds.substr(0, binds.size() - 2) + ")";
+        spdlog::log(cc_logged_++ < kLoggedCc ? spdlog::level::info : spdlog::level::debug, "[cc] {} ({}) snare {:.2f} speed {:.0f} flags {}{}", n.leaf, n.actor_id, n.cc.snare,
+                    held ? 0.0 : n.ai.params().chase_speed_cm_s * kept, n.cc.flags, binds);
     }
     cc_unlogged_.clear();
 }
@@ -1452,14 +1491,23 @@ void CombatWorld::drop_effects_of(uint64_t instigator) {
     }
 }
 
+bool CombatWorld::takes_crowd_control(const abilities::EffectDef& def) {
+    if (!def.cc) return false;   // (the data file lacks its record)
+    const int64_t status = def.cc->applied_status;
+    const int64_t known = content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities | content::kCcEmplace | content::kCcSnare;
+    if ((status & ~known) != 0) return false;                                   // a push, a pull, a status of the system
+    if ((status & (content::kCcRoot | content::kCcSnare)) == 0) return false;   // a silence or a disarm binds no walk and no attack of a mob; a record with no status does nothing
+    return def.cc->animation_request.find("Custom") == std::string::npos;      // (an animation of its own is not played yet)
+}
+
 void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now) {
     if (n.dead || !a.def) return;
-    // a snare alone is a slow: the creature walks at 1 - the snare of its speed (apply_crowd_control); every other crowd control binds more than a walk and a mob does not yet stop for one, so the
-    // effect would wear the icon and the mob would keep acting
-    const bool slow = a.def->cc && a.def->cc->applied_status == content::kCcSnare;
-    if (a.def->row.crowd_control_guid != 0 && !slow) {
+    // A slow, a root, a freeze, a stun, a trip and a sleep go on like any effect and bind the creature (apply_crowd_control); a silence, a knockback, a pull and the rest stay off: the effect would wear its
+    // icon and the mob would keep acting
+    if (a.def->row.crowd_control_guid != 0 && !takes_crowd_control(*a.def)) {
         if (refused_effects_.insert(a.def->row.guid).second) {
-            spdlog::info("[effects] {} is a root, stun or other crowd control: mobs do not stop for one yet, so it is not put on {}", a.def->row.name, n.leaf);
+            spdlog::info("[effects] {} is a crowd control mobs do not take yet (status {}: a silence, a knockback, a pull or an animation of its own), so it is not put on {}", a.def->row.name,
+                         a.def->cc ? a.def->cc->applied_status : -1, n.leaf);
         }
         return;
     }
@@ -1681,15 +1729,13 @@ void CombatWorld::begin_reset(Npc& n, double now) {
         n.cs->set_current(content::kGuidHealth, max->value);
         write_stat(registry_, n.actor_id, content::kGuidHealth, max->value);
     }
-    stop_cast(n);   // ... and with a fight that is reset
-    n.hold_until = 0;
-    pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return p.npc == n.actor_id; }), pending_.end());
+    drop_attack(n);   // ... and with a fight that is reset
     set_flags(n, false, 0);
     if (npcs_world_) npcs_world_->order_return_home(n.actor_id);
 }
 
 void CombatWorld::pursue(Npc& n, uint64_t target, double speed_cm_s, double stop_distance_cm) {
-    if (!npcs_world_) return;
+    if (!npcs_world_ || (n.cc.flags & content::kCcRoot) != 0) return;   // (a rooted creature takes no chase: the NPC world would hold its feet anyway, and it is not asked for a path at every look)
     npcs_world_->order_pursue(
         n.actor_id,
         [this, target](nav::Vec3& out) {
@@ -1778,7 +1824,7 @@ void CombatWorld::think(Npc& n, double now) {
             default: break;
         }
     }
-    if (o.attack && now >= n.next_attack_at) {
+    if (o.attack && now >= n.next_attack_at && (n.cc.flags & content::kCcNoAbilities) == 0) {   // (a stunned, tripped or sleeping creature starts none; its cooldowns run on)
         // A creature with its own animation starts an attack only where its tree allows one, every time: from where it stands now, facing the way it faces now.  Where the tree allows none it
         // does not cast: it turns towards the target when only its facing is wrong (it turns at its rate while it stands, and is never stopped to turn), and walks up to it when it is too far, and
         // looks again at its next look.

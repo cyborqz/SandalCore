@@ -77,9 +77,9 @@ std::printf("the rules of a creature's effects, from the data\n");
         };
         const uint64_t a = w.spawn(wolf_path, 900, 0, 25, 1.0);
         cw.fighter_of(a);
-        // a crowd control stays off a creature (land_effect): a trip does not land
+        // a trip is a crowd control a creature takes (land_effect): it lands
         put(a, "Status_Tripped", 0.5);
-        CHECK(count_of(a, "Status_Tripped") == 0, "a trip stays off a creature");
+        CHECK(count_of(a, "Status_Tripped") == 1, "a trip lands on a creature");
         // the effect's own requirement: a Boss takes no stun
         const abilities::HitDef* stunning = nullptr;
         for (const content::AbilityHitRow& row : r.catalog->ability(6064633748157319575ll)->hits) {
@@ -96,7 +96,7 @@ std::printf("the rules of a creature's effects, from the data\n");
             CHECK(cw.resolver().resolve_effects(player.fighter(), *stun_fighter, *stunning, meta, gate, why), "(Soul Flare's effects run)");
             CHECK(gate.effects.size() == 1 && gate.effects[0].def == r.catalog->effect_named("Status_Stunned"), "the data's Soul Flare asks for a stun");
             cw.apply_effects(stun_target, 77, gate.effects, now);
-            CHECK(count_of(stun_target, "Status_Stunned") == 0, "... which stays off the creature");
+            CHECK(count_of(stun_target, "Status_Stunned") == 1, "... which lands on the creature");
         }
         // a Hex's end detonates on the creature
         const uint64_t c = w.spawn(wolf_path, 900, 600, 25, 1.0);
@@ -256,7 +256,7 @@ for (const pets::PetAbility& use : pets::kPetAbilities) {
         CHECK(cw.health_of(prey) < full && !player.dealt.empty(), "Stomp hurts what stands around the pet, and the owner is told");
     }
     if (name.find("Taunt") != std::string::npos) CHECK(cw.effect_stacks(prey, 6064630758760448234ll) == 1, "Taunt demoralizes the creature");
-    if (name.find("Incapacitate") != std::string::npos) CHECK(cw.effect_stacks(prey, pets::kHunterIncapMelee) == 0, "Incapacitate plays; its crowd control stays off the creature");
+    if (name.find("Incapacitate") != std::string::npos) CHECK(cw.effect_stacks(prey, pets::kHunterIncapMelee) == 1, "Incapacitate plays and puts the creature to sleep");
     if (name.find("Eviscerate") != std::string::npos || name.find("Lunge") != std::string::npos) CHECK(cw.health_of(prey) < full, "its hit hurts the creature");
     if (name.find("Eruption") != std::string::npos) CHECK(cw.health_of(prey) < full, "Essence Eruption hurts around its target");
     if (name.find("Recreate") != std::string::npos || name.find("Cleanse") != std::string::npos) CHECK(!player.from_pet.empty(), "the Mystic's help lands on its owner");

@@ -52,10 +52,23 @@ bool mark_dead(world::WorldActor& actor);
 /// CombatInfo.EliteRank.
 bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int rank);
 
-/// The stats component's CrowdControlState, the part a snare uses: StatusFlags (the status bits of the crowd control the creature is under, content::kCcSnare ...) and SnareValue (the strength of the
-/// strongest snare; the speed the creature keeps is 1 minus it).  A creature that holds none has both at 0.  The creature's clients are told in the update that carries the effect items, so whoever
-/// changes its CurrentEffects writes this in the same call.  False when the actor has no such state.
-bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, int64_t flags, double snare);
+/// What the stats component's CrowdControlState says of a creature: StatusFlags (the status bits of the crowd control it is under, content::kCcSnare ...), SnareValue (the strength of the strongest
+/// snare; the speed it keeps is 1 minus it), whether it is rooted by another's hand (bRootedByOther) and whether its client's own movement is overridden, and the animation the client plays (a stun's or
+/// a trip's: CurrentAnimationRequest, the record to animate, when it began on the effects' clock, its length and the moment it ends).  A creature that holds none has the defaults: all 0, no animation
+/// (255) and an end of -1.
+struct CcWire {
+    int64_t flags = 0;
+    double  snare = 0;
+    bool    rooted_by_other = false, override_move = false;
+    int     anim_request = 255;
+    int64_t anim_record = 0;
+    double  anim_start = 0, anim_seconds = 0, anim_end = -1;
+};
+
+/// Writes the creature's CrowdControlState.  The creature's clients are told in the update that carries the effect items, so whoever changes its CurrentEffects writes this in the same call.  A field is
+/// only written when it differs from what the client holds: one that was never written and is at its default stays out (a root says its flags and the override, not the animation fields).  False when
+/// the actor has no such state.
+bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, const CcWire& wire);
 
 /// The EveryoneProxy item's value for a stat of an actor opened from a template (what the client is told now); false when there is none.
 bool read_stat(const world::WorldActor& actor, int64_t record, float& value);

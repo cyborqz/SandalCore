@@ -588,7 +588,7 @@ void NpcWorld::commit(Npc& n, double t, bool force) {
     if (!a) return;
     const nav::Vec3 g = n.mover.ground();
     const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
-    const bool moving = n.mover.moving() && n.active;
+    const bool moving = n.mover.moving() && n.active && !n.lock_walk;   // (crowd control holds its feet: its place goes out as standing still, whatever walk it is on)
     const nav::Vec3 vel = moving ? n.mover.velocity() : nav::Vec3{};
     const bool moved = std::fabs(a->x - g.x) > 1e-3 || std::fabs(a->y - g.y) > 1e-3 || std::fabs(a->z - z) > 1e-3 || std::fabs(a->yaw_degrees - yaw) > 1e-3;
     if (!force && !moved && moving == n.reported_moving) return;
@@ -599,6 +599,7 @@ void NpcWorld::commit(Npc& n, double t, bool force) {
 }
 
 void NpcWorld::steer(Npc& n, double t) {
+    if (n.lock_turn) return;   // crowd control holds its facing: it turns to nothing, and what it was turning to is kept for when the lock is lifted
     const double dt = cfg_.step_seconds;
     bool turned = false;
     if (n.track) {
@@ -612,7 +613,7 @@ void NpcWorld::steer(Npc& n, double t) {
                 turned = true;
             }
         }
-    } else if (n.turning && !n.mover.moving()) {
+    } else if (n.turning && !(n.mover.moving() && !n.lock_walk)) {   // (a walk that is held is not a walk: a root turns on the spot)
         if (n.mover.turn_toward(n.turn_yaw, dt, n.turn_rate)) n.turning = false;
         turned = true;
     }
@@ -645,6 +646,13 @@ void NpcWorld::pursue_step(Npc& n, double) {
 
 void NpcWorld::advance_npc(Npc& n, double t) {
     const double dt = cfg_.step_seconds;
+    if (n.lock_walk) {
+        // Crowd control holds its feet: no step of any walk is taken and no walk is begun (a wander waits, a chase is not planned), but the walk it was on and the order it was given are kept and go on
+        // from where it stands when the lock is lifted.  It may turn (steer does nothing when its facing is held too), and its place goes out as standing still.
+        steer(n, t);
+        commit(n, t, false);
+        return;
+    }
     pursue_step(n, t);
     if (n.mode == Mode::Stand) {
         steer(n, t);
@@ -724,6 +732,14 @@ bool NpcWorld::set_speed_scale(uint64_t id, double scale) {
     return true;
 }
 
+bool NpcWorld::set_locks(uint64_t id, bool no_walk, bool no_turn) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    it->second.lock_walk = no_walk;
+    it->second.lock_turn = no_turn;
+    return true;
+}
+
 bool NpcWorld::release(uint64_t id) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end() || it->second.mode != Mode::Ordered) return false;
@@ -755,7 +771,7 @@ bool NpcWorld::face_toward(uint64_t id, double x, double y) {
     const double dx = x - a->x, dy = y - a->y;
     if (std::fabs(dx) < 1e-6 && std::fabs(dy) < 1e-6) return true;
     Npc& n = it->second;
-    if (n.rm) return false;   // a montage carries it in the facing it began with
+    if (n.rm || n.lock_turn) return false;   // a montage carries it in the facing it began with, and crowd control may hold its facing
     n.mover.face(std::atan2(dy, dx) * 180.0 / 3.14159265358979323846);
     commit(n, now_, true);
     return true;
@@ -769,7 +785,7 @@ bool NpcWorld::turn_toward(uint64_t id, double x, double y, double rate) {
     const double dx = x - a->x, dy = y - a->y;
     if (std::fabs(dx) < 1e-6 && std::fabs(dy) < 1e-6) return true;
     Npc& n = it->second;
-    if (n.rm) return false;   // a montage carries it in the facing it has
+    if (n.rm || n.lock_turn) return false;   // a montage carries it in the facing it has, and crowd control may hold its facing
     n.turning = true;
     n.turn_yaw = std::atan2(dy, dx) * 180.0 / 3.14159265358979323846;
     n.turn_rate = std::isfinite(rate) && rate > 0 ? rate : 0.0;
@@ -894,7 +910,7 @@ void NpcWorld::advance_root_motion(Npc& n, double t) {
     // A creature that tracks its target turns while the montage carries it (its rate, no jumps), and the rest of the montage's travel goes the way it faces then: the travel so far stays
     // where it is, and the travel still to come is turned about the creature's place.
     if (n.track && n.track_until > 0 && t >= n.track_until) n.track = nullptr;
-    if (n.track) {
+    if (n.track && !n.lock_turn) {   // (a creature whose facing is held does not turn in its montage either)
         nav::Vec3 at_target;
         if (n.track(at_target) && std::hypot(at_target.x - g.x, at_target.y - g.y) > 1.0) {
             n.mover.turn_toward(std::atan2(at_target.y - g.y, at_target.x - g.x) * 180.0 / kPi, dt, n.track_rate);
