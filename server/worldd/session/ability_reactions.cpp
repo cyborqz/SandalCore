@@ -16,7 +16,8 @@
 //    - a limit on how often a reaction may fire (GlobalProcLimit, InstigatorProcLimit) is counted per reaction here (one holder), and a carrier that is a
 //      pipeline effect is taken off when its reaction reached it.
 //
-//  What this file serves: the events Hit (OwnerHits) and Ability (Consume), the instigator Owner, and the targets Owner (the holder) and Targets (the hit's); and the reactions a hit's own
+//  What this file serves: the events Hit (OwnerHits) and Ability (Consume), the instigators Owner and Instigator (the carrier of every reaction here is the character's own, so its instigator is the
+//  holder), and the targets Owner (the holder) and Targets (the hit's); and the reactions a hit's own
 //  record carries (ReactionsIds), which land on its caster, its targets or the caster's pet.
 //  The rest of the bindings, instigators and targets of the 335 records are left alone and said once in the log when a reaction would need them.
 // ============================================================================
@@ -166,8 +167,10 @@ void AbilityPipeline::run_reactions(AbilityChange& c, int kind, int bit, const R
 
 void AbilityPipeline::fire_reaction(AbilityChange& c, const ReactionDef& r, const ReactionContext& rc, double t) {
     const content::ReactionRow& row = r.row;
-    // who casts the hits: only the holder (Owner) is served; a reaction cast by the hit's instigator or its source needs actors the world does not hold yet
-    if (row.instigator != "Owner") {
+    // who casts the hits: the holder (Owner), or the instigator of the effect that carries the reaction (Instigator).  Every effect this pipeline holds, and every passive its ranks grant, is the
+    // character's own, so for it the instigator is the holder himself (Shatter and Fuse, carried by the Mage's passives).  A reaction cast by the hit's instigator or its source needs actors the world
+    // does not hold yet
+    if (row.instigator != "Owner" && row.instigator != "Instigator") {
         if (reaction_noted_.insert(row.guid).second) spdlog::info("[abilities] the reaction {} is cast by {}, which is not served yet: it does not fire", row.name, row.instigator);
         return;
     }

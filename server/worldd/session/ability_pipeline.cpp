@@ -1224,6 +1224,17 @@ void AbilityPipeline::remove_stacks(AbilityChange& c, int64_t effect_guid, int s
     }
 }
 
+// Stacks that a cost took go back on the instance they came from, which keeps its time and is not asked for its limit (it held them a moment ago); an instance that is gone comes back with them and its own time.
+void AbilityPipeline::restore_stacks(AbilityChange& c, const EffectDef& def, int stacks, double t) {
+    for (EffectInst& e : effects_) {
+        if (e.def != &def) continue;
+        e.stacks += stacks;
+        c.effects_changed.push_back(effect_item(e));
+        return;
+    }
+    apply_effect(c, def, stacks, std::nullopt, t, true);
+}
+
 void AbilityPipeline::sync_engine_effects() {
     drop_evaluation();
     if (stats_.started()) stats_.set_effects(engine_effects());
@@ -1361,7 +1372,10 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
-    if (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok) return;
+    // a reaction's hit that asks about its target (Shatter wants it Frozen) is asked of each target below: asked here, GetTarget() would read the caster
+    const content::ExprRow* requirement = hit.row.requirement_expr != 0 && catalog_ ? catalog_->expr(hit.row.requirement_expr) : nullptr;
+    const bool ask_each = src.type == content::kSourceTypeReaction && requirement && requirement->uses_target && requirement->program >= 0;
+    if (!ask_each && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
     if (!ensure_evaluation(why)) return;
     const int mask = hit.row.applicable_targets;
     double max_targets = 40;
@@ -1407,6 +1421,25 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         std::string err;
         auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
         if (!target_eval) continue;
+        if (ask_each) {   // the requirement, with this target as GetTarget()
+            bool wanted = false;
+            if (evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) {
+                const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
+                combat::HitContext ask;
+                ask.instigator = &self_view;
+                ask.target = &target_view;
+                ask.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
+                ask.enemy = hostile;
+                ask.neutral = ti.relation == combat::Relation::Neutral;
+                Host ask_host(*this);
+                ask_host.set_context(&ask);
+                double v = 0;
+                evaluation_->set_consumed(consumed_);
+                wanted = evaluation_->eval(requirement->program, ask_host, v, err) && std::isfinite(v) && v != 0.0;
+                evaluation_->clear_actors();
+            }
+            if (!wanted) continue;
+        }
         Host host(*this);
         combat::HitMeta meta;
         meta.source_type = src.type;
@@ -1464,8 +1497,6 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         outs.push_back(std::move(out));
         // what the hit applies to its target: a shield goes to the target (an effect's other mods are the NPC world's to take, part 2)
         if (!r.miss()) {
-            // what a Summoner's hit takes off its target (the other classes' removals on a creature are not followed yet)
-            if (!hit.remove_effects.empty() && hit.row.name.rfind("Summoner_", 0) == 0) combat_->remove_effects(id, hit, t);
             for (const content::HitEffectRow& row : hit.effects) {
                 if (row.kind == "self") continue;
                 const EffectDef* def = catalog_->effect(row.effect_guid);
@@ -1483,21 +1514,25 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
                 }
             }
             // ... and the target's effects (a burn, a bleed, a debuff) go on its effect list, with their numbers worked out here, for the character as he is and the target as
-            // the hit left it: what the hit's own stat mods raised may be what an effect requires (the burn needs the burn this hit added)
+            // the hit left it: what the hit's own stat mods raised may be what an effect requires (the burn needs the burn this hit added). They are worked out BEFORE the hit's removal list
+            // is served, against the target as the hit found it (the Snipe's Hemorrhage counts the bleed that the same hit takes off), and go on AFTER it, so that a hit never takes off
+            // what it has just put on
+            combat::Resolved gate;
+            bool gated = false;
             bool applies_effects = false;
             for (const content::HitEffectRow& row : hit.effects) applies_effects = applies_effects || row.kind != "self";
             std::string after_err;
             if (applies_effects && !d.lethal) {
                 if (auto after = tf->stats().evaluation(tf->worn(), after_err, true)) {
-                    combat::Resolved gate;
                     std::string gate_why;
-                    if (combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, gate,
-                                                                 gate_why)) {
-                        if (!gate_why.empty()) spdlog::debug("[abilities] the effects of {} on actor {}: {}", hit.row.name, id, gate_why);
-                        if (!gate.effects.empty()) combat_->apply_effects(id, gate.effects, t);
-                    }
+                    gated = combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, gate, gate_why);
+                    if (gated && !gate_why.empty()) spdlog::debug("[abilities] the effects of {} on actor {}: {}", hit.row.name, id, gate_why);
                 }
             }
+            // what the hit takes off its target: the effects it names, or the debuffs or buffs its filter names, up to its limit (the creature's own book decides which of them it holds); a filter that
+            // an older content.db does not say is not served here, as it is not on the character
+            if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) combat_->remove_effects(id, hit, t);
+            if (gated && !gate.effects.empty()) combat_->apply_effects(id, gate.effects, t);
         }
     }
     // what the hit applies to its caster ("self" rows) comes with the hit once, if it found anyone
@@ -1970,12 +2005,14 @@ void AbilityPipeline::run_due(double t) {
         }
         if (cast.hit_due && *cast.hit_due <= t) {
             cast.hit_due.reset();
+            mark_launched(cast.client_id);
             step_hits(cast, t, "hit");
             finish_cast_if_done(i);
             return;
         }
         if (cast.projectile_due && *cast.projectile_due <= t) {
             cast.projectile_due.reset();
+            mark_launched(cast.client_id);
             if (cast.flight_pending) {   // the projectile leaves now: its hit lands when it gets there
                 launch_shot(cast, t);
                 finish_cast_if_done(i);
@@ -1989,6 +2026,7 @@ void AbilityPipeline::run_due(double t) {
             // a cast bar whose request did not come by the deadline goes on as if it came then: a cancel is the client's ServerEndAbility (end_request has seen it), and a slow bar, a hitch or a stall
             // must not lose its cast (the owner's bars run 1.3 to 1.4 times as long as the recorded ones; a Smite has paid its mana already)
             cast.branch_due.reset();
+            mark_launched(cast.client_id);
             step_branch(cast, t);
             finish_cast_if_done(i);
             return;
@@ -1999,6 +2037,7 @@ void AbilityPipeline::run_due(double t) {
                 if (cast.missiles[k].due < cast.missiles[first].due) first = k;
             }
             if (cast.missiles[first].due <= t) {
+                mark_launched(cast.client_id);
                 if (cast.missiles[first].kind != Cast::Missile::Kind::Land) {   // a timed cast's launch, the landing of a Strike's arrow, a note or a bounce that leaves, or a step of a ball's flight
                     const Cast::Missile step = cast.missiles[first];
                     cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
@@ -2228,6 +2267,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
 }
 
 void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets) {
+    rec.launched = true;   // (a hit of the cast is out: a Dodge no longer cancels it)
     const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
     const ConsumedScope consumed(*this, rec.item_cast);   // (a consumable's hit reads the item's numbers)
     AbilityChange c;
@@ -2281,6 +2321,7 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held
         if (at >= *cast.branch_due) continue;
         spdlog::info("[abilities] the key of {} went up {:.3f} s after the trigger: the cast goes on", cast.def->row.name, now_ - cast.trigger_at);
         reschedule_branch(cast, at, cast.branched->cost);
+        cast.released = true;   // (the bar is over: a Dodge does not take the shot back)
     }
     // the key of a HELD ability went up before its bar was full: the bar ended there, at the fill reached, and the cast goes on as from a request (the client sends none for it) [R: the owner's run; modelled: the
     // fill is the held time over the longest bar this client has shown, else the recorded one]
@@ -2329,11 +2370,13 @@ void AbilityPipeline::bring_sooner(Cast& cast, double earlier) {
     }
 }
 
-void AbilityPipeline::abort_cast(size_t index, double t, const char* why) {
+void AbilityPipeline::abort_cast(size_t index, double t, const char* why, bool give_back) {
     Cast& cast = casts_[index];
-    const bool paid = cast.branched && cast.branched->cost_first;   // (a Smite paid before its bar's end: only what follows the bar is dropped)
-    spdlog::info("[abilities] {} {:.3f} s after the trigger: {}: {}", cast.def->row.name, t - cast.trigger_at, why, paid ? "its cost was paid before the bar's end, nothing more happens" : "nothing is paid and nothing fires");
+    const bool paid = cast.paid;   // (a Smite pays before its bar's end: only what follows the bar is dropped)
+    spdlog::info("[abilities] {} {:.3f} s after the trigger: {}: {}", cast.def->row.name, t - cast.trigger_at, why,
+                 paid ? (give_back ? "its cost was paid before the bar's end and is given back, nothing more happens" : "its cost was paid before the bar's end, nothing more happens") : "nothing is paid and nothing fires");
     AbilityChange c;
+    if (give_back) refund(c, cast);
     if (cast.montage_branch && !cast.item_due && item_instance_ && *item_instance_ == cast.instance) {   // (its item was sent and is still the pawn's: it keeps its place, the montage cleared)
         cast.item.montage_path.clear();
         cast.item.montage_guid = 0;
@@ -2346,6 +2389,188 @@ void AbilityPipeline::abort_cast(size_t index, double t, const char* why) {
     end_zones_of(cast, t);
     casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
     if (!c.empty()) emit({std::move(c), std::nullopt, t, text});
+}
+
+// A cast bar is running while its end is still to come: the client's request for the branch has not come (a held cast's key is still down and its charge not full), or a summon's bar has not run out.
+// A cast with no bar (a weapon swing, a song, a looping or channelled cast, a held stance) has none to end.
+bool AbilityPipeline::in_cast_bar(const Cast& cast) const {
+    if (pets::for_ability(cast.def->row.guid)) return cast.cost_due.has_value();
+    return cast.branched != nullptr && cast.branch_due && !cast.request_heard && !cast.charged && !cast.released;
+}
+
+// What a cast that paid gives back when it is cancelled: the stats its cost took (up to the stat's maximum), the stacks of the effects its cost took, its charge (the cooldown is over once every charge of
+// the group is back) and the stack of the class resource that spending Mana gave (when it gave one). A cast that has not paid has nothing to give back. The reactions that its payment raised stay.
+void AbilityPipeline::refund(AbilityChange& c, Cast& cast) {
+    if (!cast.paid) return;
+    cast.paid = false;
+    give_back(c, cast);
+}
+
+// One payment of a cast comes back: its stat costs (up to the stat's maximum), its effect stacks, one charge of its group and the class resource's stack that spending Mana gave (refund gives the whole
+// cast's once; a Salvo's shot is one payment).
+void AbilityPipeline::give_back(AbilityChange& c, const Cast& cast) {
+    bool mana = false;
+    for (const auto& [stat, amount] : cast.stat_costs) {
+        if (!(amount > 0)) continue;
+        mana = mana || stat == content::kGuidMana;
+        if (stat == content::kGuidStamina) {
+            a7_.add_stamina(c, amount);
+            continue;
+        }
+        const stats::StatValue* v = stats_.find(stat);
+        double cap = kInf;
+        if (stat == content::kGuidMana) cap = stat_now(content::kGuidMaxMana);
+        else if (stat == content::kGuidHealth) cap = stat_now(content::kGuidMaxHealth);
+        else if (v && v->has_max) cap = static_cast<double>(v->max);
+        const double now_value = stat_now(stat);
+        set_held(c, stat, std::max(now_value, std::min(cap, now_value + amount)));
+    }
+    if (resource_ && mana && cast.resource_added > 0) remove_stacks(c, resource_->row.guid, cast.resource_added);   // (only the stack the payment added: at the resource's limit it added none)
+    for (const auto& [effect, n] : cast.effect_costs) {   // the stacks the cost took go back on [modelled: no recording shows a cast bar ended after such a cost]
+        if (const EffectDef* def = catalog_ ? catalog_->effect(effect) : nullptr) restore_stacks(c, *def, n, now_);
+    }
+    if (cast.triggers_cooldown && cast.cooldown > 0) {
+        const auto it = groups_.find(cast.group);
+        if (it != groups_.end()) {
+            Group& g = it->second;
+            g.charges = std::min(g.max_charges, g.charges + cast.charge_cost);
+            if (g.charges >= g.max_charges) {   // every charge is back: the cooldown is over
+                for (const int64_t a : g.items) c.cooldowns_removed.push_back(a);
+                groups_.erase(it);
+            } else {   // another charge is still on its way back: its timer goes on
+                for (const int64_t a : g.items) c.cooldowns_set.push_back(cooldown_item(a, g));
+            }
+        }
+    }
+    recompute(c);
+}
+
+// The game's rule: a Dodge ends the cast bars the character is in (the session calls this when the runtime took a Dodge). The cast ends like one the client cancelled (abort_cast: none of its steps
+// happens, its item keeps its place with the montage cleared), what it had paid is given back, and the client is told with ClientEndAbility for the cast: it sends no end of its own for it.
+size_t AbilityPipeline::end_cast_bars(double now, const char* why) {
+    advance(now);
+    size_t ended = 0;
+    for (size_t i = casts_.size(); i-- > 0;) {
+        if (!in_cast_bar(casts_[i])) continue;
+        const int32_t client_id = casts_[i].client_id;
+        const std::string name = casts_[i].def->row.name;
+        const bool paid = casts_[i].paid;
+        AbilityEvent e;
+        e.at = now_;
+        e.end_ability = client_id;
+        abort_cast(i, now_, why, true);   // (what it had paid comes back with it)
+        instances_.erase(std::remove_if(instances_.begin(), instances_.end(), [client_id](const Instance& in) { return in.client_id == client_id; }), instances_.end());   // (the client's own end would end it twice)
+        e.note = name + " is over: " + why + (paid ? ", what it had paid is given back" : "");
+        events_.push_back(std::move(e));
+        ++ended;
+    }
+    return ended;
+}
+
+// The game's rule: a Dodge cancels an ability that has not gone out yet and gives back what it paid. Once something of it has gone out (a hit the client asked for or that landed, a projectile or a volley launched, an
+// effect started, a cast bar's end) the Dodge does nothing to it: no cancel, no refund, no message to the client, and what is in the air still hits. The session calls this when the runtime took a Dodge. It cancels the
+// cast bars the character is in (above), the Ranger's Salvo, Barrage, Air Strike and Raining Death, every held ability (the Whirlwind, Guard, Reflect, the Deliverance, the Combust ...) and the weapon swing under
+// way, each before its first arrow, hit or effect. A song goes on through a Dodge, so does a Sprint, and a Rest is ended by the runtime.
+size_t AbilityPipeline::end_by_dodge(double now) {
+    size_t ended = end_cast_bars(now, "a Dodge ended the cast bar");   // (this moves the clock to `now`)
+    ended += end_unlaunched(now_, "a Dodge cancelled it before it went out");
+    ended += end_swings(now_, "a Dodge ended the swing");
+    return ended;
+}
+
+// Whether anything of a cast has gone out: a hit the client asked for or the server applied, a projectile or a volley launched, an effect started (the record's `launched`), or the end of a cast bar (the client's
+// request, the key's release, the full charge). `cast` is the cast while it still runs; null when only its record is left (a melee swing).
+bool AbilityPipeline::gone_out(int32_t client_id, const Cast* cast) const {
+    if (cast && (cast->request_heard || cast->charged || cast->released)) return true;
+    for (const CastRecord& r : records_) {
+        if (r.client_id != client_id) continue;
+        if (r.launched || !r.asked.empty()) return true;
+        for (const HitSlot& s : r.slots) {
+            if (s.requests > 0 || s.applied || !s.due.empty()) return true;
+        }
+        return false;
+    }
+    return true;   // (no record: the cast is old or has ended)
+}
+
+void AbilityPipeline::mark_launched(int32_t client_id) {
+    if (CastRecord* r = record_of(client_id)) r->launched = true;
+}
+
+// The casts a Dodge cancels besides the cast bars and the swings: the Salvo, the Barrage, the Air Strike, the Raining Death and every held ability, while nothing of them has gone out. A song, or a toggle that this
+// press ends, is no cast to cancel.
+bool AbilityPipeline::dodge_cancels(const Cast& cast) const {
+    if (cast.loop || cast.toggle_off || is_weapon_combo(cast.def->row)) return false;
+    if (!cast.looped && !cast.timed && !cast.def->row.hold_animation) return false;
+    return !gone_out(cast.client_id, &cast);
+}
+
+// Each cast that has not gone out ends like one the client cancelled: none of its steps happens, the hits the client would still ask for are not taken (its record goes), what it paid comes back (a Salvo's first shot is
+// paid a moment before its arrow leaves) and the client is told with ClientEndAbility for the cast. The montage ends as it does at the end of a cast (step_end: the item keeps its place with the montage cleared).
+size_t AbilityPipeline::end_unlaunched(double t, const char* why) {
+    size_t ended = 0;
+    for (size_t i = casts_.size(); i-- > 0;) {
+        if (!dodge_cancels(casts_[i])) continue;
+        Cast& cast = casts_[i];
+        const int32_t client_id = cast.client_id;
+        const std::string name = cast.def->row.name;
+        const bool paid = cast.paid;
+        const double since = t - cast.trigger_at;
+        AbilityEvent e;
+        e.at = t;
+        e.end_ability = client_id;
+        for (int shot = 1; shot < cast.shots; ++shot) give_back(e.change, cast);   // (a Salvo that paid more than one shot before its first arrow left)
+        refund(e.change, cast);   // (nothing when it had not paid yet)
+        step_end(cast, t);
+        drop_record(client_id);
+        end_zones_of(cast, t);
+        casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
+        instances_.erase(std::remove_if(instances_.begin(), instances_.end(), [client_id](const Instance& in) { return in.client_id == client_id; }), instances_.end());   // (the client's own end would end it twice)
+        e.note = name + " is over: " + why + (paid ? ", what it had paid is given back" : "");
+        spdlog::info("[abilities] {} {:.3f} s after the trigger: {}", name, since, e.note);
+        events_.push_back(std::move(e));
+        ++ended;
+    }
+    return ended;
+}
+
+// The weapon swing under way is cancelled while nothing of it has gone out (no arrow has left, no hit was asked for or landed): it ends the way the client's own end of a swing ends it (stop_swing), the arrows that
+// have not left never do, the hits the client has not asked for yet are not taken (the swing's record goes, as cancel_swings drops it) and what the swing would still have landed at a plain delay does not land. A swing
+// whose item has not come yet never shows it. Once an arrow has left or a hit was asked for, the Dodge changes nothing. A swing pays nothing. The swing under way is the pawn's ability item, a swing instance the
+// client has not ended.
+size_t AbilityPipeline::end_swings(double t, const char* why) {
+    size_t ended = 0;
+    for (size_t i = casts_.size(); i-- > 0;) {
+        const Cast& p = casts_[i];
+        if (!is_weapon_combo(p.def->row) || !p.item_due) continue;
+        AbilityEvent e;
+        e.at = t;
+        e.end_ability = p.client_id;
+        e.note = "the swing of " + p.def->row.name + " is ended: " + why;
+        events_.push_back(std::move(e));
+        drop_record(p.client_id);
+        casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
+        ++ended;
+    }
+    if (!item_instance_) return ended;
+    for (size_t i = 0; i < instances_.size(); ++i) {
+        const Instance inst = instances_[i];
+        if (inst.server_id != *item_instance_ || inst.end_due) continue;
+        const AbilityDef* a = catalog_ ? catalog_->ability(inst.ability) : nullptr;
+        if (!a || !is_weapon_combo(a->row)) continue;
+        if (gone_out(inst.client_id)) return ended;   // (an arrow has left or a hit was asked for: the swing is out)
+        drop_record(inst.client_id);
+        for (Cast& cast : casts_) {
+            if (cast.instance != inst.server_id) continue;
+            cast.hit_due.reset();
+            if (!cast.shot && !cast.flight_pending) cast.projectile_due.reset();   // (a projectile in the air has its shot: it lands)
+        }
+        stop_swing(inst.server_id);
+        end_instance(i, t, a->row.name + " is over: " + why);
+        ++ended;
+        break;
+    }
+    return ended;
 }
 
 bool AbilityPipeline::can_pay(const Cast& cast) const {
@@ -2440,11 +2665,11 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     for (size_t i = 0; i < casts_.size(); ++i) {
         const Cast& cast = casts_[i];
         if (cast.instance == server_instance_id && pets::for_ability(cast.def->row.guid) && cast.cost_due) {
-            abort_cast(i, now_, "the client ended the summon before completion");
+            abort_cast(i, now_, "the client ended the summon before completion", true);
             break;
         }
         if (cast.instance != server_instance_id || !cast.branched || !cast.branched->cancels || cast.held || cast.request_heard || !cast.branch_due) continue;
-        abort_cast(i, now_, "the client ended the cast bar");
+        abort_cast(i, now_, "the client ended the cast bar", true);   // (a cast that had paid before its bar's end gets it back: a bar the client cancels costs nothing)
         break;
     }
     for (Instance& i : instances_) {
@@ -2471,7 +2696,7 @@ void AbilityPipeline::stop_swing(int64_t instance) {
     }
 }
 
-void AbilityPipeline::end_instance(size_t index, double t) {
+void AbilityPipeline::end_instance(size_t index, double t, const std::string& why) {
     const Instance inst = instances_[index];
     instances_.erase(instances_.begin() + static_cast<std::ptrdiff_t>(index));
     AbilityEvent e;
@@ -2489,7 +2714,7 @@ void AbilityPipeline::end_instance(size_t index, double t) {
         }
     }
     e.end_ability = inst.client_id;
-    e.note = "the client ended the ability instance " + std::to_string(inst.server_id);
+    e.note = why.empty() ? "the client ended the ability instance " + std::to_string(inst.server_id) : why + " (the ability instance " + std::to_string(inst.server_id) + ")";
     events_.push_back(std::move(e));
 }
 // C O A and C Y B
@@ -3500,6 +3725,7 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         events_.push_back(std::move(e));
         return;
     }
+    cast.paid = true;   // (what it takes below is what a Dodge in its bar gives back: refund)
     if (CastRecord* rec = record_of(cast.client_id)) {
         for (HitSlot& slot : rec->slots) {
             if (slot.server_self_use && !slot.applied) {
@@ -3515,7 +3741,12 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     }
     for (const auto& [effect, n] : cast.effect_costs) remove_stacks(c, effect, n);
     drop_evaluation();
-    if (resource_ && spent_mana) apply_effect(c, *resource_, 1, std::nullopt, t);   // the class's resource: one stack per cast that spends Mana
+    cast.resource_added = 0;
+    if (resource_ && spent_mana) {   // the class's resource: one stack per cast that spends Mana (none is added at the resource's limit: a give back takes off only what this added)
+        const int held = stacks_of(resource_->row.guid);
+        apply_effect(c, *resource_, 1, std::nullopt, t);
+        cast.resource_added = std::max(0, stacks_of(resource_->row.guid) - held);
+    }
     if (!cast.toggle_off) raise_ability_event(c, def, t);   // reactions: the ability was consumed (the Bard's Resonance gain)
     use_charge(c, cast, t);
     if (cast.toggle_off) {
@@ -3575,13 +3806,16 @@ void AbilityPipeline::step_own(Cast& cast, double t) {
     // A quick tap may be released before this delayed step ever creates a Held entry.
     if (cast.held_release_due && *cast.held_release_due <= t) return;
     AbilityChange c;
+    bool started = false;
     for (const EffectDef* e : cast.own_effects) {
         // an effect the character's talents gate (the Salvo's Expeditious) starts only when its requirement holds
         bool applies = true;
         std::string why;
         if (!eval_bool(e->row.requirement_expr, true, applies, why) || !applies) continue;
         apply_effect(c, *e, 1, std::nullopt, t, false, def.row.guid);
+        started = true;
     }
+    if (started) mark_launched(cast.client_id);   // (an effect of its own is on: a Dodge no longer cancels the cast)
     sync_engine_effects();
     // a held ability (the key stays down: Guard, Reflect) ends with the client's cancel
     if (def.row.hold_animation) {

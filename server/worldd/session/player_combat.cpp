@@ -222,6 +222,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     cancel_quick_make(&conn, "the player died");   // Crafting, step 3
     cancel_gather(&conn, "the player died", Interrupt::Death);   // Gathering stage 2
     if (pipeline_) pipeline_->set_dead(true);
+    if (combat_side_ && npc_world_ && npc_world_->combat()) npc_world_->combat()->player_died(combat_side_->actor_id());   // what he put on the creatures ends at once, not at the next tick of an effect
     dismiss_pet(now);
     item_reserved_.clear();   // consumables: the casts that had not paid are gone with the death (set_dead dropped them): their items stay in the bag and can be used again
     // the mounts milestone, stage 3: the dead player is dismounted (the death frame below restarts its pawn) and its mount is desummoned

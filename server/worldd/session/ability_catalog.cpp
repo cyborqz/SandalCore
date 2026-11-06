@@ -6,10 +6,15 @@
 // ============================================================================
 #include "session/ability_catalog.h"
 
+#include "content/content_db.h"
+
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <set>
+#include <string>
 
 namespace aoc::worldd::abilities {
 
@@ -27,6 +32,29 @@ void ids_of(const std::string& extra_json, const char* key, std::vector<int64_t>
 }
 
 void reaction_ids_of(const std::string& extra_json, std::vector<int64_t>& out) { ids_of(extra_json, "ReactionsIds", out); }
+
+/// What a fragility record of the shape "the holder is hit, and the hit takes Health from it, but for the hit records it names" says (the sleeps' InstantBreak): checked when its holder is hit, it
+/// breaks the effect at once when the hit's Health mod is below 0 and the hit's record is none of the ones the text leaves out (`GetHitRecord(HitEvent) != <record>`).  Any other shape (a tick
+/// check, an accumulation, another stat) is not this, and gives nothing.
+std::optional<BreakOnDamage> break_on_damage_of(const content::FragilityRow& f) {
+    if (f.fragility_type.find("FRAGILITY_Proc") == std::string::npos) return std::nullopt;
+    const nlohmann::json bound = nlohmann::json::parse(f.bindings, nullptr, false);
+    if (!bound.is_object()) return std::nullopt;
+    const auto hit_events = bound.find("HitEvents");
+    if (hit_events == bound.end() || !hit_events->is_number_integer() || (hit_events->get<int64_t>() & 2) == 0) return std::nullopt;   // (bit 2: the holder is hit)
+    const std::string& text = f.break_immediately;
+    const std::string health = "GetStatModValue(HitEvent, GetOwner(), $#5365104778484440215:" + std::to_string(content::kGuidHealth) + "$) < 0";
+    if (text.find(health) == std::string::npos) return std::nullopt;
+    BreakOnDamage out;
+    const std::string left_out = "GetHitRecord(HitEvent) != $#";   // (followed by the record type, a colon, the record's guid and a dollar sign)
+    for (size_t at = text.find(left_out); at != std::string::npos; at = text.find(left_out, at + left_out.size())) {
+        const size_t colon = text.find(':', at + left_out.size()), end = text.find('$', at + left_out.size());
+        if (colon == std::string::npos || end == std::string::npos || colon > end) continue;
+        const int64_t guid = std::strtoll(text.c_str() + colon + 1, nullptr, 10);
+        if (guid != 0) out.except_hits.push_back(guid);
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -88,6 +116,18 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         if (d.row.crowd_control_guid != 0) {   // a record the file lacks leaves the effect without one: a creature then refuses the effect, as it refuses every crowd control it has no rule for
             std::string skipped;
             if (auto cc = db->crowd_control(d.row.crowd_control_guid, skipped)) d.cc = std::move(*cc);
+            else spdlog::warn("[abilities] the effect {} names a crowd-control record the data does not have, so a creature will not take it: {}", d.row.name, skipped);
+        }
+        {   // an effect that breaks at the first damage (a sleep): its fragility record, when it is of that shape
+            std::vector<int64_t> fragilities;
+            std::string unread;
+            if (db->effect_fragilities(g, fragilities, unread)) {
+                for (const int64_t fragility : fragilities) {
+                    if (const auto record = db->fragility(fragility, unread)) {
+                        if (auto breaks = break_on_damage_of(*record)) d.breaks_on_damage = std::move(*breaks);
+                    }
+                }
+            }
         }
         c.effect_names_[d.row.name] = g;
         c.effects_.emplace(g, std::move(d));

@@ -178,8 +178,8 @@ public:
     bool set_speed_scale(uint64_t actor_id, double scale);
     /// The crowd control that holds the NPC where it is.  With `no_walk` (a root, a freeze, a stun) it takes no step of any walk, whatever it is doing on foot (a wander, a patrol, a chase, the walk home,
     /// a walk a game master gave it) and whatever order it was given before or is given after: the walk it was on, and the order, are kept and go on from where it stands when the lock is lifted.  Its
-    /// own place goes out once, as standing still.  A montage that carries it (an attack's lunge) is not a walk, is not stopped and goes on to its end.  With `no_turn` (a freeze, a stun) it does not
-    /// turn either, on the spot or in a montage, and `face_toward` / `turn_toward` change nothing; what it was turning to is kept.  Both false lift the lock.  False for an NPC the world does not hold.
+    /// own place goes out once, as standing still.  A montage that carries it (an attack's lunge) is not a walk, is not stopped and goes on to its end.  With `no_turn` (a freeze, a stun, a trip, a sleep) it does not
+    /// turn either, on the spot or in a montage, and `face_toward` / `turn_toward` change nothing, and the turn it was on is forgotten: it does not swing round to its old target when the hold lifts.  Both false lift the lock.  False for an NPC the world does not hold.
     bool set_locks(uint64_t actor_id, bool no_walk, bool no_turn);
     /// Puts the NPC at (x, y) with its feet at `ground_z` at once, standing (a pet that changes places with its owner).  False for an NPC the world does not hold.
     bool warp(uint64_t actor_id, double x, double y, double ground_z);

@@ -477,7 +477,10 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
             crate_drop_instance_ = instance;
         }
     } else {
-        runtime->trigger(ability, instance, ability_seconds(now), info);
+        const Refusal ran = runtime->trigger(ability, instance, ability_seconds(now), info);
+        // the game's rule: a Dodge the server took ends the cast bar the character is in (nothing paid, nothing fired), stops the Salvo and the Barrage, ends the weapon swing under way and the held stance
+        // (Guard); a Dodge it refused ends nothing
+        if (ran == Refusal::None && ability == content::kGuidDodge && pipeline_) pipeline_->end_by_dodge(ability_seconds(now));
     }
     take_ability_events();
     flush_abilities(conn);

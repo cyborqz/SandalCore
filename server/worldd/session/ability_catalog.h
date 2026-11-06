@@ -27,6 +27,13 @@
 
 namespace aoc::worldd::abilities {
 
+/// An effect that ends at the first damage its holder takes, as the data's fragility of that kind says it (a sleep): any hit that takes Health from the holder, except the hit records the
+/// fragility names (a lullaby's, a poison's tick).
+struct BreakOnDamage {
+    std::vector<int64_t> except_hits;   // the hit records whose damage leaves the effect on
+    bool leaves(int64_t hit_guid) const { return hit_guid != 0 && std::find(except_hits.begin(), except_hits.end(), hit_guid) != except_hits.end(); }
+};
+
 struct EffectDef {
     content::EffectRow                          row;
     std::vector<content::ModRow>                mods;   // the effect's stat mods
@@ -35,6 +42,8 @@ struct EffectDef {
     std::vector<int64_t>                        reactions;
     /// What the effect does to the movement and abilities of its holder (the crowd-control record the effect names: a snare's strength, a root, a stun ...); empty for an effect that names none.
     std::optional<content::CrowdControlRow>     cc;
+    /// Set for an effect that breaks at the first damage (the fragility "InstantBreak" of the sleeps); empty for the rest.
+    std::optional<BreakOnDamage>                breaks_on_damage;
 };
 // [C Y B x CoA]
 

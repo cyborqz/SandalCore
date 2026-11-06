@@ -2449,6 +2449,7 @@ struct WolfWorld {
     bool ground = false;
     int level = 8;
     double ahead = 120;              // how far in front of the player the Wolves stand, cm
+    double north = 0;                // ... and this far along +Y, the way the player faces, for the first Wolf (an ability that gathers the enemies in a cone ahead of the caster)
     int extra = 0;                   // E1 stage 3 fix 3: more Wolves, minted right after the first (their blocks follow its), 1 m apart
     int extra_level = 0;             // ... of this level (0: the first Wolf's)
     std::vector<uint64_t> wolves;    // their ids
@@ -2473,7 +2474,7 @@ struct WolfWorld {
         for (const auto& [p, row] : w.blueprints().rows()) {
             if (p.find("/Beast/Canine/Wolf.Default__Wolf_C") != std::string::npos) path = p;
         }
-        wolf = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY, kZ, level, 800);
+        wolf = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + north, kZ, level, 800);
         for (int i = 0; i < extra; ++i) {
             const uint64_t id = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + 100 * (i + 1), kZ, extra_level > 0 ? extra_level : level, 800);
             if (id != 0) wolves.push_back(id);
@@ -3995,12 +3996,19 @@ struct FlightCast {
     double      bar = 0;
     const char* then = "";    // a second ability pressed `then_at` seconds after the first, at the same Wolf: its item takes the pawn's place
     double      then_at = 0;
+    double      dodge_at = -1;   // a Dodge pressed this long after the trigger (negative: none)
+    bool        dodge_first = false;   // a Dodge pressed together with the trigger, so that the one at `dodge_at` finds the Dodge's cooldown running and is refused
 };
 /// What a flight cast leaves besides its confirmations: the log of the cast, the Wolves' Health and the cast ability's charges at the end.
 struct FlightEnd {
     std::string         log;
     std::vector<double> wolf_health;   // the first Wolf's, then the extra ones'
     int                 charges_left = -1;
+    int32_t             cast_id = -1;       // the client's id of the cast
+    int32_t             dodge_id = -1;      // ... and of the Dodge pressed after it
+    bool                dodge_item = false; // the Dodge's item was on the client right after it was pressed (the server took the Dodge)
+    std::vector<int32_t> ends;              // every ClientEndAbility the client got
+    float               mana_before = 0, mana_after = 0;   // the client's Mana at the trigger and at the end
 };
 /// The seconds after the trigger that the log gives for each line that holds `who` and then " leaves " (a note, an arrow or a bounce leaving).
 static std::vector<double> flight_leaves(const std::string& log, const std::string& who) {
@@ -4039,10 +4047,21 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
     const int32_t id = r.next_id++;
     const BunchWriter trig = trigger_at_value(setup, def->row.guid, id, repl::Value(cyl), fc.anim);
     const double base = r.now();
+    if (fc.dodge_first) r.trigger(kDodge);
+    if (end) end->mana_before = r.m.stats[kManaStat];
     r.send_trigger(def->row.guid, id, &trig);
-    bool requested = false, then_sent = false;
+    bool requested = false, then_sent = false, dodged = fc.dodge_at < 0;
     size_t reported = 0;
+    if (end) end->cast_id = id;
     for (int i = 0; i < static_cast<int>(fc.seconds / 0.05); ++i) {
+        if (!dodged && (i + 1) * 0.05 >= fc.dodge_at - 1e-9) {
+            dodged = true;
+            const int32_t dodge_id = r.trigger(kDodge);
+            if (end) {
+                end->dodge_id = dodge_id;
+                end->dodge_item = r.m.has_ability(kDodge);
+            }
+        }
         if (then_def && !then_sent && (i + 1) * 0.05 >= fc.then_at - 1e-9) {
             then_sent = true;
             const int32_t then_id = r.next_id++;
@@ -4081,6 +4100,8 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
         const combat::CombatWorld& cw = *r.h.fx.world->combat();
         end->wolf_health.push_back(cw.health_of(ww.wolf));
         for (const uint64_t w : ww.wolves) end->wolf_health.push_back(cw.health_of(w));
+        end->ends = r.m.end_ids();
+        end->mana_after = r.m.stats[kManaStat];
     }
     return true;
 }

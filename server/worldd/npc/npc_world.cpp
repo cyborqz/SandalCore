@@ -735,6 +735,10 @@ bool NpcWorld::set_speed_scale(uint64_t id, double scale) {
 bool NpcWorld::set_locks(uint64_t id, bool no_walk, bool no_turn) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end()) return false;
+    if (no_turn && !it->second.lock_turn) {   // a facing that goes on hold forgets the turn it was on: it does not swing round to its old target when the hold lifts
+        it->second.turning = false;
+        it->second.track = nullptr;
+    }
     it->second.lock_walk = no_walk;
     it->second.lock_turn = no_turn;
     return true;

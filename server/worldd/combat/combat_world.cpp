@@ -89,6 +89,11 @@ void CombatWorld::remove_player(PlayerPort* port) {
     }
 }
 
+void CombatWorld::player_died(uint64_t actor_id) {
+    player_combat_until_.erase(actor_id);
+    drop_effects_of(actor_id);   // (his pet's holds stand under his name too, so they end with his)
+}
+
 PlayerPort* CombatWorld::player(uint64_t actor_id) {
     for (PlayerPort* p : players_) {
         if (p->actor_id() == actor_id) return p;
@@ -1288,6 +1293,7 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
             d.lethal = true;
             d.flags |= stats::kHitLethal;
             pet_stop(npc_actor);
+            drop_effects_of_pet(npc_actor);   // what the pet held on the creatures ends with it
         }
         return d;
     }
@@ -1311,6 +1317,7 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
         }
     }
     if (!lethal) {
+        wake_on_damage(*n, r, origin, now);   // (before the creature looks again: a sleeper that is hit attacks in this very step)
         n->ai.notice(threat_to != 0 ? threat_to : attacker, std::max(threat, 1.0), now);
         if (threat_to != 0) n->ai.notice(attacker, 0.01, now);
     }
@@ -1330,6 +1337,7 @@ void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
     if (n.dead) return;
     n.dead = true;
     clear_effects(n);   // a dead creature burns no more and shows no effect
+    if (is_pet(n.actor_id)) drop_effects_of_pet(n.actor_id);   // ... and a dead pet holds nothing on the creatures any more
     n.killer = killer;
     n.ai.kill();
     n.cs->set_in_combat(false);
@@ -1430,7 +1438,7 @@ void CombatWorld::apply_crowd_control(Npc& n) {
         wire.anim_seconds = cc.anim_seconds;
         wire.anim_end = wire.anim_start + cc.anim_seconds - kCcAnimEndMargin;
     }
-    write_cc_state(registry_, n.actor_id, wire);
+    if (!write_cc_state(registry_, n.actor_id, wire)) spdlog::debug("[cc] {} ({}) has no crowd control state to write: its clients are not told, its walk is held all the same", n.leaf, n.actor_id);
     // its top speed is its speed times (1 - the strongest snare), at once and in every way it walks; a root, a freeze or a stun holds its feet, and a freeze or a stun its facing too.  The NPC world
     // holds all three (no walk order passes a slower speed or a step)
     const double kept = std::clamp(1.0 - cc.snare, 0.0, 1.0);
@@ -1491,29 +1499,71 @@ void CombatWorld::drop_effects_of(uint64_t instigator) {
     }
 }
 
+void CombatWorld::drop_effects_of_pet(uint64_t pet) {
+    for (const uint64_t id : std::vector<uint64_t>(effect_holders_.begin(), effect_holders_.end())) {
+        const auto it = npcs_.find(id);
+        if (it == npcs_.end()) continue;
+        Npc& n = *it->second;
+        effects::Book::Changes changes;
+        if (n.book.remove_from_pet(pet, changes) == 0) continue;
+        send_effects(n, changes);
+        if (n.book.empty()) {   // nothing is left to burn what the stats hold
+            for (const int64_t stat : {data_.ids().status_burning, data_.ids().status_burning_dur}) {
+                if (stat != 0) n.cs->set_current(stat, 0.0f);
+            }
+        }
+        spdlog::info("[effects] the effects of pet {} on {} ({}) end: it is gone", pet, n.leaf, n.actor_id);
+    }
+}
+
+void CombatWorld::wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* origin, double now) {
+    if (n.dead || r.miss() || n.book.empty()) return;
+    bool took_health = false;
+    for (const ResolvedMod& m : r.mods) took_health = took_health || (m.stat_guid == data_.ids().health && std::isfinite(m.value) && m.value < 0.0);
+    if (!took_health) return;
+    const int64_t record = origin && origin->hit ? origin->hit->row.guid : 0;
+    std::set<int64_t> broken;   // (the effect records; each goes off with all its instances)
+    for (const effects::Instance& e : n.book.instances()) {
+        if (e.def && e.def->breaks_on_damage && !e.def->breaks_on_damage->leaves(record)) broken.insert(e.def->row.guid);
+    }
+    for (const int64_t guid : broken) {
+        if (n.dead) return;
+        const abilities::EffectDef* def = catalog_.effect(guid);
+        spdlog::info("[effects] {} ({}) is hit by {}: {} ends", n.leaf, n.actor_id, origin && origin->hit ? origin->hit->row.name : std::string("a hit"), def ? def->row.name : std::string("an effect"));
+        remove_npc_effect(n.actor_id, guid, now);   // (as the end of any effect: its items go, its crowd control state clears, its Remove and End hits run)
+    }
+}
+
 bool CombatWorld::takes_crowd_control(const abilities::EffectDef& def) {
     if (!def.cc) return false;   // (the data file lacks its record)
     const int64_t status = def.cc->applied_status;
     const int64_t known = content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities | content::kCcEmplace | content::kCcSnare;
     if ((status & ~known) != 0) return false;                                   // a push, a pull, a status of the system
     if ((status & (content::kCcRoot | content::kCcSnare)) == 0) return false;   // a silence or a disarm binds no walk and no attack of a mob; a record with no status does nothing
+    // (the abilities bit stands for a stun, a trip and a sleep, which bind the feet and the facing as well: a record with it and a snare or a root but not the three bits is no stun, and a mob
+    // would be stunned whole by it.  None in the data today)
+    if ((status & content::kCcNoAbilities) != 0 && (status & (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) != (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) return false;
     return def.cc->animation_request.find("Custom") == std::string::npos;      // (an animation of its own is not played yet)
 }
 
-void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now) {
+void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now, uint64_t via_pet) {
     if (n.dead || !a.def) return;
     // A slow, a root, a freeze, a stun, a trip and a sleep go on like any effect and bind the creature (apply_crowd_control); a silence, a knockback, a pull and the rest stay off: the effect would wear its
     // icon and the mob would keep acting
     if (a.def->row.crowd_control_guid != 0 && !takes_crowd_control(*a.def)) {
         if (refused_effects_.insert(a.def->row.guid).second) {
-            spdlog::info("[effects] {} is a crowd control mobs do not take yet (status {}: a silence, a knockback, a pull or an animation of its own), so it is not put on {}", a.def->row.name,
-                         a.def->cc ? a.def->cc->applied_status : -1, n.leaf);
+            if (a.def->cc) {
+                spdlog::info("[effects] {} is a crowd control mobs do not take yet (status {}: a silence, a knockback, a pull or an animation of its own), so it is not put on {}", a.def->row.name,
+                             a.def->cc->applied_status, n.leaf);
+            } else {
+                spdlog::info("[effects] {} names a crowd-control record the data does not have, so it is not put on {}", a.def->row.name, n.leaf);
+            }
         }
         return;
     }
     effects::Book::Changes changes;
     effects::Instance created;
-    const bool made = n.book.apply(a, instigator, now, changes, &created);
+    const bool made = n.book.apply(a, instigator, now, changes, &created, via_pet);
     send_effects(n, changes);
     if (!changes.empty() && a.def->row.category.find("Hidden") == std::string::npos) {   // (the hidden one-second effects are not named)
         spdlog::log(effects_logged_++ < kLoggedEffects ? spdlog::level::info : spdlog::level::debug, "[effects] {} ({}) takes {}: {} stack(s), {:.1f} s left, from player {}", n.leaf, n.actor_id,
@@ -1624,6 +1674,11 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
         }
         if (!n.dead) effect_hit_fires(n, e.instigator, *hit, e.def->row.guid, at);
         if (n.dead || r.miss()) continue;
+        // what the hit takes off the creature (the effects it names, or the debuffs or buffs its filter names, up to its limit) goes before what it puts on: the lockout of a slow ends the slow it follows, and
+        // the lockouts' hits name the lockout effect they put on again (taken off after it went on, it would be gone at once). The effects of such a hit read nothing of what it takes off (no stack count), where
+        // an ability's hit on a creature works its effects out first (AbilityPipeline::apply_hit_on_targets). A filter that an older content.db does not say is not served
+        if (!hit->remove_effects.empty() || (hit->max_remove > 0 && hit->removal != abilities::HitDef::Removal::Unknown)) remove_effects_from_npc(n.actor_id, *hit, at);
+        if (n.dead) return;
         // the effects the hit puts on the creature in its turn (the burn's damage keeps its aura on, its last step ends the chain)
         Resolved gate;
         if (!resolver_.resolve_effects(from, n, *hit, meta, gate, why)) continue;

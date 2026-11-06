@@ -74,6 +74,7 @@ public:
         if (pet_.health() <= 0.0) {   // (no corpse and no reward: its session sees dead() and takes it away)
             pet_.dead = true;
             world_.pet_stop(pet_.actor_id);
+            world_.drop_effects_of_pet(pet_.actor_id);   // what it holds on the creatures ends with it
         }
     }
     void set_in_combat(bool, double) override {}
@@ -279,7 +280,7 @@ private:
     uint64_t           instigator_;
 };
 
-void CombatWorld::land_effects_of_hit(Npc& n, PlayerPort& port, const abilities::HitDef& hit, const HitMeta& meta, double now) {
+void CombatWorld::land_effects_of_hit(Npc& n, PlayerPort& port, const abilities::HitDef& hit, const HitMeta& meta, double now, uint64_t via_pet) {
     Resolved gate;
     std::string why;
     // the expressions read what the creature holds from its stat engine (GetEffectCount(GetTarget(), effect): Taunt's second landing): send_effects keeps it there
@@ -292,7 +293,7 @@ void CombatWorld::land_effects_of_hit(Npc& n, PlayerPort& port, const abilities:
         if (n.dead) return;
         const double shield = resolver_.effect_shield(port.fighter(), n, *a.def);
         if (shield > 0) add_shield(n.actor_id, shield, std::isinf(a.duration) ? 0.0 : a.duration, now);
-        land_effect(n, a, port.actor_id(), now);
+        land_effect(n, a, port.actor_id(), now, via_pet);
     }
 }
 
@@ -361,7 +362,7 @@ void CombatWorld::land_for_player(uint64_t by, uint64_t target, const abilities:
     }
     if (d.applied && !r.miss() && !d.lethal) {
         if (hit.max_remove > 0 || !hit.remove_effects.empty()) remove_effects_from_npc(target, hit, now);
-        land_effects_of_hit(n, *port, hit, meta, now);
+        land_effects_of_hit(n, *port, hit, meta, now, src.pet);   // (what a pet's hit puts on the creature is marked with the pet: it ends when the pet does)
     }
     if (src.children) land_children(by, target, hit, src, now, depth);
 }
@@ -833,6 +834,7 @@ void CombatWorld::pet_stop(uint64_t pet) {
 
 void CombatWorld::pet_cleanup(uint64_t pet) {
     pet_stop(pet);
+    drop_effects_of_pet(pet);   // dismissed, gone with its owner or taken out of the world: what it holds on the creatures ends
     pet_stand_downs_.erase(pet);
     pet_casts_.erase(pet);
     pet_owners_.erase(pet);

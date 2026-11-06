@@ -384,20 +384,23 @@ void test_cc_on_creatures(Fixture& f) {
                "...and its lunge is the free one's: %.0f against %.0f cm, steps of %.1f against %.1f cm", b.travelled, a.travelled, b.longest_step, a.longest_step);
     }
 
-    // ---- 6: two snares at once.  The Wolf walks home under the chill (0.5) and a Snared (0.25) put on in the same moment: it keeps what the stronger one leaves, not the product of the two
-    // (0.375); when the chill is off the weaker one holds it at 0.75, and when that is off it is free.
-    const abilities::HitDef* disengage = f.catalog->hit_named("Ranger_Disengage_Hit");
-    const abilities::EffectDef* snared = f.catalog->effect_named("Status_Snared");
-    CHECK(disengage && snared, "the data has the Ranger's Disengage hit and the Snared effect");
-    if (disengage && snared) {
+    // ---- 6: two snares at once.  The Wolf walks home under the chill (0.5) and a snare of 0.25 put on in the same moment: it keeps what the stronger one leaves, not the product of the two
+    // (0.375); when the chill is off the weaker one holds it at 0.75, and when that is off it is free.  The weaker one is the Generic Snared (8 s), which ticks no build-up: the Disengage's
+    // Snared and a chill together put 6 stacks a second on the build-up of the lockout (a chill 2 and the Snared 1, each tick), whose lockout at 24 stacks takes both snares off in about 4 s.
+    const abilities::EffectDef* snared = f.catalog->effect_named("Generic_Snared_Effect");
+    CHECK(snared != nullptr, "the data has the Generic Snared effect");
+    if (snared) {
         const auto snared_record = ability_db ? ability_db->crowd_control(snared->row.crowd_control_guid, err) : std::nullopt;
         CHECKF(snared_record && snared_record->applied_status == 16 && near(snared_record->snare_strength, 0.25, 1e-9), "Snared is a snare of 0.25 and nothing else: %s", err.c_str());
         if (snared_record) {
             CcRun two;
-            const abilities::HitDef* snare_hit = disengage;
             const bool ran = cc_fight(f, tables, wolf_path, 11.5, 0, 14000, -1, nullptr,
-                                      {CcEvent{1.0, chill_on(two)}, CcEvent{1.0, [&two, snare_hit](LungeStepContext& c) {
-                                                                                 two.snare_seconds = cc_land(c, *snare_hit);
+                                      {CcEvent{1.0, chill_on(two)}, CcEvent{1.0, [&two, snared](LungeStepContext& c) {
+                                                                                 effects::Applied weaker;
+                                                                                 weaker.def = snared;
+                                                                                 weaker.duration = 8.0;
+                                                                                 c.world.apply_effects(c.creature, c.player.actor_id(), {weaker}, c.now);
+                                                                                 two.snare_seconds = weaker.duration;
                                                                                  two.snared_at = c.now;
                                                                              }},
                                        CcEvent{1.0, sent_home(two)}},
@@ -605,7 +608,7 @@ struct CcWanderRun {
     double before = -1, during = -1, after = -1, scale = -1;
 };
 
-static CcWanderRun cc_wander_rooted(Fixture& f, const std::string& wolf_path, double root_at, double root_seconds, double total) {
+static CcWanderRun cc_wander_rooted(Fixture& f, const std::string& wolf_path, double root_at, double root_seconds, double total, double window_seconds = -1.0) {
     CcWanderRun out;
     Rig rig(4, 20, {});
     if (!rig.ok()) return out;
@@ -649,7 +652,7 @@ static CcWanderRun cc_wander_rooted(Fixture& f, const std::string& wolf_path, do
         const double step = std::hypot(a->x - lx, a->y - ly);
         lx = a->x;
         ly = a->y;
-        walked[now < root_at ? 0 : (now < root_at + root_seconds ? 1 : 2)] += step;
+        walked[now < root_at ? 0 : (now < root_at + (window_seconds > 0 ? window_seconds : root_seconds) ? 1 : 2)] += step;
     }
     out.before = walked[0];
     out.during = walked[1];
@@ -1060,11 +1063,14 @@ void test_cc_binds_creatures(Fixture& f) {
     }
 
     // ---- 11: a Wolf that wanders (the NPC world's own walk, with no fight) stands for the length of a root, and wanders again.
-    const CcWanderRun wander = cc_wander_rooted(f, wolf_path, 25.0, 20.0, 150.0);
-    std::printf("    11 wander: %.0f cm walked before the root, %.1f cm in the 20 s of it, %.0f cm in the 105 s after it\n", wander.before, wander.during, wander.after);
-    CHECK(wander.before >= 0, "a Wolf that wanders, with a root put on it 25 s in, can be made");
-    if (wander.before >= 0) {
-        CHECKF(wander.during <= 5.0, "a rooted Wolf does not wander: %.1f cm walked in the 20 s of the root (5 cm allowed)", wander.during);
+    // (the root lasts 7 s: a root that is kept on longer is taken off by its lockout, whose build-up gains a stack every half second and whose limit is 16)
+    const CcWanderRun wander = cc_wander_rooted(f, wolf_path, 25.0, 7.0, 150.0);
+    const CcWanderRun free_wander = cc_wander_rooted(f, wolf_path, 25.0, 0.05, 150.0, 7.0);   // (the same Wolf with no root to speak of: what it covers in the same 7 s)
+    std::printf("    11 wander: %.0f cm walked before the root, %.1f cm in the 7 s of it (a free Wolf %.0f cm), %.0f cm in the 118 s after it\n", wander.before, wander.during, free_wander.during, wander.after);
+    CHECK(wander.before >= 0 && free_wander.before >= 0, "a Wolf that wanders, with a root put on it 25 s in, can be made");
+    if (wander.before >= 0 && free_wander.before >= 0) {
+        CHECKF(free_wander.during > 100.0, "the Wolf is walking at that moment: a free one covers %.0f cm in the 7 s", free_wander.during);
+        CHECKF(wander.during <= 5.0, "a rooted Wolf does not wander: %.1f cm walked in the 7 s of the root (5 cm allowed)", wander.during);
         CHECKF(wander.before > 100.0 && wander.after > 100.0, "...and it wanders before the root and after it (%.0f and %.0f cm)", wander.before, wander.after);
         CHECKF(wander.scale == 1.0, "...and its walker keeps %.2f of its speed at the end", wander.scale);
     }

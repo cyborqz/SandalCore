@@ -59,6 +59,7 @@ struct Instance {
     double                        next_tick = kForever;  // kForever: it does not tick
     std::vector<stats::EffectMod> mods;
     uint64_t                      instigator = 0;        // the actor that applied it (the one it is shown to be from); 0: none
+    uint64_t                      pet = 0;               // the pet whose hit put it on (its owner is the instigator); 0: the instigator's own.  It ends with the pet
 };
 
 class Book {
@@ -89,8 +90,8 @@ public:
     size_t size() const { return items_.size(); }
 
     /// Applies `a` for `instigator` at time `t`.  When it made a NEW instance (the caller runs that effect's Apply hits then) `created` holds a copy of it and the
-    /// result is true; a stack added in place, a refresh and an application that changed nothing give false.
-    bool apply(const Applied& a, uint64_t instigator, double t, Changes& out, Instance* created = nullptr) {
+    /// result is true; a stack added in place, a refresh and an application that changed nothing give false.  `via_pet`: the pet whose hit it is (0: the instigator's own); the instance carries it (a pet's refresh of an instance the instigator put on himself leaves it his).
+    bool apply(const Applied& a, uint64_t instigator, double t, Changes& out, Instance* created = nullptr, uint64_t via_pet = 0) {
         if (!a.def || a.stacks < 1) return false;
         const content::EffectRow& row = a.def->row;
         const bool never_refresh = row.stack_duration_refresh.find("NeverRefresh") != std::string::npos;
@@ -109,6 +110,9 @@ public:
         const auto refresh = [&](Instance& e) {
             e.mods = a.mods;
             e.instigator = instigator;   // (a record that compares sources only reaches an instance of this same instigator)
+            // the pet's hit refreshes an instance that was the pet's own (it stays with the pet it is now from); one the owner put on himself stays the owner's: the pet's going does not take it off.
+            // The owner's own application makes an instance his, whoever it was from before
+            if (via_pet == 0 || e.pet != 0) e.pet = via_pet;
             if (never_refresh) return;
             if (extend && a.extension >= 0 && !std::isinf(e.end) && !std::isinf(a.duration)) {
                 // the time left grows by the amount the application worked out, up to the longest the record allows (what is left already is never cut)
@@ -132,6 +136,7 @@ public:
             e.mods = a.mods;
             e.next_tick = row.tick_timer > 0 ? (row.ignore_initial_tick ? t + row.tick_timer : t) : kForever;
             e.instigator = instigator;
+            e.pet = via_pet;
             items_.push_back(e);
             out.added.push_back(e);
             if (created) *created = e;
@@ -203,6 +208,21 @@ public:
             if (items_[i].instigator == instigator) {
                 out.removed.push_back(items_[i].key);
                 items_.erase(items_.begin() + static_cast<std::ptrdiff_t>(i));
+                ++n;
+            } else {
+                ++i;
+            }
+        }
+        return n;
+    }
+
+    /// Takes off everything the pet `pet` put on (it is gone); the number of instances that went.
+    size_t remove_from_pet(uint64_t pet, Changes& out) {
+        size_t n = 0;
+        if (pet == 0) return 0;
+        for (size_t i = 0; i < items_.size();) {
+            if (items_[i].pet == pet) {
+                remove_key(items_[i].key, out);   // (an instance this same change added never reached the array: it is dropped from the change)
                 ++n;
             } else {
                 ++i;

@@ -424,8 +424,20 @@ public:
 
     /// ServerEndAbility: the client ends the instance with this ServerInstanceId (an ability of ours it started): kEndDelay later the item's montage is
     /// cleared and ClientEndAbility(its ClientInstanceId) is sent [R: Cleric_SoothingGlow, the retail capture: +259 ms]. False for an instance that is none of ours
-    /// or was ended already.
+    /// or was ended already. A cast bar it ends before its end is cancelled: what a cast that had paid already took (Smite, the Arcane Circle) comes back, as after a Dodge.
     bool end_request(int32_t server_instance_id, double now);
+
+    /// A Dodge the server took: every cast bar the character is in ends (the game's rule). Nothing of the cast is paid, nothing fires and the montage ends; what a cast had paid already (the Mana and other stats
+    /// it took, the effect stacks it took, the charge that started its cooldown, the class resource that its payment gave) is given back, and the client gets ClientEndAbility for the cast. A cast whose bar is over (the client's request for
+    /// its branch came, a held cast's key went up) is not touched here, nor is a cast with no bar (a weapon swing, a song, the Salvo, the Barrage, a channel, a stance: end_by_dodge ends all of them except the song). Returns how many casts ended.
+    size_t end_cast_bars(double now, const char* why);
+
+    /// A Dodge the server took (the game's rule): a Dodge cancels an ability that has not gone out yet and gives back what it paid. Once something of it has gone out (a hit the client asked for or that landed, a projectile
+    /// or a volley launched, an effect started, a cast bar's end) the Dodge does nothing to it: no cancel, no refund, no message, and what is in the air still hits. It cancels the cast bars the character is in
+    /// (end_cast_bars), the Ranger's Salvo, Barrage, Air Strike and Raining Death, every held ability (the Whirlwind, Guard, Reflect, the Deliverance, the Combust ...) and the weapon swing under way, each before its
+    /// first arrow, hit or effect. Nothing of a cancelled cast is paid, nothing fires, the hits the client would still ask for are not taken, what it paid comes back and the client is told with ClientEndAbility for it.
+    /// A song and a Sprint go on, and a Rest ends in the runtime. Returns how many casts and swings were cancelled.
+    size_t end_by_dodge(double now);
 
     /// RequestHitVerification_Server: what the client says it hit. `own` of the `components` are the caster's own (nothing else is in this world).
     enum class HitVerdict : uint8_t {
@@ -647,6 +659,7 @@ private:
         std::shared_ptr<const ItemCast> item_cast;                // a consumable's cast (see Cast)
         int                          max_requests = kMaxRequestsPerHit;   // a zone's tick hit is asked for as often as the zone's life holds ticks
         double                       min_gap = kMinRequestGap;            // the least time between two requests for one hit
+        bool                         launched = false; // something of the cast has gone out (a hit, a projectile or a volley, an effect): a Dodge no longer cancels it
         std::vector<HitSlot>         slots;
         std::set<int64_t>            reach;            // every hit that belongs to the ability
         std::map<int64_t, std::pair<int, double>> asked;   // hit guid -> (requests, time of the last) for the hits that are no slot
@@ -683,6 +696,9 @@ private:
         int64_t                               charged_projectile = 0;     // ... and the one of its charged shot
         bool                                  held = false;               // the character's talent makes the cast a held one: it waits for the key's release or the full charge
         bool                                  charged = false;            // the charge was full: the cast fires the charged shot
+        bool                                  released = false;           // a held cast: the key went up, the cast goes on from there (its bar is over)
+        bool                                  paid = false;               // its cost step ran and took the cost (a Dodge or the client's end in its bar gives that back, refund)
+        int                                   resource_added = 0;         // the stacks of the class resource its last payment added (none at the resource's limit): what a give back takes off again
         int                                   shots = 0;                  // the shots it has taken
         int64_t                               shot_projectile = 0;        // the projectile record each shot sends (0: none: it is cast at the air)
         bool                                  montage_branch = false;     // the montage moves to a section when the cast ends (the changes of `item` below)
@@ -841,8 +857,16 @@ private:
     bool   holds_skill(int64_t skill) const;
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
     void   reschedule_branch(Cast& cast, double branch_at, double cost_after);
-    void   abort_cast(size_t index, double t, const char* why);   // a cast that ends here: none of its steps happens, its item keeps its place with the montage cleared
+    void   abort_cast(size_t index, double t, const char* why, bool give_back = false);   // a cast that ends here: none of its steps happens, its item keeps its place with the montage cleared; `give_back`: what it had paid comes back (refund)
     void   end_zones_of(const Cast& cast, double t);              // the zones a cast made go with it: one that did not open is dropped, one that did ends now
+    bool   in_cast_bar(const Cast& cast) const;                   // the cast's bar is running: the client's request for its branch has not come (a held cast's key is still down, its charge not full), or a summon has not run out
+    void   refund(bootstrap::AbilityChange& c, Cast& cast);   // what a cast paid comes back (a Dodge or the client's own end in its bar): its stat costs, its effect stacks, its charge (the cooldown ends when every charge is back) and the class resource it gave
+    void   give_back(bootstrap::AbilityChange& c, const Cast& cast);   // ... one payment of it (a Salvo shot is one: refund gives back the whole cast's, once)
+    size_t end_unlaunched(double t, const char* why);   // a Dodge: the Salvo, the Barrage, the Air Strike, the Raining Death and the held abilities that have not gone out are cancelled
+    size_t end_swings(double t, const char* why);        // a Dodge: the weapon swing under way is cancelled when nothing of it has gone out
+    bool   dodge_cancels(const Cast& cast) const;        // a cast end_unlaunched cancels: of those kinds, and nothing of it has gone out
+    bool   gone_out(int32_t client_id, const Cast* cast = nullptr) const;   // something of the cast has gone out: a hit asked for or landed, a launch, an effect, a cast bar's end
+    void   mark_launched(int32_t client_id);                                // ... a step of the cast sent something out
     bool   can_pay(const Cast& cast) const;                       // whether the character holds what the cast's cost step takes (stats, effect stacks, a charge of its group): asked at the cost step and by a jump that comes before it
     void   bring_sooner(Cast& cast, double earlier);              // the end of a cast bar came `earlier` (negative) than the moment it was taken to come: the rest of the cast moves with it
     void   land_by_flight(Cast& cast, double t);                  // the montage jumped: the cast bar's projectiles land when they get to the target (kFlights), not when the table said
@@ -901,6 +925,7 @@ private:
                         int64_t owner = 0);
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
+    void   restore_stacks(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, double t);   // stacks a cost took go back on (the instance keeps its time; one that has gone comes back whole)
     bootstrap::EffectItem effect_item(const EffectInst& e) const;
     void   run_effect_hits(bootstrap::AbilityChange& c, const EffectInst& e, const char* const* phases, size_t n, double t);
     void   step_loop(Cast& cast, double t);
@@ -1016,7 +1041,7 @@ private:
         int64_t ability = 0;
     };
     std::deque<Instance>      instances_;                           // the abilities the client may end with ServerEndAbility (the last few)
-    void   end_instance(size_t index, double t);
+    void   end_instance(size_t index, double t, const std::string& why = std::string());   // `why`: what ended it besides the client's own end (the log's note)
     /// A ranged weapon combo's swings: the step the last one played (by ability). The client plays the steps in order and starts over after the last, so the next swing is the step after it or the first;
     /// swing_montage keeps a modified client to that, and stop_swing is the client ending the swing (a stun): the arrows that had still to leave never do.
     std::map<int64_t, int> swing_steps_;

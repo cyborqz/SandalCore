@@ -248,6 +248,8 @@ public:
     // ---- players
     void add_player(PlayerPort* port);
     void remove_player(PlayerPort* port);
+    /// The player is dead (his Health ran out): everything he put on the creatures ends at once, and so does what his pet put on them (it stands under his name), instead of at the next hit of an effect.
+    void player_died(uint64_t actor_id);
     /// The port of the player whose pawn is `actor_id` (null: none joined).
     PlayerPort* find_player(uint64_t actor_id) { return player(actor_id); }
     const std::vector<PlayerPort*>& players() const { return players_; }
@@ -540,8 +542,9 @@ private:
     void  land_for_player(uint64_t by, uint64_t target, const abilities::HitDef& hit, const LandSource& src, double now, int depth = 0);
     /// The hits a hit fires through its targeting records, around `target`.
     void  land_children(uint64_t by, uint64_t target, const abilities::HitDef& hit, const LandSource& src, double now, int depth);
-    /// The effects `hit` puts on `n` for its player, each through land_effect (so a crowd control a mob does not take stays off), and the shield a TempHealth mod of one gives.
-    void  land_effects_of_hit(Npc& n, PlayerPort& port, const abilities::HitDef& hit, const HitMeta& meta, double now);
+    /// The effects `hit` puts on `n` for its player, each through land_effect (so a crowd control a mob does not take stays off), and the shield a TempHealth mod of one gives.  `via_pet`: the pet that
+    /// landed the hit (0: the player's own); what it puts on the creature ends when the pet is gone.
+    void  land_effects_of_hit(Npc& n, PlayerPort& port, const abilities::HitDef& hit, const HitMeta& meta, double now, uint64_t via_pet = 0);
     /// The hits of a hit whose effect's hits run (Soul Flare's damage around the pet, Hex's reset): only the Summoner's are followed, as the session's own hit does not follow the rest.
     void  effect_hit_fires(Npc& n, uint64_t by, const abilities::HitDef& hit, int64_t effect_guid, double now);
     /// The hit that just moved `n`'s stats, as what reacts to it reads it (read before a death takes the effects off).
@@ -559,7 +562,12 @@ private:
     uint64_t pet_of_owner(uint64_t owner) const;
     double flight_seconds(const content::AbilityHitRow& row, const Vec3& from, const Vec3& to) const;
     // ---- the effects a creature holds
-    void  land_effect(Npc& n, const effects::Applied& applied, uint64_t instigator, double now);
+    void  land_effect(Npc& n, const effects::Applied& applied, uint64_t instigator, double now, uint64_t via_pet = 0);
+    /// A hit that took Health from the creature breaks the effects that break at the first damage (a sleep: the data's InstantBreak), but for the hit records the effect leaves out (a lullaby's hit, a
+    /// poison's tick).  Called by land_hit before the creature's next look, so that the creature acts in the same step.
+    void  wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* origin, double now);
+    /// Everything the pet put on the creatures ends (it was dismissed, it died, or its owner left): what it holds is held under its owner's name, so the pet is marked on each instance.
+    void  drop_effects_of_pet(uint64_t pet);
     /// Whether a creature takes the effect's crowd control: a slow, a root, a freeze, a stun, a trip or a sleep.  A silence, a disarm or an exhaustion (they bind the player's own abilities), a push or a
     /// pull, a record that asks for an animation of its own and one that does nothing stay off.
     static bool takes_crowd_control(const abilities::EffectDef& def);
