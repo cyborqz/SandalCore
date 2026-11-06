@@ -11,11 +11,12 @@ To keep the repository clean, legal, and safe for everyone, all contributors mus
 1. **No Proprietary Game Assets**: Never submit game client binaries, game paks, copyrighted audio, 3D meshes, textures, or official game assets.
 2. **No Unreal Engine Source Code**: Never copy code from the proprietary Unreal Engine source tree into this repository.
 3. **No Personal Data or Secrets**: Never include personal identification, real names, personal file paths, non-loopback IP addresses, MAC addresses, credentials, private keys, or session tokens in code, comments, test fixtures, or pull request descriptions.
-4. **One Feature or Fix at a Time**: If you can, keep a pull request to one feature or one fix. This is a preference, not a rule: several fixes in one pull request are fine when the description names each one. Avoid massive indiscriminate refactors.
+4. **One Feature or Fix per Pull Request**: A pull request holds one feature or one fix. Split larger work into several pull requests that each build and pass the tests on their own. Do not include refactors the change does not need.
 5. **License Agreement**: All contributions are submitted under and licensed pursuant to the **GNU Affero General Public License version 3 (AGPL-3.0-only)** along with the additional terms specified in [`NOTICE`](../NOTICE).
 6. **Only What Is in the Repository**: Code comments, commit messages and pull request descriptions refer only to what is in this repository. Do not cite ids or numbers of outside recordings or logs, local file paths or private notes.
-7. **Several Pull Requests That Fit Together**: If you open more than one pull request, make sure they do not conflict when they are applied one by one. Base each on `main`; when one is merged, rebase the others onto the new `main` and check that they still build and pass the tests. If one depends on another, say so in its description.
+7. **Several Pull Requests That Fit Together**: If you open more than one pull request, make sure they do not conflict when they are applied one by one. Base each on the current `main`; when one is merged, rebase the others onto the new `main` and check that they still build and pass the tests. If one depends on another, say so in its description.
 8. **Modular Code**: Build each feature as a module as much as possible: new files of its own, a small entry point into the shared code, and as few edits to shared files as possible (see "Where New Code Goes"). Modular changes are easier to review, and they keep pull requests from conflicting with each other.
+9. **Up to Date With `main`**: A pull request is based on the current `main` with a linear history: rebase your branch, do not merge `main` into it. When `main` moves on and your pull request conflicts or falls behind, rebase it yourself.
 
 ---
 
@@ -72,10 +73,11 @@ Put a new feature into source files of its own and register it the way the exist
 ## Submitting Pull Requests
 
 1. Fork the repository and create your branch from `main`.
-2. Ensure all tests pass and code compiles with zero warnings or errors. The GitHub Actions run on your pull request shows the part that needs no game data.
+2. Rebase onto the current `main`, then make sure the code compiles with zero warnings or errors and every test passes on your own machine (both commands under "Building and Testing"). The GitHub Actions checks on your pull request must pass too.
 3. Review your diff thoroughly to verify no credentials, personal paths, or proprietary files were added.
 4. Open a pull request using the project's [Pull Request Template](PULL_REQUEST_TEMPLATE.md).
 5. Explain what changed and why, linking to relevant GitHub issues if applicable.
+6. A pull request that is not based on the current `main`, fails a check, mixes unrelated changes or leaves the template's checklist unanswered is sent back with a request for changes. A pull request with no update for 14 days after such a request may be closed.
 
 ---
 

@@ -9,8 +9,9 @@
 - 
 
 ## Scope
-<!-- If you can, keep a PR to one feature or one fix. This is a preference, not a rule: several fixes in one PR are fine, list each one under "Changes Made". -->
-- [ ] This PR holds one feature or one fix, or the list above names each one it holds.
+<!-- One feature or one fix per PR. Larger work goes into several PRs. -->
+- [ ] This PR holds one feature or one fix.
+- [ ] This PR is rebased on the current `main` (no merge commits from `main`), and its GitHub Actions checks pass.
 - [ ] If I have other open PRs: this one applies cleanly on main and on top of them, one after another, in any order they may be merged (or it names the PR it depends on).
 - [ ] New code is modular: the feature lives in files of its own and is registered the way existing features are, with as few edits to shared files as possible.
 

@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 4 November 2026
+**Last updated:** 6 November 2026
 
 ---
 
@@ -41,7 +41,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The item hand-in to a person: a conversation that asks for items opens the hand-in window at its end; the items the player picks leave the bag, count for the quest's hand-in objective and the talk goes on (Hungry For More: the Suspicious Bread to Cleric Beyam). A hand-in objective that a conversation completes counts too (the crest of The Root of the Problem), and an active hand-in objective names the node its person's talk starts at.
 - Quest map markers: a pin or an area on the map for every active objective that has a place (the people a talk objective names, the places of a "go to" objective, what a collect, use or hand-in objective tracks, the camps of mobs to kill), and the quest-available mark on the NPCs that have a quest to take, over the NPC and on the map.
 - Storage: the Storage Clerk's item and materials storage, kept across logins.
-- NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs.
+- NPC looks and names: every human NPC dressed, named and posed from the game's records, and the missing peaceful NPCs. The people whose records pin a face (the women guards of Lionhold and Joeva, several quest scholars, historians and workers) wear exactly that face, with the race and gender it was made for.
 - Bandit raiders and captains: dressed, named and armed in the Riverlands' camps, and fighting with their own attacks (strikes, cleaves, heavy slashes and whirlwinds).
 - Bandit arsonists: dressed, named and in the Riverlands' camps, throwing their fire bolts (and the fire bolt combo for the few that have it) every two seconds or so from up to 30 m, and closing in to 25 m between casts.
 - Mob projectiles: a bolt or a bomb leaves the mob when its animation says, flies to its target at the game's speed and hurts when it arrives (the arsonists' fire bolts and the goblin shamans' oozing bomb).
@@ -52,6 +52,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Burning mobs: the Burning debuff takes a fire number from a mob every second for 8 seconds (up to 24), shows the fire and the Burning icon, follows it home after a reset and ends with its death or the burner's leaving.
 - Debuffs on mobs: the bleeds (Bleeding, Hemorrhage), the poisons and the stat debuffs of a hit take effect on a mob. Bleeds and poisons take Health at their ticks (one Bleeding debuff for each attacker, a poison's stacks make its ticks bigger), Shaken and Volatile make a mob take more physical and magical damage, Demoralized makes it hit softer and Blinded makes it miss more.
 - Server speed with many players: a fixed-rate server tick, the players' views of the world taking turns, cheaper updates, one update built for all the players who see the same mob in the same state, the players' views worked out on several processor cores, and move answers at the original server's pace. In a load test with simulated players that walk, the server held its 30 updates a second with about twice as many of them as before.
+- Mob attack animations for the other families: the undead, Minotaurs, constructs, spiders, cultists and the rest of the Beast, Humanoid and Monster families play their own attack animations, as the goblins and bandits do.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -68,7 +69,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.
-- NPCs: face variety, names for rare mobs, and the other hostile humanoids (the bandit archers and healers, and the cultists).
+- NPCs: face variety for the people whose records randomize their face (they take one of a small set of recorded faces), names for rare mobs, and the other hostile humanoids (the bandit archers and healers, and the cultists).
 - Mobs: the remaining mob families' own fights and abilities (the Goblin Flame Shamans' fire bombs and the arsonists' fire spray, stream and ring among them), smooth movement for goblins and bandits while their attack animations play, pack aggro, damage matched to retail, and flying mobs.
 - Abilities: the bars of Deliverance (a held cast) and Disengage follow the game's recorded timeline.
 - The walking map: walls, fences, water and holes.

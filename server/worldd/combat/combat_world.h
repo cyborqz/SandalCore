@@ -270,6 +270,9 @@ public:
     /// The living enemies of `from` whose bodies touch the sphere of `radius_cm` around `centre` (the area where a projectile landed: the Ranger's Air Strike): a body counts when any part of it is
     /// inside and nothing on the ground stands between the centre and it (the navmesh's line, where both ends are on it).  Nearest to the centre first, at most `max`; the distance is from the centre.
     std::vector<GatheredTarget> enemies_around(const Fighter& from, const Vec3& centre, double radius_cm, size_t max);
+    /// The same as enemies_around, with nothing on the ground in the way: a body counts when any part of it is inside the sphere, whatever stands between (a ball that flies through walls: the Mage's
+    /// Ball Lightning).  Nearest to the centre first, at most `max`; the distance is from the centre.
+    std::vector<GatheredTarget> enemies_touching(const Fighter& from, const Vec3& centre, double radius_cm, size_t max);
     /// The height of the ground under (x, y): the walkable floor nearest to `z_hint`, or the landscape; false where the world knows none (no ground data).
     bool ground_height(double x, double y, double z_hint, double* z) const;
     /// The ObjectId of the NPC target's collision cylinder: what the ability items name as Targets and the confirmations export as the actor's
@@ -429,8 +432,10 @@ private:
     };
     /// Why the tree allowed none of a creature's attacks from where it stands: its target is farther than the attacks reach, or the right distance but not within the angle of its facing.
     /// `reach_cm` is the shortest reach of the ready attacks that stopped for the distance (an attack that needs the target a minimum distance away, a gap closer, does not count): the creature walks up to it.
+    /// `waits_on_timers`: the tree allowed none, and every attack the creature can play is shut by the fight clock or the creature's health alone (the fight is too young, its health is not yet where
+    /// the attack wants it), whatever the range, the angle, the cooldowns and the rolls say.
     struct TreeWhy {
-        bool   too_far = false, off_angle = false;
+        bool   too_far = false, off_angle = false, waits_on_timers = false;
         double reach_cm = -1;
     };
     /// How an attack with its own animation plays: the montage, how long it runs and the hits it lands (seconds after it starts, hit record).
@@ -448,7 +453,8 @@ private:
     class Npc;
     Npc*  combatant(uint64_t actor_id);
     Npc*  make_combatant(const world::WorldActor& a);
-    Attack choose_attack(Npc& n);
+    /// `single_swing`: the attack every creature had before the trees (its kit's, else the generic slash), whatever animation the creature has.
+    Attack choose_attack(Npc& n, bool single_swing = false);
     Attack choose_animated(Npc& n, const Fighter* target, TreeWhy* why = nullptr);
     /// Whether a hit of `area` lands on `body` now (the creature as it stands and faces): see combat/bite_area.h.  `is_target`: the body is the one the record's target part finds.
     bool  hit_reaches(const Npc& n, const Fighter& body, const BiteArea& area, bool is_target) const;

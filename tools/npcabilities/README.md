@@ -85,7 +85,7 @@ The same step (`-Only tools,npcabilities`) also writes four tables that dress an
 
 - `npc_looks.tsv` (`looks`, from the game's containers): one line per pawn Blueprint whose class defaults, or its parents', name an NPCAppearance record: the Blueprint (as `npc_motion.tsv`
   names it), the `appearance` record guid, the `name` the Blueprint carries, and the `race` and `gender` its BaseCharacterInfo sets (empty: the defaults, Kaelar and Male).
-- `npc_appearances.tsv` (`looks.py`, from content.db): the NPCAppearance records (shared appearance info, the outfit options and the curve that weighs them), the outfits (the item
+- `npc_appearances.tsv` (`looks.py`, from content.db): the NPCAppearance records (shared appearance info, the outfit options, the curve that weighs them and the customization preset a record pins), the customization presets that the records which do not randomize their face pin (their saved face, hair, eyes and colours, and the race and gender of the body they were made for; for a record that pins one, the shared appearance info that has a body for it), the outfits (the item
   appearance records of each slot and the curve that weighs them) and the races and genders each shared appearance info may make. `looks.py` documents the lines.
 - `npc_names.tsv` (`looks.py`): the display names of the population instances, asset sets and assets; the game's server takes the NPC's name from the first non-empty list of them.
 - `npc_trees.tsv` (`looks`, from the game's containers): one line per pawn Blueprint that plays a state tree (its own reference, else the nearest parent's): the Blueprint, the `tree`, and whether

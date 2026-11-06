@@ -84,13 +84,13 @@ $statprog  = Join-Path $toolsDir 'statprog.exe'
 $navbuild  = Join-Path $distDir 'Release\aoc_navbuild.exe'
 $logFile   = Join-Path $stampDir 'current.log'
 $lastLog   = Join-Path $stampDir 'last_run.log'
-# The creature kinds that attack with their own animation: one container folder of the game's files per kind (its Blueprints and the animation montages beside them).
+# The creature kinds that attack with their own animation: container folders of the game's files (the Blueprints and the animation montages beside them), one per family or kind.
 # worldd animates exactly the Blueprints this reads; a kind that is not listed keeps its single swing.
-$NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast/Rabid', 'AOC/Content/DesignAssets/Population/NPC/Beast/Canine', 'AOC/Content/DesignAssets/Population/NPC/Beast/Bear',
-               'AOC/Content/DesignAssets/Population/NPC/Beast/Bird/Raven', 'AOC/Content/DesignAssets/Population/NPC/Humanoid/Goblin',
+# from PR #10 by MrJambix: every family under Beast, Humanoid and Monster (not one folder per kind any more), and the cultists
+$NpcFolders = @('AOC/Content/DesignAssets/Population/NPC/Beast', 'AOC/Content/DesignAssets/Population/NPC/Humanoid', 'AOC/Content/DesignAssets/Population/NPC/Monster',
                # the bandits (raiders, captains, archers, mages, healers: their Blueprints, trees and animation montages) and the one raider montage that lives beside the raider's animations
-               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider',
-               # the Summoner's pets
+               'AOC/Content/DesignAssets/Population/NPC/PCRaces/Bandits', 'AOC/Content/Characters/NPC/Human/BanditRaider', 'AOC/Content/DesignAssets/Population/NPC/PCRaces/Cultists',
+               # the Summoner's pets (not under the families above)
                'AOC/Content/DesignAssets/Population/NPC/TestNPCs/Pets')
 # The folders whose montages also export the time of their animation end notify (the montage table's anim_end): where an ability's task is done and its cooldowns start (the bandits').
 # The other creatures' abilities are done when their montage is over.

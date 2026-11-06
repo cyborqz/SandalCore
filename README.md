@@ -84,7 +84,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 | **CMake** | 3.25 or newer (the copy of Visual Studio works) | the C++ build |
 | **Git** | any current version | fetches CUE4Parse and vcpkg |
 | **[vcpkg](https://github.com/microsoft/vcpkg)** | current | the C++ libraries (grpc, protobuf, openssl, ...); found through `VCPKG_ROOT`, `%USERPROFILE%\vcpkg`, `C:\vcpkg`, `\vcpkg` on the repository's drive, or the Visual Studio copy |
-| **Go** | 1.27 or newer (`services/go.mod`) | the backend services and `contentc` |
+| **Go** | 1.27.3 or newer (`services/go.mod`; `install.bat` upgrades an older Go, or take the installer from [go.dev/dl](https://go.dev/dl/)) | the backend services and `contentc` |
 | **.NET SDK** | 8.0 (any 8.x; with the 8.0 runtime) | `tools/mapc`, `tools/itemnames` and `tools/npcabilities`, which read the game's files |
 | **Python** | 3.10 or newer | the generators that `scripts\extract_game_data.ps1` runs |
 | **Docker Desktop** | current | PostgreSQL, to run the servers (not needed to build); or run PostgreSQL 15+ yourself |

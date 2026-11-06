@@ -193,6 +193,42 @@ constexpr Flight kFlights[] = {
     {"Cleric_Judgment", 2.9972165, 2, 0.0390, 0, 1.0e9},
     {"Cleric_Judgment", 2.9962265, 1, 0.0376, 1},
 };
+// The Mage's Ball Lightning: its cast bar ends where its montage reaches 1.000823 s, and the montage launches the ball 0.046711 s of montage after that (the play rate is worked out as for the cast bars above:
+// the bar's end over the seconds the bar took). The ball starts 150 cm ahead of the caster and 150 cm above the middle of the caster's body, hurts an enemy it touches at once and then every 0.5 s for as long as the
+// enemy stays inside it. Its speed, size, range and life come from the projectile's record (350 cm/s, 500 cm, 3,000 cm and 10 s: the range ends it after 8.57 s).
+constexpr BallCast kBalls[] = {
+    {"Mage_BallLightning", 1.000823, 0.046711, 0.5, 150.0, 150.0},
+};
+// A ball is flown in steps of this many seconds (17.5 cm of its way): an enemy it touches is found within one step.
+constexpr double kBallStep = 0.05;
+// The longest a ball may fly whatever its record says (a record with no life and no range would never end).
+constexpr double kBallMaxSeconds = 60.0;
+
+// The ball the ability sends (null: it sends none).
+const BallCast* ball_of(const AbilityDef& def) {
+    for (const BallCast& b : kBalls) {
+        if (def.row.name == b.ability) return &b;
+    }
+    return nullptr;
+}
+// The projectile record of the ability's ball: the first projectile the ability lists (0: none).
+int64_t ball_projectile_of(const AbilityDef& def) {
+    for (const content::AbilityHitRow& h : def.hits) {
+        if (h.source == "projectile") return h.owner_guid;
+    }
+    return 0;
+}
+// Whether the ability's ball carries this hit: the server's own ball lands it, so no request of the client's may.
+bool carried_by_ball(const AbilityDef& def, int64_t hit_guid) {
+    if (!ball_of(def)) return false;
+    for (const content::AbilityHitRow& h : def.hits) {
+        if (h.source == "projectile" && h.hit_guid == hit_guid) return true;
+    }
+    return false;
+}
+// The way a ball flies when it leaves: the way the caster faces, which is the camera's yaw at the caster's last move (as the Scatter Shot's cone and the Air Strike take it). This is the one place that says so.
+double ball_heading_degrees(const combat::Fighter& caster) { return caster.facing_degrees(); }
+
 // How far past the caster's body a projectile starts (its hand), cm.
 constexpr double kMuzzleCm = 40.0;
 // The stats the client takes its montages' play rates from (stat_def: MagicalSpeed, PhysicalSpeed).
@@ -1294,12 +1330,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     }
     const bool melee = ability && (ability->row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                                    std::find(ability->row.tags.begin(), ability->row.tags.end(), "ability.Melee") != ability->row.tags.end());
-    // whether the hit reaches a target: it is there and alive, on a side the hit helps or harms, and within reach
+    // whether the hit reaches a target: it is there and alive, on a side the hit helps or harms, and within reach (a ball's hit has no reach to keep: it hurts what the ball touches, wherever the caster is by now)
     const auto reached = [&](const combat::TargetInfo& ti) {
         if (!ti.exists || !ti.alive) return false;
         const bool hostile = ti.relation == combat::Relation::Hostile;
         if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
-        return ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
+        return src.reach_free || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
     };
     // the hit's primary target, for the formulas that tell it from the others (the melee combos give every other target a smaller share): the caster's
     // selected enemy when the hit reaches it, else the target nearest the caster
@@ -1780,7 +1816,18 @@ double AbilityPipeline::movement_allowance(double now) const {
 void AbilityPipeline::set_dead(bool dead) {
     dead_ = dead;
     if (dead) {
-        casts_.clear();
+        // every cast ends with the caster, except a ball that has left: it flies on and goes on hurting what it touches. Its own steps and the hits they sent stay; nothing else of its cast does
+        for (size_t i = casts_.size(); i-- > 0;) {
+            Cast& c = casts_[i];
+            const bool flying = c.ball != nullptr && c.ball_flight.launch_at >= 0;
+            if (flying) {
+                for (std::optional<double>* due : {&c.item_due, &c.cost_due, &c.hit_due, &c.projectile_due, &c.loop_due, &c.own_due, &c.branch_due, &c.end_due}) due->reset();
+                c.missiles.erase(std::remove_if(c.missiles.begin(), c.missiles.end(),
+                                                [](const Cast::Missile& m) { return m.kind != Cast::Missile::Kind::Ball && m.kind != Cast::Missile::Kind::Land; }),
+                                 c.missiles.end());
+            }
+            if (!flying || c.missiles.empty()) casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
+        }
         // a consumable's cast that had not paid its cost is over with the death and takes nothing from the bag (the session lets its item go): the hit the client asked for
         // before the death must not give the buff of an item that stays where it was
         records_.erase(std::remove_if(records_.begin(), records_.end(), [](const CastRecord& r) { return r.item_cast && r.cost_at < 0; }), records_.end());
@@ -1911,10 +1958,11 @@ void AbilityPipeline::run_due(double t) {
                 if (cast.missiles[k].due < cast.missiles[first].due) first = k;
             }
             if (cast.missiles[first].due <= t) {
-                if (cast.missiles[first].kind != Cast::Missile::Kind::Land) {   // a timed cast's launch, the landing of a Strike's arrow, or a note or a bounce that leaves
+                if (cast.missiles[first].kind != Cast::Missile::Kind::Land) {   // a timed cast's launch, the landing of a Strike's arrow, a note or a bounce that leaves, or a step of a ball's flight
                     const Cast::Missile step = cast.missiles[first];
                     cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
                     if (step.kind == Cast::Missile::Kind::Fly) launch_note(cast, step, t);
+                    else if (step.kind == Cast::Missile::Kind::Ball) ball_step(cast, step, t);   // (the step has left the list: it puts its next one back itself)
                     else step_timed(cast, step, t);
                     finish_cast_if_done(i);
                     return;
@@ -2853,6 +2901,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         const int64_t tg = targeting_of(*def, static_cast<int>(h.key));
         const HitDef* hit = catalog_->hit(h.hit_guid);
         if (!hit || hit->row.net_type.find("ServerVerify") == std::string::npos) continue;   // a NET_ServerOnly hit is no one's request
+        if (carried_by_ball(*def, h.hit_guid)) continue;   // the ability's ball lands this hit by itself, whatever the client asks: a request for it finds no slot and damages nobody
         HitSlot slot;
         slot.hit = hit;
         slot.targeting = tg;
@@ -2945,6 +2994,8 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
     if (cast.gathered && (!cast.cost_due || can_pay(cast))) launch_gathered(cast, t);
     // the projectiles of a cast bar are launched from the request: they land when they get to the target
     land_by_flight(cast, t);
+    // a ball (the Mage's Ball Lightning) leaves when the montage's notify gets there, whoever is or is not the cast's target
+    launch_ball(cast, t);
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
     if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
     if (cast.charged && cast.gathered && cast.gathered->charged_montage[0] != '\0') {   // the charged shot has a montage of its own
@@ -3650,6 +3701,7 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
             src.actor = false;
             src.confirm = true;
             src.simulated = true;
+            src.reach_free = cast.ball != nullptr && h.owner_guid == cast.ball_flight.projectile;   // (the ball's own hits: it hurts what it touches, wherever the caster stands)
         }
         bool landed = false;
         if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
@@ -3873,6 +3925,83 @@ void AbilityPipeline::land_strike(Cast& cast, const Cast::Missile& m, double t) 
                  std::hypot(m.x - combat_->self().position().x, m.y - combat_->self().position().y) / 100.0, hurt, hurt == 1 ? "y" : "ies");
     recompute(c);
     emit({std::move(c), std::nullopt, t, "arrow " + std::to_string(m.index + 1) + " of " + def.row.name + " lands"});
+}
+
+// ---- a ball that flies on (kBalls) -------------------------------------------------------------------------------------------------------------
+
+void AbilityPipeline::launch_ball(Cast& cast, double t) {
+    if (!combat_ || !cast.branched || cast.heard_at < 0 || cast.ball) return;   // (no world to fly in, or a cast bar whose end the client never asked for: no ball)
+    const BallCast* plan = ball_of(*cast.def);
+    if (!plan) return;
+    const int64_t projectile = ball_projectile_of(*cast.def);
+    const content::ProjectileRow* p = catalog_->projectile(projectile);
+    if (!p || !(p->speed > 0)) return;
+    // this player's play rate on the cast: the montage time of the bar's end over the seconds the bar took; the ball leaves when the montage's notify gets there, never before the cost step
+    const double rate = plan->bar / std::clamp(cast.heard_at - cast.trigger_at, 0.3, 8.0);
+    double at = std::max(cast.heard_at + plan->fire / rate, t);
+    if (cast.cost_due) at = std::max(at, *cast.cost_due);
+    cast.ball = plan;
+    BallFlight& b = cast.ball_flight;
+    b.projectile = projectile;
+    b.speed = p->speed;
+    b.radius = p->sphere_radius;
+    b.lasts = std::min({p->life_time > 0 ? p->life_time : kBallMaxSeconds, p->range > 0 ? p->range / p->speed : kBallMaxSeconds, kBallMaxSeconds});
+    b.rate = rate;
+    Cast::Missile first;
+    first.kind = Cast::Missile::Kind::Ball;
+    first.due = at;
+    first.projectile = projectile;
+    cast.missiles.push_back(first);
+}
+
+void AbilityPipeline::ball_step(Cast& cast, const Cast::Missile& step, double t) {
+    if (!combat_ || !cast.ball) return;
+    BallFlight& b = cast.ball_flight;
+    if (step.index == 0) {
+        // the montage that launches the ball is the one the pawn shows: when another ability's item has taken its place the ball never leaves
+        if (cast.instance >= 0 && (!item_instance_ || *item_instance_ != cast.instance)) return;
+        // it leaves from where the caster stands now, along the way the caster faces now, and flies level on that line
+        const combat::Fighter& me = combat_->self();
+        const combat::Vec3 from = me.position();
+        const double heading = ball_heading_degrees(me);
+        b.dx = std::cos(heading * kPiRadians / 180.0);
+        b.dy = std::sin(heading * kPiRadians / 180.0);
+        b.x = from.x + b.dx * cast.ball->ahead;
+        b.y = from.y + b.dy * cast.ball->ahead;
+        b.z = from.z + cast.ball->up;
+        b.launch_at = t;
+        spdlog::info("[abilities] {}: the ball leaves {:.3f} s after the trigger (the client plays at {:.2f}) from ({:.0f}, {:.0f}, {:.0f}) heading {:.1f} degrees", cast.def->row.name, t - cast.trigger_at,
+                     b.rate, b.x, b.y, b.z, heading);
+    }
+    // where the ball is: its way counted from the number of steps, so that a step that runs late does not move it
+    const double along = b.speed * kBallStep * step.index;
+    const combat::Vec3 centre{b.x + b.dx * along, b.y + b.dy * along, b.z};
+    for (const combat::GatheredTarget& e : combat_->enemies_touching(centre, b.radius, kMaxGathered)) {
+        BallFlight::Touch& touch = b.touched[e.actor];
+        if (touch.next > t + 1e-9) continue;   // hurt a moment ago: not again before its period is over
+        touch.next = t + cast.ball->period;
+        ++touch.hits;
+        ++b.hits;
+        // the hit is the projectile's ordinary one (the Land step): its damage, its confirmation and its effects follow the same path as any projectile's
+        Cast::Missile land;
+        land.due = t;
+        land.projectile = b.projectile;
+        land.target = e.actor;
+        cast.missiles.push_back(land);
+        spdlog::info("[abilities] {}: the ball hits actor {} (hit {} on it, {:.2f} s after the launch, {:.1f} m from the caster)", cast.def->row.name, e.actor, touch.hits, t - b.launch_at,
+                     combat_->inspect(e.actor).surface_distance_cm / 100.0);
+    }
+    if ((step.index + 1) * kBallStep <= b.lasts + 1e-9) {   // the ball is still in flight at the next step: it comes back then (this step has left the list)
+        Cast::Missile next = step;
+        next.index = step.index + 1;
+        next.due = b.launch_at + kBallStep * next.index;
+        cast.missiles.push_back(next);
+        return;
+    }
+    const content::ProjectileRow* p = catalog_->projectile(b.projectile);
+    const bool by_range = p && p->range > 0 && p->speed > 0 && (p->life_time <= 0 || p->range / p->speed <= p->life_time);
+    spdlog::info("[abilities] {}: the ball ends after {:.2f} s ({}): {} hits on {} enem{}", cast.def->row.name, b.lasts, by_range ? "its range" : "its life", b.hits, b.touched.size(),
+                 b.touched.size() == 1 ? "y" : "ies");
 }
 
 void AbilityPipeline::cancel_timed(int32_t client_instance_id, double now) {
