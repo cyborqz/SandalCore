@@ -9,6 +9,7 @@
 //
 //    StatsComponent   the StatRepInt32EveryoneProxy items (Health, MaxHealth, Mana, MaxMana, MoveSpeedMult, the penetrations ...): a stat's float
 //                     bits as the engine settled them; Health moves with every hit and is 0 in the frame of a death
+//                     and CrowdControlState, the crowd control the creature is under (a snare's flags and strength), in the update that carries the effect
 //    CombatInfo       bInCombat and ActiveTargets (the one object the NPC fights: obj:0 for none) flip together at the first exchange and clear at the
 //                     end; bIsDead is 1 in the frame of the death (the client plays the death from it, no RPC); EliteRank
 //
@@ -50,6 +51,11 @@ bool mark_dead(world::WorldActor& actor);
 
 /// CombatInfo.EliteRank.
 bool write_elite_rank(world::ActorRegistry& registry, uint64_t actor_id, int rank);
+
+/// The stats component's CrowdControlState, the part a snare uses: StatusFlags (the status bits of the crowd control the creature is under, content::kCcSnare ...) and SnareValue (the strength of the
+/// strongest snare; the speed the creature keeps is 1 minus it).  A creature that holds none has both at 0.  The creature's clients are told in the update that carries the effect items, so whoever
+/// changes its CurrentEffects writes this in the same call.  False when the actor has no such state.
+bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, int64_t flags, double snare);
 
 /// The EveryoneProxy item's value for a stat of an actor opened from a template (what the client is told now); false when there is none.
 bool read_stat(const world::WorldActor& actor, int64_t record, float& value);

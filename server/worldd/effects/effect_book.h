@@ -253,6 +253,23 @@ public:
         return out;
     }
 
+    /// The crowd control the instances put on their holder: the status flags of every live instance's crowd-control record together (content::kCcSnare ...), and the strength of the strongest live snare.
+    /// Snares do not add up or multiply: a holder under two keeps the speed the stronger one leaves it (1 - snare).  Equal when two books hold the same crowd control.
+    struct Crowd {
+        int64_t flags = 0;
+        double  snare = 0;
+        bool operator==(const Crowd&) const = default;
+    };
+    Crowd cc() const {
+        Crowd out;
+        for (const Instance& e : items_) {
+            if (!e.def || !e.def->cc) continue;
+            out.flags |= e.def->cc->applied_status;
+            if (e.def->cc->applied_status & content::kCcSnare) out.snare = std::max(out.snare, e.def->cc->snare_strength);
+        }
+        return out;
+    }
+
 private:
     bool remove_key(int64_t key, Changes& out) {
         for (size_t i = 0; i < items_.size(); ++i) {

@@ -16,12 +16,12 @@ namespace {
 
 /// A single fragment record — same semantics as Python's entry dict.
 struct Fragment {
-    size_t pkt_index;
-    size_t bunch_index;
-    const ParsedBunch* bunch;
-    const uint8_t* raw_buf;
-    size_t raw_len;
-    Direction direction;
+    size_t pkt_index{};
+    size_t bunch_index{};
+    const ParsedBunch* bunch{};
+    const uint8_t* raw_buf{};
+    size_t raw_len{};
+    Direction direction{};
 };
 
 /// Concatenate the payload bits of a chain of fragments into a single

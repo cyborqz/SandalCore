@@ -717,6 +717,13 @@ bool NpcWorld::set_yaw_rate(uint64_t id, double degrees_per_second) {
     return true;
 }
 
+bool NpcWorld::set_speed_scale(uint64_t id, double scale) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end()) return false;
+    it->second.mover.set_speed_scale(scale);   // (every walk of the NPC goes through its Mover's advance: a chase, a wander, a patrol and the way home alike)
+    return true;
+}
+
 bool NpcWorld::release(uint64_t id) {
     const auto it = npcs_.find(id);
     if (it == npcs_.end() || it->second.mode != Mode::Ordered) return false;

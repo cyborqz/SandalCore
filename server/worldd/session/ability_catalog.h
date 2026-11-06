@@ -33,6 +33,8 @@ struct EffectDef {
     std::vector<std::pair<std::string, int64_t>> hits;   // (phase, hit guid): PreApply, Apply, Tick, Consume, Remove, Expire, End
     /// The reactions the effect carries while it is on its holder (extra's ReactionsIds, in the listed order; contentc version 35).
     std::vector<int64_t>                        reactions;
+    /// What the effect does to the movement and abilities of its holder (the crowd-control record the effect names: a snare's strength, a root, a stun ...); empty for an effect that names none.
+    std::optional<content::CrowdControlRow>     cc;
 };
 // [C Y B x CoA]
 

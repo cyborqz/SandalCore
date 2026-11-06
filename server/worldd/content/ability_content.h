@@ -176,6 +176,9 @@ struct EffectRow {
     int64_t     extension_expr = 0;
 };
 
+/// The bits of CrowdControlRow::applied_status (Stun and Trip are 7, Frozen 11, a push 36).
+inline constexpr int64_t kCcRoot = 1, kCcNoTurn = 2, kCcNoAbilities = 4, kCcEmplace = 8, kCcSnare = 16, kCcDisplace = 32;
+
 /// ab_crowd_control (contentc version 39): what a crowd-control record does to its holder.  `applied_status` is a bit set: Root 1, no turning 2, abilities disabled 4, Snare 16,
 /// displaced 32 (Stun and Trip 7, Frozen 11, a push 36).  The push fields are the data's expression text; no push is played yet.
 struct CrowdControlRow {

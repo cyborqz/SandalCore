@@ -408,7 +408,7 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     if (!area_report_->props.empty()) spdlog::info("[area] quest objects: {} made (from {} recorded template(s))", area_report_->props.size(), generic_ ? generic_->props_made() : 0);
     if (looks_) {
         const auto& lc = looks_->counts();
-        spdlog::info("[looks] the area's people: {} dressed ({} customizations from the recorded pool, {} from a record's own preset, {} of them with the preset's race or gender, {} plain), {} named by the data, {} by their Blueprint, {} with no name, {} left as recorded", lc.dressed,
+        spdlog::info("[looks] the area's people: {} dressed ({} customizations from the recorded pool, {} from a record's own preset, {} of them given a different race or gender than they would have had, {} plain), {} named by the data, {} by their Blueprint, {} with no name, {} left as recorded", lc.dressed,
                      lc.from_pool, lc.from_preset, lc.preset_body, lc.plain_customization, lc.named, lc.blueprint_named, lc.unnamed, lc.no_record);
     }
     for (const std::string& n : area_report_->notes) spdlog::warn("[area] {}", n);

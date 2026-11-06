@@ -285,8 +285,10 @@ public:
     Delivery apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, const Resolved& resolved, double now, uint64_t threat_to = 0, const HitOrigin* origin = nullptr);
 
     /// Puts the effects a player's hit applies (HitResolver::resolve_effects) on an NPC.  The NPC keeps them in its effect book, shows them to the clients (its CurrentEffects), and runs
-    /// their hits from the player to it: the Apply hits now, the Tick, Expire and End hits as their moments come (tick()).  An effect that carries a slow, snare or CC record is left off
-    /// (a mob does not yet slow down or stop for one).  Everything of a player ends when he leaves or dies; everything of a mob ends with its death (and not with a reset).
+    /// their hits from the player to it: the Apply hits now, the Tick, Expire and End hits as their moments come (tick()).  An effect whose crowd-control record is a snare alone (a slow) slows the
+    /// creature: it keeps 1 minus the strongest snare of its speed, at once, in every way it walks (the NPC world holds it), and its crowd control state says so in the update of the effect.  Every other
+    /// crowd control (a root, a stun, a knockback ...) is left off (a mob does not yet stop for one).  Everything of a player ends when he leaves or dies; everything of a mob ends with its death (and
+    /// not with a reset).
     void apply_effects(uint64_t npc_actor, uint64_t instigator, const std::vector<effects::Applied>& effects, double now);
     /// Seconds left of an effect record on an NPC (0: it is not on).
     double effect_remaining(uint64_t npc_actor, int64_t effect_guid, double now) const;
@@ -533,7 +535,7 @@ private:
     void  land_for_player(uint64_t by, uint64_t target, const abilities::HitDef& hit, const LandSource& src, double now, int depth = 0);
     /// The hits a hit fires through its targeting records, around `target`.
     void  land_children(uint64_t by, uint64_t target, const abilities::HitDef& hit, const LandSource& src, double now, int depth);
-    /// The effects `hit` puts on `n` for its player, each through land_effect (so a crowd control stays off), and the shield a TempHealth mod of one gives.
+    /// The effects `hit` puts on `n` for its player, each through land_effect (so a crowd control other than a slow stays off), and the shield a TempHealth mod of one gives.
     void  land_effects_of_hit(Npc& n, PlayerPort& port, const abilities::HitDef& hit, const HitMeta& meta, double now);
     /// The hits of a hit whose effect's hits run (Soul Flare's damage around the pet, Hex's reset): only the Summoner's are followed, as the session's own hit does not follow the rest.
     void  effect_hit_fires(Npc& n, uint64_t by, const abilities::HitDef& hit, int64_t effect_guid, double now);
@@ -557,8 +559,14 @@ private:
     /// own effects are put on the creature the same way, and the player's client is told what it has to show.  An effect whose player is gone or dead ends instead.
     void  run_effect_hits(Npc& n, const effects::Instance& e, const char* const* phases, size_t count, double at);
     void  advance_effects(double now);
-    /// Writes a change of the creature's book into its CurrentEffects.
+    /// Writes a change of the creature's book into its CurrentEffects, and the crowd control the book holds now into its crowd control state and its walk (apply_crowd_control).  Every way an effect goes on, comes
+    /// off or is cleared passes here.
     void  send_effects(Npc& n, const effects::Book::Changes& changes);
+    /// The crowd control of the creature's book, when it differs from what was last written: its state (the flags and the snare, in the update of the effect items) and the share of its speed it keeps
+    /// (1 minus the snare), which the NPC world holds for every walk.  The log names it at the next step (log_crowd_control).
+    void  apply_crowd_control(Npc& n);
+    /// One `[cc]` line for each creature whose crowd control is not what the log last named, with the speed the world uses for it; a change that undid itself within the step is not named.
+    void  log_crowd_control();
     void  clear_effects(Npc& n);
     /// Everything the player applied goes (he left the area or died).
     void  drop_effects_of(uint64_t instigator);
@@ -598,7 +606,10 @@ private:
     HuntablePredicate      huntable_;
     std::set<uint64_t>     stats_filled_;     // the NPCs that are no combatants and whose stats were filled (or whose open has none)
     std::set<uint64_t>     effect_holders_;   // the combatants whose effect book is not empty
-    std::set<int64_t>      refused_effects_;  // the slow, snare and CC effects already named in the log as left off
+    std::set<int64_t>      refused_effects_;  // the crowd-control effects (other than a slow) already named in the log as left off
+    std::set<uint64_t>     cc_unlogged_;      // the creatures whose crowd control changed since the log last named it
+    size_t                 cc_logged_ = 0;                           // the crowd control changes the log named so far (the first kLoggedCc)
+    static constexpr size_t kLoggedCc = 200;
     int                    effect_depth_ = 0; // how many effects deep an effect's Apply hit is applying further effects
     size_t                 effect_hits_logged_ = 0;                  // the effect hits written to the log so far (the first kLoggedEffectHits)
     static constexpr size_t kLoggedEffectHits = 120;

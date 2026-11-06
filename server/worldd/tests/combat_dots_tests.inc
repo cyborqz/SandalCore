@@ -367,11 +367,11 @@ void test_creature_poison(Fixture& f) {
     bed.land(wolf2, "Scorpion_TailSting_Hit", t0 + 0.1, bed.other);
     CHECKF(bed.items_named(wolf2, "Status_Poisoned") == 2, "a second caster's poison is a poison of its own (%zu items)", bed.items_named(wolf2, "Status_Poisoned"));
 
-    // a slow is still left off a mob (the next slice): the Chilling poison's poison lands and its Chilled does not
+    // a slow lands on a mob (the slows slice): the Chilling poison puts its poison and its Chilled on it
     const uint64_t wolf5 = bed.wolf(1200);
     bed.land(wolf5, "Rogue_Poison_Chilling", t0, bed.player);
-    CHECKF(bed.items_named(wolf5, "Status_Poisoned") == 1 && bed.items_named(wolf5, "Status_Chilled") == 0 && bed.world.effect_stacks(wolf5, bed.effect_guid("Status_Chilled")) == 0,
-           "the Chilling poison puts its poison on the Wolf and leaves its Chilled off (%zu poisons, %zu chills)", bed.items_named(wolf5, "Status_Poisoned"), bed.items_named(wolf5, "Status_Chilled"));
+    CHECKF(bed.items_named(wolf5, "Status_Poisoned") == 1 && bed.items_named(wolf5, "Status_Chilled") == 1 && bed.world.effect_stacks(wolf5, bed.effect_guid("Status_Chilled")) == 1,
+           "the Chilling poison puts its poison and its Chilled on the Wolf (%zu poisons, %zu chills)", bed.items_named(wolf5, "Status_Poisoned"), bed.items_named(wolf5, "Status_Chilled"));
 }
 AOC_REGISTER_TEST(test_creature_poison);
 
