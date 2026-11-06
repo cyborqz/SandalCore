@@ -23,6 +23,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/ability_pipeline_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_abilities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_based_move.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_chests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat_side.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_craft.cpp

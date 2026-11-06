@@ -1276,6 +1276,27 @@ std::optional<Send> PlayerBootstrap::loot_payload(const emit::FIntrepidNetworkGU
     return rpcs(Role::PlayerController, "ClientReceiveLootStoragePayload", std::span<const repl::RpcRequest>(&call, 1));
 }
 
+std::optional<Send> PlayerBootstrap::reward_selection(const repl::GuidValue& item, const repl::RewardInstance& reward, uint64_t source_table) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientOpenRewardSelection");
+    if (!rpc) return std::nullopt;
+    repl::RewardInstance r = reward;
+    if (source_table != 0 && r.source_reward_tables.empty()) r.source_reward_tables.emplace_back(source_table, 0);
+    repl::RpcParams params;
+    const auto set = [&](const char* path, Value v) { return repl::set_rpc_param(*rpc, params, path, std::move(v)); };
+    if (!set("InData.ActivatedItemGuid.A", Value::i64(static_cast<int32_t>(item.a))) ||
+        !set("InData.ActivatedItemGuid.B", Value::i64(static_cast<int32_t>(item.b))) ||
+        !set("InData.ActivatedItemGuid.C", Value::i64(static_cast<int32_t>(item.c))) ||
+        !set("InData.ActivatedItemGuid.D", Value::i64(static_cast<int32_t>(item.d))) ||
+        !set("InData.RewardInstance", Value(std::move(r)))) {
+        return std::nullopt;
+    }
+    repl::RpcRequest call;
+    call.rpc = "ClientOpenRewardSelection";
+    call.params = std::move(params);
+    return rpcs(Role::PlayerController, "ClientOpenRewardSelection", std::span<const repl::RpcRequest>(&call, 1));
+}
+
 std::optional<Send> PlayerBootstrap::loot_removed(const emit::FIntrepidNetworkGUID& container, std::span<const LootRemoval> removed) {
     if (!ok_ || !second_state_added_ || removed.empty() || removed.size() > kMaxEventsPerChain) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveStorageEvent");

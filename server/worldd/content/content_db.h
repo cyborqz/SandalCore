@@ -1215,7 +1215,10 @@ struct ObjectData {
     std::map<int64_t, ActorDefRow>     actor_defs;      // by IAD
     std::map<int64_t, int64_t>         instance_iad;    // population instance -> its IAD
     std::map<int64_t, bool>            quest_items;     // item record -> Major (it belongs in the Quest bag)
-    std::map<int64_t, int64_t>         item_boxes;      // item record -> the reward table its choose-one window lists
+    std::map<int64_t, int64_t>         item_boxes;      // item record -> the reward table a random coffer rolls (ActivationLootBoxData.RewardTable)
+    /// contentc version 41: item record -> the reward table a selector lists in its choose-one window (RewardSelectionDataId).  A selector's use opens
+    /// ClientOpenRewardSelection; the player answers with ServerSelectReward(Index).
+    std::map<int64_t, int64_t>         item_reward_selections;
 };
 
 // ---- vendors, step 0 (contentc version 18): which NPC opens which shop and what its listings cost (npc_vendor_link, vendor_def_data, vendor_price, vendor_availability) ----------
@@ -1602,6 +1605,14 @@ public:
     std::optional<QuestData> quest_data(std::string& error) const;
     /// Quests part 3, slice 1 (contentc version 36): the quest objects' definitions; nullopt, with `error`, from a content.db of an older version.
     std::optional<ObjectData> object_data(std::string& error) const;
+    /// Chests (contentc version 41): which reward table an item opens when it is used.  A selector (item_reward_selection, Activation =
+    /// OpenRewardSelection) lists the table's items in its choose-one window; a random coffer (item_box) rolls it.  None for any other item.
+    enum class ChestKind { None, Random, Selector };
+    struct ChestTable {
+        ChestKind kind = ChestKind::None;
+        int64_t   table = 0;
+    };
+    ChestTable chest_table(int64_t item, std::string& error) const;
     /// Crafting, step 0 (contentc version 20): the station definitions and the assets that are their stations, read whole. nullopt, with `error` set, for a file of an older version.
     std::optional<CraftStationData> craft_station_data(std::string& error) const;
     /// Embersprings (contentc version 23): the places, the respawn definitions and the instances that name one, read whole. nullopt, with `error` set, for a file of an older version.

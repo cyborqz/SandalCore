@@ -31,6 +31,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Vendors: currency, buying, selling, repairing and destroying items; talking shopkeepers.
 - Crafting: processing jobs, quick make and collecting finished jobs; the artisan gear a crafter wears (shirt, pants and tool belt of a profession) changes the result: a crafted piece's quality and experience, and a job's time, extra units, units that come out a rarity higher, and experience.
 - Consumables (first part): scrolls and elixirs are used from the item bag, take one off the stack, run their cooldown and give their buff for its time: the stats and artisan ratings the item holds at its quality (an Uncommon elixir of Herbalism, the Constitution scrolls, the experience scrolls), one scroll and one elixir at a time.
+- Chests: the 50 random coffers (`item_box`) roll their reward table into the bags when used, and the 57 choose-one selectors (`OpenRewardSelection`, contentc 41's `item_reward_selection`) open the client's reward-selection window and grant the option the player picks; the chest is consumed on the pick.
 - Item rarities for resources, weapons and armor, from mobs and from crafting.
 - Glint: all six kinds, ten of a kind into one of the next with a right-click, and kills paying Glint in kinds.
 - Tutorials that stay done, and quiet confirmations (targets, the PvP flag, loot windows, map markers).
@@ -60,7 +61,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Seeing other players (first part): players within 150 m of each other are shown to each other as their characters, standing, walking and stopping, and leave each other's world when they log out. Still to come: riders on their mounts, gear and level changes, live Health and Mana, death, combat stances, and abilities and hits on other players.
 
 ### Left
-- Quests: the speech bubbles over NPCs who have an objective for you; the choose-one reward window and the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
+- Quests: the speech bubbles over NPCs who have an objective for you; the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, the slows the weapon finishers put on a mob, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).

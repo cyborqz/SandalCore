@@ -42,7 +42,7 @@ constexpr size_t kMaxRewardItems = 256;
 constexpr size_t kMaxHashedVariables = 4096;
 
 inline bool reward_instance_fits(const RewardInstance& r) {
-    if (r.items.size() > kMaxRewardItems) return false;
+    if (r.items.size() > kMaxRewardItems || r.source_reward_tables.size() > kMaxRewardItems) return false;
     for (const ItemInstance& i : r.items) {
         if (!item_instance_fits(i)) return false;
     }
@@ -61,7 +61,13 @@ inline std::optional<RewardInstance> read_reward_instance(wire::PacketReader& r)
     out.node_activity_experience = static_cast<int32_t>(r.read_uint32());
     out.guild_activity_experience = static_cast<int32_t>(r.read_uint32());
     const uint32_t experience = r.read_uint32(), currency = r.read_uint32(), tables = r.read_uint32();
-    if (overran(r) || experience != 0 || currency != 0 || tables != 0) return std::nullopt;   // only the empty maps and id list are modelled
+    if (overran(r) || experience != 0 || currency != 0) return std::nullopt;   // the two maps stay unmodelled
+    if (tables > kMaxRewardItems || static_cast<size_t>(tables) * 128 > r.remaining_bits()) return std::nullopt;
+    for (uint32_t i = 0; i < tables; ++i) {
+        const uint64_t id = r.read_uint64(), paired = r.read_uint64();
+        out.source_reward_tables.emplace_back(id, paired);
+    }
+    if (overran(r)) return std::nullopt;
     return out;
 }
 
@@ -75,7 +81,11 @@ inline bool write_reward_instance(emit::BunchWriter& out, const RewardInstance& 
     out.write_uint32(static_cast<uint32_t>(r.guild_activity_experience));
     out.write_uint32(0);   // the experience map
     out.write_uint32(0);   // the currency map
-    out.write_uint32(0);   // the source reward table ids
+    out.write_uint32(static_cast<uint32_t>(r.source_reward_tables.size()));
+    for (const auto& [id, paired] : r.source_reward_tables) {
+        out.write_uint64(id);
+        out.write_uint64(paired);
+    }
     return true;
 }
 

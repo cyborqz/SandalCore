@@ -1326,6 +1326,11 @@ void PlayerWorld::start_aftermath() {
         }
         for (const int64_t t : named) quest_tables += roots.insert(t).second ? 1 : 0;
     }
+    // chests: the tables the random coffers roll and the selectors list are in the book too (an item the player uses, not an NPC or a quest)
+    if (objects_) {
+        for (const auto& [item, table] : objects_->item_boxes) roots.insert(table);
+        for (const auto& [item, table] : objects_->item_reward_selections) roots.insert(table);
+    }
     std::string e;
     std::map<int64_t, content::LootTable> tables;
     if (aftermath_config_.enabled && !roots.empty()) {

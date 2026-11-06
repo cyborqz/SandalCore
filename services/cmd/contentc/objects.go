@@ -99,7 +99,7 @@ func buildObjects(w *writer, src *source, meta map[string]string) error {
 			named++
 		}
 	}
-	var questItems, boxes int
+	var questItems, boxes, selections int
 	for _, r := range src.rows["ItemRecordBase"] {
 		if enumValue(strOf(r.Fields["InventoryFilterType"])) == "Quest" {
 			if err := w.exec(`INSERT INTO quest_item (item_guid, major) VALUES (?, ?)`, r.Guid, b2i(enumValue(strOf(r.Fields["QuestItemSignificance"])) == "Major")); err != nil {
@@ -113,11 +113,19 @@ func buildObjects(w *writer, src *source, meta map[string]string) error {
 			}
 			boxes++
 		}
+		// version 41: the items whose use opens the choose-one reward window (RewardSelectionDataId), the selectors beside the random coffers above
+		if table := idGuid(r.Fields["RewardSelectionDataId"]); table != 0 {
+			if err := w.exec(`INSERT INTO item_reward_selection (item_guid, table_guid) VALUES (?, ?)`, r.Guid, table); err != nil {
+				return err
+			}
+			selections++
+		}
 	}
 	meta["objects.interactables"] = fmt.Sprintf("%d (%d with a player interaction, %d items granted)", icds, withPID, grants)
 	meta["objects.actor_defs"] = fmt.Sprintf("%d (%d population instances name one)", iads, named)
 	meta["objects.quest_items"] = fmt.Sprint(questItems)
 	meta["objects.item_boxes"] = fmt.Sprint(boxes)
+	meta["objects.item_reward_selections"] = fmt.Sprint(selections)
 	return nil
 }
 
