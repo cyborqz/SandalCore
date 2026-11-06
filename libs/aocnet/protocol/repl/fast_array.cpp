@@ -428,7 +428,7 @@ size_t write_fast_array_fields(const schema::ClassSchema& schema, const FastArra
     };
 
     struct Pending {
-        uint32_t        field;
+        uint32_t        field{};
         BunchWriter     payload;
         FastArrayShadow shadow;
     };

@@ -157,7 +157,8 @@ std::optional<CorpseLoot> add_loot(ActorRegistry& registry, uint64_t npc, const 
     if (!build_components(false, mint, owner, may_loot, top_rarity, c, error)) return std::nullopt;
     const FIntrepidNetworkGUID loot_guid = c.loot_guid, container_guid = c.container_guid, inter_guid = c.inter_guid;
     repl::Subobject loot = std::move(c.loot), container = std::move(c.container), inter = std::move(c.inter);
-    bool ok = registry.modify(npc, Change::State, [&](WorldActor& a) {
+    bool ok = false;
+    ok = registry.modify(npc, Change::State, [&](WorldActor& a) {
         repl::Subobject* sec = find_sub(a.actor, "UNPCSecondaryInfo");
         if (!sec) {
             ok = false;

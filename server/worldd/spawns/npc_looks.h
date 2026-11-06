@@ -10,7 +10,7 @@
 //  open.  The component is replicated: the client builds the body from what the open carries and derives nothing from the NPCAppearance record, so the server makes the
 //  choices, as the game's server does when it makes the NPC:
 //    * the NPCAppearance record: the population asset's AppearanceOverrideId when that is a record, else the one the Blueprint's class defaults name (npc_looks.tsv);
-//    * its shared appearance info (SharedAppearanceInfoId) goes into the component as it is;
+//    * its shared appearance info (SharedAppearanceInfoId): the record's own, except that an NPC wearing a preset gets the one that has a body for the preset's race and gender (the A line's last field), when the record names one and the preset has a race and a gender;
 //    * one OUTFIT of the record's options, drawn with the record's weight curve;
 //    * one item of each slot list of the outfit (head, chest, wrists, legs, shoulders, back, waist, hands, feet, held items), drawn with the outfit's weight curve,
 //      in the order the game adds them: that is AppearanceIDs;
