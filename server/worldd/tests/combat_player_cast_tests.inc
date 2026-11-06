@@ -215,6 +215,15 @@ void test_weapon_finisher_picks(Fixture& f) {
     const auto finish = [&](const abilities::AbilityDef& combo, int anim, const abilities::HitDef& hit, const abilities::HitDef& reaction_hit, bool check = true) {
         Finish out;
         t += 5.0;
+        // the wand's beam is the fifth swing of its combo, and the server keeps a ranged combo to its order: the four swings before it come first, cast at nobody
+        if (anim == 4 && combo.row.name == "WeaponCombo_Ranged_Wand") {
+            for (int before = 0; before < 4; ++before, t += 0.6) {
+                TriggerInfo lead;
+                lead.animation_index = before;
+                rig.pipe->trigger(combo.row.guid, id++, t, lead);
+                rig.run_to(t + 0.5);
+            }
+        }
         TriggerInfo info;
         info.animation_index = anim;
         info.target_count = 1;

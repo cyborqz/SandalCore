@@ -306,8 +306,7 @@ public:
     static constexpr int    kMaxRequestsPerHit = 8;
     static constexpr double kMinRequestGap = 0.100;
     /// A beam (the wand's finisher) keeps the client asking for its tick hit for as long as it burns: up to a dozen requests about 100 ms apart, the closest 68 ms.
-    /// A cast of a beam step takes that many requests per hit, that close together.
-    static constexpr int    kBeamRequestsPerHit = 24;
+    /// A cast of a beam step takes its requests that close together; how many of each hit it takes is in `kBeamHits` (ability_pipeline.cpp).
     static constexpr double kBeamRequestGap = 0.050;
     static constexpr size_t kMaxRecords = 16;
     /// The most casts waiting for their steps at once.
@@ -628,6 +627,7 @@ private:
         bool                     reaches = false;   // the hit's mask names the caster
         bool                     aims_others = false;   // plan E1, stage 3: its mask names enemies or allies other than the caster
         int                      requests = 0;
+        int                      max_requests = -1;   // the most requests this hit takes in a cast (negative: the record's)
         double                   last_request = -1e9;
         std::vector<Pending>     due;          // when a request's application runs
         bool                     applied = false;   // the server applied it by itself (no request came by the deadline)
@@ -1017,6 +1017,11 @@ private:
     };
     std::deque<Instance>      instances_;                           // the abilities the client may end with ServerEndAbility (the last few)
     void   end_instance(size_t index, double t);
+    /// A ranged weapon combo's swings: the step the last one played (by ability). The client plays the steps in order and starts over after the last, so the next swing is the step after it or the first;
+    /// swing_montage keeps a modified client to that, and stop_swing is the client ending the swing (a stun): the arrows that had still to leave never do.
+    std::map<int64_t, int> swing_steps_;
+    int    swing_montage(const abilities::AbilityDef& def, int requested, int& step) const;
+    void   stop_swing(int64_t instance);
     stats::SplitMix           guid_rng_;
     std::vector<bootstrap::ShieldElement> shields_sent_;
     size_t                    refused_ = 0, casts_started_ = 0, regen_ticks_ = 0;

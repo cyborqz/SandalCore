@@ -515,6 +515,47 @@ bool swing_flies(const std::string& ability, int animation) {
     return false;
 }
 
+// The hits a Wand beam step takes requests for, and the most requests a swing takes of each. The client asks for the step's own hit again and again while the beam burns (3 times in the first beam step, up to 12
+// in the second, 68 ms apart at the closest) and once for the beam's end and for each beam effect's audio hit; the shares keep a little over that. Every other hit of the ability takes no request: the procs' hits
+// (they apply debuffs and fire further hits on up to 40 enemies each) are asked for by no swing at all, and the other steps' hits are the server's own.
+struct BeamHit {
+    const char* hit;
+    int         requests;
+};
+const BeamHit kBeamHits[] = {
+    {"Weapon_Wand_Hit_5+", 4},
+    {"Weapon_Wand_Hit_6+", 14},
+    {"Weapon_Wand_Beam_ComboEnd_Hit", 2},
+    {"Weapon_Wand_Beam_ComboEnd2_Hit", 2},
+    {"Weapon_Wand_BeamFX_Hit_Arcane_AUDIOONLY", 2},
+    {"Weapon_Wand_BeamFX_Hit_Lightning_AUDIOONLY", 2},
+    {"Weapon_Wand_BeamFX_Hit_Fire_AUDIOONLY", 2},
+    {"Weapon_Wand_BeamFX_Hit_Ice_AUDIOONLY", 2},
+    {"Weapon_Wand_BeamFX_Hit_BeamAmp_AUDIOONLY", 2},
+};
+
+/// How many requests a Wand beam step takes of the hit (0: none).
+int beam_hit_requests(const std::string& hit) {
+    for (const BeamHit& b : kBeamHits) {
+        if (hit == b.hit) return b.requests;
+    }
+    return 0;
+}
+
+/// The step a montage plays: the number its select expression states wins over the one in its file's name (the shortbow's montages carry the wrong number or none).
+StepToken step_of_montage(const abilities::Catalog& catalog, const content::MontageRow& montage) {
+    StepToken step = step_token(leaf_of_path(montage.soft_path));
+    int named_step = 0;
+    bool named_proc = false;
+    if (const content::ExprRow* e = catalog.expr(montage.select_expr)) {
+        if (step_of_expression(e->text, named_step, named_proc)) {
+            step.step = named_step;
+            step.proc = named_proc;
+        }
+    }
+    return step;
+}
+
 // The effects an actor of the world holds, as the world's port knows them, for the expressions of a hit on it.
 class PortEffects final : public combat::TargetEffects {
 public:
@@ -2167,7 +2208,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
     // (the targeting record the client names is not checked against the ability's key map: 122 of 1,854 retail requests name another record than the
     // map's, and the hit is what decides what happens)
     if (slot->server_self_use) return HitVerdict::Quiet;
-    if (slot->requests >= max_requests || now - slot->last_request < rec->min_gap) return HitVerdict::TooMany;
+    if (slot->requests >= (slot->max_requests >= 0 ? slot->max_requests : max_requests) || now - slot->last_request < rec->min_gap) return HitVerdict::TooMany;
     ++slot->requests;
     slot->last_request = now;
     const bool found = own > 0 && slot->reaches;
@@ -2409,10 +2450,25 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     for (Instance& i : instances_) {
         if (i.server_id != server_instance_id || i.end_due) continue;
         release_held(i.client_id, now_);
+        stop_swing(i.server_id);
         i.end_due = now_ + kEndDelay;
         return true;
     }
     return false;
+}
+
+// The client ends a ranged weapon swing (a stun ends the montage it plays): the arrows, bolts and pages that had still to leave never do. The ones in the air land.
+void AbilityPipeline::stop_swing(int64_t instance) {
+    for (size_t i = casts_.size(); i-- > 0;) {
+        Cast& cast = casts_[i];
+        if (cast.instance != instance || !is_weapon_combo(cast.def->row)) continue;
+        if (cast.flight_pending) {   // (a single arrow that has not left)
+            cast.flight_pending = false;
+            cast.projectile_due.reset();
+        }
+        cast.missiles.erase(std::remove_if(cast.missiles.begin(), cast.missiles.end(), [](const Cast::Missile& m) { return m.kind == Cast::Missile::Kind::Fly && m.depth == 0; }), cast.missiles.end());
+        finish_cast_if_done(i);
+    }
 }
 
 void AbilityPipeline::end_instance(size_t index, double t) {
@@ -2540,6 +2596,45 @@ std::optional<AbilityPipeline::Inspection> AbilityPipeline::inspect(int64_t abil
 }
 // [C | O | A - Cyb]
 
+// The montage a ranged weapon swing plays (the AnimationIndex the client names), kept to the order of the combo. The client plays the steps one after the other and starts over after the last; the server keeps
+// the step of the last swing, and a swing is taken as named when it is the first step (starting over) or the step after that one. Any other montage (a step the combo has not got to, one that does not
+// exist) plays the step the combo is at, the plain swing of it, so that a client cannot name the Shortbow's five-arrow step on every swing. Nothing is known of the combo before its first swing: the montage
+// named is taken then. `step` gets the step the swing plays (0: the ability is no ranged weapon combo).
+int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& step) const {
+    step = 0;
+    if (!catalog_ || def.montages.empty() || def.row.name.rfind("WeaponCombo_Ranged", 0) != 0) return requested;
+    const content::MontageRow* asked = nullptr;
+    for (const content::MontageRow& m : def.montages) {
+        if (m.anim_index == requested) asked = &m;
+    }
+    const auto last = swing_steps_.find(def.row.guid);
+    if (asked) {
+        const StepToken named = step_of_montage(*catalog_, *asked);
+        if (!named.ok) return requested;   // (a montage the combo's steps do not describe: nothing to keep it to)
+        if (last == swing_steps_.end() || named.step == 1 || named.step == last->second + 1) {
+            step = named.step;
+            return requested;
+        }
+    }
+    // the step the combo is at: the one after the last swing's, else the first
+    int next = last == swing_steps_.end() ? 1 : last->second + 1;
+    const content::MontageRow* take = nullptr;
+    for (int attempt = 0; attempt < 2 && !take; ++attempt) {
+        bool take_proc = true;
+        for (const content::MontageRow& m : def.montages) {
+            const StepToken s = step_of_montage(*catalog_, m);
+            if (!s.ok || s.step != next || (take && !(take_proc && !s.proc))) continue;
+            take = &m;
+            take_proc = s.proc;
+        }
+        if (!take) next = 1;   // (the combo is over, or the step is none: it starts again)
+    }
+    if (!take) return requested;
+    spdlog::info("[abilities] {}: the client named montage {}, but the combo is at step {}: the swing plays montage {}", def.row.name, requested, next, take->anim_index);
+    step = next;
+    return take->anim_index;
+}
+
 Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now, const TriggerInfo& info) {
     advance(now);
     const double t = now_;
@@ -2638,7 +2733,8 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     cast.client_id = client_id;
     cast.def = def;
     cast.trigger_at = t;
-    cast.animation_index = info.animation_index;
+    int swing_step = 0;   // (a ranged weapon swing: the step it plays, kept once the swing is accepted)
+    cast.animation_index = swing_montage(*def, info.animation_index, swing_step);
     cast.item_cast = info.item_cast;
     cast.target = info.target_count > 0 && target_actors.empty();   // (aimed at the caster; a real target is named by the item's Targets)
     // ... but a projectile reaches the caster only when the ability may be aimed at the caster at all: an enemy-only ability whose target the world
@@ -2886,13 +2982,25 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     rec.item_cast = info.item_cast;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
     rec.reach = reach_of(*def);
-    // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes more requests, closer together
+    // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes its requests closer together.
+    // A ranged weapon swing's other hits are the server's own: its projectile hits land when the projectile gets there, and the retail client asks for none of them (the Wand's beam steps are the only
+    // swings that ask: for the beam's ticks and end and the step's own hit). So a swing that is no beam step takes no request at all, and a beam step takes none for the hits of the other steps,
+    // which a modified client could name to have them land on whatever actors it likes, and only as many for each of its own hits as an honest swing sends (kBeamHits).
+    const bool ranged_swing = row.name.rfind("WeaponCombo_Ranged", 0) == 0;
+    bool beam_swing = false;
+    StepToken swing_token;
+    std::set<int64_t> arrow_hits;   // the hits the swing's projectiles carry
     if (is_weapon_combo(row)) {
         for (const content::MontageRow& m : def->montages) {
-            if (m.anim_index == cast.animation_index && step_token(leaf_of_path(m.soft_path)).beam) {
-                rec.max_requests = kBeamRequestsPerHit;
+            if (m.anim_index != cast.animation_index) continue;
+            swing_token = step_of_montage(*catalog_, m);
+            if (swing_token.beam) {
+                beam_swing = true;
                 rec.min_gap = kBeamRequestGap;
             }
+        }
+        for (const content::AbilityHitRow& h : def->hits) {
+            if (h.source == "projectile") arrow_hits.insert(h.hit_guid);
         }
     }
     std::set<int64_t> seen;
@@ -2901,10 +3009,17 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         const int64_t tg = targeting_of(*def, static_cast<int>(h.key));
         const HitDef* hit = catalog_->hit(h.hit_guid);
         if (!hit || hit->row.net_type.find("ServerVerify") == std::string::npos) continue;   // a NET_ServerOnly hit is no one's request
+        if (ranged_swing && (!beam_swing || (arrow_hits.count(h.hit_guid) && !same_step(swing_token, step_token(hit->row.name))))) continue;   // (the arrows' hits land by themselves)
+        int beam_requests = -1;   // (a beam step's hit takes the share kBeamHits gives it, and a hit that table lacks takes no request)
+        if (ranged_swing) {
+            beam_requests = beam_hit_requests(hit->row.name);
+            if (beam_requests == 0) continue;
+        }
         if (carried_by_ball(*def, h.hit_guid)) continue;   // the ability's ball lands this hit by itself, whatever the client asks: a request for it finds no slot and damages nobody
         HitSlot slot;
         slot.hit = hit;
         slot.targeting = tg;
+        slot.max_requests = beam_requests;
         slot.reaches = hits_caster(hit->row);
         slot.aims_others = combat_ != nullptr && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0;
         if (pets::for_ability(ability) && hit->row.applicable_targets == 1 && hit->row.fallback_target.find("SelfOnly") != std::string::npos) {
@@ -2921,6 +3036,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     spawn_zones(cast, t + (zone_delay >= 0 ? zone_delay : (has_montage ? item_delay : cost_delay) + kZoneOpenDelay), zone_end >= 0 ? t + zone_end : -1.0);
     // an ability's trigger ends the weapon swings under way: retail's server sent no hit of a swing that an ability followed within 0.45 s, and ended one that showed no item
     if (!is_weapon_combo(row)) cancel_swings(t, name);
+    if (swing_step > 0) swing_steps_[def->row.guid] = swing_step;
     casts_.push_back(std::move(cast));
     return Refusal::None;
 }
@@ -3146,6 +3262,11 @@ void AbilityPipeline::land_shot(Cast& cast, double t) {
 
 void AbilityPipeline::launch_shot(Cast& cast, double t) {
     cast.flight_pending = false;
+    // a swing's arrow leaves with its montage: when another ability's item (the next swing's) has taken the pawn's place by now, nothing leaves, as a volley's arrows never do (launch_note)
+    if (is_weapon_combo(cast.def->row) && cast.instance >= 0 && (!item_instance_ || *item_instance_ != cast.instance)) {
+        spdlog::info("[abilities] {}: another item took the pawn's place before the projectile left: it never leaves", cast.def->row.name);
+        return;
+    }
     const combat::TargetInfo info = cast.target_actors.empty() || !combat_ ? combat::TargetInfo{} : combat_->inspect(cast.target_actors.front());
     const content::ProjectileRow* p = nullptr;
     for (const content::AbilityHitRow& h : cast.def->hits) {
@@ -3229,7 +3350,7 @@ void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t
     land.target = fly.target;
     land.index = fly.index;
     land.depth = fly.depth;
-    land.due = t + distance / p->speed;
+    land.due = t + (fly.depth == 0 ? std::min(distance / p->speed, kMaxShotFlight) : distance / p->speed);   // (a target pulled far away by the time the arrow leaves would hold the cast for as long as the flight)
     if (cast.cost_due && !cast.looped) land.due = std::max(land.due, *cast.cost_due);   // (never before the cost step; a looped cast's pending cost is the next shot's, and this arrow's own came before it left)
     cast.missiles.push_back(land);
     spdlog::info("[abilities] {}: {} {} leaves {:.3f} s after the trigger; the {} is {:.1f} m away: it lands {:.3f} s after it leaves", cast.def->row.name, what, fly.index, t - cast.trigger_at,
@@ -3642,18 +3763,8 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
             if (m.anim_index == cast.animation_index) montage = &m;
         }
         if (!montage && !def.montages.empty()) montage = &def.montages.front();
-        if (montage) {
-            step = step_token(leaf_of_path(montage->soft_path));
-            // the step the montage's select expression names wins over the file's name (the shortbow's montages carry the wrong number or none)
-            int named_step = 0;
-            bool named_proc = false;
-            if (const content::ExprRow* e = catalog_->expr(montage->select_expr)) {
-                if (step_of_expression(e->text, named_step, named_proc)) {
-                    step.step = named_step;
-                    step.proc = named_proc;
-                }
-            }
-        }
+        // (the step the montage's select expression names wins over the file's name)
+        if (montage) step = step_of_montage(*catalog_, *montage);
         if (step.beam) {   // the wand's beam: its hits are the client's requests
             emit({std::move(c), std::nullopt, t, "the projectile step of " + def.row.name + " (a beam: nothing flies)"});
             return;

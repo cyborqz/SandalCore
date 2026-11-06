@@ -66,6 +66,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **Players / Game master text** | When a game master gives a player's id to a command that takes a mob's id, the answer says "is a actor, not a creature" instead of "is the player X". | Give the mob's id, not the player's. | Open: add the Player kind to the answer, and look players up before actors. |
 | **Players / Movement base** | A client that says it stands on another player's character is placed from the server's copy of that character, which trails the character by a tick or more, and the base is not refused. | None. | Open: refuse another player's character as a movement base. |
 | **Mobs / Abilities** | Some mob abilities are not used yet: a task whose behaviour-tree condition the server does not read yet (for example an effect check, a combat timer, a target-scoring choice) is left out, so mobs use only their other attacks. A few mob abilities play but deal no damage, because their damage formula is not supported yet (for example the drowned zombie's spray). | None. | Open. |
+| **Combat / Ranged weapon swings** | An arrow, bolt or page of a ranged weapon swing that has not left when the next swing's item shows never leaves, so a character with a slow animation speed who swings again at once can lose the arrow of a swing that sends only one (the Longbow's and the Wand's third swings). A stun that ends a swing also ends its arrows that had not left. Neither is checked against the game. | None. | Open: checking both against the game. |
 
 ---
 
