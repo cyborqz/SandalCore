@@ -161,6 +161,7 @@ inline constexpr Spawn kDefaultSpawn = {-777664.5, 616578.6875, 15952.0498046875
 struct SessionValues {
     uint32_t     server_id = 0;
     double       world_time = 0;
+    world::WorldClock clock = world::default_world_clock();   // the world's clock at the join (world/world_clock.h)
     int32_t      player_id = 0;
     SessionGuids guids;
 };

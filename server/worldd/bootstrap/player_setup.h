@@ -23,6 +23,7 @@
 #include "protocol/emit/intrepid_netguid.h"
 #include "protocol/repl/node_rpc.h"
 #include "protocol/repl/value.h"
+#include "world/world_clock.h"
 
 #include <array>
 #include <cstdint>
@@ -297,6 +298,8 @@ struct PlayerSetup {
     /// The server's clock in seconds (its uptime in the capture): the GameState's world time, the PlayerController's
     /// SummonCooldownTimer, the PlayerState's StartTime (whole seconds) and what ClientSetTime derives from.
     double       world_time = 0;
+    /// The world clock the join's ClientSetTime reads (world/world_clock.h): the game time it carries is clock.game_time(world_time).
+    world::WorldClock clock = world::default_world_clock();
     int32_t      player_id = 0;       // PlayerState.PlayerId
     SessionGuids guids;
 };

@@ -1755,6 +1755,7 @@ bootstrap::SessionValues PlayerWorld::new_session(double world_time) {
     bootstrap::SessionValues s;
     s.server_id = server_id_;
     s.world_time = world_time;
+    s.clock = day_clock_;
     s.player_id = next_player_id_++;
     s.guids = bootstrap::mint_session_guids(guids_, game_state_);
     return s;

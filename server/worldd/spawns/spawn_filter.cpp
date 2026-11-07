@@ -117,8 +117,9 @@ Why SpawnFilter::filter(const content::PopFilter& f, const std::set<std::string>
     if (!f.seasons.empty() && !has(f.seasons, ctx_.season)) return Why::Season;
     if (!f.weather.empty() && !has(f.weather, ctx_.weather)) return Why::Weather;
     if (f.time_of_day_start != -1 || f.time_of_day_end != -1) {
+        // a window holds its first hour and not its last (the game's own test): 5 to 20 is day from hour 5 up to, not including, hour 20, and 20 to 5 is night, so no hour is in both
         const double a = f.time_of_day_start, b = f.time_of_day_end, h = ctx_.hour;
-        const bool in = a <= b ? (h >= a && h <= b) : (h >= a || h <= b);
+        const bool in = a <= b ? (h >= a && h < b) : (h >= a || h < b);
         if (!in) return Why::TimeOfDay;
     }
     // the siege states are mutually exclusive: the ones a filter requires are any-of (a node carries SiegeInactive); every other required tag is all-of

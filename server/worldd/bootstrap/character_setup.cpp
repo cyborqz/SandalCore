@@ -1122,6 +1122,7 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
     s.login = login;
     s.server_id = session.server_id;
     s.world_time = session.world_time;
+    s.clock = session.clock;
     s.player_id = session.player_id;
     s.guids = session.guids;
 

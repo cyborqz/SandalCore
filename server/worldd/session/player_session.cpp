@@ -345,6 +345,11 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
                  setup.name, setup.server_id, setup.player_id, mode_name(world.gamestate_mode()), p->channels_[0], p->channels_[1],
                  p->channels_[2], p->channels_[3], setup.x, setup.y, setup.z);
     for (const std::string& note : p->notes_) spdlog::info("[session] {}: {}", setup.name, note);
+    {   // the game hour the join's ClientSetTime starts this player's sky at (world/world_clock.h)
+        const double hour = setup.clock.hour(setup.world_time);
+        spdlog::info("[clock] {}: the join sets the client's game time to {} (hour {:.2f}, {}; game time {:.0f} s)", setup.name, world::hour_text(hour), hour,
+                     world::WorldClock::is_night(hour) ? "night" : "day", setup.clock.game_time(setup.world_time));
+    }
     if (p->inventory_.size() == 0) {
         spdlog::warn("[session] {}: the character has no items (the character service gives a character its class's starting kit when it starts: is it running a build with items?)", setup.name);
     }

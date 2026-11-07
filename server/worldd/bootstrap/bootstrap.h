@@ -248,7 +248,8 @@ public:
     std::optional<Send> phase_in();
     /// Plan E1, stage 3 fix: ClientSetTime alone, for `world_time` (the server's clock at the send): the client's synchronized clock is set to it and
     /// ticks on from there. Sent again after the phase-in and every 120 s, as retail repeats it (pkt#23 and every 120.0 s after).
-    std::optional<Send> set_time(double world_time);
+    /// The game time it carries is `clock`'s (the world's clock, world/world_clock.h) at `world_time`; the join's own ClientSetTime reads the setup's clock.
+    std::optional<Send> set_time(double world_time, const world::WorldClock& clock);
 
     // ---- Nodes 1, stage 2: the nodes ---------------------------------------------------------------------------------
 

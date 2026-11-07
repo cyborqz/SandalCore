@@ -31,9 +31,11 @@
 //    PlayerState open        pkt#434 exports (1177) and content (1453)          bit for bit
 //    phase-in, combat echo   pkt#2523 (194 bits), pkt#620 (281 bits), unreliable in the original
 //    move acknowledgements   pkt#1900, #1913, #1927 (68 bits)
-//  The one value that is not the capture's: ClientSetTime. Its two numbers follow from the world time by a
-//  linear formula read off the capture that holds to about 0.06 s, so the test checks its structure and
-//  that it is within 0.5 s of the captured values, not its bits.
+//  The one value that is not the capture's: ClientSetTime. Its synchronized time follows from the world time by a
+//  constant read off the capture that holds to about 0.06 s, and its game time is the world clock's
+//  (world/world_clock.h), so the test checks its structure and that it is within 0.5 s of the captured values, not its bits.
+//  The world clock has its own tests at the end (the rule of 6 game seconds per real second by day and 9 by night, against pairs of
+//  pushes measured in the original game; the whole set of them when AOC_CLOCK_SAMPLES names the file that holds it).
 //
 //  Offline harness: the whole join_sequence() in each GameState mode is decoded with read_content_blocks,
 //  read_rep_block, read_fast_array_fields and read_rpc_fields: every block reads to its last bit, the classes
@@ -53,10 +55,12 @@
 #include "protocol/server_guid_allocator.h"
 #include "protocol/wire/packet_reader.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <initializer_list>
 #include <map>
 #include <optional>
@@ -64,6 +68,7 @@
 #include <vector>
 
 namespace bs = aoc::worldd::bootstrap;
+namespace wc = aoc::worldd::world;
 using namespace aoc::protocol;
 using namespace aoc::protocol::repl;
 using emit::BunchWriter;
@@ -217,9 +222,9 @@ static void test_player_controller() {
                   std::fabs(*y - 15061647.01444424) < 0.5,
               "ClientSetTime from the world time: NewGameTime and NewSynchronizedTime within 0.5 s of pkt#23's (the formula's accuracy)");
     }
-    const bs::ClientTimes t = bs::client_times(1593462.375);
-    CHECK(std::fabs(t.synchronized_time - (1593462.375 + 13468184.6)) < 1e-6 && std::fabs(t.game_time - (9.0 * t.synchronized_time + 39389245.0)) < 1e-6,
-          "client_times: synchronized = world + 13468184.6, game = 9 x synchronized + 39389245");
+    const bs::ClientTimes t = bs::client_times(1593462.375, captured_setup().clock);
+    CHECK(std::fabs(t.synchronized_time - (1593462.375 + 13468184.6)) < 1e-6 && std::fabs(t.game_time - 174944068.06996086) < 1e-6,
+          "client_times: synchronized = world + 13468184.6, game = the world clock's (the captured login's time at its world time)");
 }
 
 static void test_game_state() {
@@ -1068,6 +1073,200 @@ static void test_lingering_actor() {
     CHECK(pb.lingering_count() == 0 && !pb.lingering_open(capture_lingering::kOpens[0].actor.object_id).has_value(), "a closed actor is forgotten");
 }
 
+// ---- the world clock (world/world_clock.h) --------------------------------------------------------------------------------------
+// The game runs its day at 6 game seconds per real second from hour 6 up to hour 18 and its night at 9.  The server's clock has to run the same rule, or the sky jumps at every push.
+
+/// The rule stepped the slow way, sharing nothing with the clock's closed form: the game seconds that pass in `real` seconds from `second_of_day` (0 up to 86,400), the rate chosen by
+/// the hour the clock stands at and a step cut at every edge.
+static double stepped_advance(double second_of_day, double real) {
+    double s = second_of_day, advanced = 0, left = real;
+    while (left > 1e-9) {
+        const bool day = s >= 21600.0 && s < 64800.0;
+        const double rate = day ? 6.0 : 9.0;
+        const double edge = day ? 64800.0 : (s >= 64800.0 ? 86400.0 + 21600.0 : 21600.0);   // where the period ends (the next day's hour 6 counts on from 86,400)
+        const double need = (edge - s) / rate;
+        if (need > left) {
+            advanced += left * rate;
+            break;
+        }
+        advanced += edge - s;
+        left -= need;
+        s = edge >= 86400.0 ? edge - 86400.0 : edge;
+    }
+    return advanced;
+}
+
+/// Two pushes of ClientSetTime of the original game: the game time of the first, the game time of the second and the real seconds between them (the difference of their synchronized
+/// clocks).  The pairs are the ones that fit the rule within 0.1 s; all 53 measured pairs fit within 0.35 s (the check after this one).
+struct MeasuredPush {
+    const char* what;
+    double      first, second, real;
+};
+static const MeasuredPush kMeasuredPushes[] = {
+    {"day, from hour 8.2", 166867867.858669, 166868588.000207, 120.0212},
+    {"day, from hour 10.9", 165840770.583005, 165841490.920560, 120.0527},
+    {"day, from hour 16.1", 165686900.832577, 165687621.146091, 120.0494},
+    {"night, from hour 0.1", 166838870.210261, 166839950.419907, 120.0212},
+    {"night, from hour 4.7", 169188177.418339, 169189096.803119, 102.1474},
+    {"night, from hour 18.7", 169929739.111834, 169930819.030645, 119.9982},
+    {"across hour 18, from hour 17.9", 169321931.930148, 169322763.819905, 118.4409},
+};
+
+static void test_world_clock_measured() {
+    std::printf("the world clock: pushes measured in the original game, 6 game seconds per real second by day and 9 by night\n");
+    for (const MeasuredPush& m : kMeasuredPushes) {
+        const wc::WorldClock clock = wc::WorldClock::reading(m.first, 0.0);
+        const double got = clock.game_time(m.real);
+        char msg[240];
+        std::snprintf(msg, sizeof(msg), "%s: %.2f game s in %.2f s (rate %.3f); the clock gives %.2f game s, %+.3f off", m.what, m.second - m.first, m.real, (m.second - m.first) / m.real,
+                      got - m.first, got - m.second);
+        CHECK(std::fabs(got - m.second) < 0.1, msg);
+    }
+}
+
+static void test_world_clock_cycle() {
+    std::printf("the world clock: one game day is 12,000 real seconds, from whatever hour the clock starts at\n");
+    double worst = 0, worst_hour = 0;
+    for (int i = 0; i < 48; ++i) {
+        const wc::WorldClock c = wc::WorldClock::starting_at(i * 0.5);
+        const double off = std::fabs(c.hour(0.0) - i * 0.5);
+        worst_hour = std::max(worst_hour, std::min(off, 24.0 - off));   // (hour 0 may read as 23.999999999: the same moment)
+        for (const double t : {0.0, 1.0, 600.5, 3599.75, 7199.9, 7200.0, 9000.0, 11999.5, 31337.25}) worst = std::max(worst, std::fabs(c.game_time(t + 12000.0) - c.game_time(t) - 86400.0));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg), "game(t + 12,000) - game(t) = 86,400 for 48 start hours (every half hour) at 9 times each (worst error %.2g s)", worst);
+    CHECK(worst < 1e-6, msg);
+    CHECK(worst_hour < 1e-9, "starting_at(h) reads h at world time 0, for the same 48 hours");
+    const wc::WorldClock six = wc::WorldClock::starting_at(6.0);
+    CHECK(std::fabs(six.game_time(7200.0) - six.game_time(0.0) - 43200.0) < 1e-6 && std::fabs(six.game_time(12000.0) - six.game_time(7200.0) - 43200.0) < 1e-6,
+          "from hour 6: 7,200 s of day carry the clock 12 game hours on, then 4,800 s of night carry it 12 more");
+    // the edges belong to the period that starts there: hour 18 is night, hour 6 is day
+    const wc::WorldClock dusk = wc::WorldClock::starting_at(17.5);   // 1,800 game s, 300 real s, to hour 18
+    CHECK(std::fabs(dusk.hour(300.0) - 18.0) < 1e-9 && std::fabs(dusk.game_time(300.0) - dusk.game_time(299.0) - 6.0) < 1e-6 && std::fabs(dusk.game_time(301.0) - dusk.game_time(300.0) - 9.0) < 1e-6,
+          "the clock reaches hour 18 after 300 s: 6 game s per real second before it, 9 from it");
+    const wc::WorldClock dawn = wc::WorldClock::starting_at(5.5);    // 1,800 game s, 200 real s, to hour 6
+    CHECK(std::fabs(dawn.hour(200.0) - 6.0) < 1e-9 && std::fabs(dawn.game_time(200.0) - dawn.game_time(199.0) - 9.0) < 1e-6 && std::fabs(dawn.game_time(201.0) - dawn.game_time(200.0) - 6.0) < 1e-6,
+          "the clock reaches hour 6 after 200 s: 9 game s per real second before it, 6 from it");
+    CHECK(!wc::WorldClock::is_night(6.0) && !wc::WorldClock::is_night(17.99) && wc::WorldClock::is_night(18.0) && wc::WorldClock::is_night(23.99) && wc::WorldClock::is_night(0.0) &&
+              wc::WorldClock::is_night(5.99),
+          "night is hour 18 up to, not including, hour 6");
+}
+
+static void test_world_clock_start() {
+    std::printf("the world clock: every start begins at the default hour\n");
+    CHECK(wc::kDefaultStartHour == 7.0, "the default start is hour 7, in the morning (one constant)");
+    // two worldd processes started 3,700 s apart: each reads the default hour at its own start and then follows the rule from there, so a restart starts the day over
+    const wc::WorldClock first = wc::default_world_clock(), second = wc::default_world_clock();
+    CHECK(std::fabs(first.hour(0.0) - 7.0) < 1e-9 && std::fabs(second.hour(0.0) - 7.0) < 1e-9 && first.game_time(0.0) == second.game_time(0.0),
+          "a start reads hour 7 at world time 0 on the same date, whenever the process started");
+    double worst = 0;
+    for (const double wall : {3700.0, 3701.0, 4300.0, 7000.0, 11000.4, 20000.25, 86400.0}) {
+        const double a = wall, b = wall - 3700.0;   // how long each process has run at this wall instant
+        worst = std::max(worst, std::fabs(first.game_time(a) - first.game_time(0.0) - stepped_advance(25200.0, a)));
+        worst = std::max(worst, std::fabs(second.game_time(b) - second.game_time(0.0) - stepped_advance(25200.0, b)));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg), "each process agrees with the rule stepped second by second from hour 7, 7 wall instants (worst %.2g game s)", worst);
+    CHECK(worst < 1e-6, msg);
+    CHECK(std::fabs(first.hour(3700.0) - (7.0 + 3700.0 * 6.0 / 3600.0)) < 1e-9 && std::fabs(second.hour(0.0) - 7.0) < 1e-9,
+          "when the second process starts the first has run 3,700 s and reads hour 13.17: the restart starts the day over at hour 7");
+    const auto shown = [](int hour, int minute, const char* half) {   // the map window's form: 12-hour clock, the minute with two digits
+        char text[32];
+        std::snprintf(text, sizeof(text), "%d:%02d %s", hour, minute, half);
+        return std::string(text);
+    };
+    CHECK(wc::hour_text(7.0) == shown(7, 0, "AM") && wc::hour_text(12.0) == shown(12, 0, "PM") && wc::hour_text(0.25) == shown(12, 15, "AM") && wc::hour_text(19.5833) == shown(7, 34, "PM") &&
+              wc::hour_text(23.999) == shown(11, 59, "PM"),
+          "the hour as the map window shows it");
+}
+
+static void test_world_clock_first_login() {
+    std::printf("the world clock: the first login of the original game and the pushes that followed it\n");
+    // the game time the original server sent when a character joined (an evening hour) and the pushes it repeated every 120 s: 1,080 game s each
+    const double world = 1593462.375, game = 174944068.06996086;
+    const wc::WorldClock clock = wc::WorldClock::reading(game, world);
+    CHECK(std::fabs(clock.game_time(world) - game) < 1e-6, "the clock reads the login's time at its world time");
+    double worst = 0;
+    for (int k = 1; k <= 7; ++k) worst = std::max(worst, std::fabs(clock.game_time(world + 120.0 * k) - (game + 1080.0 * k)));
+    char msg[200];
+    std::snprintf(msg, sizeof(msg), "the next 7 pushes, 120 s apart, are 1,080 game s on each, within 0.5 s (worst %.2g s)", worst);
+    CHECK(worst < 0.5, msg);
+    CHECK(wc::WorldClock::is_night(clock.hour(world)) && wc::WorldClock::is_night(clock.hour(world + 840.0)), "all of it is night (hour 19.6 up to hour 21.7)");
+}
+
+/// Every pair of pushes the private recordings hold, when AOC_CLOCK_SAMPLES names the file (one pair a line: the first game time, the second and the real seconds between them, apart from
+/// lines that start with #): the rule has to give the second from the first within 0.5 s, by day and by night.
+static void test_world_clock_samples() {
+    std::printf("the world clock: every measured pair of pushes\n");
+    const char* path = std::getenv("AOC_CLOCK_SAMPLES");
+    if (!path || !*path) {
+        std::printf("  [skip] SKIP: AOC_CLOCK_SAMPLES names no file of measured pairs of pushes\n");
+        return;
+    }
+    std::ifstream in(path);
+    CHECK(static_cast<bool>(in), "AOC_CLOCK_SAMPLES names a file that opens");
+    if (!in) return;
+    size_t pairs = 0, day = 0, night = 0;
+    double worst = 0;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        double first = 0, second = 0, real = 0;
+        if (std::sscanf(line.c_str(), "%lf %lf %lf", &first, &second, &real) != 3) continue;
+        const wc::WorldClock clock = wc::WorldClock::reading(first, 0.0);
+        worst = std::max(worst, std::fabs(clock.game_time(real) - second));
+        ++pairs;
+        (wc::WorldClock::is_night(std::fmod(first, 86400.0) / 3600.0) ? night : day) += 1;
+    }
+    char msg[240];
+    std::snprintf(msg, sizeof(msg), "the file holds the measured pairs (%zu read: %zu starting by day, %zu by night)", pairs, day, night);
+    CHECK(pairs >= 50 && day > 0 && night > 0, msg);
+    std::snprintf(msg, sizeof(msg), "the rule gives the second push of every pair within 0.5 s (worst %.3f s)", worst);
+    CHECK(worst < 0.5, msg);
+}
+
+/// NewGameTime and NewSynchronizedTime of a Send that holds one ClientSetTime.
+static std::optional<std::pair<double, double>> decoded_times(PlayerBootstrap& pb, const std::optional<Send>& s) {
+    if (!s) return std::nullopt;
+    const auto blocks = read_content_blocks(s->emission.payload.data(), s->emission.payload.bit_pos(), 0);
+    if (!blocks || blocks->size() != 1) return std::nullopt;
+    size_t pos = (*blocks)[0].payload_pos;
+    const auto calls = read_rpc_fields(*pb.player_controller().obj.schema, s->emission.payload.data(), pos + (*blocks)[0].payload_bits, pos);
+    if (!calls || calls->size() != 1 || !(*calls)[0].decoded || std::string((*calls)[0].rpc->name) != "ClientSetTime") return std::nullopt;
+    const double* g = (*calls)[0].params.values.at(1).get_if<double>();
+    const double* y = (*calls)[0].params.values.at(2).get_if<double>();
+    if (!g || !y) return std::nullopt;
+    return std::make_pair(*g, *y);
+}
+
+static void test_world_clock_pushes() {
+    std::printf("the world clock: the game time of the pushes of ClientSetTime\n");
+    // The client keeps the larger of its last two game times, so a start that is lower than the client's own clock takes hold with the second push: every push has to carry the clock's own
+    // time, and none may fall below the one before it (here across the edge at hour 18).
+    bs::PlayerSetup setup = captured_setup();
+    setup.clock = wc::WorldClock::starting_at(17.5);
+    setup.world_time = 100.0;
+    PlayerBootstrap pb(setup, bs::GameStateMode::Tier2);
+    CHECK(pb.ok() && pb.player_controller_open().has_value(), "the bootstrap of a player on a clock that starts at hour 17.5 builds");
+    double last = 0, worst = 0, worst_sync = 0;
+    bool rising = true, all = true;
+    for (const double t : {100.0, 145.5, 149.5, 269.5, 389.5, 509.5}) {   // the join, 1 s and 5 s after a phase-in 44.5 s later, then every 120 s
+        const auto got = decoded_times(pb, pb.set_time(t, setup.clock));
+        all = all && got.has_value();
+        if (!got) continue;
+        worst = std::max(worst, std::fabs(got->first - setup.clock.game_time(t)));
+        worst_sync = std::max(worst_sync, std::fabs(got->second - (t + 13468184.6)));
+        rising = rising && got->first > last;
+        last = got->first;
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg), "6 pushes decode, each carries the clock's game time (worst %.2g s) and its synchronized time as before (worst %.2g s)", worst, worst_sync);
+    CHECK(all && worst < 1e-3 && worst_sync < 1e-6, msg);
+    CHECK(rising, "no push is lower than the one before it, across hour 18");
+    const auto first = decoded_times(pb, pb.set_time(100.0, wc::WorldClock::starting_at(7.0)));
+    CHECK(first && std::fabs(first->first - wc::WorldClock::starting_at(7.0).game_time(100.0)) < 1e-3, "a push reads the clock it is given, not the one of the setup");
+}
+
 int main() {
     test_lingering_actor();
     test_player_controller();
@@ -1081,6 +1280,12 @@ int main() {
     test_sequence(bs::GameStateMode::Captured, "Captured");
     test_native_character();
     test_guids_and_parts();
+    test_world_clock_measured();
+    test_world_clock_cycle();
+    test_world_clock_start();
+    test_world_clock_first_login();
+    test_world_clock_samples();
+    test_world_clock_pushes();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

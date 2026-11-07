@@ -127,6 +127,7 @@ std::optional<PlayerSetup> captured_character_setup() {
     // the session (transcript section 4.2)
     s.server_id = kCapturedServerId;
     s.world_time = 1593462.375;   // pkt#22 SummonCooldownTimer; also StartTime 1593462 (pkt#434)
+    s.clock = world::WorldClock::reading(174944068.06996086, s.world_time);   // the game time the original server sent with this login (a night hour)
     s.player_id = 1874;
     SessionGuids& g = s.guids;
     g.player_state = session_guid(10341528);

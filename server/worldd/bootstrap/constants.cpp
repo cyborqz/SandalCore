@@ -238,10 +238,10 @@ repl::LoadTracker load_tracker(std::string_view flags) {
     return t;
 }
 
-ClientTimes client_times(double world_time) {
+ClientTimes client_times(double world_time, const world::WorldClock& clock) {
     ClientTimes t;
     t.synchronized_time = world_time + kSynchronizedTimeOffset;
-    t.game_time = kGameTimeFactor * t.synchronized_time + kGameTimeOffset;
+    t.game_time = clock.game_time(world_time);
     return t;
 }
 

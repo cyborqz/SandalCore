@@ -50,7 +50,9 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
         if (time_syncs_.empty()) time_syncs_.push_back(now + kTimeSyncInterval);
         const double world_time = pb_.setup().world_time + session_seconds(now);
         ++time_syncs_sent_;
-        queue("clock", [world_time](bootstrap::PlayerBootstrap& pb) { return pb.set_time(world_time); }, conn);
+        // the game time it carries is the world's clock at this moment (world/world_clock.h), the clock the join's ClientSetTime read
+        const world::WorldClock clock = world_ ? world_->day_clock() : pb_.setup().clock;
+        queue("clock", [world_time, clock](bootstrap::PlayerBootstrap& pb) { return pb.set_time(world_time, clock); }, conn);
     }
     // A town's scenery (its ANodeLayoutReplicator) is opened in the join, before the phase-in.  The client's pawn phases in when a 10 m trace down finds a blocking object, or after 120 s,
     // and in a town's bowl the only ground the client has is what the replicator builds: opened by the pass below, after the phase-in, it left the player waiting out the cap

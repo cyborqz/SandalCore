@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 6 November 2026
+**Last updated:** 7 November 2026
 
 ---
 
@@ -61,6 +61,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot, which slows the carrier; a trade crate's rarity follows its materials, a quest can give a crate, and the Drop Crate ability takes the crate off the back. Next: the crate lying on the ground for others to pick up, then putting crates into building sites and selling them. The other crate types stay under Left.
 - Summoner pets: the Guardian, Hunter and Mystic come with the summon, follow, fight, take commands and stances, play their ten abilities and come back when more than 40 m away.
 - Seeing other players (first part): players within 150 m of each other are shown to each other as their characters, standing, walking and stopping, and leave each other's world when they log out. Still to come: riders on their mounts, gear and level changes, live Health and Mana, death, combat stances, and abilities and hits on other players.
+- The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; the choose-one reward window and the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
@@ -74,7 +75,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Mobs: the remaining mob families' own fights and abilities (the Goblin Flame Shamans' fire bombs and the arsonists' fire spray, stream and ring among them), smooth movement for goblins and bandits while their attack animations play, pack aggro, damage matched to retail, and flying mobs.
 - Abilities: the bars of Deliverance (a held cast) and Disengage follow the game's recorded timeline.
 - The walking map: walls, fences, water and holes.
-- The world: spawns that follow node levels, a world clock with day and night spawns, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
+- The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
 - Economy: player trading, marketplaces, node currency and crates.
 - Social: guilds, parties and raids, chat and mail.

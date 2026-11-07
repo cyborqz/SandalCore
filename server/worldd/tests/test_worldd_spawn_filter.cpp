@@ -125,6 +125,22 @@ static void test_conditions() {
     day.time_of_day_end = -1;
     CHECK(SpawnFilter(at, nullptr).filter(day, none) == Why::TimeOfDay || SpawnFilter(at, nullptr).filter(day, none) == Why::Spawns, "a half-open day is judged without a crash");
 
+    // a window holds its first hour and not its last, so the day set (5 to 20) and the night set (20 to 5) never hold the same hour
+    content::PopFilter by_day = open_filter(), by_night = open_filter();
+    by_day.time_of_day_start = 5;
+    by_day.time_of_day_end = 20;
+    by_night.time_of_day_start = 20;
+    by_night.time_of_day_end = 5;
+    const auto spawns_at = [&](const content::PopFilter& window, double hour) {
+        SpawnContext c = ctx;
+        c.hour = hour;
+        return SpawnFilter(c, nullptr).filter(window, none) == Why::Spawns;
+    };
+    CHECK(spawns_at(by_day, 5.0) && !spawns_at(by_night, 5.0), "hour 5 is day only: the day set spawns, the night set does not");
+    CHECK(!spawns_at(by_day, 20.0) && spawns_at(by_night, 20.0), "hour 20 is night only");
+    CHECK(!spawns_at(by_day, 4.99) && spawns_at(by_night, 4.99) && spawns_at(by_day, 19.99) && !spawns_at(by_night, 19.99), "the hours just before each edge belong to the period that is ending");
+    CHECK(spawns_at(by_day, 7.0) && !spawns_at(by_night, 7.0) && spawns_at(by_night, 0.0) && !spawns_at(by_day, 0.0), "the default start hour (7) is in the day set; hour 0 is in the night set");
+
     content::PopFilter tag = open_filter();
     tag.required_tags = {"npc.stature.rareSpawn"};
     CHECK(f.filter(tag, none) == Why::RequiredTag, "a required tag the spawner lacks");

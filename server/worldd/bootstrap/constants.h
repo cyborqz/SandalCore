@@ -22,6 +22,7 @@
 #include "protocol/repl/rep_state.h"
 #include "protocol/repl/subobject.h"
 #include "protocol/repl/value.h"
+#include "world/world_clock.h"
 
 #include <cstdint>
 #include <optional>
@@ -184,9 +185,10 @@ inline constexpr uint64_t kAlignmentKeyC = 6064631980646400000ull;
 
 // ---- the clock --------------------------------------------------------------------------------------------------------
 
-/// ClientSetTime(NewGameTime, NewSynchronizedTime) from the server's world time. Derived from the eight samples of the
-/// capture (pkt#23 and every 120 s after) and explained by nothing: NewSynchronizedTime is the world time plus a constant,
-/// NewGameTime nine times that plus another (both hold to within the sampling jitter of +-0.5 s; transcript section 4.2).
+/// ClientSetTime(NewGameTime, NewSynchronizedTime) from the server's world time. NewSynchronizedTime is the world time plus a constant
+/// (derived from the eight samples of the capture, pkt#23 and every 120 s after: both hold to within the sampling jitter of +-0.5 s;
+/// transcript section 4.2). NewGameTime is the world clock's (world/world_clock.h): the day runs 6 game seconds per real second and the
+/// night 9.
 inline constexpr double kSynchronizedTimeOffset = 13468184.6;
 /// The clock of an effect's StartTime and of a cooldown's start and end (plan A7): the same synchronized clock, so
 /// `StartTime = world time + kSynchronizedTimeOffset`.  Evidence: in pkt#8228 and #8301 the StartTime of the two Rest
@@ -195,14 +197,13 @@ inline constexpr double kSynchronizedTimeOffset = 13468184.6;
 /// pkt#23 and every 120 s after: two estimates of one constant, within the +-0.5 s sampling jitter).  The clock of the
 /// client's own prediction is not asked for: an infinite effect's StartTime is only its age.
 inline double effect_clock(double world_time) { return world_time + kSynchronizedTimeOffset; }
-inline constexpr double kGameTimeFactor = 9.0;
-inline constexpr double kGameTimeOffset = 39389245.0;
 
 struct ClientTimes {
     double game_time = 0;
     double synchronized_time = 0;
 };
-ClientTimes client_times(double world_time);
+/// What ClientSetTime carries for `world_time` (worldd's seconds since it started): the synchronized clock, and the game time of `clock`.
+ClientTimes client_times(double world_time, const world::WorldClock& clock);
 
 // ---- the storages ------------------------------------------------------------------------------------------------------
 

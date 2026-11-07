@@ -312,13 +312,17 @@ int main(int argc, char** argv) {
         ->envname("AOC_NPC_EXCLUDE");
     // plan E1, stage 3: the spawn filter (spawns/spawn_filter.h): only what retail spawns for a character here now
     bool no_spawn_filter = false, spawn_humanoids = false;
-    double spawn_hour = -1;
+    double spawn_hour = -1, world_hour = -1;
     std::string spawn_node_level = "Wilderness";
     app.add_flag("--no-spawn-filter", no_spawn_filter, "spawn every point of the design data whose Blueprint opens, as stage 2 did (quest and event spawns, other maps' spawns, humanoids with no look ...)")
         ->envname("AOC_NO_SPAWN_FILTER");
     app.add_flag("--spawn-humanoids", spawn_humanoids, "let the humanoid Blueprints through whose body needs an NPCAppearanceComponent the open does not carry (they show invisible)")
         ->envname("AOC_SPAWN_HUMANOIDS");
-    app.add_option("--spawn-hour", spawn_hour, "the game hour (0-24) the spawns' time-of-day conditions are judged at (default: the machine's local hour)")
+    // the world clock (world/world_clock.h): the day runs 6 game seconds per real second and the night 9; every start begins at the default hour (the morning) unless this asks for another
+    app.add_option("--world-hour", world_hour, "the game hour (0-24) the world clock starts at; the clock runs on from there, and the sky and the spawns' time-of-day conditions follow it (default: every start begins in the morning)")
+        ->envname("AOC_WORLD_HOUR")
+        ->check(CLI::Range(-1.0, 24.0));
+    app.add_option("--spawn-hour", spawn_hour, "the same as --world-hour (its old name; --world-hour wins when both are given)")
         ->envname("AOC_SPAWN_HOUR")
         ->check(CLI::Range(-1.0, 24.0));
     app.add_option("--spawn-node-level", spawn_node_level, "the node level the spawns' conditions are judged at: Wilderness, Crossroads, Encampment, Village, Town, City, Metropolis")
@@ -431,7 +435,7 @@ int main(int argc, char** argv) {
     // CLI11's Range lets a NaN through (every comparison with it is false), so the numbers that were range-checked are checked once more as numbers
     {
         const std::pair<const char*, double> checked[] = {
-            {"--area-radius", area_radius_m},         {"--scenery-radius", scenery_radius_m},   {"--spawn-hour", spawn_hour},
+            {"--area-radius", area_radius_m},         {"--scenery-radius", scenery_radius_m},   {"--spawn-hour", spawn_hour},   {"--world-hour", world_hour},
             {"--npc-damage-mult", npc_damage_mult},   {"--loot-chance-mult", loot_chance_mult}, {"--loot-rarity-boost", loot_rarity_boost},
             {"--gather-respawn-mult", gather_respawn_mult}, {"--foliage-regrow-mult", foliage_regrow_mult},
             {"--max-move-speed", movement.limits.max_speed}};
@@ -571,6 +575,18 @@ int main(int argc, char** argv) {
     const uint64_t dice_seed = combat_seed != 0 ? combat_seed : gather::fresh_seed();
     players.set_dice_seed(dice_seed);
     spdlog::info("[combat] the hit, block and critical rolls start from seed {}{}", dice_seed, combat_seed != 0 ? " (--combat-seed: the same rolls for the same fights)" : " (new on every start)");
+    // the world clock (world/world_clock.h): ONE clock for the sky each client is sent and for the hour the spawns are judged at.  Every start begins at the default hour on the same date, then the
+    // clock runs on by the game's rule (6 game seconds per real second by day, 9 by night).  Nothing is saved and the PC's clock is not read.
+    const bool hour_asked = world_hour >= 0 || spawn_hour >= 0;
+    const double start_hour = world_hour >= 0 ? world_hour : (spawn_hour >= 0 ? spawn_hour : world::kDefaultStartHour);
+    const world::WorldClock day_clock = hour_asked ? world::WorldClock::starting_at(start_hour) : world::default_world_clock();
+    players.set_day_clock(day_clock);
+    {
+        const double h = day_clock.hour(0.0);
+        spdlog::info("[clock] the world clock starts at {} (hour {:.1f}; {}): {:.0f} game seconds per real second from hour 6 up to hour 18 and {:.0f} from hour 18 up to hour 6, so a game day takes {:.0f} minutes",
+                     world::hour_text(h), h, world_hour >= 0 ? "--world-hour" : (spawn_hour >= 0 ? "--spawn-hour" : "the default start"), world::WorldClock::kDayRate,
+                     world::WorldClock::kNightRate, world::WorldClock::kCycle / 60.0);
+    }
     players.set_quest_worker(&quest_worker);
     spdlog::info("[gm] the client's own GM teleport commands are {}", gm_commands ? "ON (--gm-commands)" : "off (--gm-commands, or AOC_GM_COMMANDS=1, turns them on); each one the client sends is logged");
     // Nodes 1, stage 1: the registry from content.db, the seed's levels at once (login never waits for the service), then the stream.  The feed is declared
@@ -669,18 +685,7 @@ int main(int argc, char** argv) {
                 spdlog::warn("[area] --spawn-node-level {} is no node level: Wilderness is used", spawn_node_level);
                 context.node_level = "Wilderness";
             }
-            if (spawn_hour >= 0) {
-                context.hour = spawn_hour;
-            } else {
-                const std::time_t t = std::time(nullptr);
-                std::tm local{};
-#ifdef _WIN32
-                localtime_s(&local, &t);
-#else
-                localtime_r(&t, &local);
-#endif
-                context.hour = local.tm_hour + local.tm_min / 60.0;
-            }
+            context.hour = day_clock.hour(0.0);   // the hour the world starts at: the world clock's own, so the spawns and the sky agree
             players.set_spawn_context(std::move(context));
             combat::CombatWorldConfig combat_config;
             combat_config.enabled = !no_combat;

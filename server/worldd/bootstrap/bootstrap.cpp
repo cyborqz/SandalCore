@@ -596,7 +596,7 @@ std::optional<Send> PlayerBootstrap::flush_bandwidth_and_time() {
     const schema::RpcSchema* cap = cls.rpc(calls[1].rpc);
     const schema::RpcSchema* time = cls.rpc(calls[2].rpc);
     if (!cls.rpc(calls[0].rpc) || !cap || !time) return std::nullopt;
-    const ClientTimes t = client_times(setup_.world_time);
+    const ClientTimes t = client_times(setup_.world_time, setup_.clock);
     if (!repl::set_rpc_param(*cap, calls[1].params, "Cap", Value::i64(kBandwidthCap)) ||
         !repl::set_rpc_param(*time, calls[2].params, "NewGameTime", Value::f64(t.game_time)) ||
         !repl::set_rpc_param(*time, calls[2].params, "NewSynchronizedTime", Value::f64(t.synchronized_time))) {
@@ -606,11 +606,11 @@ std::optional<Send> PlayerBootstrap::flush_bandwidth_and_time() {
 }
 // C Y B with C O A
 
-std::optional<Send> PlayerBootstrap::set_time(double world_time) {
+std::optional<Send> PlayerBootstrap::set_time(double world_time, const world::WorldClock& clock) {
     if (!ok_) return std::nullopt;
     const schema::RpcSchema* time = pc_.obj.schema->rpc("ClientSetTime");
     if (!time) return std::nullopt;
-    const ClientTimes t = client_times(world_time);
+    const ClientTimes t = client_times(world_time, clock);
     repl::RpcParams params;
     if (!repl::set_rpc_param(*time, params, "NewGameTime", Value::f64(t.game_time)) ||
         !repl::set_rpc_param(*time, params, "NewSynchronizedTime", Value::f64(t.synchronized_time))) {

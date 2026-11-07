@@ -83,6 +83,7 @@
 #include "world/roads.h"
 #include "world/town_floor.h"
 #include "world/town_platform.h"
+#include "world/world_clock.h"
 // [C.O.A - Cyb]
 
 #include <chrono>
@@ -205,6 +206,10 @@ public:
     /// Plan E1, stage 3: what this world is for the conditions a spawn names (spawns/spawn_filter.h); before load_area.  `enabled = false` is the kill switch.
     void set_spawn_context(spawns::SpawnContext context) { spawn_context_ = std::move(context); }
     const spawns::SpawnContext& spawn_context() const { return spawn_context_; }
+    /// The clock of the game day (world/world_clock.h): the one clock for the sky every client is sent and for the hour the spawns are judged at.  main sets it before load_area; until then it
+    /// reads the default start hour at world time 0.  The world time it takes is world_clock() (the seconds since worldd started).
+    void set_day_clock(world::WorldClock clock) { day_clock_ = clock; }
+    const world::WorldClock& day_clock() const { return day_clock_; }
     const npc::MotionTable& blueprints() const { return motion_; }
     const spawns::GenericNpcs* generic_npcs() const { return generic_ ? &*generic_ : nullptr; }
     const spawns::AreaReport*     area_report() const { return area_report_ ? &*area_report_ : nullptr; }
@@ -637,6 +642,7 @@ private:
     mutable std::map<int64_t, items::ItemRarityFacts> rarity_cache_;
     mutable std::map<int64_t, std::string> name_cache_;
     double                               world_clock_ = 0;
+    world::WorldClock                    day_clock_ = world::default_world_clock();
     std::unordered_map<uint64_t, bool>   outside_;     // per player: beyond the region's edge at the last note
     std::unordered_map<uint64_t, double> outside_logged_at_;   // per player: the world time of its last logged exit (review A M2: a rate limit; the exits are counted all the same)
     std::unordered_map<uint64_t, bool>   exit_loud_;           // per player: the exit it is outside after was logged (its re-entry is then logged too)
