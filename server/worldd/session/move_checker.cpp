@@ -8,6 +8,8 @@
 // ============================================================================
 #include "session/move_checker.h"
 
+#include "nav/area_nav.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -25,19 +27,20 @@ const char* fault_name(MoveFault f) {
         case MoveFault::ModeNotAllowed: return "a movement mode this mount cannot use";
         case MoveFault::TooFastInAir: return "too fast in the air or water";
         case MoveFault::TooFastInAirForLong: return "beyond the flight law for too long";
+        case MoveFault::UnderGround: return "under the ground";
     }
     return "?";
 }
 
 MoveVerdict MoveChecker::check(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, bool dash) {
-    return judge(move, now, dash ? std::max(limits_.max_speed, limits_.dash_speed) : limits_.max_speed);
+    return judge(move, now, dash ? std::max(limits_.max_speed, limits_.dash_speed) : limits_.max_speed, dash, false);
 }
 
-MoveVerdict MoveChecker::check_allowing(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double allow_speed) {
-    return judge(move, now, std::max(limits_.max_speed, std::isfinite(allow_speed) ? allow_speed : 0.0));
+MoveVerdict MoveChecker::check_allowing(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double allow_speed, bool based) {
+    return judge(move, now, std::max(limits_.max_speed, std::isfinite(allow_speed) ? allow_speed : 0.0), std::isfinite(allow_speed) && allow_speed > 0.0, based);
 }
 
-MoveVerdict MoveChecker::judge(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double speed) {
+MoveVerdict MoveChecker::judge(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double speed, bool ability_window, bool based) {
     MoveVerdict v;
     // the server's clock fills the bank, whatever the move turns out to be (a refused move earns time too)
     if (!paced_) {
@@ -84,6 +87,7 @@ MoveVerdict MoveChecker::judge(const protocol::repl::NetworkMove& move, std::chr
     const double dx = loc.x - good_.x, dy = loc.y - good_.y, dz = loc.z - good_.z;
     const AirLimits& air = limits_.air;
     const uint8_t mode = move.movement_mode;
+    const bool after_teleport = has_teleport_ && std::chrono::duration<double>(now - last_teleport_).count() < kTeleportGraceSeconds;
 
     // the mounts milestone, stage 4: swimming and flying are judged in three dimensions (see the header), never along the ground
     if (air.active && mode == protocol::repl::kMoveFlying && !air.can_fly) return reject(MoveFault::ModeNotAllowed);
@@ -209,6 +213,26 @@ MoveVerdict MoveChecker::judge(const protocol::repl::NetworkMove& move, std::chr
         v.step = fall;
         v.allowed = allowed_down;
         return reject(MoveFault::FallingTooFast);
+    }
+
+    // the ground (a walking move only, after the speed, rise and fall checks have passed): the old spot must stand near its own ground
+    // answer (kNearSurfaceCm), or the navmesh's surface is not the player's floor (a cellar stair, a cave, a deck above him) and the move
+    // is not judged.  The new spot must then be more than kBelowGroundCm under the ground, found in the window below.
+    if (surface_ && !ability_window && !air.active && !based && mode == protocol::repl::kMoveWalking && !after_teleport &&
+        good_.z - loc.z > kGroundDropCm) {
+        const double below = std::min(kGroundBelowCapCm, limits_.max_fall_speed * dt + kBelowGroundCm);
+        double old_ground = 0;
+        if (surface_->ready_at(good_.x, good_.y) &&
+            surface_->ground_height(good_.x, good_.y, good_.z, &old_ground, below, kGroundAboveCm) &&
+            std::fabs(good_.z - old_ground) <= kNearSurfaceCm) {
+            double ground = 0;
+            if (surface_->ready_at(loc.x, loc.y) && surface_->ground_height(loc.x, loc.y, good_.z, &ground, below, kGroundAboveCm) &&
+                loc.z < ground - kBelowGroundCm) {
+                v.step = ground - loc.z;
+                v.allowed = kBelowGroundCm;
+                return reject(MoveFault::UnderGround);
+            }
+        }
     }
 
     // accepted: the time is spent; what was not used of the allowance refills the credit, up to the slack (up: the burst)

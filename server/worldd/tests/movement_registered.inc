@@ -13,3 +13,4 @@
 #include "movement_presence_walk_tests.inc"
 #include "movement_presence_wire_tests.inc"
 #include "movement_presence_mode_tests.inc"
+#include "movement_surface_tests.inc"

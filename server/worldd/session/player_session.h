@@ -872,7 +872,7 @@ private:
                   std::optional<stats::CharacterStats> character_stats, const PlayerWorld* world, int class_id, leveling::Progress progress)
         : pb_(std::move(setup), mode),
           character_id_(std::move(character_id)),
-          checker_(movement.limits, start_of(pb_.setup())),
+          checker_(movement.limits, start_of(pb_.setup()), world ? world->nav() : nullptr),
           saved_(checker_.good()),
           loaded_(checker_.good()),
           sink_(sink),

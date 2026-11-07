@@ -17,6 +17,7 @@
 //    the horizontal distance <= max_speed * dt + credit                          TooFast
 //    the upward step <= max_rise_speed * dt + credit                             RisingTooFast
 //    the downward step <= max_fall_speed * dt + credit                           FallingTooFast
+//    a walking move is not more than kBelowGroundCm under the ground             UnderGround
 //  where dt is the TimeStamp difference, at most max_time_step, at most what the server's own
 //  clock has earned (below) and, for the first move, a first_move_seconds allowance from the
 //  spawn point.  The TimeStamp is the client's own clock, so it is paced against the server's:
@@ -80,7 +81,18 @@
 //                             saved moves"), no position, and the Sprint's drain and the regeneration pause never heard the player
 //                             move: E1 stage 1's "Stamina stops updating about 4 minutes after the join".  Half the period is
 //                             UE's own threshold; a duplicate or a reordered datagram falls by milliseconds.
-//  Not checked: collision, and anything vertical beyond the two speeds.
+//  The ground rule is generous: an honest player is never corrected.  It needs the world's ground (nav/area_nav.h, the query the mobs
+//  use) and judges a walking move only when the previous position stood on its own ground answer: |old z - old ground| <= kNearSurfaceCm.
+//    under the ground  the new z is more than kGroundDropCm below the old z and more than kBelowGroundCm under the ground at the new spot,
+//                      found in [old z - min(kGroundBelowCapCm, max_fall_speed * dt + kBelowGroundCm), old z + kGroundAboveCm].  A player
+//                      under a deck, a cellar stair or a cave floor the navmesh does not carry is not near that answer and is never judged.
+//                      A cheater who sinks in small steps (the first 100 cm under the surface passes, then the answer is no longer near)
+//                      or who starts away from the surface goes unnoticed on purpose.
+//    walls             not checked: the navmesh cannot tell a thin wall from a gap (a door, a stair or ramp joint, the 45 cm step
+//                      against the 100 cm a player can climb), and a step of 150 cm or less was never checked anyway.
+//  The ground check is skipped in a 3D mode, on a mount, on a move that stands on a movement base, in a movement ability's window (the
+//  dash allowance) and for kTeleportGraceSeconds after a server-side teleport.  Not checked: collision, walls, and anything vertical
+//  beyond the two speeds and the ground.
 //
 //  The mounts milestone, stage 4: a possessed mount's three-dimensional modes (`MoveLimits::air`).  Swimming (movement mode 4) and flying (mode 5) are judged by the 3D distance
 //  against a speed cap, not by the horizontal distance and the two vertical speeds; mode 5 is refused outright for a mount that cannot fly (ModeNotAllowed).  The numbers are the
@@ -120,6 +132,7 @@
 
 namespace aoc { namespace worldd {
 
+namespace nav { class AreaNav; }   // the world's ground and walkable surface (nav/area_nav.h): the ground check
 struct WorldBox {
     double min_x, max_x, min_y, max_y, min_z, max_z;   // cm
     bool contains(double x, double y, double z) const {
@@ -129,6 +142,16 @@ struct WorldBox {
 
 /// Verra with a margin (the header: evidence).
 inline constexpr WorldBox kVerraBox = {-2600000.0, 1000000.0, -1500000.0, 2000000.0, -200000.0, 400000.0};
+
+/// The ground check of a walking move (the header): generous: an honest player is never corrected.  A client is refused only
+/// when it is clearly under the ground, never for a real step's drift.
+inline constexpr double kBelowGroundCm = 300.0;            // cm under the ground's height at the new spot: a deeper step is refused
+inline constexpr double kNearSurfaceCm = 100.0;            // cm: the old position must be this close to its own ground answer to be judged
+inline constexpr double kGroundDropCm = 5.0;               // cm: the new z must be this much lower than the last good z for the under-ground check
+inline constexpr double kGroundBelowCapCm = 6000.0;        // cm: the below window is the fall limit times the step's time plus kBelowGroundCm, capped here
+inline constexpr double kGroundAboveCm = 1500.0;           // cm above the last good z the ground is looked for
+inline constexpr double kTeleportGraceSeconds = 2.0;       // s after a server-side teleport: no ground check
+inline constexpr double kSurfaceRefusalLogSeconds = 10.0;  // s between the log lines of the ground refusals (once per player)
 
 /// A possessed mount's three-dimensional modes (see the header): swimming (movement mode 4) and flying (mode 5).  `active` false (the pawn's checker): every mode is judged by
 /// the horizontal and vertical rules above.
@@ -184,7 +207,7 @@ struct GoodPosition {
     bool operator==(const GoodPosition&) const = default;
 };
 
-enum class MoveFault : uint8_t { None, NotFinite, OutOfWorld, TimeStampNotRising, TooFast, RisingTooFast, FallingTooFast, ModeNotAllowed, TooFastInAir, TooFastInAirForLong };
+enum class MoveFault : uint8_t { None, NotFinite, OutOfWorld, TimeStampNotRising, TooFast, RisingTooFast, FallingTooFast, ModeNotAllowed, TooFastInAir, TooFastInAirForLong, UnderGround };
 
 const char* fault_name(MoveFault f);
 
@@ -192,7 +215,7 @@ struct MoveVerdict {
     bool      accepted = true;
     MoveFault fault = MoveFault::None;
     /// For the log: the step the move made and the most the limits allowed (the speed times dt, plus the credit in hand),
-    /// in cm (TooFast, RisingTooFast, FallingTooFast); 0 for the others.
+    /// in cm (TooFast, RisingTooFast, FallingTooFast); for UnderGround the depth below the ground, against kBelowGroundCm; 0 for the others.
     double    step = 0;
     double    allowed = 0;
     double    dt = 0;                  // the seconds the allowance was computed for
@@ -204,8 +227,9 @@ struct MoveVerdict {
 
 class MoveChecker {
 public:
-    MoveChecker(const MoveLimits& limits, const GoodPosition& start)
-        : limits_(limits), good_(start), credit_along_(limits.slack), credit_up_(limits.max_rise_burst), credit_down_(limits.slack) {}
+    /// `surface`: the world's navmesh for the ground check (null: none, as a caller without ground).
+    MoveChecker(const MoveLimits& limits, const GoodPosition& start, const nav::AreaNav* surface = nullptr)
+        : limits_(limits), good_(start), credit_along_(limits.slack), credit_up_(limits.max_rise_burst), credit_down_(limits.slack), surface_(surface) {}
 
     /// Judges `move` against the last good position; an accepted move becomes the last good position. `now` is the
     /// server's clock when the move arrived (the Endpoint's): a move cannot claim more time (dt) than the bank the clock
@@ -215,8 +239,9 @@ public:
     MoveVerdict check(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, bool dash = false);
 
     /// The same with the horizontal limit `allow_speed` cm/s instead of max_speed when that is the larger (plan D2: a movement ability's
-    /// window: Flourish's slide, a Blink; `allow_speed` 0 is max_speed). The Dodge's `dash` is allow_speed = dash_speed.
-    MoveVerdict check_allowing(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double allow_speed);
+    /// window: Flourish's slide, a Blink; `allow_speed` 0 is max_speed). The Dodge's `dash` is allow_speed = dash_speed.  `based`: the move
+    /// stands on a movement base (its place is not the navmesh's): the ground check is skipped.
+    MoveVerdict check_allowing(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double allow_speed, bool based = false);
 
     /// Whether a move with this TimeStamp has been seen already (it is not newer than the last good one): the pending and
     /// old moves that ride along with each new move are skipped when they are.
@@ -227,8 +252,9 @@ public:
 // built by C | O | A with Cyb
 
     /// The server moved the player (a respawn, a GM teleport): the last good position is `x, y, z` now, the credits start over; the TimeStamp state is kept (the client's
-    /// next moves go on from it: true for a correction only; a death also restarts the client's clock, see `restart_clock`).
-    void teleport(double x, double y, double z, double yaw_degrees) {
+    /// next moves go on from it: true for a correction only; a death also restarts the client's clock, see `restart_clock`).  `now`: the server's clock, for the ground
+    /// check's grace (kTeleportGraceSeconds).
+    void teleport(double x, double y, double z, double yaw_degrees, std::chrono::steady_clock::time_point now) {
         good_.x = x;
         good_.y = y;
         good_.z = z;
@@ -239,6 +265,8 @@ public:
         air_speed_ = 0;   // (stage 4) a flight does not carry its speed through a server-side move
         hold_speed_ = 0;
         over_law_ = 0;
+        last_teleport_ = now;
+        has_teleport_ = true;
     }
 
     /// Review A I1: the controlled actor changes (a mount-up, a dismount): new limits and a new last good position (the TimeStamp restarts near 0, the flight's speed does not carry
@@ -288,7 +316,7 @@ public:
     const MoveLimits&   limits() const { return limits_; }
 
 private:
-    MoveVerdict judge(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double speed);
+    MoveVerdict judge(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double speed, bool ability_window, bool based);
     MoveLimits   limits_;
     GoodPosition good_;
     double       credit_along_, credit_up_, credit_down_;   // cm in hand per direction, 0 .. slack (up: 0 .. max_rise_burst)
@@ -299,6 +327,9 @@ private:
     double       bank_ = 0;                                  // s of claimed time the server's clock has earned and the moves have not spent
     bool         paced_ = false;                             // the bank is filled at the first check
     std::chrono::steady_clock::time_point last_now_{};
+    const nav::AreaNav* surface_ = nullptr;                  // the world's ground and walkable surface (the ground check); null: none
+    std::chrono::steady_clock::time_point last_teleport_{};  // the server's clock of the last teleport (a respawn, a GM teleport)
+    bool         has_teleport_ = false;                      // false until a teleport: `last_teleport_` means nothing before one
 };
 
 }}  // namespace aoc::worldd

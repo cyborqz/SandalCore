@@ -515,8 +515,8 @@ void PlayerSession::log_position(Clock::time_point) {
                  (nav->has_region() && !nav->in_region(at.x, at.y) ? ", outside the Riverlands" : "");
     }
     const double from_login = npc_world_ ? std::hypot(at.x - npc_world_->area().center_x, at.y - npc_world_->area().center_y) / 100.0 : 0.0;
-    spdlog::info("[session] {}: at ({:.0f}, {:.0f}, {:.0f}) cm, {:.0f} m from the login spot, movement mode {}{}; {} moves acknowledged, {} refused, {} dropped as stale{}; its view holds {} awake and {} dormant actors",
-                 name(), at.x, at.y, at.z, from_login, static_cast<unsigned>(at.movement_mode), mounted() ? " (mounted)" : "", moves_acked_, moves_refused_, moves_stale_, based_move_summary() + ground,
+    spdlog::info("[session] {}: at ({:.0f}, {:.0f}, {:.0f}) cm, {:.0f} m from the login spot, movement mode {}{}; {} moves acknowledged, {} refused ({} under the ground), {} dropped as stale{}; its view holds {} awake and {} dormant actors",
+                 name(), at.x, at.y, at.z, from_login, static_cast<unsigned>(at.movement_mode), mounted() ? " (mounted)" : "", moves_acked_, moves_refused_, moves_surface_refused_, moves_stale_, based_move_summary() + ground,
                  view_ ? view_->count(world::ClientState::Awake) : 0, view_ ? view_->count(world::ClientState::Dormant) : 0);
 }
 

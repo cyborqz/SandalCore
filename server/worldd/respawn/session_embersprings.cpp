@@ -280,7 +280,7 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     const stats::StatValue* mp = stats_ ? stats_->find(content::kGuidMaxMana) : nullptr;
     if (hp) set_current_value(content::kGuidHealth, hp->value);
     if (mp) set_current_value(content::kGuidMana, mp->value);
-    checker_.teleport(spot.x, spot.y, spot.z, spot.yaw);
+    checker_.teleport(spot.x, spot.y, spot.z, spot.yaw, now);
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
     // The death's ClientRestart restarted the client's pawn, and with it its movement clock (the TimeStamp of every move starts again near 0): the checker's last good TimeStamp is
     // from the old clock, and every move below it would be dropped silently as TimeStampNotRising for as long as the old clock had run (a death in a play test of 2026-10-10: 66 s frozen
@@ -291,7 +291,6 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     queue("respawn teleport", [ts, spot, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{spot.x, spot.y, spot.z}, repl::Vec3d{}, mode); }, conn,
           /*must_build=*/true);
     spdlog::log(level_for(death_logged_), "[session] {}: comes back at {} ({:.0f}, {:.0f}, {:.0f}) with full Health and Mana", name(), spot.name, spot.x, spot.y, spot.z);
-    (void)now;
 }
 
 /// The client calls of Embersprings: respawn choices and the home (session/rpc_table.h).

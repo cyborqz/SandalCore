@@ -43,6 +43,7 @@
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
+#include "nav_fixture.h"
 #include "net/endpoint.h"
 #include "protocol/repl/move_packed.h"
 #include "protocol/repl/replicator.h"
@@ -568,9 +569,18 @@ struct Harness {
     uint32_t pawn_ch = 0;
 // built with C Y B and CoA
 
-    explicit Harness(const MovementConfig& mc = {}, bool with_sink = true) {
+    explicit Harness(const MovementConfig& mc = {}, bool with_sink = true, bool with_ground = false) {
         fx.world->set_movement(mc);
         if (with_sink) fx.world->set_position_sink(&sink);
+        if (with_ground) {
+            // the navmesh fixture's plain (z 1,000): the ground check of the move checker
+            std::string err;
+            auto mesh = nav::AreaNav::from_file(navfix::build_file(), &err);
+            if (!mesh || !fx.world->adopt_ground(std::move(mesh), err)) {
+                std::printf("  [FAIL] the fixture's ground does not load: %s\n", err.c_str());
+                std::exit(2);
+            }
+        }
         s = PlayerSession::join(conn, *fx.world, cyb_record(), identity(), world_time_at(t), error);
         if (!s) {
             std::printf("  [FAIL] the session does not join: %s\n", error.c_str());

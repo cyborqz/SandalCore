@@ -109,7 +109,10 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
         return;
     }
     // A move that stands on a movement base gives its place relative to the base: it is put in the world before it is judged (session/player_based_move.cpp).  False: a run of moves on
-    // bases worldd cannot follow ended in a correction.
+    // bases worldd cannot follow ended in a correction.  The base is stripped there, so the flag is taken first: the ground check is not for a base's own place.
+    const bool old_based = moves->old && moves->old->has_base();
+    const bool pending_based = moves->pending && moves->pending->has_base();
+    const bool new_based = moves->new_move.has_base();
     if (!stand_on_bases(*moves)) return;
 
     // The older moves of the packet first, oldest first, unless they were judged already (every packet repeats the last
@@ -119,20 +122,19 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
     const double allow = on_mount ? 0.0
                                   : std::max(dash_allowed(now) ? checker_.limits().dash_speed : 0.0,
                                              pipeline_ ? pipeline_->movement_allowance(ability_seconds(now)) : 0.0);
-    const auto judge = [&](const repl::NetworkMove& m) {
+    const auto judge = [&](const repl::NetworkMove& m, bool based) {
         if (on_mount) {
             // the Blueprint's speed times MoveSpeedMult, now (stage 4: the 3D modes, swimming and flying, scale with it as well)
             checker_.set_max_speed(ride_->speed_limit(m.movement_mode, ability_seconds(now)));
             checker_.set_speed_mult(ride_->effective_mult(ability_seconds(now)));
         }
-        return checker_.check_allowing(m, now, allow);
+        return checker_.check_allowing(m, now, allow, based);
     };
-    for (const repl::NetworkMove* older : {moves->old ? &*moves->old : nullptr, moves->pending ? &*moves->pending : nullptr}) {
-        if (older && !checker_.is_stale(older->time_stamp)) judge(*older);
-    }
+    if (moves->old && !checker_.is_stale(moves->old->time_stamp)) judge(*moves->old, old_based);
+    if (moves->pending && !checker_.is_stale(moves->pending->time_stamp)) judge(*moves->pending, pending_based);
     const repl::NetworkMove& move = moves->new_move;
     const GoodPosition before = checker_.good();
-    const MoveVerdict verdict = judge(move);
+    const MoveVerdict verdict = judge(move, new_based);
     if (on_mount && ride_) {
         // what the moves of the packet accepted moved the mount too (its place in the registry, the road under it)
         const GoodPosition& g = checker_.good();
@@ -189,15 +191,26 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
     }
     const GoodPosition& good = checker_.good();
     const repl::Vec3d at = move.location_cm();
-    const spdlog::level::level_enum level = level_for(refused_logged_);
-    if (verdict.step > 0) {
-        spdlog::log(level, "[session] {}: the {}move at TimeStamp {} (movement mode {}) is refused ({}: {:.0f} cm in {:.3f} s, at most {:.0f}): put back at ({:.1f}, {:.1f}, {:.1f}) cm",
-                    name(), on_mount ? "mount's " : "", move.time_stamp, static_cast<unsigned>(move.movement_mode), fault_name(verdict.fault), verdict.step, verdict.dt,
-                    verdict.allowed, good.x, good.y, good.z);
+    if (verdict.fault == MoveFault::UnderGround) {
+        ++moves_surface_refused_;
+        // once per player per kSurfaceRefusalLogSeconds, with how deep
+        if (!surface_refusal_logged_ || std::chrono::duration<double>(now - surface_refusal_log_).count() >= kSurfaceRefusalLogSeconds) {
+            surface_refusal_logged_ = true;
+            surface_refusal_log_ = now;
+            spdlog::info("[session] {}: the {}move at TimeStamp {} (movement mode {}) is refused (under the ground: {:.0f} cm below it, more than the {:.0f} allowed): put back at ({:.1f}, {:.1f}, {:.1f}) cm",
+                         name(), on_mount ? "mount's " : "", move.time_stamp, static_cast<unsigned>(move.movement_mode), verdict.step, verdict.allowed, good.x, good.y, good.z);
+        }
     } else {
-        spdlog::log(level, "[session] {}: the {}move at TimeStamp {} (movement mode {}) to ({:.1f}, {:.1f}, {:.1f}) cm is refused ({}): put back at ({:.1f}, {:.1f}, {:.1f}) cm",
-                    name(), on_mount ? "mount's " : "", move.time_stamp, static_cast<unsigned>(move.movement_mode), at.x, at.y, at.z, fault_name(verdict.fault), good.x, good.y,
-                    good.z);
+        const spdlog::level::level_enum level = level_for(refused_logged_);
+        if (verdict.step > 0) {
+            spdlog::log(level, "[session] {}: the {}move at TimeStamp {} (movement mode {}) is refused ({}: {:.0f} cm in {:.3f} s, at most {:.0f}): put back at ({:.1f}, {:.1f}, {:.1f}) cm",
+                        name(), on_mount ? "mount's " : "", move.time_stamp, static_cast<unsigned>(move.movement_mode), fault_name(verdict.fault), verdict.step, verdict.dt,
+                        verdict.allowed, good.x, good.y, good.z);
+        } else {
+            spdlog::log(level, "[session] {}: the {}move at TimeStamp {} (movement mode {}) to ({:.1f}, {:.1f}, {:.1f}) cm is refused ({}): put back at ({:.1f}, {:.1f}, {:.1f}) cm",
+                        name(), on_mount ? "mount's " : "", move.time_stamp, static_cast<unsigned>(move.movement_mode), at.x, at.y, at.z, fault_name(verdict.fault), good.x, good.y,
+                        good.z);
+        }
     }
     // The correction goes out once the datagram's bunches are all judged (end_of_datagram), the latest refusal's.
     // (a TimeStamp that is NaN or infinite names no saved move: the client ignores it, so 0 goes out instead)
@@ -286,7 +299,7 @@ PlayerSession::GmMoveResult PlayerSession::move_to(Connection& conn, double x, d
     }
     // the path a respawn uses: the checker moves with the player (the credits start over, the TimeStamp state stays) and the client is snapped there
     const double yaw = checker_.good().yaw_degrees;
-    checker_.teleport(x, y, z, yaw);
+    checker_.teleport(x, y, z, yaw, now);
     pending_fix_.reset();   // a correction a refused move left would put the client back where it was
     based_fix_.reset();
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;

@@ -22,9 +22,15 @@
 //      is held to max_rise_speed once the burst (max_rise_burst, 500 cm) is spent, and the burst refills
 //    the Dodge's dash (plan A7): the retail Rogue's dash (the retail capture: 2,237 cm/s, above max_speed) is accepted while a Dodge is
 //      on (check()'s dash, limit 3,355 cm/s), a dash that lasts is refused without it, and no Dodge allows 4,500
+//    the ground (the navmesh): a walking move 4 m under the ground from the surface is refused; 1 m under, a 100 cm sink a move from
+//      the surface, a descent under a fixed surface (not near the old ground answer), a cave at the same height and an already-under
+//      player are accepted; a 400 cm drop from the surface is refused; falling, flying, mounted, a based move, an ability's window,
+//      after a teleport and a move where no ground is known are accepted.  Walls are not checked (see the header).
+// ============================================================================
 // ============================================================================
 #include "capture_moves.h"
 #include "capture_rogue_dash.h"
+#include "nav_fixture.h"
 #include "session/move_checker.h"
 
 #include <algorithm>
@@ -727,6 +733,125 @@ static void test_rogue_dash() {
           "a max_speed above the dash's is not lowered by the window");
 }
 
+/// The ground check (session/move_checker.h) on the navmesh fixture: a flat plain at z 1,000 and a wall whose top is 600 cm over it.
+static void test_the_ground() {
+    std::printf("the ground (the world's navmesh)\n");
+    const nav::AreaNav& world = navfix::shared_nav();
+
+    {
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        CHECK(chk(c, move_at(10.0f, 2000, 0, 1000)).accepted, "(a walking move on the ground is accepted)");
+        const MoveVerdict v = chk(c, move_at(11.0f, 2100, 0, 600));
+        CHECK(!v.accepted && v.fault == MoveFault::UnderGround && v.step > 399 && v.step < 401,
+              "a walking move 4 m under the ground (100 cm on, 400 down in one second) is refused: UnderGround, with the depth (400 cm)");
+        CHECK(c.good().z == 1000.0, "a refused move changes nothing: the last good position is the ground's");
+    }
+    {
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        chk(c, move_at(10.0f, 2000, 0, 1000));
+        CHECK(chk(c, move_at(11.0f, 2100, 0, 900)).accepted, "a walking move 1 m under the ground (100 cm on, 100 down) is accepted: the allowance is 300 cm");
+    }
+    {
+        // the reviewer's case: the surface at 1,000 is fixed above him, so the old spot (710) is 290 cm from it and not "near"
+        MoveChecker c({}, start_at(2000, 0, 710), &world);
+        CHECK(chk(c, move_at(10.0f, 2000, 0, 710)).accepted, "(a player standing 290 cm under the fixed surface)");
+        const MoveVerdict first = chk(c, move_at(11.0f, 2100, 0, 610));
+        CHECK(first.accepted, "the reviewer's 290 -> 390 case (710 -> 610 under a fixed surface at 1,000) is accepted: the old spot is not near the surface");
+        bool all = true;
+        float ts = 11.0f;
+        double z = 610.0;
+        for (int i = 0; i < 6; ++i) {
+            ts += 1.0f;
+            z -= 100.0;
+            all = all && chk(c, move_at(ts, 2000, 0, z)).accepted;
+        }
+        CHECK(all, "every further step of the same descent (610 -> 510 -> ... -> 10) is accepted");
+    }
+    {
+        // a cheater who stands on the surface and drops 400 cm in one move
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        chk(c, move_at(10.0f, 2000, 0, 1000));
+        const MoveVerdict v = chk(c, move_at(11.0f, 2100, 0, 600));
+        CHECK(!v.accepted && v.fault == MoveFault::UnderGround && v.step > 399 && v.step < 401,
+              "a cheater standing on the surface who drops 400 cm in one move is refused: the old spot is near the surface and 400 cm is over the 300 cm allowance");
+    }
+    {
+        // by design: 100 cm a move is never refused, even after the old spot leaves the near-surface band
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        chk(c, move_at(10.0f, 2000, 0, 1000));
+        bool all = true;
+        float ts = 10.0f;
+        double z = 1000.0;
+        for (int i = 0; i < 6; ++i) {
+            ts += 1.0f;
+            z -= 100.0;
+            all = all && chk(c, move_at(ts, 2000, 0, z)).accepted;
+        }
+        CHECK(all, "a sink of 100 cm per move from the surface is never refused (by design: after 100 cm the old spot leaves the near-surface band)");
+    }
+    {
+        // the mode: falling, flying and a mount are not judged by the pawn's ground check
+        MoveChecker falling({}, start_at(2000, 0, 1000), &world);
+        chk(falling, move_at(10.0f, 2000, 0, 1000));
+        CHECK(chk(falling, move_at(11.0f, 2100, 0, 600, 16384, repl::kMoveFalling)).accepted,
+              "a falling move 4 m below the ground is accepted (movement mode not walking; it would be refused without that skip)");
+        MoveChecker flying({}, start_at(2000, 0, 1000), &world);
+        chk(flying, move_at(10.0f, 2000, 0, 1000));
+        CHECK(chk(flying, move_at(11.0f, 2100, 0, 600, 16384, repl::kMoveFlying)).accepted,
+              "a flying move 4 m below the ground is accepted (the 3D branch returns before the ground block; the walking-mode condition is not what saves it)");
+        MoveLimits mounted;
+        mounted.air.active = true;
+        mounted.air.can_fly = true;
+        mounted.air.fly_speed = 1290.0;
+        MoveChecker mount(mounted, start_at(2000, 0, 1000), &world);
+        chk(mount, move_at(10.0f, 2000, 0, 1000));
+        CHECK(chk(mount, move_at(11.0f, 2100, 0, 600)).accepted, "a mounted move 4 m below the ground is accepted (a mount's checker)");
+    }
+    {
+        // a movement ability's window (the dash path): the ground check is skipped
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        chk(c, move_at(10.0f, 2000, 0, 1000));
+        CHECK(c.check_allowing(move_at(11.0f, 2100, 0, 600), at_s(11), 2500.0).accepted, "a move in a movement ability's window 4 m below the ground is accepted (the dash allowance path)");
+    }
+    {
+        // a move on a movement base (its place is not the navmesh's): the check is skipped
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        chk(c, move_at(10.0f, 2000, 0, 1000));
+        CHECK(c.check_allowing(move_at(11.0f, 2100, 0, 600), at_s(11), 0.0, /*based=*/true).accepted,
+              "a move on a movement base 4 m below the ground is accepted (a base's own place is not the navmesh's)");
+    }
+    {
+        // 2 s after a server-side teleport: no ground check; after that, yes
+        MoveChecker c({}, start_at(2000, 0, 1000), &world);
+        c.teleport(2000, 0, 1000, 0, t0);
+        CHECK(c.check(move_at(10.0f, 2100, 0, 600), t0 + std::chrono::seconds(1)).accepted, "within 2 s after a teleport a move 4 m below the ground is accepted");
+        MoveChecker later({}, start_at(2000, 0, 1000), &world);
+        later.teleport(2000, 0, 1000, 0, t0);
+        const MoveVerdict v = later.check(move_at(10.0f, 2100, 0, 600), t0 + std::chrono::seconds(3));
+        CHECK(!v.accepted && v.fault == MoveFault::UnderGround, "after the 2 s the same move is refused: the grace is over");
+    }
+    {
+        // a player away from the fixed surface is not near his own ground answer: never judged
+        MoveChecker c({}, start_at(2000, 0, 500), &world);
+        CHECK(chk(c, move_at(10.0f, 2000, 0, 500)).accepted, "(a player 500 cm under the fixed surface)");
+        CHECK(chk(c, move_at(11.0f, 2100, 0, 400)).accepted,
+              "a player 500 cm under the fixed surface keeps walking at 600 cm under it: the old spot is not near the surface, so the check is skipped");
+    }
+    {
+        // a wall's top is 600 cm over the plain: the height does not drop, so this is a walk along a cave floor, not a sink
+        MoveChecker c({}, start_at(-3200, 0, 1000), &world);
+        CHECK(chk(c, move_at(10.0f, -3200, 0, 1000)).accepted, "(a walking move on the plain beside the wall)");
+        CHECK(chk(c, move_at(11.0f, -3000, 0, 1000)).accepted,
+              "a walking step into the wall's footprint at the same height is accepted: the ground answer is 600 cm higher, but the player's own height did not drop");
+    }
+    {
+        // no ground known: far below any surface
+        MoveChecker c({}, start_at(300000, 0, -10000), &world);
+        CHECK(chk(c, move_at(10.0f, 300000, 0, -10000)).accepted, "(a walking move where the ground query knows nothing)");
+        CHECK(chk(c, move_at(11.0f, 300100, 0, -10400)).accepted, "a move 4 m below where no ground is known is accepted (10,400 cm under any floor)");
+    }
+}
+
 int main() {
     test_plausible_moves();
     test_refusals();
@@ -739,6 +864,7 @@ int main() {
     test_mode_alternation();
     test_rebase();
     test_rogue_dash();
+    test_the_ground();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1723,8 +1723,8 @@ uint64_t PlayerWorld::respawn_npc(uint32_t spawn_ref, double now) {
 void PlayerWorld::note_player(uint64_t player_id, double x, double y) {
     if (npcs_) npcs_->note_player(player_id, x, y, world_clock_);
     if (!nav_ || !nav_->has_region() || !std::isfinite(x) || !std::isfinite(y)) return;
-    // the region's edge (G1 stage 1): beyond it there is no navmesh and nothing spawns, but the player is not held: no wall, and the move checks do not look at the ground
-    // (speed, rise and fall only), so the player stays playable.  One log line per exit.
+    // the region's edge (G1 stage 1): beyond it there is no navmesh and nothing spawns, but the player is not held: no wall, and every ground query
+    // answers none there, so the move checker's ground check is skipped and the player stays playable.  One log line per exit.
     const bool outside = !nav_->in_region(x, y);
     bool& was = outside_[player_id];
     if (outside && !was) {
