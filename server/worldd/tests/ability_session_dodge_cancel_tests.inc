@@ -1224,6 +1224,152 @@ void test_dodge_ends_the_combust() {
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_combust);
 
+// ---- the Dodge on every ordinary ability ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// The game's two rules: a Dodge cancels an ability and gives back what it paid until the ability goes out, and once it has gone out the Dodge changes nothing. For the kinds those rules leave open: the item of a
+// consumable is used at the press and its buff applies in full whatever the Dodge does; a pet command, a leap, a charge, a teleport and a dash count as gone out at the press; only the five Melodies are songs (the ten
+// one-shot Songs are ordinary abilities); an ability with no hit of its own is gone out once it is paid.
+
+/// The windows of the Dodge rule for one ability, in seconds after the press.
+struct DodgeWindows {
+    double before = 0.1;       // a Dodge before the cost step: nothing was paid
+    double between = 0.5;      // ... after the cost step and before the ability goes out: the cost comes back (negative: the ability has no such window)
+    double after = 1.0;        // ... after the ability went out
+    double refused = -1;       // the Dodge the server refuses, inside the cooldown of the one pressed before the trigger (negative: the time of `before`)
+    double ask_from = 0.8;     // when the client asks for the hit (negative: it asks for none)
+    double seconds = 3.0;      // how long each run plays
+    float  min_price = 10.0f;  // the Mana the cast must spend for the control to count (0: the cast spends no Mana: its cooldown is the sign that it is paid)
+    bool   on_target = true;   // the hit's confirmations reach a target (a buff on the caster does not)
+    bool   lands = true;       // the ability has a hit that lands (false: no hit is counted)
+};
+static void prepare_dodge_cast(ChanCast& cc, const char* hit, const DodgeWindows& w) {
+    if (w.ask_from >= 0) {
+        cc.ask = {hit};
+        cc.ask_from = w.ask_from;
+        cc.ask_gap = 100;
+    }
+    cc.seconds = w.seconds;
+}
+static int landed_hits(const ChanEnd& e, const char* hit, const DodgeWindows& w) { return w.lands ? chan_hits(e, hit, -1e9, w.on_target) : 0; }
+/// Nothing is paid: no Mana (a regeneration tick may have added some) and no cooldown.
+static bool dodge_unpaid(const ChanEnd& e, const DodgeWindows& w) { return (w.min_price <= 0 || spent_mana(e) < 3.0f) && !e.cooldown_on && e.charges_left == -1; }
+/// It stays paid: the Mana spent (when it spends any) and the cooldown running.
+static bool dodge_paid(const ChanEnd& e, const DodgeWindows& w, float price) { return (w.min_price <= 0 || spent_mana(e) > 0.8f * price) && e.cooldown_on; }
+
+/// The control of an ability: the cast with no Dodge goes out (its hit lands, when it has one), is paid, starts its cooldown and the client is told nothing. False, after the reason, when it does not.
+static bool run_dodge_control(const svc::Character& rec, const ChanCast& cc, const char* hit, const char* what, const DodgeWindows& w, int& landed, float& price) {
+    ChanEnd ce;
+    const bool ok = run_chan_cast(rec, cc, ce);
+    CHECKF(ok, "%s: a world with ground and a Wolf", what);
+    if (!ok) return false;
+    landed = landed_hits(ce, hit, w);
+    price = spent_mana(ce);
+    const bool paid = w.min_price > 0 ? price > w.min_price : ce.cooldown_on;
+    std::printf("  (%s, control: %d hit(s), Mana %.1f -> %.1f, cooldown %d, charges %d, %d end(s))\n", what, landed, ce.mana_before, ce.mana_after, ce.cooldown_on, ce.charges_left, chan_ends(ce, ce.cast_id));
+    const bool good = (!w.lands || landed >= 1) && paid && ce.cooldown_on && chan_ends(ce, ce.cast_id) == 0;
+    CHECKF(good, "%s, control, no Dodge: the ability goes out, it is paid, its cooldown runs and the client is told nothing", what);
+    if (!good) {
+        std::printf("    | %s\n", ce.probe.c_str());
+        log_excerpt(ce.log, cc.ability);
+    }
+    return good;
+}
+
+// An ordinary instant ability has a short wind up: its item comes at once, its cost step at about 0.3 s and its hit is asked for by the client after that. A Dodge in the wind up cancels it (before the
+// cost step nothing was paid, after it the cost comes back); once the hit was asked for or landed the Dodge changes nothing. `w` holds the times of the windows for the ability's own timeline.
+static void check_ordinary_ability_dodge(const svc::Character& rec, ChanCast cc, const char* hit, const char* what, const DodgeWindows& w = DodgeWindows()) {
+    prepare_dodge_cast(cc, hit, w);
+    int control_landed = 0;
+    float price = 0;
+    if (!run_dodge_control(rec, cc, hit, what, w, control_landed, price)) return;
+    // a Dodge before the cost step: nothing was paid, the cast is cancelled
+    cc.dodge_at = w.before;
+    {
+        ChanEnd de;
+        const bool ok = run_chan_cast(rec, cc, de);
+        CHECKF(ok, "%s: a world with ground and a Wolf and a Dodge before the cost step", what);
+        if (!ok) return;
+        std::printf("  (%s, Dodge at %.2f s: %d hit(s), Mana %.1f -> %.1f, cooldown %d, charges %d, %d end(s))\n", what, de.dodged_at, landed_hits(de, hit, w), de.mana_before, de.mana_after, de.cooldown_on,
+                    de.charges_left, chan_ends(de, de.cast_id));
+        CHECKF(de.dodge_item && landed_hits(de, hit, w) == 0, "%s: a Dodge before the cost step cancels it: nothing of it goes out", what);
+        CHECKF(chan_ends(de, de.cast_id) == 1, "%s: ... and the client is told it is over: one ClientEndAbility for its instance", what);
+        CHECKF(dodge_unpaid(de, w), "%s: ... nothing was paid: no Mana (a regeneration tick may have added some) and no cooldown", what);
+    }
+    // a Dodge after the cost step and before the ability goes out: the cost comes back
+    if (w.between >= 0) {
+        cc.dodge_at = w.between;
+        ChanEnd de;
+        const bool ok = run_chan_cast(rec, cc, de);
+        CHECKF(ok, "%s: a world with ground and a Wolf and a Dodge between the cost step and the launch", what);
+        if (!ok) return;
+        std::printf("  (%s, Dodge at %.2f s: %d hit(s), Mana %.1f -> %.1f, cooldown %d, charges %d, %d end(s))\n", what, de.dodged_at, landed_hits(de, hit, w), de.mana_before, de.mana_after, de.cooldown_on,
+                    de.charges_left, chan_ends(de, de.cast_id));
+        CHECKF(de.dodge_item && landed_hits(de, hit, w) == 0, "%s: a Dodge between the cost step and the launch cancels it: nothing of it goes out", what);
+        CHECKF(chan_ends(de, de.cast_id) == 1, "%s: ... and the client is told it is over: one ClientEndAbility for its instance", what);
+        CHECKF(dodge_unpaid(de, w), "%s: ... and the cost is given back: the Mana (a regeneration tick may have added some) and the cooldown", what);
+    }
+    // a Dodge after the ability went out: the Dodge changes nothing
+    cc.dodge_at = w.after;
+    {
+        ChanEnd de;
+        const bool ok = run_chan_cast(rec, cc, de);
+        CHECKF(ok, "%s: a world with ground and a Wolf and a Dodge after it went out", what);
+        if (!ok) return;
+        std::printf("  (%s, Dodge at %.2f s: %d hit(s), Mana %.1f -> %.1f, cooldown %d, %d end(s))\n", what, de.dodged_at, landed_hits(de, hit, w), de.mana_before, de.mana_after, de.cooldown_on,
+                    chan_ends(de, de.cast_id));
+        CHECKF(de.dodge_item && (!w.lands || landed_hits(de, hit, w) >= 1), "%s: a Dodge after it went out changes nothing: its hit stays landed (when it has one)", what);
+        CHECKF(chan_ends(de, de.cast_id) == 0 && dodge_paid(de, w, price), "%s: ... the client is told nothing and it stays paid: the Mana is spent (when it spends any) and the cooldown runs", what);
+    }
+    // a Dodge the server refuses, also before the cost step
+    cc.dodge_first = true;
+    cc.dodge_at = w.refused >= 0 ? w.refused : w.before;
+    {
+        ChanEnd re;
+        const bool ok = run_chan_cast(rec, cc, re);
+        CHECKF(ok, "%s: a world with ground and a Wolf and two Dodges", what);
+        if (!ok) return;
+        CHECKF(chan_ends(re, re.dodge_id) == 1, "%s: the second Dodge, inside the cooldown of the first, is refused (ClientEndAbility for its instance)", what);
+        CHECKF((!w.lands || landed_hits(re, hit, w) >= 1) && chan_ends(re, re.cast_id) == 0 && dodge_paid(re, w, price), "%s: a refused Dodge changes nothing: the ability goes out, the cast is not ended, it stays paid", what);
+    }
+}
+
+/// An ability a Dodge leaves alone: the same cast with a Dodge at each of `dodges` is not ended, stays paid and goes out as it did with no Dodge.
+static void check_dodge_leaves_alone(const svc::Character& rec, ChanCast cc, const char* hit, const char* what, const DodgeWindows& w, std::initializer_list<double> dodges) {
+    prepare_dodge_cast(cc, hit, w);
+    int control_landed = 0;
+    float price = 0;
+    if (!run_dodge_control(rec, cc, hit, what, w, control_landed, price)) return;
+    for (const double at : dodges) {
+        cc.dodge_at = at;
+        ChanEnd de;
+        const bool ok = run_chan_cast(rec, cc, de);
+        CHECKF(ok, "%s: a world with ground and a Wolf and a Dodge at %.2f s", what, at);
+        if (!ok) return;
+        std::printf("  (%s, Dodge at %.2f s: %d hit(s), Mana %.1f -> %.1f, cooldown %d, charges %d, %d end(s))\n", what, de.dodged_at, landed_hits(de, hit, w), de.mana_before, de.mana_after, de.cooldown_on,
+                    de.charges_left, chan_ends(de, de.cast_id));
+        CHECKF(de.dodge_item && chan_ends(de, de.cast_id) == 0, "%s: a Dodge at %.2f s ends nothing: the client is told nothing about the cast", what, at);
+        CHECKF((!w.lands || landed_hits(de, hit, w) == control_landed) && dodge_paid(de, w, price), "%s: ... it stays paid and goes out as it did with no Dodge", what);
+    }
+}
+
+void test_dodge_cancels_an_ordinary_ability() {
+    std::printf("a Dodge in the wind up of an ordinary instant ability cancels it (the cost comes back once it was paid); after the hit was asked for the Dodge changes nothing\n");
+    {   // a physical instant: the Fighter's Lethal Blow at the Wolf (its cost step comes at 0.32 s)
+        ChanCast cc;
+        cc.ability = "Fighter_LethalBlow";
+        cc.aim_wolf = true;
+        cc.ahead = 120;
+        check_ordinary_ability_dodge(class25(4, "Fighter", 17749), cc, "Fighter_LethalBlow", "Fighter_LethalBlow");
+    }
+    {   // a magical instant: the Summoner's Spirit Shred at the Wolf (its cost step comes at 0.22 s; it has no bar, no projectile and no zone)
+        ChanCast cc;
+        cc.ability = "Summoner_SpiritShred";
+        cc.aim_wolf = true;
+        cc.ahead = 600;
+        check_ordinary_ability_dodge(class25(6, "Summoner", 17753), cc, "Summoner_SpiritShred", "Summoner_SpiritShred");
+    }
+}
+AOC_REGISTER_TEST(test_dodge_cancels_an_ordinary_ability);
+
 // Songs and the Sprint are not ended by a Dodge.
 void test_dodge_leaves_songs_and_the_sprint() {
     std::printf("a Dodge leaves a Bard song and the Sprint going\n");
@@ -1258,3 +1404,303 @@ void test_dodge_leaves_songs_and_the_sprint() {
     }
 }
 AOC_REGISTER_TEST(test_dodge_leaves_songs_and_the_sprint);
+
+// ---- the other kinds of ability: where each one goes out, and what a Dodge leaves alone ----------------------------------------------------------------------------------------------------------
+
+void test_dodge_cancels_each_kind_of_ability() {
+    std::printf("a Dodge cancels an ability that has not gone out, whatever its kind: a hit the client asks for, a Song, a hit the server makes, a projectile, a zone, an effect on the caster, an ability with no hit\n");
+    const svc::Character fighter = class25(4, "Fighter", 17749);
+    const svc::Character mage = class25(8, "Mage", 17750);
+    {   // a hit the client asks for, with no montage end in the recordings (cost step at 0.3 s): it stays open for 1.4 s after the press, or until the hit is asked for
+        ChanCast cc;
+        cc.ability = "Fighter_Overpower";
+        cc.aim_wolf = true;
+        cc.ahead = 120;
+        check_ordinary_ability_dodge(fighter, cc, "Fighter_Overpower", "Fighter_Overpower");
+    }
+    {   // ... and one whose hit the client never asks for: a Dodge inside the 1.4 s cancels it, one after it does not
+        ChanCast cc;
+        cc.ability = "Fighter_Overpower";
+        cc.aim_wolf = true;
+        cc.ahead = 120;
+        DodgeWindows w;
+        w.ask_from = -1;
+        w.lands = false;
+        w.between = 1.2;
+        w.after = 1.7;
+        check_ordinary_ability_dodge(fighter, cc, nullptr, "Fighter_Overpower with no hit asked for", w);
+    }
+    {   // one of the ten one-shot Songs (not a Melody), aimed at the caster: its cost step comes at 1.9 s, so there is a long wind up before it
+        ChanCast cc;
+        cc.ability = "Bard_Song_Anthem";
+        cc.aim_self = true;
+        cc.ask_wolf = false;
+        DodgeWindows w;
+        w.before = 1.0;
+        w.between = 2.05;
+        w.after = 2.6;
+        w.refused = 0.3;
+        w.ask_from = 2.2;
+        w.seconds = 4.0;
+        w.on_target = false;
+        check_ordinary_ability_dodge(bard25(), cc, "Bard_Song_Anthem_ST", "Bard_Song_Anthem", w);
+    }
+    {   // a hit the server makes by itself, 0.035 s after the cost step (0.53 s): a Dodge before it cancels, one after it changes nothing
+        ChanCast cc;
+        cc.ability = "Fighter_Wallop";
+        cc.aim_wolf = true;
+        cc.ahead = 120;
+        DodgeWindows w;
+        w.before = 0.3;
+        w.between = -1;
+        w.after = 0.9;
+        w.ask_from = -1;
+        w.seconds = 2.0;
+        check_ordinary_ability_dodge(fighter, cc, "Fighter_Wallop", "Fighter_Wallop", w);
+    }
+    {   // a projectile: the Firebolt leaves 0.3 s after the press and lands a flight later; a Dodge before it leaves cancels it, one after it left cannot stop it
+        ChanCast cc;
+        cc.ability = "Mage_Firebolt";
+        cc.aim_wolf = true;
+        cc.ahead = 600;
+        DodgeWindows w;
+        w.before = 0.15;
+        w.between = -1;
+        w.after = 0.9;
+        w.ask_from = -1;
+        w.seconds = 2.5;
+        check_ordinary_ability_dodge(mage, cc, "Mage_FireballCombo_Projectile_Hit", "Mage_Firebolt", w);
+    }
+    {   // a zone: it goes out at its cost step (0.16 s), when its first hit is made
+        ChanCast cc;
+        cc.ability = "Mage_ArcaneEye";
+        DodgeWindows w;
+        w.before = 0.1;
+        w.between = -1;
+        w.after = 0.6;
+        w.ask_from = -1;
+        w.seconds = 1.5;
+        w.lands = false;
+        check_ordinary_ability_dodge(mage, cc, nullptr, "Mage_ArcaneEye", w);
+    }
+    {   // an ability that puts an effect on the caster itself: it goes out when the effect starts, 0.035 s after the cost step (0.28 s); it spends no Mana, so its cooldown shows that it is paid
+        ChanCast cc;
+        cc.ability = "Mage_Elemental_Empowerment";
+        DodgeWindows w;
+        w.before = 0.1;
+        w.between = -1;
+        w.after = 0.6;
+        w.ask_from = -1;
+        w.seconds = 1.0;
+        w.lands = false;
+        w.min_price = 0;
+        check_ordinary_ability_dodge(mage, cc, nullptr, "Mage_Elemental_Empowerment", w);
+    }
+    {   // an ability with no hit of its own: nothing of it goes out for the server, so its payment is its launch (cost step at 0.35 s, the montage ends at 1.0 s)
+        ChanCast cc;
+        cc.ability = "Tank_Fortify";
+        DodgeWindows w;
+        w.before = 0.2;
+        w.between = -1;
+        w.after = 0.7;
+        w.ask_from = -1;
+        w.seconds = 2.0;
+        w.lands = false;
+        w.min_price = 0;
+        check_ordinary_ability_dodge(class25(7, "Tank", 17754), cc, nullptr, "Tank_Fortify", w);
+    }
+}
+AOC_REGISTER_TEST(test_dodge_cancels_each_kind_of_ability);
+
+// A pet command is obeyed at the press, and a leap, a charge, a teleport and a dash move the character at the press: they count as gone out then, so a Dodge cancels and gives back nothing.
+/// A Summoner with the Guardian out, one pet command pressed and a Dodge `dodge_ms` after it (the cost step comes 0.3 s after the press, Dismiss's 0.07 s): the Dodge cancels nothing, and the cooldown stays.
+static void check_dodge_after_a_pet_command(const char* what, int64_t command, int dodge_ms, bool stays) {
+    const svc::Character rec = class25(6, "Summoner", 17753);
+    Run r(0, true, &rec, [&](PlayerWorld& world) {
+        std::string error;
+        CHECK(world.load_blueprints(NPC_MOTION_PATH, error), "the pet Blueprints load");
+        spawns::AreaConfig area;
+        area.radius_cm = 1;
+        CHECK(world.load_area(area, error), "the world's actor templates load");
+    });
+    const auto bytes = capture_blocks::bytes_of(capture_blocks::kClientReadyToPhaseIn.hex);
+    BunchWriter phase;
+    phase.write_bit_range(bytes.data(), 0, capture_blocks::kClientReadyToPhaseIn.bits);
+    r.send_reliable(phase);
+    r.play(1.0, false);
+    const pets::Definition& guardian = pets::kDefinitions[0];
+    r.h.s->teach_ability(guardian.ability);
+    r.h.s->set_current_value(kManaStat, r.m.stats[kMaxManaStat]);
+    r.trigger(guardian.ability);
+    r.play(8.8, false);
+    CHECKF(r.h.s->summoned_pet() != 0 && r.h.s->pet_following(), "%s: (the Guardian comes, and follows)", what);
+    if (!r.h.s->summoned_pet()) return;
+    const int32_t id = r.trigger(command);
+    r.tick(false, std::chrono::milliseconds(dodge_ms));
+    r.trigger(kDodge);
+    CHECKF(r.m.has_ability(kDodge), "%s: (the server took the Dodge)", what);
+    r.play(0.4, false);
+    bool cooldown = false;
+    for (const auto& [cooldown_id, guid] : r.m.cooldowns) cooldown = cooldown || guid == command;
+    CHECKF(cooldown, "%s: the command's cooldown runs: the Dodge gave nothing back", what);
+    if (stays) CHECKF(!r.h.s->pet_following(), "%s: the pet obeyed the command at the press, whatever the Dodge did", what);
+    r.play(1.5, false);
+    const std::vector<int32_t> ends = r.m.end_ids();
+    CHECKF(std::count(ends.begin(), ends.end(), id) == 0, "%s: the client is told nothing about the end of the command", what);
+}
+
+void test_dodge_leaves_pet_commands_alone() {
+    std::printf("a Dodge leaves a pet command alone: the pet obeys at the press, so the command has gone out\n");
+    check_dodge_after_a_pet_command("Summoner_PetCommand_Stay", 6064633576956297816ll, 100, true);
+    check_dodge_after_a_pet_command("Summoner_PetCommand_Dismiss", 6064633780469564013ll, 50, false);
+}
+AOC_REGISTER_TEST(test_dodge_leaves_pet_commands_alone);
+
+void test_dodge_leaves_leaps_charges_and_teleports_alone() {
+    std::printf("a Dodge leaves a leap, a charge, a teleport and a dash alone: they count as gone out at the press\n");
+    const svc::Character fighter = class25(4, "Fighter", 17749);
+    {   // a leap the data gives a speed (cost step at 0.26 s)
+        ChanCast cc;
+        cc.ability = "Fighter_Blitz";
+        cc.aim_wolf = true;
+        cc.ahead = 120;
+        DodgeWindows w;
+        w.ask_from = -1;
+        w.seconds = 1.5;
+        w.lands = false;
+        check_dodge_leaves_alone(fighter, cc, nullptr, "Fighter_Blitz", w, {0.1});
+    }
+    {   // a leap the data gives no speed (cost step at 0.3 s)
+        ChanCast cc;
+        cc.ability = "Fighter_Leapstrike";
+        DodgeWindows w;
+        w.ask_from = -1;
+        w.seconds = 1.5;
+        w.lands = false;
+        check_dodge_leaves_alone(fighter, cc, nullptr, "Fighter_Leapstrike", w, {0.1});
+    }
+    {   // a teleport (cost step at 0.08 s)
+        ChanCast cc;
+        cc.ability = "Mage_Blink";
+        DodgeWindows w;
+        w.ask_from = -1;
+        w.seconds = 1.0;
+        w.lands = false;
+        check_dodge_leaves_alone(class25(8, "Mage", 17750), cc, nullptr, "Mage_Blink", w, {0.05});
+    }
+    {   // a charge: it was cancelled by a Dodge until now; the Dodge comes well after its cost step (0.07 s)
+        ChanCast cc;
+        cc.ability = "Tank_Charge";
+        DodgeWindows w;
+        w.ask_from = -1;
+        w.seconds = 2.0;
+        w.lands = false;
+        check_dodge_leaves_alone(class25(7, "Tank", 17754), cc, nullptr, "Tank_Charge", w, {0.5});
+    }
+}
+AOC_REGISTER_TEST(test_dodge_leaves_leaps_charges_and_teleports_alone);
+
+/// ServerTriggerAbility as the client sends it for a consumable: the ability of the item, the item's slot in the bag, its whole instance and its place (3: the bag).
+static BunchWriter trigger_with_bag_item(const bs::PlayerSetup& setup, int64_t guid, int32_t id, int slot, const svc::InventoryItem& item) {
+    const schema::RpcSchema* rpc = class_named("UAoCAbilityComponent").rpc("ServerTriggerAbility");
+    repl::RpcParams p;
+    bool ok = rpc && repl::set_rpc_param(*rpc, p, "AbilityGuid", repl::Value::i64(guid));
+    if (ok && id != 0) ok = repl::set_rpc_param(*rpc, p, "ClientInstanceId", repl::Value::i64(id));
+    ok = ok && repl::set_rpc_param(*rpc, p, "InputVector", repl::Value(repl::Vec2d{1, 0}));
+    ok = ok && repl::set_rpc_param(*rpc, p, "ItemData.Slot", repl::Value::i64(slot));
+    ok = ok && repl::set_rpc_param(*rpc, p, "ItemData.ItemInstance", repl::Value(items::to_instance(item)));
+    ok = ok && repl::set_rpc_param(*rpc, p, "ItemData.Location", repl::Value::u64(3));
+    if (!ok) {
+        std::printf("  [FAIL] the consumable trigger's parameters do not fit\n");
+        return BunchWriter();
+    }
+    return ability_rpc(setup.guids.ability, "ServerTriggerAbility", p);
+}
+
+// A potion, a scroll or an elixir is used at the press: its item leaves the bag and its buff is applied, whatever the Dodge does. A Dodge never gives an item back.
+void test_dodge_leaves_a_consumable_alone() {
+    std::printf("a Dodge leaves a consumable alone: its item is used at the press, its buff applies in full and nothing is given back\n");
+    constexpr int64_t kElixir = 6064632106057072682ll;   // the item: Elixir of Constitution
+    for (const double dodge_at : {-1.0, 0.03, 0.3}) {
+        svc::Character rec = class25(4, "Fighter", 17749);
+        rec.items.push_back(stack_of(kElixir, 0, 3, 93001));
+        Run r(0, true, &rec);
+        r.play(0.5, false);
+        const bs::PlayerSetup setup = r.h.s->bootstrap().setup();
+        const abilities::Catalog* cat = r.h.fx.world->ability_catalog();
+        const abilities::AbilityDef* def = cat ? cat->ability_named("Consumable_Elixir_Constitution") : nullptr;
+        const svc::InventoryItem* item = r.h.s->inventory().at(svc::ItemContainer::Backpack, 0);
+        CHECK(def && item && !def->hits.empty() && !def->effects.empty() && held_of(*r.h.s, kElixir) == 3, "(three Elixirs of Constitution lie in the bag, and the ability, its hit and its effect are in the tables)");
+        if (!def || !item || def->hits.empty() || def->effects.empty()) return;
+        const svc::InventoryItem stack = *item;
+        const int64_t effect = def->effects.begin()->second;
+        const int32_t id = r.next_id++;
+        const BunchWriter trig = trigger_with_bag_item(setup, def->row.guid, id, 0, stack);
+        r.send_trigger(def->row.guid, id, &trig);
+        bool dodged = dodge_at < 0, asked = false;
+        for (int i = 0; i < 40; ++i) {
+            const double t = i * 0.05 + 1e-9;
+            if (!asked && t >= 0.4) {   // the drink's animation reaches the hit about now
+                asked = true;
+                r.send_reliable(hit_request_bunch(setup, def->row.guid, kTargetingSelf, def->hits.front().hit_guid));
+            }
+            if (!dodged && t >= dodge_at) {
+                dodged = true;
+                r.trigger(kDodge);
+                CHECK(r.m.has_ability(kDodge), "(the server took the Dodge)");
+            }
+            r.tick(false, std::chrono::milliseconds(50));
+        }
+        const std::vector<int32_t> ends = r.m.end_ids();
+        std::printf("  (Dodge at %.2f s: %lld Elixirs left in the bag, the buff %s, %d end(s) for the cast)\n", dodge_at, static_cast<long long>(held_of(*r.h.s, kElixir)), r.m.has_effect(effect) ? "on" : "off",
+                    static_cast<int>(std::count(ends.begin(), ends.end(), id)));
+        CHECK(held_of(*r.h.s, kElixir) == 2, "the item was used at the press and nothing gave it back: two Elixirs are left");
+        CHECK(r.m.has_effect(effect), "the buff applies in full: its effect is on the character");
+        CHECK(std::count(ends.begin(), ends.end(), id) == 0, "the client is told nothing about the end of the cast");
+    }
+}
+AOC_REGISTER_TEST(test_dodge_leaves_a_consumable_alone);
+
+// Drop Crate: the crate leaves the back 0.7 s after the press, whatever the pipeline did with the cast. A Dodge before that keeps the crate on the back (the client's own cancel does the same).
+void test_dodge_keeps_the_crate_on_the_back() {
+    std::printf("a Dodge before the crate leaves the back keeps it there; with no Dodge Drop Crate puts it into the item bag 0.7 s after the press\n");
+    constexpr int64_t kCrate = 6064634015066030099ll;   // Crate_Automata_Personal_Parts: a small commodity crate carried on the back
+    for (const double dodge_at : {-1.0, 0.1, 0.5}) {
+        svc::Character rec = class25(4, "Fighter", 17749);
+        svc::InventoryItem crate = stack_of(kCrate, 0, 1, 94001);
+        crate.container = svc::ItemContainer::Equipment;
+        crate.slot = items::equip::CargoHold;
+        rec.items.push_back(crate);
+        Run r(0, true, &rec);
+        r.play(0.5, false);
+        phase_in(r);   // (the crate leaves the back only after the phase-in)
+        r.play(1.0, false);
+        r.h.s->teach_ability(content::kGuidDropCrate);
+        CHECK(r.h.s->inventory().at(svc::ItemContainer::Equipment, items::equip::CargoHold) != nullptr, "(the crate is on the back)");
+        g_log.str("");
+        r.trigger(content::kGuidDropCrate);
+        bool dodged = dodge_at < 0;
+        for (int i = 0; i < 24; ++i) {
+            const double t = i * 0.05 + 1e-9;
+            if (!dodged && t >= dodge_at) {
+                dodged = true;
+                r.trigger(kDodge);
+                CHECK(r.m.has_ability(kDodge), "(the server took the Dodge)");
+            }
+            r.tick(false, std::chrono::milliseconds(50));
+        }
+        const bool on_back = r.h.s->inventory().at(svc::ItemContainer::Equipment, items::equip::CargoHold) != nullptr;
+        std::printf("  (Dodge at %.2f s: the crate is %s)\n", dodge_at, on_back ? "on the back" : "in the bag");
+        if (dodge_at < 0) {
+            const bool left = !on_back && held_of(*r.h.s, kCrate) == 1;
+            CHECK(left, "control, no Dodge: the crate left the back and lies in the bag");
+            if (!left) {
+                spdlog::default_logger()->flush();
+                log_excerpt(g_log.str(), "DropCrate");
+            }
+        } else {
+            CHECK(on_back, "a Dodge before the crate left the back keeps it on the back");
+        }
+    }
+}
+AOC_REGISTER_TEST(test_dodge_keeps_the_crate_on_the_back);

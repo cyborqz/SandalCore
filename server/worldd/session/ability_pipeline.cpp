@@ -376,6 +376,23 @@ struct Dash {
 constexpr Dash kDashes[] = {{"Bard_Misc_Flourish", 3659.0}, {"Ranger_Disengage", 2500.0}, {"Tank_Charge", 5050.0}, {"Tank_Grapple", 1650.0},
                             {"Summoner_Transpose", 1950.0}, {"Rogue_Shadowstep", 3000.0}};
 
+// The abilities that count as gone out at the press, so that a Dodge never cancels them: a pet command (the pet obeys at once) and a leap, a charge, a teleport or a dash (the client moves the character at once and the
+// server only allows the speed). The data gives most of the moving abilities a speed (NetworkingMaxSpeed) and kDashes lists others; the Fighter's Leapstrike and Lunging Assault and the Ranger's Dash have neither.
+constexpr const char* kMovesAtPress[] = {"Fighter_Leapstrike", "Fighter_LungingAssault", "Ranger_Dash"};
+bool gone_out_at_the_press(const content::AbilityRow& row) {
+    for (const pets::PetBarCommand& c : pets::kPetBarCommands) {
+        if (c.ability == row.guid) return true;
+    }
+    if (row.networking_max_speed > 0) return true;
+    for (const Dash& d : kDashes) {
+        if (row.name == d.ability) return true;
+    }
+    for (const char* name : kMovesAtPress) {
+        if (row.name == name) return true;
+    }
+    return false;
+}
+
 // The MontageGroup of an ability's item where it is not "DefaultGroup" (retail: Flourish EmoteGroup, the five songs SongGroup).
 std::string_view group_of_name(std::string_view name) {
     if (name == "Bard_Misc_Flourish") return "EmoteGroup";
@@ -2469,8 +2486,9 @@ size_t AbilityPipeline::end_cast_bars(double now, const char* why) {
 
 // The game's rule: a Dodge cancels an ability that has not gone out yet and gives back what it paid. Once something of it has gone out (a hit the client asked for or that landed, a projectile or a volley launched, an
 // effect started, a cast bar's end) the Dodge does nothing to it: no cancel, no refund, no message to the client, and what is in the air still hits. The session calls this when the runtime took a Dodge. It cancels the
-// cast bars the character is in (above), the Ranger's Salvo, Barrage, Air Strike and Raining Death, every held ability (the Whirlwind, Guard, Reflect, the Deliverance, the Combust ...) and the weapon swing under
-// way, each before its first arrow, hit or effect. A song goes on through a Dodge, so does a Sprint, and a Rest is ended by the runtime.
+// cast bars the character is in (above), every other cast that is running (the Salvo, the Barrage, the Air Strike, the Raining Death, the held abilities, and an ordinary ability in its wind up before the cost step and
+// the hit) and the weapon swing under way, each before its first arrow, hit or effect. A Melody goes on through a Dodge, so does a Sprint, and a Rest is ended by the runtime. A consumable (its item is used at the press),
+// a pet command and a leap, a charge, a teleport or a dash are gone out at the press: the Dodge leaves them alone. An ability with no hit of its own is gone out once it is paid.
 size_t AbilityPipeline::end_by_dodge(double now) {
     size_t ended = end_cast_bars(now, "a Dodge ended the cast bar");   // (this moves the clock to `now`)
     ended += end_unlaunched(now_, "a Dodge cancelled it before it went out");
@@ -2497,11 +2515,10 @@ void AbilityPipeline::mark_launched(int32_t client_id) {
     if (CastRecord* r = record_of(client_id)) r->launched = true;
 }
 
-// The casts a Dodge cancels besides the cast bars and the swings: the Salvo, the Barrage, the Air Strike, the Raining Death and every held ability, while nothing of them has gone out. A song, or a toggle that this
-// press ends, is no cast to cancel.
+// The casts a Dodge cancels besides the cast bars and the swings: every cast that is running while nothing of it has gone out. A song (a Melody), a toggle that this press ends, a consumable's use (its item is used at the
+// press and its buff applies in full), a pet command and a leap, a charge, a teleport or a dash (all gone out at the press) are no casts to cancel.
 bool AbilityPipeline::dodge_cancels(const Cast& cast) const {
-    if (cast.loop || cast.toggle_off || is_weapon_combo(cast.def->row)) return false;
-    if (!cast.looped && !cast.timed && !cast.def->row.hold_animation) return false;
+    if (cast.loop || cast.toggle_off || cast.item_cast || is_weapon_combo(cast.def->row) || gone_out_at_the_press(cast.def->row)) return false;
     return !gone_out(cast.client_id, &cast);
 }
 
@@ -3253,6 +3270,12 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
         rec.slots.push_back(std::move(slot));
     }
+    // A cast that asks the client for its hit and has no later step of its own would end at its cost step, and a Dodge could cancel it only until then. The recordings give most abilities a montage end, and those stay open to it.
+    // The others stay open for kDodgeHold after the press (or until their hit is asked for), so that a Dodge before the hit can still cancel them. Nothing is sent to the client for it: the end clears no montage here.
+    if (!rec.slots.empty() && has_montage && !loop && !cast.end_due && !cast.hit_due && !cast.projectile_due && !cast.own_due && cast.missiles.empty() && !cast.branched && !cast.looped && !cast.timed && !cast.item_cast &&
+        !cast.toggle_off && !row.hold_animation && !is_weapon_combo(row) && !gone_out_at_the_press(row)) {
+        cast.end_due = std::max(t + kDodgeHold, *cast.cost_due + 0.05);
+    }
     records_.push_back(std::move(rec));
     while (records_.size() > kMaxRecords) records_.pop_front();
     // the zones the cast spawns: their actors open at retail's offset after the trigger where the captures show it, else a moment after the item
@@ -3749,6 +3772,8 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
     }
     if (!cast.toggle_off) raise_ability_event(c, def, t);   // reactions: the ability was consumed (the Bard's Resonance gain)
     use_charge(c, cast, t);
+    // An ability with no hit, zone or effect of its own has nothing that goes out for the server: its payment is its launch, and a Dodge after the cost step changes nothing.
+    if (def.hits.empty() && def.zones.empty() && cast.own_effects.empty() && !cast.toggle_off) mark_launched(cast.client_id);
     if (cast.toggle_off) {
         end_loop(c, def.row.guid, t);
         held_.erase(std::remove_if(held_.begin(), held_.end(), [&](const Held& h) { return h.ability == def.row.guid; }), held_.end());
@@ -3767,7 +3792,10 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
             for (const Zone& z : zones_) {
                 if (z.client_id == cast.client_id && z.ability == def.row.guid && z.zone == h.owner_guid && z.state != Zone::State::Ended) zone_owner_ = z.id;
             }
-            if (const HitDef* hit = catalog_->hit(h.hit_guid)) apply_hit(c, *hit, t, true, src);
+            if (const HitDef* hit = catalog_->hit(h.hit_guid)) {
+                mark_launched(cast.client_id);   // (the dance's first overlap is out: a Dodge no longer cancels the cast)
+                apply_hit(c, *hit, t, true, src);
+            }
             zone_owner_ = 0;
         }
     }

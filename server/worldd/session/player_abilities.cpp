@@ -478,9 +478,12 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
         }
     } else {
         const Refusal ran = runtime->trigger(ability, instance, ability_seconds(now), info);
-        // the game's rule: a Dodge the server took ends the cast bar the character is in (nothing paid, nothing fired), stops the Salvo and the Barrage, ends the weapon swing under way and the held stance
-        // (Guard); a Dodge it refused ends nothing
-        if (ran == Refusal::None && ability == content::kGuidDodge && pipeline_) pipeline_->end_by_dodge(ability_seconds(now));
+        // the game's rule: a Dodge the server took cancels every ability that has not gone out yet, gives back what it paid (the cast bars, the Salvo and the Barrage, the weapon swing under way, the held stance (Guard)
+        // and every other ability in its wind up) and keeps a crate that has not left the back; a Dodge it refused ends nothing
+        if (ran == Refusal::None && ability == content::kGuidDodge && pipeline_) {
+            pipeline_->end_by_dodge(ability_seconds(now));
+            crate_drop_due_.reset();   // (Drop Crate has not gone out until the crate leaves the back, 0.7 s after the press)
+        }
     }
     take_ability_events();
     flush_abilities(conn);

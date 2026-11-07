@@ -300,6 +300,9 @@ public:
     static constexpr double kRequestWindow = 5.0;
     /// A consumable's cast takes the request for its apply hit this long after its cost step: a meal's is asked about seven seconds after the use [R: 6.95-6.98 s].
     static constexpr double kItemRequestWindow = 15.0;
+    /// How long after the press a cast that asks the client for its hit, and whose montage end the recordings do not show, stays open for a Dodge (or until its hit is asked for): the median montage end of the recorded
+    /// abilities (1.36 s), rounded up [an estimate].
+    static constexpr double kDodgeHold = 1.4;
     /// A consumable's ability item, cost and stack removal come in one packet this long after the use [R: the retail captures of a food, an elixir and four scrolls:
     /// 54-113 ms, median about 65].
     static constexpr double kItemCastDelay = 0.065;
@@ -434,9 +437,10 @@ public:
 
     /// A Dodge the server took (the game's rule): a Dodge cancels an ability that has not gone out yet and gives back what it paid. Once something of it has gone out (a hit the client asked for or that landed, a projectile
     /// or a volley launched, an effect started, a cast bar's end) the Dodge does nothing to it: no cancel, no refund, no message, and what is in the air still hits. It cancels the cast bars the character is in
-    /// (end_cast_bars), the Ranger's Salvo, Barrage, Air Strike and Raining Death, every held ability (the Whirlwind, Guard, Reflect, the Deliverance, the Combust ...) and the weapon swing under way, each before its
-    /// first arrow, hit or effect. Nothing of a cancelled cast is paid, nothing fires, the hits the client would still ask for are not taken, what it paid comes back and the client is told with ClientEndAbility for it.
-    /// A song and a Sprint go on, and a Rest ends in the runtime. Returns how many casts and swings were cancelled.
+    /// (end_cast_bars), every other cast that is running (the Salvo, the Barrage, the Air Strike, the Raining Death, the held abilities, and an ordinary ability in its wind up before the cost step and the hit)
+    /// and the weapon swing under way, each before its first arrow, hit or effect. Nothing of a cancelled cast is paid, nothing fires, the hits the client would still ask for are not taken, what it paid comes back and the client is told with ClientEndAbility for it.
+    /// A Melody and a Sprint go on, and a Rest ends in the runtime. A consumable (its item is used at the press), a pet command and a leap, a charge, a teleport or a dash are gone out at the press and are left alone; an ability
+    /// with no hit of its own is gone out once it is paid. Returns how many casts and swings were cancelled.
     size_t end_by_dodge(double now);
 
     /// RequestHitVerification_Server: what the client says it hit. `own` of the `components` are the caster's own (nothing else is in this world).
@@ -862,9 +866,9 @@ private:
     bool   in_cast_bar(const Cast& cast) const;                   // the cast's bar is running: the client's request for its branch has not come (a held cast's key is still down, its charge not full), or a summon has not run out
     void   refund(bootstrap::AbilityChange& c, Cast& cast);   // what a cast paid comes back (a Dodge or the client's own end in its bar): its stat costs, its effect stacks, its charge (the cooldown ends when every charge is back) and the class resource it gave
     void   give_back(bootstrap::AbilityChange& c, const Cast& cast);   // ... one payment of it (a Salvo shot is one: refund gives back the whole cast's, once)
-    size_t end_unlaunched(double t, const char* why);   // a Dodge: the Salvo, the Barrage, the Air Strike, the Raining Death and the held abilities that have not gone out are cancelled
+    size_t end_unlaunched(double t, const char* why);   // a Dodge: every running cast that has not gone out is cancelled (a Melody, a toggle's off press, a consumable's use, a pet command and a leap, charge, teleport or dash are not)
     size_t end_swings(double t, const char* why);        // a Dodge: the weapon swing under way is cancelled when nothing of it has gone out
-    bool   dodge_cancels(const Cast& cast) const;        // a cast end_unlaunched cancels: of those kinds, and nothing of it has gone out
+    bool   dodge_cancels(const Cast& cast) const;        // a cast end_unlaunched cancels: not one of those, not a swing, and nothing of it has gone out
     bool   gone_out(int32_t client_id, const Cast* cast = nullptr) const;   // something of the cast has gone out: a hit asked for or landed, a launch, an effect, a cast bar's end
     void   mark_launched(int32_t client_id);                                // ... a step of the cast sent something out
     bool   can_pay(const Cast& cast) const;                       // whether the character holds what the cast's cost step takes (stats, effect stacks, a charge of its group): asked at the cost step and by a jump that comes before it
