@@ -51,6 +51,9 @@ namespace aoc::worldd::combat {
 /// Grem).  A creature friendly to players (a huntable) never attacks first; either one still fights back what hurts it.
 inline bool notices_players(bool hostile_to_players, const world::NpcInfo& npc) { return hostile_to_players && !npc.aggro_off; }
 
+/// How much faster than their Blueprint's rotation rate the goblins and bandits turn (the tests check a creature's facing against it).
+inline constexpr double kHumanoidTurnGain = 1.2;
+
 /// What an NPC attack did to a player: the hit as the confirmation and the player's Health need it.
 struct IncomingHit {
     uint64_t                 instigator = 0;      // the NPC's actor id (its ObjectId)

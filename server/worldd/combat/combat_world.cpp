@@ -36,12 +36,46 @@ constexpr double kBlueprintSightConeDefaultDeg = 45.0;   // the half angle eithe
 constexpr double kBlueprintHearingDefaultCm = 2000.0;
 constexpr double kBlueprintPlayerLookSeconds = 2.0;      // how often a creature looks for players
 
-constexpr double kHumanoidTurnGain = 1.2;   // how much faster than their Blueprint's rotation rate the goblins and bandits turn
-
 /// Whether a creature chases at its Blueprint's run speed times its own MoveSpeedMult stat (1.05 plus 0.1 for each rank of its elite scalar), as the game's creatures do: the humanoids, goblins
 /// and bandits.  The other families keep the Blueprint's run speed as it is.
 bool runs_at_stat_speed(const std::string& archetype) {
     return archetype.find("/Population/NPC/Humanoid/") != std::string::npos || archetype.find("/Population/NPC/PCRaces/") != std::string::npos;
+}
+
+/// How fast the tree's move-to-target task walks a creature during one of its attacks, as a share of its run speed (the task's SpeedMultiplierExpression): the bandit raiders' Whirlwind at
+/// 0.45 (a rank 3 raider runs 810 cm/s and its recorded whirlwind walk was 364-365) and the Goblin Flayer's SeveringSpin at 1.6.  1.0: an attack the tree walks at the creature's chase speed.
+struct AttackWalkSpeed {
+    const char* ability;
+    double      share;
+};
+constexpr AttackWalkSpeed kAttackWalkSpeeds[] = {
+    {"Bandit_Raider_Whirlwind", 0.45},
+    {"GoblinFlayer_SeveringSpin", 1.6},
+};
+
+double attack_walk_share(const std::string& ability) {
+    for (const AttackWalkSpeed& row : kAttackWalkSpeeds) {
+        if (ability == row.ability) return row.share;
+    }
+    return 1.0;
+}
+
+/// The attacks whose tree walks the creature at a speed the tables here do not give: their creature keeps the stop of a standing attack (it stands for the whole montage) rather than walking at
+/// its plain chase speed.  The Pitchfire Raider's whirlwind: the SpeedMultiplierExpression of its tree's move-to-target task is not in the tables this server reads.
+bool attack_keeps_its_stop(const std::string& ability) { return ability == "PitchfireRaider_PitchfireWhirlwind"; }
+
+/// The attacks the recordings show turning the creature towards its target through the whole montage although their task does not stop the creature and has no Rotate To of its own: the
+/// Minotaur Berserker's and Warrior's AxeStrike (106 recorded swings, its facing following the player through the swing).  Every other such attack keeps the facing it began with while its
+/// montage carries it.
+constexpr const char* kAttacksThatKeepTurning[] = {
+    "Minotaur_Berserker_AxeStrike",
+};
+
+bool attack_keeps_turning(const std::string& ability) {
+    for (const char* name : kAttacksThatKeepTurning) {
+        if (ability == name) return true;
+    }
+    return false;
 }
 
 /// The kit of a creature kind: by the Blueprint's leaf without "_C"; else the kit whose name is the longest prefix of the leaf (or the leaf of it).
@@ -387,6 +421,7 @@ void CombatWorld::stop_cast(Npc& n) {
 void CombatWorld::drop_attack(Npc& n) {
     stop_cast(n);
     n.hold_until = 0;
+    n.attack_walk_share = 1.0;
     pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return p.npc == n.actor_id; }), pending_.end());
 }
 
@@ -845,6 +880,7 @@ bool CombatWorld::plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& 
 
 void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack* picked) {
     PlayerPort* port = player(target);
+    n.attack_walk_share = 1.0;   // (the tree walks it at its chase speed unless the attack's own task says otherwise)
     // An attack with its own animation.  The tree picks it with the target where it stands; its montage starts on the client with the element the replicator writes; the creature turns
     // to the target, and when the tree says so stands still for the whole montage and keeps that facing; every hit lands at its notify, by the hit's targeting record
     // (on the target wherever it stands unless the record measures, and on everyone inside its volumes); the next attack comes when the montage is over.
@@ -919,11 +955,16 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         if (a.task) {   // (a timer the tree rolls anew each time takes a fresh number of seconds between its low and its high)
             for (const CooldownStart& c : a.task->starts) n.cooldown_until[c.name] = now + done + (c.high > c.low ? c.low + (c.high - c.low) * rng_.rand_double() : c.low);
         }
-        if (a.task) n.hold_until = now + plan.seconds;   // (no chase runs in the state of an attack: the creature stands, and turns, until the montage is over)
+        // (an attack whose tree walk speed the tables here do not give keeps the stop of a standing attack; so does one that stops the creature)
+        if (a.task && (a.task->stop_movement || attack_keeps_its_stop(a.ability->row.name))) n.hold_until = now + plan.seconds;
         n.next_attack_at = now + plan.seconds;
-        if (a.task && a.task->rotates && npcs_world_) {   // the tree turns it towards its target while the ability plays (the Rotate To task that runs with it)
+        n.attack_walk_share = attack_walk_share(a.ability->row.name);
+        // The creature turns towards its target while the ability plays: the tree's Rotate To task that runs with it, at its speed and for its time; and the one attack the recordings show
+        // turning it through the whole montage without a Rotate To (the Minotaur's axe strike, which keeps facing a player who runs round it while the montage carries it).
+        if (a.task && npcs_world_ && (a.task->rotates || attack_keeps_turning(a.ability->row.name))) {
             const uint64_t who = target;
-            const double until = now + (a.task->rotate_seconds > 0 ? std::min(a.task->rotate_seconds, plan.seconds) : plan.seconds);
+            const double rate = a.task->rotates ? a.task->rotate_speed : 0.0;   // (0: the creature's own rate)
+            const double until = now + (a.task->rotates && a.task->rotate_seconds > 0 ? std::min(a.task->rotate_seconds, plan.seconds) : plan.seconds);
             npcs_world_->track_target(
                 n.actor_id,
                 [this, who](nav::Vec3& out) {
@@ -932,7 +973,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
                     out = to_nav(p->fighter().position());
                     return true;
                 },
-                a.task->rotate_speed, until);
+                rate, until);
         }
     } else {
         const double interval = (n.kit && n.kit->interval_ms > 0 ? n.kit->interval_ms / 1000.0 : cfg_.default_attack_interval);
@@ -1872,7 +1913,12 @@ void CombatWorld::think(Npc& n, double now) {
     if (npcs_world_ && !o.began_reset && now >= n.hold_until && !carried) {   // (a creature that stands for a montage is not sent anywhere until it is over)
         const nav::Vec3 here{a->x, a->y, a->z};
         switch (o.move) {
-            case npc::ai::Orders::Move::ChaseTo: pursue(n, o.target, o.speed_cm_s, o.stop_distance_cm); break;
+            case npc::ai::Orders::Move::ChaseTo: {
+                // (an attack that does not stop the creature may let it walk on during its montage, at the speed of the tree's own move-to-target task: a share of its run speed)
+                const double speed = now < n.next_attack_at ? o.speed_cm_s * n.attack_walk_share : o.speed_cm_s;
+                pursue(n, o.target, speed, o.stop_distance_cm);
+                break;
+            }
             case npc::ai::Orders::Move::Stand:
                 if (before != npc::ai::State::Attack) npcs_world_->order_move(n.actor_id, here, 0.0, 0.0);
                 break;

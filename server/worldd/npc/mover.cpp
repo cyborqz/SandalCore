@@ -150,7 +150,7 @@ bool Mover::move_to(const Vec3& dest, double speed_cm_s, double stop_distance, d
 }
 // [C-O-A :: C-Y-B]
 
-Mover::Status Mover::advance(double dt) {
+Mover::Status Mover::advance(double dt, bool turn) {
     if (status_ != Status::Moving) {
         velocity_ = {};
         return status_;
@@ -196,8 +196,8 @@ Mover::Status Mover::advance(double dt) {
         if (nav_->ground_height(ground_.x, ground_.y, before.z, &gz, window, window)) ground_.z = gz;
         else ++ground_misses_;
     }
-    // turn towards the way it goes, at the Blueprint's rotation rate
-    if (have_heading) {
+    // turn towards the way it goes, at the Blueprint's rotation rate (unless something else turns it in this step)
+    if (have_heading && turn) {
         const double diff = wrap180(heading - yaw_), max_turn = yaw_rate_ * dt;
         yaw_ = wrap180(yaw_ + std::clamp(diff, -max_turn, max_turn));
     }

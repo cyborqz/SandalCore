@@ -516,3 +516,438 @@ void test_creature_swings_until_its_timed_attack_opens(Fixture& f) {
 }
 
 AOC_REGISTER_TEST(test_creature_swings_until_its_timed_attack_opens);
+
+// The data's stop_movement flag: an attack whose task does not stand for its montage leaves the chase (and so the movement component's turning) running, so the creature keeps moving and turning
+// at a target that moves during the montage; one whose task stands holds the creature and its facing until the montage ends, unless the task's Rotate To turns it.  A root still holds its feet.
+// The tree here is a temp table over the real montages and targeting, as test_creature_swings_until_its_timed_attack_opens does; the Growl's montage plays in place (test_creature_movement_reaches_client).
+void test_attack_stop_movement_keeps_the_chase(Fixture& f) {
+    std::printf("an attack whose task does not stop movement keeps the creature chasing and turning at a player who moves during the montage; one that stops it holds the facing until the montage ends; a root still stops it\n");
+    namespace fs = std::filesystem;
+    combat::NpcAbilityData real;
+    if (!load_creature_tables(real)) return;
+    const std::string alpha_path = creature_path(f, "/Beast/Canine/AlphaWolf.Default__AlphaWolf_C");
+    const auto bp = f.motion.find(alpha_path);
+    const abilities::AbilityDef* growl = f.catalog->ability_named("AlphaWolf_Growl");
+    const abilities::EffectDef* rooted = f.catalog->effect_named("Status_Rooted");
+    CHECK(!alpha_path.empty() && bp && real.abilities_of(alpha_path) && growl && rooted,
+          "the Blueprint table has the Alpha Wolf, the creature tables list its abilities, and the ability data has the Growl and the Rooted effect");
+    if (alpha_path.empty() || !bp || !real.abilities_of(alpha_path) || !growl || !rooted) return;
+
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    std::error_code ec;
+    const fs::path tmp = fs::temp_directory_path() / ("aoc_creature_stop_movement_" + unique_temp_suffix());   // (a folder of its own: two gates can run this program at once)
+    fs::create_directories(tmp, ec);
+    const std::string abilities_header =
+        "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
+    const double dt = 1.0 / 15.0;
+
+    struct Cast {
+        size_t first = 0, last = 0;
+        double turned = 0, moved = 0, player_moved = 0, bearing_error = 0;
+        double needed = 0;         // how far off the bearing to the player (where the cast ends) the creature faced when the cast began: the turn the cast asks of it
+        bool   in_place = false;   // its montage stays in place, so the chase during it is the creature's own walk
+    };
+    struct Run {
+        bool                     ran = false;
+        std::vector<LungeSample> samples;
+        std::vector<Cast>        casts;
+    };
+    // a fight against a player who starts 8 m away and, from the first cast on, walks along +x at 400 cm/s: every cast after it is at a target that moves
+    const auto play = [&](const char* stop, bool root, double seconds) {
+        Run r;
+        const std::string table = (tmp / "abilities.tsv").string();
+        {
+            std::ofstream out(table, std::ios::binary);
+            out << abilities_header << "\n" << alpha_path << "\t" << growl->row.guid << "\tGrowl\t0.5\t" << stop << "\t0\t-1\t100\t-1\t\t0\t1\t\t\t\t\t-1\n";
+        }
+        combat::NpcAbilityData tables;
+        std::string err;
+        if (!tables.load(table, dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err)) {
+            CHECKF(false, "the Alpha Wolf's tree with the Growl at stop_movement=%s loads (%s)", stop, err.c_str());
+            return r;
+        }
+        bool walking = false;
+        const LungeSteer steer = [&](double, const LungeSample* prev, double& px, double&, const world::WorldActor&) {
+            if (prev && prev->cast_began) walking = true;
+            if (!walking) return false;
+            px += 400.0 * dt;
+            return true;
+        };
+        bool put = false;
+        const LungeStep step = [&](LungeStepContext& c) {
+            if (!root || put || !c.after || !c.sample || !c.sample->cast_began) return;
+            put = true;
+            effects::Applied a;
+            a.def = rooted;
+            a.duration = 30.0;
+            c.world.apply_effects(c.creature, c.player.actor_id(), {a}, c.now);
+        };
+        r.ran = run_lunge_fight(f, tables, alpha_path, seconds, 0, 800, steer, r.samples, nullptr, false, -1, nullptr, 40000.0, nullptr, 0, 0, step);
+        if (!r.ran) return r;
+        for (size_t i = 0; i < r.samples.size(); ++i) {
+            if (!r.samples[i].cast_began) continue;
+            size_t last = i;
+            while (last + 1 < r.samples.size() && r.samples[last + 1].montage != 0 && !r.samples[last + 1].cast_began) ++last;
+            Cast c;
+            c.first = i;
+            c.last = last;
+            for (size_t k = i; k <= last; ++k) c.turned = std::max(c.turned, std::fabs(wrap180(r.samples[k].yaw - r.samples[i].yaw)));
+            c.moved = std::hypot(r.samples[last].wx - r.samples[i].wx, r.samples[last].wy - r.samples[i].wy);
+            c.player_moved = std::hypot(r.samples[last].px - r.samples[i].px, r.samples[last].py - r.samples[i].py);
+            const double bearing = std::atan2(r.samples[last].py - r.samples[last].wy, r.samples[last].px - r.samples[last].wx) * 180.0 / 3.14159265358979323846;
+            c.bearing_error = std::fabs(wrap180(r.samples[last].yaw - bearing));
+            c.needed = std::fabs(wrap180(r.samples[i].yaw - bearing));
+            const combat::MontageData* played = montage_of_cast(f, tables, r.samples[i].ability, r.samples[i].montage);
+            c.in_place = played && played->root_motion.empty();
+            r.casts.push_back(c);
+        }
+        return r;
+    };
+    const Run free_run = play("0", false, 12.0);
+    const Run held_run = play("1", false, 12.0);
+    const Run rooted_run = play("0", true, 12.0);
+    fs::remove_all(tmp, ec);
+    CHECK(free_run.ran && held_run.ran && rooted_run.ran, "the three fights run (the Alpha Wolf is made from its open and knows the Growl)");
+    if (!free_run.ran || !held_run.ran || !rooted_run.ran) return;
+    size_t free_cases = 0, free_moved = 0, free_turned = 0, free_asked = 0, free_faced = 0, free_air = 0;
+    double least_moved = 1e9, least_turned = 1e9, worst_facing = 0;
+    for (const Cast& c : free_run.casts) {
+        if (!c.in_place) ++free_air;
+        if (c.player_moved <= 50.0) continue;   // (the player stood for this one: it says nothing about a chase)
+        ++free_cases;
+        least_moved = std::min(least_moved, c.moved);
+        least_turned = std::min(least_turned, c.turned);
+        worst_facing = std::max(worst_facing, c.bearing_error);
+        if (c.moved < 20.0) ++free_moved;
+        if (c.needed >= 10.0) {   // (a creature that trails the player straight behind him has no turn to make: only a cast that began facing 10 deg or more off him asks for one)
+            ++free_asked;
+            if (c.turned < 5.0) ++free_turned;
+        }
+        if (c.bearing_error > 45.0) ++free_faced;
+    }
+    size_t held_cases = 0, held_moved = 0, held_turned = 0, held_air = 0;
+    double most_moved = 0, most_turned = 0;
+    for (const Cast& c : held_run.casts) {
+        if (!c.in_place) ++held_air;
+        if (c.player_moved <= 50.0) continue;
+        ++held_cases;
+        most_moved = std::max(most_moved, c.moved);
+        most_turned = std::max(most_turned, c.turned);
+        if (c.moved > 5.0) ++held_moved;
+        if (c.turned > 1.0) ++held_turned;
+    }
+    size_t rooted_cases = 0, rooted_moved = 0, rooted_air = 0;
+    double most_rooted = 0;
+    for (const Cast& c : rooted_run.casts) {
+        if (!c.in_place) ++rooted_air;
+        if (c.player_moved <= 50.0) continue;
+        ++rooted_cases;
+        most_rooted = std::max(most_rooted, c.moved);
+        if (c.moved > 5.0) ++rooted_moved;
+    }
+    std::printf("  stop_movement=0: %zu casts at a moving target, the least %.1f cm moved and %.1f deg turned, the worst facing %.1f deg off;  stop_movement=1: %zu casts, the most %.1f cm and %.1f deg;  "
+                "rooted: %zu casts, the most %.1f cm\n", free_cases, free_cases ? least_moved : 0.0, free_cases ? least_turned : 0.0, worst_facing, held_cases, most_moved, most_turned, rooted_cases, most_rooted);
+    CHECKF(free_air == 0 && held_air == 0 && rooted_air == 0, "every cast's montage stays in place, so a chase during it is the creature's own walk (%zu, %zu and %zu casts did not)", free_air, held_air, rooted_air);
+    CHECKF(free_cases >= 1, "a stop_movement=0 attack begins while the player moves (%zu such casts)", free_cases);
+    CHECKF(free_moved == 0, "during every stop_movement=0 attack at a moving target the creature chases it (%zu of %zu casts moved less than 20 cm, the least %.1f cm)", free_moved, free_cases, free_cases ? least_moved : 0.0);
+    CHECKF(free_asked >= 1 && free_turned == 0, "... and turns towards it where it began facing off him (%zu of %zu casts that began 10 deg or more off the player turned less than 5 deg)", free_turned, free_asked);
+    CHECKF(free_faced == 0, "... and ends facing it within 45 deg (%zu of %zu casts did not, the worst %.1f deg)", free_faced, free_cases, worst_facing);
+    CHECKF(held_cases >= 1, "a stop_movement=1 attack begins while the player moves (%zu such casts)", held_cases);
+    CHECKF(held_moved == 0, "during every stop_movement=1 attack at a moving target the creature stands (%zu of %zu casts moved more than 5 cm, the most %.1f cm)", held_moved, held_cases, most_moved);
+    CHECKF(held_turned == 0, "... and keeps its facing (%zu of %zu casts turned more than 1 deg, the most %.1f deg)", held_turned, held_cases, most_turned);
+    CHECKF(rooted_cases >= 1, "a stop_movement=0 attack begins with the creature rooted (%zu such casts)", rooted_cases);
+    CHECKF(rooted_moved == 0, "a root still stops it during a stop_movement=0 attack (%zu of %zu casts moved more than 5 cm, the most %.1f cm)", rooted_moved, rooted_cases, most_rooted);
+}
+
+AOC_REGISTER_TEST(test_attack_stop_movement_keeps_the_chase);
+
+// A stop_movement=0 attack that has a Rotate To as well (970 of the 1,584 such tasks) leaves the chase and the Rotate To track running together.  Both turn the creature, so while the track runs it alone
+// turns the facing: the chase's walk and the track must not add their turns up, or the creature turns faster than its own rate.  The player steps to the creature's back as its first cast begins (a run
+// round it, a dodge), so that both want the same large turn at once.  The task is the Growl of the test above, with a Rotate To of 360 deg/s for the whole montage.
+void test_attack_with_rotate_to_turns_at_the_creatures_rate(Fixture& f) {
+    std::printf("an attack that does not stop the creature and has a Rotate To: the creature chases a player who stepped behind it and turns round to him, never faster than its own rate\n");
+    namespace fs = std::filesystem;
+    combat::NpcAbilityData real;
+    if (!load_creature_tables(real)) return;
+    const std::string alpha_path = creature_path(f, "/Beast/Canine/AlphaWolf.Default__AlphaWolf_C");
+    const auto bp = f.motion.find(alpha_path);
+    const abilities::AbilityDef* growl = f.catalog->ability_named("AlphaWolf_Growl");
+    CHECK(!alpha_path.empty() && bp && real.abilities_of(alpha_path) && growl, "the Blueprint table has the Alpha Wolf, the creature tables list its abilities, and the ability data has the Growl");
+    if (alpha_path.empty() || !bp || !real.abilities_of(alpha_path) || !growl) return;
+
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    std::error_code ec;
+    const fs::path tmp = fs::temp_directory_path() / ("aoc_creature_rotate_chase_" + unique_temp_suffix());   // (a folder of its own: two gates can run this program at once)
+    fs::create_directories(tmp, ec);
+    const std::string table = (tmp / "abilities.tsv").string();
+    {
+        std::ofstream out(table, std::ios::binary);
+        out << "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival\n"
+            << alpha_path << "\t" << growl->row.guid << "\tGrowl\t0.5\t0\t0\t-1\t100\t-1\t\t0\t1\t\t\t\t360:0\t-1\n";
+    }
+    combat::NpcAbilityData tables;
+    std::string err;
+    const bool loaded = tables.load(table, dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err);
+    fs::remove_all(tmp, ec);
+    CHECKF(loaded, "the Alpha Wolf's tree with the Growl at stop_movement=0 and a Rotate To of 360:0 loads (%s)", err.c_str());
+    if (!loaded) return;
+
+    constexpr double kRate = 360.0;   // the creature's own turning rate, set on its walker so that the check does not depend on what the rig starts it with
+    bool jumped = false;
+    const LungeSteer steer = [&](double, const LungeSample* prev, double& px, double& py, const world::WorldActor& wolf) {
+        if (!prev || !prev->cast_began || jumped) return false;
+        jumped = true;   // (the player steps to the wolf's back, 8 m from it, in the tick after its first cast began)
+        const double back = (wolf.yaw_degrees + 180.0) * 3.14159265358979323846 / 180.0;
+        px = wolf.x + 800.0 * std::cos(back);
+        py = wolf.y + 800.0 * std::sin(back);
+        return true;
+    };
+    const LungeStep step = [&](LungeStepContext& c) {
+        if (!c.after) c.w.npcs->set_yaw_rate(c.creature, kRate);
+    };
+    std::vector<LungeSample> samples;
+    const bool ran = run_lunge_fight(f, tables, alpha_path, 8.0, 0, 800, steer, samples, nullptr, false, -1, nullptr, 40000.0, nullptr, 0, 0, step);
+    CHECK(ran, "a fight of 8 s against the player runs (the Alpha Wolf is made from its open and knows the Growl)");
+    if (!ran) return;
+    size_t first = samples.size();
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (samples[i].cast_began) {
+            first = i;
+            break;
+        }
+    }
+    CHECK(jumped && first + 1 < samples.size(), "the Alpha Wolf plays its Growl, and the player steps behind it as it begins");
+    if (!jumped || first + 1 >= samples.size()) return;
+    size_t last = first;   // the end of that first cast
+    while (last + 1 < samples.size() && samples[last + 1].montage != 0 && !samples[last + 1].cast_began) ++last;
+    double worst_step = 0, turned = 0;
+    for (size_t k = first + 1; k < samples.size(); ++k) worst_step = std::max(worst_step, std::fabs(wrap180(samples[k].yaw - samples[k - 1].yaw)));
+    for (size_t k = first; k <= last; ++k) turned = std::max(turned, std::fabs(wrap180(samples[k].yaw - samples[first].yaw)));
+    const double moved = std::hypot(samples[last].wx - samples[first].wx, samples[last].wy - samples[first].wy);
+    const double bearing = std::atan2(samples[last].py - samples[last].wy, samples[last].px - samples[last].wx) * 180.0 / 3.14159265358979323846;
+    const double error = std::fabs(wrap180(samples[last].yaw - bearing));
+    std::printf("  the player stepped behind it at %.2f s: in that cast of %.2f s it moved %.0f cm and turned %.1f deg, ending %.1f deg off him; from then on the biggest turn in a tick was %.1f deg (its rate allows %.1f)\n",
+                samples[first].t, static_cast<double>(last - first + 1) / 15.0, moved, turned, error, worst_step, kRate / 15.0);
+    CHECKF(moved >= 20.0, "during its stop_movement=0 attack the creature chases the player who stepped behind it (%.0f cm moved in the cast)", moved);
+    CHECKF(turned >= 120.0 && error <= 45.0, "... and turns round to him (%.1f deg turned, %.1f deg off him at the end of the cast)", turned, error);
+    CHECKF(worst_step <= kRate / 15.0 + 1.0, "... and its facing never turns faster than its own rate, with the chase and the Rotate To both at work (%.1f deg in a tick, %.1f allowed)", worst_step, kRate / 15.0 + 1.0);
+}
+
+AOC_REGISTER_TEST(test_attack_with_rotate_to_turns_at_the_creatures_rate);
+
+// The Minotaur Berserker's axe swing is an attack that does not stop the creature (stop_movement=0) and has no Rotate To, and its montage carries the creature for most of its 2.5 s.  This swing (the
+// one such attack the recordings show turning, kAttacksThatKeepTurning) keeps the creature turning towards its target at its own rate for the whole montage, also while the montage carries it: a player who runs round it is faced at the end of every swing, and the
+// facing never turns faster than the creature's rate.
+void test_carried_attack_keeps_turning_to_a_circling_player(Fixture& f) {
+    std::printf("a Minotaur Berserker whose player runs round it at 90 deg/s turns to him through every axe swing its montage carries, at its own rate, and ends each swing facing him\n");
+    constexpr double kPi = 3.14159265358979323846;
+    const double dt = 1.0 / 15.0;
+    combat::NpcAbilityData real;
+    if (!load_creature_tables(real)) return;
+    const std::string mino = creature_path(f, "/Minotaur/Berserker/Minotaur_Berserker.Default__Minotaur_Berserker_C");
+    const auto bp = f.motion.find(mino);
+    BanditOpen made;
+    const bool have = !mino.empty() && bp && real.abilities_of(mino) && make_bandit_open(f, real, mino, made) && made.open;
+    CHECK(have, "the Blueprint table has the Minotaur Berserker, the creature tables list its abilities, and the world makes an open for it");
+    if (!have) return;
+    bool started = false;
+    double angle = 0, radius = 0, cx = 0, cy = 0;
+    const LungeSteer steer = [&](double, const LungeSample* prev, double& px, double& py, const world::WorldActor& c) {
+        if (prev && prev->cast_began && !started) {   // (from its first swing on, the player runs round the place it swung from, at the distance he had)
+            started = true;
+            cx = c.x;
+            cy = c.y;
+            angle = std::atan2(py - cy, px - cx);
+            radius = std::hypot(px - cx, py - cy);
+        }
+        if (!started) return false;
+        angle += 90.0 * kPi / 180.0 * dt;
+        px = cx + radius * std::cos(angle);
+        py = cy + radius * std::sin(angle);
+        return true;
+    };
+    std::vector<LungeSample> samples;
+    const bool ran = run_lunge_fight(f, real, mino, 40.0, 0, 450, steer, samples, nullptr, false, 0.2, nullptr, 40000.0, made.open);
+    CHECK(ran, "a fight of 40 s against a player who runs round the Minotaur Berserker runs");
+    if (!ran) return;
+    const double allowed = bp->rotation_rate_yaw * combat::kHumanoidTurnGain / 15.0 + 1.0;   // (its rate in a tick, with the turn gain of the creatures that run at their stat speed)
+    double worst_step = 0;
+    for (size_t i = 1; i < samples.size(); ++i) worst_step = std::max(worst_step, std::fabs(wrap180(samples[i].yaw - samples[i - 1].yaw)));
+    size_t swings = 0, unturned = 0, off = 0;
+    double least_turn = 1e9, worst_end = 0;
+    std::vector<double> ends;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (!samples[i].cast_began) continue;
+        size_t last = i;
+        while (last + 1 < samples.size() && samples[last + 1].montage != 0 && !samples[last + 1].cast_began) ++last;
+        size_t carried = 0;
+        double turn = 0;
+        for (size_t k = i + 1; k <= last; ++k) {
+            if (samples[k].active != 1) continue;
+            ++carried;
+            turn += std::fabs(wrap180(samples[k].yaw - samples[k - 1].yaw));
+        }
+        if (carried * 2 < last - i + 1) continue;   // (a swing the montage does not carry for most of its time says nothing here)
+        const LungeSample& e = samples[last];
+        if (std::hypot(e.px - e.wx, e.py - e.wy) < 150.0) continue;   // (a player inside its reach at the end has no clear way to face)
+        const double bearing = std::atan2(e.py - e.wy, e.px - e.wx) * 180.0 / kPi;
+        const double end_off = std::fabs(wrap180(e.yaw - bearing));
+        ++swings;
+        least_turn = std::min(least_turn, turn);
+        worst_end = std::max(worst_end, end_off);
+        ends.push_back(end_off);
+        if (turn < 20.0) ++unturned;
+        if (end_off > 15.0) ++off;
+    }
+    std::sort(ends.begin(), ends.end());
+    const double median = ends.empty() ? 0.0 : ends[ends.size() / 2];
+    std::printf("  %zu carried swings at the runner: the least turn while carried %.1f deg; at their end %.1f deg off him at the median, %.1f at the worst; the biggest turn in a tick %.1f deg (%.1f allowed)\n",
+                swings, swings ? least_turn : 0.0, median, worst_end, worst_step, allowed);
+    CHECKF(swings >= 3, "the Minotaur Berserker swings its axe again and again at a player who runs round it (%zu carried swings)", swings);
+    CHECKF(unturned == 0, "it turns towards him while every swing carries it (%zu of %zu swings turned less than 20 deg while carried, the least %.1f deg)", unturned, swings, swings ? least_turn : 0.0);
+    CHECKF(off == 0 && median <= 5.0, "... and ends every swing facing him (%zu of %zu ended more than 15 deg off; %.1f deg at the median, 5 allowed)", off, swings, median);
+    CHECKF(worst_step <= allowed, "... and its facing never turns faster than its own rate (%.1f deg in a tick, %.1f allowed)", worst_step, allowed);
+    // the facing a client is sent while the montage carries it is the server's, on every carried tick (ReplicatedMovement's 8 bits, RepRootMotion.Rotation's 16)
+    size_t carried_ticks = 0, wire_off = 0;
+    double worst_wire = 0;
+    for (const LungeSample& s : samples) {
+        if (s.active != 1) continue;
+        ++carried_ticks;
+        if (s.has_mv_yaw) {
+            const double d8 = std::fabs(wrap180(s.mv_yaw - s.yaw));
+            worst_wire = std::max(worst_wire, d8);
+            if (d8 > 0.75 * 360.0 / 256.0) ++wire_off;
+        }
+        if (s.has_rrm_yaw) {
+            const double d16 = std::fabs(wrap180(s.rrm_yaw - s.yaw));
+            worst_wire = std::max(worst_wire, d16);
+            if (d16 > 0.05) ++wire_off;
+        }
+    }
+    CHECKF(carried_ticks >= 5 && wire_off == 0, "the facing a client is sent while the montage carries it is the server's (%zu carried ticks, %zu off, the worst %.2f deg)", carried_ticks, wire_off,
+           worst_wire);
+}
+
+AOC_REGISTER_TEST(test_carried_attack_keeps_turning_to_a_circling_player);
+
+// Only the Minotaur's axe strike turns the creature through a montage that carries it (the recordings show its facing following the player through the whole swing).  Every other attack
+// that does not stop the creature and has no Rotate To keeps the facing it began with while the montage carries it.  The Ashen Haunt's Rebuke cannot show this: the world keeps its single
+// swing (its hit lands by a volume the world cannot place).  The test gives the Wolf's Bite, a carried lunge, a tree that says it does not stop the creature and has no Rotate To; at a
+// player who runs round it from the first tick, its facing stays where the lunge began.
+void test_carried_attack_outside_the_list_keeps_its_facing(Fixture& f) {
+    std::printf("a carried attack that does not stop the creature and has no Rotate To (the Wolf's Bite in a tree that says so) keeps the facing it began the lunge with while the player runs round it\n");
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr double kDt = 1.0 / 15.0;
+    namespace fs = std::filesystem;
+    combat::NpcAbilityData real;
+    if (!load_creature_tables(real)) return;
+    const std::string wolf_path = creature_path(f, "/Beast/Canine/Wolf.Default__Wolf_C");
+    const abilities::AbilityDef* bite = f.catalog->ability_named("Wolf_Bite");
+    CHECK(!wolf_path.empty() && f.motion.find(wolf_path) && real.abilities_of(wolf_path) && bite, "the Blueprint table has the Wolf, the creature tables list its abilities and the ability data has the Bite");
+    if (wolf_path.empty() || !f.motion.find(wolf_path) || !real.abilities_of(wolf_path) || !bite) return;
+
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    std::error_code ec;
+    const fs::path tmp = fs::temp_directory_path() / ("aoc_creature_carried_hold_" + unique_temp_suffix());   // (a folder of its own: two gates can run this program at once)
+    fs::create_directories(tmp, ec);
+    const std::string table = (tmp / "abilities.tsv").string();
+    {
+        std::ofstream out(table, std::ios::binary);
+        out << "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival\n"
+            << wolf_path << "\t" << bite->row.guid << "\tBite\t0.5\t0\t0\t-1\t5000\t-1\t\t0\t1\t\t\t\t\t-1\n";
+    }
+    combat::NpcAbilityData tables;
+    std::string err;
+    const bool loaded = tables.load(table, dir + "npc_montages.tsv", dir + "npc_targeting.tsv", err);
+    fs::remove_all(tmp, ec);
+    CHECKF(loaded, "the Wolf's tree with the Bite at stop_movement=0 and no Rotate To loads (%s)", err.c_str());
+    if (!loaded) return;
+
+    // from the first tick of the lunge the player runs round the place it began from, at the distance he had
+    bool started = false;
+    double angle = 0, radius = 0, cx = 0, cy = 0;
+    const LungeSteer steer = [&](double, const LungeSample* prev, double& px, double& py, const world::WorldActor& c) {
+        if (!started) {
+            if (!prev || !prev->cast_began || prev->ability != bite->row.guid) return false;
+            started = true;
+            cx = c.x;
+            cy = c.y;
+            angle = std::atan2(py - cy, px - cx);
+            radius = std::max(200.0, std::hypot(px - cx, py - cy));
+        }
+        angle += 90.0 * kPi / 180.0 * kDt;
+        px = cx + radius * std::cos(angle);
+        py = cy + radius * std::sin(angle);
+        return true;
+    };
+    std::vector<LungeSample> samples;
+    const bool ran = run_lunge_fight(f, tables, wolf_path, 30.0, 0, 800, steer, samples, nullptr, false, -1, nullptr, 40000.0);
+    CHECK(ran, "a fight of 30 s against a player who runs round the Wolf from the first tick of its carried Bite runs");
+    if (!ran) return;
+    size_t casts = 0, carried = 0;
+    double turned = 0, circled = 0;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (!samples[i].cast_began || samples[i].ability != bite->row.guid) continue;
+        ++casts;
+        size_t last = i;   // the end of that cast
+        while (last + 1 < samples.size() && samples[last + 1].montage != 0 && !samples[last + 1].cast_began) ++last;
+        size_t carried_last = i;
+        for (size_t k = i + 1; k <= last; ++k) {
+            if (samples[k].active == 1) {
+                ++carried;
+                carried_last = k;
+            }
+        }
+        if (carried_last > i) {
+            turned = std::fabs(wrap180(samples[carried_last].yaw - samples[i].yaw));
+            const double a0 = std::atan2(samples[i].py - samples[i].wy, samples[i].px - samples[i].wx);
+            const double a1 = std::atan2(samples[carried_last].py - samples[carried_last].wy, samples[carried_last].px - samples[carried_last].wx);
+            circled = std::fabs(wrap180((a1 - a0) * 180.0 / kPi));
+        }
+        break;   // (the first one is enough)
+    }
+    std::printf("  %zu Bite cast(s); the first carried it for %zu ticks, the player went %.0f deg round it in them and its facing turned %.1f deg\n", casts, carried, circled, turned);
+    CHECKF(casts >= 1 && carried >= 3, "it plays its Bite and the montage carries it (%zu casts, %zu carried ticks)", casts, carried);
+    CHECKF(circled >= 25.0 && turned <= 10.0, "... and it keeps the facing it began the lunge with while the player runs round it (%.0f deg round, facing turned %.1f deg; 10 allowed)", circled, turned);
+}
+
+AOC_REGISTER_TEST(test_carried_attack_outside_the_list_keeps_its_facing);
+
+// A Rotate To track whose target is gone (dead, out of the world) turns nothing, so it must not keep the creature's walk from turning it either: a creature that walks with such a track faces where it
+// walks, it does not walk on sideways with a frozen facing.
+void test_walk_turns_a_creature_whose_track_lost_its_target(Fixture& f) {
+    std::printf("a Wolf that walks north with a track whose target is gone turns to face where it walks\n");
+    combat_rig::World w;
+    CHECK(w.problem.empty(), "a world for the walk");
+    if (!w.problem.empty()) return;
+    const uint64_t wolf = w.spawn(wolf_archetype(f), 0, 0, 7, 0);
+    CHECK(wolf != 0, "a Wolf that stands");
+    if (!wolf) return;
+    double now = 0;
+    const auto run = [&](int ticks) {
+        for (int i = 0; i < ticks; ++i) {
+            now += 1.0 / 15.0;
+            w.npcs->note_player(77, 0, 500, now);   // (a player stands near: the Wolf is awake)
+            w.npcs->tick(now);
+        }
+    };
+    run(3);
+    w.npcs->face_toward(wolf, 1000.0, 0.0);   // (it faces east)
+    run(1);
+    const world::WorldActor* a = w.registry.find(wolf);
+    const double start_x = a->x, start_y = a->y;
+    CHECK(w.npcs->order_move(wolf, nav::Vec3{start_x, start_y + 2000.0, a->z}, 400.0, 0.0), "it is told to walk 20 m north");
+    CHECK(w.npcs->track_target(wolf, [](nav::Vec3&) { return false; }, 360.0, 0.0), "it gets a track whose target is gone");
+    run(15);
+    a = w.registry.find(wolf);
+    const double walked = a->y - start_y;
+    const double off = std::fabs(wrap180(a->yaw_degrees - 90.0));
+    std::printf("  in 1 s it walked %.0f cm north and faces %.1f deg off north\n", walked, off);
+    CHECKF(walked > 100.0, "it walks north (%.0f cm in 1 s)", walked);
+    CHECKF(off <= 10.0, "... facing where it walks, not frozen in its old facing (%.1f deg off north)", off);
+}
+
+AOC_REGISTER_TEST(test_walk_turns_a_creature_whose_track_lost_its_target);

@@ -526,3 +526,111 @@ void test_humanoids_walk_up_on_the_real_ground(Fixture& f) {
 }
 
 AOC_REGISTER_TEST(test_humanoids_walk_up_on_the_real_ground);
+
+// The tree's own walk speed during an attack that does not stop the creature: the raiders' Whirlwind walks at 0.45 of the creature's run speed (a rank 3 raider runs 810 cm/s and its
+// whirlwind walk was recorded at 364-365), and the Goblin Flayer's SeveringSpin at 1.6.  The player is put 15 m off the tick the attack begins and runs on at 150 cm/s, so the creature's AI
+// chases him for the whole montage, and what it covers in a tick is the speed the tree's move-to-target task walks it at.
+struct AttackWalk {
+    bool   ran = false, cast = false;
+    size_t ticks = 0;
+    double speed = 0, chase = 0;
+    std::map<std::string, size_t> casts;
+};
+
+static AttackWalk attack_walk(Fixture& f, const combat::NpcAbilityData& tables, const std::string& path, const spawns::OpenTemplate* open, const abilities::AbilityDef& ability,
+                              double seconds, double chase_cm_s) {
+    constexpr double kDt = 1.0 / 15.0;
+    AttackWalk out;
+    out.chase = chase_cm_s;
+    bool away = false;
+    double dirx = 0, diry = 0;
+    const LungeSteer steer = [&](double, const LungeSample* prev, double& px, double& py, const world::WorldActor& c) {
+        if (!away) {
+            if (!prev || !prev->cast_began || prev->ability != ability.row.guid) return false;
+            // (the tick its attack begins, the player is put 15 m off along the way it faces and runs on: its AI has to walk after him for the whole montage)
+            const double bearing = std::atan2(py - c.y, px - c.x);
+            dirx = std::cos(bearing);
+            diry = std::sin(bearing);
+            px = c.x + 1500.0 * dirx;
+            py = c.y + 1500.0 * diry;
+            away = true;
+            return true;
+        }
+        px += 150.0 * kDt * dirx;
+        py += 150.0 * kDt * diry;
+        return true;
+    };
+    std::vector<LungeSample> samples;
+    if (!run_lunge_fight(f, tables, path, seconds, 0, 800, steer, samples, nullptr, false, -1, nullptr, 40000.0, open)) return out;
+    out.ran = true;
+    for (const LungeSample& s : samples) {
+        if (!s.cast_began) continue;
+        const abilities::AbilityDef* def = f.catalog->ability(s.ability);
+        if (def) ++out.casts[def->row.name];
+    }
+    std::vector<double> speeds;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (!samples[i].cast_began || samples[i].ability != ability.row.guid) continue;
+        out.cast = true;
+        size_t last = i;   // the end of that cast
+        while (last + 1 < samples.size() && samples[last + 1].montage != 0 && !samples[last + 1].cast_began) ++last;
+        for (size_t k = i + 1; k <= last; ++k) {
+            const double step = std::hypot(samples[k].wx - samples[k - 1].wx, samples[k].wy - samples[k - 1].wy) / kDt;
+            if (step > 20.0) speeds.push_back(step);   // (a tick it did not walk: the player was still inside the reach of the attack it is ready with)
+        }
+        break;   // (the first one is enough)
+    }
+    std::sort(speeds.begin(), speeds.end());
+    out.ticks = speeds.size();
+    out.speed = speeds.empty() ? 0.0 : speeds[speeds.size() / 2];
+    return out;
+}
+
+void test_attack_walk_speeds(Fixture& f) {
+    std::printf("the tree's walk during an attack that does not stop the creature: the bandit raiders' Whirlwind walks at 0.45 of its chase speed and the Goblin Flayer's SeveringSpin at 1.6\n");
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    combat::NpcStatBook book(*f.ctx->bundle, *f.ctx->gear);
+    struct Kind {
+        const char* leaf;
+        const char* ability;
+        double      share;
+        double      seconds;
+    };
+    for (const Kind kind : {Kind{"/Bandit_Raider/CSB_Bandit_Raider_StateTree.Default__CSB_Bandit_Raider_StateTree_C", "Bandit_Raider_Whirlwind", 0.45, 90.0},
+                            Kind{"/GoblinFlayer/Goblin_Flayer_Gravehide.Default__Goblin_Flayer_Gravehide_C", "GoblinFlayer_SeveringSpin", 1.6, 90.0}}) {
+        const std::string path = creature_path(f, kind.leaf);
+        const auto bp = f.motion.find(path);
+        const abilities::AbilityDef* ability = f.catalog->ability_named(kind.ability);
+        const std::string name = spawns::blueprint_leaf(path);
+        CHECKF(!path.empty() && bp && tables.abilities_of(path) && ability, "the Blueprint table has the %s, the creature tables list its abilities and the ability data has the %s", name.c_str(),
+               kind.ability);
+        if (path.empty() || !bp || !tables.abilities_of(path) || !ability) continue;
+        const combat::CreatureAbility* task = nullptr;   // the task that plays the attack
+        for (const combat::CreatureAbility& t : *tables.abilities_of(path)) {
+            if (t.ability == ability->row.guid) task = &t;
+        }
+        CHECKF(task && !task->stop_movement, "the %s's tree plays the %s without stopping it (stop_movement %d)", name.c_str(), kind.ability, task ? (task->stop_movement ? 1 : 0) : -1);
+        if (!task || task->stop_movement) continue;
+        BanditOpen made;
+        CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the %s (verdict: %s)", name.c_str(), spawns::verdict_name(made.why));
+        if (!made.open) continue;
+        std::string err;
+        auto cs = book.make(*bp, 7, err);
+        const stats::StatValue* mult = cs ? cs->find(f.data->ids().move_speed_mult) : nullptr;
+        CHECKF(mult && mult->value >= 1.0, "the %s has a MoveSpeedMult of its own at level 7 (%.2f)", name.c_str(), mult ? mult->value : 0.0);
+        if (!mult) continue;
+        const double chase = std::max({bp->max_run_speed, bp->max_walk_speed, 300.0}) * mult->value;
+        const AttackWalk walk = attack_walk(f, tables, path, made.open, *ability, kind.seconds, chase);
+        CHECKF(walk.ran && walk.cast, "a fight of %.0f s in which the %s plays its %s runs", kind.seconds, name.c_str(), kind.ability);
+        if (!walk.ran || !walk.cast) continue;
+        std::string seen;
+        for (const auto& [label, n] : walk.casts) seen += (seen.empty() ? "" : ", ") + label + " " + std::to_string(n);
+        const double ratio = walk.speed / chase;
+        std::printf("  %s: %s; while its montage plays it walks %.0f cm/s (%.2f x its chase speed of %.0f cm/s) over %zu ticks\n", name.c_str(), seen.c_str(), walk.speed, ratio, chase, walk.ticks);
+        CHECKF(walk.ticks >= 8 && std::fabs(ratio - kind.share) <= 0.05 * kind.share + 0.02, "the %s walks at %.2f x its chase speed while the %s plays (%.2f x measured over %zu ticks)", name.c_str(),
+               kind.share, kind.ability, ratio, walk.ticks);
+    }
+}
+
+AOC_REGISTER_TEST(test_attack_walk_speeds);

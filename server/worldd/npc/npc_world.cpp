@@ -598,20 +598,23 @@ void NpcWorld::commit(Npc& n, double t, bool force) {
     ++stats_.writes;
 }
 
+bool NpcWorld::track_running(const Npc& n, double t) { return n.track && !n.lock_turn && !(n.track_until > 0 && t >= n.track_until); }
+
 void NpcWorld::steer(Npc& n, double t) {
     if (n.lock_turn) return;   // crowd control holds its facing: it turns to nothing, and what it was turning to is kept for when the lock is lifted
     const double dt = cfg_.step_seconds;
     bool turned = false;
+    if (n.track && !track_running(n, t)) n.track = nullptr;   // (its time is up)
     if (n.track) {
         nav::Vec3 at;
-        if (n.track_until > 0 && t >= n.track_until) {
-            n.track = nullptr;
-        } else if (n.track(at)) {
+        if (n.track(at)) {
             const nav::Vec3 g = n.mover.ground();
             if (std::hypot(at.x - g.x, at.y - g.y) > 1.0) {
                 n.mover.turn_toward(std::atan2(at.y - g.y, at.x - g.x) * 180.0 / 3.14159265358979323846, dt, n.track_rate);
                 turned = true;
             }
+        } else {
+            n.track = nullptr;   // (the target is gone: it turns to nothing, and the walk's own turning may take over)
         }
     } else if (n.turning && !(n.mover.moving() && !n.lock_walk)) {   // (a walk that is held is not a walk: a root turns on the spot)
         if (n.mover.turn_toward(n.turn_yaw, dt, n.turn_rate)) n.turning = false;
@@ -667,7 +670,18 @@ void NpcWorld::advance_npc(Npc& n, double t) {
         }
         // a walk began: its first step is this step's
     }
-    const Mover::Status st = n.mover.advance(dt);
+    // A Rotate To track that is running turns the creature alone: the walk's own turn towards its path waits for the steps without a track.  An attack that does not stop the creature leaves its chase
+    // and its track running together, and a walk and a track that both turned it in one step would turn it at the sum of their rates.  A track whose target is gone (dead, out of the world) turns
+    // nothing, so it is dropped here and the walk turns the creature again (it would else walk on in a frozen facing).
+    bool tracked = track_running(n, t);
+    if (tracked) {
+        nav::Vec3 target_at;
+        if (!n.track(target_at)) {
+            n.track = nullptr;
+            tracked = false;
+        }
+    }
+    const Mover::Status st = n.mover.advance(dt, !tracked);
     steer(n, t);
     commit(n, t, false);
     if (st == Mover::Status::Arrived) {
@@ -913,8 +927,8 @@ void NpcWorld::advance_root_motion(Npc& n, double t) {
     const nav::Vec3 g = n.mover.ground();
     // A creature that tracks its target turns while the montage carries it (its rate, no jumps), and the rest of the montage's travel goes the way it faces then: the travel so far stays
     // where it is, and the travel still to come is turned about the creature's place.
-    if (n.track && n.track_until > 0 && t >= n.track_until) n.track = nullptr;
-    if (n.track && !n.lock_turn) {   // (a creature whose facing is held does not turn in its montage either)
+    if (n.track && !track_running(n, t)) n.track = nullptr;   // (its time is up)
+    if (track_running(n, t)) {   // (a creature whose facing is held turns nothing in its montage either)
         nav::Vec3 at_target;
         if (n.track(at_target) && std::hypot(at_target.x - g.x, at_target.y - g.y) > 1.0) {
             n.mover.turn_toward(std::atan2(at_target.y - g.y, at_target.x - g.x) * 180.0 / kPi, dt, n.track_rate);

@@ -111,9 +111,10 @@ struct CcRun {
     bool   ran = false;
 };
 
-/// A fight of the Wolf against the player standing at (player_x, player_y) with `events` happening in it.  `provoke_at` is when the player starts hitting it.
+/// A fight of the Wolf against the player standing at (player_x, player_y) with `events` happening in it.  `provoke_at` is when the player starts hitting it.  `made` (if any) is the open the
+/// creature is spawned from (a humanoid made from a generic one, whose ability component lists its tree's).
 static bool cc_fight(Fixture& f, const combat::NpcAbilityData& tables, const std::string& path, double seconds, double player_x, double player_y, double provoke_at, const LungeSteer& steer,
-                     std::vector<CcEvent> events, CcRun& out) {
+                     std::vector<CcEvent> events, CcRun& out, const spawns::OpenTemplate* made = nullptr) {
     const abilities::EffectDef* chilled = f.catalog->effect_named("Status_Chilled");
     const LungeStep step = [&](LungeStepContext& c) {
         if (c.after) {
@@ -128,7 +129,7 @@ static bool cc_fight(Fixture& f, const combat::NpcAbilityData& tables, const std
             e.act(c);
         }
     };
-    out.ran = run_lunge_fight(f, tables, path, seconds, player_x, player_y, steer, out.s, &out.hits, false, provoke_at, nullptr, 40000.0, nullptr, 0, 0, step);
+    out.ran = run_lunge_fight(f, tables, path, seconds, player_x, player_y, steer, out.s, &out.hits, false, provoke_at, nullptr, 40000.0, made, 0, 0, step);
     return out.ran;
 }
 
@@ -1076,3 +1077,86 @@ void test_cc_binds_creatures(Fixture& f) {
     }
 }
 AOC_REGISTER_TEST(test_cc_binds_creatures);
+
+// A freeze that lands while a montage carries a tracked Minotaur swing, at a player who runs round it: a freeze clears every turn a creature is on (as it does for a Rotate To), so the
+// facing stays where it was held for the rest of the carry; the swing itself plays on (a freeze does not end the attack, a stun does).
+void test_carried_swing_drops_its_track_under_a_freeze(Fixture& f) {
+    std::printf("a Minotaur Berserker whose axe swing carries it at a player who runs round it: a freeze that lands in the carry drops the track, and the facing does not turn while it is held\n");
+    constexpr double kPi = 3.14159265358979323846;
+    combat::NpcAbilityData tables;
+    if (!load_creature_tables(tables)) return;
+    const std::string mino = creature_path(f, "/Minotaur/Berserker/Minotaur_Berserker.Default__Minotaur_Berserker_C");
+    const auto bp = f.motion.find(mino);
+    const abilities::HitDef* frostbolt = f.catalog->hit_named("Mage_Frostbolt_Hit");
+    const abilities::HitDef* cone = f.catalog->hit_named("Mage_ConeOfCold_Hit");
+    const abilities::EffectDef* frozen = f.catalog->effect_named("Status_Frozen");
+    BanditOpen made;
+    const bool have = !mino.empty() && bp && tables.abilities_of(mino) && frostbolt && cone && frozen && make_bandit_open(f, tables, mino, made) && made.open;
+    CHECK(have, "the Blueprint table has the Minotaur Berserker, the world makes an open for it, and the data has the Frostbolt's chill and the Cone of Cold's freeze");
+    if (!have) return;
+    const double dt = 1.0 / 15.0;
+    // from its first swing on, the player runs round the place it swung from, at the distance he had (as in the Minotaur test)
+    bool started = false;
+    double angle = 0, radius = 0, cx = 0, cy = 0;
+    const LungeSteer steer = [&](double, const LungeSample* prev, double& px, double& py, const world::WorldActor& c) {
+        if (!started) {
+            if (!prev || !prev->cast_began) return false;
+            started = true;
+            cx = c.x;
+            cy = c.y;
+            angle = std::atan2(py - cy, px - cx);
+            radius = std::max(150.0, std::hypot(px - cx, py - cy));
+        }
+        angle += 90.0 * kPi / 180.0 * dt;
+        px = cx + radius * std::cos(angle);
+        py = cy + radius * std::sin(angle);
+        return true;
+    };
+    CcRun run;
+    run.watch = frozen;
+    double cone_seconds = 0;
+    const auto put_frostbolt = [frostbolt](LungeStepContext& c) { cc_land(c, *frostbolt); };
+    const auto put_cone = [&run, &cone_seconds, cone](LungeStepContext& c) {
+        cone_seconds = cc_land(c, *cone);   // (the Cone of Cold's freeze wants the chill the Frostbolt leaves)
+        run.on_at = c.now;
+        run.on_seconds = cone_seconds;
+    };
+    const bool ran = cc_fight(f, tables, mino, 40.0, 0, 450, 0.2, steer,
+                              {CcEvent{0.2, put_frostbolt}, CcEvent{0.0, put_cone, false, [&run](LungeStepContext&) { return !run.s.empty() && run.s.back().active == 1; }}, cc_probe_at(run, 39.5)}, run,
+                              made.open);
+    CHECK(ran, "a fight of 40 s against a player who runs round the Minotaur, with a freeze put on it while a montage carries its swing, runs");
+    if (!ran) return;
+    const size_t on_i = cc_at(run.s, run.on_at);
+    size_t off_i = on_i;
+    while (off_i < run.watch_left.size() && run.watch_left[off_i] > 0) ++off_i;
+    size_t carried = 0, active_ticks = 0;
+    for (const LungeSample& s : run.s) active_ticks += s.active == 1 ? 1 : 0;
+    for (size_t k = on_i; k < off_i && k < run.s.size(); ++k) carried += run.s[k].active == 1 ? 1 : 0;
+    const bool ok = run.on_at > 0 && on_i >= 1 && on_i < run.s.size() && off_i > on_i && off_i < run.s.size() && carried >= 3;
+    CHECKF(ok, "the freeze lands in a swing its montage carries and holds it for some ticks (%zu carried ticks in it, %zu in the fight; the freeze lasted %.2f s)", carried, active_ticks, cone_seconds);
+    if (!ok) return;
+    size_t cast_i = on_i;
+    while (cast_i > 0 && !run.s[cast_i].cast_began) --cast_i;
+    size_t last = cast_i;   // the end of that cast
+    while (last + 1 < run.s.size() && run.s[last + 1].montage != 0 && !run.s[last + 1].cast_began) ++last;
+    std::string cast_name;
+    if (const abilities::AbilityDef* def = f.catalog->ability(run.s[cast_i].ability)) cast_name = def->row.name;
+    const double turned = std::fabs(wrap180(run.s[off_i - 1].yaw - run.s[on_i].yaw));
+    const double a0 = std::atan2(run.s[on_i].py - run.s[on_i].wy, run.s[on_i].px - run.s[on_i].wx);
+    const double a1 = std::atan2(run.s[off_i - 1].py - run.s[off_i - 1].wy, run.s[off_i - 1].px - run.s[off_i - 1].wx);
+    const double circled = std::fabs(wrap180((a1 - a0) * 180.0 / kPi));
+    // if the carry goes on after the freeze, the facing stays then too: the track the swing began with is gone
+    size_t after_carried = 0;
+    double after_turn = 0;
+    for (size_t k = off_i; k <= last && k < run.s.size(); ++k) {
+        if (run.s[k].active != 1) continue;
+        ++after_carried;
+        after_turn = std::max(after_turn, std::fabs(wrap180(run.s[k].yaw - run.s[off_i - 1].yaw)));
+    }
+    std::printf("  %s, carried in the freeze for %zu of its %zu ticks (%.2f s): the player went %.0f deg round it, its facing turned %.1f deg; after the freeze %zu carried ticks, facing turned %.1f deg\n", cast_name.c_str(),
+                carried, off_i - on_i, run.s[off_i - 1].t - run.s[on_i].t, circled, turned, after_carried, after_turn);
+    CHECKF(turned <= 5.0 && circled >= 30.0, "... and the facing does not turn while it is held, though the player runs round it (%.0f deg round, facing turned %.1f deg; 5 allowed)", circled, turned);
+    CHECKF(after_carried == 0 || after_turn <= 5.0, "... and the carry after the freeze does not turn it either: the track is dropped (%zu carried ticks after it, facing turned %.1f deg)", after_carried, after_turn);
+}
+
+AOC_REGISTER_TEST(test_carried_swing_drops_its_track_under_a_freeze);

@@ -72,6 +72,7 @@ public:
     NpcCastState                           cast;             // the attack the client is shown (combat/npc_ability_replicator.h)
     std::map<std::string, double>          cooldown_until;   // the name of a task's cooldown -> when it is over
     double                                 hold_until = 0;   // the creature stands still, facing as it does, until then (the montage of an attack it stands for)
+    double                                 attack_walk_share = 1.0;   // how much of its chase speed the tree's walk keeps while the attack it plays goes on (the task's SpeedMultiplierExpression)
     double                                 stand_off_cm = -1;   // a creature whose attacks launch projectiles closes in on its target to this distance (its tree's arrival distance) between two casts; -1: it does not
     double                                 shot_reach_cm = -1;  // ... and starts casting once its target is within this reach (the distance its tree lets it cast from)
     double                                 fight_began = 0;  // when its fight began (the tree asks how long it has gone on)

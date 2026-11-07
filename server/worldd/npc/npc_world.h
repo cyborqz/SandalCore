@@ -196,7 +196,8 @@ public:
     /// Where a target is now; false when it is gone.
     using Where = std::function<bool(nav::Vec3&)>;
     /// The NPC keeps turning towards the place `where` names, at `rate` degrees a second (<= 0: its rotation rate), until the world clock reaches `until` (<= 0: until `stop_tracking`): while it stands,
-    /// and while a montage carries it, when the rest of the montage's travel goes the way it faces then.
+    /// and while a montage carries it, when the rest of the montage's travel goes the way it faces then.  While it walks, the track alone turns it: the walk does not turn it towards its path in the
+    /// steps the track runs in, so that the two never add their turns up.
     bool track_target(uint64_t actor_id, Where where, double rate, double until);
     void stop_tracking(uint64_t actor_id);
     /// Orders a walk after a target that moves: at every step the walk is re-planned to the target's place when it has moved off the walk's end (or the NPC has stopped short of it), so the NPC
@@ -354,6 +355,8 @@ private:
     void   advance_root_motion(Npc& n, double t);
     /// One step of the NPC's turning on the spot or tracking its target, and of its pursuit: before it walks.
     void   steer(Npc& n, double t);
+    /// Whether a track (the Rotate To target of an attack, or the target of an attack that keeps turning) is running at `t`: it has one, its facing is not held, and its time is not up.
+    static bool track_running(const Npc& n, double t);
     void   pursue_step(Npc& n, double t);
     void   finish_root_motion(Npc& n, double t);
     /// A montage has let go of the creature: its place will go out again at the following steps.
