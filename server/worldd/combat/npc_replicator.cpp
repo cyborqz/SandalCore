@@ -6,8 +6,12 @@
 // ============================================================================
 #include "combat/npc_replicator.h"
 
+#include "protocol/repl/codecs.h"
+
 #include <algorithm>
 #include <bit>
+#include <cmath>
+#include <string>
 
 namespace aoc::worldd::combat {
 
@@ -166,6 +170,20 @@ bool write_cc_state(world::ActorRegistry& registry, uint64_t actor_id, const CcW
         put("CrowdControlState.SyncStartAnimTime", repl::Value::f64(w.anim_start), w.anim_start == 0.0);
         put("CrowdControlState.Duration", repl::Value::f32(static_cast<float>(w.anim_seconds)), w.anim_seconds == 0.0);
         put("CrowdControlState.EndAnimTime", repl::Value::f64(w.anim_end), w.anim_end == -1.0);
+        // the push the clients play on the creature: the record, who applied it and where it came from, when it began, and the place and facing it works from; all of it back to nothing with the effect
+        put("CrowdControlState.CrowdControlRecordToDisplace", repl::Value::i64(w.push_record), w.push_record == 0);
+        static const char* const kWord[4] = {"A", "B", "C", "D"};
+        for (size_t i = 0; i < 4; ++i) {
+            put((std::string("CrowdControlState.PushInstigatorGuid.") + kWord[i]).c_str(), repl::Value::i64(static_cast<int32_t>(w.push_instigator[i])), w.push_instigator[i] == 0);
+            put((std::string("CrowdControlState.PushSourceGuid.") + kWord[i]).c_str(), repl::Value::i64(static_cast<int32_t>(w.push_source[i])), w.push_source[i] == 0);
+        }
+        put("CrowdControlState.SyncStartPushTime", repl::Value::f64(w.push_start), w.push_start == 0.0);
+        {
+            constexpr double kPi = 3.14159265358979323846;
+            const double half = w.origin_yaw_degrees * kPi / 360.0;   // (a turn about the vertical axis: half its angle)
+            put("CrowdControlState.InitialOriginTransform.Transform.Rotation", repl::Value(repl::quat_to_wire(0.0, 0.0, std::sin(half), std::cos(half))), !w.has_origin);
+            put("CrowdControlState.InitialOriginTransform.Transform.Translation", repl::Value(repl::Vec3d{w.origin_x, w.origin_y, w.origin_z}), !w.has_origin);
+        }
         ok = flags_ok && snare_ok;
     });
     return ok;

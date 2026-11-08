@@ -8,6 +8,7 @@
 
 #include "bootstrap/constants.h"
 #include "combat/combat_world_npc.h"
+#include "combat/knockback.h"
 #include "combat/npc_ability_replicator.h"
 #include "combat/npc_kits.h"
 #include "combat/npc_replicator.h"
@@ -18,8 +19,12 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
+#include <memory>
 #include <string_view>
 
 namespace aoc::worldd::combat {
@@ -879,6 +884,7 @@ bool CombatWorld::plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& 
 }
 
 void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack* picked) {
+    if (npcs_world_ && npcs_world_->displaced(n.actor_id)) return;   // (a creature that is thrown or pushed starts nothing until it comes to rest: it tries again at its next look)
     PlayerPort* port = player(target);
     n.attack_walk_share = 1.0;   // (the tree walks it at its chase speed unless the attack's own task says otherwise)
     // An attack with its own animation.  The tree picks it with the target where it stands; its montage starts on the client with the element the replicator writes; the creature turns
@@ -1357,6 +1363,7 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
             spdlog::info("[combat] {} ({}) is burning: {:.1f} fire damage to burn over {:.1f} s (it was {:.1f} over {:.1f} s)", n->leaf, npc_actor, pool->value, dur->value, burn_before, burn_dur_before);
         }
     }
+    if (!lethal && origin) move_by_hit(*n, attacker, r, *origin, now);   // (a hit that throws the creature or pulls it does so before the creature looks again)
     if (!lethal) {
         wake_on_damage(*n, r, origin, now);   // (before the creature looks again: a sleeper that is hit attacks in this very step)
         n->ai.notice(threat_to != 0 ? threat_to : attacker, std::max(threat, 1.0), now);
@@ -1465,6 +1472,7 @@ void CombatWorld::apply_crowd_control(Npc& n) {
     if (cc == n.cc) return;
     const effects::Book::Crowd was = n.cc;
     n.cc = cc;
+    track_push(n, was, cc);   // (before the state is written: the state names the origin the push works from)
     // the state the client is told: the flags and the snare, the override of its own movement, and the animation of the strongest stun or trip (it plays from the item's start for the item's length, and its
     // end is that length less the end of the montage, which the client works out for itself)
     CcWire wire;
@@ -1479,6 +1487,7 @@ void CombatWorld::apply_crowd_control(Npc& n) {
         wire.anim_seconds = cc.anim_seconds;
         wire.anim_end = wire.anim_start + cc.anim_seconds - kCcAnimEndMargin;
     }
+    push_wire(n, cc, wire);
     if (!write_cc_state(registry_, n.actor_id, wire)) spdlog::debug("[cc] {} ({}) has no crowd control state to write: its clients are not told, its walk is held all the same", n.leaf, n.actor_id);
     // its top speed is its speed times (1 - the strongest snare), at once and in every way it walks; a root, a freeze or a stun holds its feet, and a freeze or a stun its facing too.  The NPC world
     // holds all three (no walk order passes a slower speed or a step)
@@ -1506,6 +1515,7 @@ void CombatWorld::log_crowd_control() {
         if (held) binds += "no walk, ";
         if (n.cc.flags & content::kCcNoTurn) binds += "no turn, ";
         if (n.cc.flags & content::kCcNoAbilities) binds += "no attack, ";
+        if (n.cc.flags & content::kCcDisplace) binds += "pushed, ";
         if (!binds.empty()) binds = " (" + binds.substr(0, binds.size() - 2) + ")";
         spdlog::log(cc_logged_++ < kLoggedCc ? spdlog::level::info : spdlog::level::debug, "[cc] {} ({}) snare {:.2f} speed {:.0f} flags {}{}", n.leaf, n.actor_id, n.cc.snare,
                     held ? 0.0 : n.ai.params().chase_speed_cm_s * kept, n.cc.flags, binds);
@@ -1578,23 +1588,28 @@ void CombatWorld::wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* ori
 bool CombatWorld::takes_crowd_control(const abilities::EffectDef& def) {
     if (!def.cc) return false;   // (the data file lacks its record)
     const int64_t status = def.cc->applied_status;
-    const int64_t known = content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities | content::kCcEmplace | content::kCcSnare;
-    if ((status & ~known) != 0) return false;                                   // a push, a pull, a status of the system
-    if ((status & (content::kCcRoot | content::kCcSnare)) == 0) return false;   // a silence or a disarm binds no walk and no attack of a mob; a record with no status does nothing
+    const int64_t known = content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities | content::kCcEmplace | content::kCcSnare | content::kCcDisplace;
+    if ((status & ~known) != 0) return false;                                   // a status of the system
+    const bool pushes = (status & content::kCcDisplace) != 0;                   // a push, a pull: the NPC world plays it
+    if ((status & (content::kCcRoot | content::kCcSnare | content::kCcDisplace)) == 0) return false;   // a silence or a disarm binds no walk and no attack of a mob; a record with no status does nothing
     // (the abilities bit stands for a stun, a trip and a sleep, which bind the feet and the facing as well: a record with it and a snare or a root but not the three bits is no stun, and a mob
-    // would be stunned whole by it.  None in the data today)
-    if ((status & content::kCcNoAbilities) != 0 && (status & (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) != (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) return false;
+    // would be stunned whole by it.  None in the data today.  A push stops the abilities of what it pushes and binds nothing else)
+    if (!pushes && (status & content::kCcNoAbilities) != 0 && (status & (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) != (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) return false;
     return def.cc->animation_request.find("Custom") == std::string::npos;      // (an animation of its own is not played yet)
 }
 
 void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now, uint64_t via_pet) {
     if (n.dead || !a.def) return;
-    // A slow, a root, a freeze, a stun, a trip and a sleep go on like any effect and bind the creature (apply_crowd_control); a silence, a knockback, a pull and the rest stay off: the effect would wear its
+    // A slow, a root, a freeze, a stun, a trip, a sleep and a push go on like any effect and bind the creature (apply_crowd_control); a silence, a disarm and the rest stay off: the effect would wear its
     // icon and the mob would keep acting
+    if (a.def->cc && (a.def->cc->applied_status & content::kCcDisplace) != 0 && is_boss(n)) {   // a boss is not pushed: the effect of a push, and the CC that comes with it, is not put on it
+        spare_boss(n, a.def->row.name, "push");
+        return;
+    }
     if (a.def->row.crowd_control_guid != 0 && !takes_crowd_control(*a.def)) {
         if (refused_effects_.insert(a.def->row.guid).second) {
             if (a.def->cc) {
-                spdlog::info("[effects] {} is a crowd control mobs do not take yet (status {}: a silence, a knockback, a pull or an animation of its own), so it is not put on {}", a.def->row.name,
+                spdlog::info("[effects] {} is a crowd control mobs do not take yet (status {}: a silence, a disarm or an animation of its own), so it is not put on {}", a.def->row.name,
                              a.def->cc->applied_status, n.leaf);
             } else {
                 spdlog::info("[effects] {} names a crowd-control record the data does not have, so it is not put on {}", a.def->row.name, n.leaf);
@@ -1909,7 +1924,7 @@ void CombatWorld::think(Npc& n, double now) {
     else if (n.ai.state() == npc::ai::State::Idle || n.ai.state() == npc::ai::State::Reset) set_flags(n, false, 0);
     // A montage that carries the creature (a lunge) is played to the end of its carry: the client moves its copy along the whole montage, so a walk order that took the creature's feet back
     // half way would leave the server's creature behind it.  The AI's walking and turning wait until the carry is over; a reset (the way home) and a death end it.
-    const bool carried = npcs_world_ && npcs_world_->root_motion_active(n.actor_id);
+    const bool carried = npcs_world_ && (npcs_world_->root_motion_active(n.actor_id) || npcs_world_->displaced(n.actor_id));   // (a creature that is thrown or pushed waits as well, until it comes to rest)
     if (npcs_world_ && !o.began_reset && now >= n.hold_until && !carried) {   // (a creature that stands for a montage is not sent anywhere until it is over)
         const nav::Vec3 here{a->x, a->y, a->z};
         switch (o.move) {
@@ -1984,6 +1999,7 @@ void CombatWorld::tick(double now) {
     now_ = now;
     if (!cfg_.enabled) return;
     log_crowd_control();
+    log_rests();
     resolve_pending(now);
     advance_flights(now);
     advance_effects(now);
@@ -2061,5 +2077,7 @@ void CombatWorld::tick(double now) {
     }
     tick_pets(now);
 }
+
+#include "combat/combat_knockback.inc"   // what throws, pushes and pulls a creature (move_by_hit, track_push, push_wire, origin_actors)
 
 }  // namespace aoc::worldd::combat

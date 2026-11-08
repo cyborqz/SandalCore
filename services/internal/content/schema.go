@@ -793,5 +793,8 @@ func Create(db *sql.DB) error {
 	if err := createWarehouse(db); err != nil {
 		return err
 	}
-	return createEffectControl(db) // extends ab_effect: after the ability tables
+	if err := createEffectControl(db); err != nil { // extends ab_effect: after the ability tables
+		return err
+	}
+	return createKnockback(db) // the impulses of hits, the pushes of crowd-control records and the teleports: after the ability tables and the crowd-control ones
 }

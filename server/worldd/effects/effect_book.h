@@ -284,17 +284,28 @@ public:
         int64_t anim_record = 0;                      // ... the crowd-control record to animate,
         double  anim_start = 0;                       // ... when its effect began (this book's clock)
         double  anim_seconds = 0;                     // ... and how long it lasts, as the effect's item states it (a float's worth)
+        // contentc version 42: the push that plays (a live record with the displaced bit and a push row): the highest priority, of two equal the later one.  Its instance's key tells a new application of the
+        // same record from the one that plays (the push begins again from the new moment and place).
+        const content::CrowdControlRow* push = nullptr;
+        int64_t  push_key = 0;
+        uint64_t push_instigator = 0;
+        double   push_start = 0, push_end = 0;        // when its effect began and when it ends (this book's clock)
         bool operator==(const Crowd&) const = default;
     };
     Crowd cc() const {
         Crowd out;
         const Instance* shown = nullptr;
+        const Instance* pushing = nullptr;
         for (const Instance& e : items_) {
             if (!e.def || !e.def->cc) continue;
             const content::CrowdControlRow& r = *e.def->cc;
             out.flags |= r.applied_status;
             if (r.applied_status & content::kCcSnare) out.snare = std::max(out.snare, r.snare_strength);
             out.override_move = out.override_move || r.override_client_move;
+            if ((r.applied_status & content::kCcDisplace) != 0 && r.has_push_row &&
+                (!pushing || r.priority > pushing->def->cc->priority || (r.priority == pushing->def->cc->priority && e.start > pushing->start))) {
+                pushing = &e;
+            }
             if (animation_of(r) == content::kCcAnimNone) continue;
             if (!shown || r.priority > shown->def->cc->priority ||
                 (r.priority == shown->def->cc->priority && (e.end > shown->end || (e.end == shown->end && e.start > shown->start)))) {
@@ -306,6 +317,13 @@ public:
             out.anim_record = shown->def->cc->guid;
             out.anim_start = shown->start;
             out.anim_seconds = std::isinf(shown->end) ? static_cast<double>(std::numeric_limits<float>::max()) : static_cast<double>(static_cast<float>(shown->end - shown->start));
+        }
+        if (pushing) {
+            out.push = &*pushing->def->cc;
+            out.push_key = pushing->key;
+            out.push_instigator = pushing->instigator;
+            out.push_start = pushing->start;
+            out.push_end = pushing->end;
         }
         return out;
     }

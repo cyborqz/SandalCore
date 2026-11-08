@@ -99,6 +99,13 @@ struct Resolved {
     uint8_t                  flags = 0;     // stats::kHitMiss | kHitBlock | kHitCrit (Lethal is the applier's)
     std::vector<ResolvedMod> mods;
     double                   threat = 0;    // what a damaging hit adds to the target's threat table
+    /// The velocity change the hit gives its target (HitDef::impulse, worked out for the two): its size (cm/s) and the degrees it is lifted up from the ground.  `valid` is false for a hit with none, a
+    /// miss, and a magnitude of nothing.
+    struct Impulse {
+        bool   valid = false;
+        double magnitude = 0, angle_degrees = 0;
+    };
+    Impulse                  impulse;
     /// The effects the hit puts on its target, each with its numbers worked out (see HitResolver::resolve_effects); empty until that is asked.
     std::vector<effects::Applied> effects;
     bool miss() const { return (flags & stats::kHitMiss) != 0; }
@@ -133,6 +140,10 @@ public:
     bool holds(Fighter& fighter, int64_t expr, bool none);
     /// Whether the hit's own requirement holds for the two (true when it has none, false when it does not run).
     bool requirement_holds(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta);
+
+    /// The number an expression gives for two actors and the distance between them (a crowd-control push's magnitude reads GetDistanceBetween(GetInstigator(), GetTarget())): `attacker` is the
+    /// evaluation of the one who pushes, `target` that of the one pushed (null: the same actor).  False, with `why`, when the expression does not run.
+    bool eval_between(stats::CharacterStats::Evaluation& attacker, const stats::CharacterStats::Evaluation* target, int64_t expr, double distance_cm, double& out, std::string& why);
 
     /// The chances of the three rolls for a hit of the aspect between two stat views (the stats' own, before a hit's overrides).
     struct Rates {

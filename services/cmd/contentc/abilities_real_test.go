@@ -37,15 +37,31 @@ func TestRealAbilityTables(t *testing.T) {
 		// ab_effect 1,361 -> 1,521, ab_projectile 217 -> 309, ab_zone 62 -> 109) with 241 more expressions of the abilities' (ab.exprs 1,728 -> 1,969); two texts the reward tables
 		// used to add are met among them first (loot.exprs 536 -> 534), and the effect-control export adds one more (ab_expr 2,312 -> 2,552)
 		// PR #10 review: his numbers (1,406 abilities, 2,383 hits and so on) were measured before the pet attacks of version 40; these include them
-		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1521, "ab_expr": 2552, "ab_effect_control": 1521,
+		// version 42: the knock-back export writes the impulses of 30 hits, the pushes of 7 crowd-control records and 5 teleports, with the expressions their numbers are (12 more: ab_expr 2,552 -> 2,564,
+		// after all the others, so that no id moves); the removal tags it adds to 5 hits are in the hit rows' extra
+		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1521, "ab_expr": 2564, "ab_effect_control": 1521,
+		"ab_hit_impulse": 30, "ab_crowd_push": 7, "ab_teleport": 5,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "1410", "ab.hits": "2389", "ab.effects": "1521", "ab.projectiles": "309", "ab.zones": "109", "ab.exprs": "1969", "loot.exprs": "534", "gather.exprs": "35"} {
+	for key, want := range map[string]string{"ab.abilities": "1410", "ab.hits": "2389", "ab.effects": "1521", "ab.projectiles": "309", "ab.zones": "109", "ab.exprs": "1969", "loot.exprs": "534", "gather.exprs": "35",
+		"ab.hit_impulses": "30", "ab.crowd_pushes": "7", "ab.teleports": "5"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)
+		}
+	}
+	// the knock-back export (version 42): Get Off The Stage throws by a velocity change from the Bard, the Cone of Cold pushes by a force with the status flags 36 and an origin it caches, the Grapple's
+	// teleport names the instigator, and Air Strike's removal filter asks for the Snared tag
+	for _, q := range []string{
+		`SELECT count(*) FROM ab_hit_impulse i JOIN ab_hit h ON h.guid = i.hit_guid WHERE h.name = 'Bard_Misc_GetOffTheStage' AND i.applies = 1 AND i.velocity_change = 1 AND i.origin_location = 'EAbilitySystemOrigin::Instigator' AND i.angle_expr <> 0 AND i.magnitude_expr <> 0`,
+		`SELECT count(*) FROM ab_crowd_push p JOIN ab_crowd_control c ON c.guid = p.cc_guid WHERE c.name = 'Mage_ConeOfCold_Push' AND c.applied_status = 36 AND p.cache_origin = 1 AND p.magnitude_expr <> 0`,
+		`SELECT count(*) FROM ab_teleport WHERE name = 'InFrontOfInstigator' AND target = 'ECombatLabel::Instigator' AND swap_with_target = 0`,
+		`SELECT count(*) FROM ab_hit WHERE name = 'Ranger_AirStrike_AoE' AND extra LIKE '%"EffectRemovalTag":"Debuff.Snared"%'`,
+	} {
+		if n := scalarInt(t, db, q); n != 1 {
+			t.Errorf("%d rows (want 1) for %s", n, strings.Join(strings.Fields(q), " "))
 		}
 	}
 

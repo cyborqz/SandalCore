@@ -12,6 +12,7 @@
 
 #include "ability_rig.h"
 #include "combat/combat_world.h"
+#include "combat/knockback.h"
 #include "combat/npc_replicator.h"
 #include "nav_fixture.h"
 #include "npc/area_npcs.h"
@@ -39,6 +40,7 @@ public:
     int level() const override { return rig_.cs->level(); }
     combat::Vec3 position() const override { return pos_; }
     double radius_cm() const override { return 34.0; }
+    double facing_degrees() const override { return facing_; }
     bool alive() const override {
         const stats::StatValue* h = rig_.cs->find(content::kGuidHealth);
         return h && h->value > 0;
@@ -46,12 +48,15 @@ public:
     const std::vector<int64_t>& alignments() const override { return aligns_; }
     stats::CharacterStats& stats() override { return *rig_.cs; }
     void move_to(const combat::Vec3& p) { pos_ = p; }
+    /// The way the player faces (degrees, 0 along +X, turning towards +Y); a knock-back, a push and a pull work from it.
+    void face(double degrees) { facing_ = degrees; }
 
 private:
     ability_rig::Rig&    rig_;
     uint64_t             id_;
     combat::Vec3         pos_;
     std::vector<int64_t> aligns_;
+    double               facing_ = 0.0;
 };
 
 /// The NetGUIDs the rig's player is known by, with the ServerId and Randomizer of a session: his pawn, and the pawn's collision cylinder (the pawn's ObjectId + 20, as in the captured session).
@@ -125,7 +130,7 @@ private:
 /// An NPC of the Blueprint made from a retail open (the Wolf's when no capture opened the Blueprint: the stat arrays and CombatInfo are the same shape), put
 /// in `registry` at (x, y, origin_z) and given to `npcs` (standing).  0 when it cannot be made.
 inline uint64_t spawn_npc(world::ActorRegistry& registry, npc::NpcWorld* npcs, const spawns::CapturedData& captured, uint64_t& next_id, const std::string& archetype_path, double x,
-                          double y, double origin_z, int level, double aggro_cm = 0, double half_height = 88.0, const spawns::OpenTemplate* made = nullptr) {
+                          double y, double origin_z, int level, double aggro_cm = 0, double half_height = 88.0, const spawns::OpenTemplate* made = nullptr, const npc::MotionStats* body = nullptr) {
     // `made`: the open the world itself makes for the Blueprint (spawns::GenericNpcs::template_for), when the test is about that one
     const spawns::OpenTemplate* t = made ? made : captured.template_for(archetype_path);
     if (!t) {
@@ -164,6 +169,11 @@ inline uint64_t spawn_npc(world::ActorRegistry& registry, npc::NpcWorld* npcs, c
         npc::NpcMotionSetup setup;
         setup.ambient = npc::Ambient::Stationary;
         setup.foot_offset = half_height;
+        if (body) {   // what a throw or a push works on: the Blueprint's own body constants where its table row has them (make_setup does the same)
+            if (body->ground_friction >= 0) setup.ground_friction = body->ground_friction;
+            if (body->braking_deceleration >= 0) setup.braking = body->braking_deceleration;
+            if (body->mass > 0) setup.mass = body->mass;
+        }
         npcs->add(id, setup);
     }
     return id;
@@ -186,9 +196,10 @@ struct World {
 
     /// An NPC of the Blueprint (archetype path) standing at (x, y) of the plain, at `level`; its aggro radius and home as the data would say.  0 when it
     /// cannot be made.
-    uint64_t spawn(const std::string& archetype_path, double x, double y, int level, double aggro_cm = 0, double half_height = 88.0, const spawns::OpenTemplate* made = nullptr) {
+    uint64_t spawn(const std::string& archetype_path, double x, double y, int level, double aggro_cm = 0, double half_height = 88.0, const spawns::OpenTemplate* made = nullptr,
+                   const npc::MotionStats* body = nullptr) {
         if (!captured) return 0;
-        return spawn_npc(registry, npcs.get(), *captured, next_id, archetype_path, x, y, 1000.0 + half_height, level, aggro_cm, half_height, made);
+        return spawn_npc(registry, npcs.get(), *captured, next_id, archetype_path, x, y, 1000.0 + half_height, level, aggro_cm, half_height, made, body);
     }
 };
 

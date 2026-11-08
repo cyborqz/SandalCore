@@ -42,7 +42,7 @@ double dist2d(const nav::Vec3& a, const nav::Vec3& b) { return std::hypot(a.x - 
 
 bool finite_setup(const NpcMotionSetup& s) {
     for (double v : {s.home_yaw, s.foot_offset, s.yaw_rate, s.wander_min, s.wander_max, s.wander_delay, s.wander_delay_deviation, s.walk_speed, s.patrol_speed, s.run_speed, s.leg_median, s.leg_p90,
-                     s.arrival_distance, s.awake_radius}) {
+                     s.arrival_distance, s.awake_radius, s.ground_friction, s.braking, s.mass}) {
         if (!std::isfinite(v)) return false;
     }
     for (const nav::Vec3& p : s.route) {
@@ -51,7 +51,8 @@ bool finite_setup(const NpcMotionSetup& s) {
     for (double p : s.pauses) {
         if (!std::isfinite(p)) return false;
     }
-    return s.foot_offset >= 0 && s.foot_offset < 5000 && s.wander_min >= 0 && s.wander_max >= s.wander_min && s.walk_speed >= 0 && s.patrol_speed >= 0 && s.run_speed >= 0;
+    return s.foot_offset >= 0 && s.foot_offset < 5000 && s.wander_min >= 0 && s.wander_max >= s.wander_min && s.walk_speed >= 0 && s.patrol_speed >= 0 && s.run_speed >= 0 && s.ground_friction >= 0 &&
+           s.braking >= 0 && s.mass > 0;
 }
 // [Cyb :: C.O.A]
 
@@ -390,7 +391,7 @@ void NpcWorld::refresh_active(double t) {
         for (const uint64_t id : near) {
             const auto it = npcs_.find(id);
             // (an NPC that stands, and has no turning to do, is not stepped)
-            if (it == npcs_.end() || (it->second.mode == Mode::Stand && !it->second.turning && !it->second.track) || it->second.pending_ground) continue;
+            if (it == npcs_.end() || (it->second.mode == Mode::Stand && !it->second.turning && !it->second.track && !it->second.disp) || it->second.pending_ground) continue;
             const world::WorldActor* a = registry_.find(id);
             // (an NPC whose chunk of the ground has gone out of the window sleeps where it stands: nothing is there to walk on)
             if (a && awake_for_someone(*a) && nav_->ready_at(a->x, a->y)) next.push_back(id);
@@ -588,8 +589,8 @@ void NpcWorld::commit(Npc& n, double t, bool force) {
     if (!a) return;
     const nav::Vec3 g = n.mover.ground();
     const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
-    const bool moving = n.mover.moving() && n.active && !n.lock_walk;   // (crowd control holds its feet: its place goes out as standing still, whatever walk it is on)
-    const nav::Vec3 vel = moving ? n.mover.velocity() : nav::Vec3{};
+    const bool moving = n.mover.moving() && n.active && !n.lock_walk && !n.disp;   // (crowd control holds its feet: its place goes out as standing still, whatever walk it is on)
+    const nav::Vec3 vel = n.disp ? n.disp->velocity : moving ? n.mover.velocity() : nav::Vec3{};   // (a creature that is thrown or pushed says the velocity it has)
     const bool moved = std::fabs(a->x - g.x) > 1e-3 || std::fabs(a->y - g.y) > 1e-3 || std::fabs(a->z - z) > 1e-3 || std::fabs(a->yaw_degrees - yaw) > 1e-3;
     if (!force && !moved && moving == n.reported_moving) return;
     registry_.move(n.id, g.x, g.y, z, yaw);
@@ -649,6 +650,10 @@ void NpcWorld::pursue_step(Npc& n, double) {
 
 void NpcWorld::advance_npc(Npc& n, double t) {
     const double dt = cfg_.step_seconds;
+    if (n.disp) {   // thrown, pushed or sliding: nothing else moves it, and it does nothing else (its walk goes on from where it comes to rest)
+        advance_displacement(n, t);
+        return;
+    }
     if (n.lock_walk) {
         // Crowd control holds its feet: no step of any walk is taken and no walk is begun (a wander waits, a chase is not planned), but the walk it was on and the order it was given are kept and go on
         // from where it stands when the lock is lifted.  It may turn (steer does nothing when its facing is held too), and its place goes out as standing still.
@@ -715,6 +720,11 @@ bool NpcWorld::warp(uint64_t id, double x, double y, double ground_z) {
     n.mover.place(x, y, ground_z, n.mover.yaw_degrees());
     n.mode = Mode::Stand;
     n.ordered_return = false;
+    if (n.disp) {   // a creature that is thrown or pushed goes on from the new place with the velocity it has: a pull does not stop it
+        n.disp->last_floor = {x, y, ground_z};
+        n.disp->airborne = false;
+        n.disp->velocity.z = 0.0;
+    }
     commit(n, now_, true);
     return true;
 }
@@ -771,6 +781,7 @@ bool NpcWorld::halt(uint64_t id) {
     if (it == npcs_.end()) return false;
     Npc& n = it->second;
     if (n.rm) finish_root_motion(n, now_);
+    end_displacement(n);
     n.turning = false;
     n.pursue = nullptr;
     n.track = nullptr;
@@ -866,7 +877,7 @@ bool NpcWorld::in_freeze_box(double cx, double cy, double yaw_degrees, double di
 
 bool NpcWorld::begin_root_motion(uint64_t id, RootMotionPlay play) {
     const auto it = npcs_.find(id);
-    if (it == npcs_.end() || it->second.pending_ground || play.steps.empty() || !(play.length > 0) || !std::isfinite(play.length) || !std::isfinite(play.rate) || !std::isfinite(play.blend_out)) return false;
+    if (it == npcs_.end() || it->second.pending_ground || it->second.disp || play.steps.empty() || !(play.length > 0) || !std::isfinite(play.length) || !std::isfinite(play.rate) || !std::isfinite(play.blend_out)) return false;   // (a thrown or pushed creature is carried by no montage)
     for (const RootMotionStep& s : play.steps) {
         if (!std::isfinite(s.time) || !std::isfinite(s.x) || !std::isfinite(s.y)) return false;
     }
@@ -1165,6 +1176,7 @@ NpcWorld::RelocateResult NpcWorld::relocate(uint64_t id, double x, double y, dou
     }
     // the feet are taken from what they were doing: a montage that carried it ends, a turn and a look end, a walk is dropped (a chase it was ordered goes on from here)
     if (n.rm) finish_root_motion(n, now_);
+    end_displacement(n);
     n.turning = false;
     n.track = nullptr;
     n.mover.stop();
@@ -1181,6 +1193,115 @@ NpcWorld::RelocateResult NpcWorld::relocate(uint64_t id, double x, double y, dou
     r.ground = n.mover.ground();
     r.origin_z = n.mover.origin_z();
     return r;
+}
+
+// ---- displacement: a creature that something other than its legs moves (npc/displacement.h) ----------------------------------------------------------------------------
+
+Displacement& NpcWorld::begin_displacement(Npc& n) {
+    if (!n.disp) {
+        Displacement d;
+        d.velocity = n.mover.moving() && !n.lock_walk ? n.mover.velocity() : nav::Vec3{};   // (a creature that charges keeps the velocity it has: what moves it is added to it)
+        d.friction = n.setup.ground_friction;
+        d.braking = n.setup.braking;
+        d.mass = n.setup.mass;
+        d.last_floor = n.mover.ground();
+        n.disp = std::move(d);
+        n.mover.stop();   // (its order and its pursuit are kept: the pursuit plans its way again from where it comes to rest)
+        n.turning = false;
+    }
+    return *n.disp;
+}
+
+void NpcWorld::end_displacement(Npc& n) {
+    if (!n.disp) return;
+    if (n.disp->falling_shown) {
+        if (world::WorldActor* a = registry_.find(n.id)) swap_movement_mode(*a, n.disp->saved_mode.value_or(repl::kMoveWalking));
+    }
+    n.disp.reset();
+}
+
+bool NpcWorld::launch(uint64_t id, const nav::Vec3& impulse) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || it->second.pending_ground || !std::isfinite(impulse.x) || !std::isfinite(impulse.y) || !std::isfinite(impulse.z)) return false;
+    Npc& n = it->second;
+    if (n.rm) finish_root_motion(n, now_);   // (a montage that carried it is over: it is in the air)
+    return add_velocity_change(begin_displacement(n), impulse, cfg_.step_seconds);
+}
+
+bool NpcWorld::begin_push(uint64_t id, PushPlay play) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || it->second.pending_ground || !play.frame) return false;
+    Npc& n = it->second;
+    if (n.rm) finish_root_motion(n, now_);
+    begin_displacement(n).push = std::move(play);
+    return true;
+}
+
+bool NpcWorld::end_push(uint64_t id) {
+    const auto it = npcs_.find(id);
+    if (it == npcs_.end() || !it->second.disp || !it->second.disp->push) return false;
+    it->second.disp->push.reset();
+    return true;
+}
+
+bool NpcWorld::displaced(uint64_t id) const {
+    const auto it = npcs_.find(id);
+    return it != npcs_.end() && it->second.disp.has_value();
+}
+
+nav::Vec3 NpcWorld::displacement_velocity(uint64_t id) const {
+    const auto it = npcs_.find(id);
+    return it != npcs_.end() && it->second.disp ? it->second.disp->velocity : nav::Vec3{};
+}
+
+void NpcWorld::advance_displacement(Npc& n, double t) {
+    world::WorldActor* a = registry_.find(n.id);
+    if (!a) {
+        n.disp.reset();
+        return;
+    }
+    Displacement& d = *n.disp;
+    const nav::Vec3 g = n.mover.ground();
+    DisplacePose pose;
+    pose.x = g.x;
+    pose.y = g.y;
+    pose.feet_z = g.z;
+    pose.foot_offset = n.mover.foot_offset();
+    const DisplaceWorld world{
+        [this](double x, double y, double hint, double* z) { return nav_->ground_height(x, y, hint, z, 400.0, 150.0); },
+        [this](const nav::Vec3& from, const nav::Vec3& to, nav::Vec3* edge) {
+            if (!nav_->on_navmesh(from)) return true;   // (off the walking map the ground says nothing: it goes where it is sent)
+            nav::Vec3 hit;
+            if (nav_->raycast(from, to, &hit)) return true;
+            *edge = hit;
+            return false;
+        }};
+    DisplaceOutcome out;
+    displace_step(d, pose, t, cfg_.step_seconds, world, out);
+    n.mover.shift(pose.x, pose.y, pose.feet_z);
+    // the movement mode: falling while it is in the air (the retail server puts a creature in it, and the client moves its copy by it), the mode it had before once it is down
+    bool mode_changed = false;
+    if (d.airborne && !d.falling_shown) {
+        d.saved_mode = swap_movement_mode(*a, repl::kMoveFalling);
+        d.falling_shown = true;
+        mode_changed = true;
+    } else if (!d.airborne && d.falling_shown) {
+        swap_movement_mode(*a, d.saved_mode.value_or(repl::kMoveWalking));
+        d.falling_shown = false;
+        mode_changed = true;
+    }
+    if (out.at_rest && !nav_->on_navmesh(n.mover.ground())) {   // it comes to rest on the walking map: the walk it goes back to starts from there
+        nav::Vec3 on;
+        if (nav_->nearest_point(n.mover.ground(), 150, 300, &on)) n.mover.shift(on.x, on.y, on.z);
+    }
+    const nav::Vec3 at = n.mover.ground();
+    const double z = n.mover.origin_z(), yaw = n.mover.yaw_degrees();
+    registry_.move(n.id, at.x, at.y, z, yaw);
+    write_replicated(*a, at.x, at.y, z, yaw, d.velocity, false, t);
+    if (mode_changed || out.at_rest) registry_.touch(*a, world::Change::State);   // (the take-off, the landing and the rest must not be lost: they go on a reliable chain)
+    n.reported_moving = false;
+    ++stats_.writes;
+    if (out.at_rest) n.disp.reset();
 }
 
 NpcWorld::Stats NpcWorld::stats() const {

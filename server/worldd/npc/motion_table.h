@@ -47,7 +47,7 @@ struct MotionStats {
     std::vector<int64_t> alignments;         // StartingAlignments: CharacterAlignment record guids
     std::string          move_mode;          // DefaultCharacterMovementMode ("EMovementMode::MOVE_NavWalking")
     double               fly_speed = 0;      // CharacterMovement's MaxFlySpeed (0: the Blueprint sets none)
-    std::string          tags;               // GameplayTags, comma separated
+    std::string          tags;               // the actor's Tags (AActor::Tags) along the class chain, comma separated: "Boss" marks a boss
     // what the Blueprint draws (columns 14-17; a file with 13 columns has none of this: every Blueprint is then taken to draw)
     bool                 has_visuals_columns = false;
     std::string          mesh;               // the SkeletalMesh of CharacterMesh0 ("SkeletalMesh'SK_NPC_Wolf_A_0'"; "" none)
@@ -60,6 +60,8 @@ struct MotionStats {
     int                  dist[8] = {10, 10, 10, 10, 10, 10, 10, 10};   // StatDistribution: Constitution, Strength, Dexterity, Mentality, Intelligence, Wisdom, MaxHealth, MaxMana
     std::vector<std::pair<int, int>> elite;   // EliteLevelRanks: (level, rank)
     std::vector<int64_t> rewards;            // the RewardTables of the Blueprint's Rewards
+    // what moves its body when something other than its legs does (columns 22 to 24; -1: no Blueprint on its chain sets it and the engine's defaults stand, or the file has 21 columns or fewer)
+    double               ground_friction = -1.0, braking_deceleration = -1.0, mass = -1.0;
     /// The mesh is the player's master mesh: the body is merged at run time from an NPCAppearanceComponent, which a generic open does not carry.
     bool appearance_dependent() const { return mesh.find("SK_PC_MASTER") != std::string::npos; }
 };

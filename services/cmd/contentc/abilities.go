@@ -205,6 +205,7 @@ type abBuilder struct {
 	reactions, cooldowns, targetingRows                map[int64]*designdb.Row
 	groups                                             map[int64]*designdb.Row // contentc version 38: the EffectGroup rows, and the ones written to ab_effect_group
 	groupsWritten                                      map[int64]bool
+	ccWritten                                          map[int64]bool // contentc version 42: the crowd-control records written to ab_crowd_control (the knock-back export reads the ones that push)
 }
 
 func indexRows(rows []designdb.Row) map[int64]*designdb.Row {
@@ -751,7 +752,10 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	if err := b.buildGather(opt, meta); err != nil { // Gathering stage 2: the gathering tables (their formulas join the set)
 		return err
 	}
-	return b.writeEffectControl(opt, meta, sortedBools(effectSet)) // version 39: after every other table, so that no existing expression id moves
+	if err := b.writeEffectControl(opt, meta, sortedBools(effectSet)); err != nil { // version 39: after every other table, so that no existing expression id moves
+		return err
+	}
+	return b.writeKnockback(opt, meta, sortedBools(hitSet)) // version 42: after the effect-control tables (the pushes it writes are theirs), for the same reason
 }
 
 // [CoA ~ C_Y_B]
@@ -1064,6 +1068,10 @@ func (b *abBuilder) writeHit(r *designdb.Row) error {
 		"EffectRemoval": effectRemovalKind(f.str("EffectRemovalFilter")), "RemoveAsDispel": f.boolean("bRemoveAsDispel"),
 		"TeleportId": teleport, "ResurrectId": resurrect,
 		"LingeringZonesIds": zones, // the zones the hit spawns (also in ab_hit_zone)
+	}
+	// version 42: a filter that asks only for a tag (EffectHasTag(GetEffect(), "Debuff.Snared")) names the tag: the hit takes off the effects that carry it (Air Strike lifts a creature's snares)
+	if tag := effectRemovalTag(f.str("EffectRemovalFilter")); tag != "" {
+		extra["EffectRemovalTag"] = tag
 	}
 	// Plan E1, stage 3: what the damage rules read of a hit besides its mods: its event tags (the element, Melee, ComboStep.End ...), the rates that
 	// override the stats' crit, block and miss chances (expressions, 0 for the default), what it forces and the life states it applies to.

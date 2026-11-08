@@ -155,6 +155,11 @@ constexpr const char* kHitRecursiveSql = "SELECT r.ord, r.child_hit_guid, r.targ
 constexpr const char* kCrowdControlSql =
     "SELECT guid, name, applied_status, snare_strength, animation_request, priority, disable_guid, face_source, ignore_non_combatant, restart_montage, override_client_move, "
     "push_parameterization, push_magnitude, push_duration, push_dir_x, push_dir_y, push_dir_z, push_arrival_distance, end_push_at_arrival FROM ab_crowd_control WHERE guid = ?1";
+// contentc version 42: what throws, pushes and pulls a creature (all three tables or none)
+constexpr const char* kCrowdPushSql = "SELECT magnitude_expr, duration_expr, origin_location, origin_orientation, origin_rel_x, origin_rel_y, origin_rel_z, cache_origin FROM ab_crowd_push WHERE cc_guid = ?1";
+constexpr const char* kHitImpulseSql = "SELECT hit_guid, applies, velocity_change, angle_expr, magnitude_expr, dir_x, dir_y, origin_location, origin_orientation, origin_rel_x, origin_rel_y, origin_rel_z, "
+                                       "rotation_behavior FROM ab_hit_impulse WHERE hit_guid = ?1";
+constexpr const char* kTeleportSql = "SELECT guid, name, target, script, swap_with_target FROM ab_teleport WHERE guid = ?1";
 constexpr const char* kAbilityDisableSql = "SELECT guid, name, filter FROM ab_ability_disable WHERE guid = ?1";
 constexpr const char* kFragilitySql = "SELECT guid, name, fragility_type, break_threshold, accumulation_rate, tick_frequency, break_immediately, evaluate_accumulation, bindings "
                                       "FROM ab_fragility WHERE guid = ?1";
@@ -163,7 +168,7 @@ constexpr const char* kEffectFragilitiesSql = "SELECT fragility_guid FROM ab_eff
 }  // namespace
 
 AbilityContent::AbilityContent(AbilityContent&& other) noexcept
-    : db_(std::exchange(other.db_, nullptr)), path_(std::move(other.path_)), contentc_version_(other.contentc_version_), reactions_(other.reactions_) {}
+    : db_(std::exchange(other.db_, nullptr)), path_(std::move(other.path_)), contentc_version_(other.contentc_version_), reactions_(other.reactions_), knockback_(other.knockback_) {}
 
 AbilityContent& AbilityContent::operator=(AbilityContent&& other) noexcept {
     if (this != &other) {
@@ -172,6 +177,7 @@ AbilityContent& AbilityContent::operator=(AbilityContent&& other) noexcept {
         path_ = std::move(other.path_);
         contentc_version_ = other.contentc_version_;
         reactions_ = other.reactions_;
+        knockback_ = other.knockback_;
     }
     return *this;
 }
@@ -231,6 +237,11 @@ std::optional<AbilityContent> AbilityContent::open(const std::string& path, std:
     {
         Stmt a(c.db_, kReactionSql), b(c.db_, kReactionHitsSql), h(c.db_, kHitRecursiveSql), g(c.db_, kGuidListSql[5]);
         c.reactions_ = a.ok() && b.ok() && h.ok() && g.ok();
+    }
+    // the knock-back tables came with contentc version 42; all of them or none
+    {
+        Stmt a(c.db_, kCrowdPushSql), b(c.db_, kHitImpulseSql), t(c.db_, kTeleportSql);
+        c.knockback_ = a.ok() && b.ok() && t.ok();
     }
     return c;
 }
@@ -602,7 +613,71 @@ std::optional<CrowdControlRow> AbilityContent::crowd_control(int64_t guid, std::
             return true;
         }, error))
         return std::nullopt;
-    if (!out) error = "content.db has no crowd-control record " + std::to_string(guid);
+    if (!out) {
+        error = "content.db has no crowd-control record " + std::to_string(guid);
+        return out;
+    }
+    if (knockback_) {   // a record that pushes has a row in ab_crowd_push
+        std::string push_error;
+        run(db_, kCrowdPushSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            out->has_push_row = true;
+            out->push_magnitude_expr = col_i64(s, 0);
+            out->push_duration_expr = col_i64(s, 1);
+            out->push_origin_location = col_text(s, 2);
+            out->push_origin_orientation = col_text(s, 3);
+            out->push_origin_rel_x = col_f64(s, 4);
+            out->push_origin_rel_y = col_f64(s, 5);
+            out->push_origin_rel_z = col_f64(s, 6);
+            out->push_cache_origin = col_bool(s, 7);
+            return true;
+        }, push_error);
+    }
+    return out;
+}
+
+std::optional<HitImpulseRow> AbilityContent::hit_impulse(int64_t hit, std::string& error) const {
+    std::optional<HitImpulseRow> out;
+    if (!knockback_) return out;
+    if (!run(db_, kHitImpulseSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, hit); }, [&](sqlite3_stmt* s) {
+            HitImpulseRow r;
+            r.hit_guid = col_i64(s, 0);
+            r.applies = col_bool(s, 1);
+            r.velocity_change = col_bool(s, 2);
+            r.angle_expr = col_i64(s, 3);
+            r.magnitude_expr = col_i64(s, 4);
+            r.dir_x = col_f64(s, 5);
+            r.dir_y = col_f64(s, 6);
+            r.origin_location = col_text(s, 7);
+            r.origin_orientation = col_text(s, 8);
+            r.origin_rel_x = col_f64(s, 9);
+            r.origin_rel_y = col_f64(s, 10);
+            r.origin_rel_z = col_f64(s, 11);
+            r.rotation_behavior = col_text(s, 12);
+            out = std::move(r);
+            return true;
+        }, error))
+        return std::nullopt;
+    return out;
+}
+
+std::optional<TeleportRow> AbilityContent::teleport(int64_t guid, std::string& error) const {
+    std::optional<TeleportRow> out;
+    if (!knockback_) {
+        error = "content.db has no teleport tables";
+        return out;
+    }
+    if (!run(db_, kTeleportSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            TeleportRow r;
+            r.guid = col_i64(s, 0);
+            r.name = col_text(s, 1);
+            r.target = col_text(s, 2);
+            r.script = col_text(s, 3);
+            r.swap_with_target = col_bool(s, 4);
+            out = std::move(r);
+            return true;
+        }, error))
+        return std::nullopt;
+    if (!out) error = "content.db has no teleport record " + std::to_string(guid);
     return out;
 }
 

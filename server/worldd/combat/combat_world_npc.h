@@ -88,6 +88,11 @@ public:
     EffectItemIds                          item_ids;         // the CurrentEffects array's item for each effect of the book
     effects::Book::Crowd                   cc;               // the crowd control the book held when the world last wrote it to the creature's state and to its walk
     effects::Book::Crowd                   cc_logged;        // ... and the one the log last named
+    /// The place and facing the push that plays works from, worked out when its effect went on (the state names it; a record that caches its origin works from it all along).
+    struct PushOrigin {
+        bool        set = false;
+        OriginFrame frame;
+    } push_origin;
 
     /// A loss goes through the shields first (the oldest first); what is left reaches Health.
     double absorb(double loss, double now) {

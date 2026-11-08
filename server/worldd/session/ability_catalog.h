@@ -57,6 +57,16 @@ struct HitDef {
     enum class Removal : uint8_t { Unknown, None, Debuff, Buff, Other };
     Removal                            removal = Removal::Unknown;
     bool                               remove_as_dispel = false;   // bRemoveAsDispel: it takes only what can be dispelled [modelled: the flag's name; no recording shows one refused]
+    /// contentc version 42: the tag a filter that asks only EffectHasTag(GetEffect(), "<tag>") names (Air Strike's "Debuff.Snared"); a hit with one takes off the effects that carry the tag (or a tag below it).
+    /// Empty for a hit with another kind of filter.
+    std::string                        removal_tag;
+    /// Whether the effect carries the tag or a tag below it ("Debuff.Snared" matches "Debuff.Snared" and "Debuff.Snared.Hard").
+    static bool carries_tag(const EffectDef& e, const std::string& want) {
+        const auto has = [&](const std::vector<std::string>& tags) {
+            return std::any_of(tags.begin(), tags.end(), [&](const std::string& t) { return t == want || (t.size() > want.size() && t.compare(0, want.size(), want) == 0 && t[want.size()] == '.'); });
+        };
+        return has(e.row.tags) || has(e.row.effect_tags);
+    }
     /// Whether the hit may take this effect off its holder.
     bool removes(const EffectDef& e) const {
         if (!remove_effects.empty()) return std::find(remove_effects.begin(), remove_effects.end(), e.row.guid) != remove_effects.end();
@@ -66,9 +76,13 @@ struct HitDef {
             case Removal::Unknown:
             case Removal::Debuff: return debuff;
             case Removal::Buff: return e.row.category.find("EFFECT_Buff") != std::string::npos;
+            case Removal::Other: return !removal_tag.empty() && carries_tag(e, removal_tag);
             default: return false;
         }
     }
+    /// contentc version 42: the velocity change this hit gives its target when it lands (Get Off The Stage), the teleport record it names (the Grapple's pull); empty for a hit that has none.
+    std::optional<content::HitImpulseRow> impulse;
+    std::optional<content::TeleportRow>   teleport;
     std::vector<int64_t>               zones;            // the lingering zones the hit spawns (LingeringZonesIds)
     std::vector<int64_t>               fires;            // E1 stage 3 fix 2: the projectiles the hit fires when it lands (ab_hit_projectile "fire": the book's Split hits)
     // plan E1, stage 3: what the damage rules read of the hit (extra's EventTags ...)

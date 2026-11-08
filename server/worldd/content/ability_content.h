@@ -195,6 +195,35 @@ struct CrowdControlRow {
     std::string push_parameterization, push_magnitude, push_duration;
     double      push_dir_x = 0, push_dir_y = 0, push_dir_z = 0, push_arrival_distance = 0;
     bool        end_push_at_arrival = false;
+    /// contentc version 42 (ab_crowd_push): what a push works from.  `has_push_row` is false for a record that does not push and in a file from before the table.  The magnitude and the duration are
+    /// ab_expr ids (0: none); the origin is a place (an EAbilitySystemOrigin) and a facing (an EAbilitySystemOrientation) with a relative location in that frame, taken once when the effect goes on
+    /// (`push_cache_origin`) or again at every step.
+    bool        has_push_row = false;
+    int64_t     push_magnitude_expr = 0, push_duration_expr = 0;
+    std::string push_origin_location, push_origin_orientation;
+    double      push_origin_rel_x = 0, push_origin_rel_y = 0, push_origin_rel_z = 0;
+    bool        push_cache_origin = false;
+};
+
+/// ab_hit_impulse (contentc version 42): the velocity change a hit gives its target when it lands.  The angle and the magnitude are ab_expr ids (0: none); the direction is horizontal, in the frame the
+/// origin gives.
+struct HitImpulseRow {
+    int64_t     hit_guid = 0;
+    bool        applies = false;           // bAppliesImpulse
+    bool        velocity_change = false;   // bApplyImpulseAsVelocityChange
+    int64_t     angle_expr = 0, magnitude_expr = 0;
+    double      dir_x = 0, dir_y = 0;
+    std::string origin_location, origin_orientation;
+    double      origin_rel_x = 0, origin_rel_y = 0, origin_rel_z = 0;
+    std::string rotation_behavior;         // ECrowdControlRotationBehavior: Unaffected, FaceOrigin
+};
+
+/// ab_teleport (contentc version 42): a teleport record a hit names (extra's TeleportId).  `target` is the actor the place is worked out from (an ECombatLabel), `script` the soft path of the class that works
+/// it out.
+struct TeleportRow {
+    int64_t     guid = 0;
+    std::string name, target, script;
+    bool        swap_with_target = false;
 };
 
 /// ab_ability_disable: the filter text says which abilities a silence, a disarm or an exhaustion leaves usable.
@@ -348,6 +377,13 @@ public:
     /// ab_effect_fragility: the fragility records an effect lists, in order.
     bool effect_fragilities(int64_t effect, std::vector<int64_t>& out, std::string& error) const;
 
+    /// Whether the file has the knock-back tables (contentc version 42 or later).  A file without them has no impulses, pushes or teleports.
+    bool has_knockback() const { return knockback_; }
+    /// The impulse a hit gives; nullopt (with `error` empty) for a hit that carries none and in a file without the tables.
+    std::optional<HitImpulseRow> hit_impulse(int64_t hit, std::string& error) const;
+    /// The teleport record with the guid; nullopt with `error` for one the tables do not have.
+    std::optional<TeleportRow> teleport(int64_t guid, std::string& error) const;
+
     /// The guids of every ability, hit, effect, projectile or zone of the tables, in guid order (what a catalog that holds them all loads).
     /// Reaction lists the reactions (empty without the reaction tables).
     enum class Table { Ability, Hit, Effect, Projectile, Zone, Reaction };
@@ -362,6 +398,7 @@ private:
     std::string path_;
     int         contentc_version_ = 0;
     bool        reactions_ = false;
+    bool        knockback_ = false;
 };
 
 }  // namespace aoc::worldd::content

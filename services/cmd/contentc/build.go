@@ -30,7 +30,7 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "41"
+const Version = "42"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -142,6 +142,7 @@ var keep = map[string]bool{
 	"CrowdControlRecordBase":     true,
 	"AbilityDisableRecordBase":   true,
 	"FragileEffectDefRecordBase": true,
+	"TeleportRecordBase":         true, // version 42: the teleport records the hits name (the Grapple's pull)
 	"StatModRecordBase":          true,
 	// plan B2: the item tables
 	"ItemRecordBase":              true,

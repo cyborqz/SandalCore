@@ -16,14 +16,16 @@ namespace Mapc;
 /// facts a server needs to open an NPC of an archetype no retail capture opened (plan E1, stage 2 fix).  One line per Blueprint whose class descends
 /// from NPCPawn_C, in path order:
 ///   archetype  parents  default_scale  starting_alignments  half_height  radius  max_walk_speed  max_run_speed  max_acceleration  rotation_rate_yaw
-///   move_mode  fly_speed  tags  mesh  anim  placeholder  hidden  lists  dist  elite  rewards
+///   move_mode  fly_speed  tags  mesh  anim  placeholder  hidden  lists  dist  elite  rewards  ground_friction  braking_deceleration  mass
+/// `tags` are the actor's Tags (AActor::Tags) of the class default object, from the nearest class on the chain that sets them, comma separated; "Boss" marks a boss.
 /// The last four (plan E1, stage 3, the spawn filter) say whether the Blueprint draws at all: the SkeletalMesh and AnimClass its CharacterMesh0
 /// resolves along the Blueprint's archetype chain ("" for none: a humanoid's body is merged at run time from its NPCAppearance, a creature's is the
 /// Blueprint's own), whether a material it overrides is the engine's placeholder ("PinkMaterial"), and whether the actor or its mesh is hidden.
 /// And the NPC's combat facts (plan E1, stage 3): `lists` the stat initializer lists its StatsComponent names, "base;list1;list2" as record guids
 /// (CombatStats; NPC_Base and NPC_Elite_Scalar on NPCPawn itself; a child that sets none inherits), `dist` the StatDistribution* weights
 /// "Constitution,Strength,Dexterity,Mentality,Intelligence,Wisdom,MaxHealth,MaxMana", `elite` the EliteLevelRanks "level:rank,..." and `rewards`
-/// the RewardTable guids of its Rewards, comma separated.
+/// the RewardTable guids of its Rewards, comma separated.  And what moves its body when something other than its legs does (a knock-back): the movement component's
+/// GroundFriction, BrakingDecelerationWalking and Mass, empty where no Blueprint on the chain sets them (the engine's defaults stand).
 /// </summary>
 public static class NpcBlueprints
 {
@@ -40,9 +42,10 @@ public static class NpcBlueprints
         public string Mesh = "", Anim = "";
         public string Lists = "", Dist = "", Elite = "", Rewards = "";
         public bool Placeholder = false, Hidden = false;
+        public double? GroundFriction, Braking, Mass;   // what moves a body when something other than its legs does (a knock-back): null where no Blueprint on the chain sets it (the engine's defaults stand: 8, 2048, 100)
     }
 
-    public const string Header = "archetype\tparents\tdefault_scale\tstarting_alignments\thalf_height\tradius\tmax_walk_speed\tmax_run_speed\tmax_acceleration\trotation_rate_yaw\tmove_mode\tfly_speed\ttags\tmesh\tanim\tplaceholder\thidden\tlists\tdist\telite\trewards";
+    public const string Header = "archetype\tparents\tdefault_scale\tstarting_alignments\thalf_height\tradius\tmax_walk_speed\tmax_run_speed\tmax_acceleration\trotation_rate_yaw\tmove_mode\tfly_speed\ttags\tmesh\tanim\tplaceholder\thidden\tlists\tdist\telite\trewards\tground_friction\tbraking_deceleration\tmass";
 
     public static bool IsPawnPath(string p) =>
         p.StartsWith("AOC/Content/DesignAssets/", StringComparison.OrdinalIgnoreCase) || p.StartsWith("AOC/Content/ThirdPersonCPP/", StringComparison.OrdinalIgnoreCase);
@@ -101,7 +104,7 @@ public static class NpcBlueprints
                 }
             }
             foreach (var c in cdos) { if (c.TryGetValue(out FName mm, "DefaultCharacterMovementMode")) { r.MoveMode = mm.Text; break; } }
-            foreach (var c in cdos) { if (c.TryGetValue(out FName[] tags, "GameplayTags") && tags != null) { r.Tags = string.Join(",", tags.Select(t => t.Text)); break; } }
+            foreach (var c in cdos) { if (c.TryGetValue(out FName[] tags, "Tags") && tags != null) { r.Tags = string.Join(",", tags.Select(t => t.Text)); break; } }   // the actor's Tags (AActor::Tags): the nearest class on the chain that sets them (an empty list replaces its parent's); "Boss" marks a boss
             UObject? capsule = null, move = null, skel = null;
             foreach (var e in pkg.GetExports())
             {
@@ -118,6 +121,9 @@ public static class NpcBlueprints
             r.Yaw = Lv.TryProp<FRotator>(move, "RotationRate", out var rr) ? rr.Yaw : 360.0;
             if (r.MoveMode.Length == 0 && Lv.TryProp<FName>(move, "DefaultLandMovementMode", out var dl)) r.MoveMode = dl.Text;
             r.FlySpeed = Lv.TryProp<float>(move, "MaxFlySpeed", out var fs) ? fs : 0;
+            if (Lv.TryProp<float>(move, "GroundFriction", out var gfr)) r.GroundFriction = gfr;
+            if (Lv.TryProp<float>(move, "BrakingDecelerationWalking", out var brk)) r.Braking = brk;
+            if (Lv.TryProp<float>(move, "Mass", out var mss)) r.Mass = mss;
             // does it draw: the mesh component's properties along its own archetype chain (the parents' packages), the actor's along the class chain
             if (skel != null)
             {
@@ -207,7 +213,8 @@ public static class NpcBlueprints
               .Append(F(r.HalfHeight)).Append('\t').Append(F(r.Radius)).Append('\t').Append(F(r.Walk)).Append('\t').Append(F(r.Run)).Append('\t')
               .Append(F(r.Accel)).Append('\t').Append(F(r.Yaw)).Append('\t').Append(r.MoveMode).Append('\t').Append(F(r.FlySpeed)).Append('\t').Append(r.Tags).Append('\t').Append(r.Mesh).Append('\t').Append(r.Anim).Append('\t')
               .Append(r.Placeholder ? "1" : "0").Append('\t').Append(r.Hidden ? "1" : "0").Append('\t').Append(r.Lists).Append('\t').Append(r.Dist).Append('\t')
-              .Append(r.Elite).Append('\t').Append(r.Rewards).Append('\n');
+              .Append(r.Elite).Append('\t').Append(r.Rewards).Append('\t').Append(r.GroundFriction.HasValue ? F(r.GroundFriction.Value) : "").Append('\t')
+              .Append(r.Braking.HasValue ? F(r.Braking.Value) : "").Append('\t').Append(r.Mass.HasValue ? F(r.Mass.Value) : "").Append('\n');
         }
         return sb.ToString();
     }

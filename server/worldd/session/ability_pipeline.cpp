@@ -1618,6 +1618,23 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
                 --carried_depth_;
             }
         }
+        // ... and a hit that fires a delayed hit at the creatures it reached (the Cone of Cold's freeze when its talent pushes instead) fires it when its delay is up: it lands on the same creatures,
+        // which it asks again then (alive, in reach, and the child's own requirement)
+        for (const content::RecursiveHitRow& r : hit.recursive) {
+            const HitDef* child = catalog_->hit(r.child_hit);
+            if (!child || (child->row.applicable_targets & 2) == 0 || r.radius_cm > 0 || !child->fires.empty() || child->row.delay_expr == 0 || event.targets.empty() || delayed_.size() >= kMaxDelayed) continue;
+            double delay = 0;
+            if (!eval(child->row.delay_expr, delay, why) || !(delay > 0)) continue;
+            DelayedChild d;
+            d.due = t + delay;
+            d.hit = child;
+            d.ability = ability;
+            d.src = src;
+            d.src.type = content::kSourceTypeReaction;   // (the server's own hit: confirmed only if it shows something)
+            d.src.confirm = false;
+            d.targets = event.targets;
+            delayed_.push_back(std::move(d));
+        }
     }
     drop_evaluation();
     if (outs.empty()) return;
@@ -1659,6 +1676,13 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     event.ability = ability;
     event.src = src;
     raise_hit_event(c, event, t);
+}
+
+void AbilityPipeline::land_delayed(const DelayedChild& child, double t) {
+    if (!combat_ || !child.hit || dead_) return;
+    AbilityChange c;
+    apply_hit_on_targets(c, *child.hit, child.targets, t, child.src, child.ability);
+    emit({std::move(c), std::nullopt, t, "the delayed hit " + child.hit->row.name});
 }
 
 void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
@@ -1947,6 +1971,7 @@ void AbilityPipeline::set_dead(bool dead) {
         // a new life starts the weapon combos over: no accepted swing and no step of the last one counts
         swing_records_.clear();
         swing_steps_.clear();
+        delayed_.clear();   // the hits a hit was to fire later are not fired
         // every cast ends with the caster, except a ball that has left: it flies on and goes on hurting what it touches. Its own steps and the hits they sent stay; nothing else of its cast does
         for (size_t i = casts_.size(); i-- > 0;) {
             Cast& c = casts_[i];
@@ -2012,6 +2037,7 @@ double AbilityPipeline::next_due() const {
     for (const CastRecord& r : records_) {
         for (const HitSlot& s : r.slots) due = std::min(due, slot_due(r, s));
     }
+    for (const DelayedChild& d : delayed_) due = std::min(due, d.due);
     for (const Held& h : held_) {
         if (h.end_due) due = std::min(due, *h.end_due);
     }
@@ -2044,6 +2070,13 @@ void AbilityPipeline::tick(double now) { advance(now); }
 
 void AbilityPipeline::run_due(double t) {
     clock_ = t;
+    for (size_t i = 0; i < delayed_.size(); ++i) {   // a hit a hit fired some time ago: it lands now
+        if (delayed_[i].due > t) continue;
+        const DelayedChild child = std::move(delayed_[i]);
+        delayed_.erase(delayed_.begin() + static_cast<std::ptrdiff_t>(i));
+        land_delayed(child, t);
+        return;
+    }
     for (size_t i = 0; i < casts_.size(); ++i) {
         Cast& cast = casts_[i];
         if (cast.item_due && *cast.item_due <= t) {

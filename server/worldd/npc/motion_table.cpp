@@ -72,7 +72,7 @@ bool MotionTable::parse(const std::string& text, std::string& error) {
         }
         const auto f = split_tabs(line);
         MotionStats m;
-        if ((f.size() != 13 && f.size() != 17 && f.size() != 21) || f[0].empty() || !number(f[2], &m.default_scale) || !number(f[4], &m.half_height) || !number(f[5], &m.radius) || !number(f[6], &m.max_walk_speed) ||
+        if ((f.size() != 13 && f.size() != 17 && f.size() != 21 && f.size() != 24) || f[0].empty() || !number(f[2], &m.default_scale) || !number(f[4], &m.half_height) || !number(f[5], &m.radius) || !number(f[6], &m.max_walk_speed) ||
             !number(f[7], &m.max_run_speed) || !number(f[8], &m.max_acceleration) || !number(f[9], &m.rotation_rate_yaw) || !number(f[11], &m.fly_speed)) {
             error = "npc_motion.tsv: line " + std::to_string(n) + " is not an archetype, its Blueprint's facts and its numbers";
             return false;
@@ -87,7 +87,7 @@ bool MotionTable::parse(const std::string& text, std::string& error) {
             m.placeholder = f[15] == "1";
             m.hidden = f[16] == "1";
         }
-        if (f.size() == 21) {
+        if (f.size() >= 21) {
             m.has_combat_columns = true;
             const auto semi = split(f[17], ';');
             if (semi.size() != 3) {
@@ -115,6 +115,16 @@ bool MotionTable::parse(const std::string& text, std::string& error) {
             }
             if (!f[20].empty()) {
                 for (const std::string& g : split(f[20], ',')) m.rewards.push_back(std::strtoll(g.c_str(), nullptr, 10));
+            }
+        }
+        if (f.size() == 24) {   // the body's constants: empty where no Blueprint sets them
+            double* const body[3] = {&m.ground_friction, &m.braking_deceleration, &m.mass};
+            for (size_t i = 0; i < 3; ++i) {
+                if (f[21 + i].empty()) continue;
+                if (!number(f[21 + i], body[i]) || *body[i] < 0) {
+                    error = "npc_motion.tsv: line " + std::to_string(n) + " has a body constant that is not a number";
+                    return false;
+                }
             }
         }
         if (!f[3].empty()) {

@@ -24,7 +24,9 @@
 #include "combat/fighter.h"
 #include "combat/hit_resolver.h"
 #include "combat/npc_ability_data.h"
+#include "combat/npc_replicator.h"
 #include "combat/npc_stats.h"
+#include "combat/origin_frame.h"
 #include "effects/effect_book.h"
 #include "nav/area_nav.h"
 #include "npc/ai/npc_ai.h"
@@ -293,7 +295,7 @@ public:
     /// their hits from the player to it: the Apply hits now, the Tick, Expire and End hits as their moments come (tick()).  An effect whose crowd-control record is a snare (a slow) slows the creature:
     /// it keeps 1 minus the strongest snare of its speed, at once, in every way it walks (the NPC world holds it).  A root, a freeze, a stun, a trip and a sleep hold its feet (it takes no step of any walk,
     /// a root may turn, the others hold its facing too), and a stun, a trip and a sleep stop the attack it had begun, drop the hits that had not landed and start no attack until they end; its own attack's
-    /// lunge goes on.  Its crowd control state says so in the update of the effect.  Every other crowd control (a silence, a knockback, a pull ...) is left off (a mob does not take it yet).  Everything of a
+    /// lunge goes on.  Its crowd control state says so in the update of the effect.  A crowd-control record that pushes (the displaced bit) moves the creature while its effect lives (track_push); every other crowd control (a silence, a disarm ...) is left off (a mob does not take it yet).  Everything of a
     /// player ends when he leaves or dies; everything of a mob ends with its death (and not with a reset).
     void apply_effects(uint64_t npc_actor, uint64_t instigator, const std::vector<effects::Applied>& effects, double now);
     /// Seconds left of an effect record on an NPC (0: it is not on).
@@ -571,8 +573,8 @@ private:
     void  wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* origin, double now);
     /// Everything the pet put on the creatures ends (it was dismissed, it died, or its owner left): what it holds is held under its owner's name, so the pet is marked on each instance.
     void  drop_effects_of_pet(uint64_t pet);
-    /// Whether a creature takes the effect's crowd control: a slow, a root, a freeze, a stun, a trip or a sleep.  A silence, a disarm or an exhaustion (they bind the player's own abilities), a push or a
-    /// pull, a record that asks for an animation of its own and one that does nothing stay off.
+    /// Whether a creature takes the effect's crowd control: a slow, a root, a freeze, a stun, a trip, a sleep or a push.  A silence, a disarm or an exhaustion (they bind the player's own abilities),
+    /// a record that asks for an animation of its own and one that does nothing stay off.
     static bool takes_crowd_control(const abilities::EffectDef& def);
     /// Runs the hits of `e` in the given phases, from the player that applied it to the creature that holds it: each is resolved with the two as they are now, landed on the creature, its
     /// own effects are put on the creature the same way, and the player's client is told what it has to show.  An effect whose player is gone or dead ends instead.
@@ -585,6 +587,23 @@ private:
     /// effect items), the share of its speed it keeps (1 minus the snare) and the locks on its feet and its facing, which the NPC world holds for every walk and turn.  When its abilities go off (a stun) the
     /// attack it had begun is dropped.  The log names it at the next step (log_crowd_control).
     void  apply_crowd_control(Npc& n);
+    // ---- what throws, pushes and pulls a creature (combat/combat_knockback.inc)
+    /// What a hit does to the place of the creature it landed on, before the creature looks again: the velocity change it gives (Get Off The Stage throws it) and the teleport it names (the Grapple pulls it
+    /// in front of the one who pulled).  A boss, a creature whose Blueprint carries the Boss tag, is neither thrown nor pulled.  A creature thrown into the air loses the attack it had begun.
+    void  move_by_hit(Npc& n, uint64_t attacker, const Resolved& resolved, const HitOrigin& origin, double now);
+    /// The push the creature's book says plays on it, when that is not the one that played: a new application of a crowd-control record with the displaced bit begins the push (worked out from where its
+    /// origin is now, or from where it was when the effect went on if the record caches it), and none ends it.  The push works for as long as the effect lives.
+    void  track_push(Npc& n, const effects::Book::Crowd& was, const effects::Book::Crowd& now_cc);
+    /// The push fields of the crowd control state: the record, who pushed, when and from where.
+    void  push_wire(Npc& n, const effects::Book::Crowd& cc, CcWire& wire);
+    /// Keeps the place a creature was thrown or pushed from (the first one only), and names in the log where it came to rest and how far that is, once the NPC world has let go of it.
+    void  note_moved(const Npc& n);
+    void  log_rests();
+    /// Whether the creature's Blueprint carries the Boss tag; a boss is not thrown, pushed or pulled.  `spare_boss` says in the log, once for each kind, that `by` (a hit or an effect) left it alone.
+    bool  is_boss(const Npc& n) const;
+    void  spare_boss(const Npc& n, const std::string& by, const char* verb);
+    /// The actors an origin transform names, for a hit or an effect of `by` on `n`.
+    OriginActors origin_actors(const Npc& n, PlayerPort* by);
     /// One `[cc]` line for each creature whose crowd control is not what the log last named, with the speed the world uses for it; a change that undid itself within the step is not named.
     void  log_crowd_control();
     void  clear_effects(Npc& n);
@@ -630,6 +649,10 @@ private:
     std::set<uint64_t>     cc_unlogged_;      // the creatures whose crowd control changed since the log last named it
     size_t                 cc_logged_ = 0;                           // the crowd control changes the log named so far (the first kLoggedCc)
     static constexpr size_t kLoggedCc = 200;
+    std::map<uint64_t, Vec3> moved_from_;                                // the creatures that are thrown or pushed -> where they were first moved from
+    std::set<std::pair<uint64_t, std::string>> boss_spared_;             // the bosses the log said a throw, a push or a pull left alone (creature, verb)
+    size_t                 rests_logged_ = 0;                        // the rests the log named so far (the first kLoggedRests)
+    static constexpr size_t kLoggedRests = 200;
     int                    effect_depth_ = 0; // how many effects deep an effect's Apply hit is applying further effects
     size_t                 effect_hits_logged_ = 0;                  // the effect hits written to the log so far (the first kLoggedEffectHits)
     static constexpr size_t kLoggedEffectHits = 120;

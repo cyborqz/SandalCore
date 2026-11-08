@@ -205,6 +205,23 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
         std::string e;
         if (row && row->program >= 0 && attacker.eval(row->program, host, v, e) && std::isfinite(v)) out.threat = std::max(0.0, v);
     }
+    // the velocity change the hit gives (contentc version 42): its magnitude and the angle it is lifted by, worked out for the two like the mods are (Get Off The Stage's reads whether the target stands
+    // under Heroic Stand: the data's way to leave it where it is)
+    if (ok && hit.impulse && hit.impulse->applies) {
+        const auto number = [&](int64_t expr, double& v) {
+            if (expr == 0) {
+                v = 0;
+                return true;
+            }
+            const content::ExprRow* row = catalog_.expr(expr);
+            std::string e;
+            return row && row->program >= 0 && attacker.eval(row->program, host, v, e) && std::isfinite(v);
+        };
+        double magnitude = 0, angle = 0;
+        const bool ran = number(hit.impulse->magnitude_expr, magnitude) && number(hit.impulse->angle_expr, angle);
+        if (!ran) why = "the impulse of " + hit.row.name + " does not run";   // (the hit's other numbers stand)
+        else if (magnitude > 0) out.impulse = {true, magnitude, angle};
+    }
     return ok;
 }
 
@@ -406,6 +423,34 @@ bool HitResolver::requirement_holds(Fighter& attacker, Fighter& target, const ab
     host.set_context(nullptr);
     a->clear_actors();
     return ran && v != 0;
+}
+
+bool HitResolver::eval_between(stats::CharacterStats::Evaluation& attacker, const stats::CharacterStats::Evaluation* target, int64_t expr, double distance_cm, double& out, std::string& why) {
+    const content::ExprRow* e = catalog_.expr(expr);
+    if (!e || e->program < 0) {
+        why = e ? "the expression does not compile: " + e->error : "there is no expression " + std::to_string(expr);
+        return false;
+    }
+    const bool other = target && target != &attacker;
+    if (other) {
+        if (!attacker.set_actor(stats::kRoleTarget, *target, why)) return false;
+    } else {
+        attacker.clear_actors();
+    }
+    const EvalView attacker_view(attacker), target_view(target ? *target : attacker);
+    HitContext ctx;
+    ctx.profile = &data_.profile();
+    ctx.instigator = &attacker_view;
+    ctx.target = other ? &target_view : nullptr;
+    ctx.distance_cm = distance_cm;
+    ResolverHost host(rng_);
+    host.set_context(&ctx);
+    double v = 0;
+    const bool ran = attacker.eval(e->program, host, v, why) && std::isfinite(v);
+    host.set_context(nullptr);
+    attacker.clear_actors();
+    if (ran) out = v;
+    return ran;
 }
 
 }  // namespace aoc::worldd::combat

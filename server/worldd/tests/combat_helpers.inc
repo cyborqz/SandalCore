@@ -376,7 +376,7 @@ static bool run_lunge_fight(Fixture& f, const combat::NpcAbilityData& tables, co
     cfg.seed = 5;
     combat::CombatWorld world(w.registry, w.npcs.get(), &navfix::shared_nav(), *f.data, *f.catalog, book, f.motion, cfg);
     world.set_ability_data(&tables);
-    const uint64_t creature = w.spawn(path, creature_x, creature_y, 7, 900, bp->half_height, made);
+    const uint64_t creature = w.spawn(path, creature_x, creature_y, 7, 900, bp->half_height, made, &*bp);   // (with the Blueprint's body constants: what a throw or a push works on)
     if (creature == 0) return false;
     world::WorldActor* actor = w.registry.find(creature);
     if (timid) actor->npc.aggro_off = true;

@@ -47,6 +47,7 @@
 // ============================================================================
 #pragma once
 
+#include "npc/displacement.h"
 #include "npc/mover.h"
 #include "world/actor_registry.h"
 
@@ -80,6 +81,9 @@ struct NpcMotionSetup {
     bool    loop = false;
     bool    start_closest = false;
     double  awake_radius = 0;           // 0: the config's
+    /// The body's constants when something moves it (npc/displacement.h): the ground friction (1/s) and the braking deceleration (cm/s^2) that slow it on the ground, and the mass a force is divided by.
+    /// The engine's defaults, which a Blueprint may override.
+    double  ground_friction = kDefaultGroundFriction, braking = kDefaultBrakingDeceleration, mass = kDefaultMass;
 };
 // built with C | Y | B and CoA
 
@@ -181,8 +185,24 @@ public:
     /// own place goes out once, as standing still.  A montage that carries it (an attack's lunge) is not a walk, is not stopped and goes on to its end.  With `no_turn` (a freeze, a stun, a trip, a sleep) it does not
     /// turn either, on the spot or in a montage, and `face_toward` / `turn_toward` change nothing, and the turn it was on is forgotten: it does not swing round to its old target when the hold lifts.  Both false lift the lock.  False for an NPC the world does not hold.
     bool set_locks(uint64_t actor_id, bool no_walk, bool no_turn);
-    /// Puts the NPC at (x, y) with its feet at `ground_z` at once, standing (a pet that changes places with its owner).  False for an NPC the world does not hold.
+    /// Puts the NPC at (x, y) with its feet at `ground_z` at once, standing (a pet that changes places with its owner, a creature a pull puts in front of the one who pulls it).  A thrown or pushed
+    /// NPC keeps its velocity (it goes on from the new place).  False for an NPC the world does not hold.
     bool warp(uint64_t actor_id, double x, double y, double ground_z);
+
+    // ---- displacement: a creature that something other than its legs moves (npc/displacement.h) ----------------------------------------------------
+    /// Adds a velocity change (cm/s) to the NPC's own: a hit throws it.  Its walk (the order and the way are kept, the order's pursuit re-plans from where it comes down), a montage that carries it and its
+    /// turning are given up for as long as it is displaced; it goes into the air when the change's up part beats what gravity takes in a step, lands where it comes down, and slides on by its ground
+    /// friction.  True when it is in the air now.  False for an NPC the world does not hold (or one still waiting for its ground).
+    bool launch(uint64_t actor_id, const nav::Vec3& impulse);
+    /// A crowd-control push works on the NPC (npc/displacement.h PushPlay), step after step, until it is ended, its frame says it is over or it ends at its arrival; the NPC is displaced for as long.  A
+    /// push in hand is replaced.  False for an NPC the world does not hold.
+    bool begin_push(uint64_t actor_id, PushPlay play);
+    /// The push ends (the NPC slides on to a stop by its own velocity).  False for an NPC that has none.
+    bool end_push(uint64_t actor_id);
+    /// Whether something other than its legs is moving the NPC now: it is in the air, a push works on it or it slides on from one.  The AI starts nothing for such an NPC.
+    bool displaced(uint64_t actor_id) const;
+    /// Its velocity (cm/s) while displaced, else none.
+    nav::Vec3 displacement_velocity(uint64_t actor_id) const;
     /// Gives the feet back to the NPC's own behaviour.
     bool release(uint64_t actor_id);
     /// Stops the NPC where it stands and writes that it is still (a zero velocity); the NPC then stands for good (stage 3: it died).
@@ -342,6 +362,7 @@ private:
         double       settle_began = 0;        // after a montage: when it let go (its place goes out again at every step after that one) ...
         double       settle_until = 0;        // ... until then (NpcWorldConfig::settle_seconds) ...
         int          settle_sent = 0;         // ... and how many times it has
+        std::optional<Displacement> disp;     // something other than its legs moves it (launch, begin_push): it does nothing else until it comes to rest
     };
 
     double next_unit(Npc& n);
@@ -352,6 +373,12 @@ private:
     void   start_patrol_leg(Npc& n);
     void   go_idle(Npc& n);
     void   commit(Npc& n, double t, bool force);
+    /// The NPC is displaced from now: its walk's velocity is the start of its own (a creature that charges keeps it), its walk is stopped.
+    Displacement& begin_displacement(Npc& n);
+    /// One step of a displaced NPC (npc/displacement.h) and the write of where it is, how fast it goes and its movement mode (falling in the air).
+    void   advance_displacement(Npc& n, double t);
+    /// The NPC is not displaced any more: its movement mode is back, and it stands on the walking map.
+    void   end_displacement(Npc& n);
     void   advance_root_motion(Npc& n, double t);
     /// One step of the NPC's turning on the spot or tracking its target, and of its pursuit: before it walks.
     void   steer(Npc& n, double t);

@@ -105,10 +105,11 @@ func TestEffectControlColumnsAndRecords(t *testing.T) {
 			t.Errorf("the %s expression %d = %q, %v; want %q", c.name, c.id, e.Text, err, c.want)
 		}
 	}
-	// the two expressions came last: no expression of any other table moved
+	// the two expressions came last of the effect-control step: no expression of any other table moved (only the knock-back step's follow, a push's magnitude and duration and a hit's angle and magnitude)
 	lo, hi := min(pep.StacksLostExpr, pep.ExtensionExpr), max(pep.StacksLostExpr, pep.ExtensionExpr)
-	if n := scalarInt(t, db, `SELECT count(*) FROM ab_expr WHERE id > ?`, hi); n != 0 {
-		t.Errorf("%d expressions come after the effect-control ones, want none", n)
+	if n := scalarInt(t, db, `SELECT count(*) FROM ab_expr WHERE id > ? AND id NOT IN (SELECT magnitude_expr FROM ab_crowd_push UNION SELECT duration_expr FROM ab_crowd_push
+		UNION SELECT angle_expr FROM ab_hit_impulse UNION SELECT magnitude_expr FROM ab_hit_impulse)`, hi); n != 0 {
+		t.Errorf("%d expressions come after the effect-control ones that no knock-back row names, want none", n)
 	}
 	if hi != lo+1 {
 		t.Errorf("the two expressions are %d and %d, want two in a row", lo, hi)

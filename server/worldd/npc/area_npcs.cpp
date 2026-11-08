@@ -163,6 +163,10 @@ NpcMotionSetup make_setup(const world::WorldActor& a, const MotionTable& table, 
     s.walk_speed = m.max_walk_speed * speeds.wander_factor;
     s.run_speed = std::max(m.max_run_speed, m.max_walk_speed) * speeds.return_factor;
     s.patrol_speed = m.max_walk_speed * speeds.patrol_default_factor;
+    // how something other than its legs moves its body (a knock-back): what its Blueprint sets, else the engine's defaults
+    if (m.ground_friction >= 0) s.ground_friction = m.ground_friction;
+    if (m.braking_deceleration >= 0) s.braking = m.braking_deceleration;
+    if (m.mass > 0) s.mass = m.mass;
     // what the retail captures show of this archetype's walking, where they show it (npc/retail_motion.h): its own speeds and the length of its legs
     const RetailMotion* retail = retail_motion(a.npc.archetype);
     // (a median faster than 55 % of MaxWalkSpeed is a chase or a run the captures caught an idle instance's NPC in, not a wander)

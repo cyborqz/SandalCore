@@ -63,6 +63,13 @@ struct CcWire {
     int     anim_request = 255;
     int64_t anim_record = 0;
     double  anim_start = 0, anim_seconds = 0, anim_end = -1;
+    // the push the clients play on the creature (a crowd-control record with the displaced bit): the record, who applied it and where it came from (the four words of a character's guid), when it began
+    // on the effects' clock, and the place and facing it works from (the origin cached when it began): none of it for a creature that is not pushed
+    int64_t                 push_record = 0;
+    std::array<uint32_t, 4> push_instigator = {0, 0, 0, 0}, push_source = {0, 0, 0, 0};
+    double                  push_start = 0;
+    bool                    has_origin = false;
+    double                  origin_x = 0, origin_y = 0, origin_z = 0, origin_yaw_degrees = 0;
 };
 
 /// Writes the creature's CrowdControlState.  The creature's clients are told in the update that carries the effect items, so whoever changes its CurrentEffects writes this in the same call.  A field is

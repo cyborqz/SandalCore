@@ -57,6 +57,7 @@ func (b *abBuilder) writeEffectControl(opt *Options, meta map[string]string, eff
 	disables := indexRows(b.src.rows["AbilityDisableRecordBase"])
 	frags := indexRows(b.src.rows["FragileEffectDefRecordBase"])
 	ccDone, disableDone, fragDone := map[int64]bool{}, map[int64]bool{}, map[int64]bool{}
+	b.ccWritten = ccDone // (the knock-back export reads the records that push)
 	for _, g := range effects {
 		r := b.effects[g]
 		if r == nil {
