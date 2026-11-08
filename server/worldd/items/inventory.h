@@ -126,6 +126,12 @@ repl::ItemInstance to_instance(const svc::InventoryItem& item);
 /// of zero words, a quantity or quality out of its range).
 std::optional<svc::InventoryItem> item_of(const repl::ItemInstance& instance, svc::ItemContainer container, int slot);
 
+/// Whether two stacks join (the joining rule): the same record, the same clamped rarity of their qualities (`facts.rarity_of`, never the
+/// quality number), equal durability, lock and persisted Health and Mana (the state `svc::InventoryItem` carries; enchantment, tempering, crate and stolen
+/// state are held nowhere yet), and never the guid or the creation time.
+/// The quality number itself is not compared: quality 25 joins quality 20 of one colour, and the joined stack keeps the target's quality and creation time.
+bool stacks_with(const svc::InventoryItem& a, const svc::InventoryItem& b, const ItemRarityFacts& facts);
+
 // ---- the catalog ---------------------------------------------------------------------------------------------------------
 
 /// What the equip rules need of an item record.
@@ -137,6 +143,8 @@ struct ItemInfo {
     int                  inv_w = 1;
     int                  inv_h = 1;
     int                  max_stack = 1;
+    /// The record's quality curve and its RarityMin..RarityMax (items/rarity.h): two stacks of the record are one colour when their qualities are the same rarity.
+    ItemRarityFacts      rarity;
     /// The grid a resource bag gives its container, set for the items that are resource bags.
     std::optional<ResourceGrid> bag;
     bool wearable() const { return !equip_slots.empty(); }
@@ -244,9 +252,11 @@ public:
                 const ItemCatalog& catalog);
 // (C | Y | B ~ CoA)
 
-    /// ServerRequestStorageEvent, Move: the whole stack of `count` items of the instance `guid` from `from_slot` to the empty `to_slot`,
-    /// both in the Backpack; or, with a `catalog`, both in resource containers (the same one or two): the stack is moved to the top-left cell `to_slot` of its rectangle, which must lie
-    /// in the grid on free cells (its own old cells are free).  The Backpack and a resource container never exchange items, a move onto a stack of the same item (Fill) is refused.
+    /// ServerRequestStorageEvent, Move: `count` items of the instance `guid` from `from_slot` to `to_slot`, both in the Backpack; or, with a `catalog`, both in resource containers
+    /// (the same one or two), where `to_slot` is the top-left cell of the destination's rectangle.  The whole stack moves to an empty place, or `count` below it splits off a new stack
+    /// there (a new instance guid, the source's quality); a stack lands on a stack it joins (the same record, colour, durability, lock and persisted state) and the target keeps its
+    /// own guid and quality, the rest staying in the source; a Move onto any other stack is refused (the client's Swap is the swap).  A split names an empty slot.  The Backpack and a
+    /// resource container never exchange items.
     Outcome move(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot, const ItemCatalog* catalog = nullptr);
     /// Storage clerks, step 0: puts `item` (an instance that left the warehouse) in `container` slot `slot`: the item bag takes an item that is not a material into an empty slot, a material bag
     /// takes a material whose rectangle fits there.  Refused, changing nothing, for another container, an instance the inventory holds already, an unknown record, a material in the item bag, a
@@ -256,15 +266,13 @@ public:
     /// one Add event, `equipment_changed`.  Refused, changing nothing, for an item that is no crate, a quantity other than 1, an instance the inventory holds already, an unknown
     /// record or a cargo slot that holds a crate already.
     Outcome grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog);
-    /// ServerRequestStorageEvent, Swap: the two whole stacks of the Backpack change places; `to_guid` and `to_count` are what the
-    /// client says is in the target slot.  A resource container's items are not swapped (refused).
+    /// ServerRequestStorageEvent, Swap: the two whole stacks change places; `to_guid` and `to_count` are what the client says is in the target slot.  Inside the Backpack, or inside
+    /// the resource containers (with a `catalog`: each stack must fit the other's rectangle); a material and an item of the Backpack never swap.
     Outcome swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
-                 const std::string& to_guid, int32_t to_count);
+                 const std::string& to_guid, int32_t to_count, const ItemCatalog* catalog = nullptr);
 
-    /// Plan D1: a use consumed `count` of the stack in `storage` slot `slot` (the instance `guid`): the stack shrinks (a Remove,
-    /// then an Add of the stack with its new count, the same instance) or goes when nothing is left (a Remove). Refused, changing
-    /// nothing, when the slot does not hold that instance or holds fewer than `count`. Modelled: no retail capture shows a stack
-    /// losing one (the consumables retail used were single items, removed with one Remove event).
+    /// Plan D1; one Remove since the stacks joined: a use consumed `count` of the stack in `storage` slot `slot` (the instance `guid`): ONE Remove that names the stack as it was
+    /// and how many leave (0: the whole stack), the same instance keeping the rest.  Refused, changing nothing, when the slot does not hold that instance or holds fewer than `count`.
     Outcome consume(svc::ItemContainer storage, int slot, const std::string& guid, int32_t count);
 
     /// A consumable's use took `count` of the stack in `storage` slot `slot` (the instance `guid`): ONE Remove that names the stack as it was and how many leave, with the character as its
@@ -296,14 +304,15 @@ public:
     Outcome take_materials(int64_t record, const ItemRarityFacts& facts, int rarity_lo, int rarity_hi, int64_t count, bool lowest_first = false);
 
     /// Plan D1: items granted (a GiveItem reward, a purchase, a use): THE routing of Gathering stage 3 -- each item goes where its kind says (see the top of this file): a resource item
-    /// tops up the stacks of its record and quality in the resource containers and starts new ones at the first free rectangle of the first container with room, any other item takes
-    /// the lowest free bag slot.  An Add event each (the character as the instigator, as the join's Adds; a top-up is a Remove and an Add of the same instance), in the order given;
-    /// `items` carry their record, quantity, quality, durability, a fresh instance guid and creation time, their container and slot are set here.  Refused, changing nothing, when the
-    /// storages have no room for all of them, an item breaks the table's rules or its guid is one the inventory has.
+    /// tops up the stacks it joins (the same record, colour and state) in the resource containers, lowest slot first, and starts new stacks of at most its max stack at the first free
+    /// rectangle of the first container with room; any other item does the same in the item bag.  A top-up is ONE Add of the amount added (the character as the instigator) and a new
+    /// stack ONE Add of the whole piece, in the order given; `items` carry their record, quantity, quality, durability, a fresh instance guid and creation time, their container and slot
+    /// are set here.  Refused, changing nothing, when the storages have no room for all of them, an item breaks the table's rules or its guid is one the inventory has.
     Outcome grant(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog);
     /// The same routing, for a caller that keeps what does not fit (a harvest: the rest goes to a pile on the ground): everything that fits is placed and the events say how, the rest
-    /// comes back in `rest`.  An item that breaks the table's rules or whose guid the inventory has refuses the whole call (nothing placed).
-    GrantResult grant_what_fits(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog);
+    /// comes back in `rest`.  An item that breaks the table's rules or whose guid the inventory has refuses the whole call (nothing placed).  With `harvest`, a top-up keeps the
+    /// accepted Remove + Add shape of the harvest path (the Add names the whole stack); otherwise it is ONE Add of the amount added.
+    GrantResult grant_what_fits(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog, bool harvest = false);
     /// Whether grant(items) would be applied (it changes nothing).
     bool can_grant(const std::vector<svc::InventoryItem>& items, const ItemCatalog& catalog) const;
     /// The login's repair: the resource items found in the Backpack (the harvests of Gathering stage 2 went there) move to the resource containers, first free rectangle each, in the
@@ -317,6 +326,8 @@ public:
     Outcome update_mount(const std::string& guid, std::optional<float> health, int64_t lock_expiration, bool events);
     /// The item of an instance guid (the Backpack, the Equipment, the Quest storage); nullptr when none.
     const svc::InventoryItem* find_guid(const std::string& guid) const;
+    /// A new instance guid for a stack this inventory makes (a split): 32 lowercase hex digits, never the zero guid and none the inventory holds.
+    std::string fresh_guid() const;
 
     /// Gathering stage 2, "Harvesting": a tool's wear.  Sets the durability of the item in `container` slot `slot` that holds the instance `guid` (no storage event: the client is
     /// told by ClientUpdateItemDurability).  False, changing nothing, when the slot holds another item or the value is not a number from 0 up.
@@ -327,10 +338,13 @@ public:
 private:
     using Key = std::pair<uint8_t, int>;
     const svc::InventoryItem* find(svc::ItemContainer c, int slot) const;
-    /// The cells a resource container's items cover (one flag per cell), `ignore` aside.
-    std::vector<bool> covered_cells(svc::ItemContainer container, const ItemCatalog& catalog, const std::string* ignore = nullptr) const;
+    /// The cells a resource container's items cover (one flag per cell), `ignore` and `ignore2` aside.
+    std::vector<bool> covered_cells(svc::ItemContainer container, const ItemCatalog& catalog, const std::string* ignore = nullptr,
+                                    const std::string* ignore2 = nullptr) const;
+    /// grant_what_fits for an item of the item bag: tops up, then starts stacks; `item.quantity` is what is left.
+    void grant_item(svc::InventoryItem item, const ItemInfo& info, GrantResult& out);
     /// grant_what_fits for one item that is a resource: tops up, then starts stacks; `item.quantity` is what is left.
-    void grant_resource(svc::InventoryItem item, const ItemInfo& info, const ItemCatalog& catalog, GrantResult& out);
+    void grant_resource(svc::InventoryItem item, const ItemInfo& info, const ItemCatalog& catalog, GrantResult& out, bool harvest);
     Outcome move_resource(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot, const ItemCatalog& catalog);
     Outcome equip(int bag_slot, const ItemCatalog& catalog, uint32_t requested);
     Outcome unequip(int equip_slot);

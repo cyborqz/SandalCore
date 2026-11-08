@@ -58,6 +58,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Mobs keep chasing and turning during the attacks that the game's data says do not stop them: they chase outside the part of the attack that the animation carries them, and while it carries them they do not walk. A Rotate To keeps turning them through the carry, and so does the Minotaur's axe swing, the one attack without a Rotate To that the recordings show turning; every other such attack keeps the facing it began the carry with. A mob stands still for a moment when such an attack begins, then chases on. The bandit raiders' whirlwind walks at 0.45 of the creature's run speed and the Goblin Flayer's spin at 1.6, as the game's own trees do (the Flayer's not yet confirmed in the game); the Pitchfire raiders' whirlwind still holds them standing. A root, a freeze, a stun, a trip or a sleep still stops the mob walking.
 - Thrown, pushed and pulled mobs: the Bard's Get Off The Stage gives each mob in his reach one velocity change of 1000 cm/s at 35 degrees up along the way he faces, the same at every distance, added to the speed the mob already has; the tuned throw (nearer and facing him: higher and faster) stays in the code behind one setting, off. The Mage's Cone of Cold (with its talent) pushes a mob along the way the Mage faces and freezes it a second later, the Tank's Ground Pound puts a short CC on a tripped mob and his Grapple pulls a mob in front of him, and the Ranger's Air Strike takes the snares off the mob it roots. A thrown or pushed mob flies and slides along the walking map and takes no step or attack until it has stopped. A boss is never thrown, pushed or pulled.
 - Ranged weapon swings kept to the weapon's own pace: a swing that comes sooner than the weapon allows is refused, the minimum time follows the character's attack speed, and honest swings still go through when the connection lags.
+- Item stacks: a stack dragged onto a stack of the same item and colour joins it up to the stack's limit, a stack split with the right-click menu goes to a free slot, and the item bag, the material bags and the warehouse's materials tab follow the same rules.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -72,7 +73,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, the slows the weapon finishers put on a mob, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).
-- Stacks: joining, splitting and dragging stacks; the gathering bags' bigger stacks; paying with change.
+- Stacks: the gathering bags' bigger stacks; paying with change.
 - Storage: buying more room, tab jobs, crates and guild storage.
 - Embersprings: the map markers, the respawn effect, and the siege, war and corruption respawns.
 - NPCs: face variety for the people whose records randomize their face (they take one of a small set of recorded faces), names for rare mobs, and the other hostile humanoids (the bandit archers and healers, and the cultists).
@@ -97,7 +98,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 3. **3- Into the world** — [Done] Entering the world as your character, with your progress kept across logins.
 4. **4- Stats** — [Done] The game's own stat formulas, updated as your gear changes.
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
-6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: splitting and joining stacks, food and potions.
+6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: food and potions.
 7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.
 8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.

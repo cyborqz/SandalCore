@@ -118,6 +118,7 @@ inline constexpr const char* kProgressStatements[] = {
     "(6064634082466267136, 'GM_Scroll_Gear 01 (Light ) Starter', 5, 0, 0), (6064633408453149160, 'GM_Scroll_Consumables 06', 5, 0, 0), "
     "(6064631187700000020, 'Test_Odd_Scroll', 1, 0, 0), (6064631187700000021, 'Test_Random_Scroll', 1, 0, 0), (6064631187700000022, 'Test_Keep_Scroll', 1, 0, 0)",
     "UPDATE item SET max_stack_size = 20 WHERE guid = 6064631187700000007",   // Test_Potion stacks to 20
+    "UPDATE item SET quality_curve_guid = 109166871729784 WHERE guid = 6064631187700000007",   // ... and shows the real colour bands (Common 1-5 ... Artifact 101-200)
     "UPDATE item SET max_durability = 11 WHERE guid IN (6064630214426886486, 6064630214427083132)",   // the chest and the legs
     "INSERT INTO item_use (item_guid, activation, consume_on_use, cooldown, disabled_in_combat) VALUES (6064634615524884604, 'ActivateActionResponses', 1, 0, 0), (6064630843430862909, 'ActivateActionResponses', 1, 0, 0), "
     "(6064632139774033920, 'ActivateActionResponses', 1, 0, 0), (6064632956008729280, 'ActivateActionResponses', 1, 0, 0), "
@@ -231,6 +232,7 @@ namespace resource {
 inline constexpr int64_t kOak = 109162169652924ll;                // Resource_Raw_Wood_Oak: 1 x 3, stack 20
 inline constexpr int64_t kCoal = 109162169652923ll;               // Resource_Raw_Stone_Coal: 1 x 1
 inline constexpr int64_t kDaffodil = 6064629184431849472ll;       // Resource_Raw_Plant_Daffodil: 1 x 2
+inline constexpr int64_t kIngotIron = 109162192590529ll;          // Resource_Processed_Ingot_Iron: 2 x 1, stack 20
 inline constexpr int64_t kMoonbell = 6064630520851136512ll;       // 1 x 2
 inline constexpr int64_t kWillow = 6064631481841025063ll;         // Resource_Raw_Wood_WeepingWillow: 1 x 3
 inline constexpr int64_t kBraidwood = 6064631481844695080ll;      // 1 x 3
@@ -265,6 +267,7 @@ inline constexpr const char* kResourceItemInsert =
     "(6064630406148390932, 'Resource_Raw_Carcass_Bear', 1, 0, 0, 20, 2, 2, 1), (6064629326234910728, 'Resource_Raw_Fish_LargemouthBass', 1, 0, 0, 20, 2, 1, 1), "
     "(6064629326176452611, 'Resource_Raw_Fish_Bluegill', 1, 0, 0, 20, 2, 1, 1), (6064632203796545556, 'Resource_Reagent_EnchantedRune_Riverlands', 1, 0, 0, 20, 1, 1, 1), "
     "(6064628753953390592, 'Certificate_T1_Glint', 1, 0, 0, 10, 1, 1, 1), "
+    "(109162192590529, 'Resource_Processed_Ingot_Iron', 1, 0, 0, 20, 2, 1, 1), "
     "(6064632218973765644, 'Bag_Resource_T2_Mining_0', 1, 1, 0, 1, 1, 1, 0), (6064632219108704288, 'Bag_Resource_T2_Lumberjacking_0', 1, 1, 0, 1, 1, 1, 0)";
 inline constexpr const char* kResourceSlotInsert =
     "INSERT INTO item_equip_slot VALUES (6064632218973765644, 0, 23), (6064632218973765644, 1, 24), (6064632218973765644, 2, 25), "

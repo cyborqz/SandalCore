@@ -401,6 +401,7 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
         ev.type = s.type;
         ev.slot = s.slot;
         ev.item = items::to_instance(s.item);
+        ev.count = s.count;
         ev.instigated = true;
         if (s.in_warehouse) {
             for (const WhComponent& w : wh_components_) {
@@ -411,19 +412,18 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
         }
         events.push_back(std::move(ev));
     }
-    if (res.steps.size() == 2) {
-        for (bootstrap::ItemEvent& ev : events) {
-            if (ev.container) continue;
-            std::vector<bootstrap::ItemEvent> one{ev};
-            add_item_toasts(one, /*removals=*/true);
-            ev.callout = one[0].callout;
-        }
+    for (bootstrap::ItemEvent& ev : events) {
+        if (ev.container) continue;
+        std::vector<bootstrap::ItemEvent> one{ev};
+        add_item_toasts(one, /*removals=*/true);
+        ev.callout = one[0].callout;
     }
     inventory_dirty_ = true;
     inventory_changed_ = true;
     ++items_applied_;
     ++wh_moves_;
     queue("ClientReceiveStorageEvent", [events](bootstrap::PlayerBootstrap& pb) { return pb.item_events(events); }, conn, /*must_build=*/true);
+    follow_linked_stack(conn, events);
     spdlog::log(level_for(wh_logged_), "[session] {}: a stack moves {} the warehouse ({} event(s))", name(), from_wh && to_wh ? "inside" : from_wh ? "out of" : "into", events.size());
     return true;
 }

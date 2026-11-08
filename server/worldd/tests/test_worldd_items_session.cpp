@@ -277,6 +277,8 @@ struct Mirror {
     std::vector<repl::ItemStorageEvent> events;           // every storage event received, in order
     std::vector<repl::RewardInstance> reward_windows;     // each ClientOpenRewardSelection's RewardInstance
     std::vector<repl::GuidValue> reward_window_items;     // ... and the ActivatedItemGuid of each
+    std::vector<emit::FIntrepidNetworkGUID> payload_targets;   // the container each ClientReceiveStoragePayload names, in order
+    std::vector<repl::StoragePayload> payload_data;            // each ClientReceiveStoragePayload as it was sent, in order
     size_t payloads = 0, stat_blocks = 0, unreadable = 0;
     // plan B3: the client's StatsComponent arrays, by field name and ReplicationID, and each update that changed them
     const schema::ClassSchema* stats_class = nullptr;
@@ -394,7 +396,10 @@ struct Mirror {
                         const int s = storage_of(guids, ev->targets[0].object);
                         const std::pair<int, int> key{s, ev->targets[0].slots[0].slot};
                         if (ev->type == static_cast<uint8_t>(repl::StorageEventType::Add)) {
-                            storage[key] = ev->item;
+                            // an Add of the same instance into the slot is a top-up: the client adds what came (retail's shape); a new instance replaces the slot
+                            const auto held = storage.find(key);
+                            if (held != storage.end() && held->second.guid == ev->item.guid) held->second.quantity += ev->item.quantity;
+                            else storage[key] = ev->item;
                         } else {
                             // a Remove that names a count smaller than the stack takes that many and leaves the rest in the slot (a use, a payment)
                             const auto held = storage.find(key);
@@ -449,6 +454,8 @@ struct Mirror {
             return;
         }
         ++payloads;
+        payload_targets.push_back(payload->target);
+        payload_data.push_back(*payload);
         const int s = storage_of(guids, payload->target);
         if (s < 0) return;   // a resource storage
         for (auto it = storage.begin(); it != storage.end();) it = it->first.first == s ? storage.erase(it) : std::next(it);
@@ -1062,18 +1069,8 @@ static void test_refusals() {
     }
     {
         MoveSpec m = potion_move(h);
-        m.type = 3;
-        move("a Fill", m);
-    }
-    {
-        MoveSpec m = potion_move(h);
         m.type = 4;   // a swap onto an empty slot
         move("a Swap onto an empty slot", m);
-    }
-    {
-        MoveSpec m = potion_move(h);
-        m.from_count = 2;
-        move("a partial stack (a split)", m);
     }
     {
         MoveSpec m = potion_move(h);
@@ -1282,16 +1279,16 @@ static BunchWriter flipped_bits(const BunchWriter& src, const std::vector<size_t
 }
 // built with C.Y.B and C O A
 
-/// The inventory reads back the same, holds only items it started with, each in one slot, and has lost no more of them than it destroyed (a dragged-out item is destroyed since
-/// vendors step 1, so the set may shrink by a destroy, never grow and never shrink otherwise).
-static bool inventory_is_sane(const items::Inventory& inv, const std::set<std::string>& guids, size_t destroyed) {
+/// The inventory reads back the same, holds each item in one slot with one guid, and has lost no stack but by a destroy or a merge (a split makes a new stack, whose guid the
+/// caller adds to `known`; a join takes the source stack into the target's, so every guid it removes is a merge).
+static bool inventory_is_sane(const items::Inventory& inv, const std::set<std::string>& known, size_t destroyed, size_t merges) {
     std::string error;
     const auto again = items::Inventory::from_items(inv.items(), error);
     if (!again || !(*again == inv)) return false;
     std::set<std::string> now;
     for (const auto& it : inv.items()) now.insert(it.instance_guid);
-    if (inv.size() != now.size() || !std::includes(guids.begin(), guids.end(), now.begin(), now.end())) return false;
-    return guids.size() - now.size() <= destroyed;
+    if (inv.size() != now.size() || !std::includes(known.begin(), known.end(), now.begin(), now.end())) return false;
+    return known.size() - now.size() <= destroyed + merges;
 }
 
 static void test_hostile() {
@@ -1311,13 +1308,19 @@ static void test_hostile() {
         return guid_n(static_cast<uint32_t>(900 + pick(40)));
     };
     const bs::SessionGuids& g = h.s->bootstrap().setup().guids;
-    size_t applied_by_use = 0, applied_by_move = 0;
+    size_t applied_by_use = 0, applied_by_move = 0, merges = 0;
     const size_t kRequests = 2500;
     bool sane = true;
     for (size_t i = 0; i < kRequests; ++i) {
         h.step(milliseconds(120));   // inside the budget: ten a second
         const auto items = h.s->inventory().items();
+        for (const auto& it : items) guids.insert(it.instance_guid);
+        std::set<std::string> before_guids;
+        for (const auto& it : items) before_guids.insert(it.instance_guid);
         const size_t applied = h.s->item_requests_applied();
+        const size_t destroyed_before = h.s->items_destroyed();
+        int64_t quantity_before = 0;
+        for (const auto& it : items) quantity_before += it.quantity;
         switch (pick(5)) {
             case 0:
             case 1: {   // ServerItemUsed: a real item (the right slot and guid, most times) or numbers
@@ -1383,17 +1386,28 @@ static void test_hostile() {
                 break;
             }
         }
+        // an applied request keeps the total quantity (a destroy is the one loss, and it is counted)
+        if (h.s->item_requests_applied() > applied) {
+            int64_t quantity_after = 0;
+            for (const auto& it : h.s->inventory().items()) quantity_after += it.quantity;
+            if (h.s->items_destroyed() == destroyed_before ? quantity_after != quantity_before : quantity_after > quantity_before) sane = false;
+        }
+        // a split makes a new stack (its guid is allowed from now on); a join takes a source stack away, which is a merge
+        std::set<std::string> after_guids;
+        for (const auto& it : h.s->inventory().items()) after_guids.insert(it.instance_guid);
+        for (const auto& guid : after_guids) guids.insert(guid);
+        if (h.s->item_requests_applied() > applied && h.s->items_destroyed() == destroyed_before && after_guids.size() < before_guids.size()) ++merges;
         if (i % 50 == 49) {
             h.settle();
-            sane = sane && inventory_is_sane(h.s->inventory(), guids, h.s->items_destroyed()) && !h.s->failed();
+            sane = sane && inventory_is_sane(h.s->inventory(), guids, h.s->items_destroyed(), merges) && !h.s->failed();
         }
     }
     h.settle();
-    sane = sane && inventory_is_sane(h.s->inventory(), guids, h.s->items_destroyed());
+    sane = sane && inventory_is_sane(h.s->inventory(), guids, h.s->items_destroyed(), merges);
     std::printf("    %zu requests: %zu applied (%zu ServerItemUsed, %zu storage events, %zu destroys), %zu refused, %zu dropped for the budget\n", kRequests, h.s->item_requests_applied(),
                 applied_by_use, applied_by_move, h.s->items_destroyed(), h.s->item_requests_refused(), h.s->requests_dropped());
     CHECK(!h.s->failed() && sane,
-          "2500 requests, valid, wrong and damaged: the session is up and the inventory is still a valid one, only items it started with, each in one slot, none lost but by a destroy");
+          "2500 requests, valid, wrong and damaged: the session is up and the inventory is still a valid one, each item in one slot, and no stack lost but by a destroy or a merge (a split may make a new stack)");
     CHECK(h.s->item_requests_applied() > 50 && applied_by_use > 10 && applied_by_move > 10, "(the run did apply requests of both kinds)");
     CHECK(h.mirror.unreadable == 0, "everything the server sent reads");
     // the client was told of every change by events: no resend of the storages is needed to agree (a resync may have come, which agrees too)
@@ -4547,15 +4561,7 @@ static void test_resource_requests() {
     MoveSpec onto = m;   // the daffodils onto the oak
     onto.from_slot = 9;
     onto.to_slot = 0;
-    CHECK(expect_refused(onto, "onto the oak"), "a Move onto another stack is refused (a swap or a fill)");
-    MoveSpec swap = onto;
-    swap.type = static_cast<uint8_t>(repl::StorageEventType::Swap);
-    swap.target_guid = guid_n(300);
-    swap.to_count = 7;
-    CHECK(expect_refused(swap, "swap"), "a Swap in the container is refused");
-    MoveSpec fill = onto;
-    fill.type = static_cast<uint8_t>(repl::StorageEventType::Fill);
-    CHECK(expect_refused(fill, "fill"), "a Fill is refused");
+    CHECK(expect_refused(onto, "onto the oak"), "a Move onto another stack is refused (a swap is asked for)");
     MoveSpec destroy = onto;
     destroy.type = static_cast<uint8_t>(repl::StorageEventType::Remove);
     CHECK(expect_refused(destroy, "destroy"), "a Remove whose slot does not hold the event's item (a destroy of the wrong stack) is refused");
@@ -4579,8 +4585,39 @@ static void test_resource_requests() {
     third.to_object = g.resource_storage[2];
     third.to_slot = 0;
     CHECK(expect_refused(third, "third container"), "a drag to Resource2, which the character has no bag for, is refused");
-    CHECK(h.s->item_requests_refused() == refused + 7, "seven refusals counted");
+    CHECK(h.s->item_requests_refused() == refused + 5, "five refusals counted");
     CHECK(h.mirror.payloads > payloads && mirror_matches(h), "the client was sent its containers again after the refusals, and agrees");
+    // a Fill is a Move between the player's own containers: six of a 14 onto a 7, both oak
+    {
+        std::vector<svc::InventoryItem> items = resource_kit();
+        items.push_back(make_item(R0, 3, fr::kOak, 303, 14));
+        Harness f(record_with(items));
+        MoveSpec fill;
+        fill.type = static_cast<uint8_t>(repl::StorageEventType::Fill);
+        fill.from_object = fill.to_object = f.s->bootstrap().setup().guids.resource_storage[0];
+        fill.from_slot = 3;
+        fill.from_count = 6;
+        fill.source_guid = fill.event_guid = guid_n(303);
+        fill.to_slot = 0;
+        fill.target_guid = guid_n(300);
+        fill.to_count = 6;
+        const size_t fill_events = f.mirror.events.size();
+        f.request(storage_move(fill), f.pc_ch);
+        CHECK(f.mirror.events.size() == fill_events + 2 && f.s->inventory().at(R0, 0) && f.s->inventory().at(R0, 0)->quantity == 13 &&
+                  f.s->inventory().at(R0, 3) && f.s->inventory().at(R0, 3)->quantity == 8 && mirror_matches(f),
+              "a Fill of 6 from a stack of 14 onto a stack of 7 is made like a Move: the target is 13 and the source keeps 8");
+    }
+    // a Swap in the container is made: the daffodils at slot 9 and the oak at slot 0 change places
+    MoveSpec swap = onto;
+    swap.type = static_cast<uint8_t>(repl::StorageEventType::Swap);
+    swap.target_guid = guid_n(300);
+    swap.to_count = 7;
+    const size_t swap_events = h.mirror.events.size();
+    h.request(storage_move(swap), h.pc_ch);
+    CHECK(h.mirror.events.size() == swap_events + 4, "a Swap in the container is four events");
+    CHECK(h.s->inventory().at(R0, 0) && h.s->inventory().at(R0, 0)->instance_guid == guid_n(301) && h.s->inventory().at(R0, 9) &&
+              h.s->inventory().at(R0, 9)->instance_guid == guid_n(300) && mirror_matches(h),
+          "...the two stacks changed places and the client agrees");
 }
 
 static void test_resource_repair() {

@@ -14,8 +14,8 @@
 //    * the cargo tab (area Cargo): one for each town of the Village level and up, a grid of 6 x 8.  It holds crates, and no crate exists yet, so nothing goes in.
 //  What a character owns is the free ones; buying more is the next step.
 //
-//  A move.  The window asks the server to move a stack between a bag (the item bag or a material bag) and a warehouse container, or inside one container.  The server takes the whole
-//  stack to an empty place (a stack is never split or merged: a move onto a stack of the same item is refused, as in the bags), or swaps two whole stacks of list containers.  What is
+//  A move.  The window asks the server to move a stack between a bag (the item bag or a material bag) and a warehouse container, or inside one container.  The server moves the whole
+//  stack to an empty place or splits part of it there, joins a stack onto a stack it passes the joining rule with (the target keeps its guid and quality), or swaps two whole stacks.  What is
 //  refused changes nothing and tells the client nothing but the storages as they are.  The answer is a Remove from the place the stack left and an Add where it arrived; the bag's side
 //  carries the item toast, the warehouse's does not.
 //
@@ -342,6 +342,7 @@ struct Step {
     Key                    key;
     int                    slot = 0;
     svc::InventoryItem     item;
+    int32_t                count = 0;   // a Remove of part of a stack: how many leave, `item` being the stack as it was (0: the whole of it)
 };
 
 struct Result {
@@ -367,19 +368,22 @@ namespace detail {
 
 inline bool is_bag(svc::ItemContainer c) { return c == svc::ItemContainer::Backpack || items::is_resource(c); }
 
-/// The cells a grid container's items cover, `ignore` aside.
-inline std::vector<bool> covered(const Spec& spec, const Storage& wh, const items::ResourceGrid& grid, const items::ItemCatalog& catalog, const std::string* ignore = nullptr) {
+/// The cells a grid container's items cover, `ignore` and `ignore2` aside.
+inline std::vector<bool> covered(const Spec& spec, const Storage& wh, const items::ResourceGrid& grid, const items::ItemCatalog& catalog, const std::string* ignore = nullptr,
+                                 const std::string* ignore2 = nullptr) {
     std::vector<bool> cells(static_cast<size_t>(grid.cells()), false);
     for (const svc::InventoryItem& it : wh.items_of(spec.key)) {
         if (ignore && it.instance_guid == *ignore) continue;
+        if (ignore2 && it.instance_guid == *ignore2) continue;
         const auto info = catalog.info(it.item_record_id);
         grid.cover(cells, it.slot, info ? info->inv_w : 1, info ? info->inv_h : 1);
     }
     return cells;
 }
 
-/// Whether `item` may be put in warehouse place (`spec`, `slot`) when the stack `ignore` (the one that is moving) does not count.  Empty when it may, else why not.
-inline std::string why_not_here(const Spec& spec, int slot, const svc::InventoryItem& item, const Storage& wh, const items::ItemCatalog& catalog, const std::string* ignore) {
+/// Whether `item` may be put in warehouse place (`spec`, `slot`) when the stacks `ignore` and `ignore2` (the ones that are moving) do not count.  Empty when it may, else why not.
+inline std::string why_not_here(const Spec& spec, int slot, const svc::InventoryItem& item, const Storage& wh, const items::ItemCatalog& catalog, const std::string* ignore,
+                                const std::string* ignore2 = nullptr) {
     const auto info = catalog.info(item.item_record_id);
     if (!info) return "the item's record is not one this server knows";
     switch (spec.key.area) {
@@ -395,12 +399,14 @@ inline std::string why_not_here(const Spec& spec, int slot, const svc::Inventory
     if (slot < 0 || slot >= spec.slots) return "slot " + std::to_string(slot) + " is not a slot of the container";
     if (spec.grid()) {
         const items::ResourceGrid grid(spec.columns, spec.rows, false);
-        if (!grid.fits(slot, info->inv_w, info->inv_h, covered(spec, wh, grid, catalog, ignore))) {
+        if (!grid.fits(slot, info->inv_w, info->inv_h, covered(spec, wh, grid, catalog, ignore, ignore2))) {
             return "a " + std::to_string(info->inv_w) + " x " + std::to_string(info->inv_h) + " item does not fit slot " + std::to_string(slot) + " (outside the tab or on another item)";
         }
     } else {
         const svc::InventoryItem* there = wh.at(spec.key, slot);
-        if (there && !(ignore && there->instance_guid == *ignore)) return "slot " + std::to_string(slot) + " is not empty (a move onto an item is a swap, and a stack is not merged)";
+        if (there && !(ignore && there->instance_guid == *ignore) && !(ignore2 && there->instance_guid == *ignore2)) {
+            return "slot " + std::to_string(slot) + " is not empty (a move onto an item is a swap)";
+        }
     }
     return {};
 }
@@ -438,116 +444,159 @@ inline Result transfer(items::Inventory& bags, Storage& wh, const items::ItemCat
     const svc::InventoryItem* source = r.from.in_warehouse ? wh.at(r.from.key, r.from.slot) : bags.at(r.from.bag, r.from.slot);
     if (!source) return refuse("no item in the source slot");
     if (items::guid_of(r.guid) == std::nullopt || source->instance_guid != r.guid) return refuse("the item in the source slot is not the instance the client named");
-    if (r.count != source->quantity) return refuse("the move names " + std::to_string(r.count) + " of a stack of " + std::to_string(source->quantity) + " (splitting is not made)");
+    if (r.count < 1 || r.count > source->quantity) return refuse("the move names " + std::to_string(r.count) + " of a stack of " + std::to_string(source->quantity));
     const svc::InventoryItem moving = *source;
+    const svc::InventoryItem* target = r.to.in_warehouse ? wh.at(r.to.key, r.to.slot) : bags.at(r.to.bag, r.to.slot);
+    const bool target_named = items::guid_of(r.to_guid).has_value();
+    const Spec* from_spec = r.from.in_warehouse ? open.find(r.from.key) : nullptr;
+    const Spec* to_spec = r.to.in_warehouse ? open.find(r.to.key) : nullptr;
+    const auto is_list = [&](const End& e) { return e.in_warehouse ? !open.find(e.key)->grid() : e.bag == svc::ItemContainer::Backpack; };
+    const auto info = catalog.info(moving.item_record_id);
+    Storage trial_wh = wh;
+    items::Inventory trial_bags = bags;
+    // takes `count` off a stack on the copies: a part of it, or the whole stack
+    const auto take_from = [&](const End& e, const svc::InventoryItem& item, int32_t count) -> std::string {
+        if (e.in_warehouse) {
+            if (count >= item.quantity) trial_wh.erase(e.key, e.slot);
+            else {
+                svc::InventoryItem left = item;
+                left.quantity -= count;
+                trial_wh.put(e.key, e.slot, left);
+            }
+            return {};
+        }
+        const items::Outcome removed = trial_bags.consume(e.bag, e.slot, item.instance_guid, count);
+        return removed.ok ? std::string() : removed.refusal;
+    };
+    // puts a stack at an end on the copies
+    const auto put_at = [&](const End& e, svc::InventoryItem item) -> std::string {
+        if (e.in_warehouse) {
+            trial_wh.put(e.key, e.slot, item);
+            return {};
+        }
+        item.container = e.bag;
+        const items::Outcome added = trial_bags.add_at(e.bag, e.slot, item, catalog);
+        return added.ok ? std::string() : added.refusal;
+    };
+    const auto fill = [&](Step& s, repl::StorageEventType type, const End& e, const svc::InventoryItem& item, int32_t count) {
+        s.type = type;
+        s.in_warehouse = e.in_warehouse;
+        s.bag = e.bag;
+        s.key = e.key;
+        s.slot = e.slot;
+        s.item = item;
+        s.count = count;
+    };
 
     if (r.type == repl::StorageEventType::Swap) {
-        // two whole stacks of list containers change places: the item bag and an item chunk
-        const auto is_list = [&](const End& e) { return e.in_warehouse ? !open.find(e.key)->grid() : e.bag == svc::ItemContainer::Backpack; };
-        if (!is_list(r.from) || !is_list(r.to)) return refuse("only the stacks of the item bag and the item chunks are swapped");
-        const svc::InventoryItem* other = r.to.in_warehouse ? wh.at(r.to.key, r.to.slot) : bags.at(r.to.bag, r.to.slot);
-        if (!other) return refuse("no item in the target slot to swap with");
-        if (items::guid_of(r.to_guid) == std::nullopt || other->instance_guid != r.to_guid) return refuse("the item in the target slot is not the instance the client named");
-        if (r.to_count != other->quantity) return refuse("a swap names whole stacks only");
-        const svc::InventoryItem swapped = *other;
-        // (the item bag and an item chunk hold items and no materials, so each stack is allowed where the other one lies)
-        // apply: the four events are the bags' own order (Remove A, Remove B, Add B where A was, Add A where B was)
-        Step ra, rb, ab, aa;
-        const auto fill = [&](Step& s, repl::StorageEventType type, const End& e, const svc::InventoryItem& item) {
-            s.type = type;
-            s.in_warehouse = e.in_warehouse;
-            s.bag = e.bag;
-            s.key = e.key;
-            s.slot = e.slot;
-            s.item = item;
-        };
-        fill(ra, repl::StorageEventType::Remove, r.from, moving);
-        fill(rb, repl::StorageEventType::Remove, r.to, swapped);
-        svc::InventoryItem b_at_from = swapped, a_at_to = moving;
-        b_at_from.slot = r.from.slot;
-        a_at_to.slot = r.to.slot;
-        fill(ab, repl::StorageEventType::Add, r.from, b_at_from);
-        fill(aa, repl::StorageEventType::Add, r.to, a_at_to);
-        // the bags: a swap of the item bag's stack with a chunk's goes through the inventory's own pieces
-        if (!r.from.in_warehouse || !r.to.in_warehouse) {
-            const End& bag_end = r.from.in_warehouse ? r.to : r.from;
-            const End& wh_end = r.from.in_warehouse ? r.from : r.to;
-            const svc::InventoryItem& bag_item = r.from.in_warehouse ? swapped : moving;
-            const svc::InventoryItem& wh_item = r.from.in_warehouse ? moving : swapped;
-            items::Inventory trial = bags;
-            const items::Outcome removed = trial.consume(bag_end.bag, bag_end.slot, bag_item.instance_guid, bag_item.quantity);
-            if (!removed.ok) return refuse(removed.refusal);
-            svc::InventoryItem arriving = wh_item;
-            const items::Outcome added = trial.add_at(bag_end.bag, bag_end.slot, arriving, catalog);
-            if (!added.ok) return refuse(added.refusal);
-            bags = std::move(trial);
-            wh.put(wh_end.key, wh_end.slot, bag_item);
-            out.bags_changed = true;
+        // two whole stacks change places: both list places (the item bag and an item chunk) or both grids (a material bag and a material tab)
+        if (!target) return refuse("no item in the target slot to swap with");
+        if (!target_named || target->instance_guid != r.to_guid) return refuse("the item in the target slot is not the instance the client named");
+        if (r.count != moving.quantity || r.to_count != target->quantity) return refuse("a swap names whole stacks only");
+        if (is_list(r.from) != is_list(r.to)) return refuse("only stacks of the item bag and the item chunks, or of two grids, are swapped");
+        if (r.from.in_warehouse && r.to.in_warehouse && r.from.key == r.to.key && to_spec->grid()) {
+            // the final places are judged together: the moving stack's new place, then the target's against it and every other item (each checked on its own
+            // with both ignored would let two rectangles of one grid land on one cell)
+            const std::string why = detail::why_not_here(*to_spec, r.to.slot, moving, trial_wh, catalog, &target->instance_guid, &moving.instance_guid);
+            if (!why.empty()) return refuse("the source: " + why);
+            const items::ResourceGrid grid(to_spec->columns, to_spec->rows, false);
+            std::vector<bool> cells = detail::covered(*to_spec, trial_wh, grid, catalog, &moving.instance_guid, &target->instance_guid);
+            grid.cover(cells, r.to.slot, info->inv_w, info->inv_h);
+            const auto target_info = catalog.info(target->item_record_id);
+            if (!target_info) return refuse("the target: the item's record is not one this server knows");
+            if (!grid.fits(r.from.slot, target_info->inv_w, target_info->inv_h, cells)) {
+                return refuse("the target: a " + std::to_string(target_info->inv_w) + " x " + std::to_string(target_info->inv_h) + " item does not fit slot " +
+                              std::to_string(r.from.slot) + " (outside the tab or on another item)");
+            }
         } else {
-            wh.put(r.from.key, r.from.slot, swapped);
-            wh.put(r.to.key, r.to.slot, moving);
+            if (r.to.in_warehouse) {
+                const std::string why = detail::why_not_here(*to_spec, r.to.slot, moving, trial_wh, catalog, &target->instance_guid, &moving.instance_guid);
+                if (!why.empty()) return refuse("the source: " + why);
+            }
+            if (r.from.in_warehouse) {
+                const std::string why = detail::why_not_here(*from_spec, r.from.slot, *target, trial_wh, catalog, &moving.instance_guid, &target->instance_guid);
+                if (!why.empty()) return refuse("the target: " + why);
+            }
         }
+        if (std::string why = take_from(r.from, moving, moving.quantity); !why.empty()) return refuse(why);
+        if (std::string why = take_from(r.to, *target, target->quantity); !why.empty()) return refuse(why);
+        svc::InventoryItem b_at_from = *target;
+        b_at_from.slot = r.from.slot;
+        if (std::string why = put_at(r.from, b_at_from); !why.empty()) return refuse(why);
+        svc::InventoryItem a_at_to = moving;
+        a_at_to.slot = r.to.slot;
+        if (std::string why = put_at(r.to, a_at_to); !why.empty()) return refuse(why);
+        Step ra, rb, ab, aa;
+        fill(ra, repl::StorageEventType::Remove, r.from, moving, 0);
+        fill(rb, repl::StorageEventType::Remove, r.to, *target, 0);
+        fill(ab, repl::StorageEventType::Add, r.from, b_at_from, 0);
+        fill(aa, repl::StorageEventType::Add, r.to, a_at_to, 0);
+        bags = std::move(trial_bags);
+        wh = std::move(trial_wh);
         out.steps = {ra, rb, ab, aa};
+        out.bags_changed = !r.from.in_warehouse || !r.to.in_warehouse;
         out.ok = true;
         return out;
     }
 
-    // Move and Fill: the whole stack to an empty place
-    if (r.to.in_warehouse) {
-        const Spec* spec = open.find(r.to.key);
-        const std::string* ignore = r.from.in_warehouse ? &moving.instance_guid : nullptr;
-        const std::string why = detail::why_not_here(*spec, r.to.slot, moving, wh, catalog, ignore);
-        if (!why.empty()) return refuse(why);
-        // it leaves a bag, or another place of the same container
-        Step remove, add;
-        remove.type = repl::StorageEventType::Remove;
-        remove.in_warehouse = r.from.in_warehouse;
-        remove.bag = r.from.bag;
-        remove.key = r.from.key;
-        remove.slot = r.from.slot;
-        remove.item = moving;
-        add.type = repl::StorageEventType::Add;
-        add.in_warehouse = true;
-        add.key = r.to.key;
-        add.slot = r.to.slot;
-        add.item = moving;
-        add.item.slot = r.to.slot;
-        if (r.from.in_warehouse) {
-            wh.erase(r.from.key, r.from.slot);
-        } else {
-            const items::Outcome removed = bags.consume(r.from.bag, r.from.slot, moving.instance_guid, moving.quantity);
-            if (!removed.ok) return refuse(removed.refusal);
-            out.bags_changed = true;
+    if (!target) {
+        // an empty place: the whole stack moves, or a part of it becomes a new stack there (the client names no item in the place)
+        if (target_named) return refuse("the target slot is empty, but the client named an item in it");
+        const bool split = r.count < moving.quantity;
+        // a whole stack leaves its cells, so a same-container move may slide over itself; a split leaves the source in place
+        if (r.to.in_warehouse) {
+            const std::string* ignore = r.from.in_warehouse && !split ? &moving.instance_guid : nullptr;
+            const std::string why = detail::why_not_here(*to_spec, r.to.slot, moving, trial_wh, catalog, ignore);
+            if (!why.empty()) return refuse(why);
         }
-        wh.put(r.to.key, r.to.slot, moving);
-        out.steps = {remove, add};
-        out.ok = true;
-        return out;
-    }
-    // out of the warehouse into a bag
-    {
         svc::InventoryItem arriving = moving;
-        const items::Outcome added = bags.add_at(r.to.bag, r.to.slot, arriving, catalog);
-        if (!added.ok) return refuse(added.refusal);
-        wh.erase(r.from.key, r.from.slot);
+        if (split) {
+            if (!info) return refuse("the item's record is not one this server knows");
+            arriving.quantity = r.count;
+            do {
+                arriving.instance_guid = bags.fresh_guid();
+            } while (!items::guid_of(arriving.instance_guid) || bags.find_guid(arriving.instance_guid) || wh.holds_guid(arriving.instance_guid));
+        }
+        arriving.slot = r.to.slot;
+        if (!r.to.in_warehouse) arriving.container = r.to.bag;
+        if (std::string why = take_from(r.from, moving, r.count); !why.empty()) return refuse(why);
+        if (std::string why = put_at(r.to, arriving); !why.empty()) return refuse(why);
         Step remove, add;
-        remove.type = repl::StorageEventType::Remove;
-        remove.in_warehouse = true;
-        remove.key = r.from.key;
-        remove.slot = r.from.slot;
-        remove.item = moving;
-        add.type = repl::StorageEventType::Add;
-        add.in_warehouse = false;
-        add.bag = r.to.bag;
-        add.slot = r.to.slot;
-        add.item = moving;
-        add.item.container = r.to.bag;
-        add.item.slot = r.to.slot;
-        out.bags_changed = true;
+        fill(remove, repl::StorageEventType::Remove, r.from, moving, split ? r.count : 0);
+        fill(add, repl::StorageEventType::Add, r.to, arriving, 0);
+        bags = std::move(trial_bags);
+        wh = std::move(trial_wh);
         out.steps = {remove, add};
+        out.bags_changed = !r.from.in_warehouse || !r.to.in_warehouse;
         out.ok = true;
         return out;
     }
+
+    // onto a stack: it joins when the two stacks pass the rule, and the target keeps its own guid and quality
+    if (!target_named || target->instance_guid != r.to_guid) return refuse("the target slot holds an item, and the client did not name it (a Move or a Fill to a free slot names no item)");
+    if (!info) return refuse("the item's record is not one this server knows");
+    if (!items::stacks_with(moving, *target, info->rarity)) return refuse("the target holds another stack (a move onto an item is a swap)");
+    const int32_t max_stack = std::max(1, info->max_stack);
+    const int32_t room = max_stack > target->quantity ? max_stack - target->quantity : 0;
+    if (r.count > room) return refuse("the move names " + std::to_string(r.count) + " of a stack of " + std::to_string(moving.quantity) + "; only " + std::to_string(room) + " fit onto the target");
+    if (std::string why = take_from(r.from, moving, r.count); !why.empty()) return refuse(why);
+    svc::InventoryItem merged = *target;
+    merged.quantity += r.count;
+    if (!r.to.in_warehouse) {
+        if (std::string why = take_from(r.to, *target, target->quantity); !why.empty()) return refuse(why);
+    }
+    if (std::string why = put_at(r.to, merged); !why.empty()) return refuse(why);
+    Step remove, add;
+    fill(remove, repl::StorageEventType::Remove, r.from, moving, r.count < moving.quantity ? r.count : 0);
+    svc::InventoryItem added = *target;
+    added.quantity = r.count;
+    fill(add, repl::StorageEventType::Add, r.to, added, 0);
+    bags = std::move(trial_bags);
+    wh = std::move(trial_wh);
+    out.steps = {remove, add};
+    out.bags_changed = !r.from.in_warehouse || !r.to.in_warehouse;
+    out.ok = true;
+    return out;
 }
 
 /// The payload a container sends the client: its slots (one element for each, an empty one where nothing lies) and its shape.

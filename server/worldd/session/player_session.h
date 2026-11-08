@@ -1184,6 +1184,10 @@ private:
     std::string fresh_guid();
     /// Tells the client what an applied request did (the events, then the visible gear) and marks the inventory dirty.
     void apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what, bool with_toasts = false);
+    /// Rule 12: a join that empties a stack linked on the action bar moves the bar slot to the stack it was joined into, with the same one-slot
+    /// ClientReceiveActionbarSlotPayload the bar uses, so the key still uses the item.  A split, a whole move and a swap keep every guid, and a drag onto
+    /// the linked stack keeps it: their bar slots are unchanged.
+    void follow_linked_stack(Connection& conn, const std::vector<bootstrap::ItemEvent>& events);
     /// Crates: note_cargo_crate() looks at an applied outcome and calls construction_crate_equipped() (the quests' input, declared with the quest functions above) when a
     /// construction crate (gameplay tag Item.Crate.Construction) now stands in the cargo slot: the one place that tells the quests a crate is carried.  construction_deposit() is the
     /// deposit input that the construction site will call once a crate is put into it.

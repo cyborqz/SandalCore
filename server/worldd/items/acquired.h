@@ -102,6 +102,16 @@ inline ::aoc::protocol::repl::CalloutQueueInfo acquired_callout(const ::aoc::pro
     return item_callout(acquired_text(item, name, facts), kAcquiredCalloutType, item, creation_ticks);
 }
 
+/// The item a toast names for a Remove: the count that left when part of a stack goes (`count`), the whole stack otherwise.
+inline ::aoc::protocol::repl::ItemInstance toast_item(const ::aoc::protocol::repl::ItemInstance& item, int32_t count) {
+    if (count > 0 && static_cast<uint32_t>(count) < item.quantity) {
+        ::aoc::protocol::repl::ItemInstance shown = item;
+        shown.quantity = static_cast<uint32_t>(count);
+        return shown;
+    }
+    return item;
+}
+
 /// The callout type of the toast of an item that leaves a bag: sold to a shop, or destroyed.
 inline constexpr uint8_t kRemovedCalloutType = 16;
 

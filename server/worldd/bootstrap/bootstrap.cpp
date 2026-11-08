@@ -1648,7 +1648,11 @@ void PlayerBootstrap::remember(std::span<const ItemEvent> events) {
         if (e.container) continue;   // a warehouse container: the caller keeps what it holds
         const std::pair<uint8_t, int32_t> key{static_cast<uint8_t>(e.storage), e.slot};
         if (e.type == repl::StorageEventType::Add) {
-            items_[key] = e.item;
+            // an Add into a slot that holds the same instance is a top-up: the stack keeps what it had and gains what came (the one-Add top-up of a
+            // join, a pick-up or a warehouse join carries only the added amount); an Add into an empty slot, or of another instance, is the whole item
+            const auto held = items_.find(key);
+            if (held != items_.end() && held->second.guid == e.item.guid && held->second.has_item) held->second.quantity += e.item.quantity;
+            else items_[key] = e.item;
         } else if (e.count > 0 && e.count < static_cast<int32_t>(e.item.quantity)) {
             repl::ItemInstance rest = e.item;   // the stack as it was, less what left
             rest.quantity = e.item.quantity - static_cast<decltype(rest.quantity)>(e.count);

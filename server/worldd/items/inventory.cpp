@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <random>
 
 namespace aoc::worldd::items {
 
@@ -131,6 +132,14 @@ repl::ItemInstance to_instance(const svc::InventoryItem& item) {
     return i;
 }
 
+bool stacks_with(const svc::InventoryItem& a, const svc::InventoryItem& b, const ItemRarityFacts& facts) {
+    // (the quality number is not compared: the colour is; the guid, the quantity, the place and the creation time say nothing of what the item is)
+    // (enchantment, tempering, crate and stolen state are held nowhere in svc::InventoryItem or the character service's item: every item has none, so the rule holds;
+    // compare them when they are added)
+    return a.item_record_id == b.item_record_id && facts.rarity_of(a.quality) == facts.rarity_of(b.quality) && a.durability == b.durability &&
+           a.lock_expiration == b.lock_expiration && a.persisted_health == b.persisted_health && a.persisted_mana == b.persisted_mana;
+}
+
 std::optional<svc::InventoryItem> item_of(const repl::ItemInstance& instance, svc::ItemContainer container, int slot) {
     if (!instance.has_item) return std::nullopt;
     svc::InventoryItem it;
@@ -181,6 +190,7 @@ std::optional<ItemInfo> ContentItemCatalog::info(int64_t record) const {
     i.inv_w = rec->inv_w;
     i.inv_h = rec->inv_h;
     i.max_stack = std::max(1, rec->max_stack_size);
+    i.rarity = *rec;
     // a resource bag gives its container a grid (only an item worn in a bag slot can be one)
     if (std::any_of(i.equip_slots.begin(), i.equip_slots.end(), [](uint8_t s) { return bag_container_of(s) >= 0; })) {
         std::string bag_error;
@@ -265,13 +275,14 @@ const ResourceGrid& Inventory::grid(svc::ItemContainer container) const {
     return is_resource(container) ? grids_[static_cast<size_t>(resource_index(container))] : kNone;
 }
 
-std::vector<bool> Inventory::covered_cells(svc::ItemContainer container, const ItemCatalog& catalog, const std::string* ignore) const {
+std::vector<bool> Inventory::covered_cells(svc::ItemContainer container, const ItemCatalog& catalog, const std::string* ignore, const std::string* ignore2) const {
     std::vector<bool> covered;
     const ResourceGrid& g = grid(container);
     if (g.empty()) return covered;
     covered.assign(static_cast<size_t>(g.cells()), false);
     for (auto it = slots_.lower_bound({static_cast<uint8_t>(container), 0}); it != slots_.end() && it->first.first == static_cast<uint8_t>(container); ++it) {
         if (ignore && it->second.instance_guid == *ignore) continue;
+        if (ignore2 && it->second.instance_guid == *ignore2) continue;
         const auto info = catalog.info(it->second.item_record_id);
         g.cover(covered, it->second.slot, info ? info->inv_w : 1, info ? info->inv_h : 1);
     }
@@ -686,21 +697,11 @@ Outcome Inventory::consume(svc::ItemContainer storage, int slot, const std::stri
     remove.container = storage;
     remove.slot = slot;
     remove.item = before;
+    remove.count = count < before.quantity ? count : 0;
     remove.instigated = true;
     out.events.push_back(std::move(remove));
-    slots_.erase({static_cast<uint8_t>(storage), slot});
-    if (before.quantity > count) {
-        svc::InventoryItem left = before;
-        left.quantity = before.quantity - count;
-        Event add;
-        add.type = repl::StorageEventType::Add;
-        add.container = storage;
-        add.slot = slot;
-        add.item = left;
-        add.instigated = true;
-        slots_[{static_cast<uint8_t>(storage), slot}] = left;
-        out.events.push_back(std::move(add));
-    }
+    if (count < before.quantity) slots_[{static_cast<uint8_t>(storage), slot}].quantity = before.quantity - count;
+    else slots_.erase({static_cast<uint8_t>(storage), slot});
     out.ok = true;
     out.equipment_changed = storage == svc::ItemContainer::Equipment;
     return out;
@@ -742,7 +743,6 @@ Outcome Inventory::tier_up(svc::ItemContainer storage, int slot, const std::stri
     out.events.push_back(std::move(remove));
 
     // the first stack of the product's colour with room, bag by bag and slot by slot
-    const int product_rarity = facts.rarity_of(static_cast<double>(product.quality));
     const int32_t max_stack = std::max(1, info->max_stack);
     bool placed = false;
     for (int i = 0; i < kResourceContainers && !placed; ++i) {
@@ -750,10 +750,7 @@ Outcome Inventory::tier_up(svc::ItemContainer storage, int slot, const std::stri
         if (trial.grid(c).empty()) continue;
         for (auto it = trial.slots_.lower_bound({static_cast<uint8_t>(c), 0}); it != trial.slots_.end() && it->first.first == static_cast<uint8_t>(c); ++it) {
             svc::InventoryItem& held = it->second;
-            if (held.item_record_id != product.item_record_id || held.quantity + product.quantity > max_stack || held.durability != product.durability ||
-                facts.rarity_of(static_cast<double>(held.quality)) != product_rarity) {
-                continue;
-            }
+            if (!stacks_with(held, product, facts) || held.quantity + product.quantity > max_stack) continue;
             held.quantity += product.quantity;   // the stack keeps its own guid and quality; the client adds the one item to the slot
             product.container = c;
             product.slot = held.slot;
@@ -791,6 +788,17 @@ const svc::InventoryItem* Inventory::find_guid(const std::string& guid) const {
         if (item.instance_guid == guid) return &item;
     }
     return nullptr;
+}
+
+std::string Inventory::fresh_guid() const {
+    static thread_local std::mt19937_64 rng{std::random_device{}()};
+    for (;;) {
+        const uint64_t a = rng(), b = rng();
+        const repl::GuidValue g{static_cast<uint32_t>(a >> 32), static_cast<uint32_t>(a), static_cast<uint32_t>(b >> 32), static_cast<uint32_t>(b)};
+        if (!(g.a | g.b | g.c | g.d)) continue;
+        const std::string hex = guid_hex(g);
+        if (!find_guid(hex)) return hex;
+    }
 }
 
 bool Inventory::set_durability(svc::ItemContainer container, int slot, const std::string& guid, float durability) {
@@ -840,7 +848,7 @@ Outcome Inventory::update_mount(const std::string& guid, std::optional<float> he
 }
 // C | O | A and Cyb
 
-GrantResult Inventory::grant_what_fits(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog) {
+GrantResult Inventory::grant_what_fits(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog, bool harvest) {
     GrantResult res;
     const auto refuse = [&](std::string why) {
         res.outcome.ok = false;
@@ -863,9 +871,14 @@ GrantResult Inventory::grant_what_fits(std::vector<svc::InventoryItem> items, co
     for (svc::InventoryItem& it : items) {
         const auto info = catalog.info(it.item_record_id);
         if (info && info->resource) {
-            grant_resource(std::move(it), *info, catalog, res);
+            grant_resource(std::move(it), *info, catalog, res, harvest);
             continue;
         }
+        if (info) {
+            grant_item(std::move(it), *info, res);
+            continue;
+        }
+        // a record the file does not know: one stack in the item bag, as it came (there is no max stack or colour to read)
         const int slot = first_free(svc::ItemContainer::Backpack);
         if (slot < 0) {
             res.rest.push_back(std::move(it));
@@ -885,58 +898,129 @@ GrantResult Inventory::grant_what_fits(std::vector<svc::InventoryItem> items, co
     return res;
 }
 
-void Inventory::grant_resource(svc::InventoryItem item, const ItemInfo& info, const ItemCatalog& catalog, GrantResult& out) {
+void Inventory::grant_item(svc::InventoryItem item, const ItemInfo& info, GrantResult& out) {
     const int32_t max_stack = std::max(1, info.max_stack);
-    // first the stacks of the same record and quality that have room, container by container, slot by slot
+    bool used_granted_guid = false;
+    // first the stacks the item joins, lowest slot first, one Add of what each takes
+    for (auto it = slots_.lower_bound({static_cast<uint8_t>(svc::ItemContainer::Backpack), 0}); it != slots_.end() && it->first.first == static_cast<uint8_t>(svc::ItemContainer::Backpack) &&
+                                                                                             item.quantity > 0;
+         ++it) {
+        svc::InventoryItem& held = it->second;
+        if (!stacks_with(held, item, info.rarity) || held.quantity >= max_stack) continue;
+        const int32_t take = std::min(item.quantity, max_stack - held.quantity);
+        Event add;
+        add.type = repl::StorageEventType::Add;
+        add.container = svc::ItemContainer::Backpack;
+        add.slot = held.slot;
+        add.item = held;
+        add.item.quantity = take;
+        add.instigated = true;
+        held.quantity += take;
+        out.outcome.events.push_back(std::move(add));
+        item.quantity -= take;
+    }
+    // then new stacks of at most the max stack in the first free slots
+    while (item.quantity > 0) {
+        const int slot = first_free(svc::ItemContainer::Backpack);
+        if (slot < 0) break;
+        const int32_t piece = std::min(item.quantity, max_stack);
+        svc::InventoryItem placed = item;
+        placed.container = svc::ItemContainer::Backpack;
+        placed.slot = slot;
+        placed.quantity = piece;
+        if (used_granted_guid) placed.instance_guid = fresh_guid();
+        used_granted_guid = true;
+        Event add;
+        add.type = repl::StorageEventType::Add;
+        add.container = placed.container;
+        add.slot = slot;
+        add.item = placed;
+        add.instigated = true;
+        slots_[{static_cast<uint8_t>(placed.container), slot}] = placed;
+        out.outcome.events.push_back(std::move(add));
+        item.quantity -= piece;
+    }
+    if (item.quantity > 0) {
+        if (used_granted_guid) item.instance_guid.clear();   // the rest of an over-sized item has no guid of its own: the caller makes one if it keeps it
+        out.rest.push_back(std::move(item));
+    }
+}
+
+void Inventory::grant_resource(svc::InventoryItem item, const ItemInfo& info, const ItemCatalog& catalog, GrantResult& out, bool harvest) {
+    const int32_t max_stack = std::max(1, info.max_stack);
+    bool used_granted_guid = false;
+    // first the stacks the item joins, container by container and slot by slot
     for (int i = 0; i < kResourceContainers && item.quantity > 0; ++i) {
         const svc::ItemContainer c = resource_container(i);
         if (grid(c).empty()) continue;
         for (auto it = slots_.lower_bound({static_cast<uint8_t>(c), 0}); it != slots_.end() && it->first.first == static_cast<uint8_t>(c) && item.quantity > 0; ++it) {
             svc::InventoryItem& held = it->second;
-            if (held.item_record_id != item.item_record_id || held.quality != item.quality || held.quantity >= max_stack) continue;
+            if (!stacks_with(held, item, info.rarity) || held.quantity >= max_stack) continue;
             const int32_t take = std::min(item.quantity, max_stack - held.quantity);
-            Event remove;
-            remove.type = repl::StorageEventType::Remove;
-            remove.container = c;
-            remove.slot = held.slot;
-            remove.item = held;
-            remove.instigated = true;
-            held.quantity += take;
-            Event add;
-            add.type = repl::StorageEventType::Add;
-            add.container = c;
-            add.slot = held.slot;
-            add.item = held;
-            add.instigated = true;
-            out.outcome.events.push_back(std::move(remove));
-            out.outcome.events.push_back(std::move(add));
+            if (harvest) {
+                // the harvest path keeps the shape its tests accept: the old stack leaves and the whole new stack arrives
+                Event remove;
+                remove.type = repl::StorageEventType::Remove;
+                remove.container = c;
+                remove.slot = held.slot;
+                remove.item = held;
+                remove.instigated = true;
+                held.quantity += take;
+                Event add;
+                add.type = repl::StorageEventType::Add;
+                add.container = c;
+                add.slot = held.slot;
+                add.item = held;
+                add.instigated = true;
+                out.outcome.events.push_back(std::move(remove));
+                out.outcome.events.push_back(std::move(add));
+            } else {
+                // a top-up is one Add of the amount added (the stack keeps its guid, quality and state)
+                Event add;
+                add.type = repl::StorageEventType::Add;
+                add.container = c;
+                add.slot = held.slot;
+                add.item = held;
+                add.item.quantity = take;
+                add.instigated = true;
+                held.quantity += take;
+                out.outcome.events.push_back(std::move(add));
+            }
             item.quantity -= take;
         }
     }
     if (item.quantity <= 0) return;
-    // then a new stack at the first free rectangle of the first container that has one
-    const int32_t piece = std::min(item.quantity, max_stack);
-    for (int i = 0; i < kResourceContainers; ++i) {
-        const svc::ItemContainer c = resource_container(i);
-        const int slot = place(c, info.inv_w, info.inv_h, catalog);
-        if (slot < 0) continue;
-        svc::InventoryItem placed = item;
-        placed.container = c;
-        placed.slot = slot;
-        placed.quantity = piece;
-        Event add;
-        add.type = repl::StorageEventType::Add;
-        add.container = c;
-        add.slot = slot;
-        add.item = placed;
-        add.instigated = true;
-        slots_[{static_cast<uint8_t>(c), slot}] = placed;
-        out.outcome.events.push_back(std::move(add));
-        item.quantity -= piece;
-        if (item.quantity > 0) item.instance_guid.clear();   // the rest of an over-sized item has no guid of its own: the caller makes one if it keeps it
-        break;
+    // then new stacks at the first free rectangle of the first container that has one
+    while (item.quantity > 0) {
+        const int32_t piece = std::min(item.quantity, max_stack);
+        bool placed = false;
+        for (int i = 0; i < kResourceContainers && !placed; ++i) {
+            const svc::ItemContainer c = resource_container(i);
+            const int slot = place(c, info.inv_w, info.inv_h, catalog);
+            if (slot < 0) continue;
+            svc::InventoryItem made = item;
+            made.container = c;
+            made.slot = slot;
+            made.quantity = piece;
+            if (used_granted_guid) made.instance_guid = fresh_guid();
+            used_granted_guid = true;
+            Event add;
+            add.type = repl::StorageEventType::Add;
+            add.container = c;
+            add.slot = slot;
+            add.item = made;
+            add.instigated = true;
+            slots_[{static_cast<uint8_t>(c), slot}] = made;
+            out.outcome.events.push_back(std::move(add));
+            item.quantity -= piece;
+            placed = true;
+        }
+        if (!placed) break;
     }
-    if (item.quantity > 0) out.rest.push_back(std::move(item));
+    if (item.quantity > 0) {
+        if (used_granted_guid) item.instance_guid.clear();   // the rest of an over-sized item has no guid of its own: the caller makes one if it keeps it
+        out.rest.push_back(std::move(item));
+    }
 }
 // -- C.O.A . Cyb --
 
@@ -998,25 +1082,63 @@ Outcome Inventory::move_resource(svc::ItemContainer from, int from_slot, int32_t
     const svc::InventoryItem* item = at(from, from_slot);
     if (!item) return refuse(std::string("no item in ") + container_name(from) + " slot " + std::to_string(from_slot));
     if (!guid_of(guid) || item->instance_guid != guid) return refuse(std::string("the item in ") + container_name(from) + " slot " + std::to_string(from_slot) + " is not the instance the client named");
-    if (count != item->quantity) return refuse("the move names " + std::to_string(count) + " of a stack of " + std::to_string(item->quantity) + " (splitting is not made)");
+    if (count < 1 || count > item->quantity) return refuse("the move names " + std::to_string(count) + " of a stack of " + std::to_string(item->quantity));
     if (from == to && from_slot == to_slot) return refuse("the item is moved onto its own slot");
     const ResourceGrid& g = grid(to);
     if (g.empty()) return refuse(std::string(container_name(to)) + " has no bag: it has no cells");
     if (!g.contains(to_slot)) return refuse(std::string(container_name(to)) + " slot " + std::to_string(to_slot) + " does not exist");
     const auto info = catalog.info(item->item_record_id);
-    const int w = info ? info->inv_w : 1, h = info ? info->inv_h : 1;
-    // the stack's own cells are free for the move: it may slide over itself
-    const std::string moved_guid = item->instance_guid;
-    if (!g.fits(to_slot, w, h, covered_cells(to, catalog, &moved_guid))) {
-        return refuse(std::string("a ") + std::to_string(w) + " x " + std::to_string(h) + " item does not fit " + container_name(to) + " slot " + std::to_string(to_slot) +
-                      " (outside the grid, on a blocked cell or on another item: a move onto an item is a swap or a fill, which are not made)");
+    if (!info) return refuse("the item's record is not one this server knows");
+    const int w = info->inv_w, h = info->inv_h;
+    const svc::InventoryItem before = *item;
+    const std::string moved_guid = before.instance_guid;
+    const svc::InventoryItem* target = find(to, to_slot);
+    if (target) {
+        if (!stacks_with(before, *target, info->rarity)) {
+            return refuse(std::string(container_name(to)) + " slot " + std::to_string(to_slot) + " holds another item (a move onto an item is a swap)");
+        }
+        const int32_t max_stack = std::max(1, info->max_stack);
+        const int32_t room = max_stack > target->quantity ? max_stack - target->quantity : 0;
+        if (count > room) {
+            return refuse("the move names " + std::to_string(count) + " of a stack of " + std::to_string(before.quantity) + "; only " + std::to_string(room) + " fit onto the target");
+        }
+        const svc::InventoryItem target_before = *target;
+        Event remove;
+        remove.type = repl::StorageEventType::Remove;
+        remove.container = from;
+        remove.slot = from_slot;
+        remove.item = before;
+        remove.count = count;
+        Event add;
+        add.type = repl::StorageEventType::Add;
+        add.container = to;
+        add.slot = to_slot;
+        add.item = target_before;
+        add.item.quantity = count;
+        slots_[{static_cast<uint8_t>(to), to_slot}].quantity = target_before.quantity + count;
+        if (count == before.quantity) slots_.erase({static_cast<uint8_t>(from), from_slot});
+        else slots_[{static_cast<uint8_t>(from), from_slot}].quantity = before.quantity - count;
+        out.events = {std::move(remove), std::move(add)};
+        out.ok = true;
+        return out;
     }
-    svc::InventoryItem moved = *item;
+    // a whole stack's own cells are free for the move (it may slide over itself); a split leaves the source in place, so its cells still count
+    const bool split = count < before.quantity;
+    if (!g.fits(to_slot, w, h, covered_cells(to, catalog, split ? nullptr : &moved_guid))) {
+        return refuse(std::string("a ") + std::to_string(w) + " x " + std::to_string(h) + " item does not fit " + container_name(to) + " slot " + std::to_string(to_slot) +
+                      " (outside the grid, on a blocked cell or on another item: a move onto an item is a swap)");
+    }
+    svc::InventoryItem moved = before;
     Event remove;
     remove.type = repl::StorageEventType::Remove;
     remove.container = from;
     remove.slot = from_slot;
-    remove.item = moved;
+    remove.item = before;
+    remove.count = split ? count : 0;
+    if (split) {
+        moved.instance_guid = fresh_guid();
+        moved.quantity = count;
+    }
     moved.container = to;
     moved.slot = to_slot;
     Event add;
@@ -1024,7 +1146,8 @@ Outcome Inventory::move_resource(svc::ItemContainer from, int from_slot, int32_t
     add.container = to;
     add.slot = to_slot;
     add.item = moved;
-    slots_.erase({static_cast<uint8_t>(from), from_slot});
+    if (split) slots_[{static_cast<uint8_t>(from), from_slot}].quantity = before.quantity - count;
+    else slots_.erase({static_cast<uint8_t>(from), from_slot});
     slots_[{static_cast<uint8_t>(to), to_slot}] = moved;
     out.events = {std::move(remove), std::move(add)};
     out.ok = true;
@@ -1048,21 +1171,62 @@ Outcome Inventory::move(svc::ItemContainer from, int from_slot, int32_t count, c
     if (!item) return refuse("no item in Backpack slot " + std::to_string(from_slot));
     if (to_slot < 0 || to_slot >= kBackpackSlots) return refuse("Backpack slot " + std::to_string(to_slot) + " does not exist");
     if (!guid_of(guid) || item->instance_guid != guid) return refuse("the item in Backpack slot " + std::to_string(from_slot) + " is not the instance the client named");
-    if (count != item->quantity) return refuse("the move names " + std::to_string(count) + " of a stack of " + std::to_string(item->quantity) + " (splitting is not made)");
-    if (find(to, to_slot)) return refuse("Backpack slot " + std::to_string(to_slot) + " is not empty (a move onto an item is a swap)");
-    svc::InventoryItem moved = *item;
+    if (count < 1 || count > item->quantity) return refuse("the move names " + std::to_string(count) + " of a stack of " + std::to_string(item->quantity));
+    const svc::InventoryItem before = *item;
+    const svc::InventoryItem* target = find(to, to_slot);
+    if (target) {
+        if (!catalog) return refuse("a move onto a stack needs the item catalog");
+        const auto info = catalog->info(before.item_record_id);
+        if (!info) return refuse("the item's record is not one this server knows");
+        if (!stacks_with(before, *target, info->rarity)) {
+            return refuse("Backpack slot " + std::to_string(to_slot) + " holds another item (a move onto an item is a swap)");
+        }
+        const int32_t max_stack = std::max(1, info->max_stack);
+        const int32_t room = max_stack > target->quantity ? max_stack - target->quantity : 0;
+        if (count > room) {
+            return refuse("the move names " + std::to_string(count) + " of a stack of " + std::to_string(before.quantity) + "; only " + std::to_string(room) + " fit onto the target");
+        }
+        const svc::InventoryItem target_before = *target;
+        Event remove;
+        remove.type = repl::StorageEventType::Remove;
+        remove.container = from;
+        remove.slot = from_slot;
+        remove.item = before;
+        remove.count = count;
+        Event add;
+        add.type = repl::StorageEventType::Add;
+        add.container = to;
+        add.slot = to_slot;
+        add.item = target_before;
+        add.item.quantity = count;
+        slots_[{static_cast<uint8_t>(to), to_slot}].quantity = target_before.quantity + count;
+        if (count == before.quantity) slots_.erase({static_cast<uint8_t>(from), from_slot});
+        else slots_[{static_cast<uint8_t>(from), from_slot}].quantity = before.quantity - count;
+        out.events = {std::move(remove), std::move(add)};
+        out.ok = true;
+        return out;
+    }
+    // an empty slot: the whole stack moves, or a part of it becomes a new stack
+    const bool split = count < before.quantity;
+    svc::InventoryItem moved = before;
     Event remove;
     remove.type = repl::StorageEventType::Remove;
     remove.container = from;
     remove.slot = from_slot;
-    remove.item = moved;
+    remove.item = before;
+    remove.count = split ? count : 0;
+    if (split) {
+        moved.instance_guid = fresh_guid();
+        moved.quantity = count;
+    }
     moved.slot = to_slot;
     Event add;
     add.type = repl::StorageEventType::Add;
     add.container = to;
     add.slot = to_slot;
     add.item = moved;
-    slots_.erase({static_cast<uint8_t>(from), from_slot});
+    if (split) slots_[{static_cast<uint8_t>(from), from_slot}].quantity = before.quantity - count;
+    else slots_.erase({static_cast<uint8_t>(from), from_slot});
     slots_[{static_cast<uint8_t>(to), to_slot}] = moved;
     out.events = {std::move(remove), std::move(add)};
     out.ok = true;
@@ -1139,13 +1303,71 @@ Outcome Inventory::grant_cargo(svc::InventoryItem item, const ItemCatalog& catal
 }
 
 Outcome Inventory::swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
-                        const std::string& to_guid, int32_t to_count) {
+                        const std::string& to_guid, int32_t to_count, const ItemCatalog* catalog) {
     Outcome out;
     const auto refuse = [&](std::string why) {
         out.refusal = std::move(why);
         return out;
     };
-    if (is_resource(from) || is_resource(to)) return refuse("the items of the resource containers are not swapped");
+    if (is_resource(from) || is_resource(to)) {
+        if (!is_resource(from) || !is_resource(to)) return refuse("a material and an item of the item bag never swap");
+        if (!catalog) return refuse("a swap of material stacks needs the item catalog");
+        if (from == to && from_slot == to_slot) return refuse("the item is swapped with itself");
+        const ResourceGrid& from_grid = grid(from);
+        const ResourceGrid& to_grid = grid(to);
+        if (from_grid.empty()) return refuse(std::string(container_name(from)) + " has no bag: it has no cells");
+        if (to_grid.empty()) return refuse(std::string(container_name(to)) + " has no bag: it has no cells");
+        if (!from_grid.contains(from_slot)) return refuse(std::string(container_name(from)) + " slot " + std::to_string(from_slot) + " does not exist");
+        if (!to_grid.contains(to_slot)) return refuse(std::string(container_name(to)) + " slot " + std::to_string(to_slot) + " does not exist");
+        const svc::InventoryItem* a = at(from, from_slot);
+        const svc::InventoryItem* b = at(to, to_slot);
+        if (!a) return refuse(std::string("no item in ") + container_name(from) + " slot " + std::to_string(from_slot));
+        if (!b) return refuse(std::string("no item in ") + container_name(to) + " slot " + std::to_string(to_slot) + " to swap with");
+        if (!guid_of(guid) || a->instance_guid != guid) {
+            return refuse(std::string("the item in ") + container_name(from) + " slot " + std::to_string(from_slot) + " is not the instance the client named");
+        }
+        if (!guid_of(to_guid) || b->instance_guid != to_guid) {
+            return refuse(std::string("the item in ") + container_name(to) + " slot " + std::to_string(to_slot) + " is not the instance the client named");
+        }
+        if (count != a->quantity || to_count != b->quantity) return refuse("a swap names whole stacks only");
+        const auto info_a = catalog->info(a->item_record_id);
+        const auto info_b = catalog->info(b->item_record_id);
+        if (!info_a || !info_b) return refuse("the item's record is not one this server knows");
+        // the final places are judged together: the first stack's new place, then the second's against it and every other item (each stack checked on its own
+        // with both ignored would let two rectangles of one grid land on one cell)
+        if (from == to) {
+            std::vector<bool> cells = covered_cells(from, *catalog, &a->instance_guid, &b->instance_guid);
+            if (!from_grid.fits(to_slot, info_a->inv_w, info_a->inv_h, cells)) {
+                return refuse(std::string("the stack does not fit ") + container_name(to) + " slot " + std::to_string(to_slot));
+            }
+            from_grid.cover(cells, to_slot, info_a->inv_w, info_a->inv_h);
+            if (!from_grid.fits(from_slot, info_b->inv_w, info_b->inv_h, cells)) {
+                return refuse(std::string("the other stack does not fit ") + container_name(from) + " slot " + std::to_string(from_slot));
+            }
+        } else {
+            if (!from_grid.fits(from_slot, info_b->inv_w, info_b->inv_h, covered_cells(from, *catalog, &a->instance_guid, &b->instance_guid))) {
+                return refuse("the other stack does not fit " + std::string(container_name(from)) + " slot " + std::to_string(from_slot));
+            }
+            if (!to_grid.fits(to_slot, info_a->inv_w, info_a->inv_h, covered_cells(to, *catalog, &a->instance_guid, &b->instance_guid))) {
+                return refuse("the other stack does not fit " + std::string(container_name(to)) + " slot " + std::to_string(to_slot));
+            }
+        }
+        svc::InventoryItem na = *a, nb = *b;   // as they were
+        Event remove_a{repl::StorageEventType::Remove, from, from_slot, na};
+        Event remove_b{repl::StorageEventType::Remove, to, to_slot, nb};
+        svc::InventoryItem a_at_to = na, b_at_from = nb;
+        a_at_to.container = to;
+        a_at_to.slot = to_slot;
+        b_at_from.container = from;
+        b_at_from.slot = from_slot;
+        Event add_b{repl::StorageEventType::Add, from, from_slot, b_at_from};
+        Event add_a{repl::StorageEventType::Add, to, to_slot, a_at_to};
+        slots_[{static_cast<uint8_t>(from), from_slot}] = b_at_from;
+        slots_[{static_cast<uint8_t>(to), to_slot}] = a_at_to;
+        out.events = {std::move(remove_a), std::move(remove_b), std::move(add_b), std::move(add_a)};
+        out.ok = true;
+        return out;
+    }
     if (from != svc::ItemContainer::Backpack || to != svc::ItemContainer::Backpack) return refuse("only swaps inside the Backpack are made");
     if (from_slot == to_slot) return refuse("the item is swapped with itself");
     const svc::InventoryItem* a = at(from, from_slot);

@@ -118,7 +118,14 @@ struct FakeCatalog : items::ItemCatalog {
         const auto it = m.find(record);
         return it == m.end() ? std::nullopt : std::optional<items::ItemInfo>(it->second);
     }
-    void add(int64_t record, std::vector<uint8_t> slots, bool two_handed = false) { m[record] = items::ItemInfo{std::move(slots), two_handed}; }
+    void add(int64_t record, std::vector<uint8_t> slots, bool two_handed = false, int max_stack = 1) {
+        items::ItemInfo info;
+        info.equip_slots = std::move(slots);
+        info.two_handed = two_handed;
+        info.max_stack = max_stack;
+        info.rarity = items::default_rarity_facts();
+        m[record] = std::move(info);
+    }
 };
 
 static FakeCatalog fixture_catalog() {
@@ -531,7 +538,6 @@ static void test_move_and_swap() {
         {"a move to a slot past the bag", inv.move(Bag, 32, 1, guid_n(1), Bag, 70)},
         {"a move to a negative slot", inv.move(Bag, 32, 1, guid_n(1), Bag, -1)},
         {"a move of another instance", inv.move(Bag, 32, 1, guid_n(9), Bag, 10)},
-        {"a split", inv.move(Bag, 55, 5, guid_n(2), Bag, 10)},
         {"a count of 0", inv.move(Bag, 32, 0, guid_n(1), Bag, 10)},
         {"a move out of the bag", inv.move(Bag, 32, 1, guid_n(1), Worn, 10)},
         {"a move from the equipment", inv.move(Worn, 2, 1, guid_n(4), Bag, 10)},
@@ -543,6 +549,158 @@ static void test_move_and_swap() {
         {"a swap into the equipment", inv.swap(Bag, 32, 1, guid_n(1), Worn, 2, guid_n(4), 1)},
     };
     for (const Case& c : cases) CHECK(!c.o.ok && c.o.events.empty() && !c.o.refusal.empty() && unchanged_by(before, inv), (std::string(c.name) + " is refused").c_str());
+}
+
+// ---- joining and splitting stacks ----------------------------------------------------------------------------------------------
+
+/// A potion that stacks to `max_stack` at a slot, quality and quantity, for the tests below.
+static svc::InventoryItem stack_item(int slot, uint32_t n, int32_t quantity, int32_t quality) {
+    svc::InventoryItem it = make_item(Bag, slot, fi::kPotion, n, quantity);
+    it.quality = quality;
+    return it;
+}
+
+static void test_stack_join() {
+    std::printf("joining stacks inside the item bag\n");
+    FakeCatalog catalog = fixture_catalog();
+    catalog.add(fi::kPotion, {}, false, 20);
+    // target 14 at quality 20, source 7 at quality 25: one colour (Rare), the target's quality stays
+    Inv inv = inventory_of({stack_item(1, 1, 7, 25), stack_item(4, 2, 14, 20)});
+    auto o = inv.move(Bag, 1, 6, guid_n(1), Bag, 4, &catalog);
+    CHECK(o.ok && o.events.size() == 2, "a Move of 6 of 7 onto 14 of 20: two events");
+    CHECK(o.events.size() == 2 && same_event(o.events[0], Remove, Bag, 1, fi::kPotion, true) && o.events[0].count == 6 && o.events[0].item.quantity == 7,
+          "the Remove names the source stack as it was (7) and the 6 that leave");
+    CHECK(o.events.size() == 2 && same_event(o.events[1], Add, Bag, 4, fi::kPotion, true) && o.events[1].item.quantity == 6 &&
+              o.events[1].item.instance_guid == guid_n(2) && o.events[1].item.quality == 20,
+          "the Add names 6 in the target's slot, with the target's guid and quality 20");
+    CHECK(inv.at(Bag, 4) && inv.at(Bag, 4)->quantity == 20 && inv.at(Bag, 4)->quality == 20 && inv.at(Bag, 4)->instance_guid == guid_n(2) &&
+              inv.at(Bag, 1) && inv.at(Bag, 1)->quantity == 1 && inv.at(Bag, 1)->quality == 25,
+          "the target is 20 at its own quality and guid; the source keeps 1");
+    // a Move of 7 over the room of 6 is refused whole
+    inv = inventory_of({stack_item(1, 1, 7, 25), stack_item(4, 2, 14, 20)});
+    const Inv before = inv;
+    o = inv.move(Bag, 1, 7, guid_n(1), Bag, 4, &catalog);
+    CHECK(!o.ok && o.events.empty() && unchanged_by(before, inv), "a Move of 7 over the room of 6 is refused, both stacks unchanged");
+    // different colours: one Move onto the other is refused; the Swap exchanges them whole
+    inv = inventory_of({stack_item(1, 1, 7, 10), stack_item(4, 2, 14, 20)});
+    const Inv before_colour = inv;
+    o = inv.move(Bag, 1, 6, guid_n(1), Bag, 4, &catalog);
+    CHECK(!o.ok && o.events.empty() && unchanged_by(before_colour, inv), "qualities 20 and 10 are different colours: the Move of 6 (the room) is refused");
+    o = inv.swap(Bag, 1, 7, guid_n(1), Bag, 4, guid_n(2), 14);
+    CHECK(o.ok && o.events.size() == 4 && same_event(o.events[0], Remove, Bag, 1, fi::kPotion, true) && same_event(o.events[1], Remove, Bag, 4, fi::kPotion, true) &&
+              same_event(o.events[2], Add, Bag, 1, fi::kPotion, true) && same_event(o.events[3], Add, Bag, 4, fi::kPotion, true),
+          "the client's Swap of the two colours is four events");
+    CHECK(inv.at(Bag, 1)->instance_guid == guid_n(2) && inv.at(Bag, 1)->quality == 20 && inv.at(Bag, 4)->instance_guid == guid_n(1) && inv.at(Bag, 4)->quality == 10,
+          "the two whole stacks changed places");
+    // the clamped rarity: a record that is never below Rare joins a quality 1 (Common band) to a quality 20 (Rare band)
+    FakeCatalog rare_only = fixture_catalog();
+    rare_only.add(fi::kPotion, {}, false, 20);
+    rare_only.m[fi::kPotion].rarity.rarity_min = 2;
+    inv = inventory_of({stack_item(1, 1, 7, 1), stack_item(4, 2, 14, 20)});
+    o = inv.move(Bag, 1, 6, guid_n(1), Bag, 4, &rare_only);
+    CHECK(o.ok && inv.at(Bag, 4) && inv.at(Bag, 4)->quantity == 20 && inv.at(Bag, 4)->quality == 20 && inv.at(Bag, 4)->instance_guid == guid_n(2),
+          "a record that is never below Rare: quality 1 and quality 20 are both Rare and join (the clamped band, not the raw one)");
+    // a full stack: the Move is refused (a Swap is asked for)
+    inv = inventory_of({stack_item(1, 1, 7, 20), stack_item(4, 2, 20, 20)});
+    const Inv before_full = inv;
+    o = inv.move(Bag, 1, 7, guid_n(1), Bag, 4, &catalog);
+    CHECK(!o.ok && o.events.empty() && unchanged_by(before_full, inv), "a Move onto a full stack is refused");
+    o = inv.swap(Bag, 1, 7, guid_n(1), Bag, 4, guid_n(2), 20);
+    CHECK(o.ok && o.events.size() == 4 && inv.at(Bag, 4)->instance_guid == guid_n(1) && inv.at(Bag, 1)->instance_guid == guid_n(2) && inv.at(Bag, 1)->quantity == 20,
+          "the Swap onto the full stack exchanges them whole");
+    // a different state: the same record and colour, another durability, does not join
+    svc::InventoryItem target = stack_item(4, 2, 14, 20);
+    target.durability = 10;   // (stack_item's make_item is 11)
+    inv = inventory_of({stack_item(1, 1, 7, 20), target});
+    const Inv before_state = inv;
+    o = inv.move(Bag, 1, 6, guid_n(1), Bag, 4, &catalog);
+    CHECK(!o.ok && o.events.empty() && unchanged_by(before_state, inv), "the same record and colour with another durability does not join");
+    // a different lock is a different state too
+    target = stack_item(4, 2, 14, 20);
+    target.lock_expiration = 1770131735;
+    inv = inventory_of({stack_item(1, 1, 7, 20), target});
+    const Inv before_lock = inv;
+    o = inv.move(Bag, 1, 6, guid_n(1), Bag, 4, &catalog);
+    CHECK(!o.ok && o.events.empty() && unchanged_by(before_lock, inv), "the same record and colour with another lock does not join");
+    // the creation time is not part of the rule: two stacks made at different times join, and the target keeps its time
+    svc::InventoryItem older = stack_item(1, 1, 7, 20);
+    older.created_at_ms = 1'700'000'000'000ll;
+    svc::InventoryItem newer = stack_item(4, 2, 14, 20);
+    newer.created_at_ms = 1'771'299'474'000ll;
+    inv = inventory_of({older, newer});
+    o = inv.move(Bag, 1, 6, guid_n(1), Bag, 4, &catalog);
+    CHECK(o.ok && inv.at(Bag, 4) && inv.at(Bag, 4)->quantity == 20 && inv.at(Bag, 4)->created_at_ms == 1'771'299'474'000ll && inv.at(Bag, 1) &&
+              inv.at(Bag, 1)->quantity == 1,
+          "two stacks made at different times join; the joined stack keeps the target's creation time");
+}
+
+static void test_stack_split() {
+    std::printf("splitting a stack inside the item bag\n");
+    FakeCatalog catalog = fixture_catalog();
+    catalog.add(fi::kPotion, {}, false, 20);
+    // 14 in slot 5, a Move of 5 to the empty slot 20
+    Inv inv = inventory_of({make_item(Bag, 5, fi::kPotion, 1, 14)});
+    auto o = inv.move(Bag, 5, 5, guid_n(1), Bag, 20, &catalog);
+    const svc::InventoryItem* left = inv.at(Bag, 5);
+    const svc::InventoryItem* piece = inv.at(Bag, 20);
+    CHECK(o.ok && left && left->quantity == 9 && left->instance_guid == guid_n(1), "the source keeps its guid and 9");
+    CHECK(piece && piece->quantity == 5 && piece->quality == (left ? left->quality : -1) && piece->item_record_id == fi::kPotion &&
+              piece->instance_guid != (left ? left->instance_guid : std::string()) && items::guid_of(piece->instance_guid).has_value(),
+          "a new stack of 5 with a new guid, the source's quality, in the slot the client named");
+    CHECK(o.events.size() == 2 && same_event(o.events[0], Remove, Bag, 5, fi::kPotion, true) && o.events[0].count == 5 && o.events[0].item.quantity == 14 &&
+              same_event(o.events[1], Add, Bag, 20, fi::kPotion, true) && o.events[1].item.quantity == 5 && piece && o.events[1].item.instance_guid == piece->instance_guid,
+          "the events are the Remove of 5 (the stack as it was) and the Add of the new 5");
+    // the 5 dragged back onto the 9: 14 in the 9's slot
+    const std::string fresh = piece ? piece->instance_guid : std::string();
+    o = inv.move(Bag, 20, 5, fresh, Bag, 5, &catalog);
+    CHECK(o.ok && inv.at(Bag, 5) && inv.at(Bag, 5)->quantity == 14 && inv.at(Bag, 5)->instance_guid == guid_n(1) && !inv.at(Bag, 20),
+          "the new stack joins the 9 again: 14 in the 9's slot");
+    // a Move naming the whole stack is a plain move, not a split
+    inv = inventory_of({make_item(Bag, 5, fi::kPotion, 1, 14)});
+    o = inv.move(Bag, 5, 14, guid_n(1), Bag, 20, &catalog);
+    CHECK(o.ok && inv.at(Bag, 20) && inv.at(Bag, 20)->quantity == 14 && inv.at(Bag, 20)->instance_guid == guid_n(1) && !inv.at(Bag, 5),
+          "a Move of the whole 14 is a plain move: the same guid");
+    // a count below 1 is refused; a stack of 1 has no split below it
+    inv = inventory_of({make_item(Bag, 5, fi::kPotion, 1, 1)});
+    const Inv before = inv;
+    o = inv.move(Bag, 5, 0, guid_n(1), Bag, 20, &catalog);
+    CHECK(!o.ok && o.events.empty() && unchanged_by(before, inv), "a split of a stack of one (a count of 0) is refused");
+    o = inv.move(Bag, 5, 1, guid_n(1), Bag, 20, &catalog);
+    CHECK(o.ok && inv.at(Bag, 20) && inv.at(Bag, 20)->quantity == 1 && inv.at(Bag, 20)->instance_guid == guid_n(1), "its one item still moves whole as a plain move");
+}
+
+static void test_stack_pickups() {
+    std::printf("pick-ups top up the stacks they join, lowest slot first\n");
+    FakeCatalog catalog = fixture_catalog();
+    catalog.add(fi::kPotion, {}, false, 20);
+    Inv inv = inventory_of({make_item(Bag, 2, fi::kPotion, 1, 14), make_item(Bag, 5, fi::kPotion, 2, 18)});
+    auto r = inv.grant_what_fits({make_item(Bag, 0, fi::kPotion, 3, 10)}, catalog);
+    CHECK(r.outcome.ok && r.rest.empty() && r.outcome.events.size() == 3, "ten onto stacks of 14 and 18 (a stack of 20): three Adds");
+    CHECK(r.outcome.events.size() == 3 && r.outcome.events[0].type == Add && r.outcome.events[0].slot == 2 && r.outcome.events[0].item.quantity == 6 &&
+              r.outcome.events[0].item.instance_guid == guid_n(1), "the lowest slot first: one Add of 6 into slot 2");
+    CHECK(r.outcome.events.size() == 3 && r.outcome.events[1].type == Add && r.outcome.events[1].slot == 5 && r.outcome.events[1].item.quantity == 2 &&
+              r.outcome.events[1].item.instance_guid == guid_n(2), "then one Add of 2 into slot 5");
+    CHECK(r.outcome.events.size() == 3 && r.outcome.events[2].type == Add && r.outcome.events[2].slot == 0 && r.outcome.events[2].item.quantity == 2 &&
+              r.outcome.events[2].item.instance_guid == guid_n(3), "the last 2 start a new stack in the first free slot, with the granted guid");
+    CHECK(inv.at(Bag, 2)->quantity == 20 && inv.at(Bag, 5)->quantity == 20 && inv.at(Bag, 0) && inv.at(Bag, 0)->quantity == 2, "the stacks are 20, 20 and 2");
+    // no free slot: the first two top-ups happen, the last 2 are the caller's rest
+    std::vector<svc::InventoryItem> full = {make_item(Bag, 2, fi::kPotion, 1, 14), make_item(Bag, 5, fi::kPotion, 2, 18)};
+    for (int s = 0; s < 70; ++s) {
+        if (s != 2 && s != 5) full.push_back(make_item(Bag, s, fi::kRingA, 100 + static_cast<uint32_t>(s)));
+    }
+    Inv packed = inventory_of(full);
+    auto p = packed.grant_what_fits({make_item(Bag, 0, fi::kPotion, 3, 10)}, catalog);
+    CHECK(p.outcome.ok && p.outcome.events.size() == 2 && p.rest.size() == 1 && p.rest[0].quantity == 2, "a full bag: the two top-ups are placed and the 2 are the rest");
+    CHECK(packed.at(Bag, 2)->quantity == 20 && packed.at(Bag, 5)->quantity == 20, "...slot 2 and slot 5 each reach 20");
+}
+
+static void test_stack_consume() {
+    std::printf("using up part of a stack is one Remove\n");
+    Inv inv = inventory_of({make_item(Bag, 1, fi::kPotion, 1, 14)});
+    auto o = inv.consume(Bag, 1, guid_n(1), 3);
+    CHECK(o.ok && o.events.size() == 1 && o.events[0].type == Remove && o.events[0].slot == 1 && o.events[0].count == 3 && o.events[0].item.quantity == 14 &&
+              o.events[0].item.instance_guid == guid_n(1), "consume 3 of 14: ONE Remove of 3 that names the stack as it was");
+    CHECK(inv.at(Bag, 1) && inv.at(Bag, 1)->quantity == 11 && inv.at(Bag, 1)->instance_guid == guid_n(1), "the stack keeps 11 and its guid");
 }
 
 // ---- the visible gear ----------------------------------------------------------------------------------------------------------
@@ -1144,6 +1302,109 @@ static void test_retail_answers_through_the_bootstrap() {
 }
 // (C_Y_B) (C O A)
 
+/// The storage payload a Send carries, read back from its parameter bits.
+static std::optional<repl::StoragePayload> storage_payload_of(const bs::Send& send, const schema::ClassSchema& cls) {
+    const auto bits = param_bits_of(send, cls);
+    if (bits.size() != 1) return std::nullopt;
+    const schema::RpcSchema* rpc = cls.rpc("ClientReceiveStoragePayload");
+    if (!rpc) return std::nullopt;
+    repl::CodecOptions opts;
+    opts.inline_objects = true;
+    size_t pos = 0;
+    auto params = repl::read_rpc_params(*rpc, bits[0].data(), bits[0].bit_pos(), pos, opts);
+    if (!params || pos != bits[0].bit_pos()) return std::nullopt;
+    repl::RpcCall call;
+    call.rpc = rpc;
+    call.params = std::move(*params);
+    call.decoded = true;
+    return repl::parse_storage_payload(call);
+}
+
+/// Every slot of a storage payload is the inventory's: the item as the wire carries it, or the empty instance.
+static bool payload_is_inventory(const repl::StoragePayload& payload, const Inv& inv, ItemContainer container) {
+    const int slots = items::slot_count(container);
+    if (payload.maximum_items != slots || payload.storage.size() != static_cast<size_t>(slots)) return false;
+    for (int slot = 0; slot < slots; ++slot) {
+        const svc::InventoryItem* it = inv.at(container, slot);
+        const repl::ItemInstance want = it ? items::to_instance(*it) : repl::ItemInstance{};
+        const repl::StorageSlot& got = payload.storage[static_cast<size_t>(slot)];
+        if (!(got.item == want)) return false;
+        if (it && got.slot != slot) return false;
+    }
+    return true;
+}
+
+/// A bootstrap setup with a potion stack of 14 in bag slot 4 and one of 7 in slot 1.
+static bs::PlayerSetup stack_setup() {
+    const auto base = bs::captured_character_setup();
+    if (!base) std::exit(2);
+    bs::PlayerSetup setup = *base;
+    setup.items.clear();
+    for (const svc::InventoryItem& it : {stack_item(4, 204, 14, 1), stack_item(1, 201, 7, 1)}) {
+        bs::StoredItem si;
+        si.storage = bs::ItemStorage::Backpack;
+        si.slot = it.slot;
+        si.item = items::to_instance(it);
+        setup.items.push_back(si);
+    }
+    setup.held_items.array_key = bs::kInitialHeldItemsKey;
+    return setup;
+}
+
+static void test_top_up_payloads() {
+    std::printf("the payload after a top-up Add holds the whole stack\n");
+    const Inv expected = inventory_of({stack_item(4, 204, 20, 1), stack_item(1, 201, 7, 1)});
+    // a pick-up top-up: ONE Add of 6 into the stack of 14 (the grant's shape)
+    {
+        bs::PlayerBootstrap pb(stack_setup(), bs::GameStateMode::Tier2);
+        CHECK(pb.ok(), "the bootstrap builds from the two stacks");
+        if (!pb.ok()) return;
+        const schema::ClassSchema& pawn_cls = *pb.pawn().obj.schema;
+        bs::ItemEvent add;
+        add.type = repl::StorageEventType::Add;
+        add.storage = bs::ItemStorage::Backpack;
+        add.slot = 4;
+        add.item = items::to_instance(stack_item(4, 204, 14, 1));
+        add.item.quantity = 6;
+        add.instigated = true;
+        const std::vector<bs::ItemEvent> events{add};
+        const auto send = pb.item_events(events);
+        CHECK(send.has_value(), "the top-up Add builds");
+        const auto payload_send = pb.storage_payload(bs::StorageKind::Backpack, bs::Role::Pawn);
+        const auto payload = payload_send ? storage_payload_of(*payload_send, pawn_cls) : std::nullopt;
+        CHECK(payload && payload->target == pb.setup().guids.backpack && payload_is_inventory(*payload, expected, Bag),
+              "after a pick-up top-up every slot of the item bag's payload is the inventory's: the stack is 20, not the 6 that were added");
+    }
+    // a warehouse join into the bag: the warehouse's Remove, then the bag's Add of 6 (the same one-Add top-up)
+    {
+        bs::PlayerBootstrap pb(stack_setup(), bs::GameStateMode::Tier2);
+        CHECK(pb.ok(), "(the bootstrap builds again)");
+        if (!pb.ok()) return;
+        const schema::ClassSchema& pawn_cls = *pb.pawn().obj.schema;
+        bs::ItemEvent remove;
+        remove.type = repl::StorageEventType::Remove;
+        remove.slot = 0;
+        remove.item = items::to_instance(stack_item(1, 201, 7, 1));
+        remove.count = 6;
+        remove.container = emit::FIntrepidNetworkGUID{777777, 60, 5};
+        bs::ItemEvent add;
+        add.type = repl::StorageEventType::Add;
+        add.storage = bs::ItemStorage::Backpack;
+        add.slot = 4;
+        add.item = items::to_instance(stack_item(4, 204, 14, 1));
+        add.item.quantity = 6;
+        add.instigated = true;
+        const std::vector<bs::ItemEvent> events{remove, add};
+        const auto send = pb.item_events(events);
+        CHECK(send.has_value(), "the warehouse join's events build");
+        const auto payload_send = pb.storage_payload(bs::StorageKind::Backpack, bs::Role::Pawn);
+        const auto payload = payload_send ? storage_payload_of(*payload_send, pawn_cls) : std::nullopt;
+        CHECK(payload && payload->target == pb.setup().guids.backpack && payload_is_inventory(*payload, expected, Bag),
+              "after a warehouse join into the bag every slot of the item bag's payload is the inventory's: the stack is 20, not the 6 that were added");
+    }
+}
+// (C_Y_B) (C O A)
+
 /// restore(checkpoint) puts the HeldItems array back with the shadows: apply_equipment moves the array key before the update is built, and a chain the
 /// connection did not take is built again from the checkpoint, so the retry must move the key once, to the same bits, not twice.
 static void test_restore_undoes_the_held_items() {
@@ -1403,7 +1664,7 @@ static void test_fuzz() {
     std::printf("hostile requests\n");
     const FakeCatalog catalog = fixture_catalog();
     std::mt19937_64 rng(0xB2B2);
-    size_t applied = 0, refused = 0, invariant_breaks = 0, lost = 0;
+    size_t applied = 0, refused = 0, invariant_breaks = 0;
     for (int round = 0; round < 60; ++round) {
         std::vector<svc::InventoryItem> start = bard_kit();
         uint32_t n = 500;
@@ -1414,8 +1675,6 @@ static void test_fuzz() {
         while (static_cast<int>(used.size()) < bag_items) used.insert(static_cast<int>(rng() % 70));
         for (const int s : used) start.push_back(make_item(Bag, s, pool[rng() % (sizeof pool / sizeof pool[0])], ++n, 1 + static_cast<int32_t>(rng() % 3)));
         Inv inv = inventory_of(start);
-        std::multiset<std::string> guids;
-        for (const auto& it : inv.items()) guids.insert(it.instance_guid);
         for (int step = 0; step < 300; ++step) {
             const Inv before = inv;
             items::Outcome o;
@@ -1465,21 +1724,26 @@ static void test_fuzz() {
                 continue;
             }
             ++applied;
-            // what an applied request leaves: valid items, one per slot and guid, none made or lost, the events the inventory's difference
-            std::multiset<std::string> now;
+            // what an applied request leaves: valid items, one per slot and guid, the total quantity kept, the events the inventory's difference
             std::string why;
-            for (const auto& it : inv.items()) now.insert(it.instance_guid);
-            if (now != guids) ++lost;
-            if (!Inv::from_items(inv.items(), why) || inv.size() != before.size()) ++invariant_breaks;
-            // the events, replayed on the earlier inventory, give the later one
+            int64_t quantity_before = 0, quantity_after = 0;
+            for (const auto& it : before.items()) quantity_before += it.quantity;
+            for (const auto& it : inv.items()) quantity_after += it.quantity;
+            if (!Inv::from_items(inv.items(), why) || quantity_before != quantity_after) ++invariant_breaks;
+            // the events, replayed on the earlier inventory, give the later one (an Add of the stack already in the slot tops it up; a Remove
+            // that names a count takes that many and leaves the rest)
             std::map<std::pair<int, int>, svc::InventoryItem> replay;
             for (const auto& it : before.items()) replay[{static_cast<int>(it.container), it.slot}] = it;
             for (const items::Event& e : o.events) {
                 const std::pair<int, int> key{static_cast<int>(e.container), e.slot};
-                if (e.type == Add) replay[key] = e.item;
-                else {
+                if (e.type == Add) {
+                    const auto held = replay.find(key);
+                    if (held != replay.end() && held->second.instance_guid == e.item.instance_guid) held->second.quantity += e.item.quantity;
+                    else replay[key] = e.item;
+                } else {
                     const auto f = replay.find(key);
                     if (f == replay.end() || f->second.instance_guid != e.item.instance_guid) ++invariant_breaks;
+                    else if (e.count > 0 && e.count < f->second.quantity) f->second.quantity -= e.count;
                     else replay.erase(f);
                 }
             }
@@ -1489,8 +1753,8 @@ static void test_fuzz() {
         }
     }
     CHECK(applied > 1000 && refused > 1000, (std::to_string(applied) + " requests applied and " + std::to_string(refused) + " refused").c_str());
-    CHECK(invariant_breaks == 0 && lost == 0,
-          "never a broken invariant: the items stay valid, one per slot and guid; none is made or lost; the events replayed on the earlier inventory give the later one; a refusal changes and says nothing");
+    CHECK(invariant_breaks == 0,
+          "never a broken invariant: the items stay valid, one per slot and guid; the total quantity is kept (a split may make a new stack); the events replayed on the earlier inventory give the later one; a refusal changes and says nothing");
 }
 
 // ---- the review's fuzz: long random sequences with the strongest invariants ------------------------------------------------------------
@@ -1832,6 +2096,12 @@ static void test_acquired_popup() {
     CHECK(items::acquired_text(one, "A", common).find("[A]</>") != std::string::npos && items::acquired_text(one, "A", common).find("</>x") == std::string::npos &&
               items::acquired_text(two, "A", common).find("[A] </>x2") != std::string::npos,
           "a quantity of 1 ends [Name]</> and of 2 ends [Name] </>x2");
+    // a Remove of part of a stack toasts the count that left, not the whole stack
+    repl::ItemInstance seven = one;
+    seven.quantity = 7;
+    CHECK(items::toast_item(seven, 2).quantity == 2 && items::toast_item(seven, 0).quantity == 7 && items::toast_item(seven, 7).quantity == 7 &&
+              items::removed_callout(items::toast_item(seven, 2), "A", common, 0).message.find("[A] </>x2") != std::string::npos,
+          "a Removed toast of 2 out of a stack of 7 says x2; the whole stack (count 0 or 7) says x7");
 }
 
 int main() {
@@ -1842,12 +2112,17 @@ int main() {
     test_two_handers();
     test_refusals();
     test_move_and_swap();
+    test_stack_join();
+    test_stack_split();
+    test_stack_pickups();
+    test_stack_consume();
     test_visible_gear();
     test_retail_equips();
     test_captured_corpora();
     test_second_state_from_the_kit();
     test_join_with_items();
     test_retail_answers_through_the_bootstrap();
+    test_top_up_payloads();
     test_restore_undoes_the_held_items();
     test_setup_with_items();
     test_content_items();

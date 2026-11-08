@@ -312,8 +312,8 @@ static void test_stat_content(const fs::path& dir) {
     }
     error.clear();
     CHECK(!db->item_gear(42, error) && error.empty(), "an item that is none: nullopt, and no error (the file is fine)");
-    const auto bag = db->item_gear(content_fixture::item::kPotion, error);
-    CHECK(bag && !bag->has_curve && bag->stats.empty() && bag->tags.empty() && bag->sets.empty(), "an item with no curve, no stat block, no tags and no sets has none");
+    const auto cloak = db->item_gear(content_fixture::item::kCloak, error);
+    CHECK(cloak && !cloak->has_curve && cloak->stats.empty() && cloak->tags.empty() && cloak->sets.empty(), "an item with no curve, no stat block, no tags and no sets has none");
     const auto cape = db->item_gear(content_fixture::item::kGatherCape, error);
     CHECK(cape && !cape->has_curve && cape->stats.empty(), "a made-up item of the fixture without a stat block has no stat data either");
     // the made-up items the session tests give stat blocks (content_db_fixture.h): the heavy chest's Constitution and Mentality

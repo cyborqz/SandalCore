@@ -106,6 +106,18 @@ std::optional<svc::ItemContainer> material_bag_of_location(uint8_t location) {
     return std::nullopt;
 }
 
+/// The storage one of the character's container guids names, nullopt for any other.
+std::optional<bootstrap::StorageKind> storage_kind_of(const bootstrap::PlayerSetup& setup, const FIntrepidNetworkGUID& object) {
+    const bootstrap::SessionGuids& g = setup.guids;
+    if (object == g.backpack) return bootstrap::StorageKind::Backpack;
+    if (object == g.equipment) return bootstrap::StorageKind::Equipment;
+    if (object == g.quest_storage) return bootstrap::StorageKind::QuestStorage;
+    for (int i = 0; i < items::kResourceContainers; ++i) {
+        if (setup.resource_bags[static_cast<size_t>(i)].present && object == g.resource_storage[static_cast<size_t>(i)]) return bootstrap::resource_kind(i);
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 const items::ItemCatalog& PlayerSession::item_catalog() const {
@@ -113,18 +125,7 @@ const items::ItemCatalog& PlayerSession::item_catalog() const {
     return catalog_ ? *catalog_ : none;
 }
 
-std::string PlayerSession::fresh_guid() {
-    static thread_local std::mt19937_64 rng{std::random_device{}()};
-    for (;;) {
-        const uint64_t a = rng(), b = rng();
-        const repl::GuidValue g{static_cast<uint32_t>(a >> 32), static_cast<uint32_t>(a), static_cast<uint32_t>(b >> 32), static_cast<uint32_t>(b)};
-        if (!(g.a | g.b | g.c | g.d)) continue;
-        const std::string hex = items::guid_hex(g);
-        bool taken = false;
-        for (const svc::InventoryItem& it : inventory_.items()) taken = taken || it.instance_guid == hex;
-        if (!taken) return hex;
-    }
-}
+std::string PlayerSession::fresh_guid() { return inventory_.fresh_guid(); }
 
 void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what, bool with_toasts) {
     inventory_dirty_ = true;
@@ -145,6 +146,7 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     if (with_toasts) add_item_toasts(events, /*removals=*/true);
     // the storage events go first (the PlayerController's chain), then the pawn's visible gear: the order and the packet of the retail answer
     queue("ClientReceiveStorageEvent", [events](bootstrap::PlayerBootstrap& pb) { return pb.item_events(events); }, conn, /*must_build=*/true);
+    follow_linked_stack(conn, events);
     if (outcome.equipment_changed) {
         const std::vector<bootstrap::HeldItem> held = bootstrap::held_items_for(inventory_);
         const std::vector<repl::AppearanceId> appearance = items::appearance_ids(inventory_);
@@ -164,6 +166,44 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     if (outcome.equipment_changed) sync_cargo(conn, last_now_);
     // a resource bag worn, replaced or taken off: its container opens or closes on the client now, after the events that moved the bag
     for (const items::BagChange& c : outcome.bags) update_resource_container(conn, c);
+}
+
+void PlayerSession::follow_linked_stack(Connection& conn, const std::vector<bootstrap::ItemEvent>& events) {
+    if (bar_.empty()) return;
+    for (const bootstrap::ItemEvent& remove : events) {
+        if (remove.type != repl::StorageEventType::Remove || remove.container || !remove.item.has_item) continue;
+        // the whole stack leaves (a Remove of part of it keeps the instance, and its bar slot)
+        if (remove.count > 0 && static_cast<uint32_t>(remove.count) < remove.item.quantity) continue;
+        // an Add of the same instance carries it on: a whole move, a swap and a split keep every guid
+        bool kept = false;
+        for (const bootstrap::ItemEvent& e : events) {
+            if (e.type == repl::StorageEventType::Add && e.item.has_item && e.item.guid == remove.item.guid) kept = true;
+        }
+        if (kept) continue;
+        // the join's Add names the stack it joined (the same record)
+        const bootstrap::ItemEvent* into = nullptr;
+        for (const bootstrap::ItemEvent& e : events) {
+            if (e.type == repl::StorageEventType::Add && e.item.has_item && e.item.record_id == remove.item.record_id) into = &e;
+        }
+        if (!into) continue;
+        for (const repl::ActionbarSlot& slot : bar_.slots()) {
+            if (slot.use.use_type != repl::ActionbarUseType::Item || !(slot.use.item_guid == remove.item.guid)) continue;
+            repl::ActionbarSlot moved = slot;
+            moved.use.item_guid = into->item.guid;
+            moved.use.item_record_id = static_cast<int64_t>(into->item.record_id);
+            moved.use.item_quality = static_cast<int32_t>(into->item.quality);
+            if (world_) moved.use.item_rarity = static_cast<uint8_t>(world_->item_rarity_facts(static_cast<int64_t>(into->item.record_id)).rarity_of(into->item.quality));
+            std::string why;
+            if (!bar_.set(moved, &why)) continue;
+            repl::ActionbarPayload payload;
+            payload.slots.push_back(moved);
+            queue("ClientReceiveActionbarSlotPayload", [payload](bootstrap::PlayerBootstrap& pb) { return pb.action_bar(payload); }, conn, /*must_build=*/true);
+            progress_changed_ = true;
+            hand_over_progress("the action bar");
+            spdlog::info("[session] {}: the stack on action bar bank {} slot {} was joined away: the slot names the stack it joined (bank {} slot {})", name(),
+                         slot.bank_index, slot.slot_index, moved.bank_index, moved.slot_index);
+        }
+    }
 }
 
 void PlayerSession::note_cargo_crate(const items::Outcome& outcome) {
@@ -498,9 +538,8 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
                     *where == svc::ItemContainer::Backpack ? "the item bag" : "a material bag", slot.slot);
         return;
     }
-    if (type != repl::StorageEventType::Move && type != repl::StorageEventType::Swap) {
-        // (a Fill, dragging a stack onto another: Gathering stage 3 refuses it; the backlog has it)
-        return refuse_item_request(conn, what, "an event of type " + std::to_string(event->type) + " is not made (only a Move and a Swap of whole stacks, and the destroy)", now);
+    if (type != repl::StorageEventType::Move && type != repl::StorageEventType::Fill && type != repl::StorageEventType::Swap) {
+        return refuse_item_request(conn, what, "an event of type " + std::to_string(event->type) + " is not made (only a Move, a Fill, a Swap and the destroy)", now);
     }
     if (event->move_source.slots.size() != 1 || event->targets.size() != 1 || event->targets[0].slots.size() != 1) {
         return refuse_item_request(conn, what, "a move names one source slot and one target slot", now);
@@ -511,30 +550,32 @@ void PlayerSession::on_storage_event_request(Connection& conn, const repl::Clien
     const repl::StorageEventSlot& src = event->move_source.slots[0];
     const repl::StorageEventSlot& dst = event->targets[0].slots[0];
     if (!(src.item_guid == event->item.guid)) return refuse_item_request(conn, what, "the item of the event is not the instance of its source slot", now);
+    if (type != repl::StorageEventType::Swap) {
+        // a Move or a Fill onto a stack names that stack's instance; one to a free slot names the moved item's own instance or none (a split names none)
+        const std::string target_guid = items::guid_hex(dst.item_guid);
+        const bool names_target = items::guid_of(target_guid).has_value();
+        const svc::InventoryItem* there = inventory_.at(*to, dst.slot);
+        if (!names_target) {
+            if (there) return refuse_item_request(conn, what, "a Move or a Fill to a free slot names no item, and the target slot holds one", now);
+        } else if (!there) {
+            if (!(dst.item_guid == src.item_guid)) return refuse_item_request(conn, what, "the target slot is empty, but the client named another item in it", now);
+        } else if (there->instance_guid != target_guid) {
+            return refuse_item_request(conn, what, "the item in the target slot is not the instance the client named", now);
+        }
+    }
     const std::string guid = items::guid_hex(src.item_guid);
-    const items::Outcome outcome = type == repl::StorageEventType::Move
-                                       ? inventory_.move(*from, src.slot, src.count, guid, *to, dst.slot, &item_catalog())
-                                       : inventory_.swap(*from, src.slot, src.count, guid, *to, dst.slot, items::guid_hex(dst.item_guid), dst.count);
+    const items::Outcome outcome = type == repl::StorageEventType::Swap
+                                       ? inventory_.swap(*from, src.slot, src.count, guid, *to, dst.slot, items::guid_hex(dst.item_guid), dst.count, &item_catalog())
+                                       : inventory_.move(*from, src.slot, src.count, guid, *to, dst.slot, &item_catalog());
     if (!outcome.ok) return refuse_item_request(conn, what, outcome.refusal, now);
-    apply_outcome(conn, outcome, type == repl::StorageEventType::Move ? "an item is moved in the bag" : "two items swap places in the bag");
+    apply_outcome(conn, outcome, type == repl::StorageEventType::Swap ? "two items swap places in the bag" : "an item is moved in the bag");
 }
 
 void PlayerSession::on_storage_request(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
     const auto it = rpc.call.params.values.find(1);
     const auto* container = rpc.call.decoded && it != rpc.call.params.values.end() ? it->second.get_if<FIntrepidNetworkGUID>() : nullptr;
-    const bootstrap::SessionGuids& g = pb_.setup().guids;
     if (container && warehouse_payload(conn, *container, now)) return;   // storage clerks, step 0: a warehouse container's data
-    std::optional<bootstrap::StorageKind> kind;
-    if (container) {
-        if (*container == g.backpack) kind = bootstrap::StorageKind::Backpack;
-        else if (*container == g.equipment) kind = bootstrap::StorageKind::Equipment;
-        else if (*container == g.quest_storage) kind = bootstrap::StorageKind::QuestStorage;
-        else {
-            for (int i = 0; i < items::kResourceContainers; ++i) {
-                if (pb_.setup().resource_bags[static_cast<size_t>(i)].present && *container == g.resource_storage[static_cast<size_t>(i)]) kind = bootstrap::resource_kind(i);
-            }
-        }
-    }
+    const auto kind = container ? storage_kind_of(pb_.setup(), *container) : std::nullopt;
     if (!kind) {
         spdlog::debug("[session] {}: ServerRequestStorageData names a container worldd has no payload for", name());
         return;
@@ -581,7 +622,7 @@ void PlayerSession::add_item_toasts(std::vector<bootstrap::ItemEvent>& events, b
             const bool restacked = i + 1 < events.size() && events[i + 1].type == repl::StorageEventType::Add && same_slot(events[i + 1], ev);
             if (!restacked) {
                 const std::string& removed_name = name_of(static_cast<int64_t>(ev.item.record_id));
-                ev.callout = items::removed_callout(ev.item, removed_name, rarities.at(static_cast<int64_t>(ev.item.record_id)), made);
+                ev.callout = items::removed_callout(items::toast_item(ev.item, ev.count), removed_name, rarities.at(static_cast<int64_t>(ev.item.record_id)), made);
             }
         }
     }
@@ -675,6 +716,23 @@ PlayerSession::GmItemResult PlayerSession::gm_give_item(Connection& conn, int64_
 /// The client calls of storage, using items (session/rpc_table.h).
 void PlayerSession::register_items_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerRequestStorageEvent", [](PlayerSession& s, const RpcContext& c) { s.on_storage_event_request(c.conn, c.rpc, c.now); });
+    t.add(RpcScope::PlayerController, "ServerRetrieveStoragePayload", [](PlayerSession& s, const RpcContext& c) {
+        const auto it = c.rpc.call.params.values.find(1);
+        const auto* container = c.rpc.call.decoded && it != c.rpc.call.params.values.end() ? it->second.get_if<FIntrepidNetworkGUID>() : nullptr;
+        if (!container) {
+            spdlog::debug("[session] {}: a ServerRetrieveStoragePayload names no container", s.name());
+            return;
+        }
+        if (s.warehouse_payload(c.conn, *container, c.now)) return;
+        const auto kind = storage_kind_of(s.pb_.setup(), *container);
+        if (!kind) {
+            spdlog::debug("[session] {}: ServerRetrieveStoragePayload names a container worldd has no payload for", s.name());
+            return;
+        }
+        if (!s.within_budget(s.storage_budget_, "ServerRetrieveStoragePayload", c.now) || !s.room_for(1)) return;
+        const bootstrap::StorageKind k = *kind;
+        s.queue("ClientReceiveStoragePayload", [k](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(k, Role::Pawn); }, c.conn);
+    });
     t.add(RpcScope::Pawn, "ServerRequestStorageData", [](PlayerSession& s, const RpcContext& c) { s.on_storage_request(c.conn, c.rpc, c.now); });
     t.add(RpcScope::Pawn, "ServerItemUsed", [](PlayerSession& s, const RpcContext& c) { s.on_item_used(c.conn, c.rpc, c.now); });
     t.add(RpcScope::Pawn, "ServerActivateItem", [](PlayerSession& s, const RpcContext&) { s.on_activate_item_ignored(); });

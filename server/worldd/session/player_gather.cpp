@@ -461,7 +461,7 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
     items::Outcome granted;
     granted.ok = true;
     if (!fresh.empty()) {
-        items::GrantResult placed = inventory_.grant_what_fits(fresh, item_catalog());
+        items::GrantResult placed = inventory_.grant_what_fits(fresh, item_catalog(), /*harvest=*/true);
         if (!placed.outcome.ok) {   // a record the table refuses: nothing was placed
             spdlog::error("[gather] {}: the harvest's items are not granted ({}): they go to a pile", name(), placed.outcome.refusal);
             for (const svc::InventoryItem& it : fresh) overflow.push_back(pile_stack(it));
