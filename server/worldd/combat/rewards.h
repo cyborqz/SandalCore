@@ -170,6 +170,9 @@ public:
     /// What `amount` experience of a creature is worth to a player of `ctx.player_level`: the decay of the level difference, rounded.
     int64_t xp_for(int64_t amount, RollContext& ctx) const;
 
+    /// The quantity a reward line's Quantity expression gives for `ctx`, as the rolls read it: 1 for no expression (id 0) and for one that does not run.
+    int64_t quantity(int64_t expr, RollContext& ctx) const;
+
 private:
     const abilities::Catalog&               catalog_;
     std::map<int64_t, content::LootTable>   tables_;

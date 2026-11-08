@@ -302,6 +302,18 @@ Rolled RewardBook::roll(const std::vector<int64_t>& roots, RollContext& ctx) con
     return out;
 }
 
+int64_t RewardBook::quantity(int64_t expr, RollContext& ctx) const {
+    if (expr == 0 || !ctx.npc) return 1;
+    const int program = catalog_.program(expr);
+    if (program < 0) return 1;
+    RewardHost host(ctx);
+    double v = 0;
+    std::string error;
+    if (!ctx.npc->eval(program, host, v, error) || !std::isfinite(v)) return 1;
+    const int64_t quantity = rolled_quantity(v);
+    return quantity > 0 ? quantity : 1;
+}
+
 int64_t RewardBook::xp_for(int64_t amount, RollContext& ctx) const {
     double mult = 1.0;
     if (decay_expr_ != 0 && ctx.npc) {

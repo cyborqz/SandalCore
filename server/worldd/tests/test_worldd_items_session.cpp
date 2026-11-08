@@ -54,6 +54,7 @@
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/leveling.h"
 #include "protocol/repl/rep_block.h"
+#include "protocol/repl/rpc_fields.h"
 #include "protocol/repl/skill_rpc.h"
 #include "protocol/repl/storage_rpc.h"
 #include "protocol/schema/generated/index.h"
@@ -274,6 +275,8 @@ struct Mirror {
     size_t appearance_updates = 0;
     std::vector<std::string> pc_calls;                    // the PlayerController's RPCs, in order
     std::vector<repl::ItemStorageEvent> events;           // every storage event received, in order
+    std::vector<repl::RewardInstance> reward_windows;     // each ClientOpenRewardSelection's RewardInstance
+    std::vector<repl::GuidValue> reward_window_items;     // ... and the ActivatedItemGuid of each
     size_t payloads = 0, stat_blocks = 0, unreadable = 0;
     // plan B3: the client's StatsComponent arrays, by field name and ReplicationID, and each update that changed them
     const schema::ClassSchema* stats_class = nullptr;
@@ -358,6 +361,27 @@ struct Mirror {
                             sequence.push_back("P");
                         } else {
                             ++unreadable;
+                        }
+                    }
+                    if (std::string(c.rpc->name) == "ClientOpenRewardSelection") {
+                        const repl::Value* value = repl::rpcf::value_of(*c.rpc, c.params, "InData.RewardInstance");
+                        const auto* reward = value ? value->get_if<repl::RewardInstance>() : nullptr;
+                        if (!reward) {
+                            ++unreadable;
+                        } else {
+                            reward_windows.push_back(*reward);
+                            repl::GuidValue activated;
+                            const auto word = [&](const char* path, uint32_t& out) {
+                                const repl::Value* v = repl::rpcf::value_of(*c.rpc, c.params, path);
+                                const int64_t* i = v ? v->get_if<int64_t>() : nullptr;
+                                if (i) out = static_cast<uint32_t>(*i);
+                            };
+                            word("InData.ActivatedItemGuid.A", activated.a);
+                            word("InData.ActivatedItemGuid.B", activated.b);
+                            word("InData.ActivatedItemGuid.C", activated.c);
+                            word("InData.ActivatedItemGuid.D", activated.d);
+                            reward_window_items.push_back(activated);
+                            sequence.push_back("W");
                         }
                     }
                     if (std::string(c.rpc->name) == "ClientReceiveStorageEvent") {
@@ -4832,6 +4856,7 @@ static void test_consumables_item_gone_and_death() {
     CHECK(h.s->inventory().at(Bag, 6) && h.s->inventory().at(Bag, 6)->quantity == 1 && h.s->uses_applied() == used_before_death, "the scroll is still in its slot and nothing was taken");
     CHECK(cs->find(gc::kProcessingXpRating)->value == xp_before && pipe->stacks_of(gc::kProcessingXpEffect) == 0, "the hit the client asked for before the death gave no buff");
 }
+
 
 #include "items_session_registered.inc"
 

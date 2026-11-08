@@ -15,4 +15,5 @@
 #include "session/members/based_move.inc"
 #include "session/members/view_phases.inc"
 #include "session/members/presence.inc"
+#include "session/members/chests.inc"
 #include "session/members/surface_move.inc"

@@ -126,7 +126,7 @@ std::string PlayerSession::fresh_guid() {
     }
 }
 
-void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what) {
+void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcome, const char* what, bool with_toasts) {
     inventory_dirty_ = true;
     inventory_changed_ = true;
     ++items_applied_;
@@ -142,6 +142,7 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     }
     if (outcome.equipment_changed) apply_gear_stats();   // before the replies are queued: they are built later, and carry the stats' deltas
     std::vector<bootstrap::ItemEvent> events = item_events_for(outcome);
+    if (with_toasts) add_item_toasts(events, /*removals=*/true);
     // the storage events go first (the PlayerController's chain), then the pawn's visible gear: the order and the packet of the retail answer
     queue("ClientReceiveStorageEvent", [events](bootstrap::PlayerBootstrap& pb) { return pb.item_events(events); }, conn, /*must_build=*/true);
     if (outcome.equipment_changed) {
@@ -373,6 +374,8 @@ void PlayerSession::on_item_used(Connection& conn, const repl::ClientRpc& rpc, C
                 // a consumable casts an ability: the client sends the ability's trigger in the same datagram and the cast runs the use (nothing is done here)
                 if (item_casts_ability(item->item_record_id)) return;
                 const svc::InventoryItem copy = *item;   // the inventory changes under the use
+                // chests: a random coffer rolls its table, a selector opens its reward window; neither is a generic item action
+                if (open_chest(conn, *use, copy, now)) return;
                 return on_item_activated(conn, *use, copy, now);
             }
         }
