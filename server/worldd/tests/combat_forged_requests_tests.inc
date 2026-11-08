@@ -312,16 +312,26 @@ AOC_REGISTER_TEST(test_forged_slicing_requests);
 // three and five. The client plays the steps in order and starts over after the last; a modified client could name the five-arrow step on every swing, ask for the hits the arrows carry on top of
 // the arrows' own landing, let a swing's arrows leave after a stun, and hold a cast for as long as an arrow takes to reach a target that ran off.
 
-/// A Ranger who swings a ranged weapon combo at a Wolf, swing after swing; what landed is counted from the confirmations the client was sent.
+/// The character's play rate becomes `rate`: the stat the weapon's class plays at (PhysicalSpeed for a Ranger, MagicalSpeed for a Mage), through the data's
+/// Ranger_Snipe_Hasting effect (a real play-rate effect: one of the 23 PhysicalSpeed/MagicalSpeed rows): the mod is the test's, so the rate is exact, and the
+/// stat engine's own run applies it. set_current keeps a held stat only, and the rate is not one; the pipeline's recompute puts the ability runtime's effects
+/// back on every tick, so the rate is set again before each trigger.
+void set_rate(Rig& rig, double rate, bool magical = false);
+
+/// A Ranger (or, with `magical`, a Mage) who swings a ranged weapon combo at a Wolf, swing after swing; what landed is counted from the confirmations the
+/// client was sent.
 struct Swings {
     Forge                        g;
     const abilities::AbilityDef* def = nullptr;
     uint64_t                     wolf = 0;
     double                       t = 1.0;       // when the last swing was triggered
     int32_t                      id = 100;
+    double                       rate = 0;      // (the play rate the swings are made at; 0: the character's own)
+    bool                         magical = false;   // (the play rate stat is MagicalSpeed, as a Mage's weapon combo plays)
     std::set<int64_t>            arrow_hits;    // the hits the combo's projectiles carry
 
-    Swings(Fixture& f, const char* combo, double x = 800.0) : g(f, 1, {}), def(f.catalog->ability_named(combo)) {
+    Swings(Fixture& f, const char* combo, double x = 800.0, int class_enum = 1, bool magical = false)
+        : g(f, class_enum, {}), def(f.catalog->ability_named(combo)), magical(magical) {
         if (!g.ok() || !def) return;
         wolf = g.w.spawn(g.wolf_path, x, 0, 60, 100);   // (a Wolf of level 60 outlives every arrow of the checks)
         g.rig.know({combo});
@@ -334,7 +344,8 @@ struct Swings {
     /// The client triggers a swing `gap` seconds after the last one and names this montage.
     Refusal swing(int anim, double gap) {
         t += gap;
-        g.rig.run_to(t - 0.001);
+        g.rig.run_to(t);   // (the due steps first, so the rate set below survives the trigger's own advance)
+        if (rate > 0) set_rate(g.rig, rate, magical);
         TriggerInfo info;
         info.animation_index = anim;
         info.target_count = 1;
@@ -385,6 +396,21 @@ struct Swings {
     }
 };
 
+/// The four imported ranged weapon combos: the table's least gap (ability_pipeline.cpp kSwingGaps) and the shortest honest gap the retail recordings show.
+struct RangedCombo {
+    const char* name;
+    double      table;
+    double      shortest;
+    int         step3;       // (the plain third-step montage's AnimationIndex)
+    double      item_delay;  // (kTimings: when the swing's item shows)
+};
+constexpr RangedCombo kRangedCombos[] = {
+    {"WeaponCombo_Ranged_Shortbow", 0.24, 0.297, 2, 0.258},
+    {"WeaponCombo_Ranged_Wand", 0.30, 0.375, 2, 0.107},
+    {"WeaponCombo_Ranged_Longbow", 0.55, 0.694, 3, 0.088},
+    {"WeaponCombo_Ranged_Book", 0.63, 0.786, 3, 0.084},
+};
+
 /// The arrows each swing of a Shortbow sent, for the montages named in order.
 std::vector<size_t> shortbow_arrows(Fixture& f, const std::vector<int>& anims, bool* accepted) {
     std::vector<size_t> out;
@@ -425,6 +451,465 @@ void test_forged_swing_step(Fixture& f) {
 }
 AOC_REGISTER_TEST(test_forged_swing_step);
 
+// ---- a swing that comes sooner than an honest one -------------------------------------------------------------------------------------------------
+// A modified client that names montage 0 on every trigger can fire as fast as the least gap lets it; the server keeps a ranged weapon swing to the least gap
+// after the last accepted swing of the same combo, judged over the last two gaps and never under 0.05 s for one gap. The gaps are the table's
+// (ability_pipeline.cpp kSwingGaps: 0.24 Shortbow, 0.30 Wand, 0.55 Longbow, 0.63 Book), kept here so that a table typo shows; the play rate is set to 1.0,
+// so the table's value is the floor (a rate below 1 lengthens it, a rate above 1 shortens it).
+/// The character's play rate (PhysicalSpeed) becomes `rate` through the data's Ranger_Snipe_Hasting effect (a real play-rate effect: one of the 23
+/// PhysicalSpeed/MagicalSpeed rows): the mod is the test's, so the rate is exact, and the stat engine's own run applies it. set_current keeps a held stat
+/// only, and the rate is not one; the pipeline's recompute puts the ability runtime's effects back on every tick, so the rate is set again before each
+/// trigger.
+void set_rate(Rig& rig, double rate, bool magical) {
+    const int64_t kStat = magical ? 109343399106257ll : 109343399171808ll;   // (ability_pipeline.cpp's kStatMagicalSpeed / kStatPhysicalSpeed)
+    const stats::StatValue* v = rig.cs->find(kStat);
+    const auto it = rig.ctx->bundle->by_guid.find(kStat);
+    const abilities::EffectDef* effect = rig.catalog ? rig.catalog->effect_named("Ranger_Snipe_Hasting") : nullptr;
+    if (!v || it == rig.ctx->bundle->by_guid.end() || !effect) return;
+    const uint8_t flags = rig.ctx->bundle->stats[it->second].flags;
+    const double now = v->value;
+    const double mod = (flags & stats::kStatMulMods) == 0 ? rate - now : (flags & stats::kStatMulCompl) != 0 ? 1.0 - rate / now : rate / now;
+    stats::ActiveEffect fx;
+    fx.effect = {stats::kRefTypeEffect, effect->row.guid};
+    fx.stacks = 1;
+    fx.mods = {{kStat, mod}};
+    rig.cs->set_effects({fx});
+    std::vector<stats::StatValue> changed;
+    std::string err;
+    rig.cs->update({}, changed, err);
+}
+void test_forged_swing_gap(Fixture& f) {
+    std::printf("a ranged weapon swing comes no sooner than the least gap after the last accepted swing of its combo\n");
+    struct ComboFloor {
+        const char* combo;
+        double      floor;
+        int         forged_accepted;   // (the 0.55 grid: the average rule takes 10 or 11 of the 21)
+    };
+    constexpr ComboFloor kCombos[] = {
+        {"WeaponCombo_Ranged_Shortbow", 0.24, 11},
+        {"WeaponCombo_Ranged_Wand", 0.30, 10},
+        {"WeaponCombo_Ranged_Longbow", 0.55, 10},
+        {"WeaponCombo_Ranged_Book", 0.63, 11},
+    };
+    struct Run {
+        int               accepted = 0;
+        int               refused = 0;
+        size_t            landed = 0;
+        std::set<Refusal> why;
+        bool              ok = false;
+    };
+    // `gaps` are the seconds between the triggers (the first is 0); the character (a Ranger) swings at the play rate `rate`
+    const auto run = [&](const char* combo, const std::vector<double>& gaps, double rate) {
+        Run out;
+        Swings s(f, combo);
+        CHECKF(s.ok(), "the world for the %s swings (%s%s)", combo, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) return out;
+        s.rate = rate;
+        for (const double gap : gaps) {
+            const Refusal r = s.swing(0, gap);
+            if (r == Refusal::None) ++out.accepted;
+            else {
+                ++out.refused;
+                out.why.insert(r);
+            }
+        }
+        s.play(3.0);
+        out.landed = s.landed(content::kSourceTypeProjectile);
+        out.ok = s.g.rig.pawn.broken.empty();
+        return out;
+    };
+    // the exact counts a run must show; every refused swing is the Cooldown refusal the gate uses. `landed` -1: the arrows are not counted (a forged
+    // client's refused triggers advance the test's clock past both an arrow's launch and the next item, and the tick takes the item first: the existing
+    // item replacement, not the gate; the honest grid below proves the arrow lands)
+    const auto check = [](const char* what, const Run& r, int accepted, int refused, long landed) {
+        const bool refusals_ok = refused == 0 ? r.why.empty() : (r.why.size() == 1 && *r.why.begin() == Refusal::Cooldown);
+        const char* got = r.why.empty() ? "none" : r.why.size() == 1 ? refusal_name(*r.why.begin()) : "several";
+        const bool landed_ok = landed < 0 || r.landed == static_cast<size_t>(landed);
+        const std::string want = landed < 0 ? "any number of" : std::to_string(landed);
+        CHECKF(r.ok, "(the pawn took every change: %s)", what);
+        CHECKF(r.accepted == accepted && r.refused == refused && landed_ok && refusals_ok, "%s: %d accepted, %d refused and %s landed; got %d, %d, %zu (refusals: %s)", what,
+               accepted, refused, want.c_str(), r.accepted, r.refused, r.landed, got);
+    };
+    // a modified client: 21 Shortbow swings 0.10 s apart (2 s); the average of the last two gaps takes every second or third trigger, 9 swings and 9 arrows,
+    // and 12 refusals
+    std::vector<double> forged10(21, 0.10);
+    forged10[0] = 0.0;
+    check("the Shortbow every 0.10 s for 2 s", run("WeaponCombo_Ranged_Shortbow", forged10, 1.0), 9, 12, 9);
+    // every combo: a grid just over half its least gap (the average rule takes 10 or 11 of the 21; its arrows are not counted: see check), an honest 1.25x
+    // grid (all accepted, every arrow lands), and the two sides of the floor
+    for (const ComboFloor& c : kCombos) {
+        std::vector<double> forged(21, 0.55 * c.floor);
+        forged[0] = 0.0;
+        std::vector<double> honest(6, 1.25 * c.floor);
+        honest[0] = 0.0;
+        const std::vector<double> boundary = {0.0, c.floor - 0.03, 0.06};
+        const std::string name = c.combo;
+        check((name + " every 0.55 of its least gap").c_str(), run(c.combo, forged, 1.0), c.forged_accepted, 21 - c.forged_accepted, -1);
+        check((name + " every 1.25 of its least gap").c_str(), run(c.combo, honest, 1.0), 6, 0, 6);
+        check((name + " 0.03 s under and over its least gap").c_str(), run(c.combo, boundary, 1.0), 2, 1, 2);
+    }
+    // a play rate of 1.25 shortens the Shortbow's 0.24 s floor to 0.192 s: 0.18 s after the first swing is refused, 0.22 s is accepted
+    const std::vector<double> fast = {0.0, 0.18, 0.04};
+    check("the Shortbow at a play rate of 1.25", run("WeaponCombo_Ranged_Shortbow", fast, 1.25), 2, 1, 2);
+}
+AOC_REGISTER_TEST(test_forged_swing_gap);
+
+// ---- a late packet, the hard minimum and a forged burst -------------------------------------------------------------------------------------------
+// A packet that arrives late leaves the next gap shorter than the least gap even when both swings were honest: each combo's recorded shortest gap is a little
+// above its floor (the margins: 57 ms Shortbow, 75 Wand, 144 Longbow, 156 Book); a pair compressed by that margin + 20 ms right after a swing that arrived by the
+// margin has gaps shortest + margin and floor - 20 ms, whose average is above the floor. The first gap of a combo has no earlier gap to average and must make
+// the floor alone; a single gap under 0.05 s is never taken, so two triggers at the same moment cannot both be accepted. Each combo is measured by its own
+// margins and its own floor.
+void test_swing_gap_lag(Fixture& f) {
+    std::printf("a late packet does not refuse an honest pair, and two swings at the same moment are refused\n");
+    for (const RangedCombo& c : kRangedCombos) {
+        const double margin = c.shortest - c.table;
+        const double compressed = c.table - 0.020;   // (the shortest gap less the margin + 20 ms)
+        Swings s(f, c.name);
+        CHECKF(s.ok(), "the world for %s (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) continue;
+        s.rate = 1.0;
+        CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing is accepted", c.name);
+        CHECKF(s.swing(1, c.shortest) == Refusal::None, "%s: the second swing %.3f s later (the shortest honest gap) is accepted", c.name, c.shortest);
+        CHECKF(s.swing(2, c.shortest + margin) == Refusal::None, "%s: the next swing %.3f s later (a packet %.0f ms late) is accepted", c.name, c.shortest + margin,
+               margin * 1000.0);
+        const Refusal late = s.swing(3, compressed);
+        CHECKF(late == Refusal::None, "%s: the next honest gap compressed by %.0f + 20 ms to %.3f s is averaged with the late %.3f s gap and accepted (%s)", c.name,
+               margin * 1000.0, compressed, c.shortest + margin, refusal_name(late));
+        s.play(3.0);
+        CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        // the same moment: the earlier 2-floor gap would average above the floor, so only the hard minimum refuses it
+        Swings pair(f, c.name);
+        CHECKF(pair.ok(), "the world for the %s same-moment pair (%s%s)", c.name, pair.g.rig.problem.c_str(), pair.g.w.problem.c_str());
+        if (!pair.ok()) continue;
+        pair.rate = 1.0;
+        CHECKF(pair.swing(0, 3.0) == Refusal::None, "%s: the first swing of the pair is accepted", c.name);
+        CHECKF(pair.swing(1, 2.0 * c.table) == Refusal::None, "%s: a %.3f s gap is accepted", c.name, 2.0 * c.table);
+        const Refusal same = pair.swing(2, 0.0);
+        CHECKF(same == Refusal::Cooldown, "%s: a second swing at the same moment is refused (%s)", c.name, refusal_name(same));
+        CHECK(pair.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_lag);
+
+// A forged client cannot turn the average into a faster rate, measured on each combo's own floor: the first gap of the burst makes the floor, then a gap just
+// over the 0.05 s hard minimum and a gap that makes the pair average the floor; over ten swings the nine gaps still sum to nine floors. The character's own play
+// rate is used, so the floor is the same for all ten (the set_rate helper is not called here).
+void test_swing_gap_forged_burst(Fixture& f) {
+    std::printf("a forged burst of ten swings does not beat the least gap over the ten, combo by combo\n");
+    constexpr double kMin = 0.055;
+    for (const RangedCombo& c : kRangedCombos) {
+        Swings s(f, c.name);
+        CHECKF(s.ok(), "the world for the %s burst (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) continue;
+        const double floor = c.table / s.g.rig.pipe->stat_of(109343399171808ll);   // (the combo's table gap over the character's own play rate)
+        const double kLong = 2.0 * floor - kMin + 0.005;
+        std::vector<double> burst = {0.0, kLong};
+        bool short_gap = true;
+        while (burst.size() < 10) {
+            burst.push_back(short_gap ? kMin : kLong);
+            short_gap = !short_gap;
+        }
+        int accepted = 0;
+        for (const double gap : burst) {
+            if (s.swing(0, gap) == Refusal::None) ++accepted;
+        }
+        CHECKF(accepted == 10, "%s: all ten swings of the burst are taken (%d accepted)", c.name, accepted);
+        CHECKF(s.t - 1.0 >= 9.0 * floor - 1e-9, "%s: the ten swings span at least nine floors (%.3f s for 9 x %.3f s)", c.name, s.t - 1.0, floor);
+        s.play(3.0);
+        CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_forged_burst);
+
+// ---- a slowed character's least gap ---------------------------------------------------------------------------------------------------------------
+// The shot divides its notify by the character's play rate, and the client's combo does too: a slowed character's honest gap is the recorded shortest gap
+// divided by the rate. The floor follows the same rate, combo by combo: 0.737536 and 0.790392 are the rates the data gives (the Mage's and the Ranger's); the
+// shortest recorded gaps 0.297, 0.375, 0.694 and 0.786 s give each combo's honest gap. A swing at the combo's normal-speed table gap is under the slow rate's
+// floor and refused.
+void test_swing_gap_slow_rate(Fixture& f) {
+    std::printf("a slowed character's swing gap follows its play rate both ways, combo by combo\n");
+    constexpr double kSlows[] = {0.737536, 0.790392};
+    for (const double rate : kSlows) {
+        for (const RangedCombo& c : kRangedCombos) {
+            const double honest = c.shortest / rate;
+            Swings fast(f, c.name);
+            CHECKF(fast.ok(), "the world for %s at %.6f (%s%s)", c.name, rate, fast.g.rig.problem.c_str(), fast.g.w.problem.c_str());
+            if (!fast.ok()) continue;
+            fast.rate = rate;
+            CHECKF(fast.swing(0, 3.0) == Refusal::None, "%s at %.6f: the first swing is accepted", c.name, rate);
+            const Refusal r = fast.swing(1, honest);
+            CHECKF(r == Refusal::None, "%s at %.6f: an honest swing %.3f s after the first (%.3f / %.6f) is accepted (%s)", c.name, rate, honest, c.shortest, rate,
+                   refusal_name(r));
+            Swings normal(f, c.name);
+            CHECKF(normal.ok(), "the world for the %s normal-speed swing at %.6f (%s%s)", c.name, rate, normal.g.rig.problem.c_str(), normal.g.w.problem.c_str());
+            if (!normal.ok()) continue;
+            normal.rate = rate;
+            CHECKF(normal.swing(0, 3.0) == Refusal::None, "%s at %.6f: the first swing is accepted", c.name, rate);
+            const Refusal too_soon = normal.swing(1, c.table);
+            CHECKF(too_soon == Refusal::Cooldown, "%s at %.6f: the normal-speed %.3f s gap is under the slow rate's floor and refused (%s)", c.name, rate, c.table,
+                   refusal_name(too_soon));
+            CHECK(normal.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        }
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_slow_rate);
+
+// ---- the data's real slow -------------------------------------------------------------------------------------------------------------------------
+// The data's -0.5 Ancient_One_Oracle_Deceleration takes a normal character near 0.29 (the owner's Ranger 0.790392 - 0.5 = 0.290392; the test sets 0.29 through
+// set_rate's real effect record). The least gap follows the rate both ways down to that rate, combo by combo: the table's gap over 0.29. A steady swing 0.02 s
+// over the floor is taken (two equal gaps, so the two-gap average is the gap), one just under it is refused, and the slower gaps the old 0.5 bound let through
+// (0.60, 0.70, 1.20 and 1.40 s) are refused too. Each combo is measured on its own.
+void test_swing_gap_real_slow(Fixture& f) {
+    std::printf("the data's real slow (0.29) has the table's least gap over 0.29, combo by combo\n");
+    constexpr double kRate = 0.29;
+    struct OldGap {
+        const char* combo;
+        double      gap;   // (over the old 0.5 bound's floor, under the 0.29 floor)
+    };
+    constexpr OldGap kOldGaps[] = {
+        {"WeaponCombo_Ranged_Shortbow", 0.60},
+        {"WeaponCombo_Ranged_Wand", 0.70},
+        {"WeaponCombo_Ranged_Longbow", 1.20},
+        {"WeaponCombo_Ranged_Book", 1.40},
+    };
+    for (const RangedCombo& c : kRangedCombos) {
+        const double floor = c.table / kRate;
+        Swings above(f, c.name);
+        CHECKF(above.ok(), "the world for the %s at %.2f (%s%s)", c.name, kRate, above.g.rig.problem.c_str(), above.g.w.problem.c_str());
+        if (!above.ok()) continue;
+        above.rate = kRate;
+        CHECKF(above.swing(0, 3.0) == Refusal::None, "%s at %.2f: the first swing is accepted", c.name, kRate);
+        CHECKF(above.swing(0, floor + 0.02) == Refusal::None, "%s at %.2f: a steady %.3f s gap (the %.3f s floor + 0.02) is accepted", c.name, kRate, floor + 0.02, floor);
+        CHECKF(above.swing(0, floor + 0.02) == Refusal::None, "%s at %.2f: the next steady %.3f s gap is accepted too (the average is the gap)", c.name, kRate, floor + 0.02);
+        above.play(3.0);
+        CHECK(above.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        Swings below(f, c.name);
+        CHECKF(below.ok(), "the world for the %s under the %.3f s floor (%s%s)", c.name, floor, below.g.rig.problem.c_str(), below.g.w.problem.c_str());
+        if (!below.ok()) continue;
+        below.rate = kRate;
+        CHECKF(below.swing(0, 3.0) == Refusal::None, "%s at %.2f: the first swing is accepted", c.name, kRate);
+        const Refusal r = below.swing(0, floor - 0.005);
+        CHECKF(r == Refusal::Cooldown, "%s at %.2f: a %.3f s gap under the %.3f s floor is refused (%s)", c.name, kRate, floor - 0.005, floor, refusal_name(r));
+        CHECK(below.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
+    for (const OldGap& o : kOldGaps) {
+        Swings s(f, o.combo);
+        CHECKF(s.ok(), "the world for the %s at the old-bound gap (%s%s)", o.combo, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) continue;
+        s.rate = kRate;
+        CHECKF(s.swing(0, 3.0) == Refusal::None, "%s at %.2f: the first swing is accepted", o.combo, kRate);
+        const Refusal r = s.swing(0, o.gap);
+        CHECKF(r == Refusal::Cooldown, "%s at %.2f: the %.2f s gap the old 0.5 bound let through is refused (%s)", o.combo, kRate, o.gap, refusal_name(r));
+        CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_real_slow);
+
+// ---- a broken slow rate is bounded ----------------------------------------------------------------------------------------------------------------
+// The floor follows the rate down only to 0.25: a broken or extreme slow at 0.21 (just above the stat engine's 0.2 lower bound) is read as 0.25, so the floor is
+// 4 x the table's gap, not 4.76 x. Each combo is checked on its own: a gap just under 4 x its table gap is refused, one just over is accepted. A rate read as
+// 0.21 would refuse the accepted one, so the bound is measured, not assumed.
+void test_swing_gap_min_rate(Fixture& f) {
+    std::printf("a broken slow rate is bounded at 0.25, combo by combo\n");
+    constexpr double kRate = 0.21, kBound = 0.25;
+    for (const RangedCombo& c : kRangedCombos) {
+        const double floor = c.table / kBound;
+        Swings too_short(f, c.name);
+        CHECKF(too_short.ok(), "the world for the %s bounded floor (%s%s)", c.name, too_short.g.rig.problem.c_str(), too_short.g.w.problem.c_str());
+        if (!too_short.ok()) continue;
+        too_short.rate = kRate;
+        CHECKF(too_short.swing(0, 3.0) == Refusal::None, "%s at %.3f: the first swing is accepted", c.name, kRate);
+        const Refusal r = too_short.swing(1, floor - 0.005);
+        CHECKF(r == Refusal::Cooldown, "%s at %.3f: a %.3f s gap under the %.3f s bounded floor is refused (%s)", c.name, kRate, floor - 0.005, floor, refusal_name(r));
+        CHECK(too_short.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        Swings enough(f, c.name);
+        CHECKF(enough.ok(), "the world for the %s bounded floor over it (%s%s)", c.name, enough.g.rig.problem.c_str(), enough.g.w.problem.c_str());
+        if (!enough.ok()) continue;
+        enough.rate = kRate;
+        CHECKF(enough.swing(0, 3.0) == Refusal::None, "%s at %.3f: the first swing is accepted", c.name, kRate);
+        const Refusal ok = enough.swing(1, floor + 0.005);
+        CHECKF(ok == Refusal::None, "%s at %.3f: a %.3f s gap over the %.3f s bounded floor is accepted (%s)", c.name, kRate, floor + 0.005, floor, refusal_name(ok));
+        CHECK(enough.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_min_rate);
+
+// ---- a play rate that changes between two swings --------------------------------------------------------------------------------------------------
+// The floor uses the faster of the last swing's rate and the new one's, combo by combo: a buff at 1.383 (the test character's 0.808 + the data's +0.25 and +0.325
+// effects) that ends before the next swing still lets the gap the buffed client played (each combo's recorded shortest / 1.383) through the table / 1.383 floor,
+// where the new rate alone would ask the table's gap. A forged swing under the faster rate's floor is still refused.
+void test_swing_gap_rate_change(Fixture& f) {
+    std::printf("a buff that ends between two swings does not refuse the second, combo by combo\n");
+    constexpr double kFast = 1.383;
+    for (const RangedCombo& c : kRangedCombos) {
+        Swings s(f, c.name);
+        CHECKF(s.ok(), "the world for the %s buffed swings (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) continue;
+        s.rate = kFast;
+        CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing is at a play rate of %.3f", c.name, kFast);
+        s.rate = 1.0;
+        const Refusal honest = s.swing(1, c.shortest / kFast);
+        CHECKF(honest == Refusal::None, "%s: the buffed client's %.3f s gap is accepted after the buff ends (%s)", c.name, c.shortest / kFast, refusal_name(honest));
+        s.play(3.0);
+        CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        Swings forged(f, c.name);
+        CHECKF(forged.ok(), "the world for the %s forged swing (%s%s)", c.name, forged.g.rig.problem.c_str(), forged.g.w.problem.c_str());
+        if (!forged.ok()) continue;
+        forged.rate = kFast;
+        CHECKF(forged.swing(0, 3.0) == Refusal::None, "%s: the first swing is at a play rate of %.3f", c.name, kFast);
+        const Refusal too_soon = forged.swing(1, c.table / kFast - 0.01);
+        CHECKF(too_soon == Refusal::Cooldown, "%s: a %.3f s swing under the %.3f rate's %.3f s floor is refused (%s)", c.name, c.table / kFast - 0.01, kFast,
+               c.table / kFast, refusal_name(too_soon));
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_rate_change);
+
+// ---- the swing record after a dodge, a cancel, a client end and a death -----------------------------------------------------------------------------
+// The least gap counts from an accepted swing, but a swing the game ended or the character's death leaves no record: the first honest swing after each is
+// accepted, combo by combo. Each case starts with an accepted swing and then, inside that combo's own least gap, a second swing. The stop case ends the swing
+// through its item (the client gets the instance id with it), so it can only come within the floor of the combos whose item shows before their floor; the others
+// are still checked for acceptance.
+void test_swing_gap_record_cleared(Fixture& f) {
+    std::printf("the first honest swing after a dodge, a cancel, a client end and a death is accepted, combo by combo\n");
+    for (const RangedCombo& c : kRangedCombos) {
+        // a Dodge before the swing's item: the swing ends (end_swings) and its record goes
+        {
+            Swings s(f, c.name);
+            CHECKF(s.ok(), "the world for the %s Dodge (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+            if (!s.ok()) continue;
+            s.rate = 1.0;
+            CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing is accepted", c.name);
+            s.g.rig.pipe->end_by_dodge(s.t + 0.05);
+            s.g.rig.take();
+            const Refusal r = s.swing(1, 0.10);
+            CHECKF(r == Refusal::None, "%s: a Dodge 0.05 s in ends the swing: the next swing 0.10 s after it is accepted (%s)", c.name, refusal_name(r));
+            CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        }
+        // a non-weapon ability (the Ranger's Power Shot) cancels the swing (cancel_swings)
+        {
+            Swings s(f, c.name);
+            CHECKF(s.ok(), "the world for the %s cancel (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+            if (!s.ok()) continue;
+            s.g.rig.know({c.name, "Ranger_PowerShot"});
+            s.rate = 1.0;
+            CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing is accepted", c.name);
+            TriggerInfo info;
+            info.target_count = 1;
+            info.target_actors = {s.wolf};
+            s.g.rig.run_to(s.t + 0.05);
+            const Refusal power = s.g.rig.pipe->trigger(s.g.rig.ability("Ranger_PowerShot"), s.id++, s.t + 0.05, info);
+            s.g.rig.take();
+            CHECKF(power == Refusal::None, "%s: the Power Shot is accepted and cancels the swing (%s)", c.name, refusal_name(power));
+            const Refusal r = s.swing(1, 0.10);
+            CHECKF(r == Refusal::None, "%s: a cancel 0.05 s in: the next swing 0.10 s after the first is accepted (%s)", c.name, refusal_name(r));
+            CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        }
+        // the client ends the swing (stop_swing): the item has shown by `item_delay + 0.02` s; the next swing 0.05 s later is accepted
+        {
+            Swings s(f, c.name);
+            CHECKF(s.ok(), "the world for the %s client end (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+            if (!s.ok()) continue;
+            s.rate = 1.0;
+            CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing is accepted", c.name);
+            const double shown = c.item_delay + 0.02;
+            s.g.rig.run_to(s.t + shown);
+            const bootstrap::ActiveAbilityItem* item = s.g.rig.pawn.ability_item();
+            CHECK(item != nullptr && item->ability_guid == s.def->row.guid, "(the swing's item is the pawn's)");
+            if (item) CHECK(s.g.rig.pipe->end_request(static_cast<int32_t>(item->server_instance_id), s.t + shown), "(the client ends the swing)");
+            s.g.rig.take();
+            s.t += shown;
+            const Refusal r = s.swing(1, 0.05);
+            CHECKF(r == Refusal::None, "%s: a client end %.3f s in: the next swing 0.05 s later is accepted (%s)", c.name, shown, refusal_name(r));
+            CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        }
+        // death: set_dead(true) clears the record; after the respawn (set_dead(false)) the next swing is accepted
+        {
+            Swings s(f, c.name);
+            CHECKF(s.ok(), "the world for the %s death (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+            if (!s.ok()) continue;
+            s.rate = 1.0;
+            CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing is accepted", c.name);
+            s.g.rig.pipe->set_dead(true);
+            s.g.rig.pipe->set_dead(false);
+            s.g.rig.take();
+            const Refusal r = s.swing(0, 0.10);
+            CHECKF(r == Refusal::None, "%s: after a death the next swing 0.10 s after the last is accepted (%s)", c.name, refusal_name(r));
+            CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        }
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_record_cleared);
+
+// ---- a refused swing keeps the client's combo step --------------------------------------------------------------------------------------------------
+// The client's combo step is one past the last ability it played (its TriggerAbility computes the new step from GetComboCount), and a swing the server refused
+// still counts until its montage ends: the client's next swing names the step after the refused one. The server advances its own step on a refusal, so the next
+// honest swing plays its own step 3 montage instead of a corrected step 2; each combo is checked by the montage the pawn's item shows.
+void test_swing_gap_refusal_keeps_the_step(Fixture& f) {
+    std::printf("a refused swing leaves the combo at the client's step, combo by combo\n");
+    for (const RangedCombo& c : kRangedCombos) {
+        Swings s(f, c.name);
+        CHECKF(s.ok(), "the world for the %s refused step (%s%s)", c.name, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) continue;
+        s.rate = 1.0;
+        CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing of the combo is accepted", c.name);
+        const Refusal refused = s.swing(1, 0.10);
+        CHECKF(refused == Refusal::Cooldown, "%s: the second swing 0.10 s later is refused (%s)", c.name, refusal_name(refused));
+        const Refusal next = s.swing(c.step3, 3.0);
+        CHECKF(next == Refusal::None, "%s: the next swing, the plain step 3 montage, is accepted (%s)", c.name, refusal_name(next));
+        s.g.rig.run_to(s.t + 0.30);   // (every combo's item has shown by now: the latest is the Shortbow's 0.258 s)
+        const bootstrap::ActiveAbilityItem* item = s.g.rig.pawn.ability_item();
+        std::string want;
+        for (const content::MontageRow& m : s.def->montages) {
+            if (m.anim_index == c.step3) want = m.soft_path;
+        }
+        CHECKF(item != nullptr && item->ability_guid == s.def->row.guid && !want.empty() && item->montage_path == want,
+               "%s: the next swing's item plays the step 3 montage (%.3f s in), not the corrected step 2 (%s)", c.name, 0.30, item ? item->montage_path.c_str() : "no item");
+        s.g.rig.take();
+        CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
+}
+AOC_REGISTER_TEST(test_swing_gap_refusal_keeps_the_step);
+
+// ---- the recorded session's swings -------------------------------------------------------------------------------------------------------------------
+// The recorded session's four weapons (the item of each swing and the client's play rate). The gaps below are the log's item times: the item step comes a
+// constant time after the trigger, so they are the trigger gaps. The session's character is a Mage (its Mage_ConeOfCold and Mage_Frostbolt ended a Wand and a
+// Longbow swing), so the combos play at MagicalSpeed; its rate is 0.785 for the Wand and 0.782 for the others. Each weapon starts from a fresh record (the
+// swap cleared it), and every one of its honest swings is taken.
+struct RecordedSwings {
+    const char*         combo;
+    double              rate;
+    std::vector<double> gaps;
+};
+const RecordedSwings kRecordedSwings[] = {
+    {"WeaponCombo_Ranged_Wand", 0.785,
+     {0.537, 0.663, 0.667, 0.533, 0.935, 0.499, 0.7, 0.667, 0.832, 0.534, 0.667, 0.688, 3.611, 0.501, 0.7, 0.668, 0.532, 1.134, 0.532, 0.667, 0.701, 0.5,
+      1.133, 0.499, 6.268, 0.499, 0.7, 0.667, 4.767, 0.499, 0.701, 0.667, 0.533, 0.933, 0.5, 0.667, 1.633, 0.5, 0.667, 0.7, 0.499}},
+    {"WeaponCombo_Ranged_Shortbow", 0.782, {0.399, 0.567, 0.365, 0.8, 8.501, 0.833, 1.2, 0.399, 0.568, 0.4, 0.799}},
+    {"WeaponCombo_Ranged_Longbow", 0.782, {1.066, 0.9, 1.367, 1.067, 0.9, 4.933, 1.067, 0.899, 1.368}},
+    {"WeaponCombo_Ranged_Book", 0.782, {0.933, 1.067, 1.333, 0.934, 1.067, 1.332, 0.935, 1.066}},
+};
+void test_recorded_swing_gaps(Fixture& f) {
+    std::printf("the recorded session's ranged swings are all taken, weapon by weapon\n");
+    for (const RecordedSwings& o : kRecordedSwings) {
+        Swings s(f, o.combo, 800.0, 8, true);   // (a Mage, as the session was, so the combo's rate is MagicalSpeed)
+        CHECKF(s.ok(), "the world for the recorded %s swings (%s%s)", o.combo, s.g.rig.problem.c_str(), s.g.w.problem.c_str());
+        if (!s.ok()) continue;
+        s.rate = o.rate;
+        CHECKF(s.swing(0, 3.0) == Refusal::None, "%s: the first swing after the swap is taken", o.combo);
+        int accepted = 1;
+        for (const double gap : o.gaps) {
+            const Refusal r = s.swing(0, gap);
+            if (r == Refusal::None) ++accepted;
+            CHECKF(r == Refusal::None, "%s: the recorded swing %.3f s after the last is taken (%s)", o.combo, gap, refusal_name(r));
+        }
+        CHECKF(accepted == 1 + static_cast<int>(o.gaps.size()), "%s: all %zu of the recorded swings are taken (%d)", o.combo, o.gaps.size() + 1, accepted);
+        CHECK(s.g.rig.pawn.broken.empty(), "(the pawn took every change)");
+        s.play(3.0);
+    }
+}
+AOC_REGISTER_TEST(test_recorded_swing_gaps);
+
 // ---- a swing the client ends ------------------------------------------------------------------------------------------------------------------------
 // A stunned client ends the swing it plays (ServerEndAbility). The arrows that have left land; the ones the montage had still to send never leave.
 void test_forged_swing_ended(Fixture& f) {
@@ -458,19 +943,50 @@ AOC_REGISTER_TEST(test_forged_swing_ended);
 
 // ---- a swing the next swing's item replaces ---------------------------------------------------------------------------------------------------------
 // The next swing's item takes the pawn's place: the montage of the swing before it is gone, and an arrow that had still to leave never does. The volley's arrows have always been held to that;
-// the swings that send one arrow were not.
+// the swings that send one arrow were not. The Longbow's third step's arrow leaves 0.904 s into its montage (the play rate is set to 1.0); the fourth step comes 0.60 s after it (the least gap
+// is 0.55 s) and shows its item 88 ms later, at 0.688 s, before the third arrow leaves.
 void test_swing_replaced_by_next(Fixture& f) {
     std::printf("a swing's single arrow does not leave once the next swing's item has taken its place\n");
     Swings s(f, "WeaponCombo_Ranged_Longbow");
     CHECKF(s.ok(), "the world for the Longbow swings (%s%s)", s.g.rig.problem.c_str(), s.g.w.problem.c_str());
     if (!s.ok()) return;
-    // the first swing's arrow leaves 0.6306 s into its montage; the second swing comes 0.45 s after it and shows its item 88 ms later
-    CHECK(s.swing(0, 3.0) == Refusal::None && s.swing(1, 0.45) == Refusal::None, "two swings 0.45 s apart are accepted");
+    s.rate = 1.0;   // (the montage's times are the table's)
+    bool third_in_data = false, fourth_in_data = false;
+    for (const content::AbilityHitRow& h : s.def->hits) {
+        if (h.source != "projectile") continue;
+        const abilities::HitDef* hit = f.catalog->hit(h.hit_guid);
+        if (!hit) continue;
+        third_in_data = third_in_data || hit->row.name.find("_03") != std::string::npos;
+        fourth_in_data = fourth_in_data || hit->row.name.find("_04") != std::string::npos;
+    }
+    CHECK(third_in_data && fourth_in_data, "the third and fourth steps' projectile hits are in the data (their names carry _03 and _04)");
+    if (!third_in_data || !fourth_in_data) return;
+    for (const int anim : {0, 1}) {
+        CHECK(s.swing(anim, 3.0) == Refusal::None, "(a swing of the Longbow's first two steps is accepted)");
+        s.play(2.5);
+    }
+    const size_t before = s.landed(content::kSourceTypeProjectile);
+    const Refusal third_swing = s.swing(2, 3.0);
+    const Refusal fourth_swing = s.swing(3, 0.60);
+    CHECKF(third_swing == Refusal::None && fourth_swing == Refusal::None, "the third and fourth swings 0.60 s apart are accepted (%s, %s)", refusal_name(third_swing), refusal_name(fourth_swing));
+    const Refusal below_floor = s.swing(4, 0.50);
+    CHECKF(below_floor == Refusal::Cooldown, "a fifth swing 0.50 s after the fourth is under the Longbow's 0.55 s least gap and is refused (%s)", refusal_name(below_floor));
     s.play(3.0);
-    const size_t first = s.landed(content::kSourceTypeProjectile, "WeaponCombo_Longbow_01");
-    const size_t second = s.landed(content::kSourceTypeProjectile, "WeaponCombo_Longbow_02");
-    CHECKF(first == 0, "the first swing's arrow never leaves: the second swing's item came before its montage sent it (%zu landed)", first);
-    CHECKF(second == 1, "...and the second swing's arrow lands (%zu landed)", second);
+    size_t arrows = 0, third = 0, fourth = 0;
+    for (const Seen& seen : s.g.rig.log) {
+        for (const bootstrap::HitConfirm& c : seen.confirmations) {
+            if (c.targets.empty() || c.source_type != content::kSourceTypeProjectile || !s.arrow_hits.count(c.record_guid)) continue;
+            ++arrows;
+            const abilities::HitDef* hit = s.g.rig.catalog->hit(c.record_guid);
+            if (!hit) continue;
+            if (hit->row.name.find("_03") != std::string::npos) ++third;
+            if (hit->row.name.find("_04") != std::string::npos) ++fourth;
+        }
+    }
+    CHECKF(third == 0, "the third swing's arrow never leaves: the fourth swing's item came before its montage sent it (%zu of its _03 hit landed)", third);
+    CHECKF(fourth == 1, "...and the fourth swing's arrow lands (%zu of its _04 hit landed)", fourth);
+    CHECKF(arrows == 3 && s.landed(content::kSourceTypeProjectile) - before == 1, "the first two arrows land and only the fourth's joins them (%zu arrows in all, %zu after the first two)", arrows,
+           s.landed(content::kSourceTypeProjectile) - before);
 }
 AOC_REGISTER_TEST(test_swing_replaced_by_next);
 

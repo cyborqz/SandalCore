@@ -25,7 +25,7 @@ const char* refusal_name(Refusal r) {
         case Refusal::None: return "none";
         case Refusal::NotEnabled: return "not an ability worldd runs";
         case Refusal::Stamina: return "not enough Stamina";
-        case Refusal::Cooldown: return "in cooldown";
+        case Refusal::Cooldown: return "in cooldown or too soon";
         case Refusal::InCombat: return "in combat";
         case Refusal::Duplicate: return "that instance is running";
         case Refusal::NotKnown: return "an ability the character does not know";

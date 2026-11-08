@@ -440,6 +440,7 @@ void PlayerSession::put_weapon_in_hand(int64_t combo, int64_t line, const std::s
     records_.push_back(combo);
     combo_ = combo;
     wielded_line_ = line;
+    if (pipeline_) pipeline_->clear_swings();   // (the weapon in hand changed: no accepted swing of the last one counts for the new one's first)
     push_abilities();   // (the pipeline answers to the new combo from here on, and not to the old one)
     pb_.set_weapon_skill_line(line, line_name);
 }
@@ -468,6 +469,7 @@ void PlayerSession::follow_worn_weapon() {
     if (weapon) {
         if (!moved_hand && weapon->combo == combo_) {   // the same combo stays in hand (another item of the same weapon, or a weapon in the other set)
             wielded_line_ = weapon->line;
+            if (pipeline_) pipeline_->clear_swings();   // (another item of the combo: the swing record does not outlive the swap)
             return;
         }
         put_weapon_in_hand(weapon->combo, weapon->line, weapon->line_name);
@@ -481,6 +483,7 @@ void PlayerSession::follow_worn_weapon() {
     const int64_t gone = combo_;
     known_.erase(std::remove(known_.begin(), known_.end(), gone), known_.end());
     combo_ = 0;
+    if (pipeline_) pipeline_->clear_swings();   // (the weapon in hand is gone: its accepted swings no longer count)
     push_abilities();
     spdlog::info("[session] {}: the weapon in hand was taken off and no other is worn: combo {} leaves KnownAbilities", name(), gone);
 }

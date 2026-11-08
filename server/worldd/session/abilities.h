@@ -81,7 +81,7 @@ enum class Refusal : uint8_t {
     None,
     NotEnabled,   // an ability worldd does not run (any combat ability): answered with ClientEndAbility
     Stamina,      // less Stamina than the ability needs
-    Cooldown,     // the Dodge's cooldown has not ended
+    Cooldown,     // the Dodge's cooldown has not ended, or a ranged swing came sooner than its least gap
     InCombat,     // Rest, in combat
     Duplicate,    // the ClientInstanceId belongs to an instance that is running: the request is dropped, nothing answered
     // plan D2: the generic runtime's refusals (every one is answered with ClientEndAbility, a Duplicate is not)

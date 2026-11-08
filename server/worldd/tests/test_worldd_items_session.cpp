@@ -3335,6 +3335,37 @@ static BunchWriter ranged_rpc(bool ranged) {
     return params ? actor_rpc(pawn, "ServerSetUseRangedWeapon", *params) : BunchWriter();
 }
 
+/// ServerTriggerAbility for a known ability with no item: the client's own id, the montage it names (the combo's step) and an input of (1, 0).
+static BunchWriter ability_trigger(const emit::FIntrepidNetworkGUID& ability, int64_t guid, int32_t id, int32_t anim) {
+    const schema::ClassSchema& cls = class_named("UAoCAbilityComponent");
+    const schema::RpcSchema* rpc = cls.rpc("ServerTriggerAbility");
+    repl::RpcParams p;
+    bool ok = rpc && repl::set_rpc_param(*rpc, p, "AbilityGuid", repl::Value::i64(guid));
+    if (ok && id != 0) ok = repl::set_rpc_param(*rpc, p, "ClientInstanceId", repl::Value::i64(id));
+    if (ok && anim != 0) ok = repl::set_rpc_param(*rpc, p, "AnimationIndex", repl::Value::i64(anim));   // the combo's step (its montage)
+    ok = ok && repl::set_rpc_param(*rpc, p, "InputVector", repl::Value(repl::Vec2d{1, 0}));
+    ok = ok && repl::set_rpc_param(*rpc, p, "ItemData.Slot", repl::Value::i64(-1));
+    ok = ok && repl::set_rpc_param(*rpc, p, "ItemData.ItemInstance", repl::Value(repl::ItemInstance{}));
+    ok = ok && repl::set_rpc_param(*rpc, p, "ItemData.Location", repl::Value::u64(24));
+    if (!ok) {
+        std::printf("  [FAIL] the trigger's parameters do not fit\n");
+        return BunchWriter();
+    }
+    BunchWriter field;
+    bool failed = false;
+    if (repl::write_rpc_field(cls, *rpc, p, field, client_options(), &failed) == 0 || failed) {
+        std::printf("  [FAIL] ServerTriggerAbility does not write\n");
+        return BunchWriter();
+    }
+    BunchWriter out;
+    repl::BlockHeader header;
+    header.is_actor = false;
+    header.has_rep_layout = false;
+    header.object = ability;
+    repl::write_content_block(out, header, field, /*server_form=*/false);
+    return out;
+}
+
 static BunchWriter client_load_rpc() { return actor_rpc(class_named("AoCPlayerControllerBP_C"), "ServerRequestClientLoad", repl::RpcParams{}); }
 
 static void advance(Harness& h, int ms) {
@@ -4043,6 +4074,39 @@ static void test_d1s2_weapon_swap() {
     h.request(ranged_rpc(false), h.pawn_ch);
     CHECK(h.s->weapon_swaps() == 2 && h.s->known_abilities().back() == 6064631845843960261ll && h.s->known_abilities().size() == 57, "back to the melee set: the Scepter's combo is the last again");
     CHECK(ranged_flag() == std::optional<bool>(false), "...and CombatInfo.bIsUsingRangedWeapon is false again");
+}
+
+/// The weapon swap clears the ranged swing's least gap: a Book swing, a swap to the melee set and back, and a second Book swing 0.12 s after the first.  On the
+/// old record the Book's 0.63 s least gap would refuse it; the swap clears the record, so it is taken.  `ability_ends_sent` counts the ClientEndAbility replies:
+/// a taken trigger sends none, a refused one sends the end.
+static void test_d1s2_weapon_swap_clears_the_swing_gap() {
+    std::printf("a weapon swap clears the ranged swing's least gap\n");
+    Harness h(bard_at(1), true, /*real_db=*/true);   // (the combos are the real content.db's: the fixture's rules do not run them in the pipeline)
+    h.request(ranged_rpc(true), h.pawn_ch);   // (the Book is the ranged set's weapon)
+    const int64_t book = h.s->known_abilities().back();
+    CHECK(book == 6064631012536680449ll, "(the Book's combo is the last known ability)");
+    if (book != 6064631012536680449ll) return;
+    const emit::FIntrepidNetworkGUID ability = h.s->bootstrap().setup().guids.ability;
+    int32_t id = 900;
+    CHECK(h.s->pipeline() != nullptr, "(the session has a pipeline)");
+    if (h.s->pipeline()) {
+        CHECK(h.s->pipeline()->known(book), "(the pipeline knows the Book's combo)");
+        CHECK(h.s->pipeline()->handles(book), "(the pipeline handles the Book's combo)");
+    }
+    const BunchWriter first = ability_trigger(ability, book, id++, 0);
+    CHECK(first.bit_pos() > 0, "(the first swing's trigger writes)");
+    if (first.bit_pos() == 0) return;
+    const size_t ends = h.s->ability_ends_sent();
+    h.client_sends({h.client.actor(h.pawn_ch, first, true)});
+    h.step();
+    CHECK(h.s->ability_ends_sent() == ends, "the first Book swing is taken (no ClientEndAbility)");
+    h.step(milliseconds(100));
+    // the two swaps and the second swing in one datagram: the client's times, 0.12 s after the first trigger
+    const BunchWriter away = ranged_rpc(false), back = ranged_rpc(true), second = ability_trigger(ability, book, id++, 1);
+    CHECK(away.bit_pos() > 0 && back.bit_pos() > 0 && second.bit_pos() > 0, "(the two swaps and the second swing write)");
+    if (away.bit_pos() == 0 || back.bit_pos() == 0 || second.bit_pos() == 0) return;
+    h.client_sends({h.client.actor(h.pawn_ch, away, true), h.client.actor(h.pawn_ch, back, true), h.client.actor(h.pawn_ch, second, true)});
+    CHECK(h.s->ability_ends_sent() == ends, "the Book swing 0.12 s after the first, across a swap, is taken, not held to the old record");
 }
 
 /// The ranks the stats hold are the Book's for the weapon in hand: the join (character setup) and every swap (refresh_rank_mods) hand the line in hand to Book::held_ranks.  The
@@ -4831,6 +4895,7 @@ int main() {
     test_d1s2_relog();
     test_d1s2_talent_slots();
     test_d1s2_weapon_swap();
+    test_d1s2_weapon_swap_clears_the_swing_gap();
     test_weapon_ranks_follow_the_hand();
     test_d1s2_shapes();
     test_d1s2_stored_garbage();

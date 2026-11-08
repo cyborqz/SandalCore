@@ -462,6 +462,8 @@ public:
     /// hits that name another actor are not made.
     void set_dead(bool dead);
     bool dead() const { return dead_; }
+    /// The weapon in hand changed (a swap, an equip): no ranged weapon combo's accepted swing counts any more, so the next swing is measured from nothing.
+    void clear_swings();
 // built with C | O | A and C | Y | B
 
     /// Plan E1, stage 3: the world's port (null: the caster is alone in its world, as in stage 2). Not owned.
@@ -1049,7 +1051,18 @@ private:
     /// A ranged weapon combo's swings: the step the last one played (by ability). The client plays the steps in order and starts over after the last, so the next swing is the step after it or the first;
     /// swing_montage keeps a modified client to that, and stop_swing is the client ending the swing (a stun): the arrows that had still to leave never do.
     std::map<int64_t, int> swing_steps_;
-    int    swing_montage(const abilities::AbilityDef& def, int requested, int& step) const;
+    /// A ranged weapon combo's last two accepted swings and the play rates they were made at (by ability): a swing is judged by its gap and the gap before
+    /// it (one late packet must not refuse an honest pair), and its floor uses the faster of the last swing's rate and its own.
+    struct SwingRecord {
+        double at = 0;              // the last accepted swing
+        double rate = 1;            // its play rate
+        double before = 0;          // the accepted swing before it
+        double before_rate = 1;     // its play rate
+        bool   has_before = false;
+    };
+    std::map<int64_t, SwingRecord> swing_records_;
+    void   forget_swing(int64_t ability);
+    int    swing_montage(const abilities::AbilityDef& def, int requested, int& step, bool log = true) const;
     void   stop_swing(int64_t instance);
     stats::SplitMix           guid_rng_;
     std::vector<bootstrap::ShieldElement> shields_sent_;

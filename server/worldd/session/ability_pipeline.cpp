@@ -58,6 +58,41 @@ constexpr Timing kTimings[] = {
     {"WeaponCombo_Ranged_Wand", 0.107, 0.107, -1},
 };
 
+// The least gap between two accepted swings of the same ranged weapon combo: its 0.24, 0.30, 0.55 and 0.63 s are about 0.8 (0.79 to 0.81) of the shortest
+// gaps the lead measured between two swings in the retail recordings: about 0.297 s Shortbow, 0.375 Wand, 0.694 Longbow and 0.786 Book (they are not the
+// only gaps the recordings show). A swing is judged by its gap and the gap before it, so one delayed packet does not refuse an honest pair, and a single gap
+// is never shorter than kMinSwingGap. The floor follows the character's play rate (the shot divides its notify by it) both ways: a faster character's floor
+// is shorter, a slower one's longer, and a rate under kMinSwingRate is read as kMinSwingRate, so a broken stat cannot make the floor huge.
+struct SwingGap {
+    const char* ability;
+    double      seconds;
+};
+constexpr SwingGap kSwingGaps[] = {
+    {"WeaponCombo_Ranged_Book", 0.63},
+    {"WeaponCombo_Ranged_Longbow", 0.55},
+    {"WeaponCombo_Ranged_Shortbow", 0.24},
+    {"WeaponCombo_Ranged_Wand", 0.30},
+};
+
+// The slowest play rate the least gap follows: the owner's characters' 0.737536 and 0.790392, and the data's -0.5 Ancient One Deceleration (near 0.29); 0.25
+// is below every real rate and keeps the floor at most four times the table's gap.
+constexpr double kMinSwingRate = 0.25;
+// The shortest gap one accepted swing may have, whatever the average: 50 ms is far under the shortest recorded honest gap (0.297 s) and the item step of the
+// fastest swing (0.084 s Book), so only a repeated trigger (the same moment) or a broken clock comes closer.
+constexpr double kMinSwingGap = 0.05;
+
+/// The least gap of a ranged weapon combo's swings (null: the ability is no ranged weapon combo). The master record already holds
+/// WeaponCombo_Ranged_Orb and WeaponCombo_Ranged_Spellstaff besides the four here: neither is imported and no item uses them, so their own gap is not
+/// measured; a ranged combo the table does not name gets the smallest gap.
+const SwingGap* swing_gap_of(const std::string& ability) {
+    const SwingGap* least = &kSwingGaps[0];
+    for (const SwingGap& g : kSwingGaps) {
+        if (ability == g.ability) return &g;
+        if (g.seconds < least->seconds) least = &g;
+    }
+    return ability.rfind("WeaponCombo_Ranged", 0) == 0 ? least : nullptr;
+}
+
 // Casts that end with a branch of their montage (see BranchedCast). Arcane Volley [R: the one recorded cast]: the ability item came 99 ms after the trigger; the client's
 // cast bar ran out and it asked for the branch 1,289 ms after the trigger; the server moved the montage to the section "CastComplete" (2.0004 s into it) 82 ms after the
 // request, took the cost (the mana, the cooldown) 69 ms after that (1,440 ms from the trigger), and cleared the item's montage 1,170 ms after the cost. The client's own cast bar
@@ -1909,6 +1944,9 @@ double AbilityPipeline::movement_allowance(double now) const {
 void AbilityPipeline::set_dead(bool dead) {
     dead_ = dead;
     if (dead) {
+        // a new life starts the weapon combos over: no accepted swing and no step of the last one counts
+        swing_records_.clear();
+        swing_steps_.clear();
         // every cast ends with the caster, except a ball that has left: it flies on and goes on hurting what it touches. Its own steps and the hits they sent stay; nothing else of its cast does
         for (size_t i = casts_.size(); i-- > 0;) {
             Cast& c = casts_[i];
@@ -2566,6 +2604,7 @@ size_t AbilityPipeline::end_swings(double t, const char* why) {
         e.note = "the swing of " + p.def->row.name + " is ended: " + why;
         events_.push_back(std::move(e));
         drop_record(p.client_id);
+        forget_swing(p.def->row.guid);   // (the Dodge ended the swing: the next one is not held to its time or step)
         casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
         ++ended;
     }
@@ -2704,6 +2743,7 @@ void AbilityPipeline::stop_swing(int64_t instance) {
     for (size_t i = casts_.size(); i-- > 0;) {
         Cast& cast = casts_[i];
         if (cast.instance != instance || !is_weapon_combo(cast.def->row)) continue;
+        forget_swing(cast.def->row.guid);   // (the client ended the swing: the next one is not held to its time or step)
         if (cast.flight_pending) {   // (a single arrow that has not left)
             cast.flight_pending = false;
             cast.projectile_due.reset();
@@ -2842,7 +2882,7 @@ std::optional<AbilityPipeline::Inspection> AbilityPipeline::inspect(int64_t abil
 // the step of the last swing, and a swing is taken as named when it is the first step (starting over) or the step after that one. Any other montage (a step the combo has not got to, one that does not
 // exist) plays the step the combo is at, the plain swing of it, so that a client cannot name the Shortbow's five-arrow step on every swing. Nothing is known of the combo before its first swing: the montage
 // named is taken then. `step` gets the step the swing plays (0: the ability is no ranged weapon combo).
-int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& step) const {
+int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& step, bool log) const {
     step = 0;
     if (!catalog_ || def.montages.empty() || def.row.name.rfind("WeaponCombo_Ranged", 0) != 0) return requested;
     const content::MontageRow* asked = nullptr;
@@ -2872,7 +2912,7 @@ int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& st
         if (!take) next = 1;   // (the combo is over, or the step is none: it starts again)
     }
     if (!take) return requested;
-    spdlog::info("[abilities] {}: the client named montage {}, but the combo is at step {}: the swing plays montage {}", def.row.name, requested, next, take->anim_index);
+    if (log) spdlog::info("[abilities] {}: the client named montage {}, but the combo is at step {}: the swing plays montage {}", def.row.name, requested, next, take->anim_index);
     step = next;
     return take->anim_index;
 }
@@ -2976,7 +3016,6 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     cast.def = def;
     cast.trigger_at = t;
     int swing_step = 0;   // (a ranged weapon swing: the step it plays, kept once the swing is accepted)
-    cast.animation_index = swing_montage(*def, info.animation_index, swing_step);
     cast.item_cast = info.item_cast;
     cast.target = info.target_count > 0 && target_actors.empty();   // (aimed at the caster; a real target is named by the item's Targets)
     // ... but a projectile reaches the caster only when the ability may be aimed at the caster at all: an enemy-only ability whose target the world
@@ -3031,7 +3070,31 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     for (const auto& [effect, n] : cast.effect_costs) {
         if (stacks_of(effect) < n) return refused(Refusal::Cost, " (" + std::to_string(n) + " stacks of effect " + std::to_string(effect) + " needed)");
     }
-
+    // A ranged weapon swing comes no sooner than its least gap after the last accepted swing of the same combo, judged over the last two gaps so that
+    // one late packet (which shortens the next gap) does not refuse an honest swing: the average of the new gap and the one before it must make the
+    // floor, and the first gap of a combo must make it alone (no earlier gap to average). A single gap is never shorter than kMinSwingGap. The floor
+    // follows the character's play rate (the shot divides its notify by it) both ways, so a slowed character's floor is longer, and it uses the faster
+    // of the last swing's rate and the new one's (a buff that ends between two swings does not refuse the second). A modified client that names the
+    // wrong montage cannot fire faster over time than this floor, which is about 0.8 of the shortest honest gap.
+    const SwingGap* swing_gap = swing_gap_of(row.name);
+    double swing_rate = 1.0;
+    if (swing_gap) {
+        swing_rate = std::max(kMinSwingRate, item_rate(*def));
+        const auto last = swing_records_.find(def->row.guid);
+        if (last != swing_records_.end()) {
+            const SwingRecord& r = last->second;
+            const double floor = swing_gap->seconds / std::max(swing_rate, r.rate);
+            const double gap = t - r.at;
+            const double judged = r.has_before ? 0.5 * (gap + (r.at - r.before)) : gap;
+            if (gap < kMinSwingGap || judged < floor) {
+                int refused_step = 0;
+                swing_montage(*def, info.animation_index, refused_step, false);   // (the client's own step still moves on: keep the server's with it)
+                if (refused_step > 0) swing_steps_[def->row.guid] = refused_step;
+                return refused(Refusal::Cooldown, " (the swing comes too soon)");
+            }
+        }
+    }
+    cast.animation_index = swing_montage(*def, info.animation_index, swing_step);
     // accepted: the steps and their times
     double item_delay = kItemDelay, cost_delay = kCostDelay, hit_delay = -1;
     double zone_delay = -1;   // when the actor of the zone the cast spawns opens, after the trigger (-1: a moment after the item)
@@ -3284,6 +3347,21 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     spawn_zones(cast, t + (zone_delay >= 0 ? zone_delay : (has_montage ? item_delay : cost_delay) + kZoneOpenDelay), zone_end >= 0 ? t + zone_end : -1.0);
     // an ability's trigger ends the weapon swings under way: retail's server sent no hit of a swing that an ability followed within 0.45 s, and ended one that showed no item
     if (!is_weapon_combo(row)) cancel_swings(t, name);
+    if (swing_gap) {   // (the least gap counts from an accepted swing; the rate it was played at goes with it)
+        auto it = swing_records_.find(def->row.guid);
+        if (it == swing_records_.end()) {
+            SwingRecord record;
+            record.at = t;
+            record.rate = swing_rate;
+            swing_records_.emplace(def->row.guid, record);
+        } else {
+            it->second.before = it->second.at;
+            it->second.before_rate = it->second.rate;
+            it->second.has_before = true;
+            it->second.at = t;
+            it->second.rate = swing_rate;
+        }
+    }
     if (swing_step > 0) swing_steps_[def->row.guid] = swing_step;
     casts_.push_back(std::move(cast));
     return Refusal::None;
@@ -3341,6 +3419,7 @@ void AbilityPipeline::cancel_swings(double t, const std::string& by) {
             for (const HitSlot& s : rec->slots) asked = asked || !s.due.empty();
         }
         if (!asked) drop_record(p.client_id);
+        forget_swing(p.def->row.guid);   // (the swing is over: the next one is not held to its time or step)
         if (p.item_due) {   // the swing never showed its item: its instance ends, in the update of the new ability's item [R: retail's reply to an ability that came within 50 ms of a swing]
             AbilityEvent e;
             e.at = t;
@@ -3350,6 +3429,15 @@ void AbilityPipeline::cancel_swings(double t, const std::string& by) {
         }
         casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
     }
+}
+
+// The combo's accepted swings stop counting (its step stays: the client's combo may go on).
+void AbilityPipeline::forget_swing(int64_t ability) {
+    swing_records_.erase(ability);
+}
+
+void AbilityPipeline::clear_swings() {
+    swing_records_.clear();
 }
 
 void AbilityPipeline::step_branch(Cast& cast, double t) {
