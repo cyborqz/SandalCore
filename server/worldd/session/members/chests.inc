@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
+// Random coffers and choose-one selectors: contributed by war-drayv in #16.
 // ============================================================================
 //  session/members/chests.inc: the members of PlayerSession's chests (session/player_chests.cpp)
 //  Included at the end of the class (session/members_registered.inc).

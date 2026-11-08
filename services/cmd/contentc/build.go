@@ -30,7 +30,11 @@ import (
 
 // Version is contentc's version, recorded in meta (contentc.version). Raise it
 // when a change alters what content.db holds.
-const Version = "42"
+//
+// 42 added the knock-back tables. 43 added item_reward_selection (the random coffers and choose-one
+// selectors contributed in #16); the comments of that code that say "version 42" were written before
+// 42 was taken.
+const Version = "43"
 
 // Options say what Build reads and writes.
 type Options struct {
