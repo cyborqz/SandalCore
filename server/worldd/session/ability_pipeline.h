@@ -195,6 +195,17 @@ struct LoopedCast {
     double      fire = 0;     // the montage time of the first FireProjectile notify (a shot's arrow leaves at it and again every `period`), seconds; 0: no notify, the arrow lands kProjectileDelay after its shot
 };
 
+/// An ability whose cast lands its damage hit several times: the SERVER runs the hit at each of the montage's hit notifies (the animation's own times, seconds at a rate of 1) and the
+/// last of them also runs the ability's Stun hit on the targets it lands on (the one recorded cast's montage; ability_pipeline.cpp has the table and the evidence).
+struct MultiHitCast {
+    const char* ability;
+    const char* damage;   // the hit the montage's notifies run (the ability's key-1 hit)
+    const char* stun;     // the hit the last of them runs too (the tooltip's final hit)
+    double      length;   // the montage's length, seconds at a rate of 1
+    int         count;    // how many hit notifies the montage has
+    double      times[4];  // their times, seconds at a rate of 1
+};
+
 /// An ability that finds its own targets: the call names none, and when the montage reaches its section the SERVER gathers the enemies a cone ahead of the caster holds and sends the
 /// ability's one homing projectile at each (the Ranger's Scatter Shot). The projectile lands after its flight and its hit does the damage (ability_pipeline.cpp has the table and the evidence).
 struct GatheredCast {
@@ -617,6 +628,8 @@ private:
         uint64_t source_actor = 0;
         /// The hit reaches its targets wherever they stand: a ball that flew on from the caster hurts what it touches, however far from the caster that is by now. Every other check of the hit holds.
         bool    reach_free = false;
+        /// The last hit of the Lullaby's cast: its Stun hit asks its own requirement (an Incapacitated target) of each target it reaches, and no other hit is asked so.
+        bool    ask_each_target = false;
     };
     /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
     struct HitEvent {
@@ -651,6 +664,7 @@ private:
         std::vector<Pending>     due;          // when a request's application runs
         bool                     applied = false;   // the server applied it by itself (no request came by the deadline)
         bool                     server_self_use = false;   // a pet summon: applied by the server after its cost, never by a request
+        bool                     server_multi = false;      // the Lullaby's cast: the server runs the hit at the montage's notifies, never by a request
         bool                     fired = false;     // the projectiles the hit fires have left: they leave once a cast, however often the client asks for the hit
     };
     /// A cast that takes hit requests until its window ends.
@@ -693,6 +707,11 @@ private:
         const abilities::AbilityDef*          def = nullptr;
         double                                trigger_at = 0;
         std::optional<double>                 item_due, cost_due, hit_due, projectile_due, loop_due, own_due;
+        /// A cast whose damage hit lands at several of its montage's notifies (kMultiHitCasts): the hit the last one also runs, which notify it has just run,
+        /// and the rate of the montage's play (its times are seconds at a rate of 1, multiplied by this).
+        const MultiHitCast*                   multi = nullptr;
+        int                                   multi_index = 0;
+        double                                multi_scale = 1.0;
         /// A cast that waits for the client's branch request (kBranchedCasts): when its montage jumps to the branch's section and ends, and the missiles of a volley
         /// each with the time it lands (each its own step); the item as the cast made it (the jump and the end are changes of that item).
         const BranchedCast*                   branched = nullptr;
@@ -844,6 +863,7 @@ private:
     void   step_item(Cast& cast, double t);
     void   step_cost(Cast& cast, double t);
     void   step_hits(Cast& cast, double t, const char* which, int depth = 0);
+void   step_multi_hit(Cast& cast, double t);
     /// A hit that fires further hits when it lands (RecursiveHit, kBounces): the child hit is confirmed on another enemy near the one just hit, and the projectile it fires flies there (a Fly step).
     void   bounce_from(bootstrap::AbilityChange& c, Cast& cast, const abilities::HitDef& hit, int64_t projectile, uint64_t target, int depth, double t);
     /// A hit that names itself in its RecursiveHit (Chain Lightning): the same hit is applied to the nearest enemy within the recursive targeting's sphere of the one just hit,

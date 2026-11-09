@@ -1577,12 +1577,34 @@ void CombatWorld::drop_effects_of_pet(uint64_t pet) {
 void CombatWorld::wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* origin, double now) {
     if (n.dead || r.miss() || n.book.empty()) return;
     bool took_health = false;
-    for (const ResolvedMod& m : r.mods) took_health = took_health || (m.stat_guid == data_.ids().health && std::isfinite(m.value) && m.value < 0.0);
+    double health_taken = 0;
+    for (const ResolvedMod& m : r.mods) {
+        if (m.stat_guid != data_.ids().health || !std::isfinite(m.value) || m.value >= 0.0) continue;
+        took_health = true;
+        health_taken += -m.value;
+    }
     if (!took_health) return;
     const int64_t record = origin && origin->hit ? origin->hit->row.guid : 0;
     std::set<int64_t> broken;   // (the effect records; each goes off with all its instances)
     for (const effects::Instance& e : n.book.instances()) {
         if (e.def && e.def->breaks_on_damage && !e.def->breaks_on_damage->leaves(record)) broken.insert(e.def->row.guid);
+    }
+    // the effects that end once the damage their holder takes adds up to a share of the instigator's maximum Health (the dance's tenth): what this hit took is added to each
+    struct Accumulating {
+        int64_t                     key = 0;
+        const abilities::EffectDef* def = nullptr;
+        uint64_t                    instigator = 0;
+    };
+    std::vector<Accumulating> accumulating;
+    for (const effects::Instance& e : n.book.instances()) {
+        if (e.def && e.def->breaks_on_damage_taken) accumulating.push_back({e.key, e.def, e.instigator});
+    }
+    for (const Accumulating& a : accumulating) {
+        PlayerPort* port = player(a.instigator);
+        const stats::StatValue* max = port ? port->fighter().stats().find(data_.ids().max_health) : nullptr;
+        if (!max) continue;
+        const double threshold = a.def->breaks_on_damage_taken->share * std::max(0.0, static_cast<double>(max->value));
+        if (n.book.add_damage_taken(a.key, health_taken) > threshold) broken.insert(a.def->row.guid);
     }
     for (const int64_t guid : broken) {
         if (n.dead) return;
@@ -1602,7 +1624,9 @@ bool CombatWorld::takes_crowd_control(const abilities::EffectDef& def) {
     // (the abilities bit stands for a stun, a trip and a sleep, which bind the feet and the facing as well: a record with it and a snare or a root but not the three bits is no stun, and a mob
     // would be stunned whole by it.  None in the data today.  A push stops the abilities of what it pushes and binds nothing else)
     if (!pushes && (status & content::kCcNoAbilities) != 0 && (status & (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) != (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities)) return false;
-    return def.cc->animation_request.find("Custom") == std::string::npos;      // (an animation of its own is not played yet)
+    // (an animation of its own is not played yet: a full stun binds everything and needs none, so the flags go on and the client plays its own; every other record that asks for one stays off)
+    if (def.cc->animation_request.find("Custom") == std::string::npos) return true;
+    return status == (content::kCcRoot | content::kCcNoTurn | content::kCcNoAbilities);
 }
 
 void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now, uint64_t via_pet) {

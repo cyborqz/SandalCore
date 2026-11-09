@@ -571,12 +571,13 @@ private:
     // ---- the effects a creature holds
     void  land_effect(Npc& n, const effects::Applied& applied, uint64_t instigator, double now, uint64_t via_pet = 0);
     /// A hit that took Health from the creature breaks the effects that break at the first damage (a sleep: the data's InstantBreak), but for the hit records the effect leaves out (a lullaby's hit, a
-    /// poison's tick).  Called by land_hit before the creature's next look, so that the creature acts in the same step.
+    /// poison's tick), and adds what it took to the effects that break once the damage adds up to a share of the instigator's maximum Health (the dance's tenth).  Called by land_hit before the creature's
+    /// next look, so that the creature acts in the same step.
     void  wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* origin, double now);
     /// Everything the pet put on the creatures ends (it was dismissed, it died, or its owner left): what it holds is held under its owner's name, so the pet is marked on each instance.
     void  drop_effects_of_pet(uint64_t pet);
     /// Whether a creature takes the effect's crowd control: a slow, a root, a freeze, a stun, a trip, a sleep or a push.  A silence, a disarm or an exhaustion (they bind the player's own abilities),
-    /// a record that asks for an animation of its own and one that does nothing stay off.
+    /// a record that asks for an animation of its own (unless it is a full stun, which needs none) and one that does nothing stay off.
     static bool takes_crowd_control(const abilities::EffectDef& def);
     /// Runs the hits of `e` in the given phases, from the player that applied it to the creature that holds it: each is resolved with the two as they are now, landed on the creature, its
     /// own effects are put on the creature the same way, and the player's client is told what it has to show.  An effect whose player is gone or dead ends instead.

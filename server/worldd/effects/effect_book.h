@@ -60,6 +60,7 @@ struct Instance {
     std::vector<stats::EffectMod> mods;
     uint64_t                      instigator = 0;        // the actor that applied it (the one it is shown to be from); 0: none
     uint64_t                      pet = 0;               // the pet whose hit put it on (its owner is the instigator); 0: the instigator's own.  It ends with the pet
+    double                        damage_taken = 0;      // what the fragility that ends at a share of the instigator's Health has counted so far
 };
 
 class Book {
@@ -254,6 +255,16 @@ public:
             if (e.def->row.guid == effect_guid) n += e.stacks;
         }
         return n;
+    }
+
+    /// Adds the damage a hit took from the holder to the instance's accumulation (the fragility that ends it at a share of the instigator's Health); the total after it (0: no such instance).
+    double add_damage_taken(int64_t key, double amount) {
+        for (Instance& e : items_) {
+            if (e.key != key) continue;
+            e.damage_taken += amount;
+            return e.damage_taken;
+        }
+        return 0.0;
     }
 
     /// The instances as the stat engine takes them: what a holder's stats read (the stat mods of each stack, GetEffectCount, GetEffectCountByTag; a tag is one of the record's

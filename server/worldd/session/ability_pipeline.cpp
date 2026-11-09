@@ -534,6 +534,31 @@ struct Dash {
 constexpr Dash kDashes[] = {{"Bard_Misc_Flourish", 3659.0}, {"Ranger_Disengage", 2500.0}, {"Tank_Charge", 5050.0}, {"Tank_Grapple", 1650.0},
                             {"Summoner_Transpose", 1950.0}, {"Rogue_Shadowstep", 3000.0}};
 
+// The Dark Lullaby's cast lands its damage hit several times: its own montage, ABLT_Bard_Lullaby_Enemy, has four AoCAnimNotify_AbilityHit notifies for the ability's key-1 hit (the
+// Enemy hit) at 0.01, 0.7300865, 1.5004842 and 2.317239 s (at a rate of 1; the client's own animation data), and the ability's tooltip says the final hit applies its second hit (the
+// Stun) if the target is Incapacitated. The recorded cast at the air fits the late notify: its self hit comes 2,348 ms in, the montage's key-3 notify 2.319 s at the play rate 0.9833.
+// The last of the four is the cast's final hit; a cast ended or interrupted before it gives no stun. (The client's own ability code names no channel; the montage's notifies are the hits.)
+constexpr MultiHitCast kMultiHitCasts[] = {
+    {"Bard_Song_Lullaby", "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby_Stun", 3.5, 4, {0.01, 0.7300865, 1.5004842, 2.317239}},
+    {"Bard_Song_Lullaby_AOE", "Bard_Song_Lullaby_AOE_Enemy", "Bard_Song_Lullaby_AOE_Stun", 3.5, 4, {0.01, 0.7300865, 1.5004842, 2.317239}},
+};
+
+/// The row of the ability's cast of several hits (nullptr: it lands its damage hit once).
+const MultiHitCast* multi_hit_of(const abilities::AbilityDef& def) {
+    for (const MultiHitCast& m : kMultiHitCasts) {
+        if (def.row.name == m.ability) return &m;
+    }
+    return nullptr;
+}
+
+/// Whether the ability's `hit` is one of the cast's server-run hits (a client's request for it is ignored: the server runs them at the montage's notifies).
+bool is_multi_hit(const abilities::AbilityDef& def, const abilities::HitDef& hit) {
+    for (const MultiHitCast& m : kMultiHitCasts) {
+        if (def.row.name == m.ability && (hit.row.name == m.damage || hit.row.name == m.stun)) return true;
+    }
+    return false;
+}
+
 // The abilities that count as gone out at the press, so that a Dodge never cancels them: a pet command (the pet obeys at once) and a leap, a charge, a teleport or a dash (the client moves the character at once and the
 // server only allows the speed). The data gives most of the moving abilities a speed (NetworkingMaxSpeed) and kDashes lists others; the Fighter's Leapstrike and Lunging Assault and the Ranger's Dash have neither.
 constexpr const char* kMovesAtPress[] = {"Fighter_Leapstrike", "Fighter_LungingAssault", "Ranger_Dash"};
@@ -1547,10 +1572,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
-    // a reaction's hit that asks about its target (Shatter wants it Frozen) is asked of each target below: asked here, GetTarget() would read the caster
+    // a hit that asks about its target is asked of each target below when it is a reaction's (as before); the last hit of the Lullaby's cast asks its own
+    // requirement (an Incapacitated target) of each target it reaches, and no other hit is asked so (src.ask_each_target: the tooltip's final hit)
     const content::ExprRow* requirement = hit.row.requirement_expr != 0 && catalog_ ? catalog_->expr(hit.row.requirement_expr) : nullptr;
     const bool ask_each = src.type == content::kSourceTypeReaction && requirement && requirement->uses_target && requirement->program >= 0;
-    if (!ask_each && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
+    const bool ask_each_this = ask_each || (src.ask_each_target && requirement && requirement->uses_target && requirement->program >= 0);
+    if (!ask_each_this && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
     if (!ensure_evaluation(why)) return;
     const int mask = hit.row.applicable_targets;
     double max_targets = 40;
@@ -1596,7 +1623,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         std::string err;
         auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
         if (!target_eval) continue;
-        if (ask_each) {   // the requirement, with this target as GetTarget()
+        if (ask_each_this) {   // the requirement, with this target as GetTarget()
             bool wanted = false;
             if (evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) {
                 const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
@@ -2219,7 +2246,8 @@ void AbilityPipeline::run_due(double t) {
         if (cast.hit_due && *cast.hit_due <= t) {
             cast.hit_due.reset();
             mark_launched(cast.client_id);
-            step_hits(cast, t, "hit");
+            if (cast.multi) step_multi_hit(cast, t);
+            else step_hits(cast, t, "hit");
             finish_cast_if_done(i);
             return;
         }
@@ -2460,7 +2488,19 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
     }
     // (the targeting record the client names is not checked against the ability's key map: 122 of 1,854 retail requests name another record than the
     // map's, and the hit is what decides what happens)
-    if (slot->server_self_use) return HitVerdict::Quiet;
+    if (slot->server_self_use || slot->server_multi) {
+        // the Lullaby's cast: the server lands its damage hit at the montage's notifies, and the client's request still names the actors it found (the area
+        // shape's cone among them), so they are kept as the targets those hits reach
+        if (slot->server_multi) {
+            if (Cast* c = cast_of(rec->client_id)) {
+                for (const uint64_t id : targets) {
+                    if (c->target_actors.size() >= 16) break;
+                    if (std::find(c->target_actors.begin(), c->target_actors.end(), id) == c->target_actors.end()) c->target_actors.push_back(id);
+                }
+            }
+        }
+        return HitVerdict::Quiet;
+    }
     if (slot->requests >= (slot->max_requests >= 0 ? slot->max_requests : max_requests) || now - slot->last_request < rec->min_gap) return HitVerdict::TooMany;
     ++slot->requests;
     slot->last_request = now;
@@ -2588,7 +2628,7 @@ void AbilityPipeline::abort_cast(size_t index, double t, const char* why, bool g
     Cast& cast = casts_[index];
     const bool paid = cast.paid;   // (a Smite pays before its bar's end: only what follows the bar is dropped)
     spdlog::info("[abilities] {} {:.3f} s after the trigger: {}: {}", cast.def->row.name, t - cast.trigger_at, why,
-                 paid ? (give_back ? "its cost was paid before the bar's end and is given back, nothing more happens" : "its cost was paid before the bar's end, nothing more happens") : "nothing is paid and nothing fires");
+                 paid ? (give_back ? "its cost was paid before the bar's end and is given back, nothing more happens" : "its cost was paid and is kept, nothing more happens") : "nothing is paid and nothing fires");
     AbilityChange c;
     if (give_back) refund(c, cast);
     if (cast.montage_branch && !cast.item_due && item_instance_ && *item_instance_ == cast.instance) {   // (its item was sent and is still the pawn's: it keeps its place, the montage cleared)
@@ -2879,11 +2919,16 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
     // answered like every other one (ClientEndAbility kEndDelay later, below): the cancel is not the whole answer
     for (size_t i = 0; i < casts_.size(); ++i) {
         const Cast& cast = casts_[i];
-        if (cast.instance == server_instance_id && pets::for_ability(cast.def->row.guid) && cast.cost_due) {
+        if (cast.instance != server_instance_id) continue;
+        if (pets::for_ability(cast.def->row.guid) && cast.cost_due) {
             abort_cast(i, now_, "the client ended the summon before completion", true);
             break;
         }
-        if (cast.instance != server_instance_id || !cast.branched || !cast.branched->cancels || cast.held || cast.request_heard || !cast.branch_due) continue;
+        if (cast.multi) {   // (the Lullaby's cast: its hits after the end never run, so its last hit and its stun do not; a cost it has already paid stays paid)
+            abort_cast(i, now_, "the client ended the cast", false);
+            break;
+        }
+        if (!cast.branched || !cast.branched->cancels || cast.held || cast.request_heard || !cast.branch_due) continue;
         abort_cast(i, now_, "the client ended the cast bar", true);   // (a cast that had paid before its bar's end gets it back: a bar the client cancels costs nothing)
         break;
     }
@@ -3425,6 +3470,14 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             if (aimed && plain && !cast.shot) plan_notes(cast, t);
         }
     }
+    // a cast whose damage hit lands at several of its montage's notifies (kMultiHitCasts): the server runs the first one at its notify and the rest in turn, and
+    // the last one also runs the shape's Stun hit; the montage plays at the caster's SpeedMultiplierSource (CastSpeed, the MagicalSpeed stat), so the table's
+    // seconds at a rate of 1 are multiplied by 1 over that rate
+    if (const MultiHitCast* mh = multi_hit_of(*def); mh && has_montage && !loop) {
+        cast.multi = mh;
+        cast.multi_scale = 1.0 / client_rate(true);
+        cast.hit_due = t + mh->times[0] * cast.multi_scale;
+    }
     // a movement ability opens the move checker's window
     double speed = row.networking_max_speed;
     for (const Dash& d : kDashes) {
@@ -3490,6 +3543,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             // A pet summon is applied at the cost step, once, even if the client's hit request is delayed or absent: a later request cannot repeat it.
             slot.server_self_use = true;
         }
+        if (is_multi_hit(*def, *hit)) slot.server_multi = true;   // (the server runs it at the montage's notifies: a request for it is ignored)
         rec.slots.push_back(std::move(slot));
     }
     // A cast that asks the client for its hit and has no later step of its own would end at its cost step, and a Dodge could cancel it only until then. The recordings give most abilities a montage end, and those stay open to it.
@@ -4504,6 +4558,39 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
     }
     recompute(c);
     emit({std::move(c), std::nullopt, t, std::string("the ") + (std::string_view(which) == "hit" ? "hits" : "projectile hits") + " of " + def.row.name});
+}
+
+void AbilityPipeline::step_multi_hit(Cast& cast, double t) {
+    const MultiHitCast& mh = *cast.multi;
+    const AbilityDef& def = *cast.def;
+    AbilityChange c;
+    HitSource src;
+    src.type = content::kSourceTypeAbility;
+    src.guid = def.row.guid;
+    src.actor = true;
+    src.confirm = true;
+    src.response = false;   // (the server's own: the client asks for the damage hit, and the server lands it at the montage's notifies)
+    const HitDef* damage = catalog_->hit_named(mh.damage);
+    bool landed = false;
+    if (damage && !cast.target_actors.empty()) apply_hit_on_targets(c, *damage, cast.target_actors, t, src, &def, &landed);
+    const bool last = ++cast.multi_index >= mh.count;
+    if (last) {
+        // The final hit also runs the shape's Stun hit. Its own record asks for an Incapacitated target (the tooltip's final hit); that requirement is asked of each
+        // target this hit reaches, and of this hit alone (HitSource::ask_each_target), never of the other hits or the other abilities' target-reading hits.
+        if (landed) {
+            if (const HitDef* stun = catalog_->hit_named(mh.stun)) {
+                HitSource next = src;
+                next.ask_each_target = true;
+                apply_hit_on_targets(c, *stun, cast.target_actors, t, next, &def);
+            }
+        }
+        cast.end_due = cast.trigger_at + mh.length * cast.multi_scale;   // (the montage's end clears the item)
+        cast.clears_montage = true;
+    } else {
+        cast.hit_due = cast.trigger_at + mh.times[cast.multi_index] * cast.multi_scale;
+    }
+    recompute(c);
+    emit({std::move(c), std::nullopt, t, "the hit " + std::string(mh.damage) + " of " + def.row.name + (last ? " (the last)" : "")});
 }
 
 // ---- casts whose montage launches projectiles at moments of its own (kTimedCasts) ----------------------------------------------------------

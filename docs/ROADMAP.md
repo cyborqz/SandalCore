@@ -62,6 +62,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Homing projectiles fly the game's turn law: the Discordance's notes, the Mend's orbs, the Frostbolt and the Salvo's arrows turn at their record's rate, curve round a target beside or behind the caster and chase a running creature where the game shows it.
 - Storage: a right-click quick-send into storage tops up a stack of the same item and colour and puts the rest in a free slot.
 - Chat (first part): a welcome line from the server appears in the chat window once when a player enters the world, and a line typed with /say comes back from the server to that player under the character's name.
+- The Bard's Marionette and Dark Lullaby: Marionette stuns the mob it hits for ten seconds with the dance the game client plays, breaks early when the mob takes a tenth of the Bard's maximum Health in damage, and leaves it Humiliated for eight seconds; the Dark Lullaby is a cast bar of four hits whose last hit stuns a mob that is already Incapacitated, for four seconds in its single shape and six in its area one, which the game's own lockout may end at about 4.5 seconds.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

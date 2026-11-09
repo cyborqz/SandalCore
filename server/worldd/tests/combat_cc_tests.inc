@@ -1160,3 +1160,650 @@ void test_carried_swing_drops_its_track_under_a_freeze(Fixture& f) {
 }
 
 AOC_REGISTER_TEST(test_carried_swing_drops_its_track_under_a_freeze);
+
+// ============================================================================================================================================================================
+//  The Bard's Marionette and Dark Lullaby on creatures.
+//
+//  Marionette is a ten-second full stun (root, no turn, no abilities) whose crowd-control record asks for an animation of its own (the dance): the creature takes the flags and the client
+//  plays the dance itself, so the server sends no animation.  Damage taken while it lasts breaks it once it adds up to a tenth of the Bard's maximum Health, and its end puts Humiliated on
+//  the creature for eight seconds.  The Dark Lullaby is a cast of four Enemy hits at its montage's notifies; the last one also runs its second hit (the stun) on the targets it lands on,
+//  only those that carry the Debuff.Incapacitated tag (the tooltip's final hit).  Its six-second area stun ends early when the game's own T2 lockout reaches ten stacks.
+// ============================================================================================================================================================================
+
+/// A character of the class a test passes (a Bard by default) at level 25 on the combat rig, the pipeline connected to a world, and the world's registry for the creatures a test spawns:
+/// the shape of combat_player_cast_tests.inc's world, with the ability rig's `asks` off (the Lullaby's own hits are the server's; a test asks for the other hits it means).
+struct BardMobWorld {
+    Rig                                     rig{2, 25, {}};
+    combat_rig::World                       w;
+    std::optional<combat::NpcStatBook>      book;
+    std::unique_ptr<combat_rig::FakePlayer> player;
+    std::unique_ptr<combat::CombatWorld>    world;
+    std::unique_ptr<combat::WorldHitPort>   port;
+    std::string                             problem;
+
+    BardMobWorld(Fixture& f, const std::string& path, int class_enum = 2) : rig(class_enum, 25, {}) {
+        if (!rig.ok()) problem = "the rig: " + rig.problem;
+        else if (!w.problem.empty()) problem = w.problem;
+        else if (path.empty()) problem = "the Blueprint is not in the table";
+        if (!problem.empty()) return;
+        book.emplace(*f.ctx->bundle, *f.ctx->gear);
+        player = std::make_unique<combat_rig::FakePlayer>(rig, 77, combat::Vec3{0, 0, 1098});
+        world = std::make_unique<combat::CombatWorld>(w.registry, w.npcs.get(), &navfix::shared_nav(), *f.data, *f.catalog, *book, f.motion);
+        world->add_player(player.get());
+        port = std::make_unique<combat::WorldHitPort>(*world, w.registry, player->fighter());
+        rig.pipe->set_combat(port.get());
+        rig.know({"Bard_Misc_Marionette", "Bard_Song_Lullaby", "Bard_Song_Lullaby_AOE"});
+        rig.asks = false;
+    }
+};
+
+/// Runs the ability runtime and the combat world to `to` in the world's ticks, keeping the Bard alive (the creature fights back), and collects the runtime's events.
+static void bard_run(BardMobWorld& bw, double from, double to, std::vector<Seen>* seen = nullptr) {
+    for (double now = from; now <= to + 1e-9; now += 1.0 / 15.0) {
+        bw.rig.set_current(content::kGuidHealth, bw.rig.pawn.stat(content::kGuidMaxHealth));
+        for (Seen& s : bw.rig.take()) {   // (the events of an earlier call, such as a hit the cast landed before this run)
+            if (seen) seen->push_back(std::move(s));
+        }
+        for (Seen& s : bw.rig.run_to(now)) {
+            if (seen) seen->push_back(std::move(s));
+        }
+        bw.world->tick(now);
+    }
+}
+
+/// The moment the runtime ran a direct hit, from its note ("the hit <hit> of <ability> ...").
+static double bard_hit_at(const std::vector<Seen>& seen, const char* hit, const char* ability) {
+    const std::string want = std::string("the hit ") + hit + " of " + ability;
+    for (const Seen& s : seen) {
+        if (s.note.rfind(want, 0) == 0) return s.at;
+    }
+    return -1.0;
+}
+
+/// The confirmation of a hit record in the runtime's events (nullptr: it was not confirmed).
+static const bootstrap::HitConfirm* bard_confirmed(const std::vector<Seen>& seen, int64_t record) {
+    for (const Seen& s : seen) {
+        for (const bootstrap::HitConfirm& c : s.confirmations) {
+            if (c.record_guid == record) return &c;
+        }
+    }
+    return nullptr;
+}
+
+/// The crowd control state of the creature, read from its replicated stats component.
+static CcNow bard_cc(BardMobWorld& bw, uint64_t creature) {
+    const world::WorldActor* a = bw.w.registry.find(creature);
+    return a ? cc_now(*a) : CcNow{};
+}
+
+/// A cast of `ability` at `targets`, the client's request for `first_hit` alone (the client asks for the first hit and not the second), and the world run to `until`.
+struct BardCast {
+    bool              cast = false;
+    bool              requested = false;
+    int32_t           client_id = 0;
+    int64_t           server_instance = 0;   // the ability item's ServerInstanceId (the client's ServerEndAbility names it)
+    std::vector<Seen> seen;
+};
+
+static BardCast bard_cast(BardMobWorld& bw, const char* ability, const std::vector<uint64_t>& targets, const char* first_hit, double t, double until) {
+    BardCast out;
+    const int64_t guid = bw.rig.ability(ability);
+    const abilities::AbilityDef* def = bw.rig.catalog->ability(guid);
+    if (!def) return out;
+    TriggerInfo info;
+    info.target_count = static_cast<int>(targets.size());
+    info.target_actors = targets;
+    out.client_id = bw.rig.next_client_id;
+    out.cast = bw.rig.pipe->trigger(guid, bw.rig.next_client_id++, t, info) == Refusal::None;
+    if (!out.cast) return out;
+    int64_t targeting = content::kTargetingDefaultSelf, hit_guid = 0;
+    for (const content::AbilityHitRow& h : def->hits) {
+        const abilities::HitDef* hd = bw.rig.catalog->hit(h.hit_guid);
+        if (!hd || hd->row.name != first_hit) continue;
+        hit_guid = h.hit_guid;
+        if (h.source == "hit") {
+            for (const content::TargetingRow& tg : def->targetings) {
+                if (tg.key == h.key) targeting = tg.guid;
+            }
+        }
+    }
+    if (hit_guid == 0) return out;
+    out.requested = bw.rig.pipe->hit_request(guid, targeting, hit_guid, 1, 0, t + 0.02, targets) == AbilityPipeline::HitVerdict::Scheduled;
+    bard_run(bw, t, until, &out.seen);
+    if (const bootstrap::ActiveAbilityItem* item = bw.rig.pawn.ability_item()) out.server_instance = item->server_instance_id;
+    return out;
+}
+
+void test_bard_marionette_stun(Fixture& f) {
+    std::printf("the Bard's Marionette: a ten-second full stun with no animation of the server's, Humiliated at its end, over another stun, and on a boss\n");
+    const std::string wolf_path = wolf_archetype(f);
+    const abilities::EffectDef* marionette = f.catalog->effect_named("Bard_Marionette");
+    const abilities::EffectDef* humiliated = f.catalog->effect_named("Status_Humiliated");
+    const abilities::EffectDef* stunned = f.catalog->effect_named("Status_Stunned");
+    CHECK(marionette && humiliated && stunned && !wolf_path.empty(), "the data has the Marionette, Humiliated and Stunned effects and the Wolf");
+    if (!marionette || !humiliated || !stunned || wolf_path.empty()) return;
+    CHECKF(marionette->cc && marionette->cc->applied_status == 7 && marionette->cc->animation_request.find("Custom") != std::string::npos,
+           "the Marionette's crowd control is a full stun (status 7) that asks for an animation of its own (%s)", marionette->cc ? marionette->cc->name.c_str() : "none");
+    if (!marionette->cc) return;
+
+    // ---- 1: a Wolf takes the ten-second stun, no animation, and Humiliated at its end
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard, the world and the Wolf: %s", bw.problem.c_str());
+        if (!bw.problem.empty()) return;
+        const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+        CHECK(wolf != 0, "a Wolf 6 m from the Bard");
+        if (!wolf) return;
+        const double t = 100.0;
+        const BardCast cast = bard_cast(bw, "Bard_Misc_Marionette", {wolf}, "Bard_Marionette", t, t + 0.8);
+        CHECK(cast.cast && cast.requested, "the cast and the client's request for its hit are accepted");
+        const double hit_at = bard_hit_at(cast.seen, "Bard_Marionette", "Bard_Misc_Marionette");
+        CHECKF(hit_at > 0.0, "the hit lands (%.2f)", hit_at);
+        if (hit_at <= 0.0) return;
+        const double left = bw.world->effect_remaining(wolf, marionette->row.guid, hit_at);
+        const CcNow cc = bard_cc(bw, wolf);
+        CHECKF(bw.world->effect_stacks(wolf, marionette->row.guid) == 1 && near(left, 10.0, 1e-6), "the Wolf takes the Marionette for its own 10 s (%.3f s left at the hit)", left);
+        CHECKF(cc.flags == 7 && cc.anim_request == content::kCcAnimNone && cc.anim_record == 0,
+               "the crowd control state is a full stun (flags %lld: root + no turn + no abilities) and no animation is sent (request %lld, record %lld)", static_cast<long long>(cc.flags),
+               static_cast<long long>(cc.anim_request), static_cast<long long>(cc.anim_record));
+        bard_run(bw, t + 0.8, hit_at + 9.9);
+        CHECKF(bw.world->effect_stacks(wolf, marionette->row.guid) == 1 && bard_cc(bw, wolf).flags == 7, "it still holds the Wolf at 9.9 s");
+        bard_run(bw, hit_at + 9.9, hit_at + 10.0 + 1.0 / 15.0);
+        const CcNow after = bard_cc(bw, wolf);
+        const double hum_left = bw.world->effect_remaining(wolf, humiliated->row.guid, hit_at + 10.0 + 1.0 / 15.0);
+        CHECKF(bw.world->effect_stacks(wolf, marionette->row.guid) == 0 && after.flags == 0 && after.anim_request == content::kCcAnimNone,
+               "after 10 s the stun is over (flags %lld, animation %lld)", static_cast<long long>(after.flags), static_cast<long long>(after.anim_request));
+        CHECKF(bw.world->effect_stacks(wolf, humiliated->row.guid) == 1 && near(hum_left, 8.0, 0.15), "Humiliated is on the Wolf right after it ends (%.2f s left, the data's 8)", hum_left);
+        std::printf("    the Marionette lands %.3f s after the trigger: %.3f s left, flags %lld, animation %lld; Humiliated %.3f s left after it ends\n", hit_at - t, left, static_cast<long long>(cc.flags),
+                    static_cast<long long>(cc.anim_request), hum_left);
+    }
+
+    // ---- 3: a Wolf already stunned by Status_Stunned: the flags are the two sets together and the stronger animation stays
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard, the world and the second Wolf: %s", bw.problem.c_str());
+        if (!bw.problem.empty()) return;
+        const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+        CHECK(wolf != 0, "a Wolf 6 m from the Bard");
+        if (!wolf) return;
+        const double t = 100.0;
+        effects::Applied already;
+        already.def = stunned;
+        already.duration = 4.0;
+        bw.world->apply_effects(wolf, 77, {already}, t);
+        const CcNow before = bard_cc(bw, wolf);
+        CHECKF(before.flags == 7 && before.anim_request == content::kCcAnimStunned && before.anim_record == stunned->cc->guid,
+               "the Wolf is stunned by Status_Stunned first (flags %lld, animation %lld, record %lld)", static_cast<long long>(before.flags), static_cast<long long>(before.anim_request),
+               static_cast<long long>(before.anim_record));
+        const BardCast over = bard_cast(bw, "Bard_Misc_Marionette", {wolf}, "Bard_Marionette", t + 0.5, t + 1.3);
+        const double at = bard_hit_at(over.seen, "Bard_Marionette", "Bard_Misc_Marionette");
+        const CcNow both = bard_cc(bw, wolf);
+        CHECKF(over.cast && over.requested && at > 0.0 && bw.world->effect_stacks(wolf, marionette->row.guid) == 1 && bw.world->effect_stacks(wolf, stunned->row.guid) == 1,
+               "the Marionette goes on over the stun (both effects on the Wolf)");
+        CHECKF(both.flags == 7 && both.anim_request == content::kCcAnimStunned && both.anim_record == stunned->cc->guid,
+               "the flags stay the two sets together (7) and the stronger animation (General_Stun, 200 over the dance's 0) stays (flags %lld, animation %lld, record %lld)",
+               static_cast<long long>(both.flags), static_cast<long long>(both.anim_request), static_cast<long long>(both.anim_record));
+        std::printf("    over Status_Stunned: flags %lld, animation %lld, record %lld (the stun's own)\n", static_cast<long long>(both.flags), static_cast<long long>(both.anim_request),
+                    static_cast<long long>(both.anim_record));
+    }
+
+    // ---- 7: a boss takes it (no boss rule for a stun in this job)
+    const std::string boss_path = creature_path(f, "/GiantCyclops/CyclopsShaman.Default__CyclopsShaman_C");
+    CHECK(!boss_path.empty(), "the Blueprint table has a boss (the Cyclops Shaman)");
+    if (!boss_path.empty()) {
+        BardMobWorld bw(f, boss_path);
+        CHECKF(bw.problem.empty(), "the Bard and the boss's world: %s", bw.problem.c_str());
+        if (!bw.problem.empty()) return;
+        const uint64_t boss = bw.w.spawn(boss_path, 900, 0, 45, 0);
+        CHECK(boss != 0, "a boss 9 m from the Bard");
+        if (!boss) return;
+        const double t = 100.0;
+        const BardCast bc = bard_cast(bw, "Bard_Misc_Marionette", {boss}, "Bard_Marionette", t, t + 0.8);
+        const double bat = bard_hit_at(bc.seen, "Bard_Marionette", "Bard_Misc_Marionette");
+        const CcNow bcc = bard_cc(bw, boss);
+        CHECKF(bc.cast && bc.requested && bat > 0.0 && bw.world->effect_stacks(boss, marionette->row.guid) == 1 && bcc.flags == 7,
+               "the boss takes the Marionette like any creature (flags %lld)", static_cast<long long>(bcc.flags));
+    }
+}
+AOC_REGISTER_TEST(test_bard_marionette_stun);
+
+void test_bard_marionette_break(Fixture& f) {
+    std::printf("the Marionette's break: a tenth of the Bard's maximum Health in damage taken ends it at that hit, one point less does not, and Humiliated comes when it ends either way\n");
+    const std::string wolf_path = wolf_archetype(f);
+    const abilities::EffectDef* marionette = f.catalog->effect_named("Bard_Marionette");
+    const abilities::EffectDef* humiliated = f.catalog->effect_named("Status_Humiliated");
+    CHECK(marionette && humiliated && !wolf_path.empty(), "the data has the Marionette and Humiliated effects and the Wolf");
+    if (!marionette || !humiliated || wolf_path.empty()) return;
+
+    // ---- 2a: damage of a tenth of the Bard's maximum Health less one does not break it, and it lasts its ten seconds
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard, the world and the Wolf: %s", bw.problem.c_str());
+        if (!bw.problem.empty()) return;
+        const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+        CHECK(wolf != 0, "a Wolf 6 m from the Bard");
+        if (!wolf) return;
+        const double t = 100.0;
+        const BardCast cast = bard_cast(bw, "Bard_Misc_Marionette", {wolf}, "Bard_Marionette", t, t + 0.8);
+        const double hit_at = bard_hit_at(cast.seen, "Bard_Marionette", "Bard_Misc_Marionette");
+        CHECKF(cast.cast && cast.requested && hit_at > 0.0 && bw.world->effect_stacks(wolf, marionette->row.guid) == 1, "the Wolf takes the Marionette");
+        if (!(hit_at > 0.0)) return;
+        const double h = bw.rig.max_health();
+        CHECKF(h > 100.0, "the Bard's maximum Health is %.1f", h);
+        const double below = 0.1 * h - 1.0;
+        combat::Resolved small;
+        small.mods.push_back({1, content::kGuidHealth, -below});
+        bw.world->apply_hit_to_npc(wolf, 77, small, hit_at + 1.0);
+        const double small_left = bw.world->effect_remaining(wolf, marionette->row.guid, hit_at + 1.0);
+        CHECKF(bw.world->effect_stacks(wolf, marionette->row.guid) == 1 && small_left > 8.0,
+               "damage of 0.1 x H - 1 (%.1f) does not break it: it is still on with %.1f s left", below, small_left);
+        bard_run(bw, t + 0.8, hit_at + 10.0 + 1.0 / 15.0);
+        const double hum_a = bw.world->effect_remaining(wolf, humiliated->row.guid, hit_at + 10.0 + 1.0 / 15.0);
+        CHECKF(bw.world->effect_stacks(wolf, marionette->row.guid) == 0, "the Wolf hit for less than the tenth keeps it for the 10 s and then it ends");
+        CHECKF(bw.world->effect_stacks(wolf, humiliated->row.guid) == 1 && near(hum_a, 8.0, 0.15), "Humiliated comes when it ends (%.2f s left)", hum_a);
+        std::printf("    H %.1f: 0.1 x H - 1 = %.1f does not break it (%.1f s left at the hit); Humiliated %.3f s left when it ends\n", h, below, small_left, hum_a);
+    }
+
+    // ---- 2b: damage of a tenth of the Bard's maximum Health plus one breaks it at that hit
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard, the world and the second Wolf: %s", bw.problem.c_str());
+        if (!bw.problem.empty()) return;
+        const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+        CHECK(wolf != 0, "a Wolf 6 m from the Bard");
+        if (!wolf) return;
+        const double t = 100.0;
+        const BardCast cast = bard_cast(bw, "Bard_Misc_Marionette", {wolf}, "Bard_Marionette", t, t + 0.8);
+        const double hit_at = bard_hit_at(cast.seen, "Bard_Marionette", "Bard_Misc_Marionette");
+        CHECKF(cast.cast && cast.requested && hit_at > 0.0 && bw.world->effect_stacks(wolf, marionette->row.guid) == 1, "the Wolf takes the Marionette");
+        if (!(hit_at > 0.0)) return;
+        const double h = bw.rig.max_health();
+        const double above = 0.1 * h + 1.0;
+        combat::Resolved big;
+        big.mods.push_back({1, content::kGuidHealth, -above});
+        bw.world->apply_hit_to_npc(wolf, 77, big, hit_at + 1.0);
+        const double hum_left = bw.world->effect_remaining(wolf, humiliated->row.guid, hit_at + 1.0);
+        CHECKF(bw.world->effect_stacks(wolf, marionette->row.guid) == 0, "damage of 0.1 x H + 1 (%.1f) breaks it at that hit", above);
+        CHECKF(bw.world->effect_stacks(wolf, humiliated->row.guid) == 1 && near(hum_left, 8.0, 1e-6), "Humiliated is on the broken Wolf right after it ends (%.3f s left, the data's 8)", hum_left);
+        std::printf("    H %.1f: 0.1 x H + 1 = %.1f breaks it at that hit; Humiliated %.3f s left\n", h, above, hum_left);
+    }
+}
+AOC_REGISTER_TEST(test_bard_marionette_break);
+
+
+// The client's own montage of the Dark Lullaby (ABLT_Bard_Lullaby_Enemy) fires its key-1 hit, the Enemy damage hit, four times: at 0.01, 0.7300865, 1.5004842 and
+// 2.317239 s of montage time at a play rate of 1 (the montage's hit notifies; both shapes play this montage). The last of them is the cast's final hit. The ability's
+// tooltip: the final hit applies the second hit (the Stun) if the target is Incapacitated.
+constexpr double kLullabyHits[] = {0.01, 0.7300865, 1.5004842, 2.317239};
+
+/// How fast the Lullaby's montage plays here: the ability's SpeedMultiplierSource is CastSpeed, so the montage and its hit notifies run at the caster's MagicalSpeed
+/// (the stat the runtime's client_rate reads; the capture's Bard played at 0.9833).
+static double lullaby_scale(BardMobWorld& bw) {
+    const stats::StatValue* speed = bw.rig.cs ? bw.rig.cs->find(109343399106257ll) : nullptr;
+    const double rate = speed ? speed->value : 1.0;
+    return (rate > 0.2 && rate < 3.0) ? 1.0 / rate : 1.0;
+}
+
+/// Every moment the runtime ran the direct hit `hit` of `ability`, in order (its events' notes).
+static std::vector<double> bard_hit_times(const std::vector<Seen>& seen, const char* hit, const char* ability) {
+    const std::string want = std::string("the hit ") + hit + " of " + ability;
+    std::vector<double> out;
+    for (const Seen& s : seen) {
+        if (s.note.rfind(want, 0) == 0) out.push_back(s.at);
+    }
+    return out;
+}
+
+/// The cast's four Enemy hits land at the montage's notifies, scaled by the play rate.
+static void lullaby_check_times(const std::vector<Seen>& seen, const char* ability, const char* damage, double t, double scale) {
+    const std::vector<double> at = bard_hit_times(seen, damage, ability);
+    CHECKF(at.size() == 4, "the cast's damage hit runs four times (%zu)", at.size());
+    for (size_t i = 0; i < at.size() && i < 4; ++i) {
+        CHECKF(near(at[i] - t, kLullabyHits[i] * scale, 1e-4), "hit %zu lands %.4f s after the trigger (the montage's %.4f s at the play rate)", i + 1, at[i] - t,
+               kLullabyHits[i] * scale);
+    }
+}
+
+void test_bard_lullaby_cast(Fixture& f) {
+    std::printf("the Dark Lullaby's cast: four Enemy hits at the montage's notifies, no stun before the last, and the last hit's stun on an Incapacitated target (4 s single, 6 s area)\n");
+    const std::string wolf_path = wolf_archetype(f);
+    const abilities::EffectDef* stunned = f.catalog->effect_named("Status_Stunned");
+    const abilities::EffectDef* incap = f.catalog->effect_named("Status_Incapacitated");
+    const abilities::EffectDef* slumber = f.catalog->effect_named("Mage_Slumber");
+    const abilities::EffectDef* hunter_incap = f.catalog->effect_named("Summoner_Pet_Hunter_Incap");
+    const abilities::EffectDef* buildup = f.catalog->effect_named("DisableEvasion_Hard_T2_Buildup");
+    const abilities::HitDef* single_stun = f.catalog->hit_named("Bard_Song_Lullaby_Stun");
+    const abilities::HitDef* aoe_stun = f.catalog->hit_named("Bard_Song_Lullaby_AOE_Stun");
+    const abilities::HitDef* aoe_enemy = f.catalog->hit_named("Bard_Song_Lullaby_AOE_Enemy");
+    CHECK(stunned && incap && slumber && hunter_incap && buildup && single_stun && aoe_stun && aoe_enemy && !wolf_path.empty(),
+          "the data has the stun, the two sleeps, the Hunter's Incapacitate, the T2 build-up, the two stun hits and the area damage hit");
+    if (!stunned || !incap || !slumber || !hunter_incap || !buildup || !single_stun || !aoe_stun || !aoe_enemy || wolf_path.empty()) return;
+    CHECKF(single_stun->row.requirement_expr == 796 && aoe_stun->row.requirement_expr == 796, "both stun hits ask the target for the Incapacitated tag (requirement 796)");
+
+    // ---- 1: the single Lullaby on an Incapacitated Wolf: four hits at the montage's notifies, no stun before the last, the 4 s stun on the last
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            effects::Applied asleep;
+            asleep.def = incap;
+            asleep.duration = 10.0;
+            bw.world->apply_effects(wolf, 77, {asleep}, 100.0);
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {wolf}, "Bard_Song_Lullaby_Enemy", t, t + kLullabyHits[2] * scale + 0.05);
+            CHECKF(cast.cast, "the cast is accepted");
+            if (cast.cast) {
+                CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 0, "no stun on the first three hits (the last one has not come)");
+                bard_run(bw, t + kLullabyHits[2] * scale + 0.05, t + kLullabyHits[3] * scale + 0.05, &cast.seen);
+                lullaby_check_times(cast.seen, "Bard_Song_Lullaby", "Bard_Song_Lullaby_Enemy", t, scale);
+                const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
+                if (at.size() == 4) {
+                    const double left = bw.world->effect_remaining(wolf, stunned->row.guid, at[3]);
+                    CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 1 && near(left, 4.0, 1e-6), "the last hit stuns the Incapacitated Wolf for 4 s (%.3f s left)", left);
+                    const bootstrap::HitConfirm* stun_confirm = bard_confirmed(cast.seen, single_stun->row.guid);
+                    CHECKF(stun_confirm && stun_confirm->source_type == content::kSourceTypeAbility && !stun_confirm->response && stun_confirm->targets.size() == 1,
+                           "the server ran the stun itself (a confirmation with no client request) on the one target");
+                    std::printf("    the single Lullaby at a play rate of %.4f: hits at %.4f, %.4f, %.4f and %.4f s; the last stuns for %.3f s\n", 1.0 / scale, at[0] - t, at[1] - t,
+                                at[2] - t, at[3] - t, left);
+                }
+            }
+        }
+    }
+
+    // ---- 2: a Wolf with no crowd control: four hits, no stun on any of them (the last hit's Stun asks the target and it is not Incapacitated)
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {wolf}, "Bard_Song_Lullaby_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+            CHECKF(cast.cast, "the cast is accepted");
+            lullaby_check_times(cast.seen, "Bard_Song_Lullaby", "Bard_Song_Lullaby_Enemy", t, scale);
+            CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 0, "a Wolf with no crowd control takes no stun, before the last hit or on it");
+            std::printf("    the single Lullaby on a Wolf with no crowd control: four hits, no stun\n");
+        }
+    }
+
+    // ---- 2b: a Wolf asleep from a sleep that carries no Incapacitated tag: the last hit gives no Lullaby stun either
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            effects::Applied sleep;
+            sleep.def = slumber;
+            sleep.duration = 10.0;
+            bw.world->apply_effects(wolf, 77, {sleep}, 100.0);
+            CHECKF(bw.world->effect_stacks(wolf, slumber->row.guid) == 1 && bard_cc(bw, wolf).flags == 7, "the Wolf is asleep (Mage_Slumber, a stun) and carries no Incapacitated tag");
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {wolf}, "Bard_Song_Lullaby_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+            CHECKF(cast.cast, "the cast is accepted");
+            lullaby_check_times(cast.seen, "Bard_Song_Lullaby", "Bard_Song_Lullaby_Enemy", t, scale);
+            CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 0, "the asleep Wolf takes no Lullaby stun (only the Incapacitated tag counts)");
+        }
+    }
+
+    // ---- 2c: the tag from another source (the Hunter's pet's Incapacitate): the last hit's stun lands
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            effects::Applied hunter;
+            hunter.def = hunter_incap;
+            hunter.duration = 10.0;
+            bw.world->apply_effects(wolf, 77, {hunter}, 100.0);
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {wolf}, "Bard_Song_Lullaby_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+            CHECKF(cast.cast, "the cast is accepted");
+            lullaby_check_times(cast.seen, "Bard_Song_Lullaby", "Bard_Song_Lullaby_Enemy", t, scale);
+            const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
+            if (at.size() == 4) {
+                CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 1 && near(bw.world->effect_remaining(wolf, stunned->row.guid, at[3]), 4.0, 1e-6),
+                       "a Wolf Incapacitated by another source (the Hunter's pet) takes the 4 s stun on the last hit");
+            }
+        }
+    }
+
+    // ---- 3: the area Lullaby on two Incapacitated Wolves: each takes the four hits and its own 6 s stun on the last
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t a = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            const uint64_t b = bw.w.spawn(wolf_path, 600, 120, 8, 0);
+            effects::Applied asleep;
+            asleep.def = incap;
+            asleep.duration = 10.0;
+            bw.world->apply_effects(a, 77, {asleep}, 100.0);
+            bw.world->apply_effects(b, 77, {asleep}, 100.0);
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby_AOE", {a, b}, "Bard_Song_Lullaby_AOE_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+            CHECKF(cast.cast, "the area cast is accepted");
+            lullaby_check_times(cast.seen, "Bard_Song_Lullaby_AOE", "Bard_Song_Lullaby_AOE_Enemy", t, scale);
+            const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_AOE_Enemy", "Bard_Song_Lullaby_AOE");
+            if (at.size() == 4) {
+                const double la = bw.world->effect_remaining(a, stunned->row.guid, at[3]);
+                const double lb = bw.world->effect_remaining(b, stunned->row.guid, at[3]);
+                CHECKF(bw.world->effect_stacks(a, stunned->row.guid) == 1 && near(la, 6.0, 1e-6), "the first Wolf takes the 6 s area stun on its own last hit (%.3f s left)", la);
+                CHECKF(bw.world->effect_stacks(b, stunned->row.guid) == 1 && near(lb, 6.0, 1e-6), "the second Wolf takes it too (%.3f s left)", lb);
+                const bootstrap::HitConfirm* stun_confirm = bard_confirmed(cast.seen, aoe_stun->row.guid);
+                CHECKF(stun_confirm && !stun_confirm->response && stun_confirm->targets.size() == 2, "the area stun was confirmed on both Wolves (%zu)",
+                       stun_confirm ? stun_confirm->targets.size() : 0);
+                std::printf("    the area Lullaby on two Incapacitated Wolves: %.3f s of the stun on each after the last hit\n", la);
+            }
+        }
+    }
+
+    // ---- 4: the area Lullaby on an Incapacitated and a plain Wolf: the last hit stuns only the Incapacitated one, and both take the damage
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t inc = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            const uint64_t plain = bw.w.spawn(wolf_path, 600, 120, 8, 0);
+            effects::Applied asleep;
+            asleep.def = incap;
+            asleep.duration = 10.0;
+            bw.world->apply_effects(inc, 77, {asleep}, 100.0);
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby_AOE", {inc, plain}, "Bard_Song_Lullaby_AOE_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+            CHECKF(cast.cast, "the area cast is accepted");
+            lullaby_check_times(cast.seen, "Bard_Song_Lullaby_AOE", "Bard_Song_Lullaby_AOE_Enemy", t, scale);
+            const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_AOE_Enemy", "Bard_Song_Lullaby_AOE");
+            if (at.size() == 4) {
+                const double left = bw.world->effect_remaining(inc, stunned->row.guid, at[3]);
+                CHECKF(bw.world->effect_stacks(inc, stunned->row.guid) == 1 && near(left, 6.0, 1e-6), "the Incapacitated Wolf takes the 6 s area stun (%.3f s left)", left);
+                CHECKF(bw.world->effect_stacks(plain, stunned->row.guid) == 0, "the Wolf with no crowd control takes no stun, though the last hit reaches it");
+                const bootstrap::HitConfirm* dmg = bard_confirmed(cast.seen, aoe_enemy->row.guid);
+                CHECKF(dmg && dmg->targets.size() == 2, "the damage hit reached both Wolves (%zu)", dmg ? dmg->targets.size() : 0);
+                std::printf("    the area Lullaby on an Incapacitated and a plain Wolf: %.3f s of the stun on the first, none on the second; the damage reached both\n", left);
+            }
+        }
+    }
+
+    // ---- 5: a cast interrupted after its third hit: three hits, no last hit, no stun, and the cost and the cooldown stay spent
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            effects::Applied asleep;
+            asleep.def = incap;
+            asleep.duration = 10.0;
+            bw.world->apply_effects(wolf, 77, {asleep}, 100.0);
+            const int64_t lullaby = bw.rig.ability("Bard_Song_Lullaby");
+            const double mana_before = bw.rig.mana();
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const double stop = t + kLullabyHits[2] * scale + 2.0 / 15.0;
+            BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {wolf}, "Bard_Song_Lullaby_Enemy", t, stop);
+            CHECKF(cast.cast, "the cast is accepted");
+            bw.rig.run_to(stop);   // (the helper's last world tick stops just before the regeneration at 102 s: read the Mana at the cancel itself)
+            bw.rig.take();
+            const double mana_paid = bw.rig.mana();
+            CHECKF(mana_paid < mana_before - 1.0, "its cost step has paid Mana before the interrupt (%.2f of %.2f)", mana_paid, mana_before);
+            CHECKF(bw.rig.pipe->charges_left(lullaby) == 0, "its charge is spent before the interrupt (%d left)", bw.rig.pipe->charges_left(lullaby));
+            const std::vector<double> before = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
+            CHECKF(before.size() == 3, "the first three hits ran (%zu)", before.size());
+            CHECKF(bw.rig.pipe->end_request(cast.server_instance, stop), "the cast is interrupted after its third hit");
+            const std::vector<Seen> cancel = bw.rig.take();
+            const double mana_after = bw.rig.mana();
+            bool cooldown_removed = false, mana_given_back = false;
+            for (const Seen& s : cancel) {
+                cooldown_removed = cooldown_removed || !s.change.cooldowns_removed.empty();
+                for (const bootstrap::StatChange& st : s.change.stats) mana_given_back = mana_given_back || (st.record == content::kGuidMana && st.value > mana_paid + 1.0f);
+            }
+            const bool mana_stays = near(mana_after, mana_paid, 0.01) && mana_after < mana_before - 1.0;
+            if (mana_stays) std::printf("  [ok ] the Mana stays spent after the interrupt (%.2f before, %.2f after the cost step, %.2f after the end)\n", mana_before, mana_paid, mana_after);
+            CHECKF(mana_stays, "the Mana stays spent after the interrupt (%.2f before, %.2f after the cost step, %.2f after the end)", mana_before, mana_paid, mana_after);
+            CHECKF(!cooldown_removed && !mana_given_back, "the end gives back neither a cooldown nor the Mana");
+            CHECKF(bw.rig.pipe->charges_left(lullaby) == 0, "the group's charge is still spent (%d left)", bw.rig.pipe->charges_left(lullaby));
+            const bootstrap::CooldownItem* cd = bw.rig.pawn.cooldown(lullaby);
+            CHECKF(cd && near(cd->initial_cooldown, 25.0, 1e-3) && cd->charges == 0, "the Lullaby's 25 s cooldown is still on the pawn (%.1f s, %d charges)", cd ? cd->initial_cooldown : -1.0,
+                   cd ? cd->charges : -1);
+            bard_run(bw, stop, t + kLullabyHits[3] * scale + 0.2, &cast.seen);
+            const std::vector<double> after = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
+            CHECKF(after.size() == 3, "no fourth hit after the interrupt (%zu)", after.size());
+            CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 0, "an interrupted cast gives no stun");
+            TriggerInfo again_info;
+            again_info.target_count = 1;
+            again_info.target_actors = {wolf};
+            const Refusal again = bw.rig.pipe->trigger(lullaby, bw.rig.next_client_id++, t + 10.0, again_info);
+            bw.rig.take();
+            CHECKF(again == Refusal::Charges, "a second Lullaby during the 25 s cooldown is refused (%d)", static_cast<int>(again));
+        }
+    }
+
+    // ---- 6: the 6 s area stun on the last hit ends when the T2 build-up reaches ten stacks (0.5 s a tick, one stack a tick, at 4.5 s)
+    {
+        BardMobWorld bw(f, wolf_path);
+        CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+        if (bw.problem.empty()) {
+            const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+            effects::Applied asleep;
+            asleep.def = incap;
+            asleep.duration = 10.0;
+            bw.world->apply_effects(wolf, 77, {asleep}, 100.0);
+            const double t = 100.0;
+            const double scale = lullaby_scale(bw);
+            const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby_AOE", {wolf}, "Bard_Song_Lullaby_AOE_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+            CHECKF(cast.cast, "the area cast is accepted");
+            const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_AOE_Enemy", "Bard_Song_Lullaby_AOE");
+            CHECKF(at.size() == 4 && bw.world->effect_stacks(wolf, stunned->row.guid) == 1, "the area stun lands on the Incapacitated Wolf on the last hit");
+            if (at.size() == 4) {
+                const double hit4 = at[3];
+                bard_run(bw, hit4 + 0.05, hit4 + 4.4);
+                const int stacks_before = bw.world->effect_stacks(wolf, buildup->row.guid);
+                const double stun_left = bw.world->effect_remaining(wolf, stunned->row.guid, hit4 + 4.4);
+                CHECKF(stacks_before == 9 && stun_left > 1.5, "at 4.4 s the T2 build-up has 9 stacks (one a tick, 0.5 s a tick) and the stun is still on (%.1f s left)", stun_left);
+                double off_at = -1.0;
+                for (double now = hit4 + 4.4; now <= hit4 + 6.5; now += 1.0 / 15.0) {
+                    bard_run(bw, now, now);
+                    if (bw.world->effect_stacks(wolf, stunned->row.guid) == 0) {
+                        off_at = now;
+                        break;
+                    }
+                }
+                CHECKF(off_at > 0.0 && near(off_at - hit4, 4.5, 1.0 / 15.0 + 1e-6), "the stun ends at %.3f s (the tenth half-second tick), not at its nominal 6 s", off_at - hit4);
+                std::printf("    at 4.4 s after the last hit: %d build-up stacks and %.1f s of the stun left; it ends at %.3f s\n", stacks_before, stun_left, off_at - hit4);
+            }
+        }
+    }
+
+    // ---- 7: an Incapacitated boss takes the last hit's 4 s stun too
+    {
+        const std::string boss_path = creature_path(f, "/GiantCyclops/CyclopsShaman.Default__CyclopsShaman_C");
+        CHECK(!boss_path.empty(), "the Blueprint table has a boss (the Cyclops Shaman)");
+        if (!boss_path.empty()) {
+            BardMobWorld bw(f, boss_path);
+            CHECKF(bw.problem.empty(), "the Bard and the boss's world: %s", bw.problem.c_str());
+            if (bw.problem.empty()) {
+                const uint64_t boss = bw.w.spawn(boss_path, 900, 0, 45, 0);
+                effects::Applied asleep;
+                asleep.def = incap;
+                asleep.duration = 10.0;
+                bw.world->apply_effects(boss, 77, {asleep}, 100.0);
+                const double t = 100.0;
+                const double scale = lullaby_scale(bw);
+                const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {boss}, "Bard_Song_Lullaby_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
+                const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
+                CHECKF(cast.cast && at.size() == 4 && bw.world->effect_stacks(boss, stunned->row.guid) == 1, "the Incapacitated boss takes the last hit's 4 s stun");
+            }
+        }
+    }
+}
+AOC_REGISTER_TEST(test_bard_lullaby_cast);
+
+void test_bard_lullaby_cut_before_the_cost(Fixture& f) {
+    std::printf("a Dark Lullaby the client ends before its cost step: nothing is paid, nothing more fires, no cooldown starts\n");
+    const std::string wolf_path = wolf_archetype(f);
+    const abilities::EffectDef* stunned = f.catalog->effect_named("Status_Stunned");
+    const abilities::EffectDef* incap = f.catalog->effect_named("Status_Incapacitated");
+    CHECK(stunned && incap && !wolf_path.empty(), "the data has the stun, the Incapacitated tag and the Wolf");
+    if (!stunned || !incap || wolf_path.empty()) return;
+    BardMobWorld bw(f, wolf_path);
+    CHECKF(bw.problem.empty(), "the Bard and the world: %s", bw.problem.c_str());
+    if (!bw.problem.empty()) return;
+    const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+    effects::Applied asleep;
+    asleep.def = incap;
+    asleep.duration = 20.0;
+    bw.world->apply_effects(wolf, 77, {asleep}, 100.0);
+    const int64_t lullaby = bw.rig.ability("Bard_Song_Lullaby");
+    const double mana_before = bw.rig.mana();
+    const double t = 100.0;
+    const double scale = lullaby_scale(bw);
+    const double stop = t + kLullabyHits[0] * scale + 2.0 / 15.0;   // (past the first hit, before the 0.300 s cost step)
+    BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {wolf}, "Bard_Song_Lullaby_Enemy", t, stop);
+    CHECKF(cast.cast, "the cast is accepted");
+    CHECKF(near(bw.rig.mana(), mana_before, 0.01), "no Mana has been paid before the cost step (%.2f of %.2f)", bw.rig.mana(), mana_before);
+    CHECKF(bw.rig.pipe->charges_left(lullaby) == -1 && bw.rig.pawn.cooldown(lullaby) == nullptr, "no cooldown has started before the cost step");
+    // (its item is sent at the same 0.300 s as the cost, so an end before it names no server instance: the cast's own is -1)
+    bw.rig.pipe->end_request(-1, stop + 1.0 / 15.0);
+    bw.rig.take();
+    CHECKF(near(bw.rig.mana(), mana_before, 0.01), "the end before the cost step takes no Mana (%.2f of %.2f)", bw.rig.mana(), mana_before);
+    CHECKF(bw.rig.pipe->charges_left(lullaby) == -1 && bw.rig.pawn.cooldown(lullaby) == nullptr, "and starts no cooldown");
+    bard_run(bw, stop + 1.0 / 15.0, t + kLullabyHits[3] * scale + 0.2, &cast.seen);
+    const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
+    const bool only_first = at.size() == 1;
+    if (only_first) std::printf("  [ok ] only the first hit ran before the end; no later hit fires (%zu)\n", at.size());
+    CHECKF(only_first, "only the first hit ran before the end; no later hit fires (%zu)", at.size());
+    CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 0, "the last hit's stun does not run");
+    CHECKF(bw.rig.pawn.broken.empty(), "(the pawn took every change)");
+}
+AOC_REGISTER_TEST(test_bard_lullaby_cut_before_the_cost);
+
+void test_bard_target_hit_requirement(Fixture& f) {
+    std::printf("a non-Lullaby hit whose requirement reads the target is still asked of the caster, as before (the Snipe's Hemorrhage)\n");
+    const std::string wolf_path = wolf_archetype(f);
+    const abilities::EffectDef* bleeding = f.catalog->effect_named("Status_Bleeding");
+    const abilities::EffectDef* hemorrhage = f.catalog->effect_named("Status_Hemorrhage");
+    const abilities::HitDef* hemo_hit = f.catalog->hit_named("Snipe_Hemorrhage");
+    CHECK(bleeding && hemorrhage && hemo_hit && !wolf_path.empty(), "the data has the bleed, the Hemorrhage and the Snipe's Hemorrhage hit");
+    if (!bleeding || !hemorrhage || !hemo_hit || wolf_path.empty()) return;
+    const content::ExprRow* req = f.catalog->expr(hemo_hit->row.requirement_expr);
+    CHECKF(req && req->uses_target, "the Hemorrhage's requirement reads its target (a bleeding one)");
+    BardMobWorld bw(f, wolf_path, 1);   // (a Ranger: the Snipe is his)
+    CHECKF(bw.problem.empty(), "the Ranger and the world: %s", bw.problem.c_str());
+    if (!bw.problem.empty()) return;
+    bw.rig.know({"Ranger_Snipe"});
+    const uint64_t wolf = bw.w.spawn(wolf_path, 600, 0, 8, 0);
+    effects::Applied bleed;
+    bleed.def = bleeding;
+    bleed.duration = 20.0;
+    bw.world->apply_effects(wolf, 77, {bleed}, 100.0);
+    CHECKF(bw.world->effect_stacks(wolf, bleeding->row.guid) == 1, "the Wolf is bleeding (the Hemorrhage's requirement holds of it)");
+    const BardCast cast = bard_cast(bw, "Ranger_Snipe", {wolf}, "Snipe_Hemorrhage", 100.0, 100.5);
+    CHECKF(cast.cast, "the Snipe's cast is accepted");
+    CHECKF(bw.world->effect_stacks(wolf, hemorrhage->row.guid) == 0, "the Hemorrhage does not land: its requirement is asked of the caster, as before");
+}
+AOC_REGISTER_TEST(test_bard_target_hit_requirement);

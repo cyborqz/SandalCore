@@ -34,6 +34,12 @@ struct BreakOnDamage {
     bool leaves(int64_t hit_guid) const { return hit_guid != 0 && std::find(except_hits.begin(), except_hits.end(), hit_guid) != except_hits.end(); }
 };
 
+/// An effect that ends once the damage its holder takes adds up to a share of the instigator's maximum Health (the dance's: a tenth): every hit that takes Health from the holder adds
+/// what it took, and the effect ends at the hit that takes the total past the share.
+struct BreakOnDamageTaken {
+    double share = 0;   // the share of the instigator's MaxHealth the damage taken must exceed
+};
+
 struct EffectDef {
     content::EffectRow                          row;
     std::vector<content::ModRow>                mods;   // the effect's stat mods
@@ -44,6 +50,8 @@ struct EffectDef {
     std::optional<content::CrowdControlRow>     cc;
     /// Set for an effect that breaks at the first damage (the fragility "InstantBreak" of the sleeps); empty for the rest.
     std::optional<BreakOnDamage>                breaks_on_damage;
+    /// Set for an effect that breaks once the damage its holder takes adds up to a share of the instigator's maximum Health (the dance's tenth); empty for the rest.
+    std::optional<BreakOnDamageTaken>           breaks_on_damage_taken;
 };
 // [C Y B x CoA]
 

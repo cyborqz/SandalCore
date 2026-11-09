@@ -56,6 +56,31 @@ std::optional<BreakOnDamage> break_on_damage_of(const content::FragilityRow& f) 
     return out;
 }
 
+/// What a fragility record of the shape "the holder is hit, and the Health it takes adds up; at a share of the instigator's maximum Health the effect ends" says (the dance's tenth).  The
+/// threshold is the instigator's MaxHealth times a share, and the accumulation is the Health each hit took, counted only when it was a loss.  Any other shape gives nothing.
+std::optional<BreakOnDamageTaken> break_on_damage_taken_of(const content::FragilityRow& f) {
+    if (f.fragility_type.find("FRAGILITY_Proc") == std::string::npos) return std::nullopt;
+    const nlohmann::json bound = nlohmann::json::parse(f.bindings, nullptr, false);
+    if (!bound.is_object()) return std::nullopt;
+    const auto hit_events = bound.find("HitEvents");
+    if (hit_events == bound.end() || !hit_events->is_number_integer() || (hit_events->get<int64_t>() & 2) == 0) return std::nullopt;   // (bit 2: the holder is hit)
+    if (f.break_immediately.find("GetStatModValue") != std::string::npos) return std::nullopt;   // (the first-damage shape, not this one)
+    const std::string& threshold = f.break_threshold;
+    if (threshold.find("GetInstigator()") == std::string::npos || threshold.find(std::to_string(content::kGuidMaxHealth)) == std::string::npos) return std::nullopt;
+    const size_t star = threshold.rfind('*');
+    if (star == std::string::npos) return std::nullopt;
+    const double share = std::strtod(threshold.c_str() + star + 1, nullptr);
+    if (!(share > 0.0)) return std::nullopt;
+    const std::string health = std::to_string(content::kGuidHealth);
+    if (f.accumulation_rate.find("-GetStatModValue(GetHitEvent(), GetOwner(),") == std::string::npos || f.accumulation_rate.find(health) == std::string::npos) return std::nullopt;
+    if (f.evaluate_accumulation.find("GetStatModValue(GetHitEvent(), GetOwner(),") == std::string::npos || f.evaluate_accumulation.find(health) == std::string::npos ||
+        f.evaluate_accumulation.find("< 0.0") == std::string::npos)
+        return std::nullopt;
+    BreakOnDamageTaken out;
+    out.share = share;
+    return out;
+}
+
 }  // namespace
 
 std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatBundle& bundle, std::string& error) {
@@ -125,6 +150,7 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
                 for (const int64_t fragility : fragilities) {
                     if (const auto record = db->fragility(fragility, unread)) {
                         if (auto breaks = break_on_damage_of(*record)) d.breaks_on_damage = std::move(*breaks);
+                        else if (auto taken = break_on_damage_taken_of(*record)) d.breaks_on_damage_taken = std::move(*taken);
                     }
                 }
             }
