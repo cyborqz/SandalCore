@@ -80,10 +80,11 @@ emit::FIntrepidNetworkGUID game_mode_class_guid();
 emit::FIntrepidNetworkGUID hud_class_guid();
 
 /// A montage worldd can name in a ReplicatedActiveAbilities item: its GUID (a static asset's, ServerId 0) and the export
-/// chain that gives the client its path. Static GUIDs are not computed from the path (a hash no one has found), so only the
-/// montages a capture shows are known: the General_Rest montage (replay_data.bin, pkt#8175), and, from the retail captures
-/// of 2026-02 (research 2026-10-02: the same ids in every session and on every server), the Sprint montage, the four Dodge
-/// montages the client asks for by AnimationIndex and the Rogue's dash.
+/// chain that gives the client its path.  A montage a capture shows keeps the retail id; a montage no table names gets an id
+/// the server computes from its path (montage_id_for), and the client takes it from the export.  The known ones: the
+/// General_Rest montage (replay_data.bin, pkt#8175), and, from the retail captures of 2026-02 (research 2026-10-02: the same
+/// ids in every session and on every server), the Sprint montage, the four Dodge montages the client asks for by
+/// AnimationIndex and the Rogue's dash.
 struct MontageRef {
     emit::FIntrepidNetworkGUID guid;
     repl::ExportChain          chain;
@@ -102,6 +103,11 @@ inline constexpr std::string_view kSprintMontageGroup = "Sprint";
 
 /// The montage with soft path `path` ("/Game/.../X.X", an Ability row's AbilityAnimationSoftPaths), when its GUID is known.
 std::optional<MontageRef> montage_for(std::string_view path);
+
+/// The id the server gives a montage no table names: CityHash64 of "AnimMontage <path>" with the lowest bit set (the shape of a static
+/// object's id).  The client registers the id from the export and does not compute it, so a server-chosen id plays.  0 for a path that is no
+/// "<package>.<name>".
+uint64_t montage_id_for(std::string_view path);
 
 /// Plan D2: a montage whose object id a retail capture names (ab_montage.net_guid, the same in every session and on every server) but whose
 /// package export no capture shows (the captures start mid-session): the object keeps the retail id, the package gets an id of its own

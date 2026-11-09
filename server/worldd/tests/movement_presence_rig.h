@@ -19,7 +19,8 @@ struct PresenceEndpoints {
     std::unique_ptr<CharacterSaver> saver;
     EndpointConfig                  cfg;
     std::unique_ptr<Rig>            rig;
-    explicit PresenceEndpoints(unsigned threads) {
+    /// `real`: the world runs on the content.db AOC_CONTENT_DB names (the ability tables a scenario needs are only there).
+    explicit PresenceEndpoints(unsigned threads, bool real = false) : fx(real) {
         saver = std::make_unique<CharacterSaver>(api, quick());
         fx.world->set_position_sink(saver.get());
         cfg.players = fx.world.get();

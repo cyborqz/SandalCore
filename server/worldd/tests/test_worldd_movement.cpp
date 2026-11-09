@@ -62,6 +62,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <limits>
@@ -448,10 +449,13 @@ struct Fixture {
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
 
-    Fixture() {
+    /// The small content.db of content_db_fixture.h, or, with `use_real`, the file AOC_CONTENT_DB names (the ability tables a
+    /// scenario needs are only there).
+    explicit Fixture(bool use_real = false) {
         dir = content_fixture::make_temp_dir("worldd_movement_");
-        const fs::path db = dir / "content.db";
-        if (!content_fixture::make_db(db)) std::exit(2);
+        fs::path db = dir / "content.db";
+        if (const char* real = std::getenv("AOC_CONTENT_DB"); use_real && real && *real) db = real;
+        else if (!content_fixture::make_db(db)) std::exit(2);
         std::string error;
         content = content::ContentDb::open(db.string(), error);
         if (!content) {

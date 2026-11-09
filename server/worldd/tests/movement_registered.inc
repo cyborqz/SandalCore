@@ -14,3 +14,4 @@
 #include "movement_presence_wire_tests.inc"
 #include "movement_presence_mode_tests.inc"
 #include "movement_surface_tests.inc"
+#include "movement_presence_emotes_tests.inc"

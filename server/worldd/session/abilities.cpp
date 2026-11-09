@@ -259,6 +259,8 @@ void AbilityRuntime::set_moving(bool moving, double now) {
     if (mounted_) moving = false;   // a rider's moves are its mount's: nothing it does charges the pawn
     moving_ = moving;
     moving_at_ = std::max(now, now_);
+    // The Rest's record has no rule for movement (usable_while_walking 1, no break condition): walking away stands the character up, as a second /sit does.
+    if (moving_ && rest_ && !rest_->ended) release_rest(now_, "the Rest ends: the player walks away");
     // the Sprint's regeneration stop depends on the player moving: the StaminaRegeneration item follows
     if (sprint_ && base_.count(content::kGuidStaminaRegeneration) != 0) {
         AbilityChange c;
@@ -332,10 +334,10 @@ void AbilityRuntime::regenerate(double t) {
     emit({std::move(c), std::nullopt, t, "Stamina regenerates"});
 }
 
-void AbilityRuntime::refuse(int32_t client_instance_id, Refusal why, double t, const char* what) {
+void AbilityRuntime::refuse(int32_t client_instance_id, Refusal why, double t, const char* what, bool tell) {
     ++refused_;
     AbilityEvent e;
-    e.end_ability = client_instance_id;
+    if (tell) e.end_ability = client_instance_id;
     e.at = t;
     e.note = std::string(what) + " refused: " + refusal_name(why);
     e.refusal = true;
@@ -354,37 +356,37 @@ Refusal AbilityRuntime::trigger(int64_t ability_guid, int32_t client_instance_id
     advance(now);
     const AbilityRule* r = rules_.ability(ability_guid);
     if (!r) {
-        refuse(client_instance_id, Refusal::NotEnabled, now_, "an ability worldd does not run");
+        refuse(client_instance_id, Refusal::NotEnabled, now_, "an ability worldd does not run", !info.by_server);
         return Refusal::NotEnabled;
     }
     // An instance that is running is not started twice, and not ended either: ClientEndAbility(id) would end the real one.
     if (instance_of(client_instance_id)) return Refusal::Duplicate;
     if (mounted_) {
-        refuse(client_instance_id, Refusal::Mounted, now_, r->name.c_str());
+        refuse(client_instance_id, Refusal::Mounted, now_, r->name.c_str(), !info.by_server);
         return Refusal::Mounted;
     }
     if (r->requires_out_of_combat && in_combat_) {
-        refuse(client_instance_id, Refusal::InCombat, now_, r->name.c_str());
+        refuse(client_instance_id, Refusal::InCombat, now_, r->name.c_str(), !info.by_server);
         return Refusal::InCombat;
     }
     if (r == &rules_.sprint) {
         if (stamina() < r->min_stamina) {
-            refuse(client_instance_id, Refusal::Stamina, now_, r->name.c_str());
+            refuse(client_instance_id, Refusal::Stamina, now_, r->name.c_str(), !info.by_server);
             return Refusal::Stamina;
         }
         start_sprint(client_instance_id, now_);
     } else if (r == &rules_.dodge) {
         if (r->disable_during_cooldown && now_ < dodge_cooldown_until_) {
-            refuse(client_instance_id, Refusal::Cooldown, now_, r->name.c_str());
+            refuse(client_instance_id, Refusal::Cooldown, now_, r->name.c_str(), !info.by_server);
             return Refusal::Cooldown;
         }
         if (stamina() < r->cost_amount) {
-            refuse(client_instance_id, Refusal::Stamina, now_, r->name.c_str());
+            refuse(client_instance_id, Refusal::Stamina, now_, r->name.c_str(), !info.by_server);
             return Refusal::Stamina;
         }
         start_dodge(client_instance_id, now_, info);
     } else {
-        start_rest(client_instance_id, now_);
+        start_rest(client_instance_id, now_, info.by_server);
     }
     return Refusal::None;
 }
@@ -402,6 +404,14 @@ bool AbilityRuntime::cancel(int32_t client_instance_id, double now) {
         return true;
     }
     return false;
+}
+
+bool AbilityRuntime::end_rest(double now) {
+    if (!ok()) return false;
+    advance(now);
+    if (!rest_ || rest_->ended) return false;
+    release_rest(now_, "the Rest ends: the player stands up");
+    return true;
 }
 
 // ---- Sprint ---------------------------------------------------------------------------------------------------------
@@ -536,7 +546,7 @@ void AbilityRuntime::end_dodge_items(double t) {
 // ---- Rest -----------------------------------------------------------------------------------------------------------
 // Cyb - C | O | A
 
-void AbilityRuntime::start_rest(int32_t id, double t) {
+void AbilityRuntime::start_rest(int32_t id, double t, bool by_server) {
     // No retail capture has a Rest, so what the client does with its own Sprint is unknown: the server ends the Sprint and tells it.
     if (sprint_) end_sprint(t, Tell::Now, "the Sprint ends: a Rest starts");
     const AbilityRule& r = rules_.rest;
@@ -554,8 +564,10 @@ void AbilityRuntime::start_rest(int32_t id, double t) {
     const int64_t instance = next_instance_++;
     bootstrap::ActiveAbilityItem item = ability_item(r, instance);
     item.animation_counter = rest_animation_counter_;
+    item.branch_predicted = !by_server;   // [R: the retail server's item for an emote's Rest says bBranchPredictedOnAutonomous 0; the client's own Rest says 1]
     c.abilities_added.push_back(item);
     rest_ = Rest{id, instance};
+    rest_->by_server = by_server;
     rest_->effect_due = t + kRestEffectDelay;
     emit({std::move(c), std::nullopt, t, "the Rest starts"});
 }
@@ -569,6 +581,7 @@ void AbilityRuntime::release_rest(double t, const char* why) {
     item.montage_position = kRestSitEndPosition;
     item.may_jump_to_position = true;
     item.animation_counter = ++rest_animation_counter_;
+    item.branch_predicted = !rest_->by_server;
     if (rest_->effect_key) rest_->remove_due = t + kRestEndEffectDelay;
     AbilityChange c;
     c.abilities_changed.push_back(item);

@@ -45,6 +45,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     // server's tick (before every view pass of the tick), after everything that can move the player (the moves, a teleport, a respawn, the floor net), so the registry is never written while the views
     // read it, and it makes no difference whether the server runs the view passes on threads.
     sync_presence(now);
+    run_emotes(conn, now);   // the emote items of this player's pawn, written to the pawn the other players are shown (session/player_emotes.cpp)
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
     if (phase_in_done_ && !time_syncs_.empty() && now >= time_syncs_.front() && room_for(1)) {
         time_syncs_.pop_front();

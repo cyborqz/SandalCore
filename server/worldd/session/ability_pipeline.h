@@ -21,7 +21,8 @@
 //               does not compile refuses the ability (NoFormula), logged. A ClientInstanceId the pipeline has seen lately is dropped with no answer.
 //    cast       one trigger makes up to four steps, each at its own time after the trigger (the montage's notifies):
 //                 item       the ability item (ReplicatedActiveAbilities): the ability, a ServerInstanceId from the pawn's counter, the montage's
-//                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid), PlayRate (the character's speed stat for an ability whose table rows say which one, else 1.0), MontageGroup (DefaultGroup;
+//                            static NetGUID by the call's AnimationIndex (ab_montage.net_guid; an emote whose montage has none gets the id the server
+//                            computes from its path), PlayRate (the character's speed stat for an ability whose table rows say which one, else 1.0), MontageGroup (DefaultGroup;
 //                            Flourish EmoteGroup, the songs SongGroup), Targets the caster when the call named one; the previous item
 //                            of the pipeline goes in the same update (every retail reply says "deleted 1"). The median of the recorded casts where
 //                            ability_timings.h has the ability (50 to 110 ms for most, per kind of cast), else about 300 ms after the trigger
@@ -730,6 +731,7 @@ private:
         bool                                  montage_branch = false;     // the montage moves to a section when the cast ends (the changes of `item` below)
         float                                 branch_position = 0;        // where that section starts
         bool                                  branch_predicted = true;    // the client took the branch itself (its cast bar); false when the server decided it
+        bool                                  by_server = false;          // the server began the cast (an emote): its item is not one the client predicted
         std::optional<double>                 branch_due, end_due;
         struct Missile {
             double   due = 0;
@@ -1110,6 +1112,9 @@ void   step_multi_hit(Cast& cast, double t);
     std::map<int64_t, SwingRecord> swing_records_;
     void   forget_swing(int64_t ability);
     int    swing_montage(const abilities::AbilityDef& def, int requested, int& step, bool log = true) const;
+    /// The montage an emote plays: the first of the ability's montages whose selection expression holds (a row with none always does), or the first
+    /// montage when an expression cannot be read.  The client names no AnimationIndex for an emote, so the server picks.
+    int32_t emote_montage_index(const abilities::AbilityDef& def, int32_t fallback);
     void   stop_swing(int64_t instance);
     stats::SplitMix           guid_rng_;
     std::vector<bootstrap::ShieldElement> shields_sent_;

@@ -150,6 +150,7 @@ void PlayerSession::take_ability_events() {
                 return;
             }
             abilities_dirty_ = true;
+            note_emote_items(e.change);   // the emotes among the pawn's ability items: the other players are shown them (session/player_emotes.cpp)
         }
         for (const int64_t id : e.change.effects_removed) pet_effects_.erase(id);
         for (const auto& effect : e.change.effects_added) {

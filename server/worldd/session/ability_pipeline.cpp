@@ -8,6 +8,7 @@
 
 #include "bootstrap/constants.h"
 #include "content/content_db.h"
+#include "content/emote_commands.h"
 #include "session/ability_timings.h"
 #include "session/summoner_pets.h"
 #include "session/consumable_timings.h"
@@ -3121,6 +3122,24 @@ int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& st
     return take->anim_index;
 }
 
+int32_t AbilityPipeline::emote_montage_index(const AbilityDef& def, int32_t fallback) {
+    bool have_first = false;
+    int32_t first = fallback;
+    for (const content::MontageRow& m : def.montages) {
+        if (m.soft_path.empty()) continue;
+        if (!have_first) {
+            first = m.anim_index;
+            have_first = true;
+        }
+        if (m.select_expr == 0) return m.anim_index;   // (a row with no expression always holds)
+        double v = 0;
+        std::string why;
+        if (!eval(m.select_expr, v, why)) return first;   // (an expression that cannot be read: the first montage)
+        if (v != 0.0) return m.anim_index;
+    }
+    return first;
+}
+
 Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now, const TriggerInfo& info) {
     advance(now);
     const double t = now_;
@@ -3134,6 +3153,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     const std::string name = def ? def->row.name : std::to_string(ability);
     auto refused = [&](Refusal why, const std::string& extra = {}) {
         refuse(client_id, why, t, name + extra);
+        if (info.by_server) events_.back().end_ability.reset();   // the server started this cast (an emote): the client has no instance of it to end
         return why;
     };
     if (dead_) return refused(Refusal::Dead);
@@ -3221,6 +3241,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     cast.trigger_at = t;
     int swing_step = 0;   // (a ranged weapon swing: the step it plays, kept once the swing is accepted)
     cast.item_cast = info.item_cast;
+    cast.by_server = info.by_server;
     cast.target = info.target_count > 0 && target_actors.empty();   // (aimed at the caster; a real target is named by the item's Targets)
     // ... but a projectile reaches the caster only when the ability may be aimed at the caster at all: an enemy-only ability whose target the world
     // does not have (another player) is cast at the air, like one with no target, and Mock's Quick Wit heal never lands on the caster [E1 stage 3 fix]
@@ -3299,6 +3320,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
     }
     cast.animation_index = swing_montage(*def, info.animation_index, swing_step);
+    if (content::is_emote_ability(row.guid)) cast.animation_index = emote_montage_index(*def, cast.animation_index);
     // accepted: the steps and their times
     double item_delay = kItemDelay, cost_delay = kCostDelay, hit_delay = -1;
     double zone_delay = -1;   // when the actor of the zone the cast spawns opens, after the trigger (-1: a moment after the item)
@@ -3593,6 +3615,7 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
     item.server_instance_id = cast.instance = a7_.allocate_instance_id();
     instances_.push_back({cast.instance, cast.client_id, std::nullopt, def.row.guid});
     while (instances_.size() > 32) instances_.pop_front();
+    item.branch_predicted = !cast.by_server;   // [R: the retail server's item for an emote says bBranchPredictedOnAutonomous 0; an ability the client triggered says 1]
     item.targets_self = cast.target;
     if (combat_) {
         for (const uint64_t id : cast.target_actors) {
@@ -3603,7 +3626,12 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
     for (const content::MontageRow& m : def.montages) {
         if (m.anim_index != cast.animation_index) continue;
         item.montage_path = m.soft_path;
+        // the id: the table's, then the server's recorded montages, then (an emote) the id the server computes from the path
         item.montage_guid = m.net_guid ? *m.net_guid : 0;
+        if (!m.net_guid) {
+            if (const auto known = bootstrap::montage_for(m.soft_path)) item.montage_guid = known->guid.ObjectId;
+            else if (content::is_emote_ability(def.row.guid)) item.montage_guid = bootstrap::montage_id_for(m.soft_path);
+        }
         break;
     }
     item.montage_group = montage_group_of(def);

@@ -8,7 +8,8 @@
 //  bootstrap/observer_actor.cpp  (players seeing each other, stage A)
 //
 //  The player's pawn as the OTHER players are shown it (PlayerBootstrap::observer_pawn, declared in bootstrap/bootstrap.h): the owner's pawn with only the values and components that
-//  show the character.  The session puts it into the world's registry once the phase-in is built (session/player_presence.cpp).
+//  show the character, and an AbilityComponent that shows the emotes it plays (observer_ability_component).  The session puts it into the world's registry once the phase-in is built
+//  (session/player_presence.cpp).
 //
 //  #14 review: the PlayerState that was built beside the pawn (observer_player_state) is gone, and the pawn names none: the other players are shown the pawn alone, and nothing of the
 //  login text (the ?Name= option, which names the player's PC) reaches their clients.
@@ -16,6 +17,7 @@
 #include "bootstrap/bootstrap.h"
 
 #include "bootstrap/constants.h"
+#include "content/emote_commands.h"
 #include "protocol/repl/move_packed.h"
 #include "protocol/schema/generated/index.h"
 
@@ -63,6 +65,24 @@ bool observer_component(const repl::Subobject& from, const std::vector<std::stri
     return true;
 }
 
+/// The AbilityComponent as another player is shown it, for the emotes: it holds no ability item (the session puts the emote items of the owner's pawn in, session/player_emotes.cpp) and asks
+/// the other player's client to load the records of the emote abilities the owner's component loads, which it needs to play them.  The owner's KnownAbilities, its Cooldowns and the records
+/// of its class's abilities stay the owner's.  False when the empty array does not exist.
+bool observer_ability_component(const repl::Subobject& from, repl::Subobject& out) {
+    const schema::ClassSchema& cls = *from.obj.schema;
+    const Value* records = from.obj.state.get(cls, "ReplicatedRecordsToLoad");
+    const auto* list = records ? records->get_if<repl::ArrayValue>() : nullptr;
+    if (list) {
+        repl::ArrayValue shown;
+        for (const repl::ElementState& e : list->elements) {
+            const auto guid = e.values.find(1);
+            if (guid != e.values.end() && guid->second.get_if<int64_t>() && content::is_emote_ability(*guid->second.get_if<int64_t>())) shown.elements.push_back(e);
+        }
+        if (!out.obj.state.set(cls, "ReplicatedRecordsToLoad", Value(std::move(shown)))) return false;
+    }
+    return out.obj.arrays.get(cls, "ReplicatedActiveAbilities") != nullptr;
+}
+
 }  // namespace
 
 std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
@@ -92,6 +112,7 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
          {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D", "CharacterName", "Race", "Gender", "Level", "ServerId", "bHasBeenPossessed"},
          {"HeldItems"}},
         {&g.combat_info, {"bIsDead", "PrimaryClassId.Guid"}, {}},
+        {&g.ability, {}, {}},   // the emotes: observer_ability_component
         {&g.stats, {}, {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}},
         {&g.appearance, {"SharedAppearanceInfoId.Guid", "CharacterCustomization", "AppearanceIDs"}, {}},
     };
@@ -100,6 +121,7 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
         if (!from) return std::nullopt;
         repl::Subobject sub;
         if (!observer_component(*from, w.paths, w.arrays, sub)) return std::nullopt;
+        if (w.guid == &g.ability && !observer_ability_component(*from, sub)) return std::nullopt;
         a.subobjects.push_back(std::move(sub));
     }
     if (!ok) return std::nullopt;

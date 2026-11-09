@@ -84,6 +84,13 @@ static void test_presence_the_pawn_other_players_are_shown_has_nothing_of_the_ow
     CHECK(!unique_id, "no object of the pawn has a UniqueId");
     CHECK(leaked == 0, "no text value of the pawn holds the login's ?Name= text");
     CHECK(character_name == "cyb" && !login_text.empty(), "its CharacterName is the character's name, not the login's text");
-    CHECK(pawn->subobjects.size() == 5, "it has the five components that show the character (Alignment, BaseCharacterInfo, CombatInfo, Stats, Appearance) and nothing of the owner's");
+    CHECK(pawn->subobjects.size() == 6, "it has the six components that show the character (Alignment, BaseCharacterInfo, CombatInfo, AbilityComponent with the emotes only, Stats, Appearance) and nothing of the owner's");
+    {
+        const repl::Subobject* ability = nullptr;
+        for (const repl::Subobject& s : pawn->subobjects) {
+            if (s.obj.schema && std::string(s.obj.schema->name) == "UAoCAbilityComponent") ability = &s;
+        }
+        CHECK(ability && ability->obj.state.get(*ability->obj.schema, "KnownAbilities") == nullptr, "its AbilityComponent has none of the owner's list of known abilities");
+    }
 }
 AOC_REGISTER_TEST(test_presence_the_pawn_other_players_are_shown_has_nothing_of_the_owners);

@@ -12,3 +12,6 @@
 #include "ability_session_pets_go_to_tests.inc"
 #include "ability_session_death_holds_tests.inc"
 #include "ability_session_dodge_cancel_tests.inc"
+#include "ability_session_emote_list_tests.inc"
+#include "ability_session_emotes_tests.inc"
+#include "ability_session_emotes_seen_tests.inc"

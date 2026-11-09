@@ -14,6 +14,7 @@
 #include "bootstrap/captured_gamestate.h"
 #include "protocol/repl/rep_block.h"
 #include "protocol/schema/generated/index.h"
+#include "quest/quest_log.h"
 
 #include <cmath>
 
@@ -145,6 +146,9 @@ constexpr MontageDef kMontages[] = {
     {"/Game/Characters/Animations/00_ABLT/Rogue/CM_M_ABLT_RogueDash_Right_Montage.CM_M_ABLT_RogueDash_Right_Montage",
      "CM_M_ABLT_RogueDash_Right_Montage", 10081100002258589133ull, 16102130323274345795ull,
      "/Game/Characters/Animations/00_ABLT/Rogue/CM_M_ABLT_RogueDash_Right_Montage"},
+    {"/Game/Characters/Animations/00_EMO/All_EMO_M_Dance04_Montage.All_EMO_M_Dance04_Montage",
+     "All_EMO_M_Dance04_Montage", 80184083730092395ull, 6184692607877003321ull,
+     "/Game/Characters/Animations/00_EMO/All_EMO_M_Dance04_Montage"},   // the recorded dance
 };
 
 /// AnimationIndex -> the Dodge montage (an entry of kMontages), its axis and fixed yaw.
@@ -174,6 +178,13 @@ std::optional<MontageRef> montage_for(std::string_view path) {
         return m;
     }
     return std::nullopt;
+}
+
+uint64_t montage_id_for(std::string_view path) {
+    const size_t dot = path.rfind('.');
+    if (dot == std::string_view::npos || dot == 0 || dot + 1 >= path.size()) return 0;
+    const std::string full = "AnimMontage " + std::string(path);
+    return quest::city_hash64(full) | 1;
 }
 
 std::optional<MontageRef> montage_for(std::string_view path, uint64_t net_guid) {

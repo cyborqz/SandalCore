@@ -7,3 +7,4 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "gather_session_pile_tests.inc"
+#include "gather_session_sit_tests.inc"
