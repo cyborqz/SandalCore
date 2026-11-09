@@ -8,3 +8,5 @@
 #include "items_session_level_up_tests.inc"
 #include "items_session_chests_tests.inc"
 #include "items_session_stacks_tests.inc"
+#include "items_session_consumables_tests.inc"
+#include "items_session_interruption_tests.inc"

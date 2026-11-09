@@ -466,6 +466,8 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);
     bool accepted_cast = true;   // (the generic runtime has no refusal to give back: a pet's command goes on as before)
+    // An item use still running (a meal being eaten, a potion being drunk) ends too: its own lasting state (a meal's Resting) goes, its buff and timed effects stay.
+    if (pipeline_) pipeline_->end_item_casts(ability_seconds(now), "another ability starts");
     if (pipeline_ && pipeline_->handles(ability)) {
         if (item_slot != -1) info.item_cast = consumable_cast(ability, item_slot, item_location);   // consumables: the item whose numbers the ability reads
         const Refusal accepted = pipeline_->trigger(ability, instance, ability_seconds(now), info);
