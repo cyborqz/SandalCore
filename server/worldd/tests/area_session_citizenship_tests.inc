@@ -726,8 +726,50 @@ void test_election_in_game() {
 
 }  // namespace
 
+/// An elections file that does not read is moved aside before anything writes the elections again (session/player_citizenship.cpp PlayerWorld::set_elections).
+void test_elections_unreadable_file() {
+    std::printf("node citizenship: an elections file that does not read\n");
+    CitizenHarness h;
+    h.play();
+    h.run(milliseconds(500));
+    spdlog::set_level(std::getenv("AOC_TEST_CITIZEN_LOG") ? spdlog::level::info : spdlog::level::off);
+    const std::filesystem::path bad =
+        std::filesystem::temp_directory_path() / ("aoc_elections_unreadable_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+    const std::string text = "{ this is not the file's format";
+    {
+        std::ofstream out(bad, std::ios::binary | std::ios::trunc);
+        out << text;
+    }
+    h.fx.world->set_elections(world::ElectionRules{}, bad.string());
+    h.fx.world->elections()->set_citizen(kTestCitizenNode, world::ElectionPerson{h.record.account_id, kCyb, "cyb", 1});
+    h.fx.world->save_elections();
+    std::string aside_text;
+    std::vector<std::filesystem::path> asides;
+    for (const auto& e : std::filesystem::directory_iterator(bad.parent_path())) {
+        if (e.path().filename().string().rfind(bad.filename().string() + ".unreadable-", 0) == 0) asides.push_back(e.path());
+    }
+    if (asides.size() == 1) {
+        std::ifstream in(asides[0], std::ios::binary);
+        aside_text.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
+    std::string now_text;
+    {
+        std::ifstream in(bad, std::ios::binary);
+        now_text.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
+    world::Elections fresh{world::ElectionRules{}};
+    std::string err;
+    const bool reads = fresh.from_json(now_text, err);
+    std::error_code ec;
+    for (const auto& a : asides) std::filesystem::remove(a, ec);
+    std::filesystem::remove(bad, ec);
+    CHECK(asides.size() == 1 && aside_text == text, "an elections file that does not read is moved aside with what it held (FILE.unreadable-<time>)");
+    CHECK(reads && fresh.citizen_count(kTestCitizenNode) == 1, "... and the next change writes a new file at the old name");
+}
+
 AOC_REGISTER_TEST(test_citizenship_flow);
 AOC_REGISTER_TEST(test_mayor_flow);
 AOC_REGISTER_TEST(test_citizenship_gm);
 AOC_REGISTER_TEST(test_node_taxes);
+AOC_REGISTER_TEST(test_elections_unreadable_file);
 AOC_REGISTER_TEST(test_election_in_game);

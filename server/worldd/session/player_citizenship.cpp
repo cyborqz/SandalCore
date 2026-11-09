@@ -35,6 +35,7 @@
 #include "world/citizenship.h"
 #include "world/elections.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -471,7 +472,18 @@ void PlayerWorld::set_elections(world::ElectionRules rules, std::string file) {
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     std::string error;
     if (!elections_->from_json(text, error)) {
-        spdlog::error("[nodes] the elections file {} does not read ({}): the elections start afresh, and the file is kept as it is until they change", elections_file_, error);
+        // moved aside before anything writes the elections again (the next change, a tick of the calendar, saves them), so nothing it holds is lost
+        in.close();
+        const int64_t unix_s = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        const std::string aside = elections_file_ + ".unreadable-" + std::to_string(unix_s);
+        std::error_code moved;
+        std::filesystem::rename(elections_file_, aside, moved);
+        if (moved) {
+            spdlog::error("[nodes] the elections file {} does not read ({}) and cannot be moved aside ({}): the elections start afresh, and the file is written over at their next change",
+                          elections_file_, error, moved.message());
+        } else {
+            spdlog::error("[nodes] the elections file {} does not read ({}): it is kept as {}, and the elections start afresh", elections_file_, error, aside);
+        }
         return;
     }
     elections_saved_ = elections_->version();
