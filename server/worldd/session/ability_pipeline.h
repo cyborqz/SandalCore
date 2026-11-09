@@ -138,6 +138,7 @@
 #include "combat/hit_resolver.h"
 #include "session/abilities.h"
 #include "session/ability_catalog.h"
+#include "session/projectile_flight.h"
 #include "session/summoner_pets.h"
 #include "stats/character_stats.h"
 
@@ -718,11 +719,18 @@ private:
             // A timed cast (kTimedCasts) has two more kinds of step in this list: a launch (launch `index` leaves) and, for a Strike, the landing of arrow `index` at (x, y, z).
             // A Fly is a projectile that leaves at `due` (kNoteCasts: a note; a bounce leaves the enemy just hit, at (x, y, z)) and lands a flight later on `target`; `depth` counts the bounces before it
             // A Ball is one step of a ball's flight (kBalls): `index` counts the steps, 0 is the launch; a step looks at what the ball touches and sends a Land at each enemy that is due a hit
-            enum class Kind : uint8_t { Land, Launch, Strike, Fly, Ball };
+            // A Steer is a projectile whose record limits how fast it may turn (kSteerCasts): `steer` is its flight, one 20 ms step per due, and it becomes a Land on arrival or at its closest pass
+            enum class Kind : uint8_t { Land, Launch, Strike, Fly, Ball, Steer };
             Kind     kind = Kind::Land;
             int      index = 0;
             double   x = 0, y = 0, z = 0;
             int      depth = 0;
+            flight::Flight steer;             // a Steer: where it is, which way it goes, how fast and how far it may turn each second
+            double   steer_launch = 0;        // ... when it left
+            double   steer_at = 0;            // ... the time its flight state is at (a step catches up to `due` in 20 ms sub-steps)
+            double   steer_deadline = 0;      // ... when the first lap and the half second after it are over (or its life ends): it lands at its closest pass then
+            double   steer_closest = 1e18;    // ... the closest it has come to its target so far, and when
+            double   steer_closest_at = 0;
         };
         std::vector<Missile>                  missiles;
         const TimedCast*                      timed = nullptr;            // a cast whose montage launches its projectiles at moments of its own (kTimedCasts)
@@ -838,10 +846,16 @@ private:
     void   step_hits(Cast& cast, double t, const char* which, int depth = 0);
     /// A hit that fires further hits when it lands (RecursiveHit, kBounces): the child hit is confirmed on another enemy near the one just hit, and the projectile it fires flies there (a Fly step).
     void   bounce_from(bootstrap::AbilityChange& c, Cast& cast, const abilities::HitDef& hit, int64_t projectile, uint64_t target, int depth, double t);
+    /// A hit that names itself in its RecursiveHit (Chain Lightning): the same hit is applied to the nearest enemy within the recursive targeting's sphere of the one just hit,
+    /// again from each enemy it reaches, up to the rule's number of enemies in all; none of them twice (ability_pipeline_chain.inc has the table and the evidence).
+    void   chain_from(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& first, double t, const HitSource& src, const abilities::AbilityDef* ability);
     /// An ordinary cast that sends several projectiles at its target (kNoteCasts): each is a Fly step at the montage's notify of its own, and none of the cast's hits lands before its projectile gets there.
     void   plan_notes(Cast& cast, double t);
     /// A Fly step: the projectile leaves now; its landing is the target's distance (from the caster, or from the enemy a bounce left) over its speed away, never before the cast's cost step.
     void   launch_note(Cast& cast, const Cast::Missile& fly, double t);
+    /// One step of a turn-limited projectile (kSteerCasts): it turns toward the target's live position by at most its turn each second and advances 20 ms; on arrival (or at its
+    /// closest pass after the first lap and half a second) it becomes a Land, which lands through the ordinary projectile hit path.
+    void   steer_step(Cast& cast, const Cast::Missile& m, double t);
     /// A weapon combo's swing that another ability's trigger overtakes is over (the client cancels it with its own press): none of its steps happens, and one whose item has not shown yet is
     /// ended with ClientEndAbility. Without this the swing's item, due later than the ability's, took the pawn's item from the ability: the ability's montage never got its jump or its end.
     void   cancel_swings(double t, const std::string& by);
@@ -937,6 +951,7 @@ private:
     std::vector<DelayedChild> delayed_;
     static constexpr size_t kMaxDelayed = 64;
     void   land_delayed(const DelayedChild& child, double t);
+    bool   chaining_ = false;   // a chain's own jumps apply their hit without starting another chain (chain_from)
     const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,

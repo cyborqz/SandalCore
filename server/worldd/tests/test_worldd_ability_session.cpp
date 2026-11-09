@@ -2476,7 +2476,7 @@ struct WolfWorld {
         }
         wolf = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + north, kZ, level, 800);
         for (int i = 0; i < extra; ++i) {
-            const uint64_t id = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + 100 * (i + 1), kZ, extra_level > 0 ? extra_level : level, 800);
+            const uint64_t id = combat_rig::spawn_npc(w.registry(), w.npcs(), *captured, next_actor_id, path, kX + ahead, kY + north + 100 * (i + 1), kZ, extra_level > 0 ? extra_level : level, 800);
             if (id != 0) wolves.push_back(id);
         }
     }
@@ -4027,7 +4027,8 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
     WolfWorld ww;
     ww.level = fc.wolf_level;
     ww.extra_level = fc.extra_level;
-    ww.ahead = fc.ahead;
+    ww.ahead = 0;              // (the Wolf stands the way the player faces: the turn-limited flight leaves along the caster's facing)
+    ww.north = fc.ahead;
     ww.extra = fc.extra;
     Run r(0, true, &rec, [&](PlayerWorld& w) { ww.prepare(w); });
     if (!ww.ground || ww.wolf == 0 || !r.h.fx.world->combat()) return false;

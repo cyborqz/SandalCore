@@ -149,7 +149,9 @@ struct TargetInfo {
     bool     in_line_of_sight = true;
     double   surface_distance_cm = 0;   // from the surfaces of the two bodies
     Vec3     position;
+    Vec3     velocity;                  // the creature's walk velocity (cm/s; zero for a player or a still creature)
     double   radius_cm = 50.0;
+    double   half_height_cm = 88.0;   // the capsule's half height (the motion table's; the NPCPawn default)
     bool     is_player = false;
 };
 

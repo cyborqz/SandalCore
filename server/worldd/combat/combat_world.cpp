@@ -256,8 +256,15 @@ TargetInfo CombatWorld::inspect(uint64_t target_actor, const Fighter& from) {
     if (!a || a->kind != world::ActorKind::Npc) return t;
     t.exists = true;
     t.position = {a->x, a->y, a->z};
+    if (npcs_world_) {
+        if (const npc::Mover* m = npcs_world_->mover(target_actor)) {
+            const nav::Vec3 v = m->velocity();
+            t.velocity = {v.x, v.y, v.z};
+        }
+    }
     const npc::MotionStats bp = motion_.get(a->npc.archetype);
     t.radius_cm = bp.radius;
+    t.half_height_cm = bp.half_height;
     const auto it = npcs_.find(target_actor);
     t.alive = it == npcs_.end() ? true : !it->second->dead;
     std::vector<int64_t> aligns(bp.alignments.begin(), bp.alignments.end());

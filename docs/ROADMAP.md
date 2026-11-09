@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 8 November 2026
+**Last updated:** 9 November 2026
 
 ---
 
@@ -59,6 +59,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Thrown, pushed and pulled mobs: the Bard's Get Off The Stage gives each mob in his reach one velocity change of 1000 cm/s at 35 degrees up along the way he faces, the same at every distance, added to the speed the mob already has; the tuned throw (nearer and facing him: higher and faster) stays in the code behind one setting, off. The Mage's Cone of Cold (with its talent) pushes a mob along the way the Mage faces and freezes it a second later, the Tank's Ground Pound puts a short CC on a tripped mob and his Grapple pulls a mob in front of him, and the Ranger's Air Strike takes the snares off the mob it roots. A thrown or pushed mob flies and slides along the walking map and takes no step or attack until it has stopped. A boss is never thrown, pushed or pulled.
 - Ranged weapon swings kept to the weapon's own pace: a swing that comes sooner than the weapon allows is refused, the minimum time follows the character's attack speed, and honest swings still go through when the connection lags.
 - Item stacks: a stack dragged onto a stack of the same item and colour joins it up to the stack's limit, a stack split with the right-click menu goes to a free slot, and the item bag, the material bags and the warehouse's materials tab follow the same rules.
+- Homing projectiles fly the game's turn law: the Discordance's notes, the Mend's orbs, the Frostbolt and the Salvo's arrows turn at their record's rate, curve round a target beside or behind the caster and chase a running creature where the game shows it.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

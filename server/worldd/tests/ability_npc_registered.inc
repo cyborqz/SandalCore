@@ -10,3 +10,4 @@
 #include "ability_npc_pets_target_tests.inc"
 #include "ability_npc_pets_despawn_tests.inc"
 #include "ability_npc_pets_holds_tests.inc"
+#include "ability_npc_chain_homing_tests.inc"

@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <string_view>
 
@@ -370,6 +372,127 @@ constexpr NoteCast kNoteCasts[] = {
     {"WeaponCombo_Ranged_Book", 8, 0.7986078, false, 5},
     {"WeaponCombo_Ranged_Book", 9, 0.79917175, false, 5},
 };
+
+// Projectiles whose record limits how fast they may turn (DesiredAngularSpeed) and whose fire rotation the client uses: they leave along the record's fire rotation, counted from the way
+// the caster faces, and turn toward the target at that limit (the design's 2.1 and 3.1). The speed and the sphere radius are the projectile record's; the rest is the record's own movement
+// data, which content.db does not carry, so it is a table here as kShotCasts is one. A row is found by the projectile record itself (its guid), never by its place among the ability's
+// projectile rows: the Discordance's two bounces sit between note 1 and note 2 in that order, and they fly straight (the design's 3.2), so they have no row here.
+//  - The Discordance's notes: 1,250 cm/s, 100 deg/s. The record's fire rotation is pitch/yaw 20/0, 10/-30 and 20/20 from the way the caster faces, but the game adds a random launch cone that
+//    each record sets (5 degrees for notes 1 and 3, 25 degrees for note 2) and the hand's pose at that moment, so the rows hold the mean of 18 launches recorded from the game: pitch/yaw
+//    18.7/-0.2 (note 1), 4.3/-34.1 (note 2) and 20.6/19.7 (note 3). The spawn is the hand's place in the caster's frame (x forward, y right, z up), the mean of the same launches: note 1
+//    (-31.0, 41.8, -11.5), note 2 (121.8, -39.3, -26.3) and note 3 (80.3, 4.2, 32.5) cm. The aim point is the target's spine socket, 60 cm above its position. A note that has to turn round
+//    moves 0.01 to 0.05 s for each degree of launch direction. The server's notes fly the centre of the cone (the mean launch), so in the game a landing can differ from the server's by up to
+//    about 0.2 s (notes 1 and 3) or about 1 s (note 2).
+//  - The Cleric's Mend: five projectiles, 1,250 to 2,000 cm/s, 100 deg/s, pitch 20, spawn (35,35,0), aim spine_01. The game's launch cone for them is 25 degrees.
+//  - The Mage's Frostbolt: 4,000 cm/s, 135 deg/s, pitch/yaw 0, spawn (30,-30,80). Its shard is not listed: the bolt's hit does not fire it yet.
+//  - The Ranger's Salvo: 7,000 cm/s, 500 deg/s, pitch/yaw 0, spawn (0,0,0).
+struct SteerCast {
+    int64_t     projectile;   // the projectile record that turns
+    double      turn_deg_s;
+    double      pitch_deg, yaw_deg;
+    double      spawn_x, spawn_y, spawn_z;
+    double      aim_height_cm;   // the aim point's height above the target's position (the spine socket; 0: its centre)
+};
+constexpr SteerCast kSteerCasts[] = {
+    {6064631278466105357ll, 100, 18.69, -0.24, -30.96, 41.82, -11.5, 60},     // Bard_Misc_Discordance1 (note 1)
+    {6064631935308136566ll, 100, 4.33, -34.10, 121.81, -39.28, -26.26, 60},   // Bard_Misc_Discordance2 (note 2)
+    {6064631935309250679ll, 100, 20.63, 19.73, 80.32, 4.21, 32.46, 60},       // Bard_Misc_Discordance3 (note 3)
+    {6064629375773386931ll, 100, 20, 0, 35, 35, 0, 60},       // Cleric_Mend_Projectile1
+    {6064629658684243754ll, 100, 20, 0, 35, 35, 0, 60},       // Cleric_Mend_Projectile2
+    {6064629658684309291ll, 100, 20, 0, 35, 35, 0, 60},       // Cleric_Mend_Projectile3
+    {6064629658684309292ll, 100, 20, 0, 35, 35, 0, 60},       // Cleric_Mend_Projectile4
+    {6064629658684374829ll, 100, 20, 0, 35, 35, 0, 60},       // Cleric_Mend_Projectile5
+    {6064628889634930690ll, 135, 0, 0, 30, -30, 80, 0},      // Mage_Frostbolt
+    {6064633102456433473ll, 500, 0, 0, 0, 0, 0, 0},          // Ranger_Salvo
+};
+constexpr double kSteerPi = 3.14159265358979323846;
+constexpr double kSteerStep = 0.005;       // the flight's step, seconds (the client steps every 5 to 7 ms)
+
+// The row of the projectile record `projectile` (null: it is not a turn-limited one).
+const SteerCast* steer_of(int64_t projectile) {
+    for (const SteerCast& s : kSteerCasts) {
+        if (s.projectile == projectile) return &s;
+    }
+    return nullptr;
+}
+
+// The homing flight trace (AOC_PROJECTILE_TRACE=1): one line at the launch, one every 0.1 s of flight and one at its end. The environment is read once at
+// the launch and kept on the flight, so the 20 ms sub-steps never read it.
+bool projectile_trace_on() {
+    const char* v = std::getenv("AOC_PROJECTILE_TRACE");
+    return v != nullptr && std::strcmp(v, "1") == 0;
+}
+
+struct FlightTrace {
+    std::string        ability;
+    int                index = 0;
+    int                depth = 0;
+    double             since_trigger = 0;
+    uint64_t           target = 0;
+    combat::TargetInfo target_info;
+};
+
+// The three line kinds share these formats: positions to 0.1 cm, times to 0.001 s, angles to 0.1 degree. `target_pos` is the target's real place; the step and end lines add
+// `view`, the place the flight takes as the target's (see flight::kViewLagS).
+struct TraceFormat {
+    static std::string pos(const flight::Vec3& p) { return fmt::format("{:.1f} {:.1f} {:.1f}", p.x, p.y, p.z); }
+    static std::string sec(double s) { return fmt::format("{:.3f}", s); }
+    static std::string deg(double d) { return fmt::format("{:.1f}", d); }
+    static std::string cm(double v) { return fmt::format("{:.1f}", v); }
+};
+
+std::string trace_head(const FlightTrace& t) { return fmt::format("[trace] {} note {} depth {}", t.ability, t.index, t.depth); }
+
+// The direction as yaw and pitch (degrees; the pitch is positive downwards, the trace's own sign).
+void trace_direction(const flight::Vec3& vel, double& yaw, double& pitch) {
+    const double speed = flight::length(vel);
+    yaw = std::atan2(vel.y, vel.x) * 180.0 / kSteerPi;
+    pitch = speed > 1e-9 ? -std::asin(std::clamp(vel.z / speed, -1.0, 1.0)) * 180.0 / kSteerPi : 0.0;
+}
+
+void trace_launch(const FlightTrace& t, const flight::Flight& f) {
+    double yaw = 0, pitch = 0;
+    trace_direction(f.vel, yaw, pitch);
+    const flight::Vec3 target{t.target_info.position.x, t.target_info.position.y, t.target_info.position.z};
+    const flight::Vec3 to = target - f.pos;
+    const double distance = flight::length(to);
+    const double angle = distance > 1e-9 ? std::acos(std::clamp(flight::dot(flight::normalized(f.vel), flight::normalized(to)), -1.0, 1.0)) * 180.0 / kSteerPi : 0.0;
+    spdlog::info("{} launch t={} pos={} yaw={} pitch={} dir={} speed={} turn={} target={} target_pos={} radius={} half_height={} distance={} angle={}", trace_head(t), TraceFormat::sec(t.since_trigger),
+                 TraceFormat::pos(f.pos), TraceFormat::deg(yaw), TraceFormat::deg(pitch), TraceFormat::pos(flight::normalized(f.vel)), TraceFormat::cm(f.speed),
+                 TraceFormat::deg(f.turn_rad_s * 180.0 / kSteerPi), t.target, TraceFormat::pos(target), TraceFormat::cm(t.target_info.radius_cm),
+                 TraceFormat::cm(t.target_info.half_height_cm), TraceFormat::cm(distance), TraceFormat::deg(angle));
+}
+
+void trace_step(const FlightTrace& t, double since_launch, const flight::Flight& f, const flight::Vec3& target, double distance) {
+    double yaw = 0, pitch = 0;
+    trace_direction(f.vel, yaw, pitch);
+    spdlog::info("{} t={} pos={} yaw={} pitch={} target_pos={} distance={} view={}", trace_head(t), TraceFormat::sec(since_launch), TraceFormat::pos(f.pos), TraceFormat::deg(yaw),
+                 TraceFormat::deg(pitch), TraceFormat::pos(target), TraceFormat::cm(distance), TraceFormat::pos(f.view));
+}
+
+void trace_end(const FlightTrace& t, bool arrived, double since_launch, const flight::Vec3& pos, const flight::Vec3& target, double distance, double radius, const flight::Vec3& view) {
+    spdlog::info("{} {} t={} pos={} target_pos={} distance={} radius={} view={}", trace_head(t), arrived ? "arrived" : "closest pass", TraceFormat::sec(since_launch), TraceFormat::pos(pos),
+                 TraceFormat::pos(target), TraceFormat::cm(distance), TraceFormat::cm(radius), TraceFormat::pos(view));
+}
+
+// Where the projectile starts and which way it goes: the caster's origin plus the record's spawn offset (x forward, y right, z up, turned by the way the caster faces), and the
+// fire rotation (the caster's facing plus the record's yaw, pitched by the record's pitch; a positive pitch is upwards, as the record's fire rotation takes it).
+flight::Flight make_flight(const combat::Fighter& caster, const content::ProjectileRow& p, const SteerCast& row, const FlightTrace& trace) {
+    const double facing = caster.facing_degrees() * kSteerPi / 180.0;
+    const double yaw = (caster.facing_degrees() + row.yaw_deg) * kSteerPi / 180.0;
+    const double pitch = row.pitch_deg * kSteerPi / 180.0;
+    const combat::Vec3 at = caster.position();
+    flight::Flight f;
+    f.pos = {at.x + row.spawn_x * std::cos(facing) - row.spawn_y * std::sin(facing), at.y + row.spawn_x * std::sin(facing) + row.spawn_y * std::cos(facing), at.z + row.spawn_z};
+    const double flat = std::cos(pitch);
+    f.vel = {flat * std::cos(yaw) * p.speed, flat * std::sin(yaw) * p.speed, std::sin(pitch) * p.speed};
+    f.speed = p.speed;
+    f.turn_rad_s = row.turn_deg_s * kSteerPi / 180.0;
+    f.aim_height = row.aim_height_cm;
+    f.trace = projectile_trace_on();
+    if (f.trace) trace_launch(trace, f);
+    return f;
+}
 
 // Hits that fire a bounce (see BounceRule, bounce_from). Their parent hit lands, the child hit (no damage of its own) is confirmed on the next enemy, and the projectile it fires flies from the enemy just hit to that
 // one and lands the projectile's hits there.
@@ -1671,6 +1794,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             confirm(std::move(one), actor);
         }
     }
+    // a hit that names itself in its RecursiveHit (Chain Lightning) jumps to the enemies near the one it hit, each with its own confirmation (chain_from)
+    chain_from(c, hit, event.targets, t, src, ability);
     // reactions: the hit landed (after its confirmations are queued, so a reaction's follow them)
     event.hit = &hit;
     event.ability = ability;
@@ -2131,6 +2256,7 @@ void AbilityPipeline::run_due(double t) {
                     cast.missiles.erase(cast.missiles.begin() + static_cast<std::ptrdiff_t>(first));
                     if (step.kind == Cast::Missile::Kind::Fly) launch_note(cast, step, t);
                     else if (step.kind == Cast::Missile::Kind::Ball) ball_step(cast, step, t);   // (the step has left the list: it puts its next one back itself)
+                    else if (step.kind == Cast::Missile::Kind::Steer) steer_step(cast, step, t);
                     else step_timed(cast, step, t);
                     finish_cast_if_done(i);
                     return;
@@ -3543,8 +3669,27 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
             if (!p || !(p->speed > 0)) continue;
             for (const Flight& f : kFlights) {
                 if (matches(f) && f.key == h.key) {
-                    cast.projectile_due = land_at(f, *p);
-                    first = last = *cast.projectile_due;
+                    if (const SteerCast* steer = steer_of(h.owner_guid)) {
+                        // a turn-limited one (the Frostbolt): it leaves at the montage's notify and turns toward the target; its landing is the Steer's arrival
+                        Cast::Missile m;
+                        const double launch = cast.heard_at + f.fire / rate;
+                        m.kind = Cast::Missile::Kind::Steer;
+                        m.projectile = h.owner_guid;
+                        m.target = cast.target_actors.front();
+                        m.steer_at = launch;
+                        m.due = std::max(t, launch + kSteerStep);
+                        m.steer = make_flight(combat_->self(), *p, *steer, {cast.def->row.name, 0, 0, launch - cast.trigger_at, cast.target_actors.front(), info});
+                        m.steer_launch = launch;
+                        m.steer_deadline = launch + (p->life_time > 0 ? p->life_time : 10.0);
+                        cast.missiles.push_back(m);
+                        cast.projectile_due.reset();
+                        first = last = launch;
+                        spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger and turns toward its target at {:.0f} deg/s ({} cm/s)", cast.def->row.name, launch,
+                                     steer->turn_deg_s, p->speed);
+                    } else {
+                        cast.projectile_due = land_at(f, *p);
+                        first = last = *cast.projectile_due;
+                    }
                     any = true;
                 }
             }
@@ -3654,6 +3799,24 @@ void AbilityPipeline::launch_shot(Cast& cast, double t) {
                      client_rate(plays_at_magical(*cast.def, cast.shot->magical)), cast.target_actors.empty() ? "the cast is at the caster" : "its target is not there");
         return;
     }
+    // a projectile whose record limits its turn (the Mend's steps): it leaves along its fire rotation and turns toward the target; its landing is the Steer's arrival
+    if (const SteerCast* steer = steer_of(p->guid)) {
+        Cast::Missile m;
+        m.kind = Cast::Missile::Kind::Steer;
+        m.projectile = p->guid;
+        m.target = cast.target_actors.front();
+        m.due = t + kSteerStep;
+        m.steer = make_flight(combat_->self(), *p, *steer, {cast.def->row.name, 0, 0, t - cast.trigger_at, cast.target_actors.front(), info});
+        m.steer_launch = t;
+        m.steer_at = t;
+        m.steer_deadline = t + (p->life_time > 0 ? p->life_time : 10.0);
+        cast.missiles.push_back(m);
+        cast.flight = 0;
+        spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger (the client plays at {:.3f}{}) and turns toward its target at {:.0f} deg/s", cast.def->row.name,
+                     cast.launch_at - cast.trigger_at, client_rate(plays_at_magical(*cast.def, cast.shot->magical)), cast.anchored ? ", the launch is the client's request" : "",
+                     steer->turn_deg_s);
+        return;
+    }
     const double distance = info.surface_distance_cm + kMuzzleCm;
     cast.flight = std::min(distance / p->speed, kMaxShotFlight);   // (a target pulled far away by the time the shot leaves would hold the cast's slot for as long as the flight)
     land_shot(cast, t);
@@ -3711,8 +3874,28 @@ void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t
         spdlog::info("[abilities] {}: {} {} finds nobody at its target", cast.def->row.name, what, fly.index);
         return;
     }
-    // a note flies from the caster's hand to the target's surface, a bounce from the enemy it left to the next one's surface
-    const double distance = fly.depth == 0 ? info.surface_distance_cm + kMuzzleCm : std::max(0.0, std::hypot(info.position.x - fly.x, info.position.y - fly.y) - info.radius_cm);
+    // A projectile whose record limits its turn leaves along its fire rotation and turns toward the target (kSteerCasts): its flight is a Steer step, and it lands through the
+    // ordinary Land path when it gets there (or at its closest pass after the first lap and half a second).
+    if (const SteerCast* steer = steer_of(fly.projectile)) {
+        Cast::Missile m;
+        m.kind = Cast::Missile::Kind::Steer;
+        m.projectile = fly.projectile;
+        m.target = fly.target;
+        m.index = fly.index;
+        m.depth = fly.depth;
+        m.due = t + kSteerStep;
+        m.steer = make_flight(combat_->self(), *p, *steer, {cast.def->row.name, fly.index, fly.depth, t - cast.trigger_at, fly.target, info});
+        m.steer_launch = t;
+        m.steer_at = t;
+        m.steer_deadline = t + (p->life_time > 0 ? p->life_time : 10.0);
+        cast.missiles.push_back(m);
+        spdlog::info("[abilities] {}: {} {} leaves {:.3f} s after the trigger and turns toward its target at {:.0f} deg/s ({} cm/s)", cast.def->row.name, what, fly.index, t - cast.trigger_at,
+                     steer->turn_deg_s, p->speed);
+        return;
+    }
+    // a note flies from the caster's hand to the target's surface, a bounce from the enemy it left to the next one's body, its sphere touching it
+    const double distance = fly.depth == 0 ? info.surface_distance_cm + kMuzzleCm
+                                           : std::max(0.0, std::hypot(info.position.x - fly.x, info.position.y - fly.y) - info.radius_cm - p->sphere_radius);
     Cast::Missile land;
     land.kind = Cast::Missile::Kind::Land;
     land.projectile = fly.projectile;
@@ -3724,6 +3907,82 @@ void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t
     cast.missiles.push_back(land);
     spdlog::info("[abilities] {}: {} {} leaves {:.3f} s after the trigger; the {} is {:.1f} m away: it lands {:.3f} s after it leaves", cast.def->row.name, what, fly.index, t - cast.trigger_at,
                  fly.depth == 0 ? "target" : "next enemy", distance / 100.0, land.due - t);
+}
+
+void AbilityPipeline::steer_step(Cast& cast, const Cast::Missile& m, double t) {
+    if (!combat_) return;
+    const content::ProjectileRow* p = catalog_->projectile(m.projectile);
+    const combat::TargetInfo info = combat_->inspect(m.target);
+    if (!p || !info.exists || !info.alive) {   // (the target is gone or dead: it lands at once, as a straight projectile does)
+        Cast::Missile land = m;
+        land.kind = Cast::Missile::Kind::Land;
+        land.due = t;
+        cast.missiles.push_back(land);
+        return;
+    }
+    // the target's live position and velocity every step: a moving target is followed, no path is precomputed
+    const flight::Vec3 target{info.position.x, info.position.y, info.position.z};
+    const flight::Vec3 target_velocity{info.velocity.x, info.velocity.y, info.velocity.z};
+    const double radius = info.radius_cm + p->sphere_radius;   // (the trace's arrival radius: the projectile's sphere and the target's body)
+    const FlightTrace trace{cast.def->row.name, m.index, m.depth, 0.0, m.target, info};
+    flight::Flight f = m.steer;
+    double at = m.steer_at;
+    double closest = m.steer_closest, closest_at = m.steer_closest_at;
+    double next_trace = (std::floor((m.steer_at - m.steer_launch) / 0.1 + 1e-9) + 1.0) * 0.1;
+    flight::Vec3 closest_pos = f.pos;
+    bool landed = false;
+    // 5 ms sub-steps to the step's time (a step that comes late catches up); the target's position is read once, at the time the step runs. The flight aims at, and arrives at,
+    // the place the game draws the target at (f.view: the real place seen a little late, see flight::kViewLagS), so a target that runs is reached where the game shows it.
+    while (at < t - 1e-9) {
+        const double dt = std::min(kSteerStep, t - at);
+        flight::step(f, target, target_velocity, dt);
+        at += dt;
+        const double d = flight::distance(f.pos, f.view);
+        if (d < closest) {
+            closest = d;
+            closest_at = at;
+            closest_pos = f.pos;
+        }
+        if (f.trace) {
+            while (next_trace <= at - m.steer_launch + 1e-9) {
+                trace_step(trace, at - m.steer_launch, f, target, flight::distance(f.pos, target));
+                next_trace += 0.1;
+            }
+        }
+        if (flight::arrived(f.pos, f.view, info.radius_cm, info.half_height_cm, p->sphere_radius)) {
+            landed = true;
+            break;
+        }
+        if (at >= m.steer_deadline) break;   // (its life: it never gets there)
+    }
+    if (f.trace) {
+        if (landed) trace_end(trace, true, at - m.steer_launch, f.pos, target, flight::distance(f.pos, target), radius, f.view);
+        else if (at >= m.steer_deadline) trace_end(trace, false, closest_at - m.steer_launch, closest_pos, target, closest, radius, f.view);
+    }
+    Cast::Missile next = m;
+    next.steer = f;
+    next.steer_at = at;
+    next.steer_closest = closest;
+    next.steer_closest_at = closest_at;
+    // never before the cast's cost step; a looped cast's pending cost is the NEXT shot's, and this arrow's own came before it left
+    const double floor = (!cast.looped && cast.cost_due) ? *cast.cost_due : at;
+    if (landed) {
+        next.kind = Cast::Missile::Kind::Land;
+        next.due = std::max(at, floor);
+        cast.missiles.push_back(next);
+        spdlog::info("[abilities] {}: the projectile reaches its target {:.3f} s after it left ({} cm/s)", cast.def->row.name, at - m.steer_launch, m.steer.speed);
+        return;
+    }
+    if (at >= m.steer_deadline) {
+        next.kind = Cast::Missile::Kind::Land;
+        next.due = std::max(at, floor);
+        cast.missiles.push_back(next);
+        spdlog::info("[abilities] {}: the projectile never reaches its target: it lands at its closest pass ({:.1f} m) after {:.3f} s ({} cm/s)", cast.def->row.name, closest / 100.0, at - m.steer_launch,
+                     m.steer.speed);
+        return;
+    }
+    next.due = at + kSteerStep;
+    cast.missiles.push_back(next);
 }
 
 void AbilityPipeline::bounce_from(AbilityChange& c, Cast& cast, const HitDef& hit, int64_t projectile, uint64_t target, int depth, double t) {
@@ -4552,5 +4811,6 @@ void AbilityPipeline::fire_from_hit(const CastRecord& rec, const HitDef& hit, do
     if (!wave.missiles.empty()) casts_.push_back(std::move(wave));
 }
 
+#include "session/ability_pipeline_chain.inc"
 
 }  // namespace aoc::worldd
