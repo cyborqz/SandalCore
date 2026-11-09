@@ -9,15 +9,43 @@ public:
     /// The lines the session sent back to its player, and the ones it refused (empty, whitespace-only, over 512 characters or unreadable).
     size_t chat_lines_sent() const { return chat_echoes_; }
     size_t chat_lines_refused() const { return chat_refused_; }
+    /// The lines another player's /say or /tell sent this player, and the ones that did not fit the reply queue.
+    size_t chat_lines_received() const { return chat_received_; }
+    size_t chat_lines_dropped() const { return chat_dropped_; }
     /// True once the session's welcome line was queued (it is queued once its phase-in was built).
     bool   welcome_line_sent() const { return welcome_sent_; }
 
+    /// One session's place in the chat directory of its world: the other sessions a /say in range or a /tell reaches.  The
+    /// entry is added when the session is built and removed when it is destroyed, and it learns the session's connection at
+    /// its first tick.  The directory is only touched on the network thread (session/player_chat.cpp).
+    struct ChatEntry {
+        explicit ChatEntry(PlayerSession* self);
+        ~ChatEntry();
+        ChatEntry(const ChatEntry&) = delete;
+        ChatEntry& operator=(const ChatEntry&) = delete;
+        PlayerSession*     self = nullptr;
+        Connection*        connection = nullptr;   // the session's own connection, set at its first tick
+        const PlayerWorld* world = nullptr;        // the world the session is in: a /say and a /tell reach their own world only
+        /// The entries of `world` whose player is in the world and whose connection is known, in the order the sessions joined.
+        static std::vector<ChatEntry*> in_world(const PlayerWorld* world);
+        /// The entry of the player named `name` (case does not count) in `world`, or nullptr.
+        static ChatEntry* find(const PlayerWorld* world, const std::string& name);
+    private:
+        static std::vector<ChatEntry*>& registry();
+    };
+
 private:
-    /// Every tick: the welcome line, once the phase-in was built.
+    /// Every tick: the welcome line, once the phase-in was built, and the session's connection for the chat directory.
     void run_chat(Connection& conn, Clock::time_point now);
     /// Queues the welcome line when it is due and the reply queue has room.
     void send_welcome(Connection& conn);
-    /// Server SendChatMessage: one line back to the sender, or a refusal.
+    /// Server SendChatMessage: the step-2 echo, a /say's fan-out, a /tell's two copies, or a refusal.
     void on_send_chat_message(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
+    /// One chat line another session sends this player (a /say in range, a /tell): queued behind what the session already has.
+    void receive_chat_line(Connection& conn, std::string text, int category, std::string from);
+    /// True when the player is in the world: its pawn is there after the phase-in, and a finished or failed session is not.
+    bool in_world_for_chat() const { return phase_in_done_ && !finished_ && !failed_; }
     bool   welcome_sent_ = false;
     size_t chat_echoes_ = 0, chat_refused_ = 0, chat_logged_ = 0, chat_refusals_logged_ = 0, chat_unreadable_logged_ = 0;
+    size_t chat_received_ = 0, chat_dropped_ = 0;
+    ChatEntry chat_entry_{this};
