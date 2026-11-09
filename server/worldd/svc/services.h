@@ -272,6 +272,8 @@ struct Character {
     std::vector<int32_t> attunements;
     int32_t              home_attunement = 0;
     int64_t              home_last_used_ms = 0;
+    /// Social, step 6: the players and the guilds the character ignores (the names as typed, each list in the order they were added; with the items).  A service of an older version sends none.
+    std::vector<std::string> ignored_character_names, ignored_guild_names;
     /// Quests, slice 1: the character's saved quest log, read from the quest service at the login.  Empty (nullopt) when the world server has no quest service or it did not answer: the
     /// character then plays without quests, and nothing is saved over what the service holds.
     std::optional<SavedQuestLog> quest_log;
@@ -306,6 +308,11 @@ struct Progress {
     std::vector<int32_t>         attunements;
     int32_t                      home_attunement = 0;
     int64_t                      home_last_used_ms = 0;
+    /// Social, step 6: with replace_ignored_names the players and the guilds the character ignores become exactly these lists, each in its order; without it they are left alone (the character service
+    /// refuses a list over 50 names, a name that is empty, over 64 bytes, with a space at either end or with a control character, and a name twice in a list).
+    bool                         replace_ignored_names = false;
+    std::vector<std::string>     ignored_character_names;
+    std::vector<std::string>     ignored_guild_names;
     bool operator==(const Progress& o) const {
         if (level != o.level || class_id != o.class_id || experience.size() != o.experience.size()) return false;
         for (size_t i = 0; i < experience.size(); ++i) {
@@ -313,7 +320,8 @@ struct Progress {
         }
         return replace_skill_ranks == o.replace_skill_ranks && skill_ranks == o.skill_ranks && replace_action_bar == o.replace_action_bar &&
                action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues &&
-               replace_attunements == o.replace_attunements && attunements == o.attunements && home_attunement == o.home_attunement && home_last_used_ms == o.home_last_used_ms;
+               replace_attunements == o.replace_attunements && attunements == o.attunements && home_attunement == o.home_attunement && home_last_used_ms == o.home_last_used_ms &&
+               replace_ignored_names == o.replace_ignored_names && ignored_character_names == o.ignored_character_names && ignored_guild_names == o.ignored_guild_names;
     }
 };
 // [C:Y:B :: C O A]

@@ -81,6 +81,14 @@ public:
         (void)character_id;
         (void)progress;
     }
+    /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
+    /// keeps nothing (a test's) answers false.
+    virtual bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
+        (void)character_id;
+        (void)players;
+        (void)guilds;
+        return false;
+    }
 };
 
 class CharacterSaver : public PositionSink {
@@ -106,6 +114,8 @@ public:
     void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
                         std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) override;
     void save_progress(const std::string& character_id, svc::Progress progress) override;
+    /// Social, step 6: the ignored players and guilds of the progress the saver still holds for the character (see PositionSink).
+    bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);

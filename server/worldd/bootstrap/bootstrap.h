@@ -181,6 +181,9 @@ inline constexpr size_t kMaxKnownRecipes = 4400;
 
 /// The most finished tutorials one character keeps (UFTUEComponent.CompletedFTUEs; the design data has fewer than 100 tutorials, and the client reports one id per call).
 inline constexpr size_t kMaxCompletedFtues = 1024;
+
+/// The most names OwnerInfo.IgnoredCharacterNames holds, and the most IgnoredGuildNames holds: the longest list of ignored players (or guilds) a character may keep.
+inline constexpr size_t kMaxIgnoredNames = 50;
 /// Missing systems, step 1: how many triggers that carried the PvP flag are remembered for their ability items.
 inline constexpr size_t kMaxTriggerFlags = 64;
 
@@ -341,6 +344,10 @@ public:
     /// OwnerInfo.PlayerKnownRecipeIds: the recipes the character has learned (the ones the game makes a player learn; the others are known to the client by their own flag), in the order
     /// given.  Sent with the next currencies_update().  False when the pawn has no OwnerInfo or the list is over `kMaxKnownRecipes`.
     bool set_known_recipes(const std::vector<int64_t>& recipes);
+    /// Social, step 6: OwnerInfo.IgnoredCharacterNames and OwnerInfo.IgnoredGuildNames: the players and the guilds the character ignores, each list in order.  The game client shows them and hides the chat
+    /// lines of those names by itself.  A list that is what the pawn holds already changes nothing; after a change the caller sends pawn_state_update().  False when the pawn has no OwnerInfo or a list is
+    /// over `kMaxIgnoredNames`.
+    bool set_ignored_names(const std::vector<std::string>& characters, const std::vector<std::string>& guilds);
     /// OwnerInfo.ActiveProcessingStations: the stations where the player has a job running or waiting, each as the four words of its StationGuid.  Sent with the next currencies_update() (the
     /// pawn's update that carries the OwnerInfo changes).  False when the pawn has no OwnerInfo.
     bool set_active_stations(const std::vector<std::array<int32_t, 4>>& stations);

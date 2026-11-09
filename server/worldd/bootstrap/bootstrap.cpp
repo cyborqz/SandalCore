@@ -1444,6 +1444,28 @@ bool PlayerBootstrap::set_known_recipes(const std::vector<int64_t>& recipes) {
     return owner->obj.state.set(*owner->obj.schema, "PlayerKnownRecipeIds", Value(std::move(list)));
 }
 
+bool PlayerBootstrap::set_ignored_names(const std::vector<std::string>& characters, const std::vector<std::string>& guilds) {
+    if (!ok_ || characters.size() > kMaxIgnoredNames || guilds.size() > kMaxIgnoredNames) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    // a list that is what the pawn holds already (or empty, with nothing ever set) is not set again, so that it does not become dirty
+    const auto put = [&](const char* path, const std::vector<std::string>& names) {
+        const Value* held = owner->obj.state.get(*owner->obj.schema, path);
+        if (!held && names.empty()) return true;
+        repl::ArrayValue list;
+        list.elements.reserve(names.size());
+        for (const std::string& n : names) {
+            repl::ElementState e;
+            e.values[1] = Value::str(n);   // the array's one member
+            list.elements.push_back(std::move(e));
+        }
+        const repl::ArrayValue* same = held ? held->get_if<repl::ArrayValue>() : nullptr;
+        if (same && *same == list) return true;
+        return owner->obj.state.set(*owner->obj.schema, path, Value(std::move(list)));
+    };
+    return put("IgnoredCharacterNames", characters) && put("IgnoredGuildNames", guilds);
+}
+
 bool PlayerBootstrap::set_active_stations(const std::vector<std::array<int32_t, 4>>& stations) {
     if (!ok_) return false;
     repl::Subobject* owner = component(setup_.guids.owner_info);

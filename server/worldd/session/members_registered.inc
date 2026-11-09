@@ -18,3 +18,4 @@
 #include "session/members/chests.inc"
 #include "session/members/surface_move.inc"
 #include "session/members/chat.inc"
+#include "session/members/ignore.inc"

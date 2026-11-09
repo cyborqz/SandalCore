@@ -215,8 +215,12 @@ type Character struct {
 	// Storage clerks, step 0: the items the character keeps in the warehouse (migration 0017), with the items (include_items): the item chunks (the same in every town), the material tabs and
 	// the cargo tab of each town it stored in. A character that stored nothing has none.
 	WarehouseItems []*WarehouseItem `protobuf:"bytes,30,rep,name=warehouse_items,json=warehouseItems,proto3" json:"warehouse_items,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Social, step 6: the players and the guilds the character ignores (migration 0021), each list in the order the names were added, with the items (include_items). The game client hides the chat lines
+	// of a name on its lists by itself. A character that ignores nobody has none.
+	IgnoredCharacterNames []string `protobuf:"bytes,31,rep,name=ignored_character_names,json=ignoredCharacterNames,proto3" json:"ignored_character_names,omitempty"`
+	IgnoredGuildNames     []string `protobuf:"bytes,32,rep,name=ignored_guild_names,json=ignoredGuildNames,proto3" json:"ignored_guild_names,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *Character) Reset() {
@@ -434,6 +438,20 @@ func (x *Character) GetHomeLastUsedMs() int64 {
 func (x *Character) GetWarehouseItems() []*WarehouseItem {
 	if x != nil {
 		return x.WarehouseItems
+	}
+	return nil
+}
+
+func (x *Character) GetIgnoredCharacterNames() []string {
+	if x != nil {
+		return x.IgnoredCharacterNames
+	}
+	return nil
+}
+
+func (x *Character) GetIgnoredGuildNames() []string {
+	if x != nil {
+		return x.IgnoredGuildNames
 	}
 	return nil
 }
@@ -2092,8 +2110,14 @@ type SaveProgressRequest struct {
 	Attunements        []int32 `protobuf:"varint,13,rep,packed,name=attunements,proto3" json:"attunements,omitempty"`
 	HomeAttunement     int32   `protobuf:"varint,14,opt,name=home_attunement,json=homeAttunement,proto3" json:"home_attunement,omitempty"`
 	HomeLastUsedMs     int64   `protobuf:"varint,15,opt,name=home_last_used_ms,json=homeLastUsedMs,proto3" json:"home_last_used_ms,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Social, step 6: with replace_ignored_names the players and the guilds the character ignores become exactly `ignored_character_names` and `ignored_guild_names`, each list in this order; without it they
+	// are left alone. InvalidArgument, with nothing changed, for more than 50 names in a list, a name that is empty, over 64 bytes, with a space at either end or with a control character, or one given twice
+	// in a list (the letters A to Z count the same in either case).
+	ReplaceIgnoredNames   bool     `protobuf:"varint,16,opt,name=replace_ignored_names,json=replaceIgnoredNames,proto3" json:"replace_ignored_names,omitempty"`
+	IgnoredCharacterNames []string `protobuf:"bytes,17,rep,name=ignored_character_names,json=ignoredCharacterNames,proto3" json:"ignored_character_names,omitempty"`
+	IgnoredGuildNames     []string `protobuf:"bytes,18,rep,name=ignored_guild_names,json=ignoredGuildNames,proto3" json:"ignored_guild_names,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *SaveProgressRequest) Reset() {
@@ -2231,6 +2255,27 @@ func (x *SaveProgressRequest) GetHomeLastUsedMs() int64 {
 	return 0
 }
 
+func (x *SaveProgressRequest) GetReplaceIgnoredNames() bool {
+	if x != nil {
+		return x.ReplaceIgnoredNames
+	}
+	return false
+}
+
+func (x *SaveProgressRequest) GetIgnoredCharacterNames() []string {
+	if x != nil {
+		return x.IgnoredCharacterNames
+	}
+	return nil
+}
+
+func (x *SaveProgressRequest) GetIgnoredGuildNames() []string {
+	if x != nil {
+		return x.IgnoredGuildNames
+	}
+	return nil
+}
+
 type SaveProgressResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     *Character             `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"` // with its experience rows
@@ -2284,7 +2329,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
 	"\x01z\x18\x03 \x01(\x01R\x01z\x12\x10\n" +
-	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xfc\b\n" +
+	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xe4\t\n" +
 	"\tCharacter\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2321,7 +2366,9 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\vattunements\x18\x18 \x03(\x05R\vattunements\x12'\n" +
 	"\x0fhome_attunement\x18\x19 \x01(\x05R\x0ehomeAttunement\x12)\n" +
 	"\x11home_last_used_ms\x18\x1a \x01(\x03R\x0ehomeLastUsedMs\x12H\n" +
-	"\x0fwarehouse_items\x18\x1e \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\"\xed\x03\n" +
+	"\x0fwarehouse_items\x18\x1e \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\x126\n" +
+	"\x17ignored_character_names\x18\x1f \x03(\tR\x15ignoredCharacterNames\x12.\n" +
+	"\x13ignored_guild_names\x18  \x03(\tR\x11ignoredGuildNames\"\xed\x03\n" +
 	"\rWarehouseItem\x12\x12\n" +
 	"\x04area\x18\x01 \x01(\tR\x04area\x12\x1b\n" +
 	"\tnode_guid\x18\x02 \x01(\x03R\bnodeGuid\x12%\n" +
@@ -2475,7 +2522,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x11replace_warehouse\x18\x14 \x01(\bR\x10replaceWarehouse\x12H\n" +
 	"\x0fwarehouse_items\x18\x15 \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\"-\n" +
 	"\x15SaveInventoryResponse\x12\x14\n" +
-	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xbd\x05\n" +
+	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xd9\x06\n" +
 	"\x13SaveProgressRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\x05R\x05level\x12\x19\n" +
@@ -2496,7 +2543,10 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x13replace_attunements\x18\f \x01(\bR\x12replaceAttunements\x12 \n" +
 	"\vattunements\x18\r \x03(\x05R\vattunements\x12'\n" +
 	"\x0fhome_attunement\x18\x0e \x01(\x05R\x0ehomeAttunement\x12)\n" +
-	"\x11home_last_used_ms\x18\x0f \x01(\x03R\x0ehomeLastUsedMs\"Q\n" +
+	"\x11home_last_used_ms\x18\x0f \x01(\x03R\x0ehomeLastUsedMs\x122\n" +
+	"\x15replace_ignored_names\x18\x10 \x01(\bR\x13replaceIgnoredNames\x126\n" +
+	"\x17ignored_character_names\x18\x11 \x03(\tR\x15ignoredCharacterNames\x12.\n" +
+	"\x13ignored_guild_names\x18\x12 \x03(\tR\x11ignoredGuildNames\"Q\n" +
 	"\x14SaveProgressResponse\x129\n" +
 	"\tcharacter\x18\x01 \x01(\v2\x1b.aoc.character.v1.CharacterR\tcharacter*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +

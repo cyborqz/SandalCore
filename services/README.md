@@ -598,6 +598,16 @@ DELETE FROM schema_migrations WHERE version = 19;
 COMMIT;
 ```
 
+**Rolling back migration 0021.** Migration 0021 (social, step 6, "the ignore list") adds ONE table, `character_ignored_names` (the players and the guilds a character ignores, one row each with its kind and its place in the character's list of that kind); it writes nowhere else, backfills nothing and touches no existing table or column. worldd loads a character's lists at login, hands them to the game client, which hides the chat lines of every name on them by itself, and saves them with the progress (`SaveProgress` with `replace_ignored_names`). The rollback drops the table with whatever it holds: every ignored name is forgotten (a player ignores them again with the ignore command). The characters, their items, their progress, their jobs, their tutorials, their places and their quests are untouched, and the migration applies again. Stop the character service and worldd first, and start the ones from before 0021 afterwards: the character service of 0021 reads the table at every login.
+
+```sql
+-- rollback of migration 0021 (social, step 6: the ignore list)
+BEGIN;
+DROP TABLE character_ignored_names;
+DELETE FROM schema_migrations WHERE version = 21;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or
@@ -615,6 +625,8 @@ its name. worldd takes the commands of a character that plays every moment and d
 **Known recipes (crafting, step 3).** Migration 0014 adds `character_known_recipes`: the recipes a game master taught a character although the game makes a player learn them (a recipe the game does not make a player learn is known to everybody and has no row). worldd reads them with `GetCharacter` (with items) and saves them with the items and the wallet in the same transaction (`SaveInventory` with `replace_known_recipes`). The admin API's `TeachRecipe`, `ForgetRecipe` and `ListTaughtRecipes` (`worldctl craft teach`, `forget`, `taught`) change the list of a character in the world.
 
 **Finished tutorials (missing systems, step 0).** Migration 0015 adds `character_completed_ftues`: the tutorials a character finished, in the order they were finished. worldd reads them with `GetCharacter` (with items) and saves them with the progress (`SaveProgress` with `replace_completed_ftues`: the list is replaced whole, at most 1,024 ids, each a positive record Guid once). The admin API's `ResetTutorials` (`worldctl tutorials reset <character>`) empties the list of a character in the world.
+
+**Ignored names (social, step 6).** Migration 0021 adds `character_ignored_names`: the players and the guilds a character ignores, each list in the order the names were added, at most 50 names in each. worldd reads them with `GetCharacter` (with items: `ignored_character_names` and `ignored_guild_names`) and saves them with the progress (`SaveProgress` with `replace_ignored_names`: both lists are replaced whole). The character service refuses a list over 50 names, a name that is empty, over 64 bytes, with a space at either end or with a control character, and a name twice in a list (the letters A to Z count as the same in either case, as they do in the game client's list). The names are kept as they were typed, and a name that no character has is kept as well. The game client hides the chat lines of a name on its list by itself; the server still sends them.
 
 **Content (vendors, step 1).** contentc version 19 adds `item_vendor` (per item: Vendorable, Blacklisted and the range its rarity is held inside) and `item_sell_value` (per item with a base value, vendorable or not, rarity and currency: the item's base value for a sale or a repair, per unit, rounded up; the record's own sale expressions when it overrides them, else its buy expressions), evaluated with `aocexpr` like `vendor_price`; the shops' sell modifiers and filters are read from the step 0 tables. Rebuild `content.db` (the extractor does it) after pulling. **The test mounts of the GM starter set are given once:** the character service gives them to a character that had the set before the mounts existed (`gm_starter_set_granted_at` set, `gm_starter_mounts_granted_at` not), the ones it holds nowhere, and marks it in the same transaction, also when it held them all; a mount thrown away later stays gone (a character created with the set is marked at once).
 

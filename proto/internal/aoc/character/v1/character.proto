@@ -43,7 +43,7 @@ service CharacterService {
   // XP or debt. Plan D1, stage 2: the same call stores the ranks the character bought and its action bar (replace_skill_ranks and
   // replace_action_bar); InvalidArgument, with nothing changed, for a tree or rank of 0, a rank twice in a tree, a bar slot outside
   // the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
-  // Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues).
+  // Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues). Social, step 6: and the players and the guilds it ignores (replace_ignored_names).
   rpc SaveProgress(SaveProgressRequest) returns (SaveProgressResponse);
 }
 
@@ -110,6 +110,10 @@ message Character {
   // Storage clerks, step 0: the items the character keeps in the warehouse (migration 0017), with the items (include_items): the item chunks (the same in every town), the material tabs and
   // the cargo tab of each town it stored in. A character that stored nothing has none.
   repeated WarehouseItem warehouse_items = 30;
+  // Social, step 6: the players and the guilds the character ignores (migration 0021), each list in the order the names were added, with the items (include_items). The game client hides the chat lines
+  // of a name on its lists by itself. A character that ignores nobody has none.
+  repeated string ignored_character_names = 31;
+  repeated string ignored_guild_names = 32;
 }
 
 // One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
@@ -354,6 +358,12 @@ message SaveProgressRequest {
   repeated int32 attunements = 13;
   int32 home_attunement = 14;
   int64 home_last_used_ms = 15;
+  // Social, step 6: with replace_ignored_names the players and the guilds the character ignores become exactly `ignored_character_names` and `ignored_guild_names`, each list in this order; without it they
+  // are left alone. InvalidArgument, with nothing changed, for more than 50 names in a list, a name that is empty, over 64 bytes, with a space at either end or with a control character, or one given twice
+  // in a list (the letters A to Z count the same in either case).
+  bool replace_ignored_names = 16;
+  repeated string ignored_character_names = 17;
+  repeated string ignored_guild_names = 18;
 }
 
 message SaveProgressResponse {

@@ -48,6 +48,9 @@ type Progress struct {
 	// Embersprings: with ReplaceAttunements the character's discovered places, home and last use of the home respawn become exactly Attunements (attunements.go); without it they are left alone.
 	ReplaceAttunements bool
 	Attunements        Attunements
+	// Social, step 6: with ReplaceIgnoredNames the players and the guilds the character ignores become exactly IgnoredNames, each list in its order (ignored_names.go); without it they are left alone.
+	ReplaceIgnoredNames bool
+	IgnoredNames        IgnoredNames
 }
 
 // C-Y-B x C O A
@@ -116,6 +119,13 @@ func (p Progress) Validate() error {
 		}
 	} else if len(p.Attunements.Discovered) > 0 || p.Attunements.Home != 0 || p.Attunements.HomeLastUsedMs != 0 {
 		return fmt.Errorf("%w: attunements are given without replace_attunements", ErrInvalid)
+	}
+	if p.ReplaceIgnoredNames {
+		if err := ValidateIgnoredNames(p.IgnoredNames); err != nil {
+			return err
+		}
+	} else if len(p.IgnoredNames.Characters) > 0 || len(p.IgnoredNames.Guilds) > 0 {
+		return fmt.Errorf("%w: ignored names are given without replace_ignored_names", ErrInvalid)
 	}
 	return nil
 }
@@ -219,6 +229,11 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if p.ReplaceAttunements {
 		if err := replaceAttunements(ctx, tx, characterID, p.Attunements); err != nil {
+			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplaceIgnoredNames {
+		if err := replaceIgnoredNames(ctx, tx, characterID, p.IgnoredNames); err != nil {
 			return Character{}, itemsError(err)
 		}
 	}

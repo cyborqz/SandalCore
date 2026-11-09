@@ -168,6 +168,11 @@ void Endpoint::on_handshake(const Address& from, const uint8_t* data, size_t len
             carried = true;
             carried_id = old.id;
             carried_result = result;
+            // the carried record is as old as its read: the old session's ignore lists are the character's (social, step 6)
+            if (old.player) {
+                carried_result->character.ignored_character_names = old.player->ignored_character_names();
+                carried_result->character.ignored_guild_names = old.player->ignored_guild_names();
+            }
         }
         remove(from, carried ? "reconnected, keeping its login" : "reconnected");
     }
@@ -227,6 +232,7 @@ void Endpoint::post_login_result(uint64_t session_id, LoginResult result) {
 void Endpoint::on_login_result(Session& s, LoginResult result, Clock::time_point now) {
     if (s.closing) return;  // already kicked or refused
     if (result.accepted) {
+        bool took_lists = false;   // the old session was still here, and its list was taken from it
         auto other = by_character_.find(result.character.id);
         if (other != by_character_.end() && !(other->second == s.address)) {
             auto os = sessions_.find(other->second);
@@ -253,8 +259,23 @@ void Endpoint::on_login_result(Session& s, LoginResult result, Clock::time_point
                     const auto record_items = items::Inventory::from_items(result.character.items, unused);
                     s.carried_items_differ = !record_items || !(*record_items == old->inventory());
                     result.character.items = old->inventory().items();
+                    // the same goes for the ignore lists (social, step 6): the record's are as old as the login's read, the old session's are the character's.
+                    result.character.ignored_character_names = old->ignored_character_names();
+                    result.character.ignored_guild_names = old->ignored_guild_names();
+                    took_lists = true;
                 }
                 apply(*os->second, os->second->control.kick(login_text::kLoggedInElsewhere), now);
+            }
+        }
+        // Social, step 6: the old session may already be gone (remove() ends it and forgets the character), and the record is as old as the login's
+        // read.  A hand-over the saver still holds for the character is newer than that read: its lists are the character's.
+        if (!took_lists) {
+            if (PositionSink* sink = cfg_.players ? cfg_.players->position_sink() : nullptr) {
+                std::vector<std::string> players, guilds;
+                if (sink->pending_ignored_names(result.character.id, players, guilds)) {
+                    result.character.ignored_character_names = std::move(players);
+                    result.character.ignored_guild_names = std::move(guilds);
+                }
             }
         }
         by_character_[result.character.id] = s.address;

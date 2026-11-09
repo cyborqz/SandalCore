@@ -87,6 +87,13 @@ type AttunementStore interface {
 
 var _ AttunementStore = (*character.Store)(nil)
 
+// IgnoredStore is the part of character.Store that keeps the players and the guilds a character ignores (social, step 6). A store without it keeps none: GetCharacter sends none.
+type IgnoredStore interface {
+	IgnoredNames(ctx context.Context, id string) (character.IgnoredNames, error)
+}
+
+var _ IgnoredStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -294,6 +301,14 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			out.HomeAttunement = a.Home
 			out.HomeLastUsedMs = a.HomeLastUsedMs
 		}
+		if is, ok := s.store.(IgnoredStore); ok {
+			ignored, err := is.IgnoredNames(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.IgnoredCharacterNames = ignored.Characters
+			out.IgnoredGuildNames = ignored.Guilds
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -304,7 +319,8 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRequest) (*characterv1.SaveProgressResponse, error) {
 	p := character.Progress{Level: r.GetLevel(), ClassID: r.GetClassId(), ReplaceSkillRanks: r.GetReplaceSkillRanks(), ReplaceActionBar: r.GetReplaceActionBar(),
 		ReplaceCompletedFTUEs: r.GetReplaceCompletedFtues(), CompletedFTUEs: r.GetCompletedFtues(),
-		ReplaceAttunements: r.GetReplaceAttunements(), Attunements: character.Attunements{Discovered: r.GetAttunements(), Home: r.GetHomeAttunement(), HomeLastUsedMs: r.GetHomeLastUsedMs()}}
+		ReplaceAttunements: r.GetReplaceAttunements(), Attunements: character.Attunements{Discovered: r.GetAttunements(), Home: r.GetHomeAttunement(), HomeLastUsedMs: r.GetHomeLastUsedMs()},
+		ReplaceIgnoredNames: r.GetReplaceIgnoredNames(), IgnoredNames: character.IgnoredNames{Characters: r.GetIgnoredCharacterNames(), Guilds: r.GetIgnoredGuildNames()}}
 	for _, e := range r.GetExperience() {
 		p.Experience = append(p.Experience, character.Experience{LevelingTypeGuid: e.GetLevelingTypeGuid(), XP: e.GetXp(), Debt: e.GetDebt()})
 	}

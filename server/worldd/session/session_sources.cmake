@@ -29,6 +29,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat_side.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_craft.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_dialogue.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_ignore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_interact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_items.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_mounts.cpp

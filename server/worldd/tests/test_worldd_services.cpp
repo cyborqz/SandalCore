@@ -75,6 +75,9 @@ struct Characters final : characterv1::CharacterService::Service {
         int64_t xp = 0;
     };
     std::vector<Prof> got_professions, reply_professions;
+    // Social step 6: SaveProgress's ignored names as the service received them, and what GetCharacter answers with
+    bool got_replace_ignored = false;
+    std::vector<std::string> got_ignored_characters, got_ignored_guilds, reply_ignored_characters, reply_ignored_guilds;
     int progress_calls = 0;
     int32_t got_level = 0;
     std::chrono::milliseconds save_delay{0};   // a service that hangs on SaveCharacterState
@@ -102,6 +105,9 @@ struct Characters final : characterv1::CharacterService::Service {
         got_level = req->level();
         got_professions.clear();
         for (const auto& p : req->professions()) got_professions.push_back({p.profession_guid(), p.certification_tier(), p.level(), p.xp()});
+        got_replace_ignored = req->replace_ignored_names();
+        got_ignored_characters.assign(req->ignored_character_names().begin(), req->ignored_character_names().end());
+        got_ignored_guilds.assign(req->ignored_guild_names().begin(), req->ignored_guild_names().end());
         return save_code == grpc::StatusCode::OK ? grpc::Status::OK : grpc::Status(save_code, "no");
     }
     grpc::Status GetCharacter(grpc::ServerContext* ctx, const characterv1::GetCharacterRequest* req,
@@ -120,6 +126,8 @@ struct Characters final : characterv1::CharacterService::Service {
         c->set_appearance_json("{}");
         c->set_level(5);
         c->set_last_region("Riverlands");
+        for (const std::string& n : reply_ignored_characters) c->add_ignored_character_names(n);
+        for (const std::string& n : reply_ignored_guilds) c->add_ignored_guild_names(n);
         for (const Prof& p : reply_professions) {
             auto* x = c->add_professions();
             x->set_profession_guid(p.guid);
@@ -232,6 +240,48 @@ int main() {
         CHECK(!(a == b), "progress that differs in a profession's XP is not equal (the saver skips a save only when nothing changed)");
     }
     ch.reply_professions.clear();
+    ch.progress_calls = 0;
+
+    std::printf("ignored names (social step 6)\n");
+    CHECK(s.get_character("x").character.ignored_character_names.empty() && s.get_character("x").character.ignored_guild_names.empty(),
+          "a character record with no ignored names maps to none");
+    const std::vector<std::string> players = {"Brannoc", "Mirelle", "Tavish"}, guilds = {"Sandal Makers"};
+    ch.reply_ignored_characters = players;
+    ch.reply_ignored_guilds = guilds;
+    {
+        const auto ic = s.get_character("x");
+        CHECK(ic.status == svc::CallStatus::Ok && ic.character.ignored_character_names == players && ic.character.ignored_guild_names == guilds,
+              "GetCharacter maps the ignored players and guilds, each list in order");
+    }
+    {
+        svc::Progress p;
+        p.level = 3;
+        p.replace_ignored_names = true;
+        p.ignored_character_names = players;
+        p.ignored_guild_names = guilds;
+        CHECK(s.save_progress("x", p) == svc::CallStatus::Ok && ch.got_replace_ignored && ch.got_ignored_characters == players && ch.got_ignored_guilds == guilds,
+              "SaveProgress sends replace_ignored_names and both lists, each in order");
+        svc::Progress none;
+        none.level = 3;
+        CHECK(s.save_progress("x", none) == svc::CallStatus::Ok && !ch.got_replace_ignored && ch.got_ignored_characters.empty() && ch.got_ignored_guilds.empty(),
+              "a save that does not replace the names sends neither the flag nor a name");
+        svc::Progress emptied;
+        emptied.replace_ignored_names = true;
+        CHECK(s.save_progress("x", emptied) == svc::CallStatus::Ok && ch.got_replace_ignored && ch.got_ignored_characters.empty() && ch.got_ignored_guilds.empty(),
+              "an empty replacement sends the flag alone");
+        svc::Progress a = p, b = p;
+        CHECK(a == b, "equal progress with equal ignored names");
+        b.ignored_character_names.push_back("Dorrin");
+        CHECK(!(a == b), "progress that differs in an ignored player is not equal (the saver skips a save only when nothing changed)");
+        b = p;
+        b.ignored_guild_names.clear();
+        CHECK(!(a == b), "progress that differs in an ignored guild is not equal");
+        b = p;
+        b.replace_ignored_names = false;
+        CHECK(!(a == b), "progress that differs in replace_ignored_names is not equal");
+    }
+    ch.reply_ignored_characters.clear();
+    ch.reply_ignored_guilds.clear();
     ch.progress_calls = 0;
 
     std::printf("save_position (plan A6)\n");

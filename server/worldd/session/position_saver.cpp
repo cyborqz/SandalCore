@@ -142,6 +142,15 @@ void CharacterSaver::save_progress(const std::string& character_id, svc::Progres
     cv_.notify_one();
 }
 
+bool CharacterSaver::pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = entries_.find(character_id);
+    if (it == entries_.end() || !it->second.progress || !it->second.progress->replace_ignored_names) return false;
+    players = it->second.progress->ignored_character_names;
+    guilds = it->second.progress->ignored_guild_names;
+    return true;
+}
+
 bool CharacterSaver::flush(std::chrono::milliseconds max_wait) {
     std::unique_lock<std::mutex> lock(mu_);
     return idle_cv_.wait_for(lock, max_wait, [this] { return (order_.empty() && !in_flight_) || abandon_; }) && order_.empty() && !in_flight_;

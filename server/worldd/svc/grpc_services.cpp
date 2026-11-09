@@ -183,6 +183,8 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     for (const int32_t n : c.attunements()) r.character.attunements.push_back(n);
     r.character.home_attunement = c.home_attunement();
     r.character.home_last_used_ms = c.home_last_used_ms();
+    for (const std::string& n : c.ignored_character_names()) r.character.ignored_character_names.push_back(n);
+    for (const std::string& n : c.ignored_guild_names()) r.character.ignored_guild_names.push_back(n);
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -283,6 +285,9 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
     for (const int32_t n : progress.attunements) req.add_attunements(n);
     req.set_home_attunement(progress.home_attunement);
     req.set_home_last_used_ms(progress.home_last_used_ms);
+    req.set_replace_ignored_names(progress.replace_ignored_names);
+    for (const std::string& n : progress.ignored_character_names) req.add_ignored_character_names(n);
+    for (const std::string& n : progress.ignored_guild_names) req.add_ignored_guild_names(n);
     characterv1::SaveProgressResponse resp;
     return map_grpc_status(stubs_->character->SaveProgress(&ctx, req, &resp));
 }

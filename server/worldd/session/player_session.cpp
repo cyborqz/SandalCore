@@ -237,6 +237,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     if (!p->taught_.empty() && !p->pb_.set_known_recipes(p->taught_)) {
         spdlog::warn("[session] {}: the {} recipes the character was taught do not fit the player's state: the client is not told of them", p->pb_.setup().name, p->taught_.size());
     }
+    p->init_ignored(character);   // social, step 6: the players and the guilds the character ignores, sent with the join
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
         p->inventory_dirty_ = true;
@@ -677,6 +678,9 @@ void PlayerSession::hand_over_progress(const char* why) {
     p.home_last_used_ms = attunements_.home_last_used_ms;
     p.replace_completed_ftues = true;   // missing systems, step 0: the finished tutorials go whole with every hand-over (what the session holds is what the character has)
     p.completed_ftues = completed_ftues_;
+    p.replace_ignored_names = true;   // social, step 6: the ignored players and guilds go whole with every hand-over (what the session holds is what the character has)
+    p.ignored_character_names = ignored_characters_;
+    p.ignored_guild_names = ignored_guilds_;
     sink_->save_progress(character_id_, std::move(p));
     ++progress_handed_over_;
     spdlog::info("[session] {}: saving the progress (level {}, class {}, Adventuring {} XP, debt {}) ({})", name(), progress_.level, class_id_, progress_.xp,
