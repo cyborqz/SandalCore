@@ -543,6 +543,10 @@ target_compile_definitions(test_worldd_node_state PRIVATE
     MOUNT_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
     MOUNT_SPEEDS_PATH="${PROJECT_SOURCE_DIR}/dist/content/mount_speeds.tsv")
 
+# node citizenship's rules with no session and no game data (the mayoral elections, the runoff, the dues, the mayor's taxes): CI runs it; its checks of the real
+# content.db skip themselves without one
+worldd_add_test(test_worldd_elections)
+
 # the towns' scenery (Nodes 1, stage 3a): the items of each town's replicator built from the real content.db against the 18 retail payloads of the captures, the replicator actors
 # (their place, a level change as a new full payload), the actor view opening and closing them by range, and the world following the node levels
 worldd_add_test(test_worldd_node_layout)

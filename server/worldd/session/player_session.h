@@ -619,9 +619,6 @@ public:
     /// Vendor requests (an interaction, a purchase): a burst of eight, then ten a second.
     static constexpr uint32_t                  kVendorBurst = 8;
     static constexpr std::chrono::milliseconds kVendorInterval{100};
-    /// Tax-table requests (the answer is 7 KB): a burst of three, then one a second.
-    static constexpr uint32_t                  kTaxBurst = 3;
-    static constexpr std::chrono::milliseconds kTaxInterval{1000};
     // ---- plan E1, stage 3, part 2: kills, loot ---------------------------------------------------------------------------------------
     /// Loot requests (a window opened, items taken): a burst of eight, then ten a second.
     static constexpr uint32_t                  kLootBurst = 8;
@@ -773,9 +770,6 @@ public:
     size_t   warehouse_moves() const { return wh_moves_; }
     size_t   warehouse_refused() const { return wh_refused_; }
     const warehouse::Storage& warehouse_storage() const { return wh_storage_; }
-    /// The tax-table requests of the vendor windows, and the tables sent in answer.
-    size_t   tax_requests() const { return tax_requests_; }
-    size_t   tax_tables_sent() const { return tax_tables_sent_; }
 
     // ---- the GM travel tools (session/gm_travel.h) -----------------------------------------------------------------------------------
     /// What a GM teleport did.
@@ -862,7 +856,6 @@ public:
     size_t node_map_updates() const { return node_map_updates_; }
     size_t node_requests_dropped() const { return node_requests_dropped_; }
     size_t node_gm_rpcs() const { return node_gm_rpcs_; }
-    size_t citizenship_requests() const { return citizenship_requests_; }
     /// The registry version the GameState's node maps were last brought to.
     uint64_t node_maps_version() const { return node_maps_version_; }
 
@@ -1256,12 +1249,10 @@ private:
     /// Opens the window of `def` for the shopkeeper `npc` the player talks to: the same answer for a line the server runs and a request of the client.  False when it does not open.
     bool open_talk_shop(Connection& conn, const world::WorldActor& npc, int64_t def, Clock::time_point now);
     void on_vendor_transaction(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
-    void on_node_tax_request(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);
     // ---- Nodes 1, stage 2 ----
     void on_node_summary_request(const protocol::repl::ClientRpc& rpc);
     void on_siege_summary_request(const protocol::repl::ClientRpc& rpc);
     void on_siege_cooldowns_request();
-    void on_citizenship_window_request();
     /// ServerSetNodeLevel, ServerAddNodeExperience, ServerGMGetNodeData, ServerGMWhatTimeIsIt, ServerGMFastForwardRealTime: the client's node GM console, answered through the
     /// node service (world/node_control.h) with the GM switch on; every other ServerGM* is logged as not implemented.  Each received is logged, switch or no switch.
     void on_gm_node_rpc(const protocol::repl::ClientRpc& rpc, Clock::time_point now);
@@ -1622,8 +1613,8 @@ private:
     bool                           cooldowns_pending_ = false;
     uint64_t                       node_maps_version_ = 0;               // the registry version the GameState's maps were last brought to
     size_t node_requests_ = 0, node_summaries_sent_ = 0, siege_summaries_sent_ = 0, siege_cooldowns_sent_ = 0, node_map_updates_ = 0, node_requests_dropped_ = 0,
-           node_gm_rpcs_ = 0, citizenship_requests_ = 0, node_logged_ = 0;
-    bool                           node_unreadable_logged_ = false, node_overflow_logged_ = false, citizenship_logged_ = false, node_unknown_logged_ = false;
+           node_gm_rpcs_ = 0, node_logged_ = 0;
+    bool                           node_unreadable_logged_ = false, node_overflow_logged_ = false, node_unknown_logged_ = false;
     std::optional<Ride>            ride_;                        // the mount the player rides, or has been on and has not lost (desummoned)
     double                         dash_ready_at_ = -1.0;        // review A I3: when the mount dash is ready again (the session's ability clock): a new mount's Ride starts with it, so a desummon and a summon do not reset the 30 s
     protocol::emit::FIntrepidNetworkGUID mount_guid_, mount_cylinder_, mount_ability_, mount_mesh_;   // of the ride's mount
@@ -1669,8 +1660,6 @@ private:
     std::vector<WhComponent>       wh_components_;             // the pawn's warehouse components of this connection, with their guids
     RequestBudget                  wh_budget_{kVendorBurst, kVendorInterval};
     size_t wh_opens_ = 0, wh_moves_ = 0, wh_refused_ = 0, wh_logged_ = 0, wh_refused_logged_ = 0, wh_unreadable_logged_ = 0;
-    RequestBudget                  tax_budget_{kTaxBurst, kTaxInterval};
-    size_t tax_requests_ = 0, tax_tables_sent_ = 0, tax_logged_ = 0;
     size_t vendor_opens_ = 0, vendor_purchases_ = 0, vendor_refused_ = 0, interact_ignored_ = 0, vendor_logged_ = 0, interact_logged_ = 0;
     size_t station_opens_ = 0, station_logged_ = 0, station_ignored_logged_ = 0;   // crafting, step 0: windows opened, log lines said
     std::vector<svc::ProcessingJob> jobs_;            // crafting, step 1: the character's processing jobs, in the order they were queued (saved with the inventory)

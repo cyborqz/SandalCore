@@ -155,7 +155,8 @@ struct RecordingSink : PositionSink {
     std::vector<std::vector<svc::InventoryItem>> inventories;
     void save(const std::string&, const svc::Position&) override {}
     void save_inventory(const std::string&, std::vector<svc::InventoryItem> items) override { inventories.push_back(std::move(items)); }
-    void save_progress(const std::string&, svc::Progress) override {}
+    std::vector<svc::Progress> progress;   // node citizenship: what each progress save carried
+    void save_progress(const std::string&, svc::Progress p) override { progress.push_back(std::move(p)); }
 };
 
 // ---- the world ---------------------------------------------------------------------------------------------------------------------
@@ -1362,6 +1363,7 @@ int main() {
     test_crowd();
     test_crowd_moving();
     test_dialogue_book();
+    test_dialogue_citizenship();
     test_dialogue_town_crier();
     test_dialogue_session();
     test_dialogue_1531();

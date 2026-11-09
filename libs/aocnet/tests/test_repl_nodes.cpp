@@ -21,6 +21,7 @@
 #include "test_support.h"
 
 #include "protocol/repl/fast_array.h"
+#include "protocol/repl/citizenship_codec.h"
 #include "protocol/repl/node_rpc.h"
 #include "protocol/repl/rpc.h"
 
@@ -302,6 +303,100 @@ void test_requests() {
     CHECK(!parse_gm_set_node_level(x) && !parse_gm_add_node_experience(g) && !parse_gm_get_node_data(g), "each parser refuses the other RPCs");
 }
 
+/// FEssentialCitizenshipWindowData (ClientPopulateCitizenshipData): the layout read from the client's NetSerialize (citizenship_codec.h), against the bytes packed by
+/// hand in Python (struct.pack, the client's order: the notifications, the byte, the two maps, the int32, FCitizenshipStatus, FCitizenshipDuesData).  No
+/// recording of the call is in this repository.
+void test_citizenship_window() {
+    CitizenshipWindowData d;
+    NodeNotification n;
+    n.type = 3;
+    n.created = 100;
+    n.timestamp = 200;
+    n.mayor = "Ann";
+    n.election_state = 2;
+    n.election_type = 1;
+    n.plot = 10;
+    n.building = 11;
+    n.building_state = 4;
+    n.expansion = 12;
+    n.expansion_state = -1;
+    n.commission = 13;
+    n.declaring_node = 14;
+    n.target_node = 15;
+    n.war = 16;
+    n.won_war = true;
+    n.war_end_reason = 5;
+    n.buy_order = 17;
+    d.notifications.push_back(n);
+    d.state = 2;
+    d.named_guids.push_back({{1, 2, 3, 4}, "Bo", {{5, 6, 7, 8}}});
+    d.names.push_back({{9, 10, 11, 12}, "Cy"});
+    d.phase_seconds_left = 7;
+    d.status.primary = {{21, 22, 23, 24}, "Dee"};
+    d.status.alternates.push_back({{25, 26, 27, 28}, "Ed"});
+    d.status.dues_paid = 3;
+    d.status.dues_required = 20;
+    d.status.dues_level_impact = 1.5;
+    d.status.dues_rank_impact = 2.0;
+    d.status.dues_non_owner_impact = 1.0;
+    d.status.at_risk_start = 0.25;
+    d.status.dues_overdue = true;
+    d.status.rank = 4;
+    d.status.player_level = 12;
+    d.status.highest_level = 25;
+    d.status.property_state = 1;
+    d.dues_due_time = 1700000000;
+    d.late_fees_due_time = 1700432000;
+    d.dues_state = 1;
+    BunchWriter w;
+    CHECK(write_citizenship_window(w, d) && w.bit_pos() == 2472, "a citizenship window with one of everything is 2472 bits");
+    const char* const want =
+        "01000000036400000000000000c80000000000000004000000416e6e0002010a000000000000000b00000000000000040c00000000000000ffffffff0d000000000000000e000000000000"
+        "000f0000000000000010000000000000000100000005110000000000000002010000000100000002000000030000000400000003000000426f000100000005000000060000000700000008"
+        "00000001000000090000000a0000000b0000000c000000030000004379000700000015000000160000001700000018000000040000004465650001000000190000001a0000001b0000001c"
+        "000000030000004564000300000014000000000000000000f83f0000000000000040000000000000f03f000000000000d03f01000000040000000c000000190000000100f1536500000000"
+        "80885a650000000001";
+    const Bits bits(w);
+    const Bits expect = bits_of_hex(want, 2472);
+    bool same = bits.size() == expect.size();
+    for (size_t i = 0; same && i < bits.size(); ++i) same = bits.b[i] == expect.b[i];
+    CHECK(same, "... bit for bit the client's order: ElectionState before ElectionType, the building state before the expansion id, bools as 32-bit words");
+    const auto back = with_exact(bits, [&](const uint8_t* p, size_t bytes, size_t nbits) {
+        wire::PacketReader r(p, bytes, nbits);
+        return read_citizenship_window(r);
+    });
+    CHECK(back && *back == d, "it reads back");
+    CitizenshipWindowData empty;
+    BunchWriter e;
+    CHECK(write_citizenship_window(e, empty) && e.bit_pos() == 32 + 8 + 32 + 32 + 32 + (128 + 32 + 32 + 64 + 64 * 4 + 32 * 4 + 8) + (64 + 64 + 8),
+          "an empty window (no notifications, no citizenship) is 1024 bits");
+    // a bool word above 1 is the exe's error: refused
+    BunchWriter bad;
+    CitizenshipWindowData one = empty;
+    write_citizenship_window(bad, one);
+    Bits broken(bad);
+    const size_t overdue_bit = 32 + 8 + 32 + 32 + 32 + 128 + 32 + 32 + 64 + 64 * 4;   // the first bit of bDuesOverdue
+    broken.b[overdue_bit + 1] = 1;                                                     // the word is 2
+    const auto refused = with_exact(broken, [&](const uint8_t* p, size_t bytes, size_t nbits) {
+        wire::PacketReader r(p, bytes, nbits);
+        return read_citizenship_window(r);
+    });
+    CHECK(!refused, "a bool word of 2 is refused, as the client marks it an error");
+
+    // the RPC: ClientPopulateCitizenshipData carries it as its one parameter and reads back through the schema
+    const schema::RpcSchema& rpc = rpc_of("ClientPopulateCitizenshipData");
+    RpcParams params;
+    CHECK(set_rpc_param(rpc, params, "EssentialCitizenshipData", Value(d)), "ClientPopulateCitizenshipData takes the window data");
+    const Bits pbits = written(rpc, params);
+    CHECK(pbits.size() == 1 + 2472, "... and writes it as its send bit and the struct");
+    const auto call = read_call(rpc, pbits);
+    const Value* got = nullptr;
+    if (call) {
+        for (const auto& [h, v] : call->params.values) got = &v;
+    }
+    CHECK(got && got->get_if<CitizenshipWindowData>() && *got->get_if<CitizenshipWindowData>() == d, "... and the schema reads it back");
+}
+
 }  // namespace
 
 int main() {
@@ -309,6 +404,7 @@ int main() {
     test_summaries();
     test_sieges();
     test_requests();
+    test_citizenship_window();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

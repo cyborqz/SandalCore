@@ -6,8 +6,8 @@ package db
 
 // Migration 0021 (social, step 6: the ignore list). It ADDS ONE TABLE, character_ignored_names, and touches nothing else (every migration is add-only). It is tested for what it must not do first
 // (every character reads back as it was, no other table, column, constraint or index changes), then for what it makes (the checks, the keys, the cascade that removes a deleted character's
-// names), a second run changes nothing, and the rollback is the README's block, run as written. The last tests are about the number: the runner allows the gap at 0020, applies a 0020
-// that comes later, and refuses a second file with a version it already has.
+// names), a second run changes nothing, and the rollback is the README's block, run as written. The last tests are about the number: a database that ran 0021 before 0020 (node
+// citizenship, numbered first and landed later) still takes 0020, and the runner refuses a second file with a version it already has.
 
 import (
 	"context"
@@ -24,12 +24,12 @@ import (
 
 const ignoredNamesTable = "character_ignored_names"
 
-// before21 is the schema as it is after 0019 (the newest migration of the play database), with the real-shaped characters.
+// before21 is the schema as it is before 0021 (after 0020), with the real-shaped characters.
 func before21(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool, _, _ := legacySetup(t)
 	if err := migrate(context.Background(), pool, upTo(t, 21)); err != nil {
-		t.Fatalf("migrate to 0019: %v", err)
+		t.Fatalf("migrate to 0020: %v", err)
 	}
 	return pool
 }
@@ -97,10 +97,10 @@ func TestMigration0021AddsTheIgnoredNamesTableAndTouchesNothingElse(t *testing.T
 			t.Errorf("%s changed by 0021", b.name)
 		}
 	}
-	// the version is recorded once, and nothing is recorded at 20: the number is left free
+	// the version is recorded once, after 0020 (node citizenship, which before21 applied)
 	versions := appliedVersions(t, pool)
-	if !slices.Contains(versions, 21) || slices.Contains(versions, 20) {
-		t.Errorf("applied versions = %v, want 21 in it and 20 not", versions)
+	if !slices.Contains(versions, 21) || !slices.Contains(versions, 20) {
+		t.Errorf("applied versions = %v, want 20 and 21 in it", versions)
 	}
 	if err := Migrate(ctx, pool); err != nil {
 		t.Errorf("second migrate: %v", err)
@@ -235,37 +235,38 @@ func TestMigration0021RollbackFromTheREADME(t *testing.T) {
 	}
 }
 
-// The number. 0021 leaves 0020 free for a change that is numbered 0020 elsewhere. The runner has to take that: a gap is no error, a 0020 that comes after 0021 is applied to a database that already
-// holds 0021, and the one thing it refuses is two files with one version, which stops every service that migrates when it starts.
-func TestAMigrationNumbered0020CanStillLandAfter0021(t *testing.T) {
+// The number. 0021 left 0020 free for node citizenship (0020_account_citizenship.sql), numbered first and landed later. The runner has to take that: a database that already holds 0021
+// without 0020 applies 0020 when it comes, a new one applies both, and the one thing it refuses is two files with one version, which stops every service that migrates when it starts.
+func TestMigration0020CanLandAfter0021(t *testing.T) {
 	ctx := context.Background()
-	if !slices.Contains(embeddedVersions(t), 21) {
-		t.Fatal("migration 0021 is not embedded")
-	}
-	if slices.Contains(embeddedVersions(t), 20) {
-		t.Fatal("a migration 0020 is embedded: this test is about the number being free")
+	if !slices.Contains(embeddedVersions(t), 20) || !slices.Contains(embeddedVersions(t), 21) {
+		t.Fatal("migrations 0020 and 0021 are not both embedded")
 	}
 	pool := dbtest.Pool(t)
-	without20 := upTo(t, 22) // every embedded migration: 1 to 19 and 21
+	with20 := upTo(t, 22) // the embedded migrations 1 to 21
+	without20 := fstest.MapFS{}
+	for name, f := range with20 {
+		if !strings.HasPrefix(name, "0020_") {
+			without20[name] = f
+		}
+	}
+	if len(without20) != len(with20)-1 {
+		t.Fatalf("%d migrations without 0020 of %d", len(without20), len(with20))
+	}
 	if err := migrate(ctx, pool, without20); err != nil {
 		t.Fatalf("migrate with the gap at 0020: %v", err)
 	}
 	if got := appliedVersions(t, pool); slices.Contains(got, 20) || !slices.Contains(got, 21) {
 		t.Fatalf("applied versions = %v, want 21 and no 20", got)
 	}
-	with20 := fstest.MapFS{}
-	for name, f := range without20 {
-		with20[name] = f
-	}
-	with20["0020_late.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE late_change (id INT PRIMARY KEY);")}
 	if err := migrate(ctx, pool, with20); err != nil {
-		t.Fatalf("migrate once a 0020 has landed: %v", err)
+		t.Fatalf("migrate once 0020 has landed: %v", err)
 	}
 	if got := appliedVersions(t, pool); !slices.Contains(got, 20) || !slices.Contains(got, 21) {
 		t.Errorf("applied versions = %v, want 20 and 21", got)
 	}
-	if !tableExists(t, pool, "late_change") {
-		t.Error("the late 0020 was recorded but its table is missing")
+	if !tableExists(t, pool, "account_citizenship") || !tableExists(t, pool, ignoredNamesTable) {
+		t.Errorf("after 0020 landed: account_citizenship there = %v, %s there = %v", tableExists(t, pool, "account_citizenship"), ignoredNamesTable, tableExists(t, pool, ignoredNamesTable))
 	}
 	// the other order, a new database: 0020 first, then 0021, both there
 	fresh := dbtest.Pool(t)
@@ -277,7 +278,7 @@ func TestAMigrationNumbered0020CanStillLandAfter0021(t *testing.T) {
 	}
 	// a second file numbered 0021 is the collision: refused before anything is applied, and the error names both files
 	clash := fstest.MapFS{}
-	for name, f := range without20 {
+	for name, f := range with20 {
 		clash[name] = f
 	}
 	clash["0021_other_change.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE other_change (id INT);")}

@@ -109,30 +109,25 @@ void PlayerSession::on_siege_cooldowns_request() {
     cooldowns_pending_ = true;
 }
 
-// The citizenship window (ServerSetEssentialCitizenshipWindowData -> ClientPopulateCitizenshipData): its struct, FEssentialCitizenshipWindowData, is a NetSerialize struct
-// whose layout is not decoded (33 to 219 kbit in the captures; evidence.md section 4.4).  A default cannot be written without it (UE always sends a struct parameter), and a
-// guessed payload could make the client drop the connection, so the request is logged and not answered: the citizenship panel of the node window stays empty until the
-// citizenship milestone decodes the struct.
-void PlayerSession::on_citizenship_window_request() {
-    ++citizenship_requests_;
-    if (citizenship_logged_) return;
-    citizenship_logged_ = true;
-    spdlog::info("[nodes] {}: the client asks for the citizenship window's data (ServerSetEssentialCitizenshipWindowData): not answered, the struct's layout is not decoded yet "
-                 "(the citizenship milestone); further ones are not logged", name());
-}
+// (The citizenship window's request, ServerSetEssentialCitizenshipWindowData, is answered in session/player_citizenship.cpp.)
 // C.Y.B with CoA
 
 void PlayerSession::run_nodes(Connection& conn) {
     if (finished_ || failed_ || !join_.empty()) return;   // (the join includes the pawn's second state: the client's world exists, as retail's answers assume)
+    run_citizenship(conn);
     const world::CityNodes* nodes = world_ ? world_->city_nodes() : nullptr;
     const world::NodeWire* wire = world_ ? world_->node_wire() : nullptr;
     // room for a reply, leaving the others theirs (an answer burst of 98 must not starve a purchase's reply): no log when it is full, the next tick tries again
     const auto has_room = [this] { return !failed_ && replies_.size() + delayed_.size() + 8 <= kMaxPendingReplies; };
 
     // the registry's levels changed: a delta of the GameState's node maps
-    if (pb_.mode() == bootstrap::GameStateMode::Tier3 && nodes && wire && nodes->version() != node_maps_version_ && has_room()) {
+    const world::Elections* elections = world_ ? world_->elections() : nullptr;
+    const uint64_t election_version = elections ? elections->version() : 0;
+    if (pb_.mode() == bootstrap::GameStateMode::Tier3 && nodes && wire && (nodes->version() != node_maps_version_ || election_version != node_maps_election_version_) &&
+        has_room()) {
         node_maps_version_ = nodes->version();
-        auto maps = std::make_shared<protocol::repl::NodeStateMaps>(wire->maps(*nodes));
+        node_maps_election_version_ = election_version;   // (a mayor or a citizen count changed: the maps follow; an unchanged map sends nothing)
+        auto maps = std::make_shared<protocol::repl::NodeStateMaps>(wire->maps(*nodes, elections));
         ++node_map_updates_;
         spdlog::info("[nodes] {}: the node levels changed (registry version {}): sending the GameState's node maps ({})", name(), node_maps_version_, nodes->describe_levels());
         queue("GameState node maps", [maps](bootstrap::PlayerBootstrap& pb) { return pb.node_maps_update(*maps); }, conn, /*must_build=*/false);
@@ -167,7 +162,7 @@ void PlayerSession::run_nodes(Connection& conn) {
         node_summary_wait_.pop_front();
         node_summary_queued_.erase(node);
         const int64_t unix_now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        const auto s = nodes && wire ? wire->summary(node, *nodes, unix_now) : std::nullopt;
+        const auto s = nodes && wire ? wire->summary(node, *nodes, unix_now, elections) : std::nullopt;
         if (!s) {
             unknown(node, "for its summary");
             continue;
@@ -250,7 +245,6 @@ void PlayerSession::register_nodes_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerRequestNodeSummary", [](PlayerSession& s, const RpcContext& c) { s.on_node_summary_request(c.rpc); });
     t.add(RpcScope::PlayerController, "ServerRequestCurrentSiegeSummary", [](PlayerSession& s, const RpcContext& c) { s.on_siege_summary_request(c.rpc); });
     t.add(RpcScope::PlayerController, "ServerRequestAllNodeSiegeCooldowns", [](PlayerSession& s, const RpcContext&) { s.on_siege_cooldowns_request(); });
-    t.add(RpcScope::PlayerController, "ServerSetEssentialCitizenshipWindowData", [](PlayerSession& s, const RpcContext&) { s.on_citizenship_window_request(); });
     t.add(RpcScope::PlayerController, "ServerSetNodeLevel", [](PlayerSession& s, const RpcContext& c) { s.on_gm_node_rpc(c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerAddNodeExperience", [](PlayerSession& s, const RpcContext& c) { s.on_gm_node_rpc(c.rpc, c.now); });
     t.add_prefix(RpcScope::PlayerController, "ServerGM", [](PlayerSession& s, const RpcContext& c) { s.on_gm_node_rpc(c.rpc, c.now); });

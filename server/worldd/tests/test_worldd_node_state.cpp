@@ -11,7 +11,7 @@
 //    the summaries  NodeWire::summary for all 49 nodes the client asks about, against the 49 retail summaries: the layout, the level, the plots of the layout at that level,
 //                   the essence and the relic slots; the siege summaries rebuilt from the node to retail's exact bits
 //    the session    a Tier3 join sends the maps in the GameState's open and the account's characters in OwnerInfo; the client's bunch of 49 + 49 requests is answered in retail's order
-//                   (every siege summary, then every node summary); a repeated request is one answer; an unknown node and the citizenship window are not answered; the cooldowns are
+//                   (every siege summary, then every node summary); a repeated request is one answer; an unknown node is not answered, the citizenship window is (an empty one); the cooldowns are
 //                   one empty answer; a level change reaches the client as a delta of the maps; a client that joins later has the new levels (a server hop re-sends everything)
 //    the console    the client's ServerSetNodeLevel, ServerAddNodeExperience, ServerGMGetNodeData ...: received and logged with the GM switch off, forwarded to the node service
 //                   with it on; GrpcNodeControl over gRPC against an in-process fake of the service: the token, the calls, the answers, an unreachable service
@@ -667,6 +667,41 @@ static std::vector<std::string> pc_calls_from(const Harness& h, size_t from, std
     return names;
 }
 
+/// The node window's mayor and the map's citizens: with the elections, FClientNodeData's Mayor names the node's mayor and NodeNumberOfCitizensFastMap counts its citizens;
+/// the summary carries the mayor's message, which the mayor may edit at once.
+static void test_mayor_in_maps() {
+    std::printf("the node's mayor and citizens in the GameState's maps and the summary\n");
+    world::Elections el;
+    const char* const kMayorId = "00000000000000000000000000c0ffee";
+    el.set_citizen(kJoeva, world::ElectionPerson{1, kMayorId, "Mayorie", 10});
+    el.set_citizen(kJoeva, world::ElectionPerson{2, "000000000000000000000000000000b2", "Second", 20});
+    el.set_mayor(kJoeva, world::ElectionPerson{1, kMayorId, "Mayorie", 0}, 30);
+    std::string why;
+    CHECK(el.set_message(kJoeva, 1, "Joeva welcomes you", why), "(the mayor's message is set)");
+    const repl::NodeStateMaps plain = g_wire->maps(*g_nodes);
+    const repl::NodeStateMaps with = g_wire->maps(*g_nodes, &el);
+    const world::CityNodeInfo* joeva = g_nodes->by_guid(kJoeva);
+    const repl::NodeDataEntry* entry = nullptr;
+    for (const repl::NodeDataEntry& n : with.nodes) {
+        if (n.guid == kJoeva) entry = &n;
+    }
+    CHECK(entry && entry->mayor_name == "Mayorie" && entry->mayor_guid == (std::array<uint32_t, 4>{0, 0, 0, 0xc0ffee}), "Joeva's entry names its mayor, the character's guid and name");
+    size_t others_named = 0;
+    for (const repl::NodeDataEntry& n : with.nodes) others_named += n.guid != kJoeva && !n.mayor_name.empty();
+    CHECK(others_named == 0, "no other node has a mayor");
+    const int joeva_level = joeva ? g_nodes->level_of(kJoeva) : 0;
+    uint8_t citizens = 255;
+    for (const auto& [rank, n] : with.citizens) {
+        if (joeva && rank == static_cast<uint32_t>(joeva->rank)) citizens = n;
+    }
+    CHECK(joeva_level < 3 || citizens == 2, "the citizens map counts Joeva's two citizens (it lists the nodes from Village)");
+    CHECK(plain.citizens.size() == with.citizens.size() && plain.nodes.size() == with.nodes.size(), "the maps list the same nodes with or without the elections");
+    const auto summary = g_wire->summary(kJoeva, *g_nodes, 0, &el);
+    CHECK(summary && summary->mayor_message == "Joeva welcomes you" && summary->next_mayor_message_edit_time == 0, "the summary carries the mayor's message, editable now");
+    const auto halcyon = g_wire->summary(kHalcyon, *g_nodes, 0, &el);
+    CHECK(halcyon && halcyon->mayor_message.empty() && halcyon->next_mayor_message_edit_time == 60, "a node with no mayor keeps retail's no-mayor values");
+}
+
 static void test_join() {
     std::printf("a Tier3 join: the maps in the GameState's open, the account's characters in OwnerInfo\n");
     Harness h(cyb_record());
@@ -823,14 +858,24 @@ static void test_requests() {
     h.settle();
     std::vector<repl::RpcCall> cd;
     const std::vector<std::string> cd_names = pc_calls_from(h, cd_from, &cd);
-    if (cd_names != std::vector<std::string>{"ClientReceiveAllCurrentNodeSiegeCooldowns"}) {
+    std::vector<std::string> sorted = cd_names;
+    std::sort(sorted.begin(), sorted.end());
+    if (sorted != std::vector<std::string>{"ClientPopulateCitizenshipData", "ClientReceiveAllCurrentNodeSiegeCooldowns"}) {
         std::printf("    (the PlayerController got:");
         for (const std::string& n : cd_names) std::printf(" %s", n.c_str());
         std::printf("; cooldown answers sent %zu, requests %zu)\n", h.s->siege_cooldowns_sent(), h.s->node_requests());
     }
-    CHECK(cd_names == std::vector<std::string>{"ClientReceiveAllCurrentNodeSiegeCooldowns"}, "ServerRequestAllNodeSiegeCooldowns is answered (the empty array); the citizenship window is not");
-    CHECK(cd.size() == 1 && cd[0].param_bits == 1, "the cooldown answer is one bit, as retail's");
-    CHECK(h.s->citizenship_requests() == 1 && h.s->siege_cooldowns_sent() == 1, "(the citizenship request is counted and logged once)");
+    CHECK((sorted == std::vector<std::string>{"ClientPopulateCitizenshipData", "ClientReceiveAllCurrentNodeSiegeCooldowns"}),
+          "ServerRequestAllNodeSiegeCooldowns is answered (the empty array), and the citizenship window (node citizenship)");
+    size_t cooldown_bits = 0, window_bits = 0;
+    for (const repl::RpcCall& c : cd) {
+        if (std::string(c.rpc->name) == "ClientReceiveAllCurrentNodeSiegeCooldowns") cooldown_bits = c.param_bits;
+        if (std::string(c.rpc->name) == "ClientPopulateCitizenshipData") window_bits = c.param_bits;
+    }
+    CHECK(cooldown_bits == 1, "the cooldown answer is one bit, as retail's");
+    if (window_bits != 1 + 920) std::printf("    (the citizenship window's parameters: %zu bits)\n", window_bits);
+    CHECK(window_bits == 1 + 920, "the window of a character with no citizenship: its send bit and the empty archive (920 bits: five counts and states, the primary's guid and empty name, the dues words and times)");
+    CHECK(h.s->citizenship_requests() == 1 && h.s->siege_cooldowns_sent() == 1, "(the citizenship request is counted once)");
 }
 
 static void test_level_change() {
@@ -953,10 +998,7 @@ static void test_console() {
         repl::set_rpc_param(rpc, p, "FastForwardDuration", repl::Value(ticks));
     });
     CHECK(h.fx.control.calls.size() == 5 && h.fx.control.calls[4].rfind("advance 3600", 0) == 0, "ServerGMFastForwardRealTime skips the node clock by its seconds");
-    send("ServerGMSetMayor", [&](const schema::RpcSchema& rpc, repl::RpcParams& p) {
-        repl::set_rpc_param(rpc, p, "NodeName", repl::Value::str("Joeva"));
-        repl::set_rpc_param(rpc, p, "CharacterName", repl::Value::str("cyb"));
-    });
+    send("ServerGMForceVassalTaxDueDateNow", [&](const schema::RpcSchema&, repl::RpcParams&) {});   // (vassal taxes: not built)
     CHECK(h.fx.control.calls.size() == 5 && h.s->node_gm_rpcs() == 8, "any other ServerGM* call is received and logged, and goes nowhere (its milestone is later)");
 
     // no node service connected: the console says so and nothing crashes
@@ -1216,6 +1258,7 @@ int main() {
     }
     test_maps();
     test_summaries();
+    test_mayor_in_maps();
     test_join();
     test_requests();
     test_level_change();

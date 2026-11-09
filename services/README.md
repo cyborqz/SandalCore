@@ -598,6 +598,19 @@ DELETE FROM schema_migrations WHERE version = 19;
 COMMIT;
 ```
 
+**Rolling back migration 0020.** Migration 0020 (node citizenship) adds one table, `account_citizenship`, and writes to nothing else. worldd saves an account's
+citizenship with the progress of the character that acts (`SaveProgress` with `replace_citizenship`) and reads it at the join (`GetCharacter`, `citizenship`). Rolling it
+back makes every account a non-citizen again and loses the renounce cooldowns, and nothing else (the Tax Vouchers paid stay spent); stop worldd first, or its progress saves
+fail until it runs a build without citizenship.
+
+```sql
+-- rollback of migration 0020 (node citizenship)
+BEGIN;
+DROP TABLE account_citizenship;
+DELETE FROM schema_migrations WHERE version = 20;
+COMMIT;
+```
+
 **Rolling back migration 0021.** Migration 0021 (social, step 6, "the ignore list") adds ONE table, `character_ignored_names` (the players and the guilds a character ignores, one row each with its kind and its place in the character's list of that kind); it writes nowhere else, backfills nothing and touches no existing table or column. worldd loads a character's lists at login, hands them to the game client, which hides the chat lines of every name on them by itself, and saves them with the progress (`SaveProgress` with `replace_ignored_names`). The rollback drops the table with whatever it holds: every ignored name is forgotten (a player ignores them again with the ignore command). The characters, their items, their progress, their jobs, their tutorials, their places and their quests are untouched, and the migration applies again. Stop the character service and worldd first, and start the ones from before 0021 afterwards: the character service of 0021 reads the table at every login.
 
 ```sql

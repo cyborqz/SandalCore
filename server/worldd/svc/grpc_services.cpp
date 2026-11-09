@@ -163,6 +163,10 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     }
     for (const int64_t recipe : c.known_recipes()) r.character.known_recipes.push_back(recipe);
     for (const int64_t id : c.completed_ftues()) r.character.completed_ftues.push_back(id);
+    if (c.has_citizenship()) {
+        const characterv1::Citizenship& cz = c.citizenship();
+        r.character.citizenship = Citizenship{cz.node_guid(), cz.primary_character_id(), cz.joined_ms(), cz.dues_due_ms(), cz.renounce_cooldown_until_ms()};
+    }
     for (const auto& w : c.warehouse_items()) {
         WarehouseItem wi;
         wi.area = w.area();
@@ -230,7 +234,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         list_req.set_account_id(r.character.account_id);
         characterv1::ListCharactersResponse list_resp;
         if (stubs_->character->ListCharacters(&list_ctx, list_req, &list_resp).ok()) {
-            for (const auto& other : list_resp.characters()) r.character.account_characters.push_back({other.id(), other.name()});
+            for (const auto& other : list_resp.characters()) r.character.account_characters.push_back({other.id(), other.name(), other.level()});
         }
     }
     return r;
@@ -281,6 +285,18 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
     }
     req.set_replace_completed_ftues(progress.replace_completed_ftues);
     for (const int64_t id : progress.completed_ftues) req.add_completed_ftues(id);
+    if (progress.replace_citizenship) {
+        req.set_replace_citizenship(true);
+        const Citizenship& cz = progress.citizenship;
+        if (cz.node_guid != 0 || cz.renounce_cooldown_until_ms != 0) {   // none: unset, and the row goes
+            auto* out = req.mutable_citizenship();
+            out->set_node_guid(cz.node_guid);
+            out->set_primary_character_id(cz.primary_character_id);
+            out->set_joined_ms(cz.joined_ms);
+            out->set_dues_due_ms(cz.dues_due_ms);
+            out->set_renounce_cooldown_until_ms(cz.renounce_cooldown_until_ms);
+        }
+    }
     req.set_replace_attunements(progress.replace_attunements);
     for (const int32_t n : progress.attunements) req.add_attunements(n);
     req.set_home_attunement(progress.home_attunement);

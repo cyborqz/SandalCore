@@ -34,7 +34,9 @@ import (
 // 42 added the knock-back tables. 43 added item_reward_selection (the random coffers and choose-one
 // selectors contributed in #16); the comments of that code that say "version 42" were written before
 // 42 was taken.
-const Version = "43"
+// 44 keeps the node citizenship and mayor lines of a conversation (AddNodeCitizenship with its VendorId,
+// RemoveNodeCitizenship, AddNodeMayorCandidate).
+const Version = "44"
 
 // Options say what Build reads and writes.
 type Options struct {

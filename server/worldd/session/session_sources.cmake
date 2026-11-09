@@ -36,6 +36,9 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_mounts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_move_ack.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_movement.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_citizenship.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_citizenship_gm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_node_taxes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_nodes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_presence.cpp
@@ -54,4 +57,8 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_pool.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_worker.h
     ${CMAKE_CURRENT_SOURCE_DIR}/warehouse/player_warehouse.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/citizenship.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/citizenship.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/elections.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/elections.h
 )

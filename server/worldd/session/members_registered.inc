@@ -16,6 +16,8 @@
 #include "session/members/view_phases.inc"
 #include "session/members/presence.inc"
 #include "session/members/chests.inc"
+#include "session/members/citizenship.inc"
+#include "session/members/node_taxes.inc"
 #include "session/members/surface_move.inc"
 #include "session/members/chat.inc"
 #include "session/members/ignore.inc"

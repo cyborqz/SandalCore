@@ -33,6 +33,7 @@
 #include "protocol/repl/vendor_rpc.h"
 #include "vendor/node_tax_table.h"
 #include "world/city_nodes.h"
+#include "world/elections.h"
 
 #include <cmath>
 #include <cstdint>
@@ -67,6 +68,23 @@ struct TaxRate {
 inline TaxRate default_tax_rate(std::string_view tag) {
     std::string t(tag);
     while (!t.empty()) {
+        for (const tax_table::Row& r : tax_table::kRows) {
+            if (t == r.tag && r.flag_a && r.flag_b) return TaxRate{r.tax_percent, r.flat_tax, true};
+        }
+        const size_t dot = t.rfind('.');
+        if (dot == std::string::npos) break;
+        t.resize(dot);
+    }
+    return TaxRate{};
+}
+
+/// The rate a tag has in a node whose mayor set rates (`overrides`; null: the default table's): from the tag up the tag tree, the first the mayor set, else the
+/// default table's first row with both flags set.
+inline TaxRate node_tax_rate(std::string_view tag, const std::map<std::string, world::TaxOverride>* overrides) {
+    if (!overrides) return default_tax_rate(tag);
+    std::string t(tag);
+    while (!t.empty()) {
+        if (const auto it = overrides->find(t); it != overrides->end()) return TaxRate{it->second.percent, it->second.flat, true};
         for (const tax_table::Row& r : tax_table::kRows) {
             if (t == r.tag && r.flag_a && r.flag_b) return TaxRate{r.tax_percent, r.flat_tax, true};
         }
@@ -187,6 +205,11 @@ public:
     TaxRate default_rate(int64_t shop) const {
         const content::VendorData::Def* d = def(shop);
         return d && !d->tax_tag.empty() ? default_tax_rate(d->tax_tag) : TaxRate{};
+    }
+    /// The shop's rate in its node, with the rates the node's mayor set (null: the default table's).
+    TaxRate rate(int64_t shop, const std::map<std::string, world::TaxOverride>* overrides) const {
+        const content::VendorData::Def* d = def(shop);
+        return d && !d->tax_tag.empty() ? node_tax_rate(d->tax_tag, overrides) : TaxRate{};
     }
 
     struct Line {
