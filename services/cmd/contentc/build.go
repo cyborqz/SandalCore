@@ -33,8 +33,9 @@ import (
 //
 // 42 added the knock-back tables. 43 added item_reward_selection (the random coffers and choose-one
 // selectors contributed in #16); the comments of that code that say "version 42" were written before
-// 42 was taken.
-const Version = "43"
+// 42 was taken. 44 folds GetAbilityItemInstance/GetItemInstanceStat into the consumed-item op (a
+// potion's HealingMod reads its own Health), so the stat program changes.
+const Version = "44"
 
 // Options say what Build reads and writes.
 type Options struct {

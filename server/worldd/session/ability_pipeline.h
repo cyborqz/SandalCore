@@ -760,6 +760,9 @@ private:
         bootstrap::ActiveAbilityItem          item;
         std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
+        /// The timed effects the ability puts on its caster itself (no hit applies them): a consumable's Nourishment (20 s of 1 s ticks) and its kind.  They start with
+        /// the own effects and expire by their own duration, not with the montage: a meal's 20 s of regeneration outlives the eating animation that ends in a few seconds.
+        std::vector<const abilities::EffectDef*> timed_effects;
         std::optional<double>                 held_release_due;   // a release heard before the held effect's delayed start
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires
@@ -799,6 +802,9 @@ private:
         double                      start = 0, end = 0;           // end: infinity for an infinite effect
         double                      next_tick = 0;                // infinity: none
         std::vector<stats::EffectMod> mods;                       // one stack's values
+        /// The consumable whose stat block the effect's hits read (GetConsumedItemStat) when they run later (a meal's tick, a salve's tick): the item of the cast that
+        /// applied the effect. null for an effect that no item cast applied.
+        std::shared_ptr<const ItemCast> item;
     };
     /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect) and the infinite effects its overlap hits
     /// put on the caster, which end with the dance.
@@ -934,8 +940,16 @@ void   step_multi_hit(Cast& cast, double t);
     struct ConsumedScope {
         AbilityPipeline&                     p;
         const std::vector<stats::StatMod>*   saved;
-        ConsumedScope(AbilityPipeline& pipeline, const std::shared_ptr<const ItemCast>& item) : p(pipeline), saved(pipeline.consumed_) { p.consumed_ = item ? &item->stats : nullptr; }
-        ~ConsumedScope() { p.consumed_ = saved; }
+        std::shared_ptr<const ItemCast>      saved_item;
+        ConsumedScope(AbilityPipeline& pipeline, const std::shared_ptr<const ItemCast>& item)
+            : p(pipeline), saved(pipeline.consumed_), saved_item(pipeline.consumable_item_) {
+            p.consumed_ = item ? &item->stats : nullptr;
+            p.consumable_item_ = item;
+        }
+        ~ConsumedScope() {
+            p.consumed_ = saved;
+            p.consumable_item_ = std::move(saved_item);
+        }
     };
     /// The fill the no-argument GetAbilityProgressRatio() reads while a cast's hits are applied (1: the ability whose hit this is has played in full).
     struct FillScope {
@@ -1069,6 +1083,7 @@ void   step_multi_hit(Cast& cast, double t);
     double last_item_at_ = -1;                                      // when the ability item of the running cast came (the DefaultGroup's progress)
     double fill_ = 1;                                               // what the no-argument GetAbilityProgressRatio() reads (FillScope): 1, the ability whose hit this is has played in full
     const std::vector<stats::StatMod>* consumed_ = nullptr;   // what GetConsumedItemStat reads while a consumable's hits are applied (ConsumedScope)
+    std::shared_ptr<const ItemCast>    consumable_item_;      // ... the item itself, so an effect it applied keeps its numbers for the ticks that come later
     std::map<int64_t, double> full_bars_;                           // a HELD ability -> the longest bar this client has shown (seconds from the trigger to its request)
     double                    next_regen_ = kRegenInterval;
     std::set<int64_t>         known_;
