@@ -707,6 +707,86 @@ struct RewardInstance {
     bool operator==(const RewardInstance&) const = default;
 };
 
+/// FGuidNamePair: a character's guid and name (citizenship_codec.h).
+struct GuidNamePair {
+    GuidValue   guid;
+    std::string name;
+    bool operator==(const GuidNamePair&) const = default;
+};
+
+/// FCitizenshipStatus (the citizenship window): the player's standing in the node, in the usmap's names (citizenship_codec.h has the wire order).
+struct CitizenshipStatus {
+    GuidNamePair              primary;                 // PrimaryCharacter
+    std::vector<GuidNamePair> alternates;              // AlternateCharacters
+    int32_t dues_paid = 0, dues_required = 0;          // DuesPaid, DuesRequired
+    double  dues_level_impact = 0;                     // DuesLevelImpact
+    double  dues_rank_impact = 0;                      // DuesCitizenshipRankImpact
+    double  dues_non_owner_impact = 0;                 // DuesNonPropertyOwnerImpact
+    double  at_risk_start = 0;                         // CitizenshipAtRiskStartTime
+    bool    dues_overdue = false;                      // bDuesOverdue
+    int32_t rank = 0;                                  // CitizenshipRank
+    int32_t player_level = 0;                          // PlayerLevel
+    int32_t highest_level = 0;                         // HighestCharacterLevelOnAccount
+    uint8_t property_state = 0;                        // PropertyOwnershipState (EPropertyOwnershipState)
+    bool operator==(const CitizenshipStatus&) const = default;
+};
+
+/// FNodeNotificationDetails: one entry of the node's notification feed (elections, buildings, wars, buy orders), in the usmap's names.
+struct NodeNotification {
+    uint8_t     type = 0;                              // NodeNotificationType (ENodeSystemNotificationType)
+    int64_t     created = 0, timestamp = 0;            // CreationTimestamp, Timestamp
+    std::string mayor;                                 // MayorName
+    uint8_t     election_type = 0, election_state = 0; // ElectionType, ElectionState
+    int64_t     plot = 0, building = 0, expansion = 0; // ServiceBuildingPlotRecordId, ServiceBuildingRecordId, ServiceBuildingExpansionRecordId
+    uint8_t     building_state = 0;                    // ServiceBuildingState (EBuildingState)
+    int32_t     expansion_state = 0;                   // ServiceBuildingExpansionState (EAoCExpansionState, an int)
+    int64_t     commission = 0;                        // MayoralCommissionRecordId
+    int64_t     declaring_node = 0, target_node = 0;   // DeclaringNodeGuid, TargetNodeGuid
+    int64_t     war = 0;                               // NodeWarRecordId
+    bool        won_war = false;                       // bDidWinWar
+    uint8_t     war_end_reason = 0;                    // WarEndReason (EWarEndReason)
+    int64_t     buy_order = 0;                         // BuyOrderRecordId
+    bool operator==(const NodeNotification&) const = default;
+};
+
+/// One entry of the window data's first map: a guid key, a name and a list of guids (its meaning is not read yet: worldd sends it empty).
+struct CitizenshipNamedGuids {
+    GuidValue              key;
+    std::string            name;
+    std::vector<GuidValue> guids;
+    bool operator==(const CitizenshipNamedGuids&) const = default;
+};
+
+/// FEssentialCitizenshipWindowData (ClientPopulateCitizenshipData): the citizenship window's data; its own NetSerialize (citizenship_codec.h).
+struct CitizenshipWindowData {
+    std::vector<NodeNotification>      notifications;  // the node's notification feed
+    uint8_t                            state = 0;      // compared by the window with a notification's ElectionState (1 to 3): the node's election state
+    std::vector<CitizenshipNamedGuids> named_guids;    // a TMap<FGuid, {FString, TArray<FGuid>}>, in the map's order
+    std::vector<std::pair<GuidValue, std::string>> names;   // a TMap<FGuid, FString>, in the map's order
+    int32_t                            phase_seconds_left = 0;   // the seconds left in the election's current phase
+    CitizenshipStatus                  status;         // the player's FCitizenshipStatus
+    int64_t dues_due_time = 0;                         // FCitizenshipDuesData: CitizenshipDuesDueTime (unix seconds)
+    int64_t late_fees_due_time = 0;                    //   LateFeesDueTime
+    uint8_t dues_state = 0;                            //   CitizenshipDuesState (ECitizenshipDuesState)
+    bool operator==(const CitizenshipWindowData&) const = default;
+};
+
+/// How a Value holds the citizenship window's data: on the heap, as EventBox holds an event (the struct is some 300 bytes; boxed, a Value stays at the size of an ItemInstance).
+/// Code never names it: Value(CitizenshipWindowData) and Value::get_if<CitizenshipWindowData>() do.
+class CitizenshipBox {
+public:
+    CitizenshipBox(CitizenshipWindowData d) : p_(std::make_unique<CitizenshipWindowData>(std::move(d))) {}
+    CitizenshipBox(const CitizenshipBox& o) : p_(o.p_ ? std::make_unique<CitizenshipWindowData>(*o.p_) : nullptr) {}
+    CitizenshipBox(CitizenshipBox&&) noexcept = default;
+    CitizenshipBox& operator=(const CitizenshipBox& o) { p_ = o.p_ ? std::make_unique<CitizenshipWindowData>(*o.p_) : nullptr; return *this; }
+    CitizenshipBox& operator=(CitizenshipBox&&) noexcept = default;
+    const CitizenshipWindowData* get() const { return p_.get(); }
+    CitizenshipWindowData*       get() { return p_.get(); }
+    bool operator==(const CitizenshipBox& o) const { return p_ && o.p_ ? *p_ == *o.p_ : !p_ && !o.p_; }
+private:
+    std::unique_ptr<CitizenshipWindowData> p_;
+};
+
 /// FHashedVariable (quests, slice 1): the variables of one quest instance, each a 64-bit key (CityHash64 of its name) and an int32 value, in the map's order; NetSerialize (quest_codec.h).
 struct HashedVariable {
     std::vector<std::pair<uint64_t, int32_t>> variables;
@@ -754,7 +834,7 @@ public:
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
-        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection>;
+        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection, CitizenshipBox>;
 
     Value() = default;
 // built by C | Y | B with C | O | A
@@ -779,6 +859,9 @@ public:
         if constexpr (std::is_same_v<T, ItemStorageEvent>) {
             const EventBox* b = std::get_if<EventBox>(&v_);
             return b ? b->get() : nullptr;
+        } else if constexpr (std::is_same_v<T, CitizenshipWindowData>) {
+            const CitizenshipBox* b = std::get_if<CitizenshipBox>(&v_);
+            return b ? b->get() : nullptr;
         } else {
             return std::get_if<T>(&v_);
         }
@@ -786,6 +869,9 @@ public:
     template <class T> T* get_if() {
         if constexpr (std::is_same_v<T, ItemStorageEvent>) {
             EventBox* b = std::get_if<EventBox>(&v_);
+            return b ? b->get() : nullptr;
+        } else if constexpr (std::is_same_v<T, CitizenshipWindowData>) {
+            CitizenshipBox* b = std::get_if<CitizenshipBox>(&v_);
             return b ? b->get() : nullptr;
         } else {
             return std::get_if<T>(&v_);

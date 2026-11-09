@@ -46,4 +46,17 @@ protocol::repl::NodeTaxDetails default_table(int64_t node) {
     return d;
 }
 
+protocol::repl::NodeTaxDetails node_table(int64_t node, const std::map<std::string, world::TaxOverride>* overrides) {
+    protocol::repl::NodeTaxDetails d = default_table(node);
+    if (!overrides) return d;
+    for (protocol::repl::NodeTaxEntry& e : d.entries) {
+        const auto it = overrides->find(e.tag);
+        if (it == overrides->end()) continue;
+        e.tax_percent = it->second.percent;
+        e.flat_tax = it->second.flat;
+        e.flag_a = e.flag_b = true;
+    }
+    return d;
+}
+
 }  // namespace aoc::worldd::vendor

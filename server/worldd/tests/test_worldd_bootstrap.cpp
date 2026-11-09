@@ -680,6 +680,39 @@ static void check_limits(const std::vector<Send>& seq, const char* what) {
     CHECK(window_ok, msg);
 }
 
+static void test_citizen_node() {
+    std::printf("OwnerInfo.CitizenNodeGuid and CharactersNodeData: the account's citizenship\n");
+    PlayerBootstrap pb = captured_bootstrap(bs::GameStateMode::Tier3);
+    CHECK(pb.pawn_second_state().has_value(), "the pawn's second state goes out first");
+    constexpr int64_t kNode = 753981145547737344;
+    CHECK(pb.set_citizen_node(kNode) && pb.setup().citizen_node == kNode, "the node is set, in setup() too");
+    const auto up = pb.currencies_update();
+    CHECK(up.has_value(), "the OwnerInfo update is built");
+    if (!up) return;
+    const Decoded d = decode(pb, *up);
+    CHECK(all_read(d), "every block of the update reads to its last bit");
+    const Subobject* owner = pb.pawn().find(pb.setup().guids.owner_info);
+    bool node = false, listed = true;
+    size_t entries = 0;
+    for (const Block& b : d.blocks) {
+        if (b.is_actor || !owner || b.object.ObjectId != owner->guid.ObjectId) continue;
+        if (const Value* v = value_of(b, *owner->obj.schema, "CitizenNodeGuid")) node = v->get_if<int64_t>() && *v->get_if<int64_t>() == kNode;
+        if (const Value* v = value_of(b, *owner->obj.schema, "CharactersNodeData")) {
+            if (const auto* arr = v->get_if<aoc::protocol::repl::ArrayValue>()) {
+                entries = arr->elements.size();
+                for (const auto& e : arr->elements) {
+                    const auto it = e.values.find(4);
+                    listed = listed && it != e.values.end() && it->second.get_if<int64_t>() && *it->second.get_if<int64_t>() == kNode;
+                }
+            }
+        }
+    }
+    CHECK(node, "the update carries CitizenNodeGuid");
+    CHECK(pb.setup().account_characters.empty() || (entries == pb.setup().account_characters.size() && listed), "... and every character of the account names the node");
+    PlayerBootstrap tier2 = captured_bootstrap();
+    CHECK(!tier2.set_citizen_node(kNode) && tier2.setup().citizen_node == kNode, "a Tier2 join keeps it in setup() alone (its OwnerInfo has no node fields)");
+}
+
 // ---- the whole sequence ------------------------------------------------------------------------------------------------
 
 static void test_sequence(bs::GameStateMode mode, const char* name) {
@@ -1280,6 +1313,7 @@ int main() {
     test_sequence(bs::GameStateMode::Captured, "Captured");
     test_native_character();
     test_guids_and_parts();
+    test_citizen_node();
     test_world_clock_measured();
     test_world_clock_cycle();
     test_world_clock_start();

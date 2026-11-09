@@ -36,6 +36,7 @@
 #include "svc/world_admin.h"
 #include "svc/world_stream.h"
 #include "svc/city_node_control.h"
+#include "world/citizenship.h"
 #include "world/city_nodes.h"
 #include "world/node_layout_data.h"
 #include "world/node_scenery.h"
@@ -340,6 +341,10 @@ int main(int argc, char** argv) {
     // plan E1, stage 3, part 2: what follows a death (combat/aftermath.h)
     bool no_loot = false, no_respawn = false, no_death_loss = false;
     double corpse_seconds = 15.0, loot_corpse_seconds = 120.0, loot_chance_mult = 1.0, loot_rarity_boost = 1.0;
+    std::string elections_file = "dist/services/elections.json";
+    app.add_option("--elections-file", elections_file,
+                   "where the nodes' mayoral elections are kept between runs (empty: a restart loses them)")
+        ->envname("AOC_ELECTIONS_FILE");
     app.add_flag("--no-loot", no_loot, "the kill switch for what follows a death: no experience, no loot, no respawn (the corpse still goes)")->envname("AOC_NO_LOOT");
     app.add_flag("--no-death-loss", no_death_loss, "a player's death takes no materials (retail: about half of each stack, into a pile where it fell)")->envname("AOC_NO_DEATH_LOSS");
     app.add_flag("--no-respawn", no_respawn, "the kill switch for respawns: a dead NPC stays dead")->envname("AOC_NO_RESPAWN");
@@ -608,6 +613,20 @@ int main(int argc, char** argv) {
                              city_nodes->zones(), seed_error);
             }
             players.set_city_nodes(city_nodes.get());
+            std::string citizenship_error;
+            if (auto rules = world::CitizenshipRules::load(content_db_path, citizenship_error)) {
+                std::string levels;
+                for (const auto& [level, secs] : rules->cooldown_secs) levels += (levels.empty() ? "" : ", ") + std::to_string(level);
+                spdlog::info("[nodes] citizenship: nodes at level {} take citizens; joining costs {} Tax Receipts, dues {} every {} weeks", levels, rules->join_cost, rules->dues_cost,
+                             rules->dues_weeks);
+                players.set_citizenship_rules(std::move(*rules));
+                std::string election_error;
+                auto election_rules = world::ElectionRules::load(content_db_path, election_error);
+                if (!election_rules) spdlog::warn("[nodes] the election rules are the defaults ({})", election_error);
+                players.set_elections(election_rules.value_or(world::ElectionRules{}), elections_file);
+            } else {
+                spdlog::warn("[nodes] no citizenship ({}): the Node Administrators' citizenship lines open nothing", citizenship_error);
+            }
             std::string wire_error;
             node_wire = world::NodeWire::load(content_db_path, *city_nodes, wire_error);
             if (!node_wire) {

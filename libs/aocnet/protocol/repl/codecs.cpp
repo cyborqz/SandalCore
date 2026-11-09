@@ -17,6 +17,7 @@
 #include "protocol/repl/channeling_codec.h"
 #include "protocol/repl/craft_codec.h"
 #include "protocol/repl/quest_codec.h"
+#include "protocol/repl/citizenship_codec.h"
 #include "protocol/repl/warehouse_codec.h"
 #include "protocol/repl/item_codec.h"
 
@@ -115,7 +116,7 @@ enum class S {
     Unknown, Vec3, Vec2, Ticks, Rotator, Quantized, Normal, RepMovement, LoadTracker, UniqueId, Tag, TagContainer,
     StatInt32, Quat, GuidToBool, Alignment, AppearanceId, Customization, ItemInstance, ItemStorageEvent, HitConfirmations,
     MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData, CraftState, RewardInstance, HashedVariable,
-    WarehouseEntry, CraftTags,
+    WarehouseEntry, CraftTags, CitizenshipWindow,
 };
 
 S find_struct(std::string_view n) {
@@ -150,6 +151,7 @@ S find_struct(std::string_view n) {
     if (n == "FHashedVariable") return S::HashedVariable;
     if (n == "FWarehouseItemChunkSummary" || n == "FWarehouseMaterialTabSummary") return S::WarehouseEntry;
     if (n == "FCraftingResourceTagCostSelection") return S::CraftTags;
+    if (n == "FEssentialCitizenshipWindowData") return S::CitizenshipWindow;
     return S::Unknown;
 }
 
@@ -1163,6 +1165,10 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
             const auto* s = v.get_if<CraftTagSelection>();
             return s && craft_tag_selection_fits(*s);
         }
+        case S::CitizenshipWindow: {
+            const auto* d = v.get_if<CitizenshipWindowData>();
+            return d && citizenship_window_fits(*d);
+        }
         case S::Unknown:     break;
     }
     return false;
@@ -1182,6 +1188,7 @@ std::optional<Value> zero_struct(std::string_view struct_name) {
         case S::CraftState:   return Value(CraftItemState{});           // no recipe, no resources
         case S::RewardInstance: return Value(RewardInstance{});         // no items, no experience
         case S::HashedVariable: return Value(HashedVariable{});         // no variables
+        case S::CitizenshipWindow: return Value(CitizenshipWindowData{});   // no notifications, no citizenship
         default:              break;
     }
     return std::nullopt;
@@ -1356,6 +1363,11 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
             if (!s) return std::nullopt;
             return Value(std::move(*s));
         }
+        case S::CitizenshipWindow: {
+            auto d = read_citizenship_window(r);
+            if (!d) return std::nullopt;
+            return Value(std::move(*d));
+        }
         case S::WarehouseEntry: {
             auto e = read_warehouse_entry(r);
             if (!e) return std::nullopt;
@@ -1477,6 +1489,8 @@ bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out
             return write_warehouse_entry(out, *v.get_if<WarehouseSummaryEntry>());
         case S::CraftTags:
             return write_craft_tag_selection(out, *v.get_if<CraftTagSelection>());
+        case S::CitizenshipWindow:
+            return write_citizenship_window(out, *v.get_if<CitizenshipWindowData>());
         case S::Unknown:
             break;
     }

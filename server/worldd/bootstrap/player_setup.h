@@ -139,6 +139,7 @@ struct AccountCharacterNode {
     std::string guid_hex;
     std::string name;
     int64_t     citizen_node = 0;
+    int32_t     level = 0;   // as the character store had it at the login
 };
 
 /// One currency the character holds, as OwnerInfo.Currencies lists it: the BASE currency def's Guid and the balance in that unit (copper for money).

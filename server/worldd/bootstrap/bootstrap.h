@@ -348,6 +348,14 @@ public:
     /// lines of those names by itself.  A list that is what the pawn holds already changes nothing; after a change the caller sends pawn_state_update().  False when the pawn has no OwnerInfo or a list is
     /// over `kMaxIgnoredNames`.
     bool set_ignored_names(const std::vector<std::string>& characters, const std::vector<std::string>& guilds);
+    /// Node citizenship: the account's node (0: none) in OwnerInfo.CitizenNodeGuid and every entry of CharactersNodeData (the account's characters share it), and in setup().
+    /// Nothing goes out until the next OwnerInfo update (currencies_update()).  False when the pawn has no OwnerInfo (a mode that is not Tier3 keeps only setup()).
+    bool set_citizen_node(int64_t node);
+    /// Node citizenship: one call of the PlayerController's (ClientShowAddNodeCitizenshipDialog, ClientPopulateCitizenshipData ...), its parameters built by `build`
+    /// from the call's schema entry.  nullopt when the controller has no such call or the parameters do not build.
+    std::optional<Send> citizenship_call(const char* rpc, const std::function<std::optional<repl::RpcParams>(const protocol::schema::RpcSchema&)>& build);
+    /// Node citizenship, stage 2: OwnerInfo.MayorNode, the node whose mayor the player's account is (0: none).  Nothing goes out until the next OwnerInfo update.
+    bool set_mayor_node(int64_t node);
     /// OwnerInfo.ActiveProcessingStations: the stations where the player has a job running or waiting, each as the four words of its StationGuid.  Sent with the next currencies_update() (the
     /// pawn's update that carries the OwnerInfo changes).  False when the pawn has no OwnerInfo.
     bool set_active_stations(const std::vector<std::array<int32_t, 4>>& stations);

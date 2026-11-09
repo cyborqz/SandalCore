@@ -64,6 +64,10 @@ struct Result {
     bool                     offer = false;     // the conversation now shows a quest offer (state().sub)
     bool                     offer_answered = false;   // the quest offer was answered or refused: the update carries the cleared queue and ExhaustBehavior
     int                      open_warehouse = 0;   // storage, step 0: the line opens the character's warehouse (the action response OpenPlayerWarehouse): its StorageAccessConfig; the conversation ends
+    /// Node citizenship: the line's action response AddNodeCitizenship (1: the join dialog opens), RemoveNodeCitizenship (2: the renounce warning opens) or AddNodeMayorCandidate
+    /// (3: the character stands for mayor); the conversation goes on.
+    int                      citizenship = 0;
+    int64_t                  citizenship_vendor = 0;   // AddNodeCitizenship's shop of the tax receipts (0: none)
     /// Quests, slice 2: the quest actions the conversation ran, in order, for the session to carry out (`node` is the node whose line or enter / exit list holds each).  Objective
     /// progress (CompleteDialogueObjective, IncrementDialogueObjective) is among them only in the result of the step that ends the conversation.
     struct Run {
@@ -181,6 +185,13 @@ public:
             }
             if (a.action == "ActionResponse" && a.response == "OpenPlayerWarehouse") {
                 if (r.open_warehouse == 0) r.open_warehouse = a.access_config > 0 && a.access_config < 64 ? static_cast<int>(a.access_config) : 7;
+                continue;
+            }
+            if (a.action == "ActionResponse" && (a.response == "AddNodeCitizenship" || a.response == "RemoveNodeCitizenship" || a.response == "AddNodeMayorCandidate")) {
+                if (r.citizenship == 0) {
+                    r.citizenship = a.response == "AddNodeCitizenship" ? 1 : a.response == "RemoveNodeCitizenship" ? 2 : 3;
+                    r.citizenship_vendor = a.vendor;
+                }
                 continue;
             }
             if (is_quest_action(a)) {

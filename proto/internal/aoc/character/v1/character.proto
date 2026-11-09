@@ -114,6 +114,18 @@ message Character {
   // of a name on its lists by itself. A character that ignores nobody has none.
   repeated string ignored_character_names = 31;
   repeated string ignored_guild_names = 32;
+  // Node citizenship (migration 0020): the citizenship of the character's account, with the items (include_items). Unset when the account never joined a node.
+  Citizenship citizenship = 36;
+}
+
+// An account's node citizenship (migration 0020). node_guid 0 is none: then only renounce_cooldown_until_ms counts. Times are Unix milliseconds on the server's wall clock;
+// 0 is none.
+message Citizenship {
+  int64 node_guid = 1; // the city node record (CityNodeRecordBase guid)
+  string primary_character_id = 2; // the character that joined ("" when it was deleted); the account's other characters are its alternates
+  int64 joined_ms = 3;
+  int64 dues_due_ms = 4; // when the next citizenship dues are due
+  int64 renounce_cooldown_until_ms = 5; // the account cannot join a node again before this
 }
 
 // One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
@@ -364,6 +376,10 @@ message SaveProgressRequest {
   bool replace_ignored_names = 16;
   repeated string ignored_character_names = 17;
   repeated string ignored_guild_names = 18;
+  // Node citizenship: with replace_citizenship the citizenship of the character's account becomes exactly `citizenship` (unset: none, no cooldown, and the row goes); without it it
+  // is left alone. InvalidArgument, with nothing changed, for a negative time, a primary character that is not of the account, or a node with no join time.
+  bool replace_citizenship = 19;
+  Citizenship citizenship = 20;
 }
 
 message SaveProgressResponse {

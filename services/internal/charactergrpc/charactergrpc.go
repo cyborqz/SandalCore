@@ -70,6 +70,14 @@ type FTUEStore interface {
 
 var _ FTUEStore = (*character.Store)(nil)
 
+// CitizenshipStore is the part of character.Store that keeps an account's node citizenship (migration 0020). A store without it keeps none: GetCharacter sends none and a save
+// that replaces it is refused.
+type CitizenshipStore interface {
+	Citizenship(ctx context.Context, id string) (character.Citizenship, bool, error)
+}
+
+var _ CitizenshipStore = (*character.Store)(nil)
+
 // WarehouseStore is the part of character.Store that keeps a character's warehouse (the storage milestone, step 0). A store without it keeps none: GetCharacter sends none and a save that
 // replaces the warehouse is refused.
 type WarehouseStore interface {
@@ -285,6 +293,16 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			}
 			out.CompletedFtues = done
 		}
+		if cs, ok := s.store.(CitizenshipStore); ok {
+			cit, has, err := cs.Citizenship(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			if has {
+				out.Citizenship = &characterv1.Citizenship{NodeGuid: cit.NodeGUID, PrimaryCharacterId: cit.PrimaryCharacterID, JoinedMs: cit.JoinedMs,
+					DuesDueMs: cit.DuesDueMs, RenounceCooldownUntilMs: cit.RenounceCooldownUntilMs}
+			}
+		}
 		if ws, ok := s.store.(WarehouseStore); ok {
 			stored, err := ws.WarehouseItems(ctx, c.ID)
 			if err != nil {
@@ -321,6 +339,18 @@ func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRe
 		ReplaceCompletedFTUEs: r.GetReplaceCompletedFtues(), CompletedFTUEs: r.GetCompletedFtues(),
 		ReplaceAttunements: r.GetReplaceAttunements(), Attunements: character.Attunements{Discovered: r.GetAttunements(), Home: r.GetHomeAttunement(), HomeLastUsedMs: r.GetHomeLastUsedMs()},
 		ReplaceIgnoredNames: r.GetReplaceIgnoredNames(), IgnoredNames: character.IgnoredNames{Characters: r.GetIgnoredCharacterNames(), Guilds: r.GetIgnoredGuildNames()}}
+	if r.GetReplaceCitizenship() {
+		if _, ok := s.store.(CitizenshipStore); !ok {
+			return nil, status.Error(codes.FailedPrecondition, "this character store keeps no citizenship")
+		}
+		p.ReplaceCitizenship = true
+		if c := r.GetCitizenship(); c != nil {
+			p.Citizenship = character.Citizenship{NodeGUID: c.GetNodeGuid(), PrimaryCharacterID: c.GetPrimaryCharacterId(), JoinedMs: c.GetJoinedMs(), DuesDueMs: c.GetDuesDueMs(),
+				RenounceCooldownUntilMs: c.GetRenounceCooldownUntilMs()}
+		}
+	} else if r.GetCitizenship() != nil {
+		return nil, status.Error(codes.InvalidArgument, "a citizenship is given without replace_citizenship")
+	}
 	for _, e := range r.GetExperience() {
 		p.Experience = append(p.Experience, character.Experience{LevelingTypeGuid: e.GetLevelingTypeGuid(), XP: e.GetXp(), Debt: e.GetDebt()})
 	}

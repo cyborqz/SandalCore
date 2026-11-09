@@ -69,6 +69,9 @@ public:
     double                          player_x = 0, player_y = 0, npc_x = 0, npc_y = 0;
     bool                            has_npc = false;
     int64_t                         citizen_node = 0;
+    bool                            citizenship_cooldown = false;   // the account renounced lately and may not join yet
+    const world::Elections*         elections = nullptr;            // node citizenship, stage 2 (null: no elections)
+    int64_t                         account = 0;
     const world::CityNodes*         nodes = nullptr;
     const quest::QuestLog*          quests = nullptr;   // quests: the character's log (null: it has none)
 
@@ -105,9 +108,24 @@ public:
             return ExprValue::of(citizen_node != 0 && citizen_node == args[1].i ? 1 : 0);
         }
         // the world around: worldd runs no elections, constructions, expansions or buy orders yet, and has no mayors
-        static const char* const kNodeActivity[] = {"Node_NumOfServiceBuildingsInState", "Node_NumOfServiceBuilding", "Node_IsNodeMayorElectionActive", "Node_IsNodeMayorPrevoteActive",
-                                                    "Node_IsExpansionInGivenState", "Node_IsBuyOrderActive", "Node_IsPlayerMayorCandidate", "Node_IsPlayerMayorCurrentNode",
-                                                    "Node_HasPlayerCitizenshipCooldown", "Node_CanPlayerBecomeCitizen"};
+        if (name == "Node_HasPlayerCitizenshipCooldown") return ExprValue::of(citizenship_cooldown ? 1 : 0);
+        // the elections: the registration is the client's "prevote"
+        const auto election_state = [&](int64_t node) -> int {
+            const world::NodeElection* e = elections ? elections->node(node) : nullptr;
+            return e ? static_cast<int>(e->state) : -1;
+        };
+        if (name == "Node_IsNodeMayorPrevoteActive" || name == "Node_IsNodeMayorElectionActive") {
+            if (args.size() != 1) return std::nullopt;
+            const int want = name == "Node_IsNodeMayorPrevoteActive" ? static_cast<int>(world::ElectionState::Registration) : static_cast<int>(world::ElectionState::Active);
+            return ExprValue::of(election_state(args[0].i) == want ? 1 : 0);
+        }
+        if (name == "Node_IsPlayerMayorCandidate") {
+            if (args.size() != 2) return std::nullopt;
+            return ExprValue::of(elections && elections->is_candidate(args[1].i, account) ? 1 : 0);
+        }
+        if (name == "Node_IsPlayerMayorCurrentNode") return ExprValue::of(elections && account != 0 && elections->mayor_node(account) == node_at(player_x, player_y) && node_at(player_x, player_y) != 0 ? 1 : 0);
+        if (name == "Node_CanPlayerBecomeCitizen") return ExprValue::of(citizen_node == 0 && !citizenship_cooldown ? 1 : 0);
+        static const char* const kNodeActivity[] = {"Node_NumOfServiceBuildingsInState", "Node_NumOfServiceBuilding", "Node_IsExpansionInGivenState", "Node_IsBuyOrderActive"};
         for (const char* f : kNodeActivity) {
             if (name == f) return ExprValue::of(0);
         }
@@ -138,6 +156,9 @@ std::unique_ptr<dialogue::Facts> PlayerSession::dialogue_facts(const world::Worl
         f->npc_y = npc->y;
     }
     f->citizen_node = pb_.setup().citizen_node;
+    f->citizenship_cooldown = citizenship_.node_guid == 0 && citizenship_.renounce_cooldown_until_ms > wall_ms();
+    f->elections = world_ ? world_->elections() : nullptr;
+    f->account = account_id_;
     f->nodes = world_ ? world_->city_nodes() : nullptr;
     if (quests_on_) f->quests = &quest_log_;
     return f;
@@ -315,6 +336,15 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
         open_talk_shop(conn, *npc, r.open_vendor, now);
     }
     if (r.outcome == dialogue::Outcome::Changed) run_talk_actions(conn, r, *npc, now);   // quests: the line's actions, the node left and the nodes entered
+    // node citizenship: the Node Administrator's lines open the join dialog or the renounce warning (session/player_citizenship.cpp)
+    if (r.citizenship == 3 && r.outcome == dialogue::Outcome::Changed) {
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: the character stands for mayor", name(), response->choice_index, response->node);
+        stand_for_mayor(conn, "the Sheriff's line");
+    } else if (r.citizenship != 0 && r.outcome == dialogue::Outcome::Changed) {
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the {}", name(), response->choice_index, response->node,
+                    r.citizenship == 1 ? "citizenship dialog" : "renounce warning");
+        open_citizenship_dialog(conn, *npc, r.citizenship == 1, r.citizenship_vendor, now);
+    }
     switch (r.outcome) {
         case dialogue::Outcome::Changed:
             ++dialogue_steps_;

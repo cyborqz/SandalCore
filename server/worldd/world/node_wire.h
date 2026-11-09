@@ -26,6 +26,7 @@
 
 #include "protocol/repl/node_rpc.h"
 #include "world/city_nodes.h"
+#include "world/elections.h"
 
 #include <cstdint>
 #include <map>
@@ -61,8 +62,9 @@ public:
     /// the data.
     static std::unique_ptr<NodeWire> load(const std::string& content_db_path, const CityNodes& nodes, std::string& error);
 
-    /// The GameState's maps for the registry's levels now.
-    protocol::repl::NodeStateMaps maps(const CityNodes& nodes) const;
+    /// The GameState's maps for the registry's levels now; with `elections`, each node's mayor (FClientNodeData's Mayor) and its number of citizens
+    /// (NodeNumberOfCitizensFastMap, saturating at 255).
+    protocol::repl::NodeStateMaps maps(const CityNodes& nodes, const Elections* elections = nullptr) const;
 
     /// The nodes of the GameState, as ranks, in rank order (retail's 46).
     const std::vector<int>& roster() const { return roster_; }
@@ -70,7 +72,8 @@ public:
 // C O A and C Y B
 
     /// The summary of the node `guid` at its level now; nullopt for a guid that is no city node record.  `unix_now` places the maintenance a week ahead.
-    std::optional<protocol::repl::NodeSummary> summary(int64_t guid, const CityNodes& nodes, int64_t unix_now) const;
+    /// With `elections`, a node that has a mayor carries the mayor's message (MayorMessage) and may be edited at once (NextMayorMessageEditTime 0).
+    std::optional<protocol::repl::NodeSummary> summary(int64_t guid, const CityNodes& nodes, int64_t unix_now, const Elections* elections = nullptr) const;
     /// The idle siege summary of the node `guid`; nullopt for a guid that is no city node record.
     std::optional<protocol::repl::SiegeSummary> siege(int64_t guid, const CityNodes& nodes) const;
 

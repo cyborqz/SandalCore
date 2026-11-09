@@ -219,8 +219,10 @@ type Character struct {
 	// of a name on its lists by itself. A character that ignores nobody has none.
 	IgnoredCharacterNames []string `protobuf:"bytes,31,rep,name=ignored_character_names,json=ignoredCharacterNames,proto3" json:"ignored_character_names,omitempty"`
 	IgnoredGuildNames     []string `protobuf:"bytes,32,rep,name=ignored_guild_names,json=ignoredGuildNames,proto3" json:"ignored_guild_names,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Node citizenship (migration 0020): the citizenship of the character's account, with the items (include_items). Unset when the account never joined a node.
+	Citizenship   *Citizenship `protobuf:"bytes,36,opt,name=citizenship,proto3" json:"citizenship,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Character) Reset() {
@@ -456,6 +458,91 @@ func (x *Character) GetIgnoredGuildNames() []string {
 	return nil
 }
 
+func (x *Character) GetCitizenship() *Citizenship {
+	if x != nil {
+		return x.Citizenship
+	}
+	return nil
+}
+
+// An account's node citizenship (migration 0020). node_guid 0 is none: then only renounce_cooldown_until_ms counts. Times are Unix milliseconds on the server's wall clock;
+// 0 is none.
+type Citizenship struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	NodeGuid                int64                  `protobuf:"varint,1,opt,name=node_guid,json=nodeGuid,proto3" json:"node_guid,omitempty"`                                // the city node record (CityNodeRecordBase guid)
+	PrimaryCharacterId      string                 `protobuf:"bytes,2,opt,name=primary_character_id,json=primaryCharacterId,proto3" json:"primary_character_id,omitempty"` // the character that joined ("" when it was deleted); the account's other characters are its alternates
+	JoinedMs                int64                  `protobuf:"varint,3,opt,name=joined_ms,json=joinedMs,proto3" json:"joined_ms,omitempty"`
+	DuesDueMs               int64                  `protobuf:"varint,4,opt,name=dues_due_ms,json=duesDueMs,proto3" json:"dues_due_ms,omitempty"`                                             // when the next citizenship dues are due
+	RenounceCooldownUntilMs int64                  `protobuf:"varint,5,opt,name=renounce_cooldown_until_ms,json=renounceCooldownUntilMs,proto3" json:"renounce_cooldown_until_ms,omitempty"` // the account cannot join a node again before this
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *Citizenship) Reset() {
+	*x = Citizenship{}
+	mi := &file_aoc_character_v1_character_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Citizenship) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Citizenship) ProtoMessage() {}
+
+func (x *Citizenship) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_character_v1_character_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Citizenship.ProtoReflect.Descriptor instead.
+func (*Citizenship) Descriptor() ([]byte, []int) {
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Citizenship) GetNodeGuid() int64 {
+	if x != nil {
+		return x.NodeGuid
+	}
+	return 0
+}
+
+func (x *Citizenship) GetPrimaryCharacterId() string {
+	if x != nil {
+		return x.PrimaryCharacterId
+	}
+	return ""
+}
+
+func (x *Citizenship) GetJoinedMs() int64 {
+	if x != nil {
+		return x.JoinedMs
+	}
+	return 0
+}
+
+func (x *Citizenship) GetDuesDueMs() int64 {
+	if x != nil {
+		return x.DuesDueMs
+	}
+	return 0
+}
+
+func (x *Citizenship) GetRenounceCooldownUntilMs() int64 {
+	if x != nil {
+		return x.RenounceCooldownUntilMs
+	}
+	return 0
+}
+
 // One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
 // WarehouseStorageItemChunk record), "Materials" (the material tabs of the town node_guid, container_guid the WarehouseStorageMaterialTab record) or "Cargo" (the cargo tab, the same keys).
 // slot is the index in a chunk, or the row-major index of the item's top-left cell in a tab; the other fields are those of Item.
@@ -480,7 +567,7 @@ type WarehouseItem struct {
 
 func (x *WarehouseItem) Reset() {
 	*x = WarehouseItem{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[2]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +579,7 @@ func (x *WarehouseItem) String() string {
 func (*WarehouseItem) ProtoMessage() {}
 
 func (x *WarehouseItem) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[2]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +592,7 @@ func (x *WarehouseItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WarehouseItem.ProtoReflect.Descriptor instead.
 func (*WarehouseItem) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{2}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *WarehouseItem) GetArea() string {
@@ -624,7 +711,7 @@ type ProcessingJob struct {
 
 func (x *ProcessingJob) Reset() {
 	*x = ProcessingJob{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[3]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -636,7 +723,7 @@ func (x *ProcessingJob) String() string {
 func (*ProcessingJob) ProtoMessage() {}
 
 func (x *ProcessingJob) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[3]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -649,7 +736,7 @@ func (x *ProcessingJob) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessingJob.ProtoReflect.Descriptor instead.
 func (*ProcessingJob) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{3}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProcessingJob) GetJobGuid() string {
@@ -754,7 +841,7 @@ type JobResource struct {
 
 func (x *JobResource) Reset() {
 	*x = JobResource{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[4]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -766,7 +853,7 @@ func (x *JobResource) String() string {
 func (*JobResource) ProtoMessage() {}
 
 func (x *JobResource) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[4]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -779,7 +866,7 @@ func (x *JobResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobResource.ProtoReflect.Descriptor instead.
 func (*JobResource) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{4}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *JobResource) GetRecordId() int64 {
@@ -807,7 +894,7 @@ type JobRarity struct {
 
 func (x *JobRarity) Reset() {
 	*x = JobRarity{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[5]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -819,7 +906,7 @@ func (x *JobRarity) String() string {
 func (*JobRarity) ProtoMessage() {}
 
 func (x *JobRarity) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[5]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -832,7 +919,7 @@ func (x *JobRarity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobRarity.ProtoReflect.Descriptor instead.
 func (*JobRarity) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{5}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *JobRarity) GetRarity() int32 {
@@ -868,7 +955,7 @@ type WalletEntry struct {
 
 func (x *WalletEntry) Reset() {
 	*x = WalletEntry{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[6]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -880,7 +967,7 @@ func (x *WalletEntry) String() string {
 func (*WalletEntry) ProtoMessage() {}
 
 func (x *WalletEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[6]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -893,7 +980,7 @@ func (x *WalletEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WalletEntry.ProtoReflect.Descriptor instead.
 func (*WalletEntry) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{6}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *WalletEntry) GetCurrencyGuid() int64 {
@@ -926,7 +1013,7 @@ type ProfessionState struct {
 
 func (x *ProfessionState) Reset() {
 	*x = ProfessionState{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[7]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -938,7 +1025,7 @@ func (x *ProfessionState) String() string {
 func (*ProfessionState) ProtoMessage() {}
 
 func (x *ProfessionState) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[7]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -951,7 +1038,7 @@ func (x *ProfessionState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfessionState.ProtoReflect.Descriptor instead.
 func (*ProfessionState) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{7}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ProfessionState) GetProfessionGuid() int64 {
@@ -995,7 +1082,7 @@ type TreeRanks struct {
 
 func (x *TreeRanks) Reset() {
 	*x = TreeRanks{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[8]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1007,7 +1094,7 @@ func (x *TreeRanks) String() string {
 func (*TreeRanks) ProtoMessage() {}
 
 func (x *TreeRanks) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[8]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1020,7 +1107,7 @@ func (x *TreeRanks) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TreeRanks.ProtoReflect.Descriptor instead.
 func (*TreeRanks) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{8}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TreeRanks) GetTreeGuid() int64 {
@@ -1060,7 +1147,7 @@ type ActionbarSlot struct {
 
 func (x *ActionbarSlot) Reset() {
 	*x = ActionbarSlot{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[9]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1072,7 +1159,7 @@ func (x *ActionbarSlot) String() string {
 func (*ActionbarSlot) ProtoMessage() {}
 
 func (x *ActionbarSlot) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[9]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1085,7 +1172,7 @@ func (x *ActionbarSlot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionbarSlot.ProtoReflect.Descriptor instead.
 func (*ActionbarSlot) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{9}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ActionbarSlot) GetBank() int32 {
@@ -1185,7 +1272,7 @@ type Experience struct {
 
 func (x *Experience) Reset() {
 	*x = Experience{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[10]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +1284,7 @@ func (x *Experience) String() string {
 func (*Experience) ProtoMessage() {}
 
 func (x *Experience) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[10]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +1297,7 @@ func (x *Experience) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Experience.ProtoReflect.Descriptor instead.
 func (*Experience) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{10}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Experience) GetLevelingTypeGuid() int64 {
@@ -1256,7 +1343,7 @@ type Item struct {
 
 func (x *Item) Reset() {
 	*x = Item{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[11]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1268,7 +1355,7 @@ func (x *Item) String() string {
 func (*Item) ProtoMessage() {}
 
 func (x *Item) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[11]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1281,7 +1368,7 @@ func (x *Item) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Item.ProtoReflect.Descriptor instead.
 func (*Item) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{11}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Item) GetContainer() ItemContainer {
@@ -1380,7 +1467,7 @@ type CreateCharacterRequest struct {
 
 func (x *CreateCharacterRequest) Reset() {
 	*x = CreateCharacterRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[12]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1392,7 +1479,7 @@ func (x *CreateCharacterRequest) String() string {
 func (*CreateCharacterRequest) ProtoMessage() {}
 
 func (x *CreateCharacterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[12]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1405,7 +1492,7 @@ func (x *CreateCharacterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCharacterRequest.ProtoReflect.Descriptor instead.
 func (*CreateCharacterRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{12}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CreateCharacterRequest) GetAccountId() int64 {
@@ -1494,7 +1581,7 @@ type CreateCharacterResponse struct {
 
 func (x *CreateCharacterResponse) Reset() {
 	*x = CreateCharacterResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[13]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1506,7 +1593,7 @@ func (x *CreateCharacterResponse) String() string {
 func (*CreateCharacterResponse) ProtoMessage() {}
 
 func (x *CreateCharacterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[13]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1519,7 +1606,7 @@ func (x *CreateCharacterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateCharacterResponse.ProtoReflect.Descriptor instead.
 func (*CreateCharacterResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{13}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CreateCharacterResponse) GetCharacter() *Character {
@@ -1538,7 +1625,7 @@ type ListCharactersRequest struct {
 
 func (x *ListCharactersRequest) Reset() {
 	*x = ListCharactersRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[14]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1550,7 +1637,7 @@ func (x *ListCharactersRequest) String() string {
 func (*ListCharactersRequest) ProtoMessage() {}
 
 func (x *ListCharactersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[14]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1563,7 +1650,7 @@ func (x *ListCharactersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCharactersRequest.ProtoReflect.Descriptor instead.
 func (*ListCharactersRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{14}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListCharactersRequest) GetAccountId() int64 {
@@ -1582,7 +1669,7 @@ type ListCharactersResponse struct {
 
 func (x *ListCharactersResponse) Reset() {
 	*x = ListCharactersResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[15]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1594,7 +1681,7 @@ func (x *ListCharactersResponse) String() string {
 func (*ListCharactersResponse) ProtoMessage() {}
 
 func (x *ListCharactersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[15]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1607,7 +1694,7 @@ func (x *ListCharactersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCharactersResponse.ProtoReflect.Descriptor instead.
 func (*ListCharactersResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{15}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListCharactersResponse) GetCharacters() []*Character {
@@ -1627,7 +1714,7 @@ type GetCharacterRequest struct {
 
 func (x *GetCharacterRequest) Reset() {
 	*x = GetCharacterRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[16]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1639,7 +1726,7 @@ func (x *GetCharacterRequest) String() string {
 func (*GetCharacterRequest) ProtoMessage() {}
 
 func (x *GetCharacterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[16]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1652,7 +1739,7 @@ func (x *GetCharacterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCharacterRequest.ProtoReflect.Descriptor instead.
 func (*GetCharacterRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{16}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetCharacterRequest) GetId() string {
@@ -1678,7 +1765,7 @@ type GetCharacterResponse struct {
 
 func (x *GetCharacterResponse) Reset() {
 	*x = GetCharacterResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[17]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1690,7 +1777,7 @@ func (x *GetCharacterResponse) String() string {
 func (*GetCharacterResponse) ProtoMessage() {}
 
 func (x *GetCharacterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[17]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1703,7 +1790,7 @@ func (x *GetCharacterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCharacterResponse.ProtoReflect.Descriptor instead.
 func (*GetCharacterResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{17}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetCharacterResponse) GetCharacter() *Character {
@@ -1727,7 +1814,7 @@ type SaveCharacterStateRequest struct {
 
 func (x *SaveCharacterStateRequest) Reset() {
 	*x = SaveCharacterStateRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[18]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1739,7 +1826,7 @@ func (x *SaveCharacterStateRequest) String() string {
 func (*SaveCharacterStateRequest) ProtoMessage() {}
 
 func (x *SaveCharacterStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[18]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1752,7 +1839,7 @@ func (x *SaveCharacterStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveCharacterStateRequest.ProtoReflect.Descriptor instead.
 func (*SaveCharacterStateRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{18}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SaveCharacterStateRequest) GetId() string {
@@ -1792,7 +1879,7 @@ type SaveCharacterStateResponse struct {
 
 func (x *SaveCharacterStateResponse) Reset() {
 	*x = SaveCharacterStateResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[19]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1804,7 +1891,7 @@ func (x *SaveCharacterStateResponse) String() string {
 func (*SaveCharacterStateResponse) ProtoMessage() {}
 
 func (x *SaveCharacterStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[19]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1817,7 +1904,7 @@ func (x *SaveCharacterStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveCharacterStateResponse.ProtoReflect.Descriptor instead.
 func (*SaveCharacterStateResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{19}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SaveCharacterStateResponse) GetCharacter() *Character {
@@ -1837,7 +1924,7 @@ type DeleteCharacterRequest struct {
 
 func (x *DeleteCharacterRequest) Reset() {
 	*x = DeleteCharacterRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[20]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1849,7 +1936,7 @@ func (x *DeleteCharacterRequest) String() string {
 func (*DeleteCharacterRequest) ProtoMessage() {}
 
 func (x *DeleteCharacterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[20]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1862,7 +1949,7 @@ func (x *DeleteCharacterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCharacterRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCharacterRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{20}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DeleteCharacterRequest) GetId() string {
@@ -1887,7 +1974,7 @@ type DeleteCharacterResponse struct {
 
 func (x *DeleteCharacterResponse) Reset() {
 	*x = DeleteCharacterResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[21]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1899,7 +1986,7 @@ func (x *DeleteCharacterResponse) String() string {
 func (*DeleteCharacterResponse) ProtoMessage() {}
 
 func (x *DeleteCharacterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[21]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1912,7 +1999,7 @@ func (x *DeleteCharacterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCharacterResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCharacterResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{21}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{22}
 }
 
 type SaveInventoryRequest struct {
@@ -1943,7 +2030,7 @@ type SaveInventoryRequest struct {
 
 func (x *SaveInventoryRequest) Reset() {
 	*x = SaveInventoryRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[22]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1955,7 +2042,7 @@ func (x *SaveInventoryRequest) String() string {
 func (*SaveInventoryRequest) ProtoMessage() {}
 
 func (x *SaveInventoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[22]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1968,7 +2055,7 @@ func (x *SaveInventoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveInventoryRequest.ProtoReflect.Descriptor instead.
 func (*SaveInventoryRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{22}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SaveInventoryRequest) GetId() string {
@@ -2050,7 +2137,7 @@ type SaveInventoryResponse struct {
 
 func (x *SaveInventoryResponse) Reset() {
 	*x = SaveInventoryResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[23]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2062,7 +2149,7 @@ func (x *SaveInventoryResponse) String() string {
 func (*SaveInventoryResponse) ProtoMessage() {}
 
 func (x *SaveInventoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[23]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2075,7 +2162,7 @@ func (x *SaveInventoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveInventoryResponse.ProtoReflect.Descriptor instead.
 func (*SaveInventoryResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{23}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SaveInventoryResponse) GetSaved() int32 {
@@ -2116,13 +2203,17 @@ type SaveProgressRequest struct {
 	ReplaceIgnoredNames   bool     `protobuf:"varint,16,opt,name=replace_ignored_names,json=replaceIgnoredNames,proto3" json:"replace_ignored_names,omitempty"`
 	IgnoredCharacterNames []string `protobuf:"bytes,17,rep,name=ignored_character_names,json=ignoredCharacterNames,proto3" json:"ignored_character_names,omitempty"`
 	IgnoredGuildNames     []string `protobuf:"bytes,18,rep,name=ignored_guild_names,json=ignoredGuildNames,proto3" json:"ignored_guild_names,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Node citizenship: with replace_citizenship the citizenship of the character's account becomes exactly `citizenship` (unset: none, no cooldown, and the row goes); without it it
+	// is left alone. InvalidArgument, with nothing changed, for a negative time, a primary character that is not of the account, or a node with no join time.
+	ReplaceCitizenship bool         `protobuf:"varint,19,opt,name=replace_citizenship,json=replaceCitizenship,proto3" json:"replace_citizenship,omitempty"`
+	Citizenship        *Citizenship `protobuf:"bytes,20,opt,name=citizenship,proto3" json:"citizenship,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SaveProgressRequest) Reset() {
 	*x = SaveProgressRequest{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[24]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2134,7 +2225,7 @@ func (x *SaveProgressRequest) String() string {
 func (*SaveProgressRequest) ProtoMessage() {}
 
 func (x *SaveProgressRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[24]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2147,7 +2238,7 @@ func (x *SaveProgressRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveProgressRequest.ProtoReflect.Descriptor instead.
 func (*SaveProgressRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{24}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SaveProgressRequest) GetId() string {
@@ -2276,6 +2367,20 @@ func (x *SaveProgressRequest) GetIgnoredGuildNames() []string {
 	return nil
 }
 
+func (x *SaveProgressRequest) GetReplaceCitizenship() bool {
+	if x != nil {
+		return x.ReplaceCitizenship
+	}
+	return false
+}
+
+func (x *SaveProgressRequest) GetCitizenship() *Citizenship {
+	if x != nil {
+		return x.Citizenship
+	}
+	return nil
+}
+
 type SaveProgressResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Character     *Character             `protobuf:"bytes,1,opt,name=character,proto3" json:"character,omitempty"` // with its experience rows
@@ -2285,7 +2390,7 @@ type SaveProgressResponse struct {
 
 func (x *SaveProgressResponse) Reset() {
 	*x = SaveProgressResponse{}
-	mi := &file_aoc_character_v1_character_proto_msgTypes[25]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2297,7 +2402,7 @@ func (x *SaveProgressResponse) String() string {
 func (*SaveProgressResponse) ProtoMessage() {}
 
 func (x *SaveProgressResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_character_v1_character_proto_msgTypes[25]
+	mi := &file_aoc_character_v1_character_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2310,7 +2415,7 @@ func (x *SaveProgressResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveProgressResponse.ProtoReflect.Descriptor instead.
 func (*SaveProgressResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{25}
+	return file_aoc_character_v1_character_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SaveProgressResponse) GetCharacter() *Character {
@@ -2329,7 +2434,8 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\x12\f\n" +
 	"\x01z\x18\x03 \x01(\x01R\x01z\x12\x10\n" +
-	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xe4\t\n" +
+	"\x03yaw\x18\x04 \x01(\x02R\x03yaw\"\xa5\n" +
+	"\n" +
 	"\tCharacter\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2368,7 +2474,14 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x11home_last_used_ms\x18\x1a \x01(\x03R\x0ehomeLastUsedMs\x12H\n" +
 	"\x0fwarehouse_items\x18\x1e \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\x126\n" +
 	"\x17ignored_character_names\x18\x1f \x03(\tR\x15ignoredCharacterNames\x12.\n" +
-	"\x13ignored_guild_names\x18  \x03(\tR\x11ignoredGuildNames\"\xed\x03\n" +
+	"\x13ignored_guild_names\x18  \x03(\tR\x11ignoredGuildNames\x12?\n" +
+	"\vcitizenship\x18$ \x01(\v2\x1d.aoc.character.v1.CitizenshipR\vcitizenship\"\xd6\x01\n" +
+	"\vCitizenship\x12\x1b\n" +
+	"\tnode_guid\x18\x01 \x01(\x03R\bnodeGuid\x120\n" +
+	"\x14primary_character_id\x18\x02 \x01(\tR\x12primaryCharacterId\x12\x1b\n" +
+	"\tjoined_ms\x18\x03 \x01(\x03R\bjoinedMs\x12\x1e\n" +
+	"\vdues_due_ms\x18\x04 \x01(\x03R\tduesDueMs\x12;\n" +
+	"\x1arenounce_cooldown_until_ms\x18\x05 \x01(\x03R\x17renounceCooldownUntilMs\"\xed\x03\n" +
 	"\rWarehouseItem\x12\x12\n" +
 	"\x04area\x18\x01 \x01(\tR\x04area\x12\x1b\n" +
 	"\tnode_guid\x18\x02 \x01(\x03R\bnodeGuid\x12%\n" +
@@ -2522,7 +2635,7 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x11replace_warehouse\x18\x14 \x01(\bR\x10replaceWarehouse\x12H\n" +
 	"\x0fwarehouse_items\x18\x15 \x03(\v2\x1f.aoc.character.v1.WarehouseItemR\x0ewarehouseItems\"-\n" +
 	"\x15SaveInventoryResponse\x12\x14\n" +
-	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xd9\x06\n" +
+	"\x05saved\x18\x01 \x01(\x05R\x05saved\"\xcb\a\n" +
 	"\x13SaveProgressRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\x05R\x05level\x12\x19\n" +
@@ -2546,7 +2659,9 @@ const file_aoc_character_v1_character_proto_rawDesc = "" +
 	"\x11home_last_used_ms\x18\x0f \x01(\x03R\x0ehomeLastUsedMs\x122\n" +
 	"\x15replace_ignored_names\x18\x10 \x01(\bR\x13replaceIgnoredNames\x126\n" +
 	"\x17ignored_character_names\x18\x11 \x03(\tR\x15ignoredCharacterNames\x12.\n" +
-	"\x13ignored_guild_names\x18\x12 \x03(\tR\x11ignoredGuildNames\"Q\n" +
+	"\x13ignored_guild_names\x18\x12 \x03(\tR\x11ignoredGuildNames\x12/\n" +
+	"\x13replace_citizenship\x18\x13 \x01(\bR\x12replaceCitizenship\x12?\n" +
+	"\vcitizenship\x18\x14 \x01(\v2\x1d.aoc.character.v1.CitizenshipR\vcitizenship\"Q\n" +
 	"\x14SaveProgressResponse\x129\n" +
 	"\tcharacter\x18\x01 \x01(\v2\x1b.aoc.character.v1.CharacterR\tcharacter*\xde\x01\n" +
 	"\rItemContainer\x12\x1e\n" +
@@ -2579,82 +2694,85 @@ func file_aoc_character_v1_character_proto_rawDescGZIP() []byte {
 }
 
 var file_aoc_character_v1_character_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_aoc_character_v1_character_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_aoc_character_v1_character_proto_goTypes = []any{
 	(ItemContainer)(0),                 // 0: aoc.character.v1.ItemContainer
 	(*Position)(nil),                   // 1: aoc.character.v1.Position
 	(*Character)(nil),                  // 2: aoc.character.v1.Character
-	(*WarehouseItem)(nil),              // 3: aoc.character.v1.WarehouseItem
-	(*ProcessingJob)(nil),              // 4: aoc.character.v1.ProcessingJob
-	(*JobResource)(nil),                // 5: aoc.character.v1.JobResource
-	(*JobRarity)(nil),                  // 6: aoc.character.v1.JobRarity
-	(*WalletEntry)(nil),                // 7: aoc.character.v1.WalletEntry
-	(*ProfessionState)(nil),            // 8: aoc.character.v1.ProfessionState
-	(*TreeRanks)(nil),                  // 9: aoc.character.v1.TreeRanks
-	(*ActionbarSlot)(nil),              // 10: aoc.character.v1.ActionbarSlot
-	(*Experience)(nil),                 // 11: aoc.character.v1.Experience
-	(*Item)(nil),                       // 12: aoc.character.v1.Item
-	(*CreateCharacterRequest)(nil),     // 13: aoc.character.v1.CreateCharacterRequest
-	(*CreateCharacterResponse)(nil),    // 14: aoc.character.v1.CreateCharacterResponse
-	(*ListCharactersRequest)(nil),      // 15: aoc.character.v1.ListCharactersRequest
-	(*ListCharactersResponse)(nil),     // 16: aoc.character.v1.ListCharactersResponse
-	(*GetCharacterRequest)(nil),        // 17: aoc.character.v1.GetCharacterRequest
-	(*GetCharacterResponse)(nil),       // 18: aoc.character.v1.GetCharacterResponse
-	(*SaveCharacterStateRequest)(nil),  // 19: aoc.character.v1.SaveCharacterStateRequest
-	(*SaveCharacterStateResponse)(nil), // 20: aoc.character.v1.SaveCharacterStateResponse
-	(*DeleteCharacterRequest)(nil),     // 21: aoc.character.v1.DeleteCharacterRequest
-	(*DeleteCharacterResponse)(nil),    // 22: aoc.character.v1.DeleteCharacterResponse
-	(*SaveInventoryRequest)(nil),       // 23: aoc.character.v1.SaveInventoryRequest
-	(*SaveInventoryResponse)(nil),      // 24: aoc.character.v1.SaveInventoryResponse
-	(*SaveProgressRequest)(nil),        // 25: aoc.character.v1.SaveProgressRequest
-	(*SaveProgressResponse)(nil),       // 26: aoc.character.v1.SaveProgressResponse
+	(*Citizenship)(nil),                // 3: aoc.character.v1.Citizenship
+	(*WarehouseItem)(nil),              // 4: aoc.character.v1.WarehouseItem
+	(*ProcessingJob)(nil),              // 5: aoc.character.v1.ProcessingJob
+	(*JobResource)(nil),                // 6: aoc.character.v1.JobResource
+	(*JobRarity)(nil),                  // 7: aoc.character.v1.JobRarity
+	(*WalletEntry)(nil),                // 8: aoc.character.v1.WalletEntry
+	(*ProfessionState)(nil),            // 9: aoc.character.v1.ProfessionState
+	(*TreeRanks)(nil),                  // 10: aoc.character.v1.TreeRanks
+	(*ActionbarSlot)(nil),              // 11: aoc.character.v1.ActionbarSlot
+	(*Experience)(nil),                 // 12: aoc.character.v1.Experience
+	(*Item)(nil),                       // 13: aoc.character.v1.Item
+	(*CreateCharacterRequest)(nil),     // 14: aoc.character.v1.CreateCharacterRequest
+	(*CreateCharacterResponse)(nil),    // 15: aoc.character.v1.CreateCharacterResponse
+	(*ListCharactersRequest)(nil),      // 16: aoc.character.v1.ListCharactersRequest
+	(*ListCharactersResponse)(nil),     // 17: aoc.character.v1.ListCharactersResponse
+	(*GetCharacterRequest)(nil),        // 18: aoc.character.v1.GetCharacterRequest
+	(*GetCharacterResponse)(nil),       // 19: aoc.character.v1.GetCharacterResponse
+	(*SaveCharacterStateRequest)(nil),  // 20: aoc.character.v1.SaveCharacterStateRequest
+	(*SaveCharacterStateResponse)(nil), // 21: aoc.character.v1.SaveCharacterStateResponse
+	(*DeleteCharacterRequest)(nil),     // 22: aoc.character.v1.DeleteCharacterRequest
+	(*DeleteCharacterResponse)(nil),    // 23: aoc.character.v1.DeleteCharacterResponse
+	(*SaveInventoryRequest)(nil),       // 24: aoc.character.v1.SaveInventoryRequest
+	(*SaveInventoryResponse)(nil),      // 25: aoc.character.v1.SaveInventoryResponse
+	(*SaveProgressRequest)(nil),        // 26: aoc.character.v1.SaveProgressRequest
+	(*SaveProgressResponse)(nil),       // 27: aoc.character.v1.SaveProgressResponse
 }
 var file_aoc_character_v1_character_proto_depIdxs = []int32{
 	1,  // 0: aoc.character.v1.Character.position:type_name -> aoc.character.v1.Position
-	12, // 1: aoc.character.v1.Character.items:type_name -> aoc.character.v1.Item
-	11, // 2: aoc.character.v1.Character.experience:type_name -> aoc.character.v1.Experience
-	9,  // 3: aoc.character.v1.Character.skill_ranks:type_name -> aoc.character.v1.TreeRanks
-	10, // 4: aoc.character.v1.Character.action_bar:type_name -> aoc.character.v1.ActionbarSlot
-	8,  // 5: aoc.character.v1.Character.professions:type_name -> aoc.character.v1.ProfessionState
-	7,  // 6: aoc.character.v1.Character.wallet:type_name -> aoc.character.v1.WalletEntry
-	4,  // 7: aoc.character.v1.Character.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
-	3,  // 8: aoc.character.v1.Character.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
-	5,  // 9: aoc.character.v1.ProcessingJob.resources:type_name -> aoc.character.v1.JobResource
-	6,  // 10: aoc.character.v1.JobResource.rarities:type_name -> aoc.character.v1.JobRarity
-	0,  // 11: aoc.character.v1.Item.container:type_name -> aoc.character.v1.ItemContainer
-	2,  // 12: aoc.character.v1.CreateCharacterResponse.character:type_name -> aoc.character.v1.Character
-	2,  // 13: aoc.character.v1.ListCharactersResponse.characters:type_name -> aoc.character.v1.Character
-	2,  // 14: aoc.character.v1.GetCharacterResponse.character:type_name -> aoc.character.v1.Character
-	1,  // 15: aoc.character.v1.SaveCharacterStateRequest.position:type_name -> aoc.character.v1.Position
-	2,  // 16: aoc.character.v1.SaveCharacterStateResponse.character:type_name -> aoc.character.v1.Character
-	12, // 17: aoc.character.v1.SaveInventoryRequest.items:type_name -> aoc.character.v1.Item
-	7,  // 18: aoc.character.v1.SaveInventoryRequest.wallet:type_name -> aoc.character.v1.WalletEntry
-	4,  // 19: aoc.character.v1.SaveInventoryRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
-	3,  // 20: aoc.character.v1.SaveInventoryRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
-	11, // 21: aoc.character.v1.SaveProgressRequest.experience:type_name -> aoc.character.v1.Experience
-	9,  // 22: aoc.character.v1.SaveProgressRequest.skill_ranks:type_name -> aoc.character.v1.TreeRanks
-	10, // 23: aoc.character.v1.SaveProgressRequest.action_bar:type_name -> aoc.character.v1.ActionbarSlot
-	8,  // 24: aoc.character.v1.SaveProgressRequest.professions:type_name -> aoc.character.v1.ProfessionState
-	2,  // 25: aoc.character.v1.SaveProgressResponse.character:type_name -> aoc.character.v1.Character
-	13, // 26: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
-	15, // 27: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
-	17, // 28: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
-	19, // 29: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
-	21, // 30: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
-	23, // 31: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
-	25, // 32: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
-	14, // 33: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
-	16, // 34: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
-	18, // 35: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
-	20, // 36: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
-	22, // 37: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
-	24, // 38: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
-	26, // 39: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
-	33, // [33:40] is the sub-list for method output_type
-	26, // [26:33] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	13, // 1: aoc.character.v1.Character.items:type_name -> aoc.character.v1.Item
+	12, // 2: aoc.character.v1.Character.experience:type_name -> aoc.character.v1.Experience
+	10, // 3: aoc.character.v1.Character.skill_ranks:type_name -> aoc.character.v1.TreeRanks
+	11, // 4: aoc.character.v1.Character.action_bar:type_name -> aoc.character.v1.ActionbarSlot
+	9,  // 5: aoc.character.v1.Character.professions:type_name -> aoc.character.v1.ProfessionState
+	8,  // 6: aoc.character.v1.Character.wallet:type_name -> aoc.character.v1.WalletEntry
+	5,  // 7: aoc.character.v1.Character.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
+	4,  // 8: aoc.character.v1.Character.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
+	3,  // 9: aoc.character.v1.Character.citizenship:type_name -> aoc.character.v1.Citizenship
+	6,  // 10: aoc.character.v1.ProcessingJob.resources:type_name -> aoc.character.v1.JobResource
+	7,  // 11: aoc.character.v1.JobResource.rarities:type_name -> aoc.character.v1.JobRarity
+	0,  // 12: aoc.character.v1.Item.container:type_name -> aoc.character.v1.ItemContainer
+	2,  // 13: aoc.character.v1.CreateCharacterResponse.character:type_name -> aoc.character.v1.Character
+	2,  // 14: aoc.character.v1.ListCharactersResponse.characters:type_name -> aoc.character.v1.Character
+	2,  // 15: aoc.character.v1.GetCharacterResponse.character:type_name -> aoc.character.v1.Character
+	1,  // 16: aoc.character.v1.SaveCharacterStateRequest.position:type_name -> aoc.character.v1.Position
+	2,  // 17: aoc.character.v1.SaveCharacterStateResponse.character:type_name -> aoc.character.v1.Character
+	13, // 18: aoc.character.v1.SaveInventoryRequest.items:type_name -> aoc.character.v1.Item
+	8,  // 19: aoc.character.v1.SaveInventoryRequest.wallet:type_name -> aoc.character.v1.WalletEntry
+	5,  // 20: aoc.character.v1.SaveInventoryRequest.processing_jobs:type_name -> aoc.character.v1.ProcessingJob
+	4,  // 21: aoc.character.v1.SaveInventoryRequest.warehouse_items:type_name -> aoc.character.v1.WarehouseItem
+	12, // 22: aoc.character.v1.SaveProgressRequest.experience:type_name -> aoc.character.v1.Experience
+	10, // 23: aoc.character.v1.SaveProgressRequest.skill_ranks:type_name -> aoc.character.v1.TreeRanks
+	11, // 24: aoc.character.v1.SaveProgressRequest.action_bar:type_name -> aoc.character.v1.ActionbarSlot
+	9,  // 25: aoc.character.v1.SaveProgressRequest.professions:type_name -> aoc.character.v1.ProfessionState
+	3,  // 26: aoc.character.v1.SaveProgressRequest.citizenship:type_name -> aoc.character.v1.Citizenship
+	2,  // 27: aoc.character.v1.SaveProgressResponse.character:type_name -> aoc.character.v1.Character
+	14, // 28: aoc.character.v1.CharacterService.CreateCharacter:input_type -> aoc.character.v1.CreateCharacterRequest
+	16, // 29: aoc.character.v1.CharacterService.ListCharacters:input_type -> aoc.character.v1.ListCharactersRequest
+	18, // 30: aoc.character.v1.CharacterService.GetCharacter:input_type -> aoc.character.v1.GetCharacterRequest
+	20, // 31: aoc.character.v1.CharacterService.SaveCharacterState:input_type -> aoc.character.v1.SaveCharacterStateRequest
+	22, // 32: aoc.character.v1.CharacterService.DeleteCharacter:input_type -> aoc.character.v1.DeleteCharacterRequest
+	24, // 33: aoc.character.v1.CharacterService.SaveInventory:input_type -> aoc.character.v1.SaveInventoryRequest
+	26, // 34: aoc.character.v1.CharacterService.SaveProgress:input_type -> aoc.character.v1.SaveProgressRequest
+	15, // 35: aoc.character.v1.CharacterService.CreateCharacter:output_type -> aoc.character.v1.CreateCharacterResponse
+	17, // 36: aoc.character.v1.CharacterService.ListCharacters:output_type -> aoc.character.v1.ListCharactersResponse
+	19, // 37: aoc.character.v1.CharacterService.GetCharacter:output_type -> aoc.character.v1.GetCharacterResponse
+	21, // 38: aoc.character.v1.CharacterService.SaveCharacterState:output_type -> aoc.character.v1.SaveCharacterStateResponse
+	23, // 39: aoc.character.v1.CharacterService.DeleteCharacter:output_type -> aoc.character.v1.DeleteCharacterResponse
+	25, // 40: aoc.character.v1.CharacterService.SaveInventory:output_type -> aoc.character.v1.SaveInventoryResponse
+	27, // 41: aoc.character.v1.CharacterService.SaveProgress:output_type -> aoc.character.v1.SaveProgressResponse
+	35, // [35:42] is the sub-list for method output_type
+	28, // [28:35] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_aoc_character_v1_character_proto_init() }
@@ -2662,15 +2780,15 @@ func file_aoc_character_v1_character_proto_init() {
 	if File_aoc_character_v1_character_proto != nil {
 		return
 	}
-	file_aoc_character_v1_character_proto_msgTypes[2].OneofWrappers = []any{}
-	file_aoc_character_v1_character_proto_msgTypes[11].OneofWrappers = []any{}
+	file_aoc_character_v1_character_proto_msgTypes[3].OneofWrappers = []any{}
+	file_aoc_character_v1_character_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_character_v1_character_proto_rawDesc), len(file_aoc_character_v1_character_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   26,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -176,6 +176,18 @@ struct ActionbarSlot {
 struct AccountCharacter {
     std::string id;     // 32 hex digits
     std::string name;
+    int32_t     level = 0;
+};
+
+/// Node citizenship (migration 0020, aoc.character.v1.Citizenship): an account's.  node_guid 0 is none (then only the renounce cooldown counts); times are Unix
+/// milliseconds on the server's wall clock, 0 for none.
+struct Citizenship {
+    int64_t     node_guid = 0;                    // the city node record
+    std::string primary_character_id;             // the character that joined ("" when it was deleted)
+    int64_t     joined_ms = 0;
+    int64_t     dues_due_ms = 0;                  // when the next citizenship dues are due
+    int64_t     renounce_cooldown_until_ms = 0;   // the account cannot join a node again before this
+    bool operator==(const Citizenship&) const = default;
 };
 
 /// Quests, slice 1: one objective of a quest the character took, as the quest service keeps it (aoc.quest.v1.ObjectiveState).
@@ -282,10 +294,17 @@ struct Character {
     /// Nodes 1, stage 2: the characters of the same account (id, name), this one included, for OwnerInfo.CharactersNodeData.  Empty when the list is not known
     /// (a service that does not answer ListCharacters, a fake): the join lists this character alone.
     std::vector<AccountCharacter> account_characters;
+    /// Node citizenship (migration 0020): the citizenship of the character's account (with the items).  nullopt when the account never joined a node, or from a service of an older
+    /// version.
+    std::optional<Citizenship> citizenship;
 };
 
 /// Plan D1: what SaveProgress writes: a zero level or class leaves that value; every row replaces the character's row of its type.
 struct Progress {
+    /// Node citizenship: with replace_citizenship the citizenship of the character's account becomes exactly `citizenship` (a node of 0 with no cooldown: none, and its row goes);
+    /// without it it is left alone (the character service refuses a negative time, a node with no join time and a primary character of another account).
+    bool                    replace_citizenship = false;
+    Citizenship             citizenship;
     int32_t                 level = 0;
     int32_t                 class_id = 0;
     std::vector<Experience> experience;
@@ -321,7 +340,8 @@ struct Progress {
         return replace_skill_ranks == o.replace_skill_ranks && skill_ranks == o.skill_ranks && replace_action_bar == o.replace_action_bar &&
                action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues &&
                replace_attunements == o.replace_attunements && attunements == o.attunements && home_attunement == o.home_attunement && home_last_used_ms == o.home_last_used_ms &&
-               replace_ignored_names == o.replace_ignored_names && ignored_character_names == o.ignored_character_names && ignored_guild_names == o.ignored_guild_names;
+               replace_ignored_names == o.replace_ignored_names && ignored_character_names == o.ignored_character_names && ignored_guild_names == o.ignored_guild_names &&
+               replace_citizenship == o.replace_citizenship && citizenship == o.citizenship;
     }
 };
 // [C:Y:B :: C O A]

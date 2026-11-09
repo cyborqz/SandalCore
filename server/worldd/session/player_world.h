@@ -73,6 +73,8 @@
 #include "vendor/town_shops.h"
 #include "warehouse/warehouse.h"
 #include "world/actor_registry.h"
+#include "world/citizenship.h"
+#include "world/elections.h"
 #include "world/city_nodes.h"
 #include "world/node_control.h"
 #include "dialogue/requirement.h"
@@ -146,6 +148,8 @@ public:
     /// certificate, and how a reward of Glint is split into kinds.  Null when the file has none of those tables (an older file or fixture): no stack of Glint changes kind and a reward
     /// is paid as it is rolled.
     const items::CurrencyTable* currencies() const { return currencies_ ? &*currencies_ : nullptr; }
+    /// A test's currency tiers (the area's content.db may have none).
+    void set_currencies_for_test(items::CurrencyTable table) { currencies_ = std::move(table); }
     /// Plan D2: every ability, hit, effect and expression of content.db's ab_* tables, read once at startup: what the generic ability runtime
     /// runs. Null when the file has none (an older fixture) or they did not read: then only Sprint, Dodge and Rest run, and the log says why.
     const abilities::Catalog* ability_catalog() const { return catalog_override_set_ ? ability_catalog_override_ : ability_catalog_ ? &*ability_catalog_ : nullptr; }
@@ -316,6 +320,23 @@ public:
     /// influence where the creature died.  The pointer must outlive this object.
     void set_city_nodes(world::CityNodes* nodes) { city_nodes_ = nodes; }
     world::CityNodes* city_nodes() const { return city_nodes_; }
+    /// Node citizenship (world/citizenship.h): its rules from content.db, set by main with the registry; null in a world with no citizenship (the Node Administrator's lines then
+    /// open nothing).
+    void set_citizenship_rules(std::optional<world::CitizenshipRules> rules) { citizenship_rules_ = std::move(rules); }
+    const world::CitizenshipRules* citizenship_rules() const { return citizenship_rules_ ? &*citizenship_rules_ : nullptr; }
+    /// The accounts' citizenship as the sessions changed it since worldd started (account id -> its citizenship): what a later login of the account reads is older than this.
+    const svc::Citizenship* account_citizenship(int64_t account) const {
+        const auto it = account_citizenship_.find(account);
+        return it == account_citizenship_.end() ? nullptr : &it->second;
+    }
+    void set_account_citizenship(int64_t account, const svc::Citizenship& c) const { if (account != 0) account_citizenship_[account] = c; }
+    /// Node citizenship, stage 2: the mayoral elections (world/elections.h), kept in `file` ("" : not kept, a restart loses them), read from it now.  Null in a world without them.
+    void set_elections(world::ElectionRules rules, std::string file);
+    world::Elections* elections() const { return elections_ ? &*elections_ : nullptr; }   // (the sessions change it through a const world, as the banks)
+    /// Brings the elections to `now_ms` (at most every 5 s; `force`: now) and writes the file when they changed.  The phase changes.
+    std::vector<world::Elections::Change> tick_elections(int64_t now_ms, bool force = false) const;
+    /// Writes the elections' file if they changed since it was last written.
+    void save_elections() const;
     /// Nodes 1, stage 2: what the client is told about the nodes (world/node_wire.h; built from content.db and the registry), set by main with the registry; null in a world
     /// with no nodes (a GameStateMode::Tier3 join then lists none).  The pointer must outlive this object.
     void set_node_wire(const world::NodeWire* wire) { node_wire_ = wire; }
@@ -606,6 +627,12 @@ private:
     std::optional<combat::RewardBook>    rewards_;
     std::unique_ptr<combat::Aftermath>   aftermath_;   // after combat_: it is destroyed first (it holds the death hook's `this`)
     world::CityNodes*                    city_nodes_ = nullptr;
+    std::optional<world::CitizenshipRules> citizenship_rules_;
+    mutable std::map<int64_t, svc::Citizenship> account_citizenship_;
+    mutable std::optional<world::Elections> elections_;
+    std::string                          elections_file_;
+    mutable uint64_t                     elections_saved_ = 0;
+    mutable int64_t                      elections_ticked_ms_ = 0;   // (as banks_: the sessions hold a const world)
     const world::NodeWire*               node_wire_ = nullptr;
     world::NodeControl*                  node_control_ = nullptr;
     std::optional<dialogue::Book>        dialogue_;

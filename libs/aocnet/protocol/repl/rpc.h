@@ -53,7 +53,7 @@
 //  are listed by read_rpc_fields with `decoded` false.  (Plan A7 gave FItemInstance its one
 //  known form, the empty item: ServerTriggerAbility decodes since, protocol/repl/ability_rpc.h.  Plan B2
 //  gave it all its fields and FItemStorageEvent a codec, item_codec.h: the storage RPCs decode since, and
-//  storage_rpc.h gives them a typed form.)
+//  storage_rpc.h gives them a typed form.  Node citizenship gave FEssentialCitizenshipWindowData one, citizenship_codec.h.)
 // ============================================================================
 #pragma once
 // ~ C-O-A - C.Y.B ~

@@ -11,6 +11,7 @@
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace aoc::worldd::world {
@@ -241,7 +242,24 @@ bool NodeWire::is_real_node(int64_t node_guid) const {
     return it != by_node_.end() && it->second.real;
 }
 
-repl::NodeStateMaps NodeWire::maps(const CityNodes& nodes) const {
+namespace {
+
+/// A character id (32 hex digits) as the FGuid's four words; all zero for one that does not read.
+std::array<uint32_t, 4> guid_words(const std::string& hex) {
+    std::array<uint32_t, 4> w{};
+    if (hex.size() != 32) return w;
+    for (size_t i = 0; i < 32; ++i) {
+        const char c = hex[i];
+        const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (d < 0) return std::array<uint32_t, 4>{};
+        w[i / 8] = (w[i / 8] << 4) | static_cast<uint32_t>(d);
+    }
+    return w;
+}
+
+}  // namespace
+
+repl::NodeStateMaps NodeWire::maps(const CityNodes& nodes, const Elections* elections) const {
     repl::NodeStateMaps m;
     const std::vector<LiveNode> live = nodes.live();
     for (const int rank : roster_) {
@@ -257,15 +275,20 @@ repl::NodeStateMaps NodeWire::maps(const CityNodes& nodes) const {
         e.bounty = info->name == "Verra_Lawless_Ocean" ? 0 : kBountyCommodity;
         e.tags = {repl::kSiegeInactiveTag};
         e.deploy_radius = std::max(0.0f, grants(info->guid, level).vehicle_deploy_radius);
+        const NodeElection* el = elections ? elections->node(info->guid) : nullptr;
+        if (el && el->mayor.account != 0) {   // the node's mayor: the character's guid and name (the node window and the map name them)
+            e.mayor_guid = guid_words(el->mayor.character_id);
+            e.mayor_name = el->mayor.name;
+        }
         m.nodes.push_back(std::move(e));
         if (level >= 1) m.percent.emplace_back(static_cast<uint32_t>(rank), static_cast<uint8_t>(percent_of(level, xp)));
-        if (level >= 3) m.citizens.emplace_back(static_cast<uint32_t>(rank), static_cast<uint8_t>(0));
+        if (level >= 3) m.citizens.emplace_back(static_cast<uint32_t>(rank), static_cast<uint8_t>(std::min<size_t>(el ? el->citizens.size() : 0, 255)));
     }
     for (const int64_t g : estates_) m.estates.emplace_back(g, std::array<uint32_t, 4>{0, 0, 0, 0});
     return m;
 }
 
-std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes& nodes, int64_t unix_now) const {
+std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes& nodes, int64_t unix_now, const Elections* elections) const {
     const CityNodeInfo* info = nodes.by_guid(guid);
     if (!info) return std::nullopt;
     repl::NodeSummary s;
@@ -289,6 +312,10 @@ std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes
     }
     s.time_until_next_maintenance = unix_now + 7 * 24 * 3600;
     s.next_mayor_message_edit_time = 60;   // retail's value for a node with no mayor
+    if (const NodeElection* el = elections ? elections->node(guid) : nullptr; el && el->mayor.account != 0) {
+        s.mayor_message = el->mayor_message;
+        s.next_mayor_message_edit_time = 0;   // the mayor may edit it now (ServerSetMayorMessage has no cooldown)
+    }
     const LevelGrants g = grants(guid, level);
     if (g.level >= 0) {
         s.max_node_essence = static_cast<uint8_t>(std::clamp(g.node_essence, 0, 255));

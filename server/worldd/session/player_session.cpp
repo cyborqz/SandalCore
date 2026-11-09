@@ -190,11 +190,16 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     }
     // Nodes 1, stage 2: the GameState's node maps at the join, and OwnerInfo's list of the account's characters.  The registry's version is read BEFORE the maps are made: a
     // change that lands in between is sent again by run_nodes at the first tick (harmless: the arrays then differ in nothing).
-    uint64_t nodes_version = 0;
+    uint64_t nodes_version = 0, election_version = 0;
+    // node citizenship: the account's (what this worldd changed since it started is newer than what the login read)
+    const svc::Citizenship citizenship = world.account_citizenship(character.account_id) ? *world.account_citizenship(character.account_id)
+                                                                                            : character.citizenship.value_or(svc::Citizenship{});
+    built.setup->citizen_node = citizenship.node_guid;
     if (world.gamestate_mode() == bootstrap::GameStateMode::Tier3) {
         if (world.city_nodes() && world.node_wire()) {
             nodes_version = world.city_nodes()->version();
-            built.setup->nodes = world.node_wire()->maps(*world.city_nodes());
+            election_version = world.elections() ? world.elections()->version() : 0;
+            built.setup->nodes = world.node_wire()->maps(*world.city_nodes(), world.elections());
         }
         std::string own = character.id;
         for (char& c : own) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -204,6 +209,8 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
             n.guid_hex = other.id;
             for (char& c : n.guid_hex) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
             n.name = other.name;
+            n.level = other.level;
+            n.citizen_node = citizenship.node_guid;   // citizenship is the account's
             listed_self = listed_self || n.guid_hex == own;
             built.setup->account_characters.push_back(std::move(n));
         }
@@ -211,6 +218,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
             bootstrap::AccountCharacterNode n;
             n.guid_hex = own;
             n.name = built.setup->name;
+            n.citizen_node = citizenship.node_guid;
             built.setup->account_characters.insert(built.setup->account_characters.begin(), std::move(n));
         }
     }
@@ -225,6 +233,8 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
                           world.ability_rules(), std::move(*built.inventory), world.item_catalog(), std::move(built.character_stats), &world,
                           character.class_id, built.progress));
     p->wallet_ = purse;
+    p->account_id_ = character.account_id;
+    p->citizenship_ = citizenship;
     p->jobs_ = character.processing_jobs;   // crafting, step 1: the jobs run on the wall clock, whether the character was logged in or not
     for (const svc::ProcessingJob& j : p->jobs_) p->job_seen_[j.job_guid] = crafting::status_at(j, wall_ms());   // (step 2: a window opened now shows them so; the changes after are sent)
     p->sync_active_stations(wall_ms());
@@ -247,6 +257,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->weapon_ = std::move(built.weapon);   // weapon XP: the totals of the weapon lines (the join already lists the ones with XP)
     if (p->stats_ && p->professions_.valid()) p->stats_->set_profession_levels(p->professions_.levels_by_name());
     p->node_maps_version_ = nodes_version;
+    p->node_maps_election_version_ = election_version;   // (the join's maps carry the mayors and citizens of then)
     // the purchase reply's delay (a probe of the D1 draft's bar animation): the default is retail's, the variable changes it
     if (const char* env = std::getenv("AOC_PURCHASE_REPLY_DELAY_MS")) {
         char* end = nullptr;
@@ -676,6 +687,10 @@ void PlayerSession::hand_over_progress(const char* why) {
     for (const int n : attunements_.discovered) p.attunements.push_back(n);
     p.home_attunement = attunements_.home;
     p.home_last_used_ms = attunements_.home_last_used_ms;
+    if (citizenship_changed_) {   // node citizenship: the account's, once this session changed it (a session that did not leaves what another may have saved)
+        p.replace_citizenship = true;
+        p.citizenship = citizenship_;
+    }
     p.replace_completed_ftues = true;   // missing systems, step 0: the finished tutorials go whole with every hand-over (what the session holds is what the character has)
     p.completed_ftues = completed_ftues_;
     p.replace_ignored_names = true;   // social, step 6: the ignored players and guilds go whole with every hand-over (what the session holds is what the character has)
