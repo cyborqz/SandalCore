@@ -2574,6 +2574,19 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
               (found ? "" : ": it found nobody")});
 }
 
+void AbilityPipeline::end_item_casts(double now, const char* why) {
+    bool any = false;
+    for (Cast& cast : casts_) {
+        if (!cast.item_cast || cast.end_due) continue;
+        cast.end_due = now;
+        cast.end_client = true;   // movement/another ability: the client is told the item's instance is over (its eating/sitting state ends)
+        any = true;
+    }
+    if (!any) return;
+    spdlog::debug("[abilities] {}{}", why, ": every item cast still running ends");
+    advance(now);   // step_end: its own lasting states go, its montage clears, its timed effects stay
+}
+
 bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held_seconds) {
     advance(now);
     cancel_timed(client_instance_id, now);
@@ -4215,6 +4228,13 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
         cast.item.branch_predicted = cast.branch_predicted;
         cast.item.animation_counter = ++animation_counter_;
         c.abilities_changed.push_back(cast.item);
+    }
+    if (cast.end_client) {
+        AbilityEvent ev{std::move(c), std::nullopt, t, "the use of " + cast.def->row.name + " is over"};
+        ev.end_ability = cast.client_id;
+        cast.end_client = false;
+        emit(std::move(ev));
+        return;
     }
     if (c.empty()) return;
     emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " ends"});

@@ -433,6 +433,10 @@ public:
     /// how long the key was held; 0 or less: worldd's own clock); true when the instance is one of ours.
     bool cancel(int32_t client_instance_id, double now, double held_seconds = 0);
 
+    /// Ends every item cast still running (a meal, a potion, a scroll): its montage ends and its own lasting states go (a meal's Resting), while the timed effects and the
+    /// buffs its hit applied keep their own lives.  The player moving or starting another ability ends the use that way.
+    void end_item_casts(double now, const char* why);
+
     /// ServerRequestBranchVerification: the client's cast bar ended and it asks the server to confirm the branch it took. A cast of an ability that waits for
     /// its branch (kBranchedCasts) goes on from this moment: the montage's jump, the cost, the hits and the montage's end follow at the offsets the retail
     /// capture shows. True when the request belongs to such a cast that was still waiting.
@@ -763,6 +767,7 @@ private:
         /// The timed effects the ability puts on its caster itself (no hit applies them): a consumable's Nourishment (20 s of 1 s ticks) and its kind.  They start with
         /// the own effects and expire by their own duration, not with the montage: a meal's 20 s of regeneration outlives the eating animation that ends in a few seconds.
         std::vector<const abilities::EffectDef*> timed_effects;
+        bool end_client = false;   // the server ended this item cast itself (the player moved or started another ability): tell the client its instance is over
         std::optional<double>                 held_release_due;   // a release heard before the held effect's delayed start
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires
