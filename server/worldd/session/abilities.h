@@ -209,6 +209,7 @@ public:
     void set_regen_rate(double per_second, double now);
     /// The player moves or stands (from the A6 moves).
     void set_moving(bool moving, double now);
+    /// The player's combat state.  A running Rest ends when combat starts: its effect's fragility breaks it.
     void set_in_combat(bool in_combat, double now);
     /// The mounts milestone, stage 3 fix 2: the player gets on (or off) a mount.  A mounted rider has no Sprint and no Stamina use [R: General_Sprint is not bUsableWhileMounted, and
     /// the rider's moves are the mount's]: getting on ends a running Sprint the way a Sprint ends (its items removed, MoveSpeedMult back to 1.0, the StaminaRegeneration item,
@@ -230,6 +231,10 @@ public:
     /// ServerNotifyHeldAbilityCancelled: true when it released a running Sprint or Rest. An unknown or finished instance
     /// is ignored.
     bool cancel(int32_t client_instance_id, double now);
+
+    /// ServerEndAbility: ends the running Sprint or Rest whose server instance is `server_instance_id` (the number the client got in
+    /// the ability item).  The client's own ids stay in cancel().  False when no running instance has that number.
+    bool end_server_instance(int64_t server_instance_id, double now);
 
     /// The character stands up on the server's say (a second /sit): a Rest that runs ends the way its cancel ends it, the montage jumps to its end section and the effect follows.  It works in
     /// combat too.  False when no Rest runs.
