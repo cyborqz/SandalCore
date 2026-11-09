@@ -325,6 +325,14 @@ struct End {
     int                slot = 0;
 };
 
+/// One target slot of a Fill that names more than one: where the part goes, how many, and the stack it joins (empty for a free slot).
+struct Target {
+    End         to;
+    int32_t     count = 0;
+    std::string to_guid;      // the stack in the slot (empty: a free slot)
+    int32_t     to_count = 0;
+};
+
 struct Request {
     repl::StorageEventType type = repl::StorageEventType::Move;   // Move, Fill or Swap
     End                    from, to;
@@ -332,6 +340,7 @@ struct Request {
     std::string            guid;           // the instance in the source slot
     std::string            to_guid;        // a Swap: the instance in the target slot
     int32_t                to_count = 0;
+    std::vector<Target>    targets;        // a Fill that names more than one target slot: the slots and what goes in each (empty: the single `to`)
 };
 
 /// One event the client is told, in order: an Add or a Remove at a bag or a warehouse place.
@@ -534,6 +543,95 @@ inline Result transfer(items::Inventory& bags, Storage& wh, const items::ItemCat
         bags = std::move(trial_bags);
         wh = std::move(trial_wh);
         out.steps = {ra, rb, ab, aa};
+        out.bags_changed = !r.from.in_warehouse || !r.to.in_warehouse;
+        out.ok = true;
+        return out;
+    }
+
+    if (!r.targets.empty()) {
+        // a Fill that names more than one target slot: the existing stacks to top up, then the free slot for the rest (the client's quick-send)
+        if (r.type != repl::StorageEventType::Fill) return refuse("a move that names more than one target slot is a Fill");
+        if (!info) return refuse("the item's record is not one this server knows");
+        const int32_t max_stack = std::max(1, info->max_stack);
+        int64_t total = 0;
+        for (const Target& t : r.targets) {
+            if (t.count < 1) return refuse("a target slot names no amount");
+            total += t.count;
+        }
+        if (total != r.count) return refuse("the move names " + std::to_string(r.count) + " but its target slots name " + std::to_string(total));
+        for (size_t i = 0; i < r.targets.size(); ++i) {
+            const Target& t = r.targets[i];
+            for (size_t j = 0; j < i; ++j) {
+                const End& earlier = r.targets[j].to;
+                if (earlier.in_warehouse == t.to.in_warehouse && earlier.bag == t.to.bag && earlier.key == t.to.key && earlier.slot == t.to.slot) {
+                    return refuse("the request names the same target slot twice");
+                }
+            }
+            if (t.to.in_warehouse != r.to.in_warehouse || t.to.bag != r.to.bag || t.to.key != r.to.key) {
+                return refuse("the target slots are not all in the target container");
+            }
+            if (t.to.in_warehouse == r.from.in_warehouse && t.to.in_warehouse && t.to.key == r.from.key && t.to.slot == r.from.slot) {
+                return refuse("the item is moved onto its own slot");
+            }
+            if (!t.to.in_warehouse && !r.from.in_warehouse && t.to.bag == r.from.bag && t.to.slot == r.from.slot) {
+                return refuse("the item is moved onto its own slot");
+            }
+        }
+        // the whole request is judged on the copies: every target slot must take its part before anything is taken from the source, and each accepted target is applied
+        // to the copies in turn, so a later target sees the raised stack or the cells a new stack took
+        std::vector<Step> adds;
+        adds.reserve(r.targets.size());
+        for (const Target& t : r.targets) {
+            const svc::InventoryItem* there = t.to.in_warehouse ? trial_wh.at(t.to.key, t.to.slot) : trial_bags.at(t.to.bag, t.to.slot);
+            if (there) {
+                if (!items::guid_of(t.to_guid) || there->instance_guid != t.to_guid) return refuse("the target slot holds an item, and the client did not name it");
+                if (!items::stacks_with(moving, *there, info->rarity)) return refuse("the target holds another stack (a move onto an item is a swap)");
+                const int32_t room = max_stack > there->quantity ? max_stack - there->quantity : 0;
+                if (t.count > room) {
+                    return refuse("the move names " + std::to_string(t.count) + " of a stack of " + std::to_string(moving.quantity) + "; only " + std::to_string(room) +
+                                  " fit onto the target");
+                }
+                Step add;
+                fill(add, repl::StorageEventType::Add, t.to, *there, 0);
+                add.item.quantity = t.count;
+                adds.push_back(std::move(add));
+                // the top-up raises the target stack on the copies, so a later target sees it
+                svc::InventoryItem merged = *there;
+                merged.quantity = there->quantity + t.count;
+                if (!t.to.in_warehouse) {
+                    if (std::string why = take_from(t.to, *there, there->quantity); !why.empty()) return refuse(why);
+                }
+                if (std::string why = put_at(t.to, merged); !why.empty()) return refuse(why);
+            } else {
+                if (items::guid_of(t.to_guid).has_value()) return refuse("the target slot is empty, but the client named an item in it");
+                if (t.to.in_warehouse) {
+                    const std::string* ignore = r.from.in_warehouse && total >= moving.quantity ? &moving.instance_guid : nullptr;
+                    const std::string why = detail::why_not_here(*to_spec, t.to.slot, moving, trial_wh, catalog, ignore);
+                    if (!why.empty()) return refuse(why);
+                }
+                svc::InventoryItem arriving = moving;
+                arriving.quantity = t.count;
+                arriving.slot = t.to.slot;
+                if (!t.to.in_warehouse) arriving.container = t.to.bag;
+                if (total < moving.quantity || r.targets.size() > 1) {
+                    do {
+                        arriving.instance_guid = bags.fresh_guid();
+                    } while (!items::guid_of(arriving.instance_guid) || bags.find_guid(arriving.instance_guid) || wh.holds_guid(arriving.instance_guid));
+                }
+                Step add;
+                fill(add, repl::StorageEventType::Add, t.to, arriving, 0);
+                adds.push_back(std::move(add));
+                // the new stack takes its cells on the copies, so a later target sees them
+                if (std::string why = put_at(t.to, arriving); !why.empty()) return refuse(why);
+            }
+        }
+        if (std::string why = take_from(r.from, moving, static_cast<int32_t>(total)); !why.empty()) return refuse(why);
+        Step remove;
+        fill(remove, repl::StorageEventType::Remove, r.from, moving, total < moving.quantity ? static_cast<int32_t>(total) : 0);
+        bags = std::move(trial_bags);
+        wh = std::move(trial_wh);
+        out.steps.push_back(std::move(remove));
+        for (Step& s : adds) out.steps.push_back(std::move(s));
         out.bags_changed = !r.from.in_warehouse || !r.to.in_warehouse;
         out.ok = true;
         return out;

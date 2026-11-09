@@ -60,6 +60,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Ranged weapon swings kept to the weapon's own pace: a swing that comes sooner than the weapon allows is refused, the minimum time follows the character's attack speed, and honest swings still go through when the connection lags.
 - Item stacks: a stack dragged onto a stack of the same item and colour joins it up to the stack's limit, a stack split with the right-click menu goes to a free slot, and the item bag, the material bags and the warehouse's materials tab follow the same rules.
 - Homing projectiles fly the game's turn law: the Discordance's notes, the Mend's orbs, the Frostbolt and the Salvo's arrows turn at their record's rate, curve round a target beside or behind the caster and chase a running creature where the game shows it.
+- Storage: a right-click quick-send into storage tops up a stack of the same item and colour and puts the rest in a free slot.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

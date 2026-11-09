@@ -336,8 +336,8 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
         refuse_warehouse_request(conn, what, "no storage window is open", now);
         return true;
     }
-    if (event.targets.size() != 1 || event.targets[0].slots.size() != 1 || event.move_source.slots.size() != 1) {
-        refuse_warehouse_request(conn, what, "a move names one source slot and one target slot", now);
+    if (event.targets.size() != 1 || event.targets[0].slots.empty() || event.move_source.slots.size() != 1) {
+        refuse_warehouse_request(conn, what, "a move names one source slot and one target container", now);
         return true;
     }
     // the clerk is still within reach
@@ -383,6 +383,18 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
     req.guid = items::guid_hex(src.item_guid);
     req.to_guid = items::guid_hex(dst.item_guid);
     req.to_count = dst.count;
+    if (event.targets[0].slots.size() > 1) {
+        req.targets.reserve(event.targets[0].slots.size());
+        for (const repl::StorageEventSlot& s : event.targets[0].slots) {
+            warehouse::Target t;
+            t.to = req.to;
+            t.to.slot = s.slot;
+            t.count = s.count;
+            t.to_guid = items::guid_hex(s.item_guid);
+            t.to_count = s.count;
+            req.targets.push_back(std::move(t));
+        }
+    }
     if (!(src.item_guid == event.item.guid)) {
         refuse_warehouse_request(conn, what, "the item of the event is not the instance of its source slot", now);
         return true;

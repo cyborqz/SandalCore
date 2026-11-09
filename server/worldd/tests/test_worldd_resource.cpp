@@ -804,6 +804,202 @@ static void test_warehouse_item_section() {
     }
 }
 
+static void test_warehouse_quick_send() {
+    std::printf("the warehouse quick-send: a Fill that tops up a stack and puts the rest in a free slot\n");
+    const CurveCatalog catalog(*g_catalog);
+    const int64_t kTab = 7000000000000000100ll;
+    warehouse::Spec tab;
+    tab.key = warehouse::Key{warehouse::Area::Materials, 0, kTab};
+    tab.columns = 8;
+    tab.rows = 5;
+    tab.slots = 40;
+    warehouse::OpenWindow open;
+    open.specs.push_back(tab);
+    const auto build_bags = [&](std::vector<svc::InventoryItem> v) -> std::optional<Inv> {
+        std::string error;
+        auto inv = Inv::from_items(std::move(v), error, &catalog);
+        if (!inv) std::printf("  [FAIL] test setup: %s\n", error.c_str());
+        return inv;
+    };
+    {
+        // the owner's case: 19 oak (quality 20) in the tab, 2 of the same in Resource0; the quick-send names the
+        // top-up (1 into the 19) and the free slot (1 as a new stack)
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kOak, 501, 2, 20)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(tab.key, 0, make_item(Bag, 0, fr::kOak, 502, 19, 20));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = false;
+        r.from.bag = R0;
+        r.from.slot = 0;
+        r.count = 2;
+        r.guid = guid_n(501);
+        r.to.in_warehouse = true;
+        r.to.key = tab.key;
+        r.to.slot = 0;
+        r.to_guid = guid_n(502);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(502), 19});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets[1].to.slot = 1;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        const svc::InventoryItem* top = wh.at(tab.key, 0);
+        const svc::InventoryItem* fresh = wh.at(tab.key, 1);
+        CHECK(res.ok && top && top->quantity == 20 && top->instance_guid == guid_n(502) && fresh && fresh->quantity == 1 &&
+                  fresh->instance_guid != guid_n(501) && items::guid_of(fresh->instance_guid).has_value() && !bags->at(R0, 0),
+              "the owner's 19 + 2: the tab's stack is 20 at its own guid, the 1 left is a new stack at the free slot, the bag slot is empty");
+        CHECK(res.steps.size() == 3 && res.steps[0].type == repl::StorageEventType::Remove && !res.steps[0].in_warehouse && res.steps[0].bag == R0 &&
+                  res.steps[0].slot == 0 && res.steps[0].count == 0 && res.steps[0].item.quantity == 2 && res.steps[0].item.instance_guid == guid_n(501) &&
+                  res.steps[1].type == repl::StorageEventType::Add && res.steps[1].in_warehouse && res.steps[1].slot == 0 && res.steps[1].item.quantity == 1 &&
+                  res.steps[1].item.instance_guid == guid_n(502) && res.steps[2].type == repl::StorageEventType::Add && res.steps[2].in_warehouse &&
+                  res.steps[2].slot == 1 && res.steps[2].item.quantity == 1 && fresh && res.steps[2].item.instance_guid == fresh->instance_guid,
+              "the events are the Remove of the whole 2 from the bag (count 0, the stack as it was), the Add of 1 into the tab's stack (its guid) and the Add of the new 1 (its guid)");
+    }
+    {
+        // the same shape where the whole stack fits into the existing stack: 15 + 2 -> 17, one target slot
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kOak, 503, 2, 20)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(tab.key, 0, make_item(Bag, 0, fr::kOak, 504, 15, 20));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = false;
+        r.from.bag = R0;
+        r.from.slot = 0;
+        r.count = 2;
+        r.guid = guid_n(503);
+        r.to.in_warehouse = true;
+        r.to.key = tab.key;
+        r.to.slot = 0;
+        r.to_guid = guid_n(504);
+        r.to_count = 15;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        CHECK(res.ok && wh.at(tab.key, 0) && wh.at(tab.key, 0)->quantity == 17 && wh.at(tab.key, 0)->instance_guid == guid_n(504) && !bags->at(R0, 0),
+              "the whole 2 fits the 15: the tab's stack is 17 at its own guid and the bag slot is empty");
+        CHECK(res.steps.size() == 2 && res.steps[0].type == repl::StorageEventType::Remove && res.steps[0].count == 0 &&
+                  res.steps[0].item.quantity == 2 && res.steps[1].type == repl::StorageEventType::Add && res.steps[1].slot == 0 &&
+                  res.steps[1].item.quantity == 2 && res.steps[1].item.instance_guid == guid_n(504),
+              "the events are the Remove of the whole 2 (count 0, the stack as it was) and the Add of 2 into the tab's stack");
+    }
+    {
+        // a part that does not fit: the free slot the request names is not free; the whole request is refused and nothing changes
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kOak, 505, 2, 20)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(tab.key, 0, make_item(Bag, 0, fr::kOak, 506, 19, 20));
+        wh.put(tab.key, 1, make_item(Bag, 0, fr::kOak, 507, 5, 20));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = false;
+        r.from.bag = R0;
+        r.from.slot = 0;
+        r.count = 2;
+        r.guid = guid_n(505);
+        r.to.in_warehouse = true;
+        r.to.key = tab.key;
+        r.to.slot = 0;
+        r.to_guid = guid_n(506);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(506), 19});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets[1].to.slot = 1;
+        const warehouse::Storage before_wh = wh;
+        const Inv before_bags = *bags;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        CHECK(!res.ok && res.steps.empty() && wh.at(tab.key, 0) && wh.at(tab.key, 0)->quantity == 19 && wh.at(tab.key, 1) && wh.at(tab.key, 1)->quantity == 5 &&
+                  bags->at(R0, 0) && bags->at(R0, 0)->quantity == 2 && wh.size() == before_wh.size() && *bags == before_bags,
+              "a target slot that is not free refuses the whole quick-send and nothing changes");
+    }
+    {
+        // the same target stack named twice: 19 + 1 + 1 with 2 in the bag; the second target would see the stack as it was before the first
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kOak, 510, 2, 20)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(tab.key, 0, make_item(Bag, 0, fr::kOak, 511, 19, 20));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = false;
+        r.from.bag = R0;
+        r.from.slot = 0;
+        r.count = 2;
+        r.guid = guid_n(510);
+        r.to.in_warehouse = true;
+        r.to.key = tab.key;
+        r.to.slot = 0;
+        r.to_guid = guid_n(511);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(511), 19});
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(511), 19});
+        const warehouse::Storage before_wh = wh;
+        const Inv before_bags = *bags;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        CHECK(!res.ok && res.steps.empty() && wh.at(tab.key, 0) && wh.at(tab.key, 0)->quantity == 19 && wh.at(tab.key, 0)->instance_guid == guid_n(511) &&
+                  bags->at(R0, 0) && bags->at(R0, 0)->quantity == 2 && bags->at(R0, 0)->instance_guid == guid_n(510) && wh.size() == before_wh.size() &&
+                  *bags == before_bags,
+              "a request that names the same target stack twice is refused and leaves the tab's 19 and the bag's 2 as they were");
+    }
+    {
+        // two free target slots whose 1 x 2 places share a cell: the daffodil at tab slots 0 and 8 (both cover cell 8)
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kDaffodil, 512, 2)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = false;
+        r.from.bag = R0;
+        r.from.slot = 0;
+        r.count = 2;
+        r.guid = guid_n(512);
+        r.to.in_warehouse = true;
+        r.to.key = tab.key;
+        r.to.slot = 0;
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets[1].to.slot = 8;
+        const warehouse::Storage before_wh = wh;
+        const Inv before_bags = *bags;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        CHECK(!res.ok && res.steps.empty() && wh.size() == before_wh.size() && bags->at(R0, 0) && bags->at(R0, 0)->quantity == 2 &&
+                  bags->at(R0, 0)->instance_guid == guid_n(512) && *bags == before_bags,
+              "two free target slots whose new places share a cell are refused and leave the tab empty and the bag's 2 as they were");
+    }
+    {
+        // the other direction: the tab holds 2, the material bag holds 19; the quick-send tops the bag's stack up and the rest is a new stack
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kOak, 508, 19, 20)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(tab.key, 0, make_item(Bag, 0, fr::kOak, 509, 2, 20));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = true;
+        r.from.key = tab.key;
+        r.from.slot = 0;
+        r.count = 2;
+        r.guid = guid_n(509);
+        r.to.in_warehouse = false;
+        r.to.bag = R0;
+        r.to.slot = 0;
+        r.to_guid = guid_n(508);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(508), 19});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets[1].to.slot = 1;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        const svc::InventoryItem* top = bags->at(R0, 0);
+        const svc::InventoryItem* fresh = bags->at(R0, 1);
+        CHECK(res.ok && top && top->quantity == 20 && top->instance_guid == guid_n(508) && fresh && fresh->quantity == 1 &&
+                  fresh->instance_guid != guid_n(509) && items::guid_of(fresh->instance_guid).has_value() && !wh.at(tab.key, 0),
+              "storage to bag: the bag's stack is 20 at its own guid, the 1 left is a new stack, the tab slot is empty");
+        CHECK(res.steps.size() == 3 && res.steps[0].type == repl::StorageEventType::Remove && res.steps[0].in_warehouse && res.steps[0].slot == 0 &&
+                  res.steps[0].count == 0 && res.steps[0].item.quantity == 2 && res.steps[1].type == repl::StorageEventType::Add && !res.steps[1].in_warehouse &&
+                  res.steps[1].bag == R0 && res.steps[1].slot == 0 && res.steps[1].item.quantity == 1 && res.steps[1].item.instance_guid == guid_n(508) &&
+                  res.steps[2].type == repl::StorageEventType::Add && !res.steps[2].in_warehouse && res.steps[2].slot == 1 && res.steps[2].item.quantity == 1 &&
+                  fresh && res.steps[2].item.instance_guid == fresh->instance_guid,
+              "the events are the Remove of the whole 2 from the tab (count 0, the stack as it was), the Add of 1 into the bag's stack and the Add of the new 1");
+    }
+}
+
 static void test_bags_stay() {
     std::printf("bags: a bag is worn, replaced and taken off during the session unless its container holds items\n");
     auto inv = build(with(worn_kit(), {make_item(Bag, 0, fr::kBagMining, 1), make_item(R0, 0, fr::kOak, 2, 4)}));
@@ -1054,6 +1250,7 @@ int main() {
         test_glint_stacks();
         test_warehouse_stacks();
         test_warehouse_item_section();
+        test_warehouse_quick_send();
         test_bags_stay();
         test_consume();
         test_repair();
