@@ -316,8 +316,8 @@ public:
     std::optional<Send> interact_done(const emit::FIntrepidNetworkGUID& component, const emit::FIntrepidNetworkGUID& actor);
     /// The pawn's ClientNotifyHomeAttune(shrine) (only when `result`) and SendClientHomeAttuneResult(place, result), in one send.
     std::optional<Send> home_attuned(const emit::FIntrepidNetworkGUID& shrine, int64_t place, bool result);
-    /// The PlayerController's ClientReceiveChatMessages with one line.
-    std::optional<Send> chat_line(const std::string& text, int category);
+    /// The PlayerController's ClientReceiveChatMessages with one line, from `from` (empty: no sender name).
+    std::optional<Send> chat_line(const std::string& text, int category, const std::string& from = std::string());
 
     /// Plan E1: ClientOpenVendor on the PlayerController (reliable): the client opens its window for the VendorDef `merch_set` (the vendor's
     /// stock and prices are the client's own tables'), `vendor` the NPC's actor. nullopt before the pawn's second state or when the RPC does

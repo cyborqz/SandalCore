@@ -949,6 +949,7 @@ void PlayerSession::on_phase_in_ready(Connection& conn, Clock::time_point now) {
         if (send) phase_in_done_ = true;
         return send;
     }, conn, /*must_build=*/true);
+    send_welcome(conn);   // the first chat line, behind the phase-in (session/player_chat.cpp)
     // E1 stage 3 fix: the client's synchronized clock is set again once its loading frames are over (1 s and 5 s after the phase-in), then every
     // 120 s (retail's cadence). The client adds each frame's whole DeltaTime to the clock after a set, so the join's ClientSetTime, processed in
     // the first frame after the 3 s LoadMap, left the clock 3 s ahead: every cooldown ended 3 s early on the client (a play test of 2026-10-06).

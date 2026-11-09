@@ -12,3 +12,4 @@
 #include "session_requests_tests.inc"
 #include "session_budgets_tests.inc"
 #include "session_endpoint_tests.inc"
+#include "session_chat_tests.inc"

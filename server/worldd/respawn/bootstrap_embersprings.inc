@@ -71,14 +71,14 @@ std::optional<Send> PlayerBootstrap::home_attuned(const emit::FIntrepidNetworkGU
     return rpcs(Role::Pawn, "ClientNotifyHomeAttune and SendClientHomeAttuneResult", std::span<const repl::RpcRequest>(calls.data(), calls.size()));
 }
 
-std::optional<Send> PlayerBootstrap::chat_line(const std::string& text, int category) {
+std::optional<Send> PlayerBootstrap::chat_line(const std::string& text, int category, const std::string& from) {
     if (!ok_ || !second_state_added_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientReceiveChatMessages");
     if (!rpc) return std::nullopt;
     repl::ArrayValue list;
     repl::ElementState e;
     e.values[1] = Value::str(text);                                   // Message
-    e.values[2] = Value::str(std::string());                          // From
+    e.values[2] = Value::str(from);                                   // From
     e.values[3] = Value::u64(static_cast<uint64_t>(category));        // Category
     e.values[4] = Value::str(std::string());                          // Decoration
     e.values[5] = Value::boolean(false);                              // bGM

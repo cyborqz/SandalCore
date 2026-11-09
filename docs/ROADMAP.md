@@ -61,6 +61,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Item stacks: a stack dragged onto a stack of the same item and colour joins it up to the stack's limit, a stack split with the right-click menu goes to a free slot, and the item bag, the material bags and the warehouse's materials tab follow the same rules.
 - Homing projectiles fly the game's turn law: the Discordance's notes, the Mend's orbs, the Frostbolt and the Salvo's arrows turn at their record's rate, curve round a target beside or behind the caster and chase a running creature where the game shows it.
 - Storage: a right-click quick-send into storage tops up a stack of the same item and colour and puts the rest in a free slot.
+- Chat (first part): a welcome line from the server appears in the chat window once when a player enters the world, and a line typed with /say comes back from the server to that player under the character's name.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

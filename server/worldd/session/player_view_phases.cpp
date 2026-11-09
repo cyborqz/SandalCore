@@ -38,6 +38,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_crafting(conn, now);
     run_quick_make(conn, now);
     run_cargo(conn, now);
+    run_chat(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);
     // Players seeing each other (stage A, unspike's #14): this player's pawn in the registry, for the other players' views.  #14 review: once a tick, here and nowhere else.  This is the first part of the
