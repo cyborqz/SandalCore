@@ -22,4 +22,14 @@ inline double consumable_montage_end(const std::string& soft_path) {
     return -1;
 }
 
+/// Seconds after the use at which the effects of the asset's kind may first apply — the least time of its eating or drinking bar (the recordings show about two
+/// seconds; its asset has no clear end of its own).  A use of such a kind holds its timed effects (the buff) back until the END of the use (the client's
+/// ServerEndAbility when its bar completes) and its hit (the buff's apply) lands no earlier than this.  The instant
+/// kinds (a scroll's, a potion's, a salve's, an elixir's) keep the cast's own step, as their client asks for their hit right after the use.  -1: the instant kinds.
+inline double consumable_effects_delay(const std::string& soft_path) {
+    if (soft_path.find("Consumable_Food") != std::string::npos) return 2.0;
+    if (soft_path.find("Consumable_Regen") != std::string::npos) return 2.0;
+    return -1;
+}
+
 }  // namespace aoc::worldd

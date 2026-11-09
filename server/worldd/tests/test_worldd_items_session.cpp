@@ -4735,7 +4735,7 @@ static void test_consumables_scroll_and_elixir() {
     const auto listed = [&](int64_t a) { return std::find(h.mirror.records.begin(), h.mirror.records.end(), a) != h.mirror.records.end(); };
     CHECK(listed(gc::kProcessingXpAbility) && listed(gc::kConstitutionAbility) && listed(gc::kHerbalismAbility),
           "the join lists the abilities of the carried scrolls and the elixir in ReplicatedRecordsToLoad (the client sends no trigger for an ability it has not loaded)");
-    CHECK(!listed(gc::kRoastedChickenAbility), "a meal's ability is not listed: meals are not served yet");
+    CHECK(listed(gc::kRoastedChickenAbility), "a meal's ability is listed too: meals are served through it now (ContentDb::consumable_ability: Food)");
 
     const auto use = [&](int slot, int64_t ability, int64_t hit, uint32_t guid, int32_t id, int hit_after_steps) {
         const svc::InventoryItem* item = h.s->inventory().at(Bag, slot);
@@ -4743,7 +4743,7 @@ static void test_consumables_scroll_and_elixir() {
         std::vector<fake::Bunch> sent;
         sent.push_back(h.client.actor(h.pawn_ch, item_used(3, slot, guid_n(guid)), true));
         sent.push_back(h.client.actor(h.pawn_ch, trigger_with_item(setup.guids.ability, ability, id, slot, items::to_instance(*item), 3), true));
-        if (hit_after_steps == 0) sent.push_back(h.client.actor(h.pawn_ch, hit_request_for(setup, ability, gc::kSelfTargeting, hit), true));
+        if (hit_after_steps == 0 && hit != 0) sent.push_back(h.client.actor(h.pawn_ch, hit_request_for(setup, ability, gc::kSelfTargeting, hit), true));
         h.client_sends(std::move(sent));
         for (int i = 0; i < 10; ++i) h.step();
         if (hit_after_steps > 0) {
@@ -4809,12 +4809,16 @@ static void test_consumables_scroll_and_elixir() {
     CHECK(xp_left == 4 && h.s->uses_applied() == used_before_pair + 1 && h.s->inventory().at(Bag, 4) && h.s->inventory().at(Bag, 4)->quantity == xp_left - 1 && mirror_matches(h),
           "two presses of one scroll within 65 ms: one is taken, the second is refused at its cost step and takes nothing");
 
-    // a meal is refused as before: the use alone is turned down and the meal stays in its slot
+    // a meal's ServerItemUsed alone does nothing now (the use is the ability's cast, sent in the same datagram): the meal stays and nothing is refused
     const size_t refused = h.s->uses_refused();
+    const size_t applied = h.s->uses_applied();
     h.request(item_used(3, 7, guid_n(313)), h.pawn_ch);
-    CHECK(h.s->uses_refused() == refused + 1 && h.s->inventory().at(Bag, 7) && h.s->inventory().at(Bag, 7)->quantity == 1 && h.s->uses_applied() == used_before_pair + 1, "a meal is not served yet: the use is refused and the meal stays");
+    CHECK(h.s->uses_refused() == refused && h.s->inventory().at(Bag, 7) && h.s->inventory().at(Bag, 7)->quantity == 1 && h.s->uses_applied() == applied,
+          "a meal's use alone casts nothing (the trigger in the same datagram runs it): the meal stays and nothing is refused");
 }
 
+/// The Health a potion of `quality` gives a level-25 Bard from 1 Health, in a session of its own (a potion's cooldown is 120 s, so two cannot be compared in one session).
+/// `requests` copies of the same hit request are sent: one use must take only the first.
 /// A use is paid at its cost step, 65 ms after the trigger: the stack must still be in the bag then, and a death before it lets the scroll go.
 static void test_consumables_item_gone_and_death() {
     const char* path = professions_db_path();

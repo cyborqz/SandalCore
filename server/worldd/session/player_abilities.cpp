@@ -89,6 +89,9 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             pipeline_->set_weapon_tags([this] { return weapon_tags(); });
             pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
             pipeline_->set_item_taker([this](int32_t client_instance_id) { return consumable_paid(client_instance_id); });   // consumables: the cost step takes the item
+            pipeline_->set_item_release([this](int32_t client_instance_id) { item_reserved_.erase(client_instance_id); });   // ... and a use cancelled before its cost step gives the reservation back
+            pipeline_->set_rest_effect(abilities_->rules().rest.effect_guid,
+                                       [this]() { return abilities_ && abilities_->rest_effect_on(); });   // the Resting effect is one: a meal's or a drink's own joins the Rest's
             // a player's heal reaches his own summoned mount: the mount is no combat world actor, its Health is the replicated stat the session holds
             // (the caster's own mount, never another player's, and only while it stands: a mount that dissolves or dies has saved the Health it had, so a heal on it would be lost)
             const auto healable = [this](uint64_t id) {
@@ -180,6 +183,15 @@ void PlayerSession::take_ability_events() {
     AbilityRuntime& runtime = *abilities_;
     std::vector<AbilityEvent> events = runtime.take_events();
     if (pipeline_) {
+        // The Resting effect is one: the Rest's own start takes it over from a running food or drink use (the meal's Resting joined it, or it began before the
+        // Rest's did — the sit-down's delay can put the Rest's own after the use's).  The takeover's removal goes out with the Rest's own add, in one flush.
+        const int64_t rest_effect = runtime.rules().rest.effect_guid;
+        if (std::any_of(events.begin(), events.end(), [rest_effect](const AbilityEvent& e) {
+                for (const bootstrap::EffectItem& item : e.change.effects_added)
+                    if (item.effect_guid == rest_effect) return true;
+                return false;
+            }))
+            pipeline_->end_effects_of(rest_effect);
         std::vector<AbilityEvent> more = pipeline_->take_events();
         events.insert(events.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
     }
