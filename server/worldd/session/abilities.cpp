@@ -290,6 +290,8 @@ void AbilityRuntime::set_regen_rate(double per_second, double now) {
 void AbilityRuntime::set_in_combat(bool in_combat, double now) {
     advance(now);
     in_combat_ = in_combat;
+    // The Rest effect's fragility ends it when its owner is in combat.
+    if (in_combat && rest_ && !rest_->ended) release_rest(now_, "the Rest ends: the player is in combat");
 }
 
 bool AbilityRuntime::regeneration_blocked(double now) const {
@@ -406,6 +408,25 @@ bool AbilityRuntime::cancel(int32_t client_instance_id, double now) {
     return false;
 }
 
+bool AbilityRuntime::end_server_instance(int64_t server_instance_id, double now) {
+    if (!ok()) return false;
+    advance(now);
+    if (sprint_ && sprint_->instance == server_instance_id) {
+        end_sprint(now_, Tell::No, "the Sprint is released");
+        return true;
+    }
+    if (rest_ && rest_->instance == server_instance_id) {
+        if (!rest_->ended) {
+            release_rest(now_, "the Rest is released");
+        } else {
+            // The client ended the instance after the SitEnd jump (or before the effect's own removal): take the effect now.
+            remove_rest_effect(now_);
+        }
+        return true;
+    }
+    return false;
+}
+
 bool AbilityRuntime::end_rest(double now) {
     if (!ok()) return false;
     advance(now);
@@ -426,7 +447,8 @@ bool AbilityRuntime::take_charge(AbilityChange& c) {
 
 void AbilityRuntime::start_sprint(int32_t id, double t) {
     if (sprint_) end_sprint(t, Tell::No, "the Sprint is replaced");
-    if (rest_ && !rest_->ended) release_rest(t, "the Rest ends: a Sprint starts");
+    // no Rest ends here: the Sprint is a speed modifier with no animation of its own, and a seated character stays seated for it — the Rest ends when the
+    // character really walks away (the movement rule) or presses something that stands him up
     const AbilityRule& r = rules_.sprint;
     const EffectRule& e = *rules_.effect(r.effect_guid);
     const int64_t instance = next_instance_++;

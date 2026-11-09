@@ -540,6 +540,13 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
             crate_drop_due_.reset();   // (Drop Crate has not gone out until the crate leaves the back, 0.7 s after the press)
         }
     }
+    // Any ability press stands the character up, taken or refused: the client plays its attack whether the server models the ability or not (a weapon combo is
+    // refused here and the character still swings), and it cancels its own sit without telling the server — a running Rest would outlive the attack the player
+    // just made.  The Rest itself (its own second press ends it), an item's use (a meal is eaten sitting: its montage has its own sit-down section) and the Sprint
+    // are not: the Sprint is a speed modifier with no animation of its own, the client stays seated for it, and the Rest ends when the character really moves (the
+    // movement rule) or presses something that stands him up.
+    if (ability != content::kGuidRest && ability != content::kGuidSprint && item_slot == -1 && runtime->resting())
+        runtime->end_rest(ability_seconds(now));   // the Rest ends: another ability starts
     take_ability_events();
     flush_abilities(conn);
     // a pet's command is the ability's: the pet obeys only when the pipeline took the cast (a refused Go To, still on its cooldown, orders nothing)
@@ -600,7 +607,8 @@ void PlayerSession::on_ability_end(Connection& conn, const repl::ClientRpc& rpc,
     const auto id = repl::parse_end_ability(rpc.call);
     if (!id) return;
     if (crate_drop_due_ && *id == crate_drop_instance_) crate_drop_due_.reset();   // (the same for an end request of that cast)
-    pipeline_->end_request(*id, ability_seconds(now));
+    // ServerEndAbility names the server's instance: a Sprint or a Rest ends by it, and the pipeline answers the rest.
+    if (!runtime->end_server_instance(*id, ability_seconds(now)) && pipeline_) pipeline_->end_request(*id, ability_seconds(now));
     take_ability_events();
     flush_abilities(conn);
 }
