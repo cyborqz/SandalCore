@@ -1243,7 +1243,7 @@ std::optional<double> AbilityPipeline::effect_end(int64_t effect_guid) const {
 bootstrap::EffectItem AbilityPipeline::effect_item(const EffectInst& e) const {
     bootstrap::EffectItem item;
     item.effect_id = e.key;
-    item.effect_guid = e.def->row.guid;
+    item.effect_guid = e.display_guid != 0 ? e.display_guid : e.def->row.guid;   // a consumable may name another record for the display only
     item.start_time = sync(e.start);
     item.duration = std::isinf(e.end) ? AbilityRuntime::kInfiniteDuration : static_cast<float>(e.end - e.start);
     item.tick_time = static_cast<float>(e.def->row.tick_timer);
@@ -1282,8 +1282,21 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
             if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
             continue;
         }
-        mods.push_back({m.stat_guid, v});
+        int64_t stat = m.stat_guid;
+        if (consumable_item_) {   // a modelled gap: the item's ability names another stat than the one its buff must raise (Might Potion)
+            const auto remap = consumable_item_->effect_stat_remap.find(stat);
+            if (remap != consumable_item_->effect_stat_remap.end()) stat = remap->second;
+        }
+        mods.push_back({stat, v});
     }
+    // What the client should draw the buff from: the effect's own record, or the one a consumable names for the display only (the effect applied and its mods stay this
+    // definition's own).  A record the content does not carry is no display at all: the own one is used.
+    const int64_t display_guid = [&]() -> int64_t {
+        if (!consumable_item_ || consumable_item_->effect_display_remap.empty() || !catalog_) return 0;
+        const auto remap = consumable_item_->effect_display_remap.find(row.guid);
+        if (remap == consumable_item_->effect_display_remap.end()) return 0;
+        return catalog_->effect(remap->second) ? remap->second : 0;
+    }();
     auto give_shield = [&](EffectInst& e) {
         if (!shield) return;
         e.has_shield = true;
@@ -1334,6 +1347,7 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         e.start = t;
         e.end = std::isinf(total) ? kInf : t + total;
         if (consumable_item_) e.item = consumable_item_;   // a tick after the refresh reads the item of the use that refreshed it
+        e.display_guid = display_guid;   // an effect refreshed by another item is drawn as that item's (0: its own record)
     };
     auto fresh = [&](int stacks) {
         EffectInst e;
@@ -1346,6 +1360,7 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         e.end = std::isinf(dur) ? kInf : t + dur;
         e.mods = mods;
         e.item = consumable_item_;
+        e.display_guid = display_guid;
         e.next_tick = row.tick_timer > 0 ? (row.ignore_initial_tick ? t + row.tick_timer : t) : kInf;
         give_shield(e);
         for (uint32_t& w : e.shield_guid) w = static_cast<uint32_t>(guid_rng_.next() >> 16);
