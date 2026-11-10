@@ -314,7 +314,7 @@ void PlayerSession::on_client_load(Connection& conn, Clock::time_point now) {
         queue("ClientReceiveStoragePayload", [k](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(k, Role::PlayerController); },
               conn);
     }
-    queue("ClientUpdateGroup", [](bootstrap::PlayerBootstrap& pb) { return pb.empty_group(); }, conn);
+    queue_party_or_empty(conn);
     if (book_) {
         // plan D1, stage 2: the bar the character arranged, or the default (the weapon bank and the class's skills), once, as retail's
         const repl::ActionbarPayload payload = bar_payload();
@@ -335,5 +335,9 @@ void PlayerSession::register_requests_rpcs(RpcTable& t) {
     t.add(RpcScope::Pawn, "ServerSetHoverTargetGuid", [](PlayerSession& s, const RpcContext& c) { s.on_set_hover_target(c.conn, c.rpc, c.now); });
     t.add(RpcScope::FtueComponent, "Server_RemoveLocaleFTUEs", [](PlayerSession& s, const RpcContext& c) { s.on_remove_ftues(c.conn, c.rpc, c.now); });
 }
+
+// The party (social step 8): its handlers, the group registry and the frame builder.  It is part of this file so that the feature
+// adds no source-list line of its own.
+#include "session/player_party.inc"
 
 }}  // namespace aoc::worldd

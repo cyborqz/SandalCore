@@ -173,6 +173,22 @@ struct LootRemoval {
     repl::ItemInstance item;
 };
 
+/// One member of a party as ClientUpdateGroup draws it (social step 8): the name and the character GUID the frame shows, and the class.
+/// The frame's stats are the waiting state of the step (zero health and mana, level 1); step 9 fills them.
+struct GroupMember {
+    std::string             name;
+    std::array<uint32_t, 4> guid{};
+    int32_t                 primary_class = 0;
+};
+
+/// The whole group a ClientUpdateGroup carries: the group's GUID, its leader and its master looter, and the members in squad order.
+struct GroupClientData {
+    std::array<uint32_t, 4>  group_guid{};
+    std::array<uint32_t, 4>  leader_guid{};
+    std::array<uint32_t, 4>  master_looter_guid{};
+    std::vector<GroupMember> members;
+};
+
 /// The most ClientReceiveStorageEvent calls one chain carries (a Backpack's 70 Adds go out in five).
 inline constexpr size_t kMaxEventsPerChain = 16;
 
@@ -457,6 +473,14 @@ public:
     /// ClientUpdateGroup of an empty group, and the class's default action bar (ClientReceiveActionbarSlotPayload,
     /// as captured): the replies to ServerRequestClientLoad.
     std::optional<Send> empty_group();
+    /// ClientUpdateGroup(NewGroup): the group as the client's frame draws it.  A group of one member is the waiting state of an
+    /// invitation; the caller sends the two-member state when the invitation is accepted.
+    std::optional<Send> group_update(const GroupClientData& group);
+    /// ClientRequestJoinGroup(GroupGuid, InviterName, GroupType): the invitation the invitee's client answers with
+    /// ServerAcceptJoinGroup or ServerDeclineJoinGroup.
+    std::optional<Send> group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name);
+    /// ClientUpdateGroupSettings with the settings a party starts with (member shouts on, the loot methods of the party frame).
+    std::optional<Send> group_settings();
     std::optional<Send> default_action_bar();
     /// Plan D1, stage 2: the character's own action bar as one ClientReceiveActionbarSlotPayload on the PlayerController (reliable): the reply to
     /// ServerRequestClientLoad, and the clearing of a class's slots when the class changes.

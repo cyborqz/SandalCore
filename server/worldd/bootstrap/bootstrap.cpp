@@ -53,6 +53,36 @@ namespace {
 
 Value object(const FIntrepidNetworkGUID& g) { return Value(g); }
 
+/// The loot methods of a party frame: Common 0, the six rarities 2, the deprecated five 0.  `methods` is the struct's
+/// "...LootAllocationMethods" path; its "...LootAllocationMethodsDEPRECATED" sibling holds the old five.
+bool set_loot_methods(const schema::RpcSchema& rpc, repl::RpcParams& params, const std::string& methods) {
+    bool ok = true;
+    const auto set = [&](const std::string& path, Value value) { ok = repl::set_rpc_param(rpc, params, path, std::move(value)) && ok; };
+    set(methods + ".DefaultLootAllocationMethod", Value::u64(0));
+    set(methods + ".CommonLootAllocationMethod", Value::u64(0));
+    for (const char* rarity : {"Uncommon", "Rare", "Heroic", "Epic", "Legendary", "Artifact"}) {
+        set(methods + "." + rarity + "LootAllocationMethod", Value::u64(2));
+    }
+    for (const char* old : {"PoorLootAllocationMethod", "CommonAndUncommonLootAllocationMethod", "RareAndEpicLootAllocationMethod",
+                            "LegendaryLootAllocationMethod", "ContainerAllocationMethod"}) {
+        set(methods + "DEPRECATED." + old, Value::u64(0));
+    }
+    return ok;
+}
+
+/// The party settings a frame carries: member shouts on and the loot methods of a party.
+bool set_party_settings(const schema::RpcSchema& rpc, repl::RpcParams& params, const std::string& block) {
+    bool ok = repl::set_rpc_param(rpc, params, block + ".bEnableMemberShouts", Value::boolean(true));
+    return set_loot_methods(rpc, params, block + ".LootAllocationMethods") && ok;
+}
+
+/// The raid settings a frame carries: shout privilege 2, the party's loot overridden off, and the same loot methods.
+bool set_raid_settings(const schema::RpcSchema& rpc, repl::RpcParams& params, const std::string& block) {
+    bool ok = repl::set_rpc_param(rpc, params, block + ".ShoutPrivilege", Value::u64(2));
+    ok = repl::set_rpc_param(rpc, params, block + ".bOverridePartyLootSettings", Value::boolean(false)) && ok;
+    return set_loot_methods(rpc, params, block + ".LootAllocationMethods") && ok;
+}
+
 /// FMath::RoundToInt: floor(x + 0.5).
 int round_to_int(float v) { return static_cast<int>(std::floor(v + 0.5f)); }
 
@@ -2157,6 +2187,107 @@ std::optional<Send> PlayerBootstrap::verbatim_block(Role role, const char* what,
 std::optional<Send> PlayerBootstrap::empty_group() {
     if (!ok_) return std::nullopt;
     return verbatim_block(Role::PlayerController, "ClientUpdateGroup (empty)", captured::kEmptyGroupBlock.hex, captured::kEmptyGroupBlock.bits);
+}
+
+std::optional<Send> PlayerBootstrap::group_update(const GroupClientData& group) {
+    if (!ok_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientUpdateGroup");
+    if (!rpc) return std::nullopt;
+    repl::RpcParams params;
+    bool good = true;
+    const auto set = [&](const std::string& path, Value value) { good = repl::set_rpc_param(*rpc, params, path, std::move(value)) && good; };
+    const auto set_guid = [&](const char* prefix, const std::array<uint32_t, 4>& guid) {
+        for (int i = 0; i < 4; ++i) set(std::string(prefix) + "." + "ABCD"[i], Value::i64(static_cast<int32_t>(guid[i])));
+    };
+    set_guid("NewGroup.GroupGuid", group.group_guid);
+    set_guid("NewGroup.LeaderGuid", group.leader_guid);
+    set_guid("NewGroup.MasterLooterGuid", group.master_looter_guid);
+    set("NewGroup.GroupType", Value::u64(0));
+    repl::ArrayValue squads;
+    repl::ElementState squad;
+    squad.values[1] = Value::i64(1);   // SquadNumber
+    repl::ArrayValue members;
+    for (const GroupMember& shown : group.members) {
+        repl::ElementState member;
+        member.values[1] = Value::str(shown.name);
+        for (int i = 0; i < 4; ++i) member.values[static_cast<uint16_t>(2 + i)] = Value::i64(static_cast<int32_t>(shown.guid[i]));
+        member.values[6] = Value::u64(static_cast<uint64_t>(shown.primary_class));
+        member.values[7] = Value::boolean(true);   // bIsOnline: the session is in the group
+        member.values[8] = Value::f32(0.0f);       // HealthPercent: the waiting state of this step
+        member.values[9] = Value::f32(0.0f);       // MaxHealth
+        member.values[10] = Value::f32(0.0f);      // ManaPercent
+        member.values[11] = Value::f32(0.0f);      // MaxMana
+        member.values[12] = Value::i64(1);         // Level
+        member.values[13] = Value::u64(0);         // AliveStatus
+        member.values[14] = Value(repl::QuantVec{});   // Location
+        member.values[15] = Value(repl::QuantVec{});   // MapMarkerLocation
+        member.values[16] = Value::f32(0.0f);      // Heading
+        members.elements.push_back(std::move(member));
+    }
+    squad.values[2] = Value(std::move(members));
+    repl::ArrayValue leaders;
+    repl::ElementState leader;
+    for (int i = 0; i < 4; ++i) leader.values[static_cast<uint16_t>(1 + i)] = Value::i64(static_cast<int32_t>(group.leader_guid[i]));
+    leaders.elements.push_back(std::move(leader));
+    squad.values[3] = Value(std::move(leaders));
+    squad.values[4] = Value::boolean(true);   // SquadSettings.bEnableMemberShouts
+    squads.elements.push_back(std::move(squad));
+    set("NewGroup.Squads", Value(std::move(squads)));
+    good = set_raid_settings(*rpc, params, "NewGroup.RaidSettings") && good;
+    good = set_party_settings(*rpc, params, "NewGroup.PartySettings") && good;
+    if (!good) return std::nullopt;
+    BunchWriter bits;
+    bool failed = false;
+    if (repl::write_rpc_params(*rpc, params, bits, {}, &failed) == 0 || failed) return std::nullopt;
+    BunchWriter field;
+    if (repl::write_field(*pc_.obj.schema, rpc->field_index, bits, field) == 0) return std::nullopt;
+    Emission e;
+    repl::BlockHeader header;
+    if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
+    return finish(Role::PlayerController, false, "ClientUpdateGroup (party)", std::move(e));
+}
+
+std::optional<Send> PlayerBootstrap::group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name) {
+    if (!ok_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientRequestJoinGroup");
+    if (!rpc) return std::nullopt;
+    repl::RpcParams params;
+    bool good = true;
+    for (int i = 0; i < 4; ++i) {
+        good = repl::set_rpc_param(*rpc, params, std::string("GroupGuid.") + "ABCD"[i], Value::i64(static_cast<int32_t>(group_guid[i]))) && good;
+    }
+    good = repl::set_rpc_param(*rpc, params, "InviterName", Value::str(inviter_name)) && good;
+    good = repl::set_rpc_param(*rpc, params, "GroupType", Value::u64(0)) && good;
+    if (!good) return std::nullopt;
+    BunchWriter bits;
+    bool failed = false;
+    if (repl::write_rpc_params(*rpc, params, bits, {}, &failed) == 0 || failed) return std::nullopt;
+    BunchWriter field;
+    if (repl::write_field(*pc_.obj.schema, rpc->field_index, bits, field) == 0) return std::nullopt;
+    Emission e;
+    repl::BlockHeader header;
+    if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
+    return finish(Role::PlayerController, false, "ClientRequestJoinGroup", std::move(e));
+}
+
+std::optional<Send> PlayerBootstrap::group_settings() {
+    if (!ok_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientUpdateGroupSettings");
+    if (!rpc) return std::nullopt;
+    repl::RpcParams params;
+    bool good = set_party_settings(*rpc, params, "PartySettings");
+    good = set_raid_settings(*rpc, params, "RaidSettings") && good;
+    good = repl::set_rpc_param(*rpc, params, "SquadSettings.bEnableMemberShouts", Value::boolean(true)) && good;
+    if (!good) return std::nullopt;
+    BunchWriter bits;
+    bool failed = false;
+    if (repl::write_rpc_params(*rpc, params, bits, {}, &failed) == 0 || failed) return std::nullopt;
+    BunchWriter field;
+    if (repl::write_field(*pc_.obj.schema, rpc->field_index, bits, field) == 0) return std::nullopt;
+    Emission e;
+    repl::BlockHeader header;
+    if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
+    return finish(Role::PlayerController, false, "ClientUpdateGroupSettings", std::move(e));
 }
 
 std::optional<Send> PlayerBootstrap::default_action_bar() {

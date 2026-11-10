@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 9 November 2026
+**Last updated:** 10 November 2026
 
 ---
 
@@ -66,6 +66,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Chat (second part): a /say reaches every player within 30 m of the speaker, and a /tell reaches the player it names: the sender reads "To <name>: <text>" and the player named reads the text under the sender's name, a tell to oneself sends both copies, and a name that is offline or unknown gets one "is not online" line.
 - Ignore list (chat): a name a player ignores goes on the list the game client shows (up to 50 names, also a name that is offline or that no character has), the game client hides the chat lines and the tells that come from a name on its list, and the list is kept for the character from one login to the next. A character cannot ignore its own name. Ignoring a guild is still to come.
 - Emotes (social, fifth step): the game's 54 emote commands are understood in any letter case. 39 of them play their animation (/sit, /wave, /bow, /dance, /cheer, /clap and the rest) with the game's cooldowns, and the players within 150 m see them. A second /sit stands the character up, and /dance plays one of four dances. A /sit in combat, on a mount or when dead does nothing.
+- Parties (social): a player invites another by name, and the invited player accepts or declines. A party holds two to eight players, any member can invite, and the group frame lists every member and marks the leader. A leave, a kick, a leader change and a disband update every member's frame. An invitation ends after five minutes or when the invited player logs out. A logout counts as a leave, and when the leader goes the member who has been in the party longest becomes the leader. A party lasts until its members leave or the server restarts.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

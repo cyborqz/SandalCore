@@ -14,3 +14,4 @@
 #include "session_endpoint_tests.inc"
 #include "session_chat_tests.inc"
 #include "session_ignore_tests.inc"
+#include "session_party_tests.inc"
