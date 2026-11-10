@@ -954,8 +954,10 @@ bool ContentDb::item_has_tag(int64_t item_guid, const std::string& tag, std::str
 int64_t ContentDb::consumable_ability(int64_t item_guid, std::string& error) const {
     const auto use = item_use(item_guid, error);
     if (!use || use->activation != "CastAbility" || !use->consume_on_use || use->cast_ability == 0) return 0;
-    // the kinds the server runs: a scroll or an elixir
-    for (const char* tag : {"Item.Consumable.Scroll", "Item.Consumable.Elixir"}) {
+    // The kinds the server runs as an item cast.  One line per tag: a new consumable kind is added here (and to the client's use list) without touching the runtime;
+    // the other Item.Consumable.* tags (recipes, enchanting, tempering kits, survey pylons, treasure maps) keep the old answer, a refused use, until they are modelled.
+    for (const char* tag : {"Item.Consumable.Food", "Item.Consumable.Drink", "Item.Consumable.Elixir", "Item.Consumable.Potion", "Item.Consumable.Salve",
+                            "Item.Consumable.Scroll"}) {
         if (item_has_tag(item_guid, tag, error)) return use->cast_ability;
         if (!error.empty()) return 0;
     }
