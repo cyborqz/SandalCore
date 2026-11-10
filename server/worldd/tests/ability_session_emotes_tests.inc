@@ -660,9 +660,10 @@ static void test_the_rest_runtime_when_the_server_asks() {
     for (const AbilityEvent& e : events)
         for (const bs::ActiveAbilityItem& a : e.change.abilities_added) not_predicted = not_predicted || (a.ability_guid == kRest && !a.branch_predicted);
     CHECK(not_predicted, "the item of a Rest the server starts says the client did not predict it (bBranchPredictedOnAutonomous 0), as the game's item of an emote does");
-    // standing up works in combat
+    // combat ends the Rest: its effect's fragility breaks it
     rt.set_in_combat(true, 1.0);
-    CHECK(rt.end_rest(1.0) && !rt.resting(), "ending the Rest works in combat: the character can always stand up");
+    CHECK(!rt.resting(), "combat ends the Rest: its effect's fragility breaks it");
+    CHECK(!rt.end_rest(1.0), "(nothing rests: combat already ended it)");
     events = rt.take_events();
     bool jumped = false;
     for (const AbilityEvent& e : events)

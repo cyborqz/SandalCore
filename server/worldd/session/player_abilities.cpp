@@ -546,7 +546,8 @@ void PlayerSession::on_ability_end(Connection& conn, const repl::ClientRpc& rpc,
     const auto id = repl::parse_end_ability(rpc.call);
     if (!id) return;
     if (crate_drop_due_ && *id == crate_drop_instance_) crate_drop_due_.reset();   // (the same for an end request of that cast)
-    pipeline_->end_request(*id, ability_seconds(now));
+    // ServerEndAbility names the server's instance: a Sprint or a Rest ends by it, and the pipeline answers the rest.
+    if (!runtime->end_server_instance(*id, ability_seconds(now)) && pipeline_) pipeline_->end_request(*id, ability_seconds(now));
     take_ability_events();
     flush_abilities(conn);
 }
