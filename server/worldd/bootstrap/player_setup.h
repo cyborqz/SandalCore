@@ -148,6 +148,14 @@ struct CurrencyBalance {
     int64_t amount = 0;
 };
 
+/// One node of OwnerInfo.NodeToPlayerReputation (a fast map keyed by the node): the character's reputation with it and when it last decayed (Unix seconds [modelled: the unit]).
+struct NodeReputationEntry {
+    int64_t node = 0;
+    float   reputation = 0;
+    int64_t last_decay = 0;
+    bool operator==(const NodeReputationEntry&) const = default;
+};
+
 // ---- the login ----------------------------------------------------------------------------------------------------
 
 /// What the PlayerState carries (transcript section 4.5): the connection's login, not the character.
@@ -290,6 +298,8 @@ struct PlayerSetup {
     int64_t                            citizen_node = 0;
     /// OwnerInfo.Currencies at the join (the vendors milestone, step 0): Copper first, then Node currency, then any other the character holds.  Empty: the field is not sent.
     std::vector<CurrencyBalance>       currencies;
+    /// OwnerInfo.NodeToPlayerReputation at the join (node reputation, migration 0022).  Empty: the field is not sent.
+    std::vector<NodeReputationEntry>   node_reputation;
 
     // ---- the login [sess] ----------------------------------------------------------------------------------------
     LoginIdentity login;

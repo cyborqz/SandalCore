@@ -235,6 +235,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->wallet_ = purse;
     p->account_id_ = character.account_id;
     p->citizenship_ = citizenship;
+    p->init_node_reputation(character);   // node reputation (migration 0022): decayed to now, the purse's old reputation moved to the citizen node
     p->jobs_ = character.processing_jobs;   // crafting, step 1: the jobs run on the wall clock, whether the character was logged in or not
     for (const svc::ProcessingJob& j : p->jobs_) p->job_seen_[j.job_guid] = crafting::status_at(j, wall_ms());   // (step 2: a window opened now shows them so; the changes after are sent)
     p->sync_active_stations(wall_ms());
@@ -690,6 +691,12 @@ void PlayerSession::hand_over_progress(const char* why) {
     if (citizenship_changed_) {   // node citizenship: the account's, once this session changed it (a session that did not leaves what another may have saved)
         p.replace_citizenship = true;
         p.citizenship = citizenship_;
+    }
+    if (node_rep_changed_) {   // node reputation (migration 0022): the whole list, once this session changed it
+        p.replace_node_reputation = true;
+        for (const auto& [node, r] : node_rep_) {
+            if (r.reputation != 0) p.node_reputation.push_back({node, r.reputation, r.last_decay_ms});
+        }
     }
     p.replace_completed_ftues = true;   // missing systems, step 0: the finished tutorials go whole with every hand-over (what the session holds is what the character has)
     p.completed_ftues = completed_ftues_;

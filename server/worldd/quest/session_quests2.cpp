@@ -213,9 +213,8 @@ bool PlayerSession::deliver_quest_rewards(Connection& conn, const std::vector<in
         const world::CityNodeInfo* town = nullptr;
         if (nodes) town = nodes->by_rank(nodes->node_at(gx, gy).node_rank);
         world::NodeControl* control = world_->node_control();
-        if (town && town->levelable && control) {
-            control->add_experience(std::to_string(town->guid), node_xp, std::string("a quest reward of ") + name());
-            node_note = "; " + std::to_string(node_xp) + " node experience to " + town->display_name;
+        if (town && town->levelable && control && world_->add_node_experience(town->guid, node_xp, "a quest reward")) {   // Nodes 2: times the node rate, with the rest
+            node_note = "; " + std::to_string(node_xp) + " node experience (x" + std::to_string(world_->node_experience_rate()) + ") to " + town->display_name;
         } else {
             node_note = "; " + std::to_string(node_xp) + " node experience goes nowhere (" +
                         (!control ? "no node service" : town ? town->display_name + " is not a town that grows" : "the giver stands in no node") + ")";

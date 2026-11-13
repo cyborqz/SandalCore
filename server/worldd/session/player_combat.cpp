@@ -309,6 +309,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
 // -- C | O | A & Cyb --
 
 void PlayerSession::apply_kill(Connection& conn, const combat::KillReward& k, Clock::time_point now) {
+    earn_node_experience(k.adventuring_xp, "a kill");   // the node the player stands in, the base XP times the node rate
     ++kills_rewarded_;
     const leveling::LevelCurve* curve = world_ ? world_->level_curve() : nullptr;
     const std::span<const content::AutoGrant> grants = world_ ? world_->auto_grants() : std::span<const content::AutoGrant>();

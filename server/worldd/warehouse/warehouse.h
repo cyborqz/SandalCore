@@ -85,19 +85,24 @@ class Facts final : public dialogue::ExprHost {
 public:
     int64_t node = 0;
     int     level = 0;
-    bool    citizen = false;   // there is no citizenship yet: nobody is
+    int64_t citizen_node = 0;   // the node the player is a citizen of (0: none)
+    int     reputation_rank = 5;   // ENodeReputationRank with the town (world/node_reputation.h); 5 (cCount): none, the player is no citizen of it
 
     std::optional<dialogue::ExprValue> call(const std::string& name, const std::vector<dialogue::ExprValue>& args) const override {
         using dialogue::ExprValue;
         constexpr int64_t kPlayer = 1;
         if (name == "GetPlayer") return ExprValue::of(kPlayer);
-        if (name == "GetCurrentNode" || name == "Node_GetActorCityNode") return args.size() == 1 ? std::optional<ExprValue>(ExprValue::of(node)) : std::nullopt;
+        if (name == "GetCurrentNode") return args.size() == 1 ? std::optional<ExprValue>(ExprValue::of(node)) : std::nullopt;
+        // a player's city node is the node the player is a citizen of (vendor/town_shops.h): the citizen tabs ask that the player stand in it and be its citizen
+        if (name == "Node_GetActorCityNode") return args.size() == 1 ? std::optional<ExprValue>(ExprValue::of(citizen_node)) : std::nullopt;
         if (name == "Node_GetLevel") return args.size() == 1 ? std::optional<ExprValue>(ExprValue::of(level)) : std::nullopt;
-        if (name == "Node_IsActorInNodeName") return ExprValue::of(1);
-        if (name == "Node_IsPlayerCitizenOfNode") return ExprValue::of(citizen ? 1 : 0);
-        if (name == "GetNodeToPlayerReputationRank") {
+        if (name == "Node_IsActorInNodeName") return args.size() == 2 ? std::optional<ExprValue>(ExprValue::of(args[1].i == node ? 1 : 0)) : std::nullopt;   // the player stands in `node`
+        if (name == "Node_IsPlayerCitizenOfNode") return args.size() == 2 ? std::optional<ExprValue>(ExprValue::of(citizen_node != 0 && citizen_node == args[1].i ? 1 : 0)) : std::nullopt;
+        if (name == "GetNodeToPlayerReputationRank") {   // the character's rank with the town; none (cCount) for a player who is no citizen of it
+            static constexpr const char* kRanks[] = {"Peasant", "Commoner", "Liege", "Noble", "Aristocrat", "cCount"};
             ExprValue v;
-            v.text = "ENodeReputationRank::None";   // no reputation tier exists yet: the character is nobody's citizen, noble or liege
+            v.i = reputation_rank >= 0 && reputation_rank <= 5 ? reputation_rank : 5;
+            v.text = std::string("ENodeReputationRank::") + kRanks[v.i];
             return v;
         }
         if (name == "EnumInt") {

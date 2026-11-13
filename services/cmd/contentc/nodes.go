@@ -25,7 +25,7 @@ import (
 var nodeSchemas = []string{
 	"CityNodeRecordBase", "ZOIRecordBase", "NodeLevelDetailsRecordBase", "NodeModificationRecordBase", "NodeSizeRecordBase", "ChildNodeRulesRecordBase",
 	"ChildNodeDesiredLevelRulesRecordBase", "VassalshipDefRecordBase", "TaxDetailsRecordBase", "NodeGlobalTaxTableRecordBase",
-	"NodeToPlayerReputationTierRecordBase", "CitizenshipNodeRecordBase", "CitizenshipGenericRecordBase", "QuantityScalarDefRecordBase",
+	"NodeToPlayerReputationTierRecordBase", "NodeRewardRecordBase", "NodeEffectRecordBase", "CitizenshipNodeRecordBase", "CitizenshipGenericRecordBase", "QuantityScalarDefRecordBase",
 	"CitizenshipDuesDefRecordBase", "PropertyTaxDuesDefRecordBase", "CityNodeElectionDefRecordBase", "ElectionConstantsRecordBase",
 	"CityNodeConstantsRecordBase", "NodeAssetSetRecordBase", "NodeAssetDefinitionRecordBase", "ServiceBuildingPlotRecordBase", "BuildingRecordBase",
 	"BuildingNodeAssetSetsRecordBase",
@@ -482,6 +482,9 @@ func buildNodes(w *writer, src *source, opt *Options, meta map[string]string) er
 			return err
 		}
 	}
+	if err := writeNodeRewards(rows, insert); err != nil {
+		return err
+	}
 	for _, r := range rows("CitizenshipNodeRecordBase") {
 		f := newFields(fmt.Sprintf("CitizenshipNode %s (%d)", r.Name, r.Guid), r.Fields)
 		level, cooldown := f.int("Level"), f.int("CitizenshipCooldownTimeSeconds")
@@ -789,6 +792,117 @@ func buildNodes(w *writer, src *source, opt *Options, meta map[string]string) er
 	meta["typed.city_node.levelable"] = strconv.Itoa(levelable)
 	for _, t := range content.NodeTables {
 		meta["typed."+t] = strconv.Itoa(counts[t])
+	}
+	return nil
+}
+
+// writeNodeRewards fills node_reward, node_reward_mod and the node_effect tables (contentc version 45): a mayoral commission's reward is NodeMods, each a
+// NodeModification for a Duration; a modification's EffectsIds name NodeEffect rows, each with the effects it puts on characters (or caravans, mounts) in the
+// node's zone of influence and the commodities it gives the node's stores.
+func writeNodeRewards(rows func(string) []designdb.Row, insert func(table, query string, args ...any) error) error {
+	structs := func(f *fields, name string) []designdb.Struct {
+		var out []designdb.Struct
+		for i, v := range f.list(name) {
+			s, ok := v.(designdb.Struct)
+			if !ok {
+				if f.err == nil {
+					f.err = fmt.Errorf("%s: %s[%d] is %T, not a struct", f.where, name, i, v)
+				}
+				return nil
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	for _, r := range rows("NodeRewardRecordBase") {
+		f := newFields(fmt.Sprintf("NodeReward %s (%d)", r.Name, r.Guid), r.Fields)
+		mods := structs(f, "NodeMods")
+		if f.err != nil {
+			return f.err
+		}
+		if err := insert("node_reward", `INSERT INTO node_reward (guid, name) VALUES (?, ?)`, r.Guid, r.Name); err != nil {
+			return err
+		}
+		for ord, s := range mods {
+			mf := newFields(fmt.Sprintf("%s: NodeMods[%d]", f.where, ord), s)
+			mod, _ := mf.id("Mod")
+			df := newFields(mf.where+": Duration", mf.strukt("Duration"))
+			if mf.err != nil {
+				return mf.err
+			}
+			duration := df.int("Duration")
+			if df.err != nil {
+				return df.err
+			}
+			if err := insert("node_reward_mod", `INSERT INTO node_reward_mod (reward_guid, ord, mod_guid, duration_ms) VALUES (?, ?, ?, ?)`, r.Guid, ord, mod, duration); err != nil {
+				return err
+			}
+		}
+	}
+	for _, r := range rows("NodeEffectRecordBase") {
+		f := newFields(fmt.Sprintf("NodeEffect %s (%d)", r.Name, r.Guid), r.Fields)
+		zoi := structs(f, "ZOIEffects")
+		commodities := structs(f, "CommoditiesToGiveNode")
+		if f.err != nil {
+			return f.err
+		}
+		if err := insert("node_effect", `INSERT INTO node_effect (guid, name) VALUES (?, ?)`, r.Guid, r.Name); err != nil {
+			return err
+		}
+		for ord, s := range zoi {
+			zf := newFields(fmt.Sprintf("%s: ZOIEffects[%d]", f.where, ord), s)
+			effect, _ := zf.id("EffectRecordId")
+			var character, caravan, mount bool
+			for _, c := range zf.list("EffectClassifications") {
+				switch c {
+				case "ECharacterClassification::Character":
+					character = true
+				case "ECharacterClassification::Caravan":
+					caravan = true
+				case "ECharacterClassification::Mount":
+					mount = true
+				default:
+					if zf.err == nil {
+						zf.err = fmt.Errorf("%s: EffectClassifications has %v", zf.where, c)
+					}
+				}
+			}
+			minRank, _ := zf.enumOrd("MinimumReputationRank", "ENodeReputationRank")
+			global := zf.boolean("CanBeAppliedGlobally")
+			globalRank, _ := zf.enumOrd("MinimumReputationRankForGlobalApplication", "ENodeReputationRank")
+			nodeType, _ := zf.enumOrd("EffectNodeType", "ENodeType")
+			alignments := zf.ids("EffectAlignments")
+			requireAll, requireOrg := zf.boolean("bRequireAllAlignments"), zf.boolean("bRequireOrgAffiliation")
+			override := zf.boolean("bOverrideEffectDuration")
+			duration := zf.number("OverrideEffectDuration")
+			if zf.err != nil {
+				return zf.err
+			}
+			if err := insert("node_effect_zoi", `INSERT INTO node_effect_zoi (node_effect_guid, ord, effect_guid, on_character, on_caravan, on_mount, min_rank, global,
+				global_min_rank, node_type, require_all_alignments, require_org, override_duration, duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				r.Guid, ord, effect, b2i(character), b2i(caravan), b2i(mount), minRank, b2i(global), globalRank, nodeType, b2i(requireAll), b2i(requireOrg),
+				b2i(override), duration); err != nil {
+				return err
+			}
+			for i, a := range alignments {
+				if err := insert("node_effect_zoi_alignment", `INSERT INTO node_effect_zoi_alignment (node_effect_guid, zoi_ord, ord, alignment_guid) VALUES (?, ?, ?, ?)`,
+					r.Guid, ord, i, a); err != nil {
+					return err
+				}
+			}
+		}
+		for ord, s := range commodities {
+			cf := newFields(fmt.Sprintf("%s: CommoditiesToGiveNode[%d]", f.where, ord), s)
+			commodity, _ := cf.id("CommodityRecord")
+			quantity := cf.int("Quantity")
+			if cf.err != nil {
+				return cf.err
+			}
+			if err := insert("node_effect_commodity", `INSERT INTO node_effect_commodity (node_effect_guid, ord, commodity_guid, quantity) VALUES (?, ?, ?, ?)`,
+				r.Guid, ord, commodity, quantity); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

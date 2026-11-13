@@ -78,6 +78,14 @@ type CitizenshipStore interface {
 
 var _ CitizenshipStore = (*character.Store)(nil)
 
+// NodeReputationStore is the part of character.Store that keeps a character's node reputations (migration 0022). A store without it keeps none: GetCharacter sends none and a save
+// that replaces them is refused.
+type NodeReputationStore interface {
+	NodeReputations(ctx context.Context, id string) ([]character.NodeReputation, error)
+}
+
+var _ NodeReputationStore = (*character.Store)(nil)
+
 // WarehouseStore is the part of character.Store that keeps a character's warehouse (the storage milestone, step 0). A store without it keeps none: GetCharacter sends none and a save that
 // replaces the warehouse is refused.
 type WarehouseStore interface {
@@ -303,6 +311,15 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 					DuesDueMs: cit.DuesDueMs, RenounceCooldownUntilMs: cit.RenounceCooldownUntilMs}
 			}
 		}
+		if rs, ok := s.store.(NodeReputationStore); ok {
+			reps, err := rs.NodeReputations(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			for _, r := range reps {
+				out.NodeReputation = append(out.NodeReputation, &characterv1.NodeReputation{NodeGuid: r.NodeGUID, Reputation: r.Reputation, LastDecayMs: r.LastDecayMs})
+			}
+		}
 		if ws, ok := s.store.(WarehouseStore); ok {
 			stored, err := ws.WarehouseItems(ctx, c.ID)
 			if err != nil {
@@ -350,6 +367,17 @@ func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRe
 		}
 	} else if r.GetCitizenship() != nil {
 		return nil, status.Error(codes.InvalidArgument, "a citizenship is given without replace_citizenship")
+	}
+	if r.GetReplaceNodeReputation() {
+		if _, ok := s.store.(NodeReputationStore); !ok {
+			return nil, status.Error(codes.FailedPrecondition, "this character store keeps no node reputation")
+		}
+		p.ReplaceNodeReputation = true
+		for _, n := range r.GetNodeReputation() {
+			p.NodeReputation = append(p.NodeReputation, character.NodeReputation{NodeGUID: n.GetNodeGuid(), Reputation: n.GetReputation(), LastDecayMs: n.GetLastDecayMs()})
+		}
+	} else if len(r.GetNodeReputation()) > 0 {
+		return nil, status.Error(codes.InvalidArgument, "node reputations are given without replace_node_reputation")
 	}
 	for _, e := range r.GetExperience() {
 		p.Experience = append(p.Experience, character.Experience{LevelingTypeGuid: e.GetLevelingTypeGuid(), XP: e.GetXp(), Debt: e.GetDebt()})

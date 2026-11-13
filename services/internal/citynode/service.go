@@ -41,6 +41,7 @@ type Node struct {
 	ToNext      int64  // the XP still missing for the next level (0 at the highest level)
 	ParentGuid  int64  // the lord this node is a vassal of; 0 for none
 	UpdatedAt   time.Time
+	LevelUpAt   time.Time // the end of its level-up countdown (Nodes 2, leveling.go); zero for none
 }
 
 // Cause says what changed a node.
@@ -50,6 +51,10 @@ const (
 	CauseSetLevel Cause = iota + 1
 	CauseAddExperience
 	CauseSeed
+	CauseLevelUp        // Nodes 2: the countdown ended and the node is a level up (leveling.go)
+	CauseLevelUpPending // ... the node reached its next threshold: the countdown runs to Node.LevelUpAt
+	CauseAtrophy        // ... the node lost XP to the atrophy
+	CauseLevelDown      // ... and a level with it
 )
 
 func (c Cause) String() string {
@@ -60,6 +65,14 @@ func (c Cause) String() string {
 		return "add-experience"
 	case CauseSeed:
 		return "seed"
+	case CauseLevelUp:
+		return "level-up"
+	case CauseLevelUpPending:
+		return "level-up-pending"
+	case CauseAtrophy:
+		return "atrophy"
+	case CauseLevelDown:
+		return "level-down"
 	}
 	return "unknown"
 }
@@ -100,6 +113,11 @@ type Service struct {
 	mu  sync.RWMutex // a change holds it for write from its transaction to its event; a read holds it for read
 	seq uint64
 	hub hub
+
+	lev         Leveling            // Nodes 2 (leveling.go); the zero value: no level-up from XP, no atrophy
+	pending     map[int64]time.Time // node -> the end of its level-up countdown (s.mu)
+	heldLogged  map[[2]int64]bool   // {node, level}: "held back" said once
+	lastAtrophy time.Time
 }
 
 // Option changes how New makes a Service.
@@ -111,7 +129,7 @@ func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = 
 // New makes a service over pool for the nodes of roster. seedPath is the seed file ApplySeed reads when it is not handed one
 // (deploy/citynode_seed.json). Start must run before anything else.
 func New(pool *pgxpool.Pool, roster *Roster, seedPath string, opts ...Option) *Service {
-	s := &Service{pool: pool, roster: roster, seedPath: seedPath, now: time.Now}
+	s := &Service{pool: pool, roster: roster, seedPath: seedPath, now: time.Now, pending: map[int64]time.Time{}, heldLogged: map[[2]int64]bool{}}
 	for _, o := range opts {
 		o(s)
 	}
@@ -137,6 +155,14 @@ func (s *Service) Start(ctx context.Context) error {
 		slog.Info("citynode: the seed was applied for the first time", "file", s.seedPath, "nodes_changed", res.Changed)
 	} else {
 		slog.Info("citynode: the seed was applied before; edits to the file need nodectl seed --force", "file", s.seedPath, "applied_at", res.AppliedAt.Format(time.RFC3339))
+	}
+	if n, err := s.normalize(ctx); err != nil {
+		return fmt.Errorf("citynode: the nodes' XP: %w", err)
+	} else if n > 0 {
+		slog.Info("citynode: nodes below their level's XP were brought to its threshold", "nodes", n)
+	}
+	if s.lev.Enabled || s.lev.AtrophyPerHour > 0 {
+		slog.Info("citynode: leveling", "level_up", s.lev.Enabled, "countdown", s.lev.Countdown.String(), "atrophy_per_hour", s.lev.AtrophyPerHour, "delevel_grace", s.lev.DelevelGrace)
 	}
 	return nil
 }
@@ -186,7 +212,7 @@ func (s *Service) loadRows(ctx context.Context, q queryer, lock string) (map[int
 func (s *Service) toNode(info Info, r row) Node {
 	pct, next := Progress(r.level, r.experience)
 	return Node{Guid: info.Guid, Name: info.Name, DisplayName: info.DisplayName, Level: r.level, Experience: r.experience,
-		Percent: pct, ToNext: next, ParentGuid: r.parent, UpdatedAt: r.updatedAt}
+		Percent: pct, ToNext: next, ParentGuid: r.parent, UpdatedAt: r.updatedAt, LevelUpAt: s.pending[info.Guid]}
 }
 
 func (s *Service) nodesFrom(rows map[int64]row) []Node {
@@ -268,14 +294,21 @@ func (s *Service) SetNodeLevel(ctx context.Context, guid int64, name string, lev
 		return s.toNode(info, old), false, nil
 	}
 	now := s.now()
-	if _, err := tx.Exec(ctx, `UPDATE city_node_state SET level = $2, updated_at = $3 WHERE node_guid = $1`, info.Guid, level, now); err != nil {
+	xp := old.experience
+	if s.lev.Enabled || s.lev.AtrophyPerHour > 0 { // Nodes 2: the XP of the level set (within its span), so that it neither levels up nor loses the level at once
+		if xp < threshold(level) || (level < MaxNodeLevel && xp >= threshold(level+1)) {
+			xp = threshold(level)
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE city_node_state SET level = $2, experience = $4, updated_at = $3 WHERE node_guid = $1`, info.Guid, level, now, xp); err != nil {
 		return Node{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Node{}, false, err
 	}
+	delete(s.pending, info.Guid)
 	nw := old
-	nw.level, nw.updatedAt = level, now
+	nw.level, nw.experience, nw.updatedAt = level, xp, now
 	n = s.toNode(info, nw)
 	s.publishNode(NodeChange{Node: n, PreviousLevel: old.level, Cause: CauseSetLevel, VassalshipDisabled: disableVassalship,
 		PreviousParentGuid: old.parent, PreviousExperience: old.experience})
@@ -321,6 +354,22 @@ func (s *Service) AddNodeExperience(ctx context.Context, guid int64, name string
 	if (amount > 0 && total < old.experience) || total < 0 {
 		return Node{}, fmt.Errorf("%w: %s holds %d XP; adding %d would leave %s", ErrInvalid, info.Name, old.experience, amount, outOfRange(amount))
 	}
+	if amount > 0 && s.lev.Enabled { // Nodes 2: no more than one span past the threshold at the highest level, the next threshold while held back
+		held := false
+		if old.level < MaxNodeLevel && total >= threshold(old.level+1) {
+			why, err := s.heldBack(ctx, tx, info.Guid, old)
+			if err != nil {
+				return Node{}, err
+			}
+			held = why != ""
+		}
+		if c := xpCap(old.level, held); total > c {
+			total = max(c, old.experience)
+		}
+		if total == old.experience {
+			return s.toNode(info, old), nil
+		}
+	}
 	now := s.now()
 	if _, err := tx.Exec(ctx, `UPDATE city_node_state SET experience = $2, updated_at = $3 WHERE node_guid = $1`, info.Guid, total, now); err != nil {
 		return Node{}, err
@@ -332,7 +381,10 @@ func (s *Service) AddNodeExperience(ctx context.Context, guid int64, name string
 	nw.experience, nw.updatedAt = total, now
 	n := s.toNode(info, nw)
 	s.publishNode(NodeChange{Node: n, PreviousLevel: old.level, Cause: CauseAddExperience, PreviousParentGuid: old.parent, PreviousExperience: old.experience})
-	return n, nil
+	if err := s.considerLevelUpLocked(ctx, info, nw); err != nil {
+		return n, err
+	}
+	return s.toNode(info, nw), nil
 }
 
 func outOfRange(amount int64) string {
@@ -356,7 +408,11 @@ type SeedResult struct {
 // the seed's text; nil reads the service's seed file (deploy/citynode_seed.json). A seed that cannot be read or is wrong changes
 // nothing.
 func (s *Service) ApplySeed(ctx context.Context, force bool, seedJSON []byte) (SeedResult, error) {
-	return s.applySeed(ctx, force, seedJSON, true)
+	res, err := s.applySeed(ctx, force, seedJSON, true)
+	if err == nil && res.Applied {
+		_, err = s.normalize(ctx) // (Nodes 2: the levels it set start at their thresholds)
+	}
+	return res, err
 }
 
 // applySeed is ApplySeed; publish says whether the node changes it makes are sent to the watchers (not at the service's start).

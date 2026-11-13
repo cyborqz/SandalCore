@@ -377,6 +377,9 @@ public:
     std::optional<Send> currency_callout(int64_t currency_tier, int64_t delta);
     /// OwnerInfo.Currencies: sets the balance of a currency (the entry is added when the field has none), sent with the next currencies_update().  False when the value does not fit.
     bool set_currency(int64_t currency, int64_t amount);
+    /// OwnerInfo.NodeToPlayerReputation: the character's reputation with each node becomes exactly `entries` (a node not listed leaves the map), sent with the next
+    /// currencies_update().  False when the pawn has no OwnerInfo or an entry does not fit.
+    bool set_node_reputation(const std::vector<NodeReputationEntry>& entries);
     /// The pawn's update that carries the changed balances (nullopt before the pawn's second state).
     std::optional<Send> currencies_update();
 

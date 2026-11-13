@@ -67,6 +67,7 @@ struct LiveNode {
     int     level = 0;
     int64_t experience = 0;
     int64_t parent_guid = 0;
+    int64_t level_up_at_ms = 0;   // Nodes 2: the end of its level-up countdown (unix ms; 0: none)
 };
 
 enum class LevelSource { Default, Seed, Service };

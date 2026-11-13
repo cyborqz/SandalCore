@@ -2,5 +2,8 @@
     "exp_rate":    1.0,
     "drop_rate":   1.0,
     "gather_rate": 1.0,
-    "craft_rate":  1.0
+    "craft_rate":  1.0,
+    "node_exp_rate": 100.0,
+    "node_atrophy_per_hour": 0.01,
+    "node_delevel_grace": 0.25
 }

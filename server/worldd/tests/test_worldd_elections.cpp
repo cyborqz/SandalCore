@@ -11,6 +11,8 @@
 // ============================================================================
 #include "world/citizenship.h"
 #include "world/elections.h"
+#include "world/node_reputation.h"
+#include "world/node_rewards.h"
 #include "vendor/node_tax.h"
 #include "vendor/town_shops.h"
 #include "world/city_nodes.h"

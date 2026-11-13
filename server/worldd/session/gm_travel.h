@@ -237,6 +237,8 @@ public:
 
     /// The player named `name` (case does not count), or an empty handle.
     PlayerHandle find_player(const std::string& name);
+    /// Every player in the world now.
+    std::vector<PlayerHandle> online() { return directory_ ? directory_() : std::vector<PlayerHandle>{}; }
 
 private:
     PlayerWorld& world_;

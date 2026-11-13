@@ -36,7 +36,9 @@ import (
 // 42 was taken.
 // 44 keeps the node citizenship and mayor lines of a conversation (AddNodeCitizenship with its VendorId,
 // RemoveNodeCitizenship, AddNodeMayorCandidate).
-const Version = "44"
+// 45 writes the node rewards (node_reward, node_reward_mod) and the node effects (node_effect, node_effect_zoi,
+// node_effect_zoi_alignment, node_effect_commodity), and seeds the boons they put on characters into the ability tables.
+const Version = "45"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -219,6 +221,8 @@ var keep = map[string]bool{
 	"TaxDetailsRecordBase":                 true,
 	"NodeGlobalTaxTableRecordBase":         true,
 	"NodeToPlayerReputationTierRecordBase": true,
+	"NodeRewardRecordBase":                 true, // version 45: the mayoral commissions' node rewards
+	"NodeEffectRecordBase":                 true,
 	"CitizenshipNodeRecordBase":            true,
 	"CitizenshipGenericRecordBase":         true,
 	"QuantityScalarDefRecordBase":          true,

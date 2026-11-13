@@ -27,6 +27,12 @@ import (
 //	node_tax_details, node_tax_table, node_tax_table_tag
 //	                      the tax bounds, and the global tax tables with the tag each tax is and the predicate that makes it available
 //	node_reputation_tier  the 5 reputation ranks with the tax modifier of each
+//	node_reward, node_reward_mod (contentc version 45)
+//	                      the 103 NodeRewardRecordBase rows (a mayoral commission's RewardId) with each NodeModification they give and for how long
+//	node_effect, node_effect_zoi, node_effect_zoi_alignment, node_effect_commodity (contentc version 45)
+//	                      the 322 NodeEffectRecordBase rows (what a node modification's EffectsIds name): the effects each puts on the characters (or caravans, mounts)
+//	                      in the node's zone of influence, with the rank, the alignment and the org affiliation they ask, whether they reach a citizen anywhere, and
+//	                      the commodities the node's stores gain
 //	citizenship_*, property_tax_def, election_def, node_constant
 //	                      the citizenship, dues, property tax and election definitions, and the two constants records
 //	node_layout*          the 70 layouts: the props (an asset set at a place), the plots per level and the population sets; node_asset_set,
@@ -197,6 +203,52 @@ CREATE TABLE node_reputation_tier (
     can_vote_building  INTEGER NOT NULL,
     can_vote_demolition INTEGER NOT NULL
 );
+CREATE TABLE node_reward (
+    guid INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE TABLE node_reward_mod (
+    reward_guid INTEGER NOT NULL,
+    ord         INTEGER NOT NULL,
+    mod_guid    INTEGER NOT NULL,                       -- NodeMods[].Mod: a node_modification
+    duration_ms INTEGER NOT NULL,                       -- NodeMods[].Duration
+    PRIMARY KEY (reward_guid, ord)
+) WITHOUT ROWID;
+CREATE TABLE node_effect (
+    guid INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE TABLE node_effect_zoi (
+    node_effect_guid     INTEGER NOT NULL,
+    ord                  INTEGER NOT NULL,
+    effect_guid          INTEGER NOT NULL,              -- EffectRecordId: an EffectRecordBase (ab_effect has it from contentc version 45)
+    on_character         INTEGER NOT NULL,              -- EffectClassifications: ECharacterClassification::Character
+    on_caravan           INTEGER NOT NULL,              -- ... Caravan
+    on_mount             INTEGER NOT NULL,              -- ... Mount
+    min_rank             INTEGER NOT NULL,              -- MinimumReputationRank (ENodeReputationRank)
+    global               INTEGER NOT NULL,              -- CanBeAppliedGlobally
+    global_min_rank      INTEGER NOT NULL,              -- MinimumReputationRankForGlobalApplication
+    node_type            INTEGER NOT NULL,              -- EffectNodeType (ENodeType)
+    require_all_alignments INTEGER NOT NULL,            -- bRequireAllAlignments
+    require_org          INTEGER NOT NULL,              -- bRequireOrgAffiliation
+    override_duration    INTEGER NOT NULL,              -- bOverrideEffectDuration
+    duration             REAL NOT NULL,                 -- OverrideEffectDuration
+    PRIMARY KEY (node_effect_guid, ord)
+) WITHOUT ROWID;
+CREATE TABLE node_effect_zoi_alignment (
+    node_effect_guid INTEGER NOT NULL,
+    zoi_ord          INTEGER NOT NULL,
+    ord              INTEGER NOT NULL,
+    alignment_guid   INTEGER NOT NULL,                  -- EffectAlignments: a CharacterAlignmentRecordBase (NodeCitizen ...)
+    PRIMARY KEY (node_effect_guid, zoi_ord, ord)
+) WITHOUT ROWID;
+CREATE TABLE node_effect_commodity (
+    node_effect_guid INTEGER NOT NULL,
+    ord              INTEGER NOT NULL,
+    commodity_guid   INTEGER NOT NULL,                  -- CommoditiesToGiveNode[].CommodityRecord
+    quantity         INTEGER NOT NULL,
+    PRIMARY KEY (node_effect_guid, ord)
+) WITHOUT ROWID;
 CREATE TABLE citizenship_node (
     guid                  INTEGER PRIMARY KEY,
     name                  TEXT NOT NULL,
@@ -397,7 +449,8 @@ CREATE TABLE building_level_spawn_pop (
 // NodeTables are the tables NodeDDL creates, in the DDL's order.
 var NodeTables = []string{"city_node", "city_node_level", "city_node_population", "city_zoi", "city_zoi_adjacent", "node_level_details", "node_level_details_mod",
 	"node_modification", "node_modification_ref", "node_size", "node_size_radius", "child_node_rule", "vassalship_def", "vassalship_region_size",
-	"node_tax_details", "node_tax_table", "node_tax_table_tag", "node_reputation_tier", "citizenship_node", "citizenship_generic", "citizenship_scalar",
+	"node_tax_details", "node_tax_table", "node_tax_table_tag", "node_reputation_tier", "node_reward", "node_reward_mod", "node_effect", "node_effect_zoi",
+	"node_effect_zoi_alignment", "node_effect_commodity", "citizenship_node", "citizenship_generic", "citizenship_scalar",
 	"citizenship_dues_def", "property_tax_def", "election_def", "node_constant", "node_layout", "node_layout_prop", "node_layout_plot",
 	"node_layout_population", "node_asset_set", "node_asset_set_member", "node_asset_def", "node_asset_def_tag", "service_plot", "service_plot_building",
 	"building", "building_asset_sets", "building_asset_state", "building_pop_spawn", "building_level_spawn", "building_level_spawn_pop"}

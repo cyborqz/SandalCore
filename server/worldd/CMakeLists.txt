@@ -306,6 +306,10 @@ add_library(worldd_core STATIC
     world/buy_orders.cpp
     world/buy_orders.h
     world/mayor_guid.h
+    world/node_reputation.cpp
+    world/node_reputation.h
+    world/node_rewards.cpp
+    world/node_rewards.h
     world/city_nodes.cpp
     world/city_nodes.h
     world/node_control.h

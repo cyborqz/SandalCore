@@ -405,6 +405,41 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	}
 	itemRows.Close()
 	opt.logf("consumable items: %d abilities, %d of them not seeded before", consumables, consumablesNew)
+	// ... and the boons the node rewards put on characters (version 45, node_effect_zoi), applied through the ability runtime the same way
+	boons := 0
+	for _, r := range src.rows["NodeEffectRecordBase"] {
+		nf := newFields(fmt.Sprintf("NodeEffect %s (%d)", r.Name, r.Guid), r.Fields)
+		for i, v := range nf.list("ZOIEffects") {
+			s, ok := v.(designdb.Struct)
+			if !ok {
+				return fmt.Errorf("%s: ZOIEffects[%d] is %T", nf.where, i, v)
+			}
+			zf := newFields(fmt.Sprintf("%s: ZOIEffects[%d]", nf.where, i), s)
+			g, _ := zf.id("EffectRecordId")
+			character := false
+			for _, c := range zf.list("EffectClassifications") {
+				character = character || c == "ECharacterClassification::Character"
+			}
+			if zf.err != nil {
+				return zf.err
+			}
+			if !character || g == 0 {
+				continue
+			}
+			if b.effects[g] == nil {
+				opt.logf("warning: node effect %s names effect %d, which is no row: the boon gives nothing", r.Name, g)
+				continue
+			}
+			if !effectSeed[g] {
+				boons++
+			}
+			effectSeed[g] = true
+		}
+		if nf.err != nil {
+			return nf.err
+		}
+	}
+	opt.logf("node boons: %d more effects", boons)
 	opt.logf("skill_rank: %d distinct ability/effect pairs, %d abilities, %d effects granted by ranks (and the always-on ones)", nranks, len(abilitySeed), len(effectSeed))
 
 	// ---- the closure ----

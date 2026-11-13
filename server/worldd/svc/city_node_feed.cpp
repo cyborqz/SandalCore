@@ -39,6 +39,7 @@ world::LiveNode live_of(const nodev1::Node& n) {
     l.level = static_cast<int>(std::min<uint32_t>(n.level(), 1000));
     l.experience = n.experience();
     l.parent_guid = n.parent_guid();
+    l.level_up_at_ms = n.level_up_at_ms();
     return l;
 }
 

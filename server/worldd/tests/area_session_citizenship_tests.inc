@@ -15,6 +15,8 @@
 #include "protocol/repl/citizenship_codec.h"
 #include "world/citizenship.h"
 #include "world/elections.h"
+#include "world/node_control.h"
+#include "world/node_reputation.h"
 #include "world/zoi_surface.h"
 
 namespace {
@@ -29,12 +31,13 @@ struct CitizenHarness : Harness {
     std::unique_ptr<world::CityNodes> nodes;
     bool zoned = false;
 
-    static svc::Character citizen_record() {
+    static svc::Character citizen_record(const std::function<void(svc::Character&)>& tweak) {
         svc::Character c = cyb_record();
         c.level = 12;
+        if (tweak) tweak(c);
         return c;
     }
-    CitizenHarness() : Harness(citizen_record()) {
+    explicit CitizenHarness(const std::function<void(svc::Character&)>& tweak = {}) : Harness(citizen_record(tweak)) {
         // one node over the zone of influence at the player's spot, at Town (4)
         const uint64_t zoi = world::zoi_at(kCx, kCy);
         zoned = zoi != 0;
@@ -65,6 +68,8 @@ struct CitizenHarness : Harness {
         content::CurrencyData data;
         data.tiers.push_back({kTestReceiptTier, "TaxReceipts", 1000000});
         data.defs.push_back({kTestReceiptDef, "TaxReceiptCurrencyDef", kTestReceiptTier, 0, fi::kPotion, 20});
+        data.tiers.push_back({world::kNodeReputationTier, "Reputation", 0});   // (node reputation: the data's tier, no item)
+        data.defs.push_back({world::kNodeReputationCurrency, "NodeToPlayerReputationCurrency", world::kNodeReputationTier, 0, 0, 0});
         std::string why;
         if (auto table = items::CurrencyTable::from(data, why)) fx.world->set_currencies_for_test(std::move(*table));
         else std::printf("  [FAIL] the test's currency does not build: %s\n", why.c_str());
@@ -961,7 +966,157 @@ void test_buy_orders_session() {
           "a third unit over the character's limit of two is refused (ClientBuyOrderFulfillmentRejection) and nothing is taken");
 }
 
+/// Node reputation through a session (session/player_reputation.cpp): the saved reputations come decayed to now; the rank counts only at the node the account is a
+/// citizen of and scales its shops' taxes; the game master's grants (one player, or the node's citizens) stay within the node's range; every change is saved whole
+/// with the progress.
+void test_node_reputation_session() {
+    std::printf("node citizenship: node reputation\n");
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    constexpr int64_t kOther = kTestCitizenNode + 9;
+    CitizenHarness h([&](svc::Character& c) {
+        svc::Citizenship cz;
+        cz.node_guid = kTestCitizenNode;
+        cz.primary_character_id = kCyb;
+        cz.joined_ms = now_ms - 86400000;
+        cz.dues_due_ms = now_ms + 10LL * 86400000;
+        c.citizenship = cz;
+        c.node_reputation = {svc::NodeReputation{kTestCitizenNode, 10500, now_ms - 3 * 3600000 - 60000}, svc::NodeReputation{kOther, 50, 0}};
+    });
+    h.play();
+    h.run(milliseconds(1500));
+    spdlog::set_level(std::getenv("AOC_TEST_CITIZEN_LOG") ? spdlog::level::info : spdlog::level::off);
+    const auto near = [](double a, double b) { return std::fabs(a - b) < 0.01; };
+    CHECK(h.s->citizenship().node_guid == kTestCitizenNode, "(the account is a citizen of the test's node)");
+    CHECK(near(h.s->node_reputation(kTestCitizenNode), 10500 - 3) && near(h.s->node_reputation(kOther), 50),
+          "at the join: 10,500 decayed by three hours (1 an hour); another node's 50 kept");
+    CHECK(h.s->reputation_rank_at(kTestCitizenNode) == 1 && h.s->reputation_rank_at(kOther) == world::kNoReputationRank,
+          "the rank: Commoner at the citizen node, none at a node the account is no citizen of");
+    const auto& reps = h.s->bootstrap().setup().node_reputation;
+    CHECK(reps.size() == 2 && std::any_of(reps.begin(), reps.end(), [&](const bootstrap::NodeReputationEntry& r) { return r.node == kTestCitizenNode && near(r.reputation, 10497); }),
+          "OwnerInfo.NodeToPlayerReputation carries both nodes");
+    const vendor::TaxRate base{10.0f, 100, true};
+    const vendor::TaxRate commoner = h.s->reputation_taxed(base, kTestCitizenNode), other = h.s->reputation_taxed(base, kOther);
+    CHECK(near(commoner.percent, 9.5) && commoner.flat == 95 && near(other.percent, 10) && other.flat == 100, "a Commoner's tax at the node is 95% of it; elsewhere it is the same");
+
+    // the game master's grants
+    const auto grant = [&](const char* player, const char* node, float amount) {
+        h.t += milliseconds(500);
+        h.pc_call("ServerGrantNodeToPlayerReputation", [&](const schema::RpcSchema& r, repl::RpcParams& p) {
+            repl::set_rpc_param(r, p, "PlayerName", repl::Value::str(player));
+            repl::set_rpc_param(r, p, "NodeName", repl::Value::str(node));
+            repl::set_rpc_param(r, p, "ReputationModifier", repl::Value::f32(amount));
+        });
+        h.run(milliseconds(300));
+    };
+    grant("", "Testhold", 20000);
+    CHECK(near(h.s->node_reputation(kTestCitizenNode), 10497), "a game master's grant does nothing without --gm-commands");
+    h.fx.world->set_gm_commands(true);
+    const size_t saves = h.sink.progress.size();
+    const size_t from = h.got.size();
+    grant("cyb", "Testhold", 20000);
+    CHECK(near(h.s->node_reputation(kTestCitizenNode), 30497) && h.s->reputation_rank_at(kTestCitizenNode) == 2, "ServerGrantNodeToPlayerReputation: +20,000, Liege now");
+    CHECK(count_calls(pc_calls_since(h, from), "ClientShowCurrencyCallout") == 1, "... with the Reputation tier's callout");
+    CHECK(count_calls(pc_calls_since(h, from), "ClientReceiveChatMessages") >= 1, "... the new rank is told in the chat");
+    bool saved = false;
+    for (size_t i = saves; i < h.sink.progress.size(); ++i) {
+        const svc::Progress& p = h.sink.progress[i];
+        saved = saved || (p.replace_node_reputation && p.node_reputation.size() == 2 &&
+                          std::any_of(p.node_reputation.begin(), p.node_reputation.end(), [&](const svc::NodeReputation& r) { return r.node_guid == kTestCitizenNode && near(r.reputation, 30497); }));
+    }
+    CHECK(saved, "... saved with the progress, the whole list (replace_node_reputation)");
+    h.t += milliseconds(500);
+    h.pc_call("ServerGrantCitizensNodeToPlayerReputation", [&](const schema::RpcSchema& r, repl::RpcParams& p) {
+        repl::set_rpc_param(r, p, "NodeName", repl::Value::str(""));
+        repl::set_rpc_param(r, p, "ReputationModifier", repl::Value::f32(-100));
+    });
+    h.run(milliseconds(300));
+    CHECK(near(h.s->node_reputation(kTestCitizenNode), 30397), "ServerGrantCitizensNodeToPlayerReputation (the node the game master stands in): -100 to its citizens");
+    grant("", "Testhold", 1000000);
+    CHECK(near(h.s->node_reputation(kTestCitizenNode), 100000) && h.s->reputation_rank_at(kTestCitizenNode) == 4, "a grant past the node's range stops at its 100,000: Aristocrat");
+    const vendor::TaxRate aristocrat = h.s->reputation_taxed(base, kTestCitizenNode);
+    CHECK(near(aristocrat.percent, 8) && aristocrat.flat == 80, "an Aristocrat pays 80% of the node's tax");
+    grant("", "Testhold", 2000000);
+    grant("", "No_Such_Node", 5);
+    grant("nobody", "Testhold", 5);
+    CHECK(near(h.s->node_reputation(kTestCitizenNode), 100000), "a grant over a million, for no node or for no player in the world does nothing");
+    const std::string text = h.s->reputation_text();
+    CHECK(text.find("Testhold: 100000.0 (Aristocrat)") != std::string::npos && text.find("not a citizen") != std::string::npos, "the reputation text lists the nodes, the rank at the citizen node");
+
+    // no longer a citizen: no rank, the full tax
+    h.t += milliseconds(500);
+    h.pc_call("ServerGMRemoveNodeCitizen", [&](const schema::RpcSchema& r, repl::RpcParams& p) {
+        repl::set_rpc_param(r, p, "NodeName", repl::Value::str("Testhold"));
+        repl::set_rpc_param(r, p, "PlayerName", repl::Value::str(""));
+    });
+    h.run(milliseconds(300));
+    const vendor::TaxRate gone = h.s->reputation_taxed(base, kTestCitizenNode);
+    CHECK(h.s->citizenship().node_guid == 0 && h.s->reputation_rank_at(kTestCitizenNode) == world::kNoReputationRank && near(gone.percent, 10) &&
+              near(h.s->node_reputation(kTestCitizenNode), 100000),
+          "a character of no node has no rank and its full tax (the old reputation stays)");
+}
+
+/// Nodes 2 through a session (session/player_node_xp.cpp): the base XP a player earns in a node that grows goes to citynode times the node rate, gathered and sent
+/// every 10 s (once per node); a node of no growth takes none; a node's level-up countdown is shown to the players in its zone once (ClientShowNodeLevelUpCountdownToast).
+struct NodeXpControl : world::NodeControl {
+    std::vector<std::pair<int64_t, int64_t>> gains;
+    void set_level(const std::string&, int, bool, const std::string&) override {}
+    void add_experience(const std::string&, int64_t, const std::string&) override {}
+    void node_data(const std::string&, const std::string&) override {}
+    void clock(const std::string&) override {}
+    void advance_clock(int64_t, const std::string&) override {}
+    void gain_experience(int64_t guid, int64_t amount) override { gains.emplace_back(guid, amount); }
+};
+
+void test_node_xp_session() {
+    std::printf("node citizenship: node XP and the level-up countdown\n");
+    CitizenHarness h;
+    h.play();
+    h.run(milliseconds(1500));
+    spdlog::set_level(std::getenv("AOC_TEST_CITIZEN_LOG") ? spdlog::level::info : spdlog::level::off);
+    // the test's node, as a node that grows
+    world::CityNodeInfo n = *h.nodes->by_guid(kTestCitizenNode);
+    n.levelable = true;
+    world::CityZoneInfo z = *h.nodes->zone_by_guid(n.zoi_guid);
+    world::CityNodes growing(std::vector<world::CityNodeInfo>{n}, std::vector<world::CityZoneInfo>{z});
+    growing.apply_change(world::LiveNode{kTestCitizenNode, 2, 0, 0});
+    h.fx.world->set_city_nodes(&growing);
+    NodeXpControl control;
+    h.fx.world->set_node_control(&control);
+    h.fx.world->set_node_experience_rate(100);
+    h.s->earn_node_experience(120, "a test kill");
+    h.s->earn_node_experience(30, "a test harvest");
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    h.fx.world->flush_node_experience(now_ms, /*force=*/true);
+    CHECK(control.gains.size() == 1 && control.gains[0].first == kTestCitizenNode && control.gains[0].second == 15000 && h.s->node_xp_gains() == 2,
+          "two gains in the node's zone go to citynode together: (120 + 30) x 100 = 15,000 XP, one call");
+    h.fx.world->flush_node_experience(now_ms + 20000, true);
+    CHECK(control.gains.size() == 1, "nothing gathered: nothing sent");
+    h.fx.world->set_city_nodes(h.nodes.get());   // (the harness's node does not grow)
+    h.s->earn_node_experience(500, "a test kill");
+    h.fx.world->flush_node_experience(now_ms + 40000, true);
+    CHECK(control.gains.size() == 1, "a node that does not grow takes no XP");
+
+    // the countdown
+    h.fx.world->set_city_nodes(&growing);
+    size_t from = h.got.size();
+    growing.apply_change(world::LiveNode{kTestCitizenNode, 2, 31643207, 0, now_ms + 5000});
+    h.run(milliseconds(300));
+    auto calls = pc_calls_since(h, from);
+    const repl::RpcCall* toast = last_call(calls, "ClientShowNodeLevelUpCountdownToast");
+    CHECK(toast && call_int(*toast, "NodeGuid") == kTestCitizenNode && h.s->level_up_toasts_sent() == 1, "a countdown of the player's node: the toast, with the node");
+    from = h.got.size();
+    growing.apply_change(world::LiveNode{kTestCitizenNode, 2, 31643208, 0, now_ms + 5000});
+    h.run(milliseconds(300));
+    CHECK(count_calls(pc_calls_since(h, from), "ClientShowNodeLevelUpCountdownToast") == 0, "... once for that countdown");
+    growing.apply_change(world::LiveNode{kTestCitizenNode, 3, 31643208, 0, 0});
+    h.run(milliseconds(300));
+    h.fx.world->set_city_nodes(h.nodes.get());
+    h.fx.world->set_node_control(nullptr);
+}
+
 AOC_REGISTER_TEST(test_buy_orders_session);
+AOC_REGISTER_TEST(test_node_xp_session);
+AOC_REGISTER_TEST(test_node_reputation_session);
 AOC_REGISTER_TEST(test_citizenship_flow);
 AOC_REGISTER_TEST(test_mayor_flow);
 AOC_REGISTER_TEST(test_citizenship_gm);

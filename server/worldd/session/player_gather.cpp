@@ -391,6 +391,7 @@ bool PlayerSession::complete_gather(Connection& conn, Clock::time_point now) {
 void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, const HarvestFrame& frame) {
     const content::ContentDb* db = world_ ? world_->content() : nullptr;
     const gather::Harvest& harvest = *frame.harvest;
+    earn_node_experience(harvest.adventuring_xp + harvest.profession_xp, "a harvest");
     const std::string& node_name = frame.what;
     const std::string& tool_guid = frame.tool_guid;
     const int tool_slot = frame.tool_slot;

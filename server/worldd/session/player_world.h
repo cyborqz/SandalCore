@@ -75,6 +75,8 @@
 #include "world/actor_registry.h"
 #include "world/citizenship.h"
 #include "world/elections.h"
+#include "world/node_reputation.h"
+#include "world/node_rewards.h"
 #include "world/city_nodes.h"
 #include "world/node_control.h"
 #include "dialogue/requirement.h"
@@ -181,6 +183,14 @@ public:
     /// Plan A6: the movement limits and the save interval of every session started from now on.
     void                  set_movement(const MovementConfig& config) { movement_ = config; }
     const MovementConfig& movement() const { return movement_; }
+    /// Nodes 2 (session/player_node_xp.cpp): the node XP rate (--node-exp-rate: a node gets the players' base XP times it), the XP gathered for citynode.
+    void set_node_experience_rate(double multiplier) { node_experience_rate_ = multiplier >= 0.0 && multiplier <= 1000.0 ? multiplier : 100.0; }
+    double node_experience_rate() const { return node_experience_rate_; }
+    /// `base` XP a player earned in node `guid` (before any rate): true when it is a node that grows and the XP is kept for it.
+    bool add_node_experience(int64_t guid, int64_t base, const char* why) const;
+    /// Sends what was gathered to citynode, every 10 s (or now with `force`).
+    void flush_node_experience(int64_t now_ms, bool force = false) const;
+    int64_t node_experience_total() const { return node_xp_total_; }
     /// Where the sessions hand positions to be saved; null (the default) saves nothing. Must outlive the sessions.
     void          set_position_sink(PositionSink* sink) { sink_ = sink; }
     PositionSink* position_sink() const { return sink_; }
@@ -324,6 +334,13 @@ public:
     /// open nothing).
     void set_citizenship_rules(std::optional<world::CitizenshipRules> rules) { citizenship_rules_ = std::move(rules); }
     const world::CitizenshipRules* citizenship_rules() const { return citizenship_rules_ ? &*citizenship_rules_ : nullptr; }
+    /// Node reputation (world/node_reputation.h): its rules from content.db, set by main; a world without them uses the data's numbers (ReputationRules{}).
+    void set_reputation_rules(world::ReputationRules rules) { reputation_rules_ = std::move(rules); }
+    const world::ReputationRules& reputation_rules() const { return reputation_rules_; }
+    /// The mayoral commissions' node rewards (world/node_rewards.h): set by main from content.db; null for a file older than contentc version 45 (a done commission
+    /// then gives its first NodeModification, which puts nothing on anyone).
+    void set_node_rewards(std::optional<world::NodeRewards> rewards) { node_rewards_ = std::move(rewards); }
+    const world::NodeRewards* node_rewards() const { return node_rewards_ ? &*node_rewards_ : nullptr; }
     /// The accounts' citizenship as the sessions changed it since worldd started (account id -> its citizenship): what a later login of the account reads is older than this.
     const svc::Citizenship* account_citizenship(int64_t account) const {
         const auto it = account_citizenship_.find(account);
@@ -595,6 +612,10 @@ private:
     protocol::emit::FIntrepidNetworkGUID game_state_;
     int32_t                              next_player_id_ = 1;
     MovementConfig                       movement_;
+    double                               node_experience_rate_ = 100.0;
+    mutable std::map<int64_t, int64_t>   node_xp_pending_;      // node -> the XP gathered since the last flush
+    mutable int64_t                      node_xp_flushed_ms_ = 0;
+    mutable int64_t                      node_xp_total_ = 0;
     PositionSink*                        sink_ = nullptr;
     world::ActorRegistry                 registry_;
     spawns::AreaConfig                   area_;
@@ -630,6 +651,8 @@ private:
     std::unique_ptr<combat::Aftermath>   aftermath_;   // after combat_: it is destroyed first (it holds the death hook's `this`)
     world::CityNodes*                    city_nodes_ = nullptr;
     std::optional<world::CitizenshipRules> citizenship_rules_;
+    world::ReputationRules                 reputation_rules_;
+    std::optional<world::NodeRewards>      node_rewards_;
     mutable std::map<int64_t, svc::Citizenship> account_citizenship_;
     mutable std::optional<world::Elections> elections_;
     std::string                          elections_file_;

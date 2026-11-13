@@ -61,12 +61,14 @@ using protocol::emit::FIntrepidNetworkGUID;
 
 namespace {
 
-/// What a shop's predicates are asked: the node the player stands in and the node the shopkeeper stands in.
-vendor::ShopFacts shop_facts_for(const world::CityNodes* nodes, const GoodPosition& player, const world::WorldActor* npc) {
+/// What a shop's predicates are asked: the node the player stands in, the node the player is a citizen of and the node the shopkeeper stands in.
+vendor::ShopFacts shop_facts_for(const world::CityNodes* nodes, const GoodPosition& player, const world::WorldActor* npc, int64_t citizen_node, int reputation_rank) {
     vendor::ShopFacts facts;
     facts.nodes = nodes;
     facts.player_x = player.x;
     facts.player_y = player.y;
+    facts.citizen_node = citizen_node;
+    facts.reputation_rank = reputation_rank;
     if (npc) {
         facts.has_npc = true;
         facts.npc_x = npc->x;
@@ -104,7 +106,8 @@ bool PlayerSession::open_talk_shop(Connection& conn, const world::WorldActor& np
     vendor_by_talk_ = true;
     ++vendor_opens_;
     // what the window hides or greys out for this player and this shopkeeper
-    const vendor::ShopFacts facts = shop_facts_for(world_->city_nodes(), at, &npc);
+    const vendor::ShopFacts facts =
+        shop_facts_for(world_->city_nodes(), at, &npc, pb_.setup().citizen_node, reputation_rank_at(citizenship_node_at(npc.x, npc.y).first));
     bool unreadable = false;
     const vendor::TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
         const auto v = dialogue::evaluate_expression(p.expression, facts);
@@ -279,7 +282,8 @@ void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurch
     // the shop's predicates: the node the player stands in, and the node the shopkeeper stands in
     const GoodPosition at = checker_.good();
     const world::WorldActor* keeper = registry_ ? registry_->find(vendor_actor_) : nullptr;
-    const vendor::ShopFacts facts = shop_facts_for(world_->city_nodes(), at, keeper);
+    const int64_t keeper_node = keeper ? citizenship_node_at(keeper->x, keeper->y).first : 0;
+    const vendor::ShopFacts facts = shop_facts_for(world_->city_nodes(), at, keeper, pb_.setup().citizen_node, reputation_rank_at(keeper_node));
     bool unreadable = false;
     const vendor::TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
         const auto v = dialogue::evaluate_expression(p.expression, facts);
@@ -287,9 +291,10 @@ void PlayerSession::buy_from_town_shop(Connection& conn, const repl::VendorPurch
         return v && v->i != 0;
     };
     // the shopkeeper's node: its mayor's rates, and its treasury takes the tax
-    const int64_t shop_node = keeper ? citizenship_node_at(keeper->x, keeper->y).first : 0;
+    const int64_t shop_node = keeper_node;
     world::Elections* governed = world_->elections();
-    const vendor::TownShops::Quote quote = shops->quote(vendor_def_, cart, shops->rate(vendor_def_, governed ? governed->taxes(shop_node) : nullptr), holds);
+    const vendor::TownShops::Quote quote =
+        shops->quote(vendor_def_, cart, reputation_taxed(shops->rate(vendor_def_, governed ? governed->taxes(shop_node) : nullptr), shop_node), holds);
     if (!quote.ok) {
         if (unreadable) spdlog::warn("[session] {}: a shop predicate does not evaluate: the listing is not sold", name());
         return refuse(quote.refusal);
@@ -492,7 +497,7 @@ void PlayerSession::repair_at_town_shop(Connection& conn, const repl::VendorTran
     const world::WorldActor* keeper = registry_ ? registry_->find(vendor_actor_) : nullptr;
     const int64_t shop_node = keeper ? citizenship_node_at(keeper->x, keeper->y).first : 0;   // its mayor's rates; its treasury takes the tax
     world::Elections* governed = world_->elections();
-    const vendor::TaxRate tax = shops->rate(vendor_def_, governed ? governed->taxes(shop_node) : nullptr);
+    const vendor::TaxRate tax = reputation_taxed(shops->rate(vendor_def_, governed ? governed->taxes(shop_node) : nullptr), shop_node);
     int64_t untaxed_total = 0;
     struct Mended {
         svc::InventoryItem item;

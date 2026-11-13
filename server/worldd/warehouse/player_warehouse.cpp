@@ -114,6 +114,8 @@ bool PlayerSession::open_warehouse(Connection& conn, const world::WorldActor& np
     warehouse::Facts facts;
     facts.node = town->guid;
     facts.level = nodes->level_of(town->guid);
+    facts.citizen_node = pb_.setup().citizen_node;
+    facts.reputation_rank = reputation_rank_at(town->guid);
     std::vector<warehouse::Spec> specs = book->owned(town->guid, facts);
     // the containers the access config allows: 1 the item chunks, 2 the town's materials, 4 its cargo
     specs.erase(std::remove_if(specs.begin(), specs.end(),
@@ -275,6 +277,8 @@ void PlayerSession::on_warehouse_request(Connection& conn, const repl::ClientRpc
     warehouse::Facts facts;
     facts.node = wh_window_.node;
     facts.level = nodes->level_of(wh_window_.node);
+    facts.citizen_node = pb_.setup().citizen_node;
+    facts.reputation_rank = reputation_rank_at(wh_window_.node);
     const auto summary = book->summary(wh_window_.node, facts);
     if (!summary) return;
     const repl::WarehouseSummary s = *summary;

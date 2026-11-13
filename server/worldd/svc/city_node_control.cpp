@@ -156,6 +156,26 @@ void GrpcNodeControl::set_level(const std::string& node, int level, bool disable
     });
 }
 
+void GrpcNodeControl::gain_experience(int64_t guid, int64_t amount) {
+    if (guid == 0 || amount <= 0) return;
+    post([this, guid, amount] {
+        grpc::ClientContext ctx;
+        prepare(ctx, options_.deadline_ms, options_.token);
+        nodev1::AddNodeExperienceRequest req;
+        req.mutable_node()->set_guid(guid);
+        req.set_amount(amount);
+        nodev1::AddNodeExperienceResponse resp;
+        const grpc::Status st = impl_->stub->AddNodeExperience(&ctx, req, &resp);
+        if (!st.ok()) {
+            if (!gain_failed_said_) spdlog::warn("[nodes] {} node XP for {} is lost: {} (said once until a gain gets through)", with_commas(amount), guid, refusal(st));
+            gain_failed_said_ = true;
+            return;
+        }
+        gain_failed_said_ = false;
+        spdlog::debug("[nodes] {} node XP: {}", with_commas(amount), describe(resp.node()));
+    });
+}
+
 void GrpcNodeControl::add_experience(const std::string& node, int64_t amount, const std::string& by) {
     post([=, this] {
         grpc::ClientContext ctx;

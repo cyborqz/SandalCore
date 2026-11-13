@@ -94,6 +94,22 @@ func syntheticNodes() *source {
 		{Key: st{"TagName": "NodeTax.GoodsTax.Marketplace"}, Value: st{"AvailabilityPredicate": "Node_NumOfServiceBuilding(GetNodeRecord(), $#1:2$) > 0", "TaxDetails": idv(930, 0, "None")}}}})}
 	src.rows["NodeToPlayerReputationTierRecordBase"] = []designdb.Row{mkRow(940, "NodeToPlayerReputation_Tier2", st{"TierRank": "ENodeReputationRank::Commoner", "NodeTaxModifier": "0.95",
 		"CanVoteMayoral": true, "CanVoteBuildingAndExpansion": true, "CanVoteDemolition": false})}
+	// version 45: a commission's reward of two modifications, a citizen's boon (Commoner, anywhere, the NodeCitizen alignment) and a node effect of commodities
+	src.rows["NodeRewardRecordBase"] = []designdb.Row{mkRow(970, "MCOM_RVR_ANY_Gather_Lumber", st{"NodeMods": list{
+		st{"Duration": st{"Duration": int64(86400000)}, "DurationModifier": "", "Mod": idv(610, 0, "None")},
+		st{"Duration": st{"Duration": int64(3600000)}, "DurationModifier": "", "Mod": idv(611, 0, "None")}}})}
+	zoiEffect := func(effect int64, class, rank string, global bool, alignments list, org bool) st {
+		return st{"CanBeAppliedGlobally": global, "EffectAlignments": alignments, "EffectClassifications": list{"ECharacterClassification::" + class},
+			"EffectNodeType": "ENodeType::Default", "EffectRecordId": idv(effect, 0, "None"), "MinimumReputationRank": "ENodeReputationRank::" + rank,
+			"MinimumReputationRankForGlobalApplication": "ENodeReputationRank::" + rank, "OverrideEffectDuration": int64(0), "bOverrideEffectDuration": false,
+			"bRequireAllAlignments": len(alignments) > 0, "bRequireOrgAffiliation": org}
+	}
+	src.rows["NodeEffectRecordBase"] = []designdb.Row{
+		mkRow(640, "NodeEffect_ZOI_MCOM_Citizen_Combat_Dexterity_Small", st{"CommoditiesToGiveNode": list{},
+			"ZOIEffects": list{zoiEffect(980, "Character", "Commoner", true, list{idv(990, 0, "None")}, true), zoiEffect(981, "Caravan", "Peasant", false, list{}, false)}}),
+		mkRow(641, "MCOM_RVR_Kill_Goblins_Gravehide_Medium_Commodities", st{"ZOIEffects": list{},
+			"CommoditiesToGiveNode": list{st{"CommodityRecord": idv(995, 0, "None"), "Quantity": int64(75)}, st{"CommodityRecord": idv(996, 0, "None"), "Quantity": int64(35)}}}),
+	}
 	src.rows["CitizenshipNodeRecordBase"] = []designdb.Row{mkRow(950, "Node_3", st{"Level": int64(3), "CitizenshipCooldownTimeSeconds": int64(0), "DuesNodeLevelScalar": int64(1),
 		"PropertyTaxNodeLevelScalar": int64(1), "MinimumBuyOrderSlots": int64(15), "MaximumBuyOrderSlots": int64(20), "MissedDuesPercentIncrease": float32(0.5), "MissedTaxPercentIncrease": float32(0.5)})}
 	src.rows["QuantityScalarDefRecordBase"] = []designdb.Row{
@@ -258,24 +274,29 @@ func TestSyntheticNodes(t *testing.T) {
 		return n
 	}
 	for q, want := range map[string]int64{
-		`SELECT COUNT(*) FROM node_tax_table_tag WHERE table_guid = 701`:                                                                              2,
-		`SELECT COUNT(*) FROM node_tax_table_tag WHERE tag = 'NodeTax.GoodsTax.Marketplace' AND availability LIKE 'Node_NumOfServiceBuilding%'`:       1,
-		`SELECT COUNT(*) FROM node_reputation_tier WHERE rank_ord = 1 AND rank_name = 'Commoner' AND tax_modifier = 0.95 AND can_vote_demolition = 0`: 1,
-		`SELECT COUNT(*) FROM citizenship_scalar WHERE kind = 'dues' AND name = 'Dues_Low' AND threshold = 50`:                                        1,
-		`SELECT COUNT(*) FROM citizenship_scalar WHERE kind = 'property_tax' AND scalar = 1.5`:                                                        1,
-		`SELECT COUNT(*) FROM citizenship_dues_def WHERE due_day_of_week = 'Thursday' AND weeks = 2`:                                                  1,
-		`SELECT COUNT(*) FROM property_tax_def WHERE due_day_of_week = 'Monday'`:                                                                      1,
-		`SELECT COUNT(*) FROM election_def WHERE election_type = 'Scientific' AND first_election_secs = 86400`:                                        1,
-		`SELECT COUNT(*) FROM node_constant WHERE name = 'RankedChoiceVoteCountLimit' AND value = '3'`:                                                1,
-		`SELECT COUNT(*) FROM node_constant WHERE name = 'NodeToPlayerReputationDecayPerHour' AND value = '1'`:                                        1,
-		`SELECT COUNT(*) FROM node_size_radius WHERE size_guid = 900`:                                                                                 2,
-		`SELECT COUNT(*) FROM node_modification_ref WHERE kind = 'mayoral_ability'`:                                                                   2,
-		`SELECT COUNT(*) FROM node_modification_ref WHERE kind IN ('effect', 'recipe_set', 'commission')`:                                             3,
-		`SELECT COUNT(*) FROM node_layout_prop WHERE layout_guid = 800 AND idx = 0 AND asset_set_guid = 1100 AND qw = 1 AND sx = 1`:                   1,
-		`SELECT COUNT(*) FROM node_layout_plot WHERE layout_guid = 800 AND level = 3 AND plot_guid = 1300 AND qz = 0.0307 AND tx = -6538.5`:           1,
-		`SELECT COUNT(*) FROM node_layout_population WHERE layout_guid = 800`:                                                                         2,
-		`SELECT COUNT(*) FROM city_node_population WHERE node_guid = 300 AND population_set_guid = 5000`:                                              1,
-		`SELECT COUNT(*) FROM node_asset_set_member WHERE set_guid = 1100 AND def_guid = 1200`:                                                        1,
+		`SELECT COUNT(*) FROM node_tax_table_tag WHERE table_guid = 701`:                                                                                                                       2,
+		`SELECT COUNT(*) FROM node_tax_table_tag WHERE tag = 'NodeTax.GoodsTax.Marketplace' AND availability LIKE 'Node_NumOfServiceBuilding%'`:                                                1,
+		`SELECT COUNT(*) FROM node_reputation_tier WHERE rank_ord = 1 AND rank_name = 'Commoner' AND tax_modifier = 0.95 AND can_vote_demolition = 0`:                                          1,
+		`SELECT COUNT(*) FROM citizenship_scalar WHERE kind = 'dues' AND name = 'Dues_Low' AND threshold = 50`:                                                                                 1,
+		`SELECT COUNT(*) FROM citizenship_scalar WHERE kind = 'property_tax' AND scalar = 1.5`:                                                                                                 1,
+		`SELECT COUNT(*) FROM citizenship_dues_def WHERE due_day_of_week = 'Thursday' AND weeks = 2`:                                                                                           1,
+		`SELECT COUNT(*) FROM property_tax_def WHERE due_day_of_week = 'Monday'`:                                                                                                               1,
+		`SELECT COUNT(*) FROM election_def WHERE election_type = 'Scientific' AND first_election_secs = 86400`:                                                                                 1,
+		`SELECT COUNT(*) FROM node_constant WHERE name = 'RankedChoiceVoteCountLimit' AND value = '3'`:                                                                                         1,
+		`SELECT COUNT(*) FROM node_constant WHERE name = 'NodeToPlayerReputationDecayPerHour' AND value = '1'`:                                                                                 1,
+		`SELECT COUNT(*) FROM node_size_radius WHERE size_guid = 900`:                                                                                                                          2,
+		`SELECT COUNT(*) FROM node_modification_ref WHERE kind = 'mayoral_ability'`:                                                                                                            2,
+		`SELECT COUNT(*) FROM node_modification_ref WHERE kind IN ('effect', 'recipe_set', 'commission')`:                                                                                      3,
+		`SELECT COUNT(*) FROM node_reward_mod WHERE reward_guid = 970 AND ((ord = 0 AND mod_guid = 610 AND duration_ms = 86400000) OR (ord = 1 AND mod_guid = 611 AND duration_ms = 3600000))`: 2,
+		`SELECT COUNT(*) FROM node_effect_zoi WHERE node_effect_guid = 640 AND ord = 0 AND effect_guid = 980 AND on_character = 1 AND on_caravan = 0 AND min_rank = 1 AND global = 1 AND global_min_rank = 1 AND require_org = 1 AND require_all_alignments = 1`: 1,
+		`SELECT COUNT(*) FROM node_effect_zoi WHERE node_effect_guid = 640 AND ord = 1 AND effect_guid = 981 AND on_character = 0 AND on_caravan = 1 AND min_rank = 0 AND global = 0`:                                                                            1,
+		`SELECT COUNT(*) FROM node_effect_zoi_alignment WHERE node_effect_guid = 640 AND zoi_ord = 0 AND alignment_guid = 990`:                                                                                                                                   1,
+		`SELECT COUNT(*) FROM node_effect_commodity WHERE node_effect_guid = 641 AND ((ord = 0 AND commodity_guid = 995 AND quantity = 75) OR (ord = 1 AND commodity_guid = 996 AND quantity = 35))`:                                                             2,
+		`SELECT COUNT(*) FROM node_layout_prop WHERE layout_guid = 800 AND idx = 0 AND asset_set_guid = 1100 AND qw = 1 AND sx = 1`:                                                                                                                              1,
+		`SELECT COUNT(*) FROM node_layout_plot WHERE layout_guid = 800 AND level = 3 AND plot_guid = 1300 AND qz = 0.0307 AND tx = -6538.5`:                                                                                                                      1,
+		`SELECT COUNT(*) FROM node_layout_population WHERE layout_guid = 800`:                                                                                                                                                                                    2,
+		`SELECT COUNT(*) FROM city_node_population WHERE node_guid = 300 AND population_set_guid = 5000`:                                                                                                                                                         1,
+		`SELECT COUNT(*) FROM node_asset_set_member WHERE set_guid = 1100 AND def_guid = 1200`:                                                                                                                                                                   1,
 		// Kaelar 0 and Tulnar 8; Scientific 1 and Divine 2; Winter 0 and Spring 1; Riverlands 14 and Highlands 21
 		`SELECT COUNT(*) FROM node_asset_def WHERE level_min = 3 AND level_max = 4 AND cultures = 257 AND node_types = 6 AND seasons = 3 AND biomes = 2113536 AND all_biomes = 0`: 1,
 		`SELECT COUNT(*) FROM service_plot WHERE guid = 1300 AND pre_construct = 1 AND starting_state = 2`:                                                                        1,

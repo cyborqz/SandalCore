@@ -55,6 +55,9 @@ type Progress struct {
 	// is left alone.
 	ReplaceCitizenship bool
 	Citizenship        Citizenship
+	// Node reputation: with ReplaceNodeReputation the character's reputations with the nodes become exactly NodeReputation (node_reputation.go); without it they are left alone.
+	ReplaceNodeReputation bool
+	NodeReputation        []NodeReputation
 }
 
 // C-Y-B x C O A
@@ -123,6 +126,13 @@ func (p Progress) Validate() error {
 		}
 	} else if p.Citizenship != (Citizenship{}) {
 		return fmt.Errorf("%w: a citizenship is given without replace_citizenship", ErrInvalid)
+	}
+	if p.ReplaceNodeReputation {
+		if err := ValidateNodeReputations(p.NodeReputation); err != nil {
+			return err
+		}
+	} else if len(p.NodeReputation) > 0 {
+		return fmt.Errorf("%w: node reputations are given without replace_node_reputation", ErrInvalid)
 	}
 	if p.ReplaceAttunements {
 		if err := ValidateAttunements(p.Attunements); err != nil {
@@ -250,6 +260,11 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if p.ReplaceCitizenship {
 		if err := replaceCitizenship(ctx, tx, characterID, p.Citizenship); err != nil {
+			return Character{}, err
+		}
+	}
+	if p.ReplaceNodeReputation {
+		if err := replaceNodeReputations(ctx, tx, characterID, p.NodeReputation); err != nil {
 			return Character{}, err
 		}
 	}

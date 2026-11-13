@@ -129,7 +129,10 @@ void PlayerSession::run_nodes(Connection& conn) {
         node_maps_election_version_ = election_version;   // (a mayor or a citizen count changed: the maps follow; an unchanged map sends nothing)
         auto maps = std::make_shared<protocol::repl::NodeStateMaps>(wire->maps(*nodes, elections));
         ++node_map_updates_;
-        spdlog::info("[nodes] {}: the node levels changed (registry version {}): sending the GameState's node maps ({})", name(), node_maps_version_, nodes->describe_levels());
+        std::string levels = nodes->describe_levels();
+        spdlog::log(levels == node_maps_levels_ ? spdlog::level::debug : spdlog::level::info, "[nodes] {}: the node {} changed (registry version {}): sending the GameState's node maps ({})",
+                    name(), levels == node_maps_levels_ ? "XP" : "levels", node_maps_version_, levels);
+        node_maps_levels_ = std::move(levels);
         queue("GameState node maps", [maps](bootstrap::PlayerBootstrap& pb) { return pb.node_maps_update(*maps); }, conn, /*must_build=*/false);
     }
     if (cooldowns_pending_ && has_room()) {

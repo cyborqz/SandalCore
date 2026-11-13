@@ -410,10 +410,17 @@ name (`Joeva`). A node has a level (0 Wilderness, 1 Crossroads, 2 Encampment, 3 
   change in the order it was made. Each message has a `seq`; the first change after the snapshot has the snapshot's `seq + 1` and each next one the one before + 1, so a
   reader sees no gap and no repeat. A reader that falls 1,024 changes behind is cut off with `Aborted` (watch again: the snapshot is the whole state); the service's
   shutdown ends the streams with `Unavailable`.
-- Controls: `SetNodeLevel(node, level, disable_vassalship)` (0..4; `InvalidArgument` outside; it changes the level only; the flag is the client's GM flag
-  `bDisableVassalshipSystem` and, with no vassal rules in Nodes 1, only travels with the change event), `AddNodeExperience(node, amount)` (stores the XP and moves the
-  progress toward the next threshold; **no automatic level-up**: the level changes only by `SetNodeLevel`; a negative amount may not take the total below 0),
-  `AdvanceClock(seconds)`, `SetClockSpeed(factor)` and `ApplySeed(force, seed_json)`.
+- Controls: `SetNodeLevel(node, level, disable_vassalship)` (0..4; `InvalidArgument` outside; with leveling on it also brings the XP to the level's threshold; the flag is
+  the client's GM flag `bDisableVassalshipSystem` and only travels with the change event), `AddNodeExperience(node, amount)` (stores the XP and moves the progress toward
+  the next threshold; a negative amount may not take the total below 0), `AdvanceClock(seconds)`, `SetClockSpeed(factor)` and `ApplySeed(force, seed_json)`.
+
+**Leveling (Nodes 2, `internal/citynode/leveling.go`).** A node whose XP reaches its next threshold gets a countdown (`Node.level_up_at_ms`, a `LEVEL_UP_PENDING` change;
+`--level-up-countdown`, 5 s: the client's toast) and then the level (`LEVEL_UP`), one at a time, unless it is a Town or a vassal whose lord's VassalshipDef allows no more
+vassals of the new level (a Village lord one Encampment, a Town lord two Encampments and two Villages): a node held back keeps no XP past the next threshold, a Town one span
+past its own. The atrophy: every minute each node loses `--atrophy-per-hour` (0.01) of its level's span per hour (`ATROPHY` when the percent moves), and the level
+(`LEVEL_DOWN`) once it is more than `--delevel-grace` (0.25) of the span below under its threshold. `--level-up=false` and `--atrophy-per-hour 0` give the Nodes 1 behaviour.
+At the start (and after a seed) a node below its level's threshold is brought to it. worldd sends the players' XP (`--node-exp-rate`, 100: the base XP they earn in a
+node's zone times it) every 10 s. `config/rates.json` lists `node_exp_rate`, `node_atrophy_per_hour` and `node_delevel_grace` for these flags.
 
 **The node clock** = real time x speed + offset (unix seconds; `city_node_clock`). `AdvanceClock` (1 second to 100 years) grows the offset: a GM's skip. `SetClockSpeed`
 (0.001 to 100,000; 1 is real time) is the test servers' speed knob; node time does not jump when the speed changes (the offset is recomputed, to the second). Retail's timers
@@ -618,6 +625,18 @@ COMMIT;
 BEGIN;
 DROP TABLE character_ignored_names;
 DELETE FROM schema_migrations WHERE version = 21;
+COMMIT;
+```
+
+**Rolling back migration 0022.** Migration 0022 (node reputation) adds one table, `character_node_reputation`, and writes to nothing else. worldd saves a character's
+reputations with the nodes with the progress of that character (`SaveProgress` with `replace_node_reputation`) and reads them at the join (`GetCharacter`, `node_reputation`).
+Rolling it back loses every character's node reputation and nothing else; stop worldd first, or its progress saves fail until it runs a build without node reputation.
+
+```sql
+-- rollback of migration 0022 (node reputation)
+BEGIN;
+DROP TABLE character_node_reputation;
+DELETE FROM schema_migrations WHERE version = 22;
 COMMIT;
 ```
 

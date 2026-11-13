@@ -40,11 +40,11 @@ func schemaWithoutIgnoredNames(t *testing.T, pool *pgxpool.Pool) []string {
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name <> 'character_ignored_names' ORDER BY 1`,
+			WHERE table_schema = current_schema() AND table_name NOT IN ('character_ignored_names', 'character_node_reputation') ORDER BY 1`,
 		`SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
-			WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text <> 'character_ignored_names' ORDER BY 1`,
-		`SELECT 'index ' || tablename || ' ' || indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename <> 'character_ignored_names' ORDER BY 1`,
-		`SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name <> 'character_ignored_names' ORDER BY 1`,
+			WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text NOT IN ('character_ignored_names', 'character_node_reputation') ORDER BY 1`,
+		`SELECT 'index ' || tablename || ' ' || indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename NOT IN ('character_ignored_names', 'character_node_reputation') ORDER BY 1`,
+		`SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT IN ('character_ignored_names', 'character_node_reputation') ORDER BY 1`,
 	} {
 		r, err := pool.Query(context.Background(), q)
 		if err != nil {

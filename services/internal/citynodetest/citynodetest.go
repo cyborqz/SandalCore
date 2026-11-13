@@ -57,9 +57,9 @@ type Env struct {
 
 // -- Cyb x C | O | A --
 
-// New migrates a fresh schema, writes seed to a file and makes a service over it with a hand-moved real time. It does not
+// New migrates a fresh schema, writes seed to a file and makes a service over it with a hand-moved real time (and opts: a test's leveling). It does not
 // start the service (Env.Start does), so a test can look at the tables first.
-func New(t *testing.T, seed string) *Env {
+func New(t *testing.T, seed string, opts ...citynode.Option) *Env {
 	t.Helper()
 	pool := dbtest.Pool(t)
 	if err := db.Migrate(context.Background(), pool); err != nil {
@@ -73,7 +73,7 @@ func New(t *testing.T, seed string) *Env {
 	}
 	clk := NewClock()
 	return &Env{Pool: pool, Clock: clk, SeedPath: path,
-		Svc: citynode.New(pool, citynode.DefaultRoster(), path, citynode.WithClock(clk.Now))}
+		Svc: citynode.New(pool, citynode.DefaultRoster(), path, append([]citynode.Option{citynode.WithClock(clk.Now)}, opts...)...)}
 }
 
 // Start starts the service (the node rows, the seed).
