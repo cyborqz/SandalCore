@@ -814,7 +814,7 @@ void PlayerSession::on_bunch(Connection& conn, const InBunch& bunch, Clock::time
         // The connection already refused a broken packet; this is a bunch whose content blocks do not read.
         // (The first bytes in hex: the client's own data, what an unknown RPC looks like when the next run is read; stage 3 fix 2.  A bunch that does not read takes every call in it with it,
         // so none may go unseen: the first three are given whole, up to 160 bytes, and so is the first of every KIND -- its size and first eight bytes -- up to kMaxUnreadKinds, which is how
-        // a start that shared a bunch with a call the reader could not read shows as a bunch of its own size; the rest one in ten, with their first 24 bytes (retest 3: they were debug lines, invisible.)
+        // a start that shared a bunch with a call the reader could not read shows as a bunch of its own size; the rest at each power of ten, with their first 24 bytes (retest 3: they were debug lines, invisible.)
         static const char* const kHex = "0123456789abcdef";
         std::string head;
         for (size_t i = 0; i < bunch.data.size() && i < 160; ++i) {
@@ -827,7 +827,9 @@ void PlayerSession::on_bunch(Connection& conn, const InBunch& bunch, Clock::time
         if (malformed_bunches_ <= 3 || new_kind) {
             spdlog::warn("[session] {}: a bunch of {} bits on channel {} ({}) does not read: ignored (starts {})", name(), bunch.bits, bunch.channel, role_name(role), head);
         } else {
-            spdlog::log(malformed_bunches_ % 10 == 0 ? spdlog::level::info : spdlog::level::debug,
+            size_t mark = 10;   // (a line at the 10th, the 100th, the 1,000th ...: garbage without end cannot grow the log without end)
+            while (mark < malformed_bunches_) mark *= 10;
+            spdlog::log(malformed_bunches_ == mark ? spdlog::level::info : spdlog::level::debug,
                         "[session] {}: a bunch of {} bits on channel {} ({}) does not read: ignored ({} so far; starts {})", name(), bunch.bits, bunch.channel, role_name(role), malformed_bunches_,
                         head.substr(0, 48));
         }

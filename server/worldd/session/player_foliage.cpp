@@ -27,6 +27,7 @@
 #include "foliage/foliage.h"
 #include "gather/rules.h"
 #include "protocol/repl/fname.h"
+#include "session/gm_travel.h"
 #include "world/interaction_state.h"
 
 #include <spdlog/spdlog.h>
@@ -126,7 +127,9 @@ void PlayerSession::on_foliage_interact(Connection& conn, const repl::ClientRpc&
     const std::string component = cv && cv->get_if<repl::NameValue>() ? repl::fname_text(*cv->get_if<repl::NameValue>()) : std::string();
     const int state = sv && sv->get_if<uint64_t>() ? static_cast<int>(*sv->get_if<uint64_t>()) : -1;
     const char* state_name = state >= foliage::kInfancy && state <= foliage::kEmpty ? foliage::kStateNames[state] : "?";
-    const std::string what = owner + " / " + component + " #" + std::to_string(index) + " (" + state_name + ")";
+    // the client's two names as the log shows them: at most 96 characters each, and no control character (log_text: a newline would start a log line of the player's making)
+    const auto shown = [](const std::string& s) { return log_text(s.size() > 96 ? s.substr(0, 96) + "..." : s); };
+    const std::string what = shown(owner) + " / " + shown(component) + " #" + std::to_string(index) + " (" + state_name + ")";
     if (!f || !g) {
         if (!foliage_off_logged_) {
             foliage_off_logged_ = true;

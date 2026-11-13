@@ -331,8 +331,9 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
                 it = objects_->interactables.count(*it) != 0 ? std::next(it) : props.erase(it);
             }
             generic_config_.prop_components = std::move(props);
-            spdlog::info("[world] quest objects: {} interactable definitions ({} are quest objects), {} actor definitions, {} quest items, {} reward boxes", objects_->interactables.size(),
-                         generic_config_.prop_components.size(), objects_->actor_defs.size(), objects_->quest_items.size(), objects_->item_boxes.size());
+            spdlog::info("[world] quest objects: {} interactable definitions ({} are quest objects), {} actor definitions, {} quest items, {} random coffers, {} reward selectors",
+                         objects_->interactables.size(), generic_config_.prop_components.size(), objects_->actor_defs.size(), objects_->quest_items.size(), objects_->item_boxes.size(),
+                         objects_->item_reward_selections.size());
         } else {
             spdlog::warn("[world] the quest objects do not load, so none is made: {}", oe);
         }
@@ -536,7 +537,7 @@ void PlayerWorld::log_huntables() const {
     std::vector<std::pair<std::string, size_t>> counts;
     for (const auto& [def, n] : by_def) counts.emplace_back(names.count(def) ? names[def] : std::to_string(def), n);
     spdlog::info("[hunt] huntable mobs in the area: {} of {} NPCs ({} kinds, eight blocks with the hunting interactable{}); a Bow in Equipment slot 38 hunts a corpse for a carcass or a trainable and Hunter XP",
-                 total, registry_.count(world::ActorKind::Npc), by_def.size(), generic_ && !generic_->has_hunting_block() ? "; NOT: the Raven's captured open is missing, so they are plain creatures" : "");
+                 total, registry_.count(world::ActorKind::Npc), by_def.size(), generic_ && !generic_->has_hunting_block() ? "; NOT: the Raven's captured open is missing, so they are plain mobs" : "");
     log_counts("[hunt] by kind: ", counts);
 }
 
