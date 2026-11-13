@@ -740,7 +740,7 @@ private:
             // A timed cast (kTimedCasts) has two more kinds of step in this list: a launch (launch `index` leaves) and, for a Strike, the landing of arrow `index` at (x, y, z).
             // A Fly is a projectile that leaves at `due` (kNoteCasts: a note; a bounce leaves the enemy just hit, at (x, y, z)) and lands a flight later on `target`; `depth` counts the bounces before it
             // A Ball is one step of a ball's flight (kBalls): `index` counts the steps, 0 is the launch; a step looks at what the ball touches and sends a Land at each enemy that is due a hit
-            // A Steer is a projectile whose record limits how fast it may turn (kSteerCasts): `steer` is its flight, one 20 ms step per due, and it becomes a Land on arrival or at its closest pass
+            // A Steer is a projectile whose record limits how fast it may turn (kSteerCasts): `steer` is its flight, one 5 ms step per due (kSteerStep), and it becomes a Land on arrival, or when its life ends
             enum class Kind : uint8_t { Land, Launch, Strike, Fly, Ball, Steer };
             Kind     kind = Kind::Land;
             int      index = 0;
@@ -748,8 +748,8 @@ private:
             int      depth = 0;
             flight::Flight steer;             // a Steer: where it is, which way it goes, how fast and how far it may turn each second
             double   steer_launch = 0;        // ... when it left
-            double   steer_at = 0;            // ... the time its flight state is at (a step catches up to `due` in 20 ms sub-steps)
-            double   steer_deadline = 0;      // ... when the first lap and the half second after it are over (or its life ends): it lands at its closest pass then
+            double   steer_at = 0;            // ... the time its flight state is at (a step catches up to `due` in 5 ms sub-steps)
+            double   steer_deadline = 0;      // ... when its life ends (the record's life time, 10 s when it names none): it has not arrived, and its hit lands then
             double   steer_closest = 1e18;    // ... the closest it has come to its target so far, and when
             double   steer_closest_at = 0;
         };
@@ -875,8 +875,8 @@ void   step_multi_hit(Cast& cast, double t);
     void   plan_notes(Cast& cast, double t);
     /// A Fly step: the projectile leaves now; its landing is the target's distance (from the caster, or from the enemy a bounce left) over its speed away, never before the cast's cost step.
     void   launch_note(Cast& cast, const Cast::Missile& fly, double t);
-    /// One step of a turn-limited projectile (kSteerCasts): it turns toward the target's live position by at most its turn each second and advances 20 ms; on arrival (or at its
-    /// closest pass after the first lap and half a second) it becomes a Land, which lands through the ordinary projectile hit path.
+    /// One step of a turn-limited projectile (kSteerCasts): it turns toward the target's live position by at most its turn each second and advances 5 ms (kSteerStep); on arrival
+    /// (or when its life ends without one) it becomes a Land, which lands through the ordinary projectile hit path.
     void   steer_step(Cast& cast, const Cast::Missile& m, double t);
     /// A weapon combo's swing that another ability's trigger overtakes is over (the client cancels it with its own press): none of its steps happens, and one whose item has not shown yet is
     /// ended with ClientEndAbility. Without this the swing's item, due later than the ability's, took the pawn's item from the ability: the ability's montage never got its jump or its end.
@@ -1100,13 +1100,12 @@ void   step_multi_hit(Cast& cast, double t);
     /// A ranged weapon combo's swings: the step the last one played (by ability). The client plays the steps in order and starts over after the last, so the next swing is the step after it or the first;
     /// swing_montage keeps a modified client to that, and stop_swing is the client ending the swing (a stun): the arrows that had still to leave never do.
     std::map<int64_t, int> swing_steps_;
-    /// A ranged weapon combo's last two accepted swings and the play rates they were made at (by ability): a swing is judged by its gap and the gap before
+    /// A ranged weapon combo's last two accepted swings and the play rate the last one was made at (by ability): a swing is judged by its gap and the gap before
     /// it (one late packet must not refuse an honest pair), and its floor uses the faster of the last swing's rate and its own.
     struct SwingRecord {
         double at = 0;              // the last accepted swing
         double rate = 1;            // its play rate
-        double before = 0;          // the accepted swing before it
-        double before_rate = 1;     // its play rate
+        double before = 0;          // the accepted swing before it (its rate is not kept: nothing reads it)
         bool   has_before = false;
     };
     std::map<int64_t, SwingRecord> swing_records_;

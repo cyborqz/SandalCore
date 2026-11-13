@@ -56,6 +56,8 @@ using bootstrap::Role;
 using protocol::emit::FIntrepidNetworkGUID;
 
 void PlayerSession::on_combat_settings(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    // the budget first: a request over it pays for nothing, not even for the copy of its values below
+    if (!within_budget(combat_budget_, "ServerUpdateAccountCombatSettings", now)) return;
     // every value the request carries goes back as the PlayerController's own: the client's options page and its combat code read that block,
     // and nothing but this update fills it (the paths are built here, so the lambda below owns them together with the values)
     std::vector<std::string> paths;
@@ -73,7 +75,7 @@ void PlayerSession::on_combat_settings(Connection& conn, const repl::ClientRpc& 
         spdlog::log(level_for(combat_empty_logged_), "[session] {}: the client's combat settings carry no value worldd can echo", name());
         return;
     }
-    if (!within_budget(combat_budget_, "ServerUpdateAccountCombatSettings", now) || !room_for(1)) return;
+    if (!room_for(1)) return;
     spdlog::log(level_for(combat_logged_), "[session] {}: the client's combat settings: echoing {} of the {} values", name(), paths.size(), total);
     queue("combat settings echo",
           [paths = std::move(paths), held = std::move(held)](bootstrap::PlayerBootstrap& pb) {

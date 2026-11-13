@@ -106,3 +106,25 @@ static void test_client_driven_log_lines() {
 }
 
 AOC_REGISTER_TEST(test_client_driven_log_lines);
+
+// The combat settings' budget is asked before anything is read or built from the request: a request over the budget is dropped and counted whatever it carries, also one with no
+// value in it (which used to be read first and was never counted).
+static void test_combat_settings_budget_comes_first() {
+    std::printf("the combat settings' budget is asked before the request is read\n");
+    Harness h;
+    h.join();
+    h.settle();
+    const schema::ClassSchema& pc_cls = class_named("AoCPlayerControllerBP_C");
+    const uint32_t pc_ch = h.s->channel_of(bs::Role::PlayerController);
+    const BunchWriter empty = client_rpc(pc_cls, "ServerUpdateAccountCombatSettings");
+    CHECK(empty.bit_pos() > 0, "(a combat settings call with no value is written)");
+    if (empty.bit_pos() == 0) return;
+    const size_t dropped = h.s->requests_dropped();
+    h.client_repeats(pc_ch, empty, 200);
+    h.settle();
+    char msg[200];
+    std::snprintf(msg, sizeof msg, "200 settings requests within a second: all but the first few are dropped at the budget (%zu dropped)", h.s->requests_dropped() - dropped);
+    CHECK(h.s->requests_dropped() >= dropped + 190, msg);
+}
+
+AOC_REGISTER_TEST(test_combat_settings_budget_comes_first);

@@ -1875,8 +1875,11 @@ void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, 
     h.record_guid = in.hit_guid;
     h.source_type = in.source_type;
     h.source_guid = in.source_guid;
-    h.source_is_actor = true;
+    // (as receive_hit confirms it: a creature's projectile hit has no source actor, the projectile's record is its source, and it is predicted on both sides)
+    const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
+    h.source_is_actor = !from_projectile;
     h.predicted_autonomous = true;
+    h.predicted_simulated = from_projectile;
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
     bootstrap::HitTargetOut t;
     t.component = target;
@@ -2773,7 +2776,12 @@ size_t AbilityPipeline::end_unlaunched(double t, const char* why) {
         const double since = t - cast.trigger_at;
         AbilityEvent e;
         e.at = t;
-        e.end_ability = client_id;
+        // The client is told the cast is over, unless it has been told: a cast whose item was sent (it has an instance) and whose instance is gone was ended by the client itself, and
+        // the answer to that end went out. A second end would name an instance the client no longer has. (An end the client asked for and that is still to be answered is answered here:
+        // the instance goes below.)
+        const int64_t instance = cast.instance;
+        const bool told = instance >= 0 && std::none_of(instances_.begin(), instances_.end(), [instance](const Instance& in) { return in.server_id == instance; });
+        if (!told) e.end_ability = client_id;
         for (int shot = 1; shot < cast.shots; ++shot) give_back(e.change, cast);   // (a Salvo that paid more than one shot before its first arrow left)
         refund(e.change, cast);   // (nothing when it had not paid yet)
         step_end(cast, t);
@@ -3591,7 +3599,6 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
             swing_records_.emplace(def->row.guid, record);
         } else {
             it->second.before = it->second.at;
-            it->second.before_rate = it->second.rate;
             it->second.has_before = true;
             it->second.at = t;
             it->second.rate = swing_rate;
@@ -3744,6 +3751,7 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
             }
         }
     }
+    bool steered = false;
     if (!any && cast.projectile_due) {   // the one projectile of a spell: its first projectile row
         for (const content::AbilityHitRow& h : cast.def->hits) {
             if (h.source != "projectile") continue;
@@ -3766,8 +3774,9 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
                         cast.missiles.push_back(m);
                         cast.projectile_due.reset();
                         first = last = launch;
-                        spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger and turns toward its target at {:.0f} deg/s ({} cm/s)", cast.def->row.name, launch,
-                                     steer->turn_deg_s, p->speed);
+                        steered = true;   // (its landing is not known yet: it lands when its flight gets there)
+                        spdlog::info("[abilities] {}: the projectile leaves {:.3f} s after the trigger and turns toward its target at {:.0f} deg/s ({} cm/s)", cast.def->row.name,
+                                     launch - cast.trigger_at, steer->turn_deg_s, p->speed);
                     } else {
                         cast.projectile_due = land_at(f, *p);
                         first = last = *cast.projectile_due;
@@ -3778,7 +3787,10 @@ void AbilityPipeline::land_by_flight(Cast& cast, double t) {
             if (any) break;
         }
     }
-    if (any) {
+    if (any && steered) {
+        spdlog::info("[abilities] {}: the target is {:.1f} m away: the projectile leaves {:.3f} s after the cast bar's end and lands when its flight gets there", cast.def->row.name, distance / 100.0,
+                     first - cast.heard_at);
+    } else if (any) {
         spdlog::info("[abilities] {}: the target is {:.1f} m away: the projectiles land {:.3f} to {:.3f} s after the cast bar's end", cast.def->row.name, distance / 100.0, first - cast.heard_at, last - cast.heard_at);
     }
 }
@@ -3957,7 +3969,7 @@ void AbilityPipeline::launch_note(Cast& cast, const Cast::Missile& fly, double t
         return;
     }
     // A projectile whose record limits its turn leaves along its fire rotation and turns toward the target (kSteerCasts): its flight is a Steer step, and it lands through the
-    // ordinary Land path when it gets there (or at its closest pass after the first lap and half a second).
+    // ordinary Land path when it gets there (or when its life ends without it getting there).
     if (const SteerCast* steer = steer_of(fly.projectile)) {
         Cast::Missile m;
         m.kind = Cast::Missile::Kind::Steer;

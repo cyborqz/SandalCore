@@ -205,8 +205,8 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
         std::string e;
         if (row && row->program >= 0 && attacker.eval(row->program, host, v, e) && std::isfinite(v)) out.threat = std::max(0.0, v);
     }
-    // the velocity change the hit gives (contentc version 42): its magnitude and the angle it is lifted by, worked out for the two like the mods are (Get Off The Stage's reads whether the target stands
-    // under Heroic Stand: the data's way to leave it where it is)
+    // the velocity change the hit gives (contentc version 42): its magnitude and the angle it is lifted by, worked out for the two like the mods are (Get Off The Stage's reads whether the target holds
+    // the effect Siege_Channel_Buff: the data's way to leave such a target where it is)
     if (ok && hit.impulse && hit.impulse->applies) {
         const auto number = [&](int64_t expr, double& v) {
             if (expr == 0) {
@@ -255,6 +255,9 @@ void fill_context(HitContext& ctx, const CombatData& data, const abilities::HitD
 }  // namespace
 
 bool HitResolver::resolve_effects(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why) {
+    // a hit with no effect row for its target has nothing to work out (resolve_effects_with says the same): no stat run is built for it. The tick of a damage-over-time debuff is
+    // such a hit, and it comes every second for every debuff on every mob.
+    if (std::none_of(hit.effects.begin(), hit.effects.end(), [](const content::HitEffectRow& row) { return row.kind != "self"; })) return true;
     std::string err;
     auto a = attacker.stats().evaluation(attacker.worn(), err, true);
     if (!a) {

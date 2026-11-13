@@ -1654,6 +1654,9 @@ void test_bard_lullaby_cast(Fixture& f) {
             CHECKF(bw.rig.pipe->charges_left(lullaby) == 0, "its charge is spent before the interrupt (%d left)", bw.rig.pipe->charges_left(lullaby));
             const std::vector<double> before = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
             CHECKF(before.size() == 3, "the first three hits ran (%zu)", before.size());
+            const bootstrap::ActiveAbilityItem* running = bw.rig.pawn.ability_item();
+            CHECKF(running && running->server_instance_id == cast.server_instance && (!running->montage_path.empty() || running->montage_guid != 0),
+                   "(the cast's item names its montage while the cast runs)");
             CHECKF(bw.rig.pipe->end_request(cast.server_instance, stop), "the cast is interrupted after its third hit");
             const std::vector<Seen> cancel = bw.rig.take();
             const double mana_after = bw.rig.mana();
@@ -1674,6 +1677,10 @@ void test_bard_lullaby_cast(Fixture& f) {
             const std::vector<double> after = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
             CHECKF(after.size() == 3, "no fourth hit after the interrupt (%zu)", after.size());
             CHECKF(bw.world->effect_stacks(wolf, stunned->row.guid) == 0, "an interrupted cast gives no stun");
+            const bootstrap::ActiveAbilityItem* ended = bw.rig.pawn.ability_item();
+            CHECKF(ended && ended->server_instance_id == cast.server_instance && ended->montage_path.empty() && ended->montage_guid == 0,
+                   "the interrupted cast's item keeps its place with the montage cleared (%s, montage \"%s\")", ended ? "the item is there" : "no item",
+                   ended ? ended->montage_path.c_str() : "");
             TriggerInfo again_info;
             again_info.target_count = 1;
             again_info.target_actors = {wolf};
@@ -1803,7 +1810,7 @@ void test_bard_target_hit_requirement(Fixture& f) {
     bw.world->apply_effects(wolf, 77, {bleed}, 100.0);
     CHECKF(bw.world->effect_stacks(wolf, bleeding->row.guid) == 1, "the Wolf is bleeding (the Hemorrhage's requirement holds of it)");
     const BardCast cast = bard_cast(bw, "Ranger_Snipe", {wolf}, "Snipe_Hemorrhage", 100.0, 100.5);
-    CHECKF(cast.cast, "the Snipe's cast is accepted");
+    CHECKF(cast.cast && cast.requested, "the Snipe's cast and the client's request for its Hemorrhage hit are accepted (cast %d, request %d)", cast.cast ? 1 : 0, cast.requested ? 1 : 0);
     CHECKF(bw.world->effect_stacks(wolf, hemorrhage->row.guid) == 0, "the Hemorrhage does not land: its requirement is asked of the caster, as before");
 }
 AOC_REGISTER_TEST(test_bard_target_hit_requirement);

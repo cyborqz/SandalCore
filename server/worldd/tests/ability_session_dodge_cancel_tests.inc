@@ -660,6 +660,7 @@ struct ChanCast {
     double                   north = 0;          // ... and this far along the way the player faces (an ability that gathers the enemies in a cone ahead of him)
     double                   release_at = -1;    // the key goes up
     double                   dodge_at = -1;      // a Dodge pressed (negative: none)
+    double                   end_at = -1;        // the client ends the cast's instance itself with ServerEndAbility (negative: never)
     bool                     dodge_first = false;   // a Dodge pressed before the trigger, so that the one at dodge_at is refused
     double                   seconds = 6.0;
     float                    fill = 300.0f;      // the class resource the cast takes, set before it
@@ -674,6 +675,7 @@ struct ChanEnd {
     std::vector<Hit>     hits;                    // every confirmation the client got: seconds after the trigger, the hit's name, whether it reached a target
     int32_t              cast_id = -1, dodge_id = -1;
     bool                 dodge_item = false;
+    bool                 ended_by_client = false;   // the client's own end was sent for the cast's item (ChanCast::end_at)
     double               dodged_at = -1;
     std::vector<int32_t> ends;
     float                mana_before = 0, mana_after = 0;
@@ -775,7 +777,7 @@ static bool run_chan_cast(const svc::Character& rec, const ChanCast& cc, ChanEnd
     } else {
         r.send_trigger(def->row.guid, out.cast_id);
     }
-    bool dodged = cc.dodge_at < 0, released = cc.release_at < 0;
+    bool dodged = cc.dodge_at < 0, released = cc.release_at < 0, ended = cc.end_at < 0;
     double next_ask = asks.empty() ? 1.0e9 : cc.ask_from;
     size_t reported = 0;
     const int steps = static_cast<int>(cc.seconds / 0.05);
@@ -792,6 +794,14 @@ static bool run_chan_cast(const svc::Character& rec, const ChanCast& cc, ChanEnd
                 if (cc.ask_wolf) comp.inline_object = cyl;
                 else comp.object = setup.guids.collision_cylinder;
                 r.send_reliable(hit_request_with(setup, def->row.guid, a.targeting, a.hit, comp));
+            }
+        }
+        if (!ended && t >= cc.end_at) {
+            ended = true;
+            for (const auto& [element, a] : r.m.abilities) {   // (the cast's item, as the client holds it: it names the server's instance)
+                if (a.ability != def->row.guid) continue;
+                r.send_reliable(end_bunch(setup.guids.ability, a.instance));
+                out.ended_by_client = true;
             }
         }
         if (!dodged && t >= cc.dodge_at) {
@@ -1704,3 +1714,28 @@ void test_dodge_keeps_the_crate_on_the_back() {
     }
 }
 AOC_REGISTER_TEST(test_dodge_keeps_the_crate_on_the_back);
+
+// A cast the client ended itself is not ended for it a second time by a Dodge.  Overpower has no cast bar and stays open to a Dodge for 1.4 s after the press; here the client ends
+// the cast's instance itself half a second after the press (the server answers that end), and a Dodge follows at 0.9 s.  Whatever the Dodge does to the cast, the client already
+// has its end: one ClientEndAbility for the cast, not two.
+void test_dodge_after_the_clients_own_end_sends_no_second_end() {
+    std::printf("a Dodge after the client's own end of a cast sends the client no second end for it\n");
+    ChanCast cc;
+    cc.ability = "Fighter_Overpower";
+    cc.aim_wolf = true;
+    cc.ahead = 120;
+    cc.end_at = 0.5;
+    cc.dodge_at = 0.9;
+    cc.seconds = 3.0;
+    ChanEnd e;
+    const bool ran = run_chan_cast(class25(4, "Fighter", 17749), cc, e);
+    CHECK(ran, "(the cast ran)");
+    if (!ran) return;
+    CHECK(e.ended_by_client, "(the client held the cast's item and ended its instance itself)");
+    CHECK(e.dodge_item, "(the server took the Dodge)");
+    char msg[160];
+    std::snprintf(msg, sizeof msg, "the client is told once that the cast is over (%d ends for it)", chan_ends(e, e.cast_id));
+    CHECK(chan_ends(e, e.cast_id) == 1, msg);
+    if (chan_ends(e, e.cast_id) != 1) log_excerpt(e.log, "Fighter_Overpower");
+}
+AOC_REGISTER_TEST(test_dodge_after_the_clients_own_end_sends_no_second_end);
