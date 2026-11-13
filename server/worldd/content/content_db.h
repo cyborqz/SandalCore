@@ -1216,7 +1216,7 @@ struct ObjectData {
     std::map<int64_t, int64_t>         instance_iad;    // population instance -> its IAD
     std::map<int64_t, bool>            quest_items;     // item record -> Major (it belongs in the Quest bag)
     std::map<int64_t, int64_t>         item_boxes;      // item record -> the reward table a random coffer rolls (ActivationLootBoxData.RewardTable)
-    /// contentc version 42: item record -> the reward table a selector lists in its choose-one window (RewardSelectionDataId).  A selector's use opens
+    /// contentc version 43: item record -> the reward table a selector lists in its choose-one window (RewardSelectionDataId).  A selector's use opens
     /// ClientOpenRewardSelection; the player answers with ServerSelectReward(Index).
     std::map<int64_t, int64_t>         item_reward_selections;
 };
@@ -1605,7 +1605,7 @@ public:
     std::optional<QuestData> quest_data(std::string& error) const;
     /// Quests part 3, slice 1 (contentc version 36): the quest objects' definitions; nullopt, with `error`, from a content.db of an older version.
     std::optional<ObjectData> object_data(std::string& error) const;
-    /// Chests (contentc version 42): which reward table an item opens when it is used.  A selector (item_reward_selection, Activation =
+    /// Chests (contentc version 43): which reward table an item opens when it is used.  A selector (item_reward_selection, Activation =
     /// OpenRewardSelection) lists the table's items in its choose-one window; a random coffer (item_box) rolls it.  None for any other item.
     enum class ChestKind { None, Random, Selector };
     struct ChestTable {

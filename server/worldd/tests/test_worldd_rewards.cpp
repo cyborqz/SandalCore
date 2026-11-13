@@ -602,6 +602,32 @@ void test_rolled_quantity() {
     CHECK(combat::rolled_xp(std::nan("")) == 0 && combat::rolled_xp(HUGE_VAL) == 0 && combat::rolled_xp(-1.0) == 0, "...and a number that is none, an infinite one and a negative one give nothing");
 }
 
+/// The quantity of one reward line, as a reward selector's window reads it.  It follows the rolls: a line with no Quantity is one item, a plain number is that many, and an expression
+/// that does not run gives none (never one item by default).
+void test_line_quantity(Fixture& f) {
+    std::printf("a reward line's quantity: one for no Quantity, the number of a plain one, none for one that does not run\n");
+    int64_t kFive = 0;   // (rows are numbered as the data is built: it is found by what it says)
+    for (int64_t id = 1; id < 40000 && kFive == 0; ++id) {
+        const content::ExprRow* row = f.catalog->expr(id);
+        if (row && row->text == "5") kFive = id;
+    }
+    CHECK(kFive != 0, "(the data holds the constant 5)");
+    if (kFive == 0) return;
+    combat::RewardBook book(*f.catalog, std::map<int64_t, content::LootTable>{}, 0);
+    Kill k;
+    if (!k.make(f, "Rabid_C", 8, 1)) {
+        CHECK(false, "a Rabid");
+        return;
+    }
+    CHECKF(book.quantity(0, k.ctx) == 1, "a line with no Quantity is one item (%lld)", static_cast<long long>(book.quantity(0, k.ctx)));
+    CHECKF(book.quantity(kFive, k.ctx) == 5, "a plain 5 is five (%lld)", static_cast<long long>(book.quantity(kFive, k.ctx)));
+    constexpr int64_t kNoSuchExpression = 7999999999999ll;
+    CHECKF(book.quantity(kNoSuchExpression, k.ctx) == 0, "an expression the data does not hold gives none, not one (%lld)", static_cast<long long>(book.quantity(kNoSuchExpression, k.ctx)));
+    combat::RollContext nobody;
+    CHECKF(book.quantity(kFive, nobody) == 0, "an expression with nobody to work it out for gives none, not one (%lld)", static_cast<long long>(book.quantity(kFive, nobody)));
+    CHECKF(book.quantity(0, nobody) == 1, "(a line with no Quantity needs nobody: one item, %lld)", static_cast<long long>(book.quantity(0, nobody)));
+}
+
 int main() {
     if (!real_db_present()) {
         std::printf("test_worldd_rewards: no content.db at %s (set AOC_CONTENT_DB): skipped\n", real_db_path().c_str());
@@ -620,6 +646,7 @@ int main() {
     test_biome(f);
     test_quest_start_tables(f);
     test_rolled_quantity();
+    test_line_quantity(f);
     test_roll_cuts_a_huge_quantity(f);
     test_roll_cuts_a_huge_experience(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

@@ -3606,7 +3606,7 @@ ContentDb::ChestTable ContentDb::chest_table(int64_t item, std::string& error) c
         Stmt q(db_, "SELECT table_guid FROM item_reward_selection WHERE item_guid = ?1");
         if (!q.ok()) {
             error = "content.db item_reward_selection query failed: " + db_message(db_) +
-                    " (the chest selectors are contentc version 42's: rebuild the file with this checkout's contentc)";
+                    " (the chest selectors are contentc version 43's: rebuild the file with this checkout's contentc)";
             return {};
         }
         sqlite3_bind_int64(q.get(), 1, item);

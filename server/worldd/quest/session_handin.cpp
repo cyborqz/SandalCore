@@ -104,9 +104,10 @@ const repl::Value* handin_value(const repl::ElementState& e, uint16_t handle) {
     return it == e.values.end() ? nullptr : &it->second;
 }
 
+/// Where a hand-in looks for a stack: the item bag only.  The quest bag is not one of them yet: Inventory::count_of and take do not read it, so a quest-bag stack would count
+/// for the objective while the items were taken from the item bag (the quest bag joins when it is built).
 std::optional<svc::ItemContainer> handin_container(int64_t location) {
     if (location == static_cast<int64_t>(repl::ItemLocation::Backpack)) return svc::ItemContainer::Backpack;
-    if (location == static_cast<int64_t>(repl::ItemLocation::Quest)) return svc::ItemContainer::Quest;
     return std::nullopt;
 }
 

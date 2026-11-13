@@ -17,7 +17,11 @@
 //  A move.  The window asks the server to move a stack between a bag (the item bag or a material bag) and a warehouse container, or inside one container.  The server moves the whole
 //  stack to an empty place or splits part of it there, joins a stack onto a stack it passes the joining rule with (the target keeps its guid and quality), or swaps two whole stacks.  What is
 //  refused changes nothing and tells the client nothing but the storages as they are.  The answer is a Remove from the place the stack left and an Add where it arrived; the bag's side
-//  carries the item toast, the warehouse's does not.
+//  carries the item toast, the warehouse's does not.  A swap answers with four events: the two Removes, then the two Adds.
+//
+//  The quick-send.  A Fill may name more than one target slot: the stacks it tops up and a free slot for what is left.  It is judged whole (every slot must take its part, or nothing
+//  changes), and its answer is one Remove from the source and one Add for each target slot, in the request's order: an Add onto a stack carries that stack's guid and the part it took,
+//  an Add into a free slot the new stack with a guid of its own.
 //
 //  The rules of what may go where are the client's own (a material only in a material container, anything else only in an item container) and the owner's of the bags (the item bag
 //  holds no materials).  A container the window does not have open, another town's tab and a place outside the container are refused.
@@ -330,9 +334,10 @@ struct Target {
     End         to;
     int32_t     count = 0;
     std::string to_guid;      // the stack in the slot (empty: a free slot)
-    int32_t     to_count = 0;
 };
 
+/// What the window asks for.  With `targets` empty the request has the one target `to` (its answer: one Remove and one Add, or a swap's four events); a Fill with `targets` names each
+/// target slot there (its answer: one Remove, then one Add for each of them).
 struct Request {
     repl::StorageEventType type = repl::StorageEventType::Move;   // Move, Fill or Swap
     End                    from, to;
@@ -604,6 +609,8 @@ inline Result transfer(items::Inventory& bags, Storage& wh, const items::ItemCat
                 if (std::string why = put_at(t.to, merged); !why.empty()) return refuse(why);
             } else {
                 if (items::guid_of(t.to_guid).has_value()) return refuse("the target slot is empty, but the client named an item in it");
+                // (a source stack larger than its record allows is bad data: its part for a free slot may not make another stack of that kind)
+                if (t.count > max_stack) return refuse("the move names " + std::to_string(t.count) + " for a free slot; a stack of this item holds " + std::to_string(max_stack));
                 if (t.to.in_warehouse) {
                     const std::string* ignore = r.from.in_warehouse && total >= moving.quantity ? &moving.instance_guid : nullptr;
                     const std::string why = detail::why_not_here(*to_spec, t.to.slot, moving, trial_wh, catalog, ignore);

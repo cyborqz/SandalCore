@@ -170,7 +170,8 @@ public:
     /// What `amount` experience of a creature is worth to a player of `ctx.player_level`: the decay of the level difference, rounded.
     int64_t xp_for(int64_t amount, RollContext& ctx) const;
 
-    /// The quantity a reward line's Quantity expression gives for `ctx`, as the rolls read it: 1 for no expression (id 0) and for one that does not run.
+    /// The quantity a reward line's Quantity expression gives for `ctx`, as the rolls read it: 1 for no expression (id 0), and 0 (nothing) for one that does not run or that
+    /// gives no whole item.  A caller that shows or grants the line leaves a line of 0 out, or refuses.
     int64_t quantity(int64_t expr, RollContext& ctx) const;
 
 private:

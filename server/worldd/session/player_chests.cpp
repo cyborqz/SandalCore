@@ -118,7 +118,14 @@ bool PlayerSession::open_reward_selection(Connection& conn, const repl::ItemUse&
     std::vector<RewardSelectionOption> options;
     options.reserve(lines.size());
     for (const content::LootItem& line : lines) {
-        const int64_t quantity = book && quantity_run ? book->quantity(line.qty, quantity_ctx) : 1;
+        // a line with no Quantity is one item; one whose Quantity cannot be worked out (no stat run, an expression that does not run or gives nothing) is not shown as one
+        // item: the window is not opened and the box stays, so the player is never given a count the data does not say (every selector line of the data is a plain number today)
+        const int64_t quantity = line.qty == 0 ? 1 : (book && quantity_run ? book->quantity(line.qty, quantity_ctx) : 0);
+        if (quantity <= 0) {
+            spdlog::warn("[chests] {}: the selector {} is not opened: the quantity of its option {} (item {}) cannot be worked out{}", name(), item.item_record_id, options.size(),
+                         line.item, quantity_run ? "" : (": no stat run (" + quantity_error + ")"));
+            return false;
+        }
         options.push_back({line.item, quantity});
     }
     const int64_t created_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -191,7 +198,7 @@ bool PlayerSession::open_coffer(Connection& conn, const repl::ItemUse& use, cons
     harvest.items = rolled.loot;
     harvest.items.insert(harvest.items.end(), rolled.direct.begin(), rolled.direct.end());
     for (const combat::RolledXp& x : rolled.xp) {
-        // A coffer's table gives Adventuring experience; node and weapon experience belong to the kill and quest paths (no chest table carries them today).
+        // No coffer table of the data has an experience line today.  Should one get Adventuring experience, it is given; node and weapon experience belong to the kill and quest paths.
         if (x.type == "Adventuring") harvest.adventuring_xp += x.amount;
         else spdlog::debug("[chests] {}: the coffer's {} experience is not granted", name(), x.type);
     }

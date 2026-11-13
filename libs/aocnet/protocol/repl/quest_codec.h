@@ -7,17 +7,18 @@
 //  The two NetSerialize structs of the quest log (quests milestone, slice 1), as the client's own code runs them, in the order it runs them.  Bit stream, LSB first;
 //  a count or number is a raw 32-bit word ("Ar << int32"), an int64 64 bits.
 //
-//  FRewardInstance (what a quest pays: the preview of the offer, the reward of a quest in the log)
+//  FRewardInstance (what a quest pays: the preview of the offer, the reward of a quest in the log; also the window of a reward selector)
 //
 //    32 + n x FItemInstance    Items: an int32 count, then each item as item_codec.h writes it (the exe refuses a count above 0x11111)
 //    32                        NodeActivityExperience (int32)
 //    32                        GuildActivityExperience (int32)
 //    32 + ...                  the experience map: an int32 count of entries
 //    32 + ...                  the currency map: an int32 count of entries
-//    32 + ...                  SourceRewardTableIds: an int32 count of ids
+//    32 + n x 128              SourceRewardTableIds: an int32 count, then each entry as two 64-bit words (the table's id and the word the client pairs with it)
 //
-//    Every captured reward (the item-started quest of the treasure map, the quest log of a login) has the two maps and the id list EMPTY (six zero words in all): only that form is
-//    modelled.  A non-empty map or id list is refused by the reader, and the writer cannot be asked for one (the struct has no member for it).
+//    Every recorded quest reward (the item-started quest of the treasure map, the quest log of a login) has the two maps and the id list EMPTY (six zero words in all).  The two
+//    maps are modelled only in that form: a non-empty map is refused by the reader, and the writer cannot be asked for one (the struct has no member for it).  The id list is
+//    read and written with its entries (a reward selector's window names its table there), at most kMaxRewardItems of them.
 //
 //  FHashedVariable (the variables of one quest instance: RepQuestVariables' map element value)
 //

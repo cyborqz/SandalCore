@@ -1030,8 +1030,9 @@ Outcome Inventory::grant(std::vector<svc::InventoryItem> items, const ItemCatalo
     if (!r.outcome.ok) return r.outcome;
     if (!r.rest.empty()) {
         Outcome out;
-        out.refusal = "the storages have no room for " + std::to_string(r.rest.size()) + " of the granted item(s) (the bag has " +
-                      std::to_string(static_cast<size_t>(kBackpackSlots) - count(svc::ItemContainer::Backpack)) + " free slot(s))";
+        out.refusal = "the storages have no room for " + std::to_string(r.rest.size()) + " of the granted item(s) (the item bag has " +
+                      std::to_string(static_cast<size_t>(kBackpackSlots) - count(svc::ItemContainer::Backpack)) +
+                      " free slot(s); a material goes into the material bags only, so free slots of the item bag do not help it)";
         return out;
     }
     *this = std::move(trial);

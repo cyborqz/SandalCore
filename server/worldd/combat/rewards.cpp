@@ -303,15 +303,16 @@ Rolled RewardBook::roll(const std::vector<int64_t>& roots, RollContext& ctx) con
 }
 
 int64_t RewardBook::quantity(int64_t expr, RollContext& ctx) const {
-    if (expr == 0 || !ctx.npc) return 1;
+    if (expr == 0) return 1;   // (a line the data gives no Quantity is one item)
+    // an expression that does not run gives none, as a roll reads it (Roller: "a formula that does not run is none"): never one item by default
+    if (!ctx.npc) return 0;
     const int program = catalog_.program(expr);
-    if (program < 0) return 1;
+    if (program < 0) return 0;
     RewardHost host(ctx);
     double v = 0;
     std::string error;
-    if (!ctx.npc->eval(program, host, v, error) || !std::isfinite(v)) return 1;
-    const int64_t quantity = rolled_quantity(v);
-    return quantity > 0 ? quantity : 1;
+    if (!ctx.npc->eval(program, host, v, error)) return 0;
+    return rolled_quantity(v);   // (nothing for a number that is none, infinite, negative or under one)
 }
 
 int64_t RewardBook::xp_for(int64_t amount, RollContext& ctx) const {

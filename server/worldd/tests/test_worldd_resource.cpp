@@ -802,6 +802,74 @@ static void test_warehouse_item_section() {
                   wh.at(chunk.key, 0) && wh.at(chunk.key, 0)->instance_guid == guid_n(434),
               "a swap in the item section: the potion stack and the ring change places whole");
     }
+    {
+        // the quick-send from the item bag into the item section: 7 potions, 19 in the chunk; one tops the 19 up and six become a new stack at the free slot named
+        auto bags = build_bags(with(worn_kit(), {make_item(Bag, 0, fi::kPotion, 440, 7)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(chunk.key, 3, make_item(Bag, 0, fi::kPotion, 441, 19));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = false;
+        r.from.bag = Bag;
+        r.from.slot = 0;
+        r.count = 7;
+        r.guid = guid_n(440);
+        r.to.in_warehouse = true;
+        r.to.key = chunk.key;
+        r.to.slot = 3;
+        r.to_guid = guid_n(441);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(441)});
+        r.targets.push_back(warehouse::Target{r.to, 6, std::string()});
+        r.targets[1].to.slot = 4;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        const svc::InventoryItem* top = wh.at(chunk.key, 3);
+        const svc::InventoryItem* fresh = wh.at(chunk.key, 4);
+        CHECK(res.ok && top && top->quantity == 20 && top->instance_guid == guid_n(441) && fresh && fresh->quantity == 6 && fresh->instance_guid != guid_n(440) &&
+                  items::guid_of(fresh->instance_guid).has_value() && !bags->at(Bag, 0),
+              "a quick-send from the item bag into the item section: the chunk's stack is 20 at its own guid, the 6 left are a new stack, the bag slot is empty");
+        CHECK(res.steps.size() == 3 && res.steps[0].type == repl::StorageEventType::Remove && !res.steps[0].in_warehouse && res.steps[0].bag == Bag && res.steps[0].slot == 0 &&
+                  res.steps[0].count == 0 && res.steps[0].item.quantity == 7 && res.steps[1].type == repl::StorageEventType::Add && res.steps[1].in_warehouse &&
+                  res.steps[1].slot == 3 && res.steps[1].item.quantity == 1 && res.steps[1].item.instance_guid == guid_n(441) &&
+                  res.steps[2].type == repl::StorageEventType::Add && res.steps[2].in_warehouse && res.steps[2].slot == 4 && res.steps[2].item.quantity == 6 && fresh &&
+                  res.steps[2].item.instance_guid == fresh->instance_guid,
+              "...the Remove of the whole 7 from the bag, the Add of 1 into the chunk's stack and the Add of the new 6");
+    }
+    {
+        // the other direction: 7 potions in the item section, 19 in the item bag; one tops the bag's 19 up and six become a new stack in the bag
+        auto bags = build_bags(with(worn_kit(), {make_item(Bag, 0, fi::kPotion, 443, 19)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(chunk.key, 0, make_item(Bag, 0, fi::kPotion, 442, 7));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = true;
+        r.from.key = chunk.key;
+        r.from.slot = 0;
+        r.count = 7;
+        r.guid = guid_n(442);
+        r.to.in_warehouse = false;
+        r.to.bag = Bag;
+        r.to.slot = 0;
+        r.to_guid = guid_n(443);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(443)});
+        r.targets.push_back(warehouse::Target{r.to, 6, std::string()});
+        r.targets[1].to.slot = 1;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        const svc::InventoryItem* top = bags->at(Bag, 0);
+        const svc::InventoryItem* fresh = bags->at(Bag, 1);
+        CHECK(res.ok && top && top->quantity == 20 && top->instance_guid == guid_n(443) && fresh && fresh->quantity == 6 && fresh->instance_guid != guid_n(442) &&
+                  items::guid_of(fresh->instance_guid).has_value() && !wh.at(chunk.key, 0),
+              "a quick-send from the item section into the item bag: the bag's stack is 20 at its own guid, the 6 left are a new stack, the chunk slot is empty");
+        CHECK(res.steps.size() == 3 && res.steps[0].type == repl::StorageEventType::Remove && res.steps[0].in_warehouse && res.steps[0].slot == 0 && res.steps[0].count == 0 &&
+                  res.steps[0].item.quantity == 7 && res.steps[1].type == repl::StorageEventType::Add && !res.steps[1].in_warehouse && res.steps[1].bag == Bag &&
+                  res.steps[1].slot == 0 && res.steps[1].item.quantity == 1 && res.steps[1].item.instance_guid == guid_n(443) &&
+                  res.steps[2].type == repl::StorageEventType::Add && !res.steps[2].in_warehouse && res.steps[2].slot == 1 && res.steps[2].item.quantity == 6 && fresh &&
+                  res.steps[2].item.instance_guid == fresh->instance_guid,
+              "...the Remove of the whole 7 from the chunk, the Add of 1 into the bag's stack and the Add of the new 6");
+    }
 }
 
 static void test_warehouse_quick_send() {
@@ -840,8 +908,8 @@ static void test_warehouse_quick_send() {
         r.to.slot = 0;
         r.to_guid = guid_n(502);
         r.to_count = 19;
-        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(502), 19});
-        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(502)});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string()});
         r.targets[1].to.slot = 1;
         const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
         const svc::InventoryItem* top = wh.at(tab.key, 0);
@@ -901,8 +969,8 @@ static void test_warehouse_quick_send() {
         r.to.slot = 0;
         r.to_guid = guid_n(506);
         r.to_count = 19;
-        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(506), 19});
-        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(506)});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string()});
         r.targets[1].to.slot = 1;
         const warehouse::Storage before_wh = wh;
         const Inv before_bags = *bags;
@@ -929,8 +997,8 @@ static void test_warehouse_quick_send() {
         r.to.slot = 0;
         r.to_guid = guid_n(511);
         r.to_count = 19;
-        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(511), 19});
-        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(511), 19});
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(511)});
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(511)});
         const warehouse::Storage before_wh = wh;
         const Inv before_bags = *bags;
         const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
@@ -954,8 +1022,8 @@ static void test_warehouse_quick_send() {
         r.to.in_warehouse = true;
         r.to.key = tab.key;
         r.to.slot = 0;
-        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
-        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string()});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string()});
         r.targets[1].to.slot = 8;
         const warehouse::Storage before_wh = wh;
         const Inv before_bags = *bags;
@@ -982,8 +1050,8 @@ static void test_warehouse_quick_send() {
         r.to.slot = 0;
         r.to_guid = guid_n(508);
         r.to_count = 19;
-        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(508), 19});
-        r.targets.push_back(warehouse::Target{r.to, 1, std::string(), 0});
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(508)});
+        r.targets.push_back(warehouse::Target{r.to, 1, std::string()});
         r.targets[1].to.slot = 1;
         const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
         const svc::InventoryItem* top = bags->at(R0, 0);
@@ -997,6 +1065,34 @@ static void test_warehouse_quick_send() {
                   res.steps[2].type == repl::StorageEventType::Add && !res.steps[2].in_warehouse && res.steps[2].slot == 1 && res.steps[2].item.quantity == 1 &&
                   fresh && res.steps[2].item.instance_guid == fresh->instance_guid,
               "the events are the Remove of the whole 2 from the tab (count 0, the stack as it was), the Add of 1 into the bag's stack and the Add of the new 1");
+    }
+    {
+        // a stack larger than its record allows (bad data: 25 oak, a stack holds 20): the quick-send may not put 24 of it into one free slot
+        auto bags = build_bags(with(worn_kit(), {make_item(R0, 0, fr::kOak, 520, 19, 20)}));
+        if (!bags) return;
+        warehouse::Storage wh;
+        wh.put(tab.key, 0, make_item(Bag, 0, fr::kOak, 521, 25, 20));
+        warehouse::Request r;
+        r.type = repl::StorageEventType::Fill;
+        r.from.in_warehouse = true;
+        r.from.key = tab.key;
+        r.from.slot = 0;
+        r.count = 25;
+        r.guid = guid_n(521);
+        r.to.in_warehouse = false;
+        r.to.bag = R0;
+        r.to.slot = 0;
+        r.to_guid = guid_n(520);
+        r.to_count = 19;
+        r.targets.push_back(warehouse::Target{r.to, 1, guid_n(520)});
+        r.targets.push_back(warehouse::Target{r.to, 24, std::string()});
+        r.targets[1].to.slot = 1;
+        const warehouse::Storage before_wh = wh;
+        const Inv before_bags = *bags;
+        const warehouse::Result res = warehouse::transfer(*bags, wh, catalog, open, r);
+        CHECK(!res.ok && res.steps.empty(), "a free slot asked to take more than a full stack refuses the whole quick-send");
+        CHECK(wh.at(tab.key, 0) && wh.at(tab.key, 0)->quantity == 25 && wh.size() == before_wh.size() && *bags == before_bags && !bags->at(R0, 1),
+              "and nothing changes: the tab keeps its 25, the bag its 19 and no new stack");
     }
 }
 

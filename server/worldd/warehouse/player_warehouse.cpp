@@ -391,7 +391,6 @@ bool PlayerSession::warehouse_event(Connection& conn, const repl::ItemStorageEve
             t.to.slot = s.slot;
             t.count = s.count;
             t.to_guid = items::guid_hex(s.item_guid);
-            t.to_count = s.count;
             req.targets.push_back(std::move(t));
         }
     }

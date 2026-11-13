@@ -1133,6 +1133,9 @@ static void test_quest_hand_in() {
     std::vector<svc::InventoryItem> items = kit();
     items.push_back(make_item(Bag, 2, kBread, 300, 3));
     const qs::Guid128 stack{0xA0000000u + 300u, 0x1000u + 300u, 0x2000u + 300u, 300u};
+    // ... and two more in the quest bag: a hand-in does not take from there (nothing counts or takes a quest-bag stack yet)
+    items.push_back(make_item(ItemContainer::Quest, 0, kBread, 301, 2));
+    const qs::Guid128 quest_bag_stack{0xA0000000u + 301u, 0x1000u + 301u, 0x2000u + 301u, 301u};
     QuestHarness h(api, *data, log_after_start(), cyb_record(items));
     if (world::WorldActor* a = h.fx.world->registry().find(h.talker)) {   // Beyam stands where Sosha Terim does
         a->npc.instance_guid = kBeyamInstance;
@@ -1192,6 +1195,8 @@ static void test_quest_hand_in() {
     refused_call("more than the stack holds is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, stack, 4, 3}}}}));
     refused_call("an objective the panel does not list is refused", delivery_rpc(kHungryForMore, context, {{kPilferedObjective, {{kBread, stack, 1, 3}}}}));
     refused_call("a stack in a bag the hand-in does not look in is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, stack, 1, 4}}}}));
+    refused_call("a stack that lies in the quest bag is refused: the objective counts nothing for it and nothing is taken",
+                 delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, quest_bag_stack, 1, 18}}}}));
     refused_call("a delivery of no item is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {}}}));
     CHECK(h.s->quest_log().find(kHungryForMore)->objectives[0].count == 0, "the objective has counted nothing");
 
