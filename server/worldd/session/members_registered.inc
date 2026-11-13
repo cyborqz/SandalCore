@@ -21,3 +21,4 @@
 #include "session/members/ignore.inc"
 #include "session/members/emotes.inc"
 #include "session/members/party.inc"
+#include "session/members/friends.inc"

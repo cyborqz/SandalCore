@@ -168,10 +168,12 @@ void Endpoint::on_handshake(const Address& from, const uint8_t* data, size_t len
             carried = true;
             carried_id = old.id;
             carried_result = result;
-            // the carried record is as old as its read: the old session's ignore lists are the character's (social, step 6)
+            // the carried record is as old as its read: the old session's ignore lists and friends are the character's (social, steps 6 and 7)
             if (old.player) {
                 carried_result->character.ignored_character_names = old.player->ignored_character_names();
                 carried_result->character.ignored_guild_names = old.player->ignored_guild_names();
+                carried_result->character.friends = old.player->friends();
+                carried_result->character.friend_requests = old.player->friend_requests();
             }
         }
         remove(from, carried ? "reconnected, keeping its login" : "reconnected");
@@ -259,9 +261,11 @@ void Endpoint::on_login_result(Session& s, LoginResult result, Clock::time_point
                     const auto record_items = items::Inventory::from_items(result.character.items, unused);
                     s.carried_items_differ = !record_items || !(*record_items == old->inventory());
                     result.character.items = old->inventory().items();
-                    // the same goes for the ignore lists (social, step 6): the record's are as old as the login's read, the old session's are the character's.
+                    // the same goes for the ignore lists and the friends (social, steps 6 and 7): the record's are as old as the login's read, the old session's are the character's.
                     result.character.ignored_character_names = old->ignored_character_names();
                     result.character.ignored_guild_names = old->ignored_guild_names();
+                    result.character.friends = old->friends();
+                    result.character.friend_requests = old->friend_requests();
                     took_lists = true;
                 }
                 apply(*os->second, os->second->control.kick(login_text::kLoggedInElsewhere), now);
@@ -275,6 +279,12 @@ void Endpoint::on_login_result(Session& s, LoginResult result, Clock::time_point
                 if (sink->pending_ignored_names(result.character.id, players, guilds)) {
                     result.character.ignored_character_names = std::move(players);
                     result.character.ignored_guild_names = std::move(guilds);
+                }
+                std::vector<svc::Friend> friends;
+                std::vector<svc::FriendRequest> requests;
+                if (sink->pending_friends(result.character.id, friends, requests)) {
+                    result.character.friends = std::move(friends);
+                    result.character.friend_requests = std::move(requests);
                 }
             }
         }

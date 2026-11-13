@@ -51,6 +51,12 @@ type Progress struct {
 	// Social, step 6: with ReplaceIgnoredNames the players and the guilds the character ignores become exactly IgnoredNames, each list in its order (ignored_names.go); without it they are left alone.
 	ReplaceIgnoredNames bool
 	IgnoredNames        IgnoredNames
+	// Social, step 7: with ReplaceFriends the character's friends become exactly Friends, in this order, and with ReplaceFriendRequests its pending requests become exactly FriendRequests
+	// (friends.go); without one of them that list is left alone.
+	ReplaceFriends        bool
+	Friends               []Friend
+	ReplaceFriendRequests bool
+	FriendRequests        []FriendRequest
 }
 
 // C-Y-B x C O A
@@ -127,7 +133,29 @@ func (p Progress) Validate() error {
 	} else if len(p.IgnoredNames.Characters) > 0 || len(p.IgnoredNames.Guilds) > 0 {
 		return fmt.Errorf("%w: ignored names are given without replace_ignored_names", ErrInvalid)
 	}
+	if p.ReplaceFriends {
+		if err := validateFriends(p.Friends); err != nil {
+			return err
+		}
+	} else if len(p.Friends) > 0 {
+		return fmt.Errorf("%w: friends are given without replace_friends", ErrInvalid)
+	}
+	if p.ReplaceFriendRequests {
+		if err := validateFriendRequests(p.FriendRequests); err != nil {
+			return err
+		}
+	} else if len(p.FriendRequests) > 0 {
+		return fmt.Errorf("%w: friend requests are given without replace_friend_requests", ErrInvalid)
+	}
 	return nil
+}
+
+// validateFriends is the friends half of ValidateFriends: the cap, each friend's fields and a friend twice.
+func validateFriends(friends []Friend) error { return ValidateFriends(Friends{Friends: friends}) }
+
+// validateFriendRequests is the requests half of ValidateFriends: the cap, each request's fields and a sender twice.
+func validateFriendRequests(requests []FriendRequest) error {
+	return ValidateFriends(Friends{Requests: requests})
 }
 
 // Experience returns the character's XP rows by leveling type. A character with none has an empty list; an unknown
@@ -173,6 +201,12 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if err := p.Validate(); err != nil {
 		return Character{}, err
+	}
+	if p.ReplaceFriends || p.ReplaceFriendRequests {
+		// what depends on the character itself: it cannot be its own friend, and a request is for it and not from it (friends.go)
+		if err := validateFriendsFor(characterID, p.Friends, p.FriendRequests); err != nil {
+			return Character{}, err
+		}
 	}
 	className, archetype := "", int32(0)
 	if p.ClassID != 0 {
@@ -234,6 +268,16 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if p.ReplaceIgnoredNames {
 		if err := replaceIgnoredNames(ctx, tx, characterID, p.IgnoredNames); err != nil {
+			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplaceFriends {
+		if err := replaceFriends(ctx, tx, characterID, p.Friends); err != nil {
+			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplaceFriendRequests {
+		if err := replaceFriendRequests(ctx, tx, characterID, p.FriendRequests); err != nil {
 			return Character{}, itemsError(err)
 		}
 	}

@@ -231,6 +231,30 @@ struct QuestLogResult {
     SavedQuestLog log;
 };
 
+/// Social, step 7: one friend of a character (migration 0024): the friend's character GUID, its name, level, class and subclass, its guild's name and whether it still counts the
+/// character as a friend (false: the friend removed the character; the entry stays until the character removes it too).  The online flag and the last online time are not stored:
+/// worldd sends the flag from the sessions in its world and 0 for the last online time.
+struct Friend {
+    std::string guid;   // 32 lowercase hex digits
+    std::string name;
+    int32_t     level = 0;
+    int32_t     class_id = 0;
+    int32_t     sub_archetype = 0;
+    std::string guild_name;
+    bool        still_friend = false;
+    bool operator==(const Friend&) const = default;
+};
+
+/// Social, step 7: one pending friend request of a character (migration 0024): its sender, the recipient and when it expires (Unix milliseconds, the store's unit; the client's wire
+/// field is Unix seconds).
+struct FriendRequest {
+    std::string sender_guid;
+    std::string sender_name;
+    std::string recipient_guid;
+    int64_t     expires_at_ms = 0;
+    bool operator==(const FriendRequest&) const = default;
+};
+
 struct Character {
     std::string id;
     int64_t account_id = 0;
@@ -274,6 +298,10 @@ struct Character {
     int64_t              home_last_used_ms = 0;
     /// Social, step 6: the players and the guilds the character ignores (the names as typed, each list in the order they were added; with the items).  A service of an older version sends none.
     std::vector<std::string> ignored_character_names, ignored_guild_names;
+    /// Social, step 7: the character's friends and the friend requests waiting for it (each list in the order it was added, oldest first; with the items).  A request at or past its
+    /// expiry is not sent.  A service of an older version sends none.
+    std::vector<Friend>        friends;
+    std::vector<FriendRequest> friend_requests;
     /// Quests, slice 1: the character's saved quest log, read from the quest service at the login.  Empty (nullopt) when the world server has no quest service or it did not answer: the
     /// character then plays without quests, and nothing is saved over what the service holds.
     std::optional<SavedQuestLog> quest_log;
@@ -313,6 +341,14 @@ struct Progress {
     bool                         replace_ignored_names = false;
     std::vector<std::string>     ignored_character_names;
     std::vector<std::string>     ignored_guild_names;
+    /// Social, step 7: with replace_friends the character's friends become exactly `friends`, in this order, and with replace_friend_requests its pending requests become exactly
+    /// `friend_requests`; without one of them that list is left alone (the character service refuses a list over 100, a GUID that is not 32 lowercase hex digits or is all zero, a name
+    /// that is empty, over 64 bytes, with a space at either end or with a control character, a level outside 1-25, a class or subclass outside 0-8, a request to the character itself or
+    /// for another character, an expiry of 0 or less, or a GUID or a sender twice in a list).
+    bool                         replace_friends = false;
+    std::vector<Friend>          friends;
+    bool                         replace_friend_requests = false;
+    std::vector<FriendRequest>   friend_requests;
     bool operator==(const Progress& o) const {
         if (level != o.level || class_id != o.class_id || experience.size() != o.experience.size()) return false;
         for (size_t i = 0; i < experience.size(); ++i) {
@@ -321,7 +357,8 @@ struct Progress {
         return replace_skill_ranks == o.replace_skill_ranks && skill_ranks == o.skill_ranks && replace_action_bar == o.replace_action_bar &&
                action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues &&
                replace_attunements == o.replace_attunements && attunements == o.attunements && home_attunement == o.home_attunement && home_last_used_ms == o.home_last_used_ms &&
-               replace_ignored_names == o.replace_ignored_names && ignored_character_names == o.ignored_character_names && ignored_guild_names == o.ignored_guild_names;
+               replace_ignored_names == o.replace_ignored_names && ignored_character_names == o.ignored_character_names && ignored_guild_names == o.ignored_guild_names &&
+               replace_friends == o.replace_friends && friends == o.friends && replace_friend_requests == o.replace_friend_requests && friend_requests == o.friend_requests;
     }
 };
 // [C:Y:B :: C O A]
@@ -348,6 +385,12 @@ class CharacterApi {
 public:
     virtual ~CharacterApi() = default;
     virtual CharacterResult get_character(const std::string& id) = 0;
+    /// Social, step 7: the character with this name, without regard to the case of the letters, for the friend request by name and the name
+    /// check.  NotFound when no character has it.  A fake that cannot ask answers Failed.
+    virtual CharacterResult get_character_by_name(const std::string& name) {
+        (void)name;
+        return {};
+    }
     /// SaveCharacterState with a position: the character's last good position after play (plan A6). The service
     /// leaves last_region and level unchanged (they are not sent). Refused: a position the store rejects (not
     /// finite); NotFound: no such character.

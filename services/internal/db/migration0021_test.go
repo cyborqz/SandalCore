@@ -34,17 +34,19 @@ func before21(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// schemaWithoutIgnoredNames lists every column, constraint, index and table but those of character_ignored_names: what 0021 must not change.
+// schemaWithoutIgnoredNames lists every column, constraint, index and table but those of character_ignored_names and the later migration 0024 (the friend tables): what 0021 must not
+// change.
 func schemaWithoutIgnoredNames(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
+	const skip = `('character_ignored_names', 'character_friends', 'character_friend_requests')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
-			WHERE table_schema = current_schema() AND table_name <> 'character_ignored_names' ORDER BY 1`,
+			WHERE table_schema = current_schema() AND table_name NOT IN ` + skip + ` ORDER BY 1`,
 		`SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
-			WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text <> 'character_ignored_names' ORDER BY 1`,
-		`SELECT 'index ' || tablename || ' ' || indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename <> 'character_ignored_names' ORDER BY 1`,
-		`SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name <> 'character_ignored_names' ORDER BY 1`,
+			WHERE connamespace = current_schema()::regnamespace AND conrelid::regclass::text NOT IN ` + skip + ` ORDER BY 1`,
+		`SELECT 'index ' || tablename || ' ' || indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename NOT IN ` + skip + ` ORDER BY 1`,
+		`SELECT 'table ' || table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT IN ` + skip + ` ORDER BY 1`,
 	} {
 		r, err := pool.Query(context.Background(), q)
 		if err != nil {

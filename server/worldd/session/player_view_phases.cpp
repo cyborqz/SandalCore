@@ -39,6 +39,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_quick_make(conn, now);
     run_cargo(conn, now);
     run_chat(conn, now);
+    run_friends(conn, now);
     run_party(conn, now);
     run_nodes(conn);
     sync_item_abilities(conn);

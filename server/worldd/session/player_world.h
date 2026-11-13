@@ -97,7 +97,8 @@
 
 namespace aoc { namespace worldd {
 
-class GmPort;   // session/gm_travel.h
+class GmPort;         // session/gm_travel.h
+class FriendLookups;  // session/friend_lookups.inc: the worker that looks a character up off the network thread
 
 /// How the sessions check moves and save positions (plan A6).
 struct MovementConfig {
@@ -111,6 +112,7 @@ public:
     /// this object and mint under `server_id`, the id mesh gave worldd.
     PlayerWorld(const content::ContentDb* content, std::string content_problem, bootstrap::GameStateMode mode,
                 uint32_t server_id, protocol::ServerGuidAllocator& guids);
+    ~PlayerWorld();
 
     bool ready() const { return content_ != nullptr; }
     const content::ContentDb* content() const { return content_; }
@@ -180,6 +182,12 @@ public:
     /// Where the sessions hand positions to be saved; null (the default) saves nothing. Must outlive the sessions.
     void          set_position_sink(PositionSink* sink) { sink_ = sink; }
     PositionSink* position_sink() const { return sink_; }
+
+    /// Social, step 7: submits a friend call's character lookup (by name or by id) to the world's lookup worker, which asks the sink off the network thread;
+    /// the ticket it returns is how the result comes back.  The session takes it on a later tick with take_friend_lookup.
+    uint64_t submit_friend_lookup(const std::string& key, bool by_name) const;
+    /// Takes the result of a submitted lookup when the worker has it yet; false when it has not.
+    bool take_friend_lookup(uint64_t ticket, svc::CharacterResult& out) const;
 
     /// The per-connection values of one joining player: ServerId, `world_time` (seconds), the next PlayerId and a
     /// fresh set of GUIDs.
@@ -573,6 +581,7 @@ private:
     int32_t                              next_player_id_ = 1;
     MovementConfig                       movement_;
     PositionSink*                        sink_ = nullptr;
+    mutable std::unique_ptr<FriendLookups> friend_lookups_;   // created at the first friend lookup; destroyed with the world (before the sink it holds)
     world::ActorRegistry                 registry_;
     spawns::AreaConfig                   area_;
     std::optional<spawns::CapturedData>  captured_;

@@ -151,7 +151,10 @@ bool PlayerSession::allocate_channels(const Connection& conn) {
 }
 
 PlayerSession::~PlayerSession() {
+    finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
+    leave_friends("the session is destroyed");
     forget_party();
+    forget_friends();   // social, step 7: the reverse index loses this session
     clear_pet();
     cancel_quick_make(nullptr, "the session is destroyed");
     cancel_gather(nullptr, "the session is destroyed");
@@ -239,6 +242,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         spdlog::warn("[session] {}: the {} recipes the character was taught do not fit the player's state: the client is not told of them", p->pb_.setup().name, p->taught_.size());
     }
     p->init_ignored(character);   // social, step 6: the players and the guilds the character ignores, sent with the join
+    p->init_friends(character);   // social, step 7: the friends and the pending requests, sent with the join in the SocialComponent
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
         p->inventory_dirty_ = true;
@@ -579,6 +583,7 @@ void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
     leave_party_on_finish();
+    leave_friends(why);   // social, step 7: the sessions that list this character are told it is offline
     clear_pet();
     cancel_quick_make(nullptr, why);   // Crafting, step 3: nothing was taken, so nothing is given back
     end_gathering(why);   // Gathering stage 2: a node this player channels is available again, and the pile a full bag made is made now if it still waits
@@ -683,6 +688,10 @@ void PlayerSession::hand_over_progress(const char* why) {
     p.replace_ignored_names = true;   // social, step 6: the ignored players and guilds go whole with every hand-over (what the session holds is what the character has)
     p.ignored_character_names = ignored_characters_;
     p.ignored_guild_names = ignored_guilds_;
+    p.replace_friends = true;   // social, step 7: the friends and the pending requests go whole with every hand-over (what the session holds is what the character has)
+    p.friends = friends_;
+    p.replace_friend_requests = true;
+    p.friend_requests = friend_requests_;
     sink_->save_progress(character_id_, std::move(p));
     ++progress_handed_over_;
     spdlog::info("[session] {}: saving the progress (level {}, class {}, Adventuring {} XP, debt {}) ({})", name(), progress_.level, class_id_, progress_.xp,
@@ -1007,5 +1016,8 @@ void PlayerSession::register_core_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerAcknowledgePossession", [](PlayerSession& s, const RpcContext& c) { s.on_possession_ack(c.rpc); });
     t.add(RpcScope::Pawn, "ServerClientIsReadyToPhaseIn", [](PlayerSession& s, const RpcContext& c) { s.on_phase_in_ready(c.conn, c.now); });
 }
+
+// Social, step 7: the friends list's load and save.  It is part of this file so that the feature adds no source-list line of its own.
+#include "session/player_friends.inc"
 
 }}  // namespace aoc::worldd

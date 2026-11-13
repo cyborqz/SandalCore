@@ -23,6 +23,8 @@ service CharacterService {
   rpc ListCharacters(ListCharactersRequest) returns (ListCharactersResponse);
   // NotFound when there is no such character.
   rpc GetCharacter(GetCharacterRequest) returns (GetCharacterResponse);
+  // Social, step 7: the character with this name, without regard to the case of the letters, for the friend request by name and the name check. NotFound when no character has it.
+  rpc GetCharacterByName(GetCharacterByNameRequest) returns (GetCharacterByNameResponse);
   // Position, region and level after play; NotFound for an unknown id,
   // InvalidArgument for input the store rejects (a negative level, a
   // non-finite position, or text PostgreSQL refuses such as NUL).
@@ -114,6 +116,32 @@ message Character {
   // of a name on its lists by itself. A character that ignores nobody has none.
   repeated string ignored_character_names = 31;
   repeated string ignored_guild_names = 32;
+  // Social, step 7: the character's friends and the friend requests waiting for it (migration 0024), each list in the order it was added, oldest first, with the items (include_items).
+  // A character with none has none; a request at or past its expiry is not sent.
+  repeated Friend friends = 33;
+  repeated FriendRequest friend_requests = 34;
+}
+
+// One friend of a character (social, step 7, migration 0024): the friend's character GUID, its name, level, class and subclass, its guild's name and whether it still counts this character
+// as a friend (false: the friend removed this character; the entry stays until this character removes it too). The online flag and the last online time are not stored: worldd sends the
+// online flag from the sessions in its world, and 0 for the last online time.
+message Friend {
+  string guid = 1; // 32 lowercase hex digits (the friend's character GUID), not all zero
+  string name = 2;
+  int32 level = 3; // 1-25
+  int32 class_id = 4; // ECharacterClass 0-8 (0: a record whose class could not be derived)
+  int32 sub_archetype = 5; // ECharacterClass 0-8 (0 in the game's lists today)
+  string guild_name = 6; // empty today: the world has no guild system
+  bool still_friend = 7;
+}
+
+// One friend request a character has received and not answered (social, step 7, migration 0024): its sender, the recipient and when it expires. The store keeps Unix milliseconds; the
+// client's wire field is Unix seconds, so the game server divides by 1,000 when the call is built (14 days = 1,209,600 s).
+message FriendRequest {
+  string sender_guid = 1; // 32 lowercase hex digits, not all zero, and not the recipient
+  string sender_name = 2;
+  string recipient_guid = 3; // 32 lowercase hex digits, the character the request is for
+  int64 expires_at_ms = 4; // Unix milliseconds; a request at or past this time is not sent
 }
 
 // One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
@@ -287,6 +315,14 @@ message GetCharacterResponse {
   Character character = 1;
 }
 
+message GetCharacterByNameRequest {
+  string name = 1;
+}
+
+message GetCharacterByNameResponse {
+  Character character = 1;
+}
+
 // An unset position, an empty last_region and a zero level each leave that
 // value unchanged; there is no way to clear one.
 message SaveCharacterStateRequest {
@@ -364,6 +400,14 @@ message SaveProgressRequest {
   bool replace_ignored_names = 16;
   repeated string ignored_character_names = 17;
   repeated string ignored_guild_names = 18;
+  // Social, step 7: with replace_friends the character's friends become exactly `friends`, in this order, and with replace_friend_requests its pending requests become exactly
+  // `friend_requests`; without one of them that list is left alone. InvalidArgument, with nothing changed, for more than 100 in a list, a GUID that is not 32 lowercase hex digits or is
+  // all zero, a name that is empty, over 64 bytes, with a space at either end or with a control character, a level outside 1-25, a class or subclass outside 0-8, a request whose sender
+  // is the character itself or whose recipient is another character, an expiry of 0 or less, or a GUID or a sender twice in a list.
+  bool replace_friends = 19;
+  repeated Friend friends = 20;
+  bool replace_friend_requests = 21;
+  repeated FriendRequest friend_requests = 22;
 }
 
 message SaveProgressResponse {

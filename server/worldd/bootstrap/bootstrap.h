@@ -189,6 +189,30 @@ struct GroupClientData {
     std::vector<GroupMember> members;
 };
 
+/// One friend as the client's SocialComponent (UIntrepidSocialComponent) carries it: the friend's character GUID as four words, the name, level,
+/// class and subclass, the guild's name, the online flag (the session's: a session of this world has the character now), the last online time
+/// (Unix seconds; not stored yet, so 0) and whether the friend still counts the character as a friend (the one-way removal's flag).
+struct FriendWire {
+    std::array<uint32_t, 4> guid{};
+    std::string             name;
+    int32_t                 level = 0;
+    int32_t                 class_id = 0;
+    int32_t                 sub_archetype = 0;
+    std::string             guild_name;
+    bool                    online = false;
+    int64_t                 last_online = 0;
+    bool                    still_friend = true;
+};
+
+/// One pending friend request as the client's SocialComponent carries it: the sender's GUID and name, the recipient's GUID and the expiry
+/// (Unix seconds on the wire; the store keeps milliseconds and the session converts).
+struct FriendRequestWire {
+    std::array<uint32_t, 4> sender_guid{};
+    std::string             sender_name;
+    std::array<uint32_t, 4> recipient_guid{};
+    int64_t                 expires = 0;
+};
+
 /// The most ClientReceiveStorageEvent calls one chain carries (a Backpack's 70 Adds go out in five).
 inline constexpr size_t kMaxEventsPerChain = 16;
 
@@ -200,6 +224,11 @@ inline constexpr size_t kMaxCompletedFtues = 1024;
 
 /// The most names OwnerInfo.IgnoredCharacterNames holds, and the most IgnoredGuildNames holds: the longest list of ignored players (or guilds) a character may keep.
 inline constexpr size_t kMaxIgnoredNames = 50;
+
+/// Social, step 7: the most friends a character may have (the game data's MaximumFriendsListCount) and the most pending friend requests it may hold (the owner's pick).  The
+/// character service refuses a list over either; the session cuts a record that is over one, so that what it saves back is what the rules allow.
+inline constexpr size_t kMaxFriends = 100;
+inline constexpr size_t kMaxFriendRequests = 100;
 /// Missing systems, step 1: how many triggers that carried the PvP flag are remembered for their ability items.
 inline constexpr size_t kMaxTriggerFlags = 64;
 
@@ -258,6 +287,16 @@ public:
     repl::FastArrays* quest_arrays();
     /// What changed on the quest component since the last update, as one PlayerController chain, reliable; nullopt when nothing did (or before the join's last chain).
     std::optional<Send> quest_update();
+
+    /// Social, step 7: the character's friends and pending requests as the PlayerController's SocialComponent carries them, each list in its
+    /// order (oldest first).  Before the component is on the actor the lists are kept for the join; after a change they are brought to the
+    /// FastArrays and friends_update() sends exactly the items that differ.  False when the component's schema is missing or a value does not fit.
+    bool set_friends(const std::vector<FriendWire>& friends, const std::vector<FriendRequestWire>& requests);
+    /// What set_friends changed on the SocialComponent since the last update, as one PlayerController chain, reliable; nullopt when nothing did
+    /// (or before the join's last chain).
+    std::optional<Send> friends_update();
+    /// The answer to ServerCheckIfCharacterNameExistsRequest: ClientCheckIfCharacterNameExistsResponse(name, exists) on the PlayerController.
+    std::optional<Send> name_check_answer(const std::string& name, bool exists);
 
     // ---- replies ----------------------------------------------------------------------------------------------------
 
@@ -779,6 +818,12 @@ private:
     /// Missing systems, step 0: puts the tutorial component on the PlayerController with the setup's list (once); false when it does not build.
     bool add_ftue_component();
     bool add_quest_component();
+    /// Social, step 7: puts the social component on the PlayerController after the quest and tutorial components (once) and brings its two arrays
+    /// to the lists set_friends holds.
+    bool add_social_component();
+    /// Social, step 7: brings a FastArrays' FriendsList and PendingFriendRequests to the lists set_friends holds (adds, changes and removes exactly
+    /// what differs, so a delta carries the changed items only).
+    bool sync_social(repl::FastArrays& arrays);
     std::optional<Send> update(Role role, const char* what, repl::Actor& actor, repl::ActorShadow& shadow);
     std::optional<Send> rpcs(Role role, const char* what, std::span<const repl::RpcRequest> calls);
     std::optional<Send> verbatim_block(Role role, const char* what, const char* hex, size_t bits);
@@ -824,6 +869,10 @@ private:
     bool                ftue_added_ = false;   // missing systems, step 0: the tutorial component is on the PlayerController
     bool                quest_added_ = false;  // quests, slice 1: the quest component is on the PlayerController
     repl::FastArrays    quest_arrays_;         // ... and, until it is, its two arrays
+    bool                          social_added_ = false;   // social, step 7: the social component is on the PlayerController
+    repl::FastArrays              social_arrays_;          // ... and, until it is, its two arrays
+    std::vector<FriendWire>        friend_wire_;           // the lists set_friends was given, for the join and the diff
+    std::vector<FriendRequestWire> friend_request_wire_;
     /// Nodes 1, stage 2: the GameState's node maps as they were before the last node_maps_update that built an update (it changes them before the chain exists); restore()
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;

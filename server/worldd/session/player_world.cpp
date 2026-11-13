@@ -6,6 +6,7 @@
 // ============================================================================
 #include "session/player_world.h"
 #include "net/tick_profile.h"
+#include "session/friend_lookups.inc"
 
 #include "combat/npc_replicator.h"
 #include "world/interaction_state.h"

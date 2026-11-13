@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 10 November 2026
+**Last updated:** 13 November 2026
 
 ---
 
@@ -67,6 +67,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Ignore list (chat): a name a player ignores goes on the list the game client shows (up to 50 names, also a name that is offline or that no character has), the game client hides the chat lines and the tells that come from a name on its list, and the list is kept for the character from one login to the next. A character cannot ignore its own name. Ignoring a guild is still to come.
 - Emotes (social, fifth step): the game's 54 emote commands are understood in any letter case. 39 of them play their animation (/sit, /wave, /bow, /dance, /cheer, /clap and the rest) with the game's cooldowns, and the players within 150 m see them. A second /sit stands the character up, and /dance plays one of four dances. A /sit in combat, on a mount or when dead does nothing.
 - Parties (social): a player invites another by name, and the invited player accepts or declines. A party holds two to eight players, any member can invite, and the group frame lists every member and marks the leader. A leave, a kick, a leader change and a disband update every member's frame. An invitation ends after five minutes or when the invited player logs out. A logout counts as a leave, and when the leader goes the member who has been in the party longest becomes the leader. A party lasts until its members leave or the server restarts.
+- Friends list (social): a player adds another by name from the friends window, and the other player accepts or declines. A request waits up to 14 days and reaches a player who is offline at their next login. The list holds up to 100 friends and 100 waiting requests, shows each friend's level and class and whether they are online, and is kept across logins. Two players who ask each other at the same time become friends at once, and removing a friend is one-sided: the other player keeps the entry, marked as no longer a friend.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -91,7 +92,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
 - Economy: player trading, marketplaces, node currency and crates.
-- Social: guilds, parties and raids, chat and mail.
+- Social: guilds, raids and mail.
 - Node sieges and territory wars.
 - Caravans and trade routes.
 - Conversations: NPC voice and animation while they talk.

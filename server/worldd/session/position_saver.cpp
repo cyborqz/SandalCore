@@ -14,6 +14,20 @@
 
 namespace aoc { namespace worldd {
 
+namespace {
+
+/// True when `progress` carries only the two friend lists and would leave every other part of the character alone (what save_friend_lists builds).
+bool friend_lists_only(const svc::Progress& progress) {
+    svc::Progress rest = progress;
+    rest.replace_friends = false;
+    rest.friends.clear();
+    rest.replace_friend_requests = false;
+    rest.friend_requests.clear();
+    return rest == svc::Progress{};
+}
+
+}  // namespace
+
 CharacterSaver::CharacterSaver(svc::CharacterApi& api, Config config) : api_(api), config_(config), thread_([this] { run(); }) {}
 
 CharacterSaver::~CharacterSaver() {
@@ -122,9 +136,24 @@ void CharacterSaver::save_progress(const std::string& character_id, svc::Progres
         if (stop_) return;
         const auto it = entries_.find(character_id);
         if (it != entries_.end()) {
-            if (it->second.progress) ++replaced_;
-            it->second.progress = std::move(progress);
-            it->second.progress_attempts = 0;
+            // A friend-lists save that lands while a full progress waits is merged into it: the two lists are the newer state, the level, the experience and
+            // the rest are the queued progress's, so neither save is lost (finding 3).
+            if (it->second.progress && friend_lists_only(progress) && !friend_lists_only(*it->second.progress)) {
+                if (progress.replace_friends) {
+                    it->second.progress->replace_friends = true;
+                    it->second.progress->friends = std::move(progress.friends);
+                }
+                if (progress.replace_friend_requests) {
+                    it->second.progress->replace_friend_requests = true;
+                    it->second.progress->friend_requests = std::move(progress.friend_requests);
+                }
+                it->second.progress_attempts = 0;
+                ++replaced_;
+            } else {
+                if (it->second.progress) ++replaced_;
+                it->second.progress = std::move(progress);
+                it->second.progress_attempts = 0;
+            }
         } else {
             if (entries_.size() >= config_.max_queued) {
                 const std::string oldest = std::move(order_.front());
@@ -151,6 +180,40 @@ bool CharacterSaver::pending_ignored_names(const std::string& character_id, std:
     return true;
 }
 
+bool CharacterSaver::pending_friends(const std::string& character_id, std::vector<svc::Friend>& friends, std::vector<svc::FriendRequest>& requests) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = entries_.find(character_id);
+    if (it == entries_.end() || !it->second.progress || !it->second.progress->replace_friends || !it->second.progress->replace_friend_requests) return false;
+    friends = it->second.progress->friends;
+    requests = it->second.progress->friend_requests;
+    return true;
+}
+
+svc::CharacterResult CharacterSaver::character_by_name(const std::string& name) { return api_.get_character_by_name(name); }
+
+svc::CharacterResult CharacterSaver::character_by_id(const std::string& id) {
+    {
+        // One path per character: the read waits until the progress this saver still holds for the character (queued, or in the worker now) is written, so a
+        // change made from what it reads keeps what the change before it wrote (review finding 1).
+        std::unique_lock<std::mutex> lock(mu_);
+        idle_cv_.wait(lock, [this, &id] {
+            if (in_flight_ && in_flight_progress_ && in_flight_character_ == id) return false;
+            const auto it = entries_.find(id);
+            return it == entries_.end() || !it->second.progress;
+        });
+    }
+    return api_.get_character(id);
+}
+
+void CharacterSaver::save_friend_lists(const std::string& character_id, std::vector<svc::Friend> friends, std::vector<svc::FriendRequest> requests) {
+    svc::Progress p;
+    p.replace_friends = true;
+    p.friends = std::move(friends);
+    p.replace_friend_requests = true;
+    p.friend_requests = std::move(requests);
+    save_progress(character_id, std::move(p));
+}
+
 bool CharacterSaver::flush(std::chrono::milliseconds max_wait) {
     std::unique_lock<std::mutex> lock(mu_);
     return idle_cv_.wait_for(lock, max_wait, [this] { return (order_.empty() && !in_flight_) || abandon_; }) && order_.empty() && !in_flight_;
@@ -175,6 +238,8 @@ void CharacterSaver::run() {
         Entry entry = std::move(it->second);
         entries_.erase(it);
         in_flight_ = true;
+        in_flight_character_ = id;
+        in_flight_progress_ = entry.progress.has_value();
         lock.unlock();
         svc::CallStatus position_status = svc::CallStatus::Ok, inventory_status = svc::CallStatus::Ok, progress_status = svc::CallStatus::Ok;
         if (entry.position) {
@@ -320,6 +385,8 @@ void CharacterSaver::run() {
             }
         }
         in_flight_ = false;
+        in_flight_character_.clear();
+        in_flight_progress_ = false;
         idle_cv_.notify_all();
     }
 }

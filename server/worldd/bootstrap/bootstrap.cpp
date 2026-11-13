@@ -881,6 +881,7 @@ std::optional<Send> PlayerBootstrap::xp_tracker_open() {
     }
     if (!quest_added_ && !add_quest_component()) return std::nullopt;   // (the quest component and the tutorial component come after the tracker in the chain, as in the retail login's big chain)
     if (!ftue_added_ && !add_ftue_component()) return std::nullopt;
+    if (!social_added_ && !add_social_component()) return std::nullopt;   // (social, step 7: after the tutorial component)
     return update(Role::PlayerController, "XPTracker", pc_, pc_shadow_);
 }
 
@@ -2969,5 +2970,6 @@ std::optional<Send> PlayerBootstrap::correction(float time_stamp, const repl::Ve
 
 #include "respawn/bootstrap_embersprings.inc"
 #include "quest/bootstrap_objects.inc"
+#include "bootstrap/bootstrap_social.inc"
 
 }  // namespace aoc::worldd::bootstrap

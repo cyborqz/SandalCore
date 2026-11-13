@@ -85,6 +85,27 @@ RedeemResult GrpcServices::redeem_ticket(const std::string& ticket, const std::s
 }
 // (C.O.A) (Cyb)
 
+CharacterResult GrpcServices::get_character_by_name(const std::string& name) {
+    grpc::ClientContext ctx;
+    prepare(ctx);
+    characterv1::GetCharacterByNameRequest req;
+    req.set_name(name);
+    characterv1::GetCharacterByNameResponse resp;
+    CharacterResult r;
+    r.status = map_grpc_status(stubs_->character->GetCharacterByName(&ctx, req, &resp));
+    if (r.status != CallStatus::Ok) return r;
+    const auto& c = resp.character();
+    r.character.id = c.id();
+    r.character.account_id = c.account_id();
+    r.character.name = c.name();
+    r.character.race_id = c.race_id();
+    r.character.gender_id = c.gender_id();
+    r.character.class_id = c.class_id();
+    r.character.archetype_id = c.archetype_id();
+    r.character.class_name = c.class_name();
+    r.character.level = c.level();
+    return r;
+}
 CharacterResult GrpcServices::get_character(const std::string& id) {
     grpc::ClientContext ctx;
     prepare(ctx);
@@ -185,6 +206,25 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     r.character.home_last_used_ms = c.home_last_used_ms();
     for (const std::string& n : c.ignored_character_names()) r.character.ignored_character_names.push_back(n);
     for (const std::string& n : c.ignored_guild_names()) r.character.ignored_guild_names.push_back(n);
+    for (const auto& f : c.friends()) {
+        Friend x;
+        x.guid = f.guid();
+        x.name = f.name();
+        x.level = f.level();
+        x.class_id = f.class_id();
+        x.sub_archetype = f.sub_archetype();
+        x.guild_name = f.guild_name();
+        x.still_friend = f.still_friend();
+        r.character.friends.push_back(std::move(x));
+    }
+    for (const auto& q : c.friend_requests()) {
+        FriendRequest x;
+        x.sender_guid = q.sender_guid();
+        x.sender_name = q.sender_name();
+        x.recipient_guid = q.recipient_guid();
+        x.expires_at_ms = q.expires_at_ms();
+        r.character.friend_requests.push_back(std::move(x));
+    }
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -288,6 +328,25 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
     req.set_replace_ignored_names(progress.replace_ignored_names);
     for (const std::string& n : progress.ignored_character_names) req.add_ignored_character_names(n);
     for (const std::string& n : progress.ignored_guild_names) req.add_ignored_guild_names(n);
+    req.set_replace_friends(progress.replace_friends);
+    for (const Friend& f : progress.friends) {
+        auto* p = req.add_friends();
+        p->set_guid(f.guid);
+        p->set_name(f.name);
+        p->set_level(f.level);
+        p->set_class_id(f.class_id);
+        p->set_sub_archetype(f.sub_archetype);
+        p->set_guild_name(f.guild_name);
+        p->set_still_friend(f.still_friend);
+    }
+    req.set_replace_friend_requests(progress.replace_friend_requests);
+    for (const FriendRequest& q : progress.friend_requests) {
+        auto* p = req.add_friend_requests();
+        p->set_sender_guid(q.sender_guid);
+        p->set_sender_name(q.sender_name);
+        p->set_recipient_guid(q.recipient_guid);
+        p->set_expires_at_ms(q.expires_at_ms);
+    }
     characterv1::SaveProgressResponse resp;
     return map_grpc_status(stubs_->character->SaveProgress(&ctx, req, &resp));
 }

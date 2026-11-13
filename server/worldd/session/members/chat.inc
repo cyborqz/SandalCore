@@ -30,6 +30,9 @@ public:
         static std::vector<ChatEntry*> in_world(const PlayerWorld* world);
         /// The entry of the player named `name` (case does not count) in `world`, or nullptr.
         static ChatEntry* find(const PlayerWorld* world, const std::string& name);
+        /// The entry of the session with this character GUID in `world` that has joined (in the world or still connecting), or nullptr: a friend call's
+        /// other side is that session before it phases in too, so a request for it is not saved beside a session that will save over it.
+        static ChatEntry* joined(const PlayerWorld* world, const std::array<uint32_t, 4>& guid);
     private:
         static std::vector<ChatEntry*>& registry();
     };

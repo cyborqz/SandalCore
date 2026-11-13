@@ -111,6 +111,15 @@ std::vector<PlayerSession::ChatEntry*> PlayerSession::ChatEntry::in_world(const 
     return out;
 }
 
+PlayerSession::ChatEntry* PlayerSession::ChatEntry::joined(const PlayerWorld* world, const std::array<uint32_t, 4>& guid) {
+    for (ChatEntry* e : registry()) {
+        // (the connection is not asked for: a session that has not ticked yet still holds the character's lists; only its update waits)
+        if (e->world != world || !e->self || e->self->finished_ || e->self->failed_) continue;
+        if (e->self->pb_.setup().character_guid == guid) return e;
+    }
+    return nullptr;
+}
+
 PlayerSession::ChatEntry* PlayerSession::ChatEntry::find(const PlayerWorld* world, const std::string& name) {
     if (name.empty()) return nullptr;
     for (ChatEntry* e : registry()) {

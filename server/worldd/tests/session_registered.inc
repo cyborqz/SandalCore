@@ -15,3 +15,4 @@
 #include "session_chat_tests.inc"
 #include "session_ignore_tests.inc"
 #include "session_party_tests.inc"
+#include "session_friends_tests.inc"

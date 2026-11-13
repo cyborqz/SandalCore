@@ -192,6 +192,9 @@ struct SessionGuids {
     /// Quests, slice 1: the PlayerController's quest component ("QuestConsumerComponent", UQuestConsumerComponent), minted after the tracker so that no earlier id moves.  It is a default
     /// subobject the client knows by name: its content block is what gives it this id.
     emit::FIntrepidNetworkGUID quest;
+    /// Social, step 7: the PlayerController's social component ("SocialComponent", UIntrepidSocialComponent), minted after the quest component so that no earlier
+    /// id moves.  It is a default subobject the client knows by name: its content block is what gives it this id.
+    emit::FIntrepidNetworkGUID social;
 };
 
 // ---- the progress (plan D1) --------------------------------------------------------------------------------------------------

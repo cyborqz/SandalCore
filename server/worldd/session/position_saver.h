@@ -89,6 +89,32 @@ public:
         (void)guilds;
         return false;
     }
+    /// Social, step 7: the friends and the pending requests of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that
+    /// hand-over carries both lists.  A sink that keeps nothing (a test's) answers false.
+    virtual bool pending_friends(const std::string& character_id, std::vector<svc::Friend>& friends, std::vector<svc::FriendRequest>& requests) {
+        (void)character_id;
+        (void)friends;
+        (void)requests;
+        return false;
+    }
+    /// Social, step 7: the character with this name (the case of the letters does not count), for the friend request by name and the name check.  The lookup is the
+    /// character service's; a sink that cannot ask (a test's) answers Failed.  Called from the network thread when a friend call asks.
+    virtual svc::CharacterResult character_by_name(const std::string& name) {
+        (void)name;
+        return {};
+    }
+    /// Social, step 7: the whole character by its id, both friend lists included, for the other side of an accept or a removal while it has no session here.
+    virtual svc::CharacterResult character_by_id(const std::string& id) {
+        (void)id;
+        return {};
+    }
+    /// Social, step 7: queues a character's two friend lists to be saved whole (the other side of a request, an accept or a removal while it has no session here).
+    /// Never blocks on the network; latest wins, as save_progress does.
+    virtual void save_friend_lists(const std::string& character_id, std::vector<svc::Friend> friends, std::vector<svc::FriendRequest> requests) {
+        (void)character_id;
+        (void)friends;
+        (void)requests;
+    }
 };
 
 class CharacterSaver : public PositionSink {
@@ -116,6 +142,14 @@ public:
     void save_progress(const std::string& character_id, svc::Progress progress) override;
     /// Social, step 6: the ignored players and guilds of the progress the saver still holds for the character (see PositionSink).
     bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) override;
+    /// Social, step 7: the friends and the pending requests of the progress the saver still holds for the character (see PositionSink).
+    bool pending_friends(const std::string& character_id, std::vector<svc::Friend>& friends, std::vector<svc::FriendRequest>& requests) override;
+    /// Social, step 7: the character service's by-name and by-id lookups (see PositionSink); the call is made where the caller stands.  The by-id read first waits until every progress this
+    /// saver still holds for the character is written (one path per character: a change made from what it reads keeps what the change before it wrote).
+    svc::CharacterResult character_by_name(const std::string& name) override;
+    svc::CharacterResult character_by_id(const std::string& id) override;
+    /// Social, step 7: queues the two lists as a progress hand-over that carries them and nothing else.
+    void save_friend_lists(const std::string& character_id, std::vector<svc::Friend> friends, std::vector<svc::FriendRequest> requests) override;
 
     /// Waits until the queue is empty and no call is running, at most `max_wait`; true when it was.
     bool flush(std::chrono::milliseconds max_wait);
@@ -159,6 +193,8 @@ private:
     std::deque<std::string>                  order_;     // the characters waiting, oldest first
     std::unordered_map<std::string, Entry>   entries_;   // their latest saves; the same ids as order_
     bool   in_flight_ = false;
+    std::string in_flight_character_;      // the entry the worker is writing (its progress is what a by-id read waits for)
+    bool   in_flight_progress_ = false;
     bool   stop_ = false;
     bool   abandon_ = false;
     size_t saved_ = 0, inventories_saved_ = 0, progress_saved_ = 0, failed_ = 0, dropped_ = 0, replaced_ = 0;

@@ -94,6 +94,21 @@ type IgnoredStore interface {
 
 var _ IgnoredStore = (*character.Store)(nil)
 
+// FriendsStore is the part of character.Store that keeps a character's friends and pending friend requests (social, step 7). A store without it keeps none: GetCharacter sends none.
+type FriendsStore interface {
+	Friends(ctx context.Context, id string) (character.Friends, error)
+}
+
+var _ FriendsStore = (*character.Store)(nil)
+
+// NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
+// character). A store without it cannot answer GetCharacterByName.
+type NameStore interface {
+	GetByName(ctx context.Context, name string) (character.Character, error)
+}
+
+var _ NameStore = (*character.Store)(nil)
+
 // Checker judges a new character before it is stored (plan B1:
 // customization.Rules, which reads content.db). Check returns nil to accept it,
 // an error wrapping ErrUnavailable when there is nothing to judge by, and any
@@ -309,8 +324,29 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			out.IgnoredCharacterNames = ignored.Characters
 			out.IgnoredGuildNames = ignored.Guilds
 		}
+		if fs, ok := s.store.(FriendsStore); ok {
+			friends, err := fs.Friends(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			out.Friends = toProtoFriends(friends.Friends)
+			out.FriendRequests = toProtoFriendRequests(friends.Requests)
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
+}
+
+// GetCharacterByName answers the name check and the request to an offline character: the character with this name, without regard to the case of the letters (social, step 7).
+func (s *Server) GetCharacterByName(ctx context.Context, r *characterv1.GetCharacterByNameRequest) (*characterv1.GetCharacterByNameResponse, error) {
+	ns, ok := s.store.(NameStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this character store has no by-name lookup")
+	}
+	c, err := ns.GetByName(ctx, r.GetName())
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.GetCharacterByNameResponse{Character: toProto(c)}, nil
 }
 
 // ~ C-Y-B - C | O | A ~
@@ -320,7 +356,9 @@ func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRe
 	p := character.Progress{Level: r.GetLevel(), ClassID: r.GetClassId(), ReplaceSkillRanks: r.GetReplaceSkillRanks(), ReplaceActionBar: r.GetReplaceActionBar(),
 		ReplaceCompletedFTUEs: r.GetReplaceCompletedFtues(), CompletedFTUEs: r.GetCompletedFtues(),
 		ReplaceAttunements: r.GetReplaceAttunements(), Attunements: character.Attunements{Discovered: r.GetAttunements(), Home: r.GetHomeAttunement(), HomeLastUsedMs: r.GetHomeLastUsedMs()},
-		ReplaceIgnoredNames: r.GetReplaceIgnoredNames(), IgnoredNames: character.IgnoredNames{Characters: r.GetIgnoredCharacterNames(), Guilds: r.GetIgnoredGuildNames()}}
+		ReplaceIgnoredNames: r.GetReplaceIgnoredNames(), IgnoredNames: character.IgnoredNames{Characters: r.GetIgnoredCharacterNames(), Guilds: r.GetIgnoredGuildNames()},
+		ReplaceFriends: r.GetReplaceFriends(), Friends: fromProtoFriends(r.GetFriends()),
+		ReplaceFriendRequests: r.GetReplaceFriendRequests(), FriendRequests: fromProtoFriendRequests(r.GetFriendRequests())}
 	for _, e := range r.GetExperience() {
 		p.Experience = append(p.Experience, character.Experience{LevelingTypeGuid: e.GetLevelingTypeGuid(), XP: e.GetXp(), Debt: e.GetDebt()})
 	}
@@ -574,6 +612,47 @@ func toProto(c character.Character) *characterv1.Character {
 	}
 	if p := c.Position; p != nil {
 		out.Position = &characterv1.Position{X: p.X, Y: p.Y, Z: p.Z, Yaw: p.Yaw}
+	}
+	return out
+}
+
+// Social, step 7: a character's friends and pending requests, as GetCharacter sends them and as SaveProgress takes them back.
+func toProtoFriends(fs []character.Friend) []*characterv1.Friend {
+	if len(fs) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.Friend, 0, len(fs))
+	for _, f := range fs {
+		out = append(out, &characterv1.Friend{Guid: f.GUID, Name: f.Name, Level: f.Level, ClassId: f.ClassID, SubArchetype: f.SubArchetype,
+			GuildName: f.GuildName, StillFriend: f.StillFriend})
+	}
+	return out
+}
+
+func fromProtoFriends(fs []*characterv1.Friend) []character.Friend {
+	out := make([]character.Friend, 0, len(fs))
+	for _, f := range fs {
+		out = append(out, character.Friend{GUID: f.GetGuid(), Name: f.GetName(), Level: f.GetLevel(), ClassID: f.GetClassId(), SubArchetype: f.GetSubArchetype(),
+			GuildName: f.GetGuildName(), StillFriend: f.GetStillFriend()})
+	}
+	return out
+}
+
+func toProtoFriendRequests(rs []character.FriendRequest) []*characterv1.FriendRequest {
+	if len(rs) == 0 {
+		return nil
+	}
+	out := make([]*characterv1.FriendRequest, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, &characterv1.FriendRequest{SenderGuid: r.SenderGUID, SenderName: r.SenderName, RecipientGuid: r.RecipientGUID, ExpiresAtMs: r.ExpiresAtMs})
+	}
+	return out
+}
+
+func fromProtoFriendRequests(rs []*characterv1.FriendRequest) []character.FriendRequest {
+	out := make([]character.FriendRequest, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, character.FriendRequest{SenderGUID: r.GetSenderGuid(), SenderName: r.GetSenderName(), RecipientGUID: r.GetRecipientGuid(), ExpiresAtMs: r.GetExpiresAtMs()})
 	}
 	return out
 }
