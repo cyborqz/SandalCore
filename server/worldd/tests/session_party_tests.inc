@@ -1230,8 +1230,8 @@ static void test_party_second_invite_keeps_first() {
     w.settle();
     CHECK(party_requests_in(w[2].got, pc_cls, before_c).empty(), "p3 gets no second join request");
     std::string why;
-    CHECK(one_system_line(w[0].got, pc_cls, before_second, "p3 cannot join: an invitation is already pending.", &why),
-          ("the leader is told the invitation is already pending: " + why).c_str());
+    CHECK(one_system_line(w[0].got, pc_cls, before_second, "p3 cannot join yet: the invitation of p2 is still pending.", &why),
+          ("the leader is told whose invitation is still pending: " + why).c_str());
     if (first.size() != 1) return;
     CHECK(party_accept(w, 1, first[0].group_guid, first[0].inviter), "p2 accepts the first invitation");
     w.settle();

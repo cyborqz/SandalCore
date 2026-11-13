@@ -11,8 +11,9 @@
 //  nothing; a new session sends it again.  The session flag is welcome_sent_ (session/members/chat.inc).
 //
 //  The /say: a SendChatMessage(FChatData) with ChatCategory 9 is answered with one ClientReceiveChatMessages to the sender
-//  (the step-2 echo, kept) and one to every other player in this world whose pawn is within 30 m on the ground.  The
-//  distance is the horizontal one the view's relevancy uses (world/relevancy.h): height does not count.  Every other
+//  (the step-2 echo, kept) and one to every other player in this world who is within 30 m on the ground.  Where a player
+//  is: his session's last_position(), the last place the movement check accepted (a dead player's is where he fell) and
+//  for a rider the place he would be put beside his mount, not the mount's own place.  The distance is the horizontal one the view's relevancy uses (world/relevancy.h): height does not count.  Every other
 //  category keeps the step-2 echo to the sender only.  The client's ChatCategory comes back unchanged (its number is
 //  logged), From is the character's name, the Quote goes through as it came (item-link markup included) and the
 //  decoration and the GM flag stay empty.  An empty or whitespace-only line and a line over 512 characters are refused:
@@ -62,6 +63,14 @@ bool blank_line(const std::string& text) {
     return std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isspace(c) != 0; });
 }
 
+/// `text` without the ASCII whitespace before and after it: a tell's name is looked up, shown and logged without the spaces a player typed around it.
+std::string without_spaces_around(const std::string& text) {
+    const auto space = [](unsigned char c) { return std::isspace(c) != 0; };
+    const auto first = std::find_if_not(text.begin(), text.end(), space);
+    const auto last = std::find_if_not(text.rbegin(), std::string::const_reverse_iterator(first), space).base();
+    return std::string(first, last);
+}
+
 /// True when `a` and `b` are the same text, case does not count (the GM tools' find_player looks a name up the same way).
 bool iequal(const std::string& a, const std::string& b) {
     if (a.size() != b.size()) return false;
@@ -103,10 +112,15 @@ PlayerSession::ChatEntry::~ChatEntry() {
     }
 }
 
+bool PlayerSession::ChatEntry::reachable() const {
+    if (!self || !connection || !self->in_world_for_chat()) return false;
+    return !connection->closing() && !connection->closed_by_client() && !connection->failed();
+}
+
 std::vector<PlayerSession::ChatEntry*> PlayerSession::ChatEntry::in_world(const PlayerWorld* world) {
     std::vector<ChatEntry*> out;
     for (ChatEntry* e : registry()) {
-        if (e->world == world && e->self && e->connection && e->self->in_world_for_chat()) out.push_back(e);
+        if (e->world == world && e->reachable()) out.push_back(e);
     }
     return out;
 }
@@ -123,7 +137,7 @@ PlayerSession::ChatEntry* PlayerSession::ChatEntry::joined(const PlayerWorld* wo
 PlayerSession::ChatEntry* PlayerSession::ChatEntry::find(const PlayerWorld* world, const std::string& name) {
     if (name.empty()) return nullptr;
     for (ChatEntry* e : registry()) {
-        if (e->world != world || !e->self || !e->connection || !e->self->in_world_for_chat()) continue;
+        if (e->world != world || !e->reachable()) continue;
         if (iequal(e->self->name(), name)) return e;
     }
     return nullptr;
@@ -137,7 +151,7 @@ void PlayerSession::send_welcome(Connection& conn) {
     welcome_sent_ = true;
     queue("ClientReceiveChatMessages (welcome)", [](bootstrap::PlayerBootstrap& pb) {
         return pb.chat_line("Welcome to SandalCore.", kSysBroadcastCategory, "Server");
-    }, conn);
+    }, conn, /*must_build=*/true);   // (the line is sent once a session: one that cannot be built is a warning, not a debug line)
 }
 
 void PlayerSession::run_chat(Connection& conn, Clock::time_point now) {
@@ -146,16 +160,17 @@ void PlayerSession::run_chat(Connection& conn, Clock::time_point now) {
     if (phase_in_done_ && !welcome_sent_) send_welcome(conn);
 }
 
-/// One chat line another session sends this player: queued behind what the session already has, or dropped and counted.
-void PlayerSession::receive_chat_line(Connection& conn, std::string text, int category, std::string from) {
+/// One chat line another session sends this player: queued behind what the session already has (true), or dropped and counted when its queue has no room (false).
+bool PlayerSession::receive_chat_line(Connection& conn, std::string text, int category, std::string from) {
     if (!room_for(1)) {
         ++chat_dropped_;
-        return;
+        return false;
     }
     ++chat_received_;
     queue("ClientReceiveChatMessages (received)", [text = std::move(text), category, from = std::move(from)](bootstrap::PlayerBootstrap& pb) {
         return pb.chat_line(text, category, from);
     }, conn);
+    return true;
 }
 
 /// SendChatMessage(ChatData): the step-2 echo, a /say's fan-out, a /tell's two copies, or a refusal.
@@ -163,9 +178,9 @@ void PlayerSession::on_send_chat_message(Connection& conn, const repl::ClientRpc
     (void)now;
     if (!rpc.call.decoded) {
         ++chat_refused_;
-        if (++chat_unreadable_logged_ <= kLoggedPerKind) {
-            spdlog::warn("[chat] {}: a SendChatMessage does not read ({} parameter bits): ignored", name(), rpc.call.param_bits);
-        }
+        // (a warning the first kLoggedPerKind times, a debug line after: never silent)
+        spdlog::log(++chat_unreadable_logged_ <= kLoggedPerKind ? spdlog::level::warn : spdlog::level::debug,
+                    "[chat] {}: a SendChatMessage does not read ({} parameter bits): ignored", name(), rpc.call.param_bits);
         return;
     }
     const repl::Value* quote = repl::rpcf::value_of(*rpc.call.rpc, rpc.call.params, "ChatData.Quote");
@@ -176,7 +191,7 @@ void PlayerSession::on_send_chat_message(Connection& conn, const repl::ClientRpc
     const std::string* target_text = target ? target->get_if<std::string>() : nullptr;
     const std::string line = text ? *text : std::string();
     const uint64_t chat_category = number ? *number : 0;
-    const std::string target_name = target_text ? *target_text : std::string();
+    const std::string target_name = without_spaces_around(target_text ? *target_text : std::string());   // (a name of spaces alone is no name: refused below)
     if (blank_line(line)) {
         ++chat_refused_;
         spdlog::log(level_for(chat_refusals_logged_), "[chat] {}: an empty line is not echoed", name());
@@ -205,19 +220,25 @@ void PlayerSession::on_send_chat_message(Connection& conn, const repl::ClientRpc
         }, conn);
         // every other player of this world whose pawn is within the radius on the ground
         const GoodPosition here = last_position();
-        size_t receivers = 0;
+        size_t receivers = 0, no_room = 0;   // the players the line was queued for, and the ones in range whose queue was full (their session dropped and counted it)
         for (ChatEntry* e : ChatEntry::in_world(world_)) {
             if (e->self == this) continue;
             const GoodPosition there = e->self->last_position();
             if (world::horizontal_distance(here.x, here.y, there.x, there.y) > kSayRadiusCm) continue;
-            e->self->receive_chat_line(*e->connection, line, static_cast<int>(chat_category), from);
-            ++receivers;
+            if (e->self->receive_chat_line(*e->connection, line, static_cast<int>(chat_category), from)) ++receivers;
+            else ++no_room;
         }
-        spdlog::log(level_for(chat_logged_), "[chat] {}: the say reached {} other player(s) within {:.0f} m", name(), receivers, kSayRadiusCm / 100.0);
+        if (no_room == 0) {
+            spdlog::log(level_for(chat_logged_), "[chat] {}: the say reached {} other player(s) within {:.0f} m", name(), receivers, kSayRadiusCm / 100.0);
+        } else {
+            spdlog::log(level_for(chat_logged_), "[chat] {}: the say reached {} other player(s) within {:.0f} m ({} had no room for the line)", name(), receivers, kSayRadiusCm / 100.0, no_room);
+        }
         return;
     }
     if (chat_category == kTellCategory) {
-        if (!room_for(2)) {
+        // the room the tell needs in this sender's queue: his own copy, and the "not online" line when nobody of that name is there (the named player's copy goes into that player's queue)
+        ChatEntry* const named = ChatEntry::find(world_, target_name);
+        if (!room_for(named ? 1 : 2)) {
             ++chat_refused_;
             return;
         }
@@ -227,8 +248,8 @@ void PlayerSession::on_send_chat_message(Connection& conn, const repl::ClientRpc
         queue("ClientReceiveChatMessages (tell)", [copy, chat_category](bootstrap::PlayerBootstrap& pb) {
             return pb.chat_line(copy, static_cast<int>(chat_category), std::string());
         }, conn);
-        if (ChatEntry* e = ChatEntry::find(world_, target_name)) {
-            e->self->receive_chat_line(*e->connection, line, static_cast<int>(chat_category), from);
+        if (named) {
+            named->self->receive_chat_line(*named->connection, line, static_cast<int>(chat_category), from);
         } else {
             const std::string miss = target_name + " is not online.";
             queue("ClientReceiveChatMessages (tell)", [miss](bootstrap::PlayerBootstrap& pb) {

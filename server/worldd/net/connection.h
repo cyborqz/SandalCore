@@ -351,6 +351,8 @@ public:
 
     /// Queues closing channel 0: the client drops the connection.
     bool send_close(uint32_t reason = 0);
+    /// True once send_close queued the close: the connection is going away, and nothing new for the player is worth queuing.
+    bool closing() const { return close_queued_; }
 
     /// Datagrams to send now: queued bunches, resends, or a keep-alive that
     /// carries our acks.
@@ -438,6 +440,7 @@ private:
     bool dirty_acks_ = false;
     bool playing_ = false;
     bool closed_by_client_ = false;
+    bool close_queued_ = false;
     bool failed_ = false;
     size_t early_total_ = 0;  // bunches in in_queue_, over all channels
 

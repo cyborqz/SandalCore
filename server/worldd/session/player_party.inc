@@ -344,7 +344,7 @@ void PlayerSession::on_party_invite(Connection& conn, const repl::ClientRpc& rpc
     }
     PartyGroup& group = *party_group_;
     if (!group.pending_name.empty()) {
-        send_party_line(*this, target.name() + " cannot join: an invitation is already pending.");
+        send_party_line(*this, target.name() + " cannot join yet: the invitation of " + group.pending_name + " is still pending.");
         spdlog::log(level_for(party_refused_logged_), "[party] {}: the invitation of {} is refused: {} is still pending", name(), target.name(), group.pending_name);
         return;
     }
