@@ -1513,6 +1513,15 @@ public:
     std::optional<ItemRecord> item(int64_t guid, std::string& error) const;
     /// The item records with this name (exact, case does not count), at most 8: how a GM tool finds an item it was given by name.  `error` is set when the query fails.
     std::vector<int64_t> items_named(const std::string& name, std::string& error) const;
+    /// One row of the item list a GM page draws a drop-down from.
+    struct ItemListRow {
+        int64_t     guid = 0;
+        std::string name;           // the record's name
+        std::string display_name;   // as the player reads it (empty in an older file or for a record with none)
+    };
+    /// A page of the item records whose name, display name or Guid holds `filter` (case does not count; empty: every item), in the order of what the player reads (the display name, else the record's),
+    /// `limit` rows from the `offset`th.  `total` is how many match.  `error` is set when a query fails.
+    std::vector<ItemListRow> list_items(const std::string& filter, size_t limit, size_t offset, size_t& total, std::string& error) const;
 
     /// Gathering stage 3 (contentc version 14): the grid of a resource bag item.  nullopt with `error` empty for an item that is no resource bag; with `error` set when a query
     /// failed or the rows are not what contentc writes (a dimension below 1 or above the 255 cells a container holds, a cell outside the grid).

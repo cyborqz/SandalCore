@@ -276,6 +276,16 @@ public:
     StationResult place_station(const std::string& node, const std::string& plot, const std::string& station, const std::string& by);
     StationResult remove_station(const std::string& node, const std::string& plot, const std::string& by);
     size_t        placed_station_count() const { return placed_stations_.size(); }
+    /// The GM page's lists for place-station and remove-station.  A plot of a node a station is (or can be) placed on: its record name, and for a placed one the station that stands there.
+    struct StationPlot {
+        std::string plot;       // the plot's record name ("Plot_17_Service")
+        std::string station;    // a placed station's Blueprint (empty for a free plot)
+    };
+    /// The plots of `node` (a name place_station takes): with `placed` false the free ones a station can be placed on, with `placed` true the ones that hold a station a game master placed.
+    /// Empty, with `why` in plain words, for a node that is none or below a Village, and for a world with no towns.
+    std::vector<StationPlot> station_plots(const std::string& node, bool placed, std::string& why) const;
+    /// The station names the buildings that can stand on `plot` of `node` have: place_station takes each of them.  Empty, with `why`, for a node or plot that is none.
+    std::vector<std::string> plot_station_names(const std::string& node, const std::string& plot, std::string& why) const;
     /// G1 stage 1: the GM garden (spawns/gm_garden.h), off by default.  `set_gm_garden(true)` before load_area; the garden is placed once the ground is known
     /// (load_ground), or by place_gm_garden() when there is no ground file.  Once.
     void                          set_gm_garden(bool on) { gm_garden_ = on; }

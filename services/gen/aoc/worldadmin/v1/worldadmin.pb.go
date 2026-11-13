@@ -25,6 +25,70 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CommandFieldType int32
+
+const (
+	CommandFieldType_COMMAND_FIELD_TYPE_UNSPECIFIED  CommandFieldType = 0
+	CommandFieldType_COMMAND_FIELD_TYPE_WHOLE_NUMBER CommandFieldType = 1 // -2^63 to 2^63-1, within the range when one is given
+	CommandFieldType_COMMAND_FIELD_TYPE_NUMBER       CommandFieldType = 2 // a finite number, within the range when one is given
+	CommandFieldType_COMMAND_FIELD_TYPE_TEXT         CommandFieldType = 3 // free text
+	CommandFieldType_COMMAND_FIELD_TYPE_CHARACTER    CommandFieldType = 4 // a character's name (ListPlayers lists them)
+	CommandFieldType_COMMAND_FIELD_TYPE_ITEM         CommandFieldType = 5 // an item's record name or its Guid
+	CommandFieldType_COMMAND_FIELD_TYPE_PLACE        CommandFieldType = 6 // a place's name (ListPlaces lists them)
+	CommandFieldType_COMMAND_FIELD_TYPE_CHOICE       CommandFieldType = 7 // one of `choices`
+)
+
+// Enum value maps for CommandFieldType.
+var (
+	CommandFieldType_name = map[int32]string{
+		0: "COMMAND_FIELD_TYPE_UNSPECIFIED",
+		1: "COMMAND_FIELD_TYPE_WHOLE_NUMBER",
+		2: "COMMAND_FIELD_TYPE_NUMBER",
+		3: "COMMAND_FIELD_TYPE_TEXT",
+		4: "COMMAND_FIELD_TYPE_CHARACTER",
+		5: "COMMAND_FIELD_TYPE_ITEM",
+		6: "COMMAND_FIELD_TYPE_PLACE",
+		7: "COMMAND_FIELD_TYPE_CHOICE",
+	}
+	CommandFieldType_value = map[string]int32{
+		"COMMAND_FIELD_TYPE_UNSPECIFIED":  0,
+		"COMMAND_FIELD_TYPE_WHOLE_NUMBER": 1,
+		"COMMAND_FIELD_TYPE_NUMBER":       2,
+		"COMMAND_FIELD_TYPE_TEXT":         3,
+		"COMMAND_FIELD_TYPE_CHARACTER":    4,
+		"COMMAND_FIELD_TYPE_ITEM":         5,
+		"COMMAND_FIELD_TYPE_PLACE":        6,
+		"COMMAND_FIELD_TYPE_CHOICE":       7,
+	}
+)
+
+func (x CommandFieldType) Enum() *CommandFieldType {
+	p := new(CommandFieldType)
+	*p = x
+	return p
+}
+
+func (x CommandFieldType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CommandFieldType) Descriptor() protoreflect.EnumDescriptor {
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[0].Descriptor()
+}
+
+func (CommandFieldType) Type() protoreflect.EnumType {
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[0]
+}
+
+func (x CommandFieldType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CommandFieldType.Descriptor instead.
+func (CommandFieldType) EnumDescriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{0}
+}
+
 type EntityKind int32
 
 const (
@@ -67,11 +131,11 @@ func (x EntityKind) String() string {
 }
 
 func (EntityKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[0].Descriptor()
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[1].Descriptor()
 }
 
 func (EntityKind) Type() protoreflect.EnumType {
-	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[0]
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[1]
 }
 
 func (x EntityKind) Number() protoreflect.EnumNumber {
@@ -80,7 +144,7 @@ func (x EntityKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EntityKind.Descriptor instead.
 func (EntityKind) EnumDescriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{0}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{1}
 }
 
 // Bits of Entity.state.
@@ -120,11 +184,11 @@ func (x EntityState) String() string {
 }
 
 func (EntityState) Descriptor() protoreflect.EnumDescriptor {
-	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[1].Descriptor()
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[2].Descriptor()
 }
 
 func (EntityState) Type() protoreflect.EnumType {
-	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[1]
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[2]
 }
 
 func (x EntityState) Number() protoreflect.EnumNumber {
@@ -133,7 +197,7 @@ func (x EntityState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EntityState.Descriptor instead.
 func (EntityState) EnumDescriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{1}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{2}
 }
 
 type StreamDetail int32
@@ -169,11 +233,11 @@ func (x StreamDetail) String() string {
 }
 
 func (StreamDetail) Descriptor() protoreflect.EnumDescriptor {
-	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[2].Descriptor()
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[3].Descriptor()
 }
 
 func (StreamDetail) Type() protoreflect.EnumType {
-	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[2]
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[3]
 }
 
 func (x StreamDetail) Number() protoreflect.EnumNumber {
@@ -182,7 +246,7 @@ func (x StreamDetail) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StreamDetail.Descriptor instead.
 func (StreamDetail) EnumDescriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{2}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{3}
 }
 
 // Bits of SubscribeRequest.layers: which kinds a stream carries.
@@ -231,11 +295,11 @@ func (x StreamLayer) String() string {
 }
 
 func (StreamLayer) Descriptor() protoreflect.EnumDescriptor {
-	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[3].Descriptor()
+	return file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[4].Descriptor()
 }
 
 func (StreamLayer) Type() protoreflect.EnumType {
-	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[3]
+	return &file_aoc_worldadmin_v1_worldadmin_proto_enumTypes[4]
 }
 
 func (x StreamLayer) Number() protoreflect.EnumNumber {
@@ -244,7 +308,7 @@ func (x StreamLayer) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StreamLayer.Descriptor instead.
 func (StreamLayer) EnumDescriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{3}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{4}
 }
 
 type Position struct {
@@ -3024,6 +3088,629 @@ func (x *MoveNpcResponse) GetFrom() *Position {
 	return nil
 }
 
+// One field of a command: the key RunCommand.fields carries it under, a label for the form, how the value is written, whether it is required, and the range or the choices.
+type CommandField struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`   // "character", "amount", "kind"
+	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"` // "Character", "Amount"
+	Type          CommandFieldType       `protobuf:"varint,3,opt,name=type,proto3,enum=aoc.worldadmin.v1.CommandFieldType" json:"type,omitempty"`
+	Required      bool                   `protobuf:"varint,4,opt,name=required,proto3" json:"required,omitempty"`
+	Hint          string                 `protobuf:"bytes,5,opt,name=hint,proto3" json:"hint,omitempty"`                                // where the value comes from, or an example
+	Choices       []string               `protobuf:"bytes,6,rep,name=choices,proto3" json:"choices,omitempty"`                          // COMMAND_FIELD_TYPE_CHOICE: the values allowed
+	HasMinimum    bool                   `protobuf:"varint,7,opt,name=has_minimum,json=hasMinimum,proto3" json:"has_minimum,omitempty"` // a whole number or a number
+	Minimum       float64                `protobuf:"fixed64,8,opt,name=minimum,proto3" json:"minimum,omitempty"`
+	HasMaximum    bool                   `protobuf:"varint,9,opt,name=has_maximum,json=hasMaximum,proto3" json:"has_maximum,omitempty"`
+	Maximum       float64                `protobuf:"fixed64,10,opt,name=maximum,proto3" json:"maximum,omitempty"`
+	HasOptions    bool                   `protobuf:"varint,11,opt,name=has_options,json=hasOptions,proto3" json:"has_options,omitempty"` // the values come from the world's data: ListFieldOptions lists them (a form draws a drop-down)
+	Searchable    bool                   `protobuf:"varint,12,opt,name=searchable,proto3" json:"searchable,omitempty"`                   // the list is long: ListFieldOptions takes a filter text and answers one page of `page_size` options
+	PageSize      uint32                 `protobuf:"varint,13,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`       // searchable: how many options a page holds
+	DependsOn     []string               `protobuf:"bytes,14,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`     // the fields of the same command whose chosen values the list follows (ListFieldOptionsRequest.chosen)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandField) Reset() {
+	*x = CommandField{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandField) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandField) ProtoMessage() {}
+
+func (x *CommandField) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandField.ProtoReflect.Descriptor instead.
+func (*CommandField) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *CommandField) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CommandField) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *CommandField) GetType() CommandFieldType {
+	if x != nil {
+		return x.Type
+	}
+	return CommandFieldType_COMMAND_FIELD_TYPE_UNSPECIFIED
+}
+
+func (x *CommandField) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
+}
+
+func (x *CommandField) GetHint() string {
+	if x != nil {
+		return x.Hint
+	}
+	return ""
+}
+
+func (x *CommandField) GetChoices() []string {
+	if x != nil {
+		return x.Choices
+	}
+	return nil
+}
+
+func (x *CommandField) GetHasMinimum() bool {
+	if x != nil {
+		return x.HasMinimum
+	}
+	return false
+}
+
+func (x *CommandField) GetMinimum() float64 {
+	if x != nil {
+		return x.Minimum
+	}
+	return 0
+}
+
+func (x *CommandField) GetHasMaximum() bool {
+	if x != nil {
+		return x.HasMaximum
+	}
+	return false
+}
+
+func (x *CommandField) GetMaximum() float64 {
+	if x != nil {
+		return x.Maximum
+	}
+	return 0
+}
+
+func (x *CommandField) GetHasOptions() bool {
+	if x != nil {
+		return x.HasOptions
+	}
+	return false
+}
+
+func (x *CommandField) GetSearchable() bool {
+	if x != nil {
+		return x.Searchable
+	}
+	return false
+}
+
+func (x *CommandField) GetPageSize() uint32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *CommandField) GetDependsOn() []string {
+	if x != nil {
+		return x.DependsOn
+	}
+	return nil
+}
+
+// One command the admin interface offers.
+type AdminCommand struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`               // "teleport", "heal", "npc-kill"
+	Description     string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"` // one sentence in plain words
+	Group           string                 `protobuf:"bytes,3,opt,name=group,proto3" json:"group,omitempty"`             // "movement", "items", "character", "combat", "world", "nodes", "quests", "mounts", "creatures", "crafting"
+	ActsOnCharacter bool                   `protobuf:"varint,4,opt,name=acts_on_character,json=actsOnCharacter,proto3" json:"acts_on_character,omitempty"`
+	Fields          []*CommandField        `protobuf:"bytes,5,rep,name=fields,proto3" json:"fields,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AdminCommand) Reset() {
+	*x = AdminCommand{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminCommand) ProtoMessage() {}
+
+func (x *AdminCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminCommand.ProtoReflect.Descriptor instead.
+func (*AdminCommand) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *AdminCommand) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AdminCommand) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *AdminCommand) GetGroup() string {
+	if x != nil {
+		return x.Group
+	}
+	return ""
+}
+
+func (x *AdminCommand) GetActsOnCharacter() bool {
+	if x != nil {
+		return x.ActsOnCharacter
+	}
+	return false
+}
+
+func (x *AdminCommand) GetFields() []*CommandField {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+type ListCommandsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCommandsRequest) Reset() {
+	*x = ListCommandsRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCommandsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCommandsRequest) ProtoMessage() {}
+
+func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCommandsRequest.ProtoReflect.Descriptor instead.
+func (*ListCommandsRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{47}
+}
+
+type ListCommandsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Commands      []*AdminCommand        `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCommandsResponse) Reset() {
+	*x = ListCommandsResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCommandsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCommandsResponse) ProtoMessage() {}
+
+func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCommandsResponse.ProtoReflect.Descriptor instead.
+func (*ListCommandsResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ListCommandsResponse) GetCommands() []*AdminCommand {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+type RunCommandRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Command       string                 `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	Fields        map[string]string      `protobuf:"bytes,2,rep,name=fields,proto3" json:"fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // every value as text; the list's field type says how it is read
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunCommandRequest) Reset() {
+	*x = RunCommandRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunCommandRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunCommandRequest) ProtoMessage() {}
+
+func (x *RunCommandRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunCommandRequest.ProtoReflect.Descriptor instead.
+func (*RunCommandRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *RunCommandRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *RunCommandRequest) GetFields() map[string]string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+type RunCommandResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Command       string                 `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	Character     string                 `protobuf:"bytes,2,opt,name=character,proto3" json:"character,omitempty"` // the character the command acted on (empty when it names none)
+	Result        string                 `protobuf:"bytes,3,opt,name=result,proto3" json:"result,omitempty"`       // one plain line the operator sees
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunCommandResponse) Reset() {
+	*x = RunCommandResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunCommandResponse) ProtoMessage() {}
+
+func (x *RunCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunCommandResponse.ProtoReflect.Descriptor instead.
+func (*RunCommandResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *RunCommandResponse) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *RunCommandResponse) GetCharacter() string {
+	if x != nil {
+		return x.Character
+	}
+	return ""
+}
+
+func (x *RunCommandResponse) GetResult() string {
+	if x != nil {
+		return x.Result
+	}
+	return ""
+}
+
+type ListFieldOptionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Command       string                 `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`                                                                         // the command's name, as ListCommands gives it
+	Field         string                 `protobuf:"bytes,2,opt,name=field,proto3" json:"field,omitempty"`                                                                             // the field's name
+	Chosen        map[string]string      `protobuf:"bytes,3,rep,name=chosen,proto3" json:"chosen,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // the values chosen so far, by field name: the character, the node, the quest ... that the list follows
+	Filter        string                 `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`                                                                           // a searchable field: only the options whose label or value holds this text (case does not count); empty: all
+	Limit         uint32                 `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`                                                                            // a searchable field: the page size (0: the field's own, and never more than the server's cap)
+	Offset        uint32                 `protobuf:"varint,6,opt,name=offset,proto3" json:"offset,omitempty"`                                                                          // a searchable field: how many matching options to skip
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListFieldOptionsRequest) Reset() {
+	*x = ListFieldOptionsRequest{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListFieldOptionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListFieldOptionsRequest) ProtoMessage() {}
+
+func (x *ListFieldOptionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListFieldOptionsRequest.ProtoReflect.Descriptor instead.
+func (*ListFieldOptionsRequest) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *ListFieldOptionsRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *ListFieldOptionsRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+func (x *ListFieldOptionsRequest) GetChosen() map[string]string {
+	if x != nil {
+		return x.Chosen
+	}
+	return nil
+}
+
+func (x *ListFieldOptionsRequest) GetFilter() string {
+	if x != nil {
+		return x.Filter
+	}
+	return ""
+}
+
+func (x *ListFieldOptionsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListFieldOptionsRequest) GetOffset() uint32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+// One value a field can take: what RunCommand carries and what the form shows.
+type FieldOption struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FieldOption) Reset() {
+	*x = FieldOption{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FieldOption) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FieldOption) ProtoMessage() {}
+
+func (x *FieldOption) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FieldOption.ProtoReflect.Descriptor instead.
+func (*FieldOption) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *FieldOption) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
+func (x *FieldOption) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+type ListFieldOptionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Options       []*FieldOption         `protobuf:"bytes,1,rep,name=options,proto3" json:"options,omitempty"`
+	Total         uint32                 `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"` // how many options match the filter (all of them when there is none)
+	More          bool                   `protobuf:"varint,3,opt,name=more,proto3" json:"more,omitempty"`   // a searchable field: there are options after this page
+	Note          string                 `protobuf:"bytes,4,opt,name=note,proto3" json:"note,omitempty"`    // why the list is empty or short, in plain words ("Choose the node first"); empty when there is nothing to say
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListFieldOptionsResponse) Reset() {
+	*x = ListFieldOptionsResponse{}
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListFieldOptionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListFieldOptionsResponse) ProtoMessage() {}
+
+func (x *ListFieldOptionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListFieldOptionsResponse.ProtoReflect.Descriptor instead.
+func (*ListFieldOptionsResponse) Descriptor() ([]byte, []int) {
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *ListFieldOptionsResponse) GetOptions() []*FieldOption {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *ListFieldOptionsResponse) GetTotal() uint32 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *ListFieldOptionsResponse) GetMore() bool {
+	if x != nil {
+		return x.More
+	}
+	return false
+}
+
+func (x *ListFieldOptionsResponse) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
 // A box in world centimetres: min inclusive, max exclusive.
 type AreaBox struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -3037,7 +3724,7 @@ type AreaBox struct {
 
 func (x *AreaBox) Reset() {
 	*x = AreaBox{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[45]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3049,7 +3736,7 @@ func (x *AreaBox) String() string {
 func (*AreaBox) ProtoMessage() {}
 
 func (x *AreaBox) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[45]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3062,7 +3749,7 @@ func (x *AreaBox) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AreaBox.ProtoReflect.Descriptor instead.
 func (*AreaBox) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{45}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *AreaBox) GetMinXCm() int32 {
@@ -3105,7 +3792,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[46]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3117,7 +3804,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[46]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3130,7 +3817,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{46}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *SubscribeRequest) GetArea() *AreaBox {
@@ -3179,7 +3866,7 @@ type Entity struct {
 
 func (x *Entity) Reset() {
 	*x = Entity{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[47]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3191,7 +3878,7 @@ func (x *Entity) String() string {
 func (*Entity) ProtoMessage() {}
 
 func (x *Entity) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[47]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3204,7 +3891,7 @@ func (x *Entity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Entity.ProtoReflect.Descriptor instead.
 func (*Entity) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{47}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *Entity) GetId() uint64 {
@@ -3286,7 +3973,7 @@ type EntitySnapshot struct {
 
 func (x *EntitySnapshot) Reset() {
 	*x = EntitySnapshot{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[48]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3298,7 +3985,7 @@ func (x *EntitySnapshot) String() string {
 func (*EntitySnapshot) ProtoMessage() {}
 
 func (x *EntitySnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[48]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3311,7 +3998,7 @@ func (x *EntitySnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntitySnapshot.ProtoReflect.Descriptor instead.
 func (*EntitySnapshot) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{48}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *EntitySnapshot) GetEntities() []*Entity {
@@ -3332,7 +4019,7 @@ type EntityDelta struct {
 
 func (x *EntityDelta) Reset() {
 	*x = EntityDelta{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[49]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3344,7 +4031,7 @@ func (x *EntityDelta) String() string {
 func (*EntityDelta) ProtoMessage() {}
 
 func (x *EntityDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[49]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3357,7 +4044,7 @@ func (x *EntityDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityDelta.ProtoReflect.Descriptor instead.
 func (*EntityDelta) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{49}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *EntityDelta) GetChanged() []*Entity {
@@ -3392,7 +4079,7 @@ type DensityGrid struct {
 
 func (x *DensityGrid) Reset() {
 	*x = DensityGrid{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[50]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3404,7 +4091,7 @@ func (x *DensityGrid) String() string {
 func (*DensityGrid) ProtoMessage() {}
 
 func (x *DensityGrid) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[50]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3417,7 +4104,7 @@ func (x *DensityGrid) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DensityGrid.ProtoReflect.Descriptor instead.
 func (*DensityGrid) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{50}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *DensityGrid) GetCellCm() uint32 {
@@ -3492,7 +4179,7 @@ type StreamStats struct {
 
 func (x *StreamStats) Reset() {
 	*x = StreamStats{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[51]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3504,7 +4191,7 @@ func (x *StreamStats) String() string {
 func (*StreamStats) ProtoMessage() {}
 
 func (x *StreamStats) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[51]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3517,7 +4204,7 @@ func (x *StreamStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamStats.ProtoReflect.Descriptor instead.
 func (*StreamStats) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{51}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *StreamStats) GetTickMs() float32 {
@@ -3588,7 +4275,7 @@ type SubscribeResponse struct {
 
 func (x *SubscribeResponse) Reset() {
 	*x = SubscribeResponse{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[52]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3600,7 +4287,7 @@ func (x *SubscribeResponse) String() string {
 func (*SubscribeResponse) ProtoMessage() {}
 
 func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[52]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3613,7 +4300,7 @@ func (x *SubscribeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeResponse.ProtoReflect.Descriptor instead.
 func (*SubscribeResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{52}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *SubscribeResponse) GetSeq() uint64 {
@@ -3709,7 +4396,7 @@ type InspectRequest struct {
 
 func (x *InspectRequest) Reset() {
 	*x = InspectRequest{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[53]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3721,7 +4408,7 @@ func (x *InspectRequest) String() string {
 func (*InspectRequest) ProtoMessage() {}
 
 func (x *InspectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[53]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3734,7 +4421,7 @@ func (x *InspectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InspectRequest.ProtoReflect.Descriptor instead.
 func (*InspectRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{53}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *InspectRequest) GetId() uint64 {
@@ -3754,7 +4441,7 @@ type ThreatEntry struct {
 
 func (x *ThreatEntry) Reset() {
 	*x = ThreatEntry{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[54]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3766,7 +4453,7 @@ func (x *ThreatEntry) String() string {
 func (*ThreatEntry) ProtoMessage() {}
 
 func (x *ThreatEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[54]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3779,7 +4466,7 @@ func (x *ThreatEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThreatEntry.ProtoReflect.Descriptor instead.
 func (*ThreatEntry) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{54}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ThreatEntry) GetId() uint64 {
@@ -3832,7 +4519,7 @@ type ActorDetail struct {
 
 func (x *ActorDetail) Reset() {
 	*x = ActorDetail{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[55]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3844,7 +4531,7 @@ func (x *ActorDetail) String() string {
 func (*ActorDetail) ProtoMessage() {}
 
 func (x *ActorDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[55]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3857,7 +4544,7 @@ func (x *ActorDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorDetail.ProtoReflect.Descriptor instead.
 func (*ActorDetail) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{55}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *ActorDetail) GetName() string {
@@ -4063,7 +4750,7 @@ type PlayerDetail struct {
 
 func (x *PlayerDetail) Reset() {
 	*x = PlayerDetail{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[56]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4075,7 +4762,7 @@ func (x *PlayerDetail) String() string {
 func (*PlayerDetail) ProtoMessage() {}
 
 func (x *PlayerDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[56]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4088,7 +4775,7 @@ func (x *PlayerDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlayerDetail.ProtoReflect.Descriptor instead.
 func (*PlayerDetail) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{56}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *PlayerDetail) GetName() string {
@@ -4147,7 +4834,7 @@ type InspectResponse struct {
 
 func (x *InspectResponse) Reset() {
 	*x = InspectResponse{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[57]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4159,7 +4846,7 @@ func (x *InspectResponse) String() string {
 func (*InspectResponse) ProtoMessage() {}
 
 func (x *InspectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[57]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4172,7 +4859,7 @@ func (x *InspectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InspectResponse.ProtoReflect.Descriptor instead.
 func (*InspectResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{57}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *InspectResponse) GetEntity() *Entity {
@@ -4233,7 +4920,7 @@ type SearchRequest struct {
 
 func (x *SearchRequest) Reset() {
 	*x = SearchRequest{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[58]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4245,7 +4932,7 @@ func (x *SearchRequest) String() string {
 func (*SearchRequest) ProtoMessage() {}
 
 func (x *SearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[58]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4258,7 +4945,7 @@ func (x *SearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
 func (*SearchRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{58}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *SearchRequest) GetQuery() string {
@@ -4285,7 +4972,7 @@ type SearchResult struct {
 
 func (x *SearchResult) Reset() {
 	*x = SearchResult{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[59]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4297,7 +4984,7 @@ func (x *SearchResult) String() string {
 func (*SearchResult) ProtoMessage() {}
 
 func (x *SearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[59]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4310,7 +4997,7 @@ func (x *SearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResult.ProtoReflect.Descriptor instead.
 func (*SearchResult) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{59}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SearchResult) GetEntity() *Entity {
@@ -4337,7 +5024,7 @@ type SearchResponse struct {
 
 func (x *SearchResponse) Reset() {
 	*x = SearchResponse{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[60]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4349,7 +5036,7 @@ func (x *SearchResponse) String() string {
 func (*SearchResponse) ProtoMessage() {}
 
 func (x *SearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[60]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4362,7 +5049,7 @@ func (x *SearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
 func (*SearchResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{60}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SearchResponse) GetResults() []*SearchResult {
@@ -4387,7 +5074,7 @@ type GetStatusRequest struct {
 
 func (x *GetStatusRequest) Reset() {
 	*x = GetStatusRequest{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[61]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4399,7 +5086,7 @@ func (x *GetStatusRequest) String() string {
 func (*GetStatusRequest) ProtoMessage() {}
 
 func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[61]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4412,7 +5099,7 @@ func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetStatusRequest) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{61}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{70}
 }
 
 type GetStatusResponse struct {
@@ -4427,7 +5114,7 @@ type GetStatusResponse struct {
 
 func (x *GetStatusResponse) Reset() {
 	*x = GetStatusResponse{}
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[62]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4439,7 +5126,7 @@ func (x *GetStatusResponse) String() string {
 func (*GetStatusResponse) ProtoMessage() {}
 
 func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[62]
+	mi := &file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4452,7 +5139,7 @@ func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetStatusResponse) Descriptor() ([]byte, []int) {
-	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{62}
+	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *GetStatusResponse) GetStats() *StreamStats {
@@ -4684,7 +5371,66 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x127\n" +
 	"\bposition\x18\x03 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\bposition\x12\x16\n" +
 	"\x06result\x18\x04 \x01(\tR\x06result\x12/\n" +
-	"\x04from\x18\x05 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\x04from\"q\n" +
+	"\x04from\x18\x05 \x01(\v2\x1b.aoc.worldadmin.v1.PositionR\x04from\"\xae\x03\n" +
+	"\fCommandField\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\x127\n" +
+	"\x04type\x18\x03 \x01(\x0e2#.aoc.worldadmin.v1.CommandFieldTypeR\x04type\x12\x1a\n" +
+	"\brequired\x18\x04 \x01(\bR\brequired\x12\x12\n" +
+	"\x04hint\x18\x05 \x01(\tR\x04hint\x12\x18\n" +
+	"\achoices\x18\x06 \x03(\tR\achoices\x12\x1f\n" +
+	"\vhas_minimum\x18\a \x01(\bR\n" +
+	"hasMinimum\x12\x18\n" +
+	"\aminimum\x18\b \x01(\x01R\aminimum\x12\x1f\n" +
+	"\vhas_maximum\x18\t \x01(\bR\n" +
+	"hasMaximum\x12\x18\n" +
+	"\amaximum\x18\n" +
+	" \x01(\x01R\amaximum\x12\x1f\n" +
+	"\vhas_options\x18\v \x01(\bR\n" +
+	"hasOptions\x12\x1e\n" +
+	"\n" +
+	"searchable\x18\f \x01(\bR\n" +
+	"searchable\x12\x1b\n" +
+	"\tpage_size\x18\r \x01(\rR\bpageSize\x12\x1d\n" +
+	"\n" +
+	"depends_on\x18\x0e \x03(\tR\tdependsOn\"\xbf\x01\n" +
+	"\fAdminCommand\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x14\n" +
+	"\x05group\x18\x03 \x01(\tR\x05group\x12*\n" +
+	"\x11acts_on_character\x18\x04 \x01(\bR\x0factsOnCharacter\x127\n" +
+	"\x06fields\x18\x05 \x03(\v2\x1f.aoc.worldadmin.v1.CommandFieldR\x06fields\"\x15\n" +
+	"\x13ListCommandsRequest\"S\n" +
+	"\x14ListCommandsResponse\x12;\n" +
+	"\bcommands\x18\x01 \x03(\v2\x1f.aoc.worldadmin.v1.AdminCommandR\bcommands\"\xb2\x01\n" +
+	"\x11RunCommandRequest\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\x12H\n" +
+	"\x06fields\x18\x02 \x03(\v20.aoc.worldadmin.v1.RunCommandRequest.FieldsEntryR\x06fields\x1a9\n" +
+	"\vFieldsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"d\n" +
+	"\x12RunCommandResponse\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\x12\x1c\n" +
+	"\tcharacter\x18\x02 \x01(\tR\tcharacter\x12\x16\n" +
+	"\x06result\x18\x03 \x01(\tR\x06result\"\x9a\x02\n" +
+	"\x17ListFieldOptionsRequest\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\x12\x14\n" +
+	"\x05field\x18\x02 \x01(\tR\x05field\x12N\n" +
+	"\x06chosen\x18\x03 \x03(\v26.aoc.worldadmin.v1.ListFieldOptionsRequest.ChosenEntryR\x06chosen\x12\x16\n" +
+	"\x06filter\x18\x04 \x01(\tR\x06filter\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\rR\x05limit\x12\x16\n" +
+	"\x06offset\x18\x06 \x01(\rR\x06offset\x1a9\n" +
+	"\vChosenEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"9\n" +
+	"\vFieldOption\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\"\x92\x01\n" +
+	"\x18ListFieldOptionsResponse\x128\n" +
+	"\aoptions\x18\x01 \x03(\v2\x1e.aoc.worldadmin.v1.FieldOptionR\aoptions\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\rR\x05total\x12\x12\n" +
+	"\x04more\x18\x03 \x01(\bR\x04more\x12\x12\n" +
+	"\x04note\x18\x04 \x01(\tR\x04note\"q\n" +
 	"\aAreaBox\x12\x18\n" +
 	"\bmin_x_cm\x18\x01 \x01(\x11R\x06minXCm\x12\x18\n" +
 	"\bmin_y_cm\x18\x02 \x01(\x11R\x06minYCm\x12\x18\n" +
@@ -4807,7 +5553,16 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\n" +
 	"world_time\x18\x02 \x01(\x01R\tworldTime\x12\x12\n" +
 	"\x04tick\x18\x03 \x01(\x04R\x04tick\x12 \n" +
-	"\vsubscribers\x18\x04 \x01(\rR\vsubscribers*\xa7\x01\n" +
+	"\vsubscribers\x18\x04 \x01(\rR\vsubscribers*\x93\x02\n" +
+	"\x10CommandFieldType\x12\"\n" +
+	"\x1eCOMMAND_FIELD_TYPE_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fCOMMAND_FIELD_TYPE_WHOLE_NUMBER\x10\x01\x12\x1d\n" +
+	"\x19COMMAND_FIELD_TYPE_NUMBER\x10\x02\x12\x1b\n" +
+	"\x17COMMAND_FIELD_TYPE_TEXT\x10\x03\x12 \n" +
+	"\x1cCOMMAND_FIELD_TYPE_CHARACTER\x10\x04\x12\x1b\n" +
+	"\x17COMMAND_FIELD_TYPE_ITEM\x10\x05\x12\x1c\n" +
+	"\x18COMMAND_FIELD_TYPE_PLACE\x10\x06\x12\x1d\n" +
+	"\x19COMMAND_FIELD_TYPE_CHOICE\x10\a*\xa7\x01\n" +
 	"\n" +
 	"EntityKind\x12\x1b\n" +
 	"\x17ENTITY_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -4832,7 +5587,7 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\x1bSTREAM_LAYER_RESOURCE_NODES\x10\x04\x12\x17\n" +
 	"\x13STREAM_LAYER_MOUNTS\x10\b\x12\x1b\n" +
 	"\x17STREAM_LAYER_LOOT_PILES\x10\x10\x12\x14\n" +
-	"\x10STREAM_LAYER_ALL\x10\x1f2\xc4\x0e\n" +
+	"\x10STREAM_LAYER_ALL\x10\x1f2\xed\x10\n" +
 	"\x11WorldAdminService\x12\\\n" +
 	"\vListPlayers\x12%.aoc.worldadmin.v1.ListPlayersRequest\x1a&.aoc.worldadmin.v1.ListPlayersResponse\x12Y\n" +
 	"\n" +
@@ -4857,7 +5612,11 @@ const file_aoc_worldadmin_v1_worldadmin_proto_rawDesc = "" +
 	"\aHealNpc\x12!.aoc.worldadmin.v1.HealNpcRequest\x1a\".aoc.worldadmin.v1.HealNpcResponse\x12Y\n" +
 	"\n" +
 	"DespawnNpc\x12$.aoc.worldadmin.v1.DespawnNpcRequest\x1a%.aoc.worldadmin.v1.DespawnNpcResponse\x12P\n" +
-	"\aMoveNpc\x12!.aoc.worldadmin.v1.MoveNpcRequest\x1a\".aoc.worldadmin.v1.MoveNpcResponse2\xe7\x02\n" +
+	"\aMoveNpc\x12!.aoc.worldadmin.v1.MoveNpcRequest\x1a\".aoc.worldadmin.v1.MoveNpcResponse\x12_\n" +
+	"\fListCommands\x12&.aoc.worldadmin.v1.ListCommandsRequest\x1a'.aoc.worldadmin.v1.ListCommandsResponse\x12Y\n" +
+	"\n" +
+	"RunCommand\x12$.aoc.worldadmin.v1.RunCommandRequest\x1a%.aoc.worldadmin.v1.RunCommandResponse\x12k\n" +
+	"\x10ListFieldOptions\x12*.aoc.worldadmin.v1.ListFieldOptionsRequest\x1a+.aoc.worldadmin.v1.ListFieldOptionsResponse2\xe7\x02\n" +
 	"\x12WorldStreamService\x12X\n" +
 	"\tSubscribe\x12#.aoc.worldadmin.v1.SubscribeRequest\x1a$.aoc.worldadmin.v1.SubscribeResponse0\x01\x12P\n" +
 	"\aInspect\x12!.aoc.worldadmin.v1.InspectRequest\x1a\".aoc.worldadmin.v1.InspectResponse\x12M\n" +
@@ -4876,164 +5635,188 @@ func file_aoc_worldadmin_v1_worldadmin_proto_rawDescGZIP() []byte {
 	return file_aoc_worldadmin_v1_worldadmin_proto_rawDescData
 }
 
-var file_aoc_worldadmin_v1_worldadmin_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
+var file_aoc_worldadmin_v1_worldadmin_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_aoc_worldadmin_v1_worldadmin_proto_msgTypes = make([]protoimpl.MessageInfo, 74)
 var file_aoc_worldadmin_v1_worldadmin_proto_goTypes = []any{
-	(EntityKind)(0),                   // 0: aoc.worldadmin.v1.EntityKind
-	(EntityState)(0),                  // 1: aoc.worldadmin.v1.EntityState
-	(StreamDetail)(0),                 // 2: aoc.worldadmin.v1.StreamDetail
-	(StreamLayer)(0),                  // 3: aoc.worldadmin.v1.StreamLayer
-	(*Position)(nil),                  // 4: aoc.worldadmin.v1.Position
-	(*Player)(nil),                    // 5: aoc.worldadmin.v1.Player
-	(*ListPlayersRequest)(nil),        // 6: aoc.worldadmin.v1.ListPlayersRequest
-	(*ListPlayersResponse)(nil),       // 7: aoc.worldadmin.v1.ListPlayersResponse
-	(*Place)(nil),                     // 8: aoc.worldadmin.v1.Place
-	(*ListPlacesRequest)(nil),         // 9: aoc.worldadmin.v1.ListPlacesRequest
-	(*ListPlacesResponse)(nil),        // 10: aoc.worldadmin.v1.ListPlacesResponse
-	(*Point)(nil),                     // 11: aoc.worldadmin.v1.Point
-	(*TeleportRequest)(nil),           // 12: aoc.worldadmin.v1.TeleportRequest
-	(*TeleportResponse)(nil),          // 13: aoc.worldadmin.v1.TeleportResponse
-	(*SetMoveSpeedRequest)(nil),       // 14: aoc.worldadmin.v1.SetMoveSpeedRequest
-	(*SetMoveSpeedResponse)(nil),      // 15: aoc.worldadmin.v1.SetMoveSpeedResponse
-	(*GiveMoneyRequest)(nil),          // 16: aoc.worldadmin.v1.GiveMoneyRequest
-	(*GiveMoneyResponse)(nil),         // 17: aoc.worldadmin.v1.GiveMoneyResponse
-	(*PlaceStationRequest)(nil),       // 18: aoc.worldadmin.v1.PlaceStationRequest
-	(*PlaceStationResponse)(nil),      // 19: aoc.worldadmin.v1.PlaceStationResponse
-	(*RemoveStationRequest)(nil),      // 20: aoc.worldadmin.v1.RemoveStationRequest
-	(*RemoveStationResponse)(nil),     // 21: aoc.worldadmin.v1.RemoveStationResponse
-	(*FinishJobsRequest)(nil),         // 22: aoc.worldadmin.v1.FinishJobsRequest
-	(*FinishJobsResponse)(nil),        // 23: aoc.worldadmin.v1.FinishJobsResponse
-	(*TeachRecipeRequest)(nil),        // 24: aoc.worldadmin.v1.TeachRecipeRequest
-	(*TeachRecipeResponse)(nil),       // 25: aoc.worldadmin.v1.TeachRecipeResponse
-	(*ForgetRecipeRequest)(nil),       // 26: aoc.worldadmin.v1.ForgetRecipeRequest
-	(*ForgetRecipeResponse)(nil),      // 27: aoc.worldadmin.v1.ForgetRecipeResponse
-	(*ListTaughtRecipesRequest)(nil),  // 28: aoc.worldadmin.v1.ListTaughtRecipesRequest
-	(*TaughtRecipe)(nil),              // 29: aoc.worldadmin.v1.TaughtRecipe
-	(*ListTaughtRecipesResponse)(nil), // 30: aoc.worldadmin.v1.ListTaughtRecipesResponse
-	(*ResetTutorialsRequest)(nil),     // 31: aoc.worldadmin.v1.ResetTutorialsRequest
-	(*ResetTutorialsResponse)(nil),    // 32: aoc.worldadmin.v1.ResetTutorialsResponse
-	(*SetWeaponXpRequest)(nil),        // 33: aoc.worldadmin.v1.SetWeaponXpRequest
-	(*SetWeaponXpResponse)(nil),       // 34: aoc.worldadmin.v1.SetWeaponXpResponse
-	(*GiveItemRequest)(nil),           // 35: aoc.worldadmin.v1.GiveItemRequest
-	(*GiveItemResponse)(nil),          // 36: aoc.worldadmin.v1.GiveItemResponse
-	(*KillNpcRequest)(nil),            // 37: aoc.worldadmin.v1.KillNpcRequest
-	(*KillNpcResponse)(nil),           // 38: aoc.worldadmin.v1.KillNpcResponse
-	(*RespawnNpcRequest)(nil),         // 39: aoc.worldadmin.v1.RespawnNpcRequest
-	(*RespawnNpcResponse)(nil),        // 40: aoc.worldadmin.v1.RespawnNpcResponse
-	(*ResetNpcRequest)(nil),           // 41: aoc.worldadmin.v1.ResetNpcRequest
-	(*ResetNpcResponse)(nil),          // 42: aoc.worldadmin.v1.ResetNpcResponse
-	(*HealNpcRequest)(nil),            // 43: aoc.worldadmin.v1.HealNpcRequest
-	(*HealNpcResponse)(nil),           // 44: aoc.worldadmin.v1.HealNpcResponse
-	(*DespawnNpcRequest)(nil),         // 45: aoc.worldadmin.v1.DespawnNpcRequest
-	(*DespawnNpcResponse)(nil),        // 46: aoc.worldadmin.v1.DespawnNpcResponse
-	(*MoveNpcRequest)(nil),            // 47: aoc.worldadmin.v1.MoveNpcRequest
-	(*MoveNpcResponse)(nil),           // 48: aoc.worldadmin.v1.MoveNpcResponse
-	(*AreaBox)(nil),                   // 49: aoc.worldadmin.v1.AreaBox
-	(*SubscribeRequest)(nil),          // 50: aoc.worldadmin.v1.SubscribeRequest
-	(*Entity)(nil),                    // 51: aoc.worldadmin.v1.Entity
-	(*EntitySnapshot)(nil),            // 52: aoc.worldadmin.v1.EntitySnapshot
-	(*EntityDelta)(nil),               // 53: aoc.worldadmin.v1.EntityDelta
-	(*DensityGrid)(nil),               // 54: aoc.worldadmin.v1.DensityGrid
-	(*StreamStats)(nil),               // 55: aoc.worldadmin.v1.StreamStats
-	(*SubscribeResponse)(nil),         // 56: aoc.worldadmin.v1.SubscribeResponse
-	(*InspectRequest)(nil),            // 57: aoc.worldadmin.v1.InspectRequest
-	(*ThreatEntry)(nil),               // 58: aoc.worldadmin.v1.ThreatEntry
-	(*ActorDetail)(nil),               // 59: aoc.worldadmin.v1.ActorDetail
-	(*PlayerDetail)(nil),              // 60: aoc.worldadmin.v1.PlayerDetail
-	(*InspectResponse)(nil),           // 61: aoc.worldadmin.v1.InspectResponse
-	(*SearchRequest)(nil),             // 62: aoc.worldadmin.v1.SearchRequest
-	(*SearchResult)(nil),              // 63: aoc.worldadmin.v1.SearchResult
-	(*SearchResponse)(nil),            // 64: aoc.worldadmin.v1.SearchResponse
-	(*GetStatusRequest)(nil),          // 65: aoc.worldadmin.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),         // 66: aoc.worldadmin.v1.GetStatusResponse
+	(CommandFieldType)(0),             // 0: aoc.worldadmin.v1.CommandFieldType
+	(EntityKind)(0),                   // 1: aoc.worldadmin.v1.EntityKind
+	(EntityState)(0),                  // 2: aoc.worldadmin.v1.EntityState
+	(StreamDetail)(0),                 // 3: aoc.worldadmin.v1.StreamDetail
+	(StreamLayer)(0),                  // 4: aoc.worldadmin.v1.StreamLayer
+	(*Position)(nil),                  // 5: aoc.worldadmin.v1.Position
+	(*Player)(nil),                    // 6: aoc.worldadmin.v1.Player
+	(*ListPlayersRequest)(nil),        // 7: aoc.worldadmin.v1.ListPlayersRequest
+	(*ListPlayersResponse)(nil),       // 8: aoc.worldadmin.v1.ListPlayersResponse
+	(*Place)(nil),                     // 9: aoc.worldadmin.v1.Place
+	(*ListPlacesRequest)(nil),         // 10: aoc.worldadmin.v1.ListPlacesRequest
+	(*ListPlacesResponse)(nil),        // 11: aoc.worldadmin.v1.ListPlacesResponse
+	(*Point)(nil),                     // 12: aoc.worldadmin.v1.Point
+	(*TeleportRequest)(nil),           // 13: aoc.worldadmin.v1.TeleportRequest
+	(*TeleportResponse)(nil),          // 14: aoc.worldadmin.v1.TeleportResponse
+	(*SetMoveSpeedRequest)(nil),       // 15: aoc.worldadmin.v1.SetMoveSpeedRequest
+	(*SetMoveSpeedResponse)(nil),      // 16: aoc.worldadmin.v1.SetMoveSpeedResponse
+	(*GiveMoneyRequest)(nil),          // 17: aoc.worldadmin.v1.GiveMoneyRequest
+	(*GiveMoneyResponse)(nil),         // 18: aoc.worldadmin.v1.GiveMoneyResponse
+	(*PlaceStationRequest)(nil),       // 19: aoc.worldadmin.v1.PlaceStationRequest
+	(*PlaceStationResponse)(nil),      // 20: aoc.worldadmin.v1.PlaceStationResponse
+	(*RemoveStationRequest)(nil),      // 21: aoc.worldadmin.v1.RemoveStationRequest
+	(*RemoveStationResponse)(nil),     // 22: aoc.worldadmin.v1.RemoveStationResponse
+	(*FinishJobsRequest)(nil),         // 23: aoc.worldadmin.v1.FinishJobsRequest
+	(*FinishJobsResponse)(nil),        // 24: aoc.worldadmin.v1.FinishJobsResponse
+	(*TeachRecipeRequest)(nil),        // 25: aoc.worldadmin.v1.TeachRecipeRequest
+	(*TeachRecipeResponse)(nil),       // 26: aoc.worldadmin.v1.TeachRecipeResponse
+	(*ForgetRecipeRequest)(nil),       // 27: aoc.worldadmin.v1.ForgetRecipeRequest
+	(*ForgetRecipeResponse)(nil),      // 28: aoc.worldadmin.v1.ForgetRecipeResponse
+	(*ListTaughtRecipesRequest)(nil),  // 29: aoc.worldadmin.v1.ListTaughtRecipesRequest
+	(*TaughtRecipe)(nil),              // 30: aoc.worldadmin.v1.TaughtRecipe
+	(*ListTaughtRecipesResponse)(nil), // 31: aoc.worldadmin.v1.ListTaughtRecipesResponse
+	(*ResetTutorialsRequest)(nil),     // 32: aoc.worldadmin.v1.ResetTutorialsRequest
+	(*ResetTutorialsResponse)(nil),    // 33: aoc.worldadmin.v1.ResetTutorialsResponse
+	(*SetWeaponXpRequest)(nil),        // 34: aoc.worldadmin.v1.SetWeaponXpRequest
+	(*SetWeaponXpResponse)(nil),       // 35: aoc.worldadmin.v1.SetWeaponXpResponse
+	(*GiveItemRequest)(nil),           // 36: aoc.worldadmin.v1.GiveItemRequest
+	(*GiveItemResponse)(nil),          // 37: aoc.worldadmin.v1.GiveItemResponse
+	(*KillNpcRequest)(nil),            // 38: aoc.worldadmin.v1.KillNpcRequest
+	(*KillNpcResponse)(nil),           // 39: aoc.worldadmin.v1.KillNpcResponse
+	(*RespawnNpcRequest)(nil),         // 40: aoc.worldadmin.v1.RespawnNpcRequest
+	(*RespawnNpcResponse)(nil),        // 41: aoc.worldadmin.v1.RespawnNpcResponse
+	(*ResetNpcRequest)(nil),           // 42: aoc.worldadmin.v1.ResetNpcRequest
+	(*ResetNpcResponse)(nil),          // 43: aoc.worldadmin.v1.ResetNpcResponse
+	(*HealNpcRequest)(nil),            // 44: aoc.worldadmin.v1.HealNpcRequest
+	(*HealNpcResponse)(nil),           // 45: aoc.worldadmin.v1.HealNpcResponse
+	(*DespawnNpcRequest)(nil),         // 46: aoc.worldadmin.v1.DespawnNpcRequest
+	(*DespawnNpcResponse)(nil),        // 47: aoc.worldadmin.v1.DespawnNpcResponse
+	(*MoveNpcRequest)(nil),            // 48: aoc.worldadmin.v1.MoveNpcRequest
+	(*MoveNpcResponse)(nil),           // 49: aoc.worldadmin.v1.MoveNpcResponse
+	(*CommandField)(nil),              // 50: aoc.worldadmin.v1.CommandField
+	(*AdminCommand)(nil),              // 51: aoc.worldadmin.v1.AdminCommand
+	(*ListCommandsRequest)(nil),       // 52: aoc.worldadmin.v1.ListCommandsRequest
+	(*ListCommandsResponse)(nil),      // 53: aoc.worldadmin.v1.ListCommandsResponse
+	(*RunCommandRequest)(nil),         // 54: aoc.worldadmin.v1.RunCommandRequest
+	(*RunCommandResponse)(nil),        // 55: aoc.worldadmin.v1.RunCommandResponse
+	(*ListFieldOptionsRequest)(nil),   // 56: aoc.worldadmin.v1.ListFieldOptionsRequest
+	(*FieldOption)(nil),               // 57: aoc.worldadmin.v1.FieldOption
+	(*ListFieldOptionsResponse)(nil),  // 58: aoc.worldadmin.v1.ListFieldOptionsResponse
+	(*AreaBox)(nil),                   // 59: aoc.worldadmin.v1.AreaBox
+	(*SubscribeRequest)(nil),          // 60: aoc.worldadmin.v1.SubscribeRequest
+	(*Entity)(nil),                    // 61: aoc.worldadmin.v1.Entity
+	(*EntitySnapshot)(nil),            // 62: aoc.worldadmin.v1.EntitySnapshot
+	(*EntityDelta)(nil),               // 63: aoc.worldadmin.v1.EntityDelta
+	(*DensityGrid)(nil),               // 64: aoc.worldadmin.v1.DensityGrid
+	(*StreamStats)(nil),               // 65: aoc.worldadmin.v1.StreamStats
+	(*SubscribeResponse)(nil),         // 66: aoc.worldadmin.v1.SubscribeResponse
+	(*InspectRequest)(nil),            // 67: aoc.worldadmin.v1.InspectRequest
+	(*ThreatEntry)(nil),               // 68: aoc.worldadmin.v1.ThreatEntry
+	(*ActorDetail)(nil),               // 69: aoc.worldadmin.v1.ActorDetail
+	(*PlayerDetail)(nil),              // 70: aoc.worldadmin.v1.PlayerDetail
+	(*InspectResponse)(nil),           // 71: aoc.worldadmin.v1.InspectResponse
+	(*SearchRequest)(nil),             // 72: aoc.worldadmin.v1.SearchRequest
+	(*SearchResult)(nil),              // 73: aoc.worldadmin.v1.SearchResult
+	(*SearchResponse)(nil),            // 74: aoc.worldadmin.v1.SearchResponse
+	(*GetStatusRequest)(nil),          // 75: aoc.worldadmin.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),         // 76: aoc.worldadmin.v1.GetStatusResponse
+	nil,                               // 77: aoc.worldadmin.v1.RunCommandRequest.FieldsEntry
+	nil,                               // 78: aoc.worldadmin.v1.ListFieldOptionsRequest.ChosenEntry
 }
 var file_aoc_worldadmin_v1_worldadmin_proto_depIdxs = []int32{
-	4,  // 0: aoc.worldadmin.v1.Player.position:type_name -> aoc.worldadmin.v1.Position
-	5,  // 1: aoc.worldadmin.v1.ListPlayersResponse.players:type_name -> aoc.worldadmin.v1.Player
-	4,  // 2: aoc.worldadmin.v1.Place.position:type_name -> aoc.worldadmin.v1.Position
-	8,  // 3: aoc.worldadmin.v1.ListPlacesResponse.places:type_name -> aoc.worldadmin.v1.Place
-	11, // 4: aoc.worldadmin.v1.TeleportRequest.point:type_name -> aoc.worldadmin.v1.Point
-	4,  // 5: aoc.worldadmin.v1.TeleportResponse.from:type_name -> aoc.worldadmin.v1.Position
-	4,  // 6: aoc.worldadmin.v1.TeleportResponse.to:type_name -> aoc.worldadmin.v1.Position
-	4,  // 7: aoc.worldadmin.v1.PlaceStationResponse.position:type_name -> aoc.worldadmin.v1.Position
-	29, // 8: aoc.worldadmin.v1.ListTaughtRecipesResponse.recipes:type_name -> aoc.worldadmin.v1.TaughtRecipe
-	4,  // 9: aoc.worldadmin.v1.KillNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
-	4,  // 10: aoc.worldadmin.v1.RespawnNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
-	4,  // 11: aoc.worldadmin.v1.ResetNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
-	4,  // 12: aoc.worldadmin.v1.HealNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
-	4,  // 13: aoc.worldadmin.v1.DespawnNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
-	11, // 14: aoc.worldadmin.v1.MoveNpcRequest.point:type_name -> aoc.worldadmin.v1.Point
-	4,  // 15: aoc.worldadmin.v1.MoveNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
-	4,  // 16: aoc.worldadmin.v1.MoveNpcResponse.from:type_name -> aoc.worldadmin.v1.Position
-	49, // 17: aoc.worldadmin.v1.SubscribeRequest.area:type_name -> aoc.worldadmin.v1.AreaBox
-	2,  // 18: aoc.worldadmin.v1.SubscribeRequest.detail:type_name -> aoc.worldadmin.v1.StreamDetail
-	0,  // 19: aoc.worldadmin.v1.Entity.kind:type_name -> aoc.worldadmin.v1.EntityKind
-	51, // 20: aoc.worldadmin.v1.EntitySnapshot.entities:type_name -> aoc.worldadmin.v1.Entity
-	51, // 21: aoc.worldadmin.v1.EntityDelta.changed:type_name -> aoc.worldadmin.v1.Entity
-	52, // 22: aoc.worldadmin.v1.SubscribeResponse.snapshot:type_name -> aoc.worldadmin.v1.EntitySnapshot
-	53, // 23: aoc.worldadmin.v1.SubscribeResponse.delta:type_name -> aoc.worldadmin.v1.EntityDelta
-	54, // 24: aoc.worldadmin.v1.SubscribeResponse.density:type_name -> aoc.worldadmin.v1.DensityGrid
-	55, // 25: aoc.worldadmin.v1.SubscribeResponse.stats:type_name -> aoc.worldadmin.v1.StreamStats
-	58, // 26: aoc.worldadmin.v1.ActorDetail.threat:type_name -> aoc.worldadmin.v1.ThreatEntry
-	51, // 27: aoc.worldadmin.v1.InspectResponse.entity:type_name -> aoc.worldadmin.v1.Entity
-	59, // 28: aoc.worldadmin.v1.InspectResponse.actor:type_name -> aoc.worldadmin.v1.ActorDetail
-	60, // 29: aoc.worldadmin.v1.InspectResponse.player:type_name -> aoc.worldadmin.v1.PlayerDetail
-	51, // 30: aoc.worldadmin.v1.SearchResult.entity:type_name -> aoc.worldadmin.v1.Entity
-	63, // 31: aoc.worldadmin.v1.SearchResponse.results:type_name -> aoc.worldadmin.v1.SearchResult
-	55, // 32: aoc.worldadmin.v1.GetStatusResponse.stats:type_name -> aoc.worldadmin.v1.StreamStats
-	6,  // 33: aoc.worldadmin.v1.WorldAdminService.ListPlayers:input_type -> aoc.worldadmin.v1.ListPlayersRequest
-	9,  // 34: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
-	12, // 35: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
-	14, // 36: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
-	16, // 37: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
-	35, // 38: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
-	18, // 39: aoc.worldadmin.v1.WorldAdminService.PlaceStation:input_type -> aoc.worldadmin.v1.PlaceStationRequest
-	20, // 40: aoc.worldadmin.v1.WorldAdminService.RemoveStation:input_type -> aoc.worldadmin.v1.RemoveStationRequest
-	22, // 41: aoc.worldadmin.v1.WorldAdminService.FinishJobs:input_type -> aoc.worldadmin.v1.FinishJobsRequest
-	24, // 42: aoc.worldadmin.v1.WorldAdminService.TeachRecipe:input_type -> aoc.worldadmin.v1.TeachRecipeRequest
-	26, // 43: aoc.worldadmin.v1.WorldAdminService.ForgetRecipe:input_type -> aoc.worldadmin.v1.ForgetRecipeRequest
-	28, // 44: aoc.worldadmin.v1.WorldAdminService.ListTaughtRecipes:input_type -> aoc.worldadmin.v1.ListTaughtRecipesRequest
-	31, // 45: aoc.worldadmin.v1.WorldAdminService.ResetTutorials:input_type -> aoc.worldadmin.v1.ResetTutorialsRequest
-	33, // 46: aoc.worldadmin.v1.WorldAdminService.SetWeaponXp:input_type -> aoc.worldadmin.v1.SetWeaponXpRequest
-	37, // 47: aoc.worldadmin.v1.WorldAdminService.KillNpc:input_type -> aoc.worldadmin.v1.KillNpcRequest
-	39, // 48: aoc.worldadmin.v1.WorldAdminService.RespawnNpc:input_type -> aoc.worldadmin.v1.RespawnNpcRequest
-	41, // 49: aoc.worldadmin.v1.WorldAdminService.ResetNpc:input_type -> aoc.worldadmin.v1.ResetNpcRequest
-	43, // 50: aoc.worldadmin.v1.WorldAdminService.HealNpc:input_type -> aoc.worldadmin.v1.HealNpcRequest
-	45, // 51: aoc.worldadmin.v1.WorldAdminService.DespawnNpc:input_type -> aoc.worldadmin.v1.DespawnNpcRequest
-	47, // 52: aoc.worldadmin.v1.WorldAdminService.MoveNpc:input_type -> aoc.worldadmin.v1.MoveNpcRequest
-	50, // 53: aoc.worldadmin.v1.WorldStreamService.Subscribe:input_type -> aoc.worldadmin.v1.SubscribeRequest
-	57, // 54: aoc.worldadmin.v1.WorldStreamService.Inspect:input_type -> aoc.worldadmin.v1.InspectRequest
-	62, // 55: aoc.worldadmin.v1.WorldStreamService.Search:input_type -> aoc.worldadmin.v1.SearchRequest
-	65, // 56: aoc.worldadmin.v1.WorldStreamService.GetStatus:input_type -> aoc.worldadmin.v1.GetStatusRequest
-	7,  // 57: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
-	10, // 58: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
-	13, // 59: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
-	15, // 60: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
-	17, // 61: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
-	36, // 62: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
-	19, // 63: aoc.worldadmin.v1.WorldAdminService.PlaceStation:output_type -> aoc.worldadmin.v1.PlaceStationResponse
-	21, // 64: aoc.worldadmin.v1.WorldAdminService.RemoveStation:output_type -> aoc.worldadmin.v1.RemoveStationResponse
-	23, // 65: aoc.worldadmin.v1.WorldAdminService.FinishJobs:output_type -> aoc.worldadmin.v1.FinishJobsResponse
-	25, // 66: aoc.worldadmin.v1.WorldAdminService.TeachRecipe:output_type -> aoc.worldadmin.v1.TeachRecipeResponse
-	27, // 67: aoc.worldadmin.v1.WorldAdminService.ForgetRecipe:output_type -> aoc.worldadmin.v1.ForgetRecipeResponse
-	30, // 68: aoc.worldadmin.v1.WorldAdminService.ListTaughtRecipes:output_type -> aoc.worldadmin.v1.ListTaughtRecipesResponse
-	32, // 69: aoc.worldadmin.v1.WorldAdminService.ResetTutorials:output_type -> aoc.worldadmin.v1.ResetTutorialsResponse
-	34, // 70: aoc.worldadmin.v1.WorldAdminService.SetWeaponXp:output_type -> aoc.worldadmin.v1.SetWeaponXpResponse
-	38, // 71: aoc.worldadmin.v1.WorldAdminService.KillNpc:output_type -> aoc.worldadmin.v1.KillNpcResponse
-	40, // 72: aoc.worldadmin.v1.WorldAdminService.RespawnNpc:output_type -> aoc.worldadmin.v1.RespawnNpcResponse
-	42, // 73: aoc.worldadmin.v1.WorldAdminService.ResetNpc:output_type -> aoc.worldadmin.v1.ResetNpcResponse
-	44, // 74: aoc.worldadmin.v1.WorldAdminService.HealNpc:output_type -> aoc.worldadmin.v1.HealNpcResponse
-	46, // 75: aoc.worldadmin.v1.WorldAdminService.DespawnNpc:output_type -> aoc.worldadmin.v1.DespawnNpcResponse
-	48, // 76: aoc.worldadmin.v1.WorldAdminService.MoveNpc:output_type -> aoc.worldadmin.v1.MoveNpcResponse
-	56, // 77: aoc.worldadmin.v1.WorldStreamService.Subscribe:output_type -> aoc.worldadmin.v1.SubscribeResponse
-	61, // 78: aoc.worldadmin.v1.WorldStreamService.Inspect:output_type -> aoc.worldadmin.v1.InspectResponse
-	64, // 79: aoc.worldadmin.v1.WorldStreamService.Search:output_type -> aoc.worldadmin.v1.SearchResponse
-	66, // 80: aoc.worldadmin.v1.WorldStreamService.GetStatus:output_type -> aoc.worldadmin.v1.GetStatusResponse
-	57, // [57:81] is the sub-list for method output_type
-	33, // [33:57] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	5,  // 0: aoc.worldadmin.v1.Player.position:type_name -> aoc.worldadmin.v1.Position
+	6,  // 1: aoc.worldadmin.v1.ListPlayersResponse.players:type_name -> aoc.worldadmin.v1.Player
+	5,  // 2: aoc.worldadmin.v1.Place.position:type_name -> aoc.worldadmin.v1.Position
+	9,  // 3: aoc.worldadmin.v1.ListPlacesResponse.places:type_name -> aoc.worldadmin.v1.Place
+	12, // 4: aoc.worldadmin.v1.TeleportRequest.point:type_name -> aoc.worldadmin.v1.Point
+	5,  // 5: aoc.worldadmin.v1.TeleportResponse.from:type_name -> aoc.worldadmin.v1.Position
+	5,  // 6: aoc.worldadmin.v1.TeleportResponse.to:type_name -> aoc.worldadmin.v1.Position
+	5,  // 7: aoc.worldadmin.v1.PlaceStationResponse.position:type_name -> aoc.worldadmin.v1.Position
+	30, // 8: aoc.worldadmin.v1.ListTaughtRecipesResponse.recipes:type_name -> aoc.worldadmin.v1.TaughtRecipe
+	5,  // 9: aoc.worldadmin.v1.KillNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	5,  // 10: aoc.worldadmin.v1.RespawnNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	5,  // 11: aoc.worldadmin.v1.ResetNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	5,  // 12: aoc.worldadmin.v1.HealNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	5,  // 13: aoc.worldadmin.v1.DespawnNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	12, // 14: aoc.worldadmin.v1.MoveNpcRequest.point:type_name -> aoc.worldadmin.v1.Point
+	5,  // 15: aoc.worldadmin.v1.MoveNpcResponse.position:type_name -> aoc.worldadmin.v1.Position
+	5,  // 16: aoc.worldadmin.v1.MoveNpcResponse.from:type_name -> aoc.worldadmin.v1.Position
+	0,  // 17: aoc.worldadmin.v1.CommandField.type:type_name -> aoc.worldadmin.v1.CommandFieldType
+	50, // 18: aoc.worldadmin.v1.AdminCommand.fields:type_name -> aoc.worldadmin.v1.CommandField
+	51, // 19: aoc.worldadmin.v1.ListCommandsResponse.commands:type_name -> aoc.worldadmin.v1.AdminCommand
+	77, // 20: aoc.worldadmin.v1.RunCommandRequest.fields:type_name -> aoc.worldadmin.v1.RunCommandRequest.FieldsEntry
+	78, // 21: aoc.worldadmin.v1.ListFieldOptionsRequest.chosen:type_name -> aoc.worldadmin.v1.ListFieldOptionsRequest.ChosenEntry
+	57, // 22: aoc.worldadmin.v1.ListFieldOptionsResponse.options:type_name -> aoc.worldadmin.v1.FieldOption
+	59, // 23: aoc.worldadmin.v1.SubscribeRequest.area:type_name -> aoc.worldadmin.v1.AreaBox
+	3,  // 24: aoc.worldadmin.v1.SubscribeRequest.detail:type_name -> aoc.worldadmin.v1.StreamDetail
+	1,  // 25: aoc.worldadmin.v1.Entity.kind:type_name -> aoc.worldadmin.v1.EntityKind
+	61, // 26: aoc.worldadmin.v1.EntitySnapshot.entities:type_name -> aoc.worldadmin.v1.Entity
+	61, // 27: aoc.worldadmin.v1.EntityDelta.changed:type_name -> aoc.worldadmin.v1.Entity
+	62, // 28: aoc.worldadmin.v1.SubscribeResponse.snapshot:type_name -> aoc.worldadmin.v1.EntitySnapshot
+	63, // 29: aoc.worldadmin.v1.SubscribeResponse.delta:type_name -> aoc.worldadmin.v1.EntityDelta
+	64, // 30: aoc.worldadmin.v1.SubscribeResponse.density:type_name -> aoc.worldadmin.v1.DensityGrid
+	65, // 31: aoc.worldadmin.v1.SubscribeResponse.stats:type_name -> aoc.worldadmin.v1.StreamStats
+	68, // 32: aoc.worldadmin.v1.ActorDetail.threat:type_name -> aoc.worldadmin.v1.ThreatEntry
+	61, // 33: aoc.worldadmin.v1.InspectResponse.entity:type_name -> aoc.worldadmin.v1.Entity
+	69, // 34: aoc.worldadmin.v1.InspectResponse.actor:type_name -> aoc.worldadmin.v1.ActorDetail
+	70, // 35: aoc.worldadmin.v1.InspectResponse.player:type_name -> aoc.worldadmin.v1.PlayerDetail
+	61, // 36: aoc.worldadmin.v1.SearchResult.entity:type_name -> aoc.worldadmin.v1.Entity
+	73, // 37: aoc.worldadmin.v1.SearchResponse.results:type_name -> aoc.worldadmin.v1.SearchResult
+	65, // 38: aoc.worldadmin.v1.GetStatusResponse.stats:type_name -> aoc.worldadmin.v1.StreamStats
+	7,  // 39: aoc.worldadmin.v1.WorldAdminService.ListPlayers:input_type -> aoc.worldadmin.v1.ListPlayersRequest
+	10, // 40: aoc.worldadmin.v1.WorldAdminService.ListPlaces:input_type -> aoc.worldadmin.v1.ListPlacesRequest
+	13, // 41: aoc.worldadmin.v1.WorldAdminService.Teleport:input_type -> aoc.worldadmin.v1.TeleportRequest
+	15, // 42: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:input_type -> aoc.worldadmin.v1.SetMoveSpeedRequest
+	17, // 43: aoc.worldadmin.v1.WorldAdminService.GiveMoney:input_type -> aoc.worldadmin.v1.GiveMoneyRequest
+	36, // 44: aoc.worldadmin.v1.WorldAdminService.GiveItem:input_type -> aoc.worldadmin.v1.GiveItemRequest
+	19, // 45: aoc.worldadmin.v1.WorldAdminService.PlaceStation:input_type -> aoc.worldadmin.v1.PlaceStationRequest
+	21, // 46: aoc.worldadmin.v1.WorldAdminService.RemoveStation:input_type -> aoc.worldadmin.v1.RemoveStationRequest
+	23, // 47: aoc.worldadmin.v1.WorldAdminService.FinishJobs:input_type -> aoc.worldadmin.v1.FinishJobsRequest
+	25, // 48: aoc.worldadmin.v1.WorldAdminService.TeachRecipe:input_type -> aoc.worldadmin.v1.TeachRecipeRequest
+	27, // 49: aoc.worldadmin.v1.WorldAdminService.ForgetRecipe:input_type -> aoc.worldadmin.v1.ForgetRecipeRequest
+	29, // 50: aoc.worldadmin.v1.WorldAdminService.ListTaughtRecipes:input_type -> aoc.worldadmin.v1.ListTaughtRecipesRequest
+	32, // 51: aoc.worldadmin.v1.WorldAdminService.ResetTutorials:input_type -> aoc.worldadmin.v1.ResetTutorialsRequest
+	34, // 52: aoc.worldadmin.v1.WorldAdminService.SetWeaponXp:input_type -> aoc.worldadmin.v1.SetWeaponXpRequest
+	38, // 53: aoc.worldadmin.v1.WorldAdminService.KillNpc:input_type -> aoc.worldadmin.v1.KillNpcRequest
+	40, // 54: aoc.worldadmin.v1.WorldAdminService.RespawnNpc:input_type -> aoc.worldadmin.v1.RespawnNpcRequest
+	42, // 55: aoc.worldadmin.v1.WorldAdminService.ResetNpc:input_type -> aoc.worldadmin.v1.ResetNpcRequest
+	44, // 56: aoc.worldadmin.v1.WorldAdminService.HealNpc:input_type -> aoc.worldadmin.v1.HealNpcRequest
+	46, // 57: aoc.worldadmin.v1.WorldAdminService.DespawnNpc:input_type -> aoc.worldadmin.v1.DespawnNpcRequest
+	48, // 58: aoc.worldadmin.v1.WorldAdminService.MoveNpc:input_type -> aoc.worldadmin.v1.MoveNpcRequest
+	52, // 59: aoc.worldadmin.v1.WorldAdminService.ListCommands:input_type -> aoc.worldadmin.v1.ListCommandsRequest
+	54, // 60: aoc.worldadmin.v1.WorldAdminService.RunCommand:input_type -> aoc.worldadmin.v1.RunCommandRequest
+	56, // 61: aoc.worldadmin.v1.WorldAdminService.ListFieldOptions:input_type -> aoc.worldadmin.v1.ListFieldOptionsRequest
+	60, // 62: aoc.worldadmin.v1.WorldStreamService.Subscribe:input_type -> aoc.worldadmin.v1.SubscribeRequest
+	67, // 63: aoc.worldadmin.v1.WorldStreamService.Inspect:input_type -> aoc.worldadmin.v1.InspectRequest
+	72, // 64: aoc.worldadmin.v1.WorldStreamService.Search:input_type -> aoc.worldadmin.v1.SearchRequest
+	75, // 65: aoc.worldadmin.v1.WorldStreamService.GetStatus:input_type -> aoc.worldadmin.v1.GetStatusRequest
+	8,  // 66: aoc.worldadmin.v1.WorldAdminService.ListPlayers:output_type -> aoc.worldadmin.v1.ListPlayersResponse
+	11, // 67: aoc.worldadmin.v1.WorldAdminService.ListPlaces:output_type -> aoc.worldadmin.v1.ListPlacesResponse
+	14, // 68: aoc.worldadmin.v1.WorldAdminService.Teleport:output_type -> aoc.worldadmin.v1.TeleportResponse
+	16, // 69: aoc.worldadmin.v1.WorldAdminService.SetMoveSpeed:output_type -> aoc.worldadmin.v1.SetMoveSpeedResponse
+	18, // 70: aoc.worldadmin.v1.WorldAdminService.GiveMoney:output_type -> aoc.worldadmin.v1.GiveMoneyResponse
+	37, // 71: aoc.worldadmin.v1.WorldAdminService.GiveItem:output_type -> aoc.worldadmin.v1.GiveItemResponse
+	20, // 72: aoc.worldadmin.v1.WorldAdminService.PlaceStation:output_type -> aoc.worldadmin.v1.PlaceStationResponse
+	22, // 73: aoc.worldadmin.v1.WorldAdminService.RemoveStation:output_type -> aoc.worldadmin.v1.RemoveStationResponse
+	24, // 74: aoc.worldadmin.v1.WorldAdminService.FinishJobs:output_type -> aoc.worldadmin.v1.FinishJobsResponse
+	26, // 75: aoc.worldadmin.v1.WorldAdminService.TeachRecipe:output_type -> aoc.worldadmin.v1.TeachRecipeResponse
+	28, // 76: aoc.worldadmin.v1.WorldAdminService.ForgetRecipe:output_type -> aoc.worldadmin.v1.ForgetRecipeResponse
+	31, // 77: aoc.worldadmin.v1.WorldAdminService.ListTaughtRecipes:output_type -> aoc.worldadmin.v1.ListTaughtRecipesResponse
+	33, // 78: aoc.worldadmin.v1.WorldAdminService.ResetTutorials:output_type -> aoc.worldadmin.v1.ResetTutorialsResponse
+	35, // 79: aoc.worldadmin.v1.WorldAdminService.SetWeaponXp:output_type -> aoc.worldadmin.v1.SetWeaponXpResponse
+	39, // 80: aoc.worldadmin.v1.WorldAdminService.KillNpc:output_type -> aoc.worldadmin.v1.KillNpcResponse
+	41, // 81: aoc.worldadmin.v1.WorldAdminService.RespawnNpc:output_type -> aoc.worldadmin.v1.RespawnNpcResponse
+	43, // 82: aoc.worldadmin.v1.WorldAdminService.ResetNpc:output_type -> aoc.worldadmin.v1.ResetNpcResponse
+	45, // 83: aoc.worldadmin.v1.WorldAdminService.HealNpc:output_type -> aoc.worldadmin.v1.HealNpcResponse
+	47, // 84: aoc.worldadmin.v1.WorldAdminService.DespawnNpc:output_type -> aoc.worldadmin.v1.DespawnNpcResponse
+	49, // 85: aoc.worldadmin.v1.WorldAdminService.MoveNpc:output_type -> aoc.worldadmin.v1.MoveNpcResponse
+	53, // 86: aoc.worldadmin.v1.WorldAdminService.ListCommands:output_type -> aoc.worldadmin.v1.ListCommandsResponse
+	55, // 87: aoc.worldadmin.v1.WorldAdminService.RunCommand:output_type -> aoc.worldadmin.v1.RunCommandResponse
+	58, // 88: aoc.worldadmin.v1.WorldAdminService.ListFieldOptions:output_type -> aoc.worldadmin.v1.ListFieldOptionsResponse
+	66, // 89: aoc.worldadmin.v1.WorldStreamService.Subscribe:output_type -> aoc.worldadmin.v1.SubscribeResponse
+	71, // 90: aoc.worldadmin.v1.WorldStreamService.Inspect:output_type -> aoc.worldadmin.v1.InspectResponse
+	74, // 91: aoc.worldadmin.v1.WorldStreamService.Search:output_type -> aoc.worldadmin.v1.SearchResponse
+	76, // 92: aoc.worldadmin.v1.WorldStreamService.GetStatus:output_type -> aoc.worldadmin.v1.GetStatusResponse
+	66, // [66:93] is the sub-list for method output_type
+	39, // [39:66] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_aoc_worldadmin_v1_worldadmin_proto_init() }
@@ -5049,12 +5832,12 @@ func file_aoc_worldadmin_v1_worldadmin_proto_init() {
 		(*SetWeaponXpRequest_Level)(nil),
 		(*SetWeaponXpRequest_Xp)(nil),
 	}
-	file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[52].OneofWrappers = []any{
+	file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[61].OneofWrappers = []any{
 		(*SubscribeResponse_Snapshot)(nil),
 		(*SubscribeResponse_Delta)(nil),
 		(*SubscribeResponse_Density)(nil),
 	}
-	file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[57].OneofWrappers = []any{
+	file_aoc_worldadmin_v1_worldadmin_proto_msgTypes[66].OneofWrappers = []any{
 		(*InspectResponse_Actor)(nil),
 		(*InspectResponse_Player)(nil),
 	}
@@ -5063,8 +5846,8 @@ func file_aoc_worldadmin_v1_worldadmin_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc), len(file_aoc_worldadmin_v1_worldadmin_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   63,
+			NumEnums:      5,
+			NumMessages:   74,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

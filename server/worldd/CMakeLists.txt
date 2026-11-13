@@ -234,6 +234,7 @@ add_library(worldd_core STATIC
     session/ability_reactions.cpp
     session/action_bar.cpp
     session/action_bar.h
+    session/gm_options.cpp
     session/gm_travel.cpp
     session/gm_travel.h
     session/item_use.cpp

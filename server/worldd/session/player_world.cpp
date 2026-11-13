@@ -1004,6 +1004,73 @@ PlayerWorld::StationResult PlayerWorld::remove_station(const std::string& node_n
     return fail(StationStatus::NotFound, "no station was placed on " + plot_name + " of " + node->display_name);
 }
 
+std::vector<PlayerWorld::StationPlot> PlayerWorld::station_plots(const std::string& node_name, bool placed, std::string& why) const {
+    std::vector<StationPlot> out;
+    if (!city_nodes_ || !node_wire_) {
+        why = "this world has no towns";
+        return out;
+    }
+    const world::CityNodeInfo* node = node_name.empty() ? nullptr : city_nodes_->by_name(node_name);
+    if (!node) {
+        why = node_name.empty() ? "Choose the node first." : "no city node is named \"" + node_name + "\".";
+        return out;
+    }
+    const int level = city_nodes_->level_of(node->guid);
+    if (level < 3) {
+        why = node->display_name + " is a " + std::string(spawns::node_level_name(level)) + ": only a Village or a Town has service plots.";
+        return out;
+    }
+    const std::vector<world::PlotRow> rows = node_wire_->plot_rows_of(node->guid, level);
+    if (!placed) {
+        for (const world::PlotRow* p : free_plots(rows)) {
+            if (!placed_stations_.count({node->guid, p->plot})) out.push_back({p->name, std::string()});
+        }
+        if (out.empty()) why = node->display_name + " has no free service plot.";
+        return out;
+    }
+    for (const auto& [key, actor] : placed_stations_) {
+        if (key.first != node->guid) continue;
+        for (const world::PlotRow& row : rows) {
+            if (row.plot != key.second) continue;
+            const world::WorldActor* a = registry_.find(actor);
+            out.push_back({row.name, a ? a->station.name : std::string()});
+        }
+    }
+    if (out.empty()) why = "No station was placed on " + node->display_name + ".";
+    return out;
+}
+
+std::vector<std::string> PlayerWorld::plot_station_names(const std::string& node_name, const std::string& plot_name, std::string& why) const {
+    std::vector<std::string> out;
+    if (!city_nodes_ || !node_wire_ || !node_pop_data_ || !area_report_ || !area_report_->data) {
+        why = "this world has no towns' people, so it has no stations to place";
+        return out;
+    }
+    const world::CityNodeInfo* node = node_name.empty() ? nullptr : city_nodes_->by_name(node_name);
+    if (!node) {
+        why = "Choose the node first.";
+        return out;
+    }
+    const int level = city_nodes_->level_of(node->guid);
+    if (level < 3) {
+        why = node->display_name + " is a " + std::string(spawns::node_level_name(level)) + ": only a Village or a Town has service plots.";
+        return out;
+    }
+    const std::vector<world::PlotRow> rows = node_wire_->plot_rows_of(node->guid, level);
+    const world::PlotRow* plot = nullptr;
+    for (const world::PlotRow& row : rows) {
+        if (!plot_name.empty() && same_text(row.name, plot_name)) plot = &row;
+    }
+    if (!plot) {
+        why = plot_name.empty() ? "Choose the plot first." : node->display_name + " has no plot named \"" + plot_name + "\".";
+        return out;
+    }
+    const spawns::NodeSite site = spawns::node_site_of(*city_nodes_, *node_wire_, *node, level);
+    out = spawns::stations_on_plot(*area_report_->data, *node_pop_data_, site, node_wire_->plot_buildings(plot->plot));
+    if (out.empty()) why = "No building that can stand on " + plot->name + " has a station at the node's level.";
+    return out;
+}
+
 void PlayerWorld::reap_placed_stations() {
     placed_seen_version_ = city_nodes_ ? city_nodes_->version() : 0;
     for (auto it = placed_stations_.begin(); it != placed_stations_.end();) {

@@ -599,6 +599,8 @@ public:
     /// The instance of an effect record: its end time on the pipeline's clock (infinity for an infinite one); nullopt when it is not on.
     std::optional<double> effect_end(int64_t effect_guid) const;
     size_t cooldowns_running() const { return groups_.size(); }
+    /// Ends every cooldown running now (a GM's clear-cooldowns): each group's abilities leave the pawn's Cooldowns with the next update. Returns how many groups were running.
+    size_t clear_cooldowns(double now);
     /// Charges left in the cooldown group of an ability (-1 when it has no group running).
     int    charges_left(int64_t ability) const;
     double now() const { return now_; }

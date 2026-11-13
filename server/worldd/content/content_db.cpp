@@ -3648,6 +3648,48 @@ std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string
     return out;
 }
 
+std::vector<ContentDb::ItemListRow> ContentDb::list_items(const std::string& filter, size_t limit, size_t offset, size_t& total, std::string& error) const {
+    std::vector<ItemListRow> out;
+    total = 0;
+    // the filter is a plain text: its LIKE wildcards are escaped
+    std::string pattern = "%";
+    for (const char c : filter) {
+        if (c == '%' || c == '_' || c == '\\') pattern.push_back('\\');
+        pattern.push_back(c);
+    }
+    pattern += "%";
+    // a file older than contentc version 16 has no display_name column: it is searched and shown by the record's name
+    bool with_display = true;
+    {
+        Stmt probe(db_, "SELECT display_name FROM item LIMIT 1");
+        with_display = probe.ok();
+    }
+    const char* where = with_display ? "(name LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\' OR CAST(guid AS TEXT) LIKE ?1 ESCAPE '\\')" : "(name LIKE ?1 ESCAPE '\\' OR CAST(guid AS TEXT) LIKE ?1 ESCAPE '\\')";
+    {
+        Stmt q(db_, (std::string("SELECT COUNT(*) FROM item WHERE ") + where).c_str());
+        if (!q.ok()) {
+            error = "content.db item query failed: " + db_message(db_);
+            return out;
+        }
+        sqlite3_bind_text(q.get(), 1, pattern.c_str(), static_cast<int>(pattern.size()), SQLITE_TRANSIENT);
+        if (sqlite3_step(q.get()) == SQLITE_ROW) total = static_cast<size_t>(sqlite3_column_int64(q.get(), 0));
+    }
+    const std::string select = with_display ? "SELECT guid, name, display_name FROM item WHERE " : "SELECT guid, name, '' FROM item WHERE ";
+    const std::string order = with_display ? " ORDER BY LOWER(CASE WHEN display_name IS NULL OR display_name = '' THEN name ELSE display_name END), guid LIMIT ?2 OFFSET ?3" : " ORDER BY LOWER(name), guid LIMIT ?2 OFFSET ?3";
+    Stmt q(db_, (select + where + order).c_str());
+    if (!q.ok()) {
+        error = "content.db item query failed: " + db_message(db_);
+        return out;
+    }
+    sqlite3_bind_text(q.get(), 1, pattern.c_str(), static_cast<int>(pattern.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_int64(q.get(), 2, static_cast<int64_t>(limit));
+    sqlite3_bind_int64(q.get(), 3, static_cast<int64_t>(offset));
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.push_back({sqlite3_column_int64(q.get(), 0), column_text(q.get(), 1), column_text(q.get(), 2)});
+    if (step != SQLITE_DONE) error = "content.db item query failed: " + db_message(db_);
+    return out;
+}
+
 std::optional<CraftStationData> ContentDb::craft_station_data(std::string& error) const {
     CraftStationData out;
     const auto failed = [&](const char* table) {

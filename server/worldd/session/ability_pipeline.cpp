@@ -2108,6 +2108,18 @@ int AbilityPipeline::charges_left(int64_t ability) const {
     return it == groups_.end() ? -1 : it->second.charges;
 }
 
+size_t AbilityPipeline::clear_cooldowns(double now) {
+    if (groups_.empty()) return 0;
+    AbilityChange c;
+    for (const auto& [key, g] : groups_) {
+        for (const int64_t a : g.items) c.cooldowns_removed.push_back(a);
+    }
+    const size_t ended = groups_.size();
+    groups_.clear();
+    emit({std::move(c), std::nullopt, now, "the GM ended every cooldown"});
+    return ended;
+}
+
 // ---- movement ---------------------------------------------------------------------------------------------------------------------------
 
 double AbilityPipeline::movement_allowance(double now) const {

@@ -43,6 +43,9 @@ const (
 	WorldAdminService_HealNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/HealNpc"
 	WorldAdminService_DespawnNpc_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/DespawnNpc"
 	WorldAdminService_MoveNpc_FullMethodName           = "/aoc.worldadmin.v1.WorldAdminService/MoveNpc"
+	WorldAdminService_ListCommands_FullMethodName      = "/aoc.worldadmin.v1.WorldAdminService/ListCommands"
+	WorldAdminService_RunCommand_FullMethodName        = "/aoc.worldadmin.v1.WorldAdminService/RunCommand"
+	WorldAdminService_ListFieldOptions_FullMethodName  = "/aoc.worldadmin.v1.WorldAdminService/ListFieldOptions"
 )
 
 // WorldAdminServiceClient is the client API for WorldAdminService service.
@@ -123,6 +126,23 @@ type WorldAdminServiceClient interface {
 	// Puts a living creature at a point at once. It stands there, and its leash and its walk home are centred on the point from now on, so a fight leashes it back to the point and not
 	// to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
 	MoveNpc(ctx context.Context, in *MoveNpcRequest, opts ...grpc.CallOption) (*MoveNpcResponse, error)
+	// ---- the command list and the run call: one list the admin app draws a form from, one call that runs any of them ----
+	//
+	// Every command the admin API offers, the travel tools above included, is in this list, with its fields: a form is drawn from the list, not written by hand for each command.
+	// A field's type says how it is written (a whole number, a number, text, a character, an item, a place, or one of a choice's values), its range and whether it is required.
+	// `acts_on_character` says whether the command names a character; such a command answers NotFound when that character is not in the world.
+	ListCommands(ctx context.Context, in *ListCommandsRequest, opts ...grpc.CallOption) (*ListCommandsResponse, error)
+	// Runs one command by its name, with its fields as text. Every field is checked here against the list's own rules (the name is in the list, a field the command does not have is
+	// refused, every required field is there, a number is a number and in its range, a choice is one of its values), then the command runs. The answer is one plain line. The caller is
+	// never trusted: the same checks hold whoever calls. Errors: InvalidArgument for an unknown command or a field that breaks its rule; NotFound for a character that is not in the
+	// world; FailedPrecondition for a state a command cannot work in (a dead character healed, a cooldown that is not running).
+	RunCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (*RunCommandResponse, error)
+	// The values one field of one command can take, read from the world's own data, so that a form draws a drop-down for it instead of a box the operator must know the answer to. The
+	// field's entry in ListCommands says it has options (`has_options`), whether the list is long (`searchable`, with `page_size`) and which other fields of the command change it
+	// (`depends_on`: the plots of the node chosen, the objectives of the quest chosen); the call carries what is chosen so far in `chosen`. Each option is a value to send in RunCommand and
+	// a label to show. InvalidArgument for a command or a field that is not in the list, or one that has no options; the answer's `note` says in plain words why a list is empty (a node
+	// that is not chosen yet, a world with no towns).
+	ListFieldOptions(ctx context.Context, in *ListFieldOptionsRequest, opts ...grpc.CallOption) (*ListFieldOptionsResponse, error)
 }
 
 type worldAdminServiceClient struct {
@@ -333,6 +353,36 @@ func (c *worldAdminServiceClient) MoveNpc(ctx context.Context, in *MoveNpcReques
 	return out, nil
 }
 
+func (c *worldAdminServiceClient) ListCommands(ctx context.Context, in *ListCommandsRequest, opts ...grpc.CallOption) (*ListCommandsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCommandsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ListCommands_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) RunCommand(ctx context.Context, in *RunCommandRequest, opts ...grpc.CallOption) (*RunCommandResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RunCommandResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_RunCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *worldAdminServiceClient) ListFieldOptions(ctx context.Context, in *ListFieldOptionsRequest, opts ...grpc.CallOption) (*ListFieldOptionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListFieldOptionsResponse)
+	err := c.cc.Invoke(ctx, WorldAdminService_ListFieldOptions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorldAdminServiceServer is the server API for WorldAdminService service.
 // All implementations must embed UnimplementedWorldAdminServiceServer
 // for forward compatibility.
@@ -411,6 +461,23 @@ type WorldAdminServiceServer interface {
 	// Puts a living creature at a point at once. It stands there, and its leash and its walk home are centred on the point from now on, so a fight leashes it back to the point and not
 	// to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
 	MoveNpc(context.Context, *MoveNpcRequest) (*MoveNpcResponse, error)
+	// ---- the command list and the run call: one list the admin app draws a form from, one call that runs any of them ----
+	//
+	// Every command the admin API offers, the travel tools above included, is in this list, with its fields: a form is drawn from the list, not written by hand for each command.
+	// A field's type says how it is written (a whole number, a number, text, a character, an item, a place, or one of a choice's values), its range and whether it is required.
+	// `acts_on_character` says whether the command names a character; such a command answers NotFound when that character is not in the world.
+	ListCommands(context.Context, *ListCommandsRequest) (*ListCommandsResponse, error)
+	// Runs one command by its name, with its fields as text. Every field is checked here against the list's own rules (the name is in the list, a field the command does not have is
+	// refused, every required field is there, a number is a number and in its range, a choice is one of its values), then the command runs. The answer is one plain line. The caller is
+	// never trusted: the same checks hold whoever calls. Errors: InvalidArgument for an unknown command or a field that breaks its rule; NotFound for a character that is not in the
+	// world; FailedPrecondition for a state a command cannot work in (a dead character healed, a cooldown that is not running).
+	RunCommand(context.Context, *RunCommandRequest) (*RunCommandResponse, error)
+	// The values one field of one command can take, read from the world's own data, so that a form draws a drop-down for it instead of a box the operator must know the answer to. The
+	// field's entry in ListCommands says it has options (`has_options`), whether the list is long (`searchable`, with `page_size`) and which other fields of the command change it
+	// (`depends_on`: the plots of the node chosen, the objectives of the quest chosen); the call carries what is chosen so far in `chosen`. Each option is a value to send in RunCommand and
+	// a label to show. InvalidArgument for a command or a field that is not in the list, or one that has no options; the answer's `note` says in plain words why a list is empty (a node
+	// that is not chosen yet, a world with no towns).
+	ListFieldOptions(context.Context, *ListFieldOptionsRequest) (*ListFieldOptionsResponse, error)
 	mustEmbedUnimplementedWorldAdminServiceServer()
 }
 
@@ -480,6 +547,15 @@ func (UnimplementedWorldAdminServiceServer) DespawnNpc(context.Context, *Despawn
 }
 func (UnimplementedWorldAdminServiceServer) MoveNpc(context.Context, *MoveNpcRequest) (*MoveNpcResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MoveNpc not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ListCommands(context.Context, *ListCommandsRequest) (*ListCommandsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCommands not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) RunCommand(context.Context, *RunCommandRequest) (*RunCommandResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunCommand not implemented")
+}
+func (UnimplementedWorldAdminServiceServer) ListFieldOptions(context.Context, *ListFieldOptionsRequest) (*ListFieldOptionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFieldOptions not implemented")
 }
 func (UnimplementedWorldAdminServiceServer) mustEmbedUnimplementedWorldAdminServiceServer() {}
 func (UnimplementedWorldAdminServiceServer) testEmbeddedByValue()                           {}
@@ -862,6 +938,60 @@ func _WorldAdminService_MoveNpc_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldAdminService_ListCommands_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCommandsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ListCommands(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ListCommands_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ListCommands(ctx, req.(*ListCommandsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_RunCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RunCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).RunCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_RunCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).RunCommand(ctx, req.(*RunCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorldAdminService_ListFieldOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFieldOptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldAdminServiceServer).ListFieldOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldAdminService_ListFieldOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldAdminServiceServer).ListFieldOptions(ctx, req.(*ListFieldOptionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorldAdminService_ServiceDesc is the grpc.ServiceDesc for WorldAdminService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -948,6 +1078,18 @@ var WorldAdminService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MoveNpc",
 			Handler:    _WorldAdminService_MoveNpc_Handler,
+		},
+		{
+			MethodName: "ListCommands",
+			Handler:    _WorldAdminService_ListCommands_Handler,
+		},
+		{
+			MethodName: "RunCommand",
+			Handler:    _WorldAdminService_RunCommand_Handler,
+		},
+		{
+			MethodName: "ListFieldOptions",
+			Handler:    _WorldAdminService_ListFieldOptions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -87,6 +87,24 @@ service WorldAdminService {
   // Puts a living creature at a point at once. It stands there, and its leash and its walk home are centred on the point from now on, so a fight leashes it back to the point and not
   // to where it came from. Its spawn point, where it is made again after a death, stays its own. With no z the creature stands on the ground under the point.
   rpc MoveNpc(MoveNpcRequest) returns (MoveNpcResponse);
+
+  // ---- the command list and the run call: one list the admin app draws a form from, one call that runs any of them ----
+  //
+  // Every command the admin API offers, the travel tools above included, is in this list, with its fields: a form is drawn from the list, not written by hand for each command.
+  // A field's type says how it is written (a whole number, a number, text, a character, an item, a place, or one of a choice's values), its range and whether it is required.
+  // `acts_on_character` says whether the command names a character; such a command answers NotFound when that character is not in the world.
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
+  // Runs one command by its name, with its fields as text. Every field is checked here against the list's own rules (the name is in the list, a field the command does not have is
+  // refused, every required field is there, a number is a number and in its range, a choice is one of its values), then the command runs. The answer is one plain line. The caller is
+  // never trusted: the same checks hold whoever calls. Errors: InvalidArgument for an unknown command or a field that breaks its rule; NotFound for a character that is not in the
+  // world; FailedPrecondition for a state a command cannot work in (a dead character healed, a cooldown that is not running).
+  rpc RunCommand(RunCommandRequest) returns (RunCommandResponse);
+  // The values one field of one command can take, read from the world's own data, so that a form draws a drop-down for it instead of a box the operator must know the answer to. The
+  // field's entry in ListCommands says it has options (`has_options`), whether the list is long (`searchable`, with `page_size`) and which other fields of the command change it
+  // (`depends_on`: the plots of the node chosen, the objectives of the quest chosen); the call carries what is chosen so far in `chosen`. Each option is a value to send in RunCommand and
+  // a label to show. InvalidArgument for a command or a field that is not in the list, or one that has no options; the answer's `note` says in plain words why a list is empty (a node
+  // that is not chosen yet, a world with no towns).
+  rpc ListFieldOptions(ListFieldOptionsRequest) returns (ListFieldOptionsResponse);
 }
 
 message Position {
@@ -363,6 +381,85 @@ message MoveNpcResponse {
   Position position = 3; // where it stands now
   string result = 4;
   Position from = 5;     // where it stood
+}
+
+// ---- the command list and the run call -----------------------------------------------------------------------------------------------------
+
+enum CommandFieldType {
+  COMMAND_FIELD_TYPE_UNSPECIFIED = 0;
+  COMMAND_FIELD_TYPE_WHOLE_NUMBER = 1; // -2^63 to 2^63-1, within the range when one is given
+  COMMAND_FIELD_TYPE_NUMBER = 2;       // a finite number, within the range when one is given
+  COMMAND_FIELD_TYPE_TEXT = 3;         // free text
+  COMMAND_FIELD_TYPE_CHARACTER = 4;    // a character's name (ListPlayers lists them)
+  COMMAND_FIELD_TYPE_ITEM = 5;         // an item's record name or its Guid
+  COMMAND_FIELD_TYPE_PLACE = 6;        // a place's name (ListPlaces lists them)
+  COMMAND_FIELD_TYPE_CHOICE = 7;       // one of `choices`
+}
+
+// One field of a command: the key RunCommand.fields carries it under, a label for the form, how the value is written, whether it is required, and the range or the choices.
+message CommandField {
+  string name = 1;               // "character", "amount", "kind"
+  string label = 2;              // "Character", "Amount"
+  CommandFieldType type = 3;
+  bool required = 4;
+  string hint = 5;               // where the value comes from, or an example
+  repeated string choices = 6;   // COMMAND_FIELD_TYPE_CHOICE: the values allowed
+  bool has_minimum = 7;          // a whole number or a number
+  double minimum = 8;
+  bool has_maximum = 9;
+  double maximum = 10;
+  bool has_options = 11;         // the values come from the world's data: ListFieldOptions lists them (a form draws a drop-down)
+  bool searchable = 12;          // the list is long: ListFieldOptions takes a filter text and answers one page of `page_size` options
+  uint32 page_size = 13;         // searchable: how many options a page holds
+  repeated string depends_on = 14; // the fields of the same command whose chosen values the list follows (ListFieldOptionsRequest.chosen)
+}
+
+// One command the admin interface offers.
+message AdminCommand {
+  string name = 1;          // "teleport", "heal", "npc-kill"
+  string description = 2;   // one sentence in plain words
+  string group = 3;         // "movement", "items", "character", "combat", "world", "nodes", "quests", "mounts", "creatures", "crafting"
+  bool acts_on_character = 4;
+  repeated CommandField fields = 5;
+}
+
+message ListCommandsRequest {}
+
+message ListCommandsResponse {
+  repeated AdminCommand commands = 1;
+}
+
+message RunCommandRequest {
+  string command = 1;
+  map<string, string> fields = 2;   // every value as text; the list's field type says how it is read
+}
+
+message RunCommandResponse {
+  string command = 1;
+  string character = 2;   // the character the command acted on (empty when it names none)
+  string result = 3;      // one plain line the operator sees
+}
+
+message ListFieldOptionsRequest {
+  string command = 1;                // the command's name, as ListCommands gives it
+  string field = 2;                  // the field's name
+  map<string, string> chosen = 3;    // the values chosen so far, by field name: the character, the node, the quest ... that the list follows
+  string filter = 4;                 // a searchable field: only the options whose label or value holds this text (case does not count); empty: all
+  uint32 limit = 5;                  // a searchable field: the page size (0: the field's own, and never more than the server's cap)
+  uint32 offset = 6;                 // a searchable field: how many matching options to skip
+}
+
+// One value a field can take: what RunCommand carries and what the form shows.
+message FieldOption {
+  string value = 1;
+  string label = 2;
+}
+
+message ListFieldOptionsResponse {
+  repeated FieldOption options = 1;
+  uint32 total = 2;      // how many options match the filter (all of them when there is none)
+  bool more = 3;         // a searchable field: there are options after this page
+  string note = 4;       // why the list is empty or short, in plain words ("Choose the node first"); empty when there is nothing to say
 }
 
 // ---- the world stream ---------------------------------------------------------------------------------------------------------------------
