@@ -14,7 +14,8 @@
 //    ServerShowMayorInventory(NodeGuid)                   the mayor's view of the treasury: ClientShowMayorInventory(NodeDescription, InventoryItems, InventoryGold)
 //    ServerGMSetTaxOverride(NodeName, TaxTag, NewTaxPercent, NewFlatTaxAmount, NewOwningNodeTaxPercent), ServerGMAddNodeGold(NodeGuid, Amount, bIgnoreTaxes)
 //                                                         a game master's (gm_rpc_admitted): a rate set past the limits (0 to 100%), gold for the treasury
-//  Not built: the node's items (InventoryItems is empty), the owning node's share (NewOwningNodeTaxPercent: all of a tax stays with the node), taxes in Glint or
+//  InventoryItems: the node's stores (NodeElection::stored, session/player_node_inventory.cpp), each kind of goods one FItemInstance.
+//  Not built: the owning node's share (NewOwningNodeTaxPercent: all of a tax stays with the node), taxes in Glint or
 //  the node's currency (only money pays into the treasury).
 // ============================================================================
 #include "session/player_session_util.h"
@@ -159,8 +160,23 @@ void PlayerSession::on_show_mayor_inventory(Connection& conn, const repl::Client
     const world::CityNodeInfo* info = world_->city_nodes() ? world_->city_nodes()->by_guid(node) : nullptr;
     const std::string description = info ? info->display_name : std::string();
     const int64_t gold = el->treasury(node);
-    send_citizenship_call(conn, "ClientShowMayorInventory", [description, gold](const schema::RpcSchema& s, repl::RpcParams& p) {
-        return repl::set_rpc_param(s, p, "NodeDescription", repl::Value::str(description)) && repl::set_rpc_param(s, p, "InventoryItems", repl::Value(repl::ArrayValue{})) &&
+    repl::ArrayValue items;   // the node's stores, each kind one FItemInstance (its guid made from the node and the item: the stores keep no instances)
+    if (const auto* stored = el->stored(node)) {
+        for (const auto& [item, quantity] : *stored) {
+            repl::ItemInstance i;
+            i.has_item = true;
+            i.record_id = static_cast<uint64_t>(item);
+            i.quantity = static_cast<uint32_t>(std::max(0, quantity));
+            i.quality = 1;
+            const uint64_t mix = static_cast<uint64_t>(node) * 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(item);
+            i.guid = repl::GuidValue{static_cast<uint32_t>(mix >> 32), static_cast<uint32_t>(mix), static_cast<uint32_t>(static_cast<uint64_t>(node)), static_cast<uint32_t>(static_cast<uint64_t>(item))};
+            repl::ElementState e;
+            e.values[1] = repl::Value(std::move(i));
+            items.elements.push_back(std::move(e));
+        }
+    }
+    send_citizenship_call(conn, "ClientShowMayorInventory", [description, gold, items](const schema::RpcSchema& s, repl::RpcParams& p) {
+        return repl::set_rpc_param(s, p, "NodeDescription", repl::Value::str(description)) && repl::set_rpc_param(s, p, "InventoryItems", repl::Value(items)) &&
                repl::set_rpc_param(s, p, "InventoryGold", repl::Value::i64(gold));
     });
 }

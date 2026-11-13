@@ -39,6 +39,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_citizenship.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_citizenship_gm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_node_taxes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_node_inventory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_nodes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_presence.cpp

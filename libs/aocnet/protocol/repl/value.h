@@ -771,6 +771,14 @@ struct CitizenshipWindowData {
     bool operator==(const CitizenshipWindowData&) const = default;
 };
 
+/// FNodeInventoryData (ClientSendNodeInventoryData): a node's stored items and money; its own NetSerialize (node_inventory_codec.h).
+struct NodeInventoryData {
+    int64_t node = 0;                                  // the city node record
+    std::vector<std::pair<int64_t, int32_t>> items;    // a TMap<int64, int32>: an item record and its quantity, in the map's order
+    int64_t money = 0;                                 // the node's Money, copper [modelled: see node_inventory_codec.h]
+    bool operator==(const NodeInventoryData&) const = default;
+};
+
 /// How a Value holds the citizenship window's data: on the heap, as EventBox holds an event (the struct is some 300 bytes; boxed, a Value stays at the size of an ItemInstance).
 /// Code never names it: Value(CitizenshipWindowData) and Value::get_if<CitizenshipWindowData>() do.
 class CitizenshipBox {
@@ -834,7 +842,7 @@ public:
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
-        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection, CitizenshipBox>;
+        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection, CitizenshipBox, NodeInventoryData>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

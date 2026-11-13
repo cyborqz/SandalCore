@@ -767,9 +767,55 @@ void test_elections_unreadable_file() {
     CHECK(reads && fresh.citizen_count(kTestCitizenNode) == 1, "... and the next change writes a new file at the old name");
 }
 
+/// The node's stores through a session (session/player_node_inventory.cpp): the start the world gives the data's nodes, ClientSendNodeInventoryData, and the mayor's
+/// ClientShowMayorInventory listing the goods.
+void test_node_inventory() {
+    std::printf("node citizenship: the node's stores\n");
+    CitizenHarness h;
+    h.play();
+    h.run(milliseconds(1500));
+    spdlog::set_level(std::getenv("AOC_TEST_CITIZEN_LOG") ? spdlog::level::info : spdlog::level::off);
+    h.fx.world->set_elections(world::ElectionRules{}, "");
+    world::Elections* el = h.fx.world->elections();
+    constexpr int64_t kHalcyon = 108646610851452ll;
+    CHECK(el->treasury(kHalcyon) == 1525050 && el->stored(kHalcyon) && el->stored(kHalcyon)->size() == 3 && el->node(kHalcyon) && el->node(kHalcyon)->stocked,
+          "the world gives each node what its record starts it with (Halcyon: 1,525,050 copper and three kinds of goods)");
+    el->change_node(kTestCitizenNode, [](world::NodeElection& e) {
+        e.stored[77] = 5;
+        e.treasury = 900;
+        return true;
+    });
+    size_t at = h.got.size();
+    h.s->send_node_inventory_for_test(h.conn, kTestCitizenNode);
+    h.run(milliseconds(300));
+    auto calls = pc_calls_since(h, at);
+    const repl::RpcCall* c = last_call(calls, "ClientSendNodeInventoryData");
+    const repl::Value* data = c ? repl::rpcf::value_of(*c->rpc, c->params, "Data") : nullptr;
+    const repl::NodeInventoryData* d = data ? data->get_if<repl::NodeInventoryData>() : nullptr;
+    CHECK(d && d->node == kTestCitizenNode && d->items.size() == 1 && d->items[0].first == 77 && d->items[0].second == 5 && d->money == 900,
+          "ClientSendNodeInventoryData: the node, its goods and its money");
+    // the mayor's view of the node lists its goods
+    el->set_citizen(kTestCitizenNode, world::ElectionPerson{h.record.account_id, kCyb, "cyb", 1});
+    el->set_mayor(kTestCitizenNode, world::ElectionPerson{h.record.account_id, kCyb, "cyb", 1}, 1);
+    at = h.got.size();
+    h.t += milliseconds(500);
+    h.pc_call("ServerShowMayorInventory", [&](const schema::RpcSchema& r, repl::RpcParams& p) { repl::set_rpc_param(r, p, "NodeGuid", repl::Value::i64(kTestCitizenNode)); });
+    h.run(milliseconds(300));
+    calls = pc_calls_since(h, at);
+    c = last_call(calls, "ClientShowMayorInventory");
+    const repl::Value* items = c ? repl::rpcf::value_of(*c->rpc, c->params, "InventoryItems") : nullptr;
+    const repl::ArrayValue* list = items ? items->get_if<repl::ArrayValue>() : nullptr;
+    const repl::Value* first = list && list->elements.size() == 1 && list->elements[0].values.count(1) ? &list->elements[0].values.at(1) : nullptr;
+    const repl::ItemInstance* item = first ? first->get_if<repl::ItemInstance>() : nullptr;
+    const repl::Value* gold = c ? repl::rpcf::value_of(*c->rpc, c->params, "InventoryGold") : nullptr;
+    CHECK(item && item->has_item && item->record_id == 77 && item->quantity == 5 && gold && *gold->get_if<int64_t>() == 900,
+          "ClientShowMayorInventory lists the node's goods as items, with its gold");
+}
+
 AOC_REGISTER_TEST(test_citizenship_flow);
 AOC_REGISTER_TEST(test_mayor_flow);
 AOC_REGISTER_TEST(test_citizenship_gm);
 AOC_REGISTER_TEST(test_node_taxes);
 AOC_REGISTER_TEST(test_elections_unreadable_file);
+AOC_REGISTER_TEST(test_node_inventory);
 AOC_REGISTER_TEST(test_election_in_game);

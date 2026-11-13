@@ -13,6 +13,8 @@
 #include "world/elections.h"
 #include "vendor/node_tax.h"
 #include "vendor/town_shops.h"
+#include "world/city_nodes.h"
+#include "world/node_inventory_table.h"
 
 #include "test_registry.h"
 

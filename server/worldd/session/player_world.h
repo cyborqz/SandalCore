@@ -332,6 +332,8 @@ public:
     void set_account_citizenship(int64_t account, const svc::Citizenship& c) const { if (account != 0) account_citizenship_[account] = c; }
     /// Node citizenship, stage 2: the mayoral elections (world/elections.h), kept in `file` ("" : not kept, a restart loses them), read from it now.  Null in a world without them.
     void set_elections(world::ElectionRules rules, std::string file);
+    /// Each node has what its record starts it with, once (session/player_node_inventory.cpp): set_elections calls it whatever the file held.
+    void stock_node_stores();
     world::Elections* elections() const { return elections_ ? &*elections_ : nullptr; }   // (the sessions change it through a const world, as the banks)
     /// Brings the elections to `now_ms` (at most every 5 s; `force`: now) and writes the file when they changed.  The phase changes.
     std::vector<world::Elections::Change> tick_elections(int64_t now_ms, bool force = false) const;

@@ -22,6 +22,7 @@
 
 #include "protocol/repl/fast_array.h"
 #include "protocol/repl/citizenship_codec.h"
+#include "protocol/repl/node_inventory_codec.h"
 #include "protocol/repl/node_rpc.h"
 #include "protocol/repl/rpc.h"
 
@@ -397,6 +398,52 @@ void test_citizenship_window() {
     CHECK(got && got->get_if<CitizenshipWindowData>() && *got->get_if<CitizenshipWindowData>() == d, "... and the schema reads it back");
 }
 
+/// FNodeInventoryData (ClientSendNodeInventoryData): the layout read from the client's NetSerialize (node_inventory_codec.h): the node, a TMap<int64, int32> of items, the money.
+void test_node_inventory() {
+    NodeInventoryData d;
+    d.node = 0x0102030405060708ll;
+    d.items = {{0x1111111111111111ll, 225}, {0x2222222222222222ll, -1}};
+    d.money = 1525050;
+    BunchWriter w;
+    CHECK(write_node_inventory(w, d) && w.bit_pos() == 64 + 32 + 2 * (64 + 32) + 64, "a node inventory of two items is 352 bits: the node, the count, 64 + 32 each, the money");
+    const Bits bits(w);
+    // the words LSB first: the node's low byte first, then the count 2
+    bool order = bits.size() == 352;
+    for (int i = 0; order && i < 8; ++i) order = bits.b[static_cast<size_t>(i)] == ((0x08 >> i) & 1);
+    for (int i = 0; order && i < 32; ++i) order = bits.b[static_cast<size_t>(64 + i)] == (i == 1 ? 1 : 0);
+    CHECK(order, "... the node's word LSB first, then the count as an int32 word");
+    const auto back = with_exact(bits, [&](const uint8_t* p, size_t bytes, size_t nbits) {
+        wire::PacketReader r(p, bytes, nbits);
+        return read_node_inventory(r);
+    });
+    CHECK(back && *back == d, "it reads back");
+    NodeInventoryData empty;
+    BunchWriter e;
+    CHECK(write_node_inventory(e, empty) && e.bit_pos() == 64 + 32 + 64, "an empty inventory is 160 bits");
+    // a count above the limit is refused
+    BunchWriter big;
+    big.write_uint64(1);
+    big.write_uint32(static_cast<uint32_t>(kMaxNodeInventoryItems + 1));
+    const Bits huge(big);
+    const auto refused = with_exact(huge, [&](const uint8_t* p, size_t bytes, size_t nbits) {
+        wire::PacketReader r(p, bytes, nbits);
+        return read_node_inventory(r);
+    });
+    CHECK(!refused, "a count above the limit is refused");
+    // the RPC: ClientSendNodeInventoryData carries it as its one parameter and reads back through the schema
+    const schema::RpcSchema& rpc = rpc_of("ClientSendNodeInventoryData");
+    RpcParams params;
+    CHECK(set_rpc_param(rpc, params, "Data", Value(d)), "ClientSendNodeInventoryData takes the inventory");
+    const Bits pbits = written(rpc, params);
+    CHECK(pbits.size() == 1 + 352, "... and writes it as its send bit and the struct");
+    const auto call = read_call(rpc, pbits);
+    const Value* got = nullptr;
+    if (call) {
+        for (const auto& [h, v] : call->params.values) got = &v;
+    }
+    CHECK(got && got->get_if<NodeInventoryData>() && *got->get_if<NodeInventoryData>() == d, "... and the schema reads it back");
+}
+
 }  // namespace
 
 int main() {
@@ -405,6 +452,7 @@ int main() {
     test_sieges();
     test_requests();
     test_citizenship_window();
+    test_node_inventory();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

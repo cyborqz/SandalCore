@@ -450,6 +450,36 @@ const std::map<std::string, TaxOverride>* Elections::taxes(int64_t node) const {
     return e && !e->taxes.empty() ? &e->taxes : nullptr;
 }
 
+const std::map<int64_t, int32_t>* Elections::stored(int64_t node) const {
+    const auto it = nodes_.find(node);
+    return it == nodes_.end() ? nullptr : &it->second.stored;
+}
+
+bool Elections::change_node(int64_t node, const std::function<bool(NodeElection&)>& f) {
+    if (node == 0) return false;
+    NodeElection& e = nodes_[node];
+    const bool changed = f(e);
+    e.treasury = std::max<int64_t>(0, e.treasury);
+    for (auto it = e.stored.begin(); it != e.stored.end();) it = it->second <= 0 ? e.stored.erase(it) : std::next(it);
+    if (changed) ++version_;
+    return changed;
+}
+
+bool Elections::stock(int64_t node, int64_t money, const std::vector<std::pair<int64_t, int32_t>>& items) {
+    if (node == 0) return false;
+    NodeElection& e = nodes_[node];
+    if (e.stocked) return false;
+    e.stocked = true;
+    e.treasury = std::max<int64_t>(0, e.treasury + money);
+    for (const auto& [item, quantity] : items) {
+        if (item == 0 || quantity <= 0) continue;
+        const int64_t sum = static_cast<int64_t>(e.stored[item]) + quantity;
+        e.stored[item] = static_cast<int32_t>(std::min<int64_t>(sum, INT32_MAX));
+    }
+    ++version_;
+    return true;
+}
+
 void Elections::add_treasury(int64_t node, int64_t copper) {
     if (node == 0 || copper == 0) return;
     NodeElection& e = nodes_[node];
@@ -562,6 +592,12 @@ std::string Elections::to_json() const {
         n["dues_off"] = e.dues_disabled;
         n["treasury"] = e.treasury;
         if (e.dues_anchor_ms != 0) n["dues_anchor"] = e.dues_anchor_ms;
+        if (e.stocked) n["stocked"] = true;
+        if (!e.stored.empty()) {
+            nlohmann::json st = nlohmann::json::array();
+            for (const auto& [item, quantity] : e.stored) st.push_back({item, quantity});
+            n["stored"] = std::move(st);
+        }
         for (const NodeNews& w : e.news) {
             n["news"].push_back({{"type", w.type}, {"at", w.at_ms}, {"mayor", w.mayor}, {"plot", w.plot}, {"building", w.building}, {"commission", w.commission},
                                  {"state", w.building_state}});
@@ -601,6 +637,14 @@ bool Elections::from_json(const std::string& text, std::string& error) {
             e.dues_disabled = n.value("dues_off", false);
             e.treasury = std::max<int64_t>(0, n.value("treasury", int64_t{0}));
             e.dues_anchor_ms = std::max<int64_t>(0, n.value("dues_anchor", int64_t{0}));
+            e.stocked = n.value("stocked", false);
+            if (n.contains("stored") && n["stored"].is_array()) {
+                for (const auto& x : n["stored"]) {
+                    if (!x.is_array() || x.size() != 2 || !x[0].is_number_integer() || !x[1].is_number_integer()) continue;
+                    const int64_t item = x[0].get<int64_t>(), quantity = x[1].get<int64_t>();
+                    if (item != 0 && quantity > 0) e.stored[item] = static_cast<int32_t>(std::min<int64_t>(quantity, INT32_MAX));
+                }
+            }
             if (n.contains("news")) {
                 for (const auto& w : n["news"]) {
                     if (e.news.size() >= kMaxNews) break;

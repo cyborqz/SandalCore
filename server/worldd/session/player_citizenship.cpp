@@ -459,6 +459,10 @@ void PlayerSession::on_citizenship_window_request() {
 void PlayerWorld::set_elections(world::ElectionRules rules, std::string file) {
     elections_.emplace(rules);
     elections_file_ = std::move(file);
+    struct Stock {   // whatever the file holds, each node then has what its record starts it with, once
+        PlayerWorld& w;
+        ~Stock() { w.stock_node_stores(); }
+    } stock{*this};
     if (elections_file_.empty()) {
         spdlog::warn("[nodes] no --elections-file: the nodes' elections are lost at a restart");
         return;

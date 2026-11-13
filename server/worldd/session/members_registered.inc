@@ -22,3 +22,4 @@
 #include "session/members/chat.inc"
 #include "session/members/ignore.inc"
 #include "session/members/emotes.inc"
+#include "session/members/node_inventory.inc"
