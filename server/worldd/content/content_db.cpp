@@ -616,6 +616,13 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
             if (sqlite3_step(q.get()) == SQLITE_ROW) rec.display_name = column_text(q.get(), 0);
         }
     }
+    {   // Quests, "the Quest bag" (contentc version 36's quest_item): the items whose record says Quest; a file without the table reads no item as one
+        Stmt q(db_, "SELECT 1 FROM quest_item WHERE item_guid = ?1");
+        if (q.ok()) {
+            sqlite3_bind_int64(q.get(), 1, guid);
+            rec.quest = sqlite3_step(q.get()) == SQLITE_ROW;
+        }
+    }
     read_item_rarity(db_, guid, rec);   // item rarities, step 0: its quality curve, RarityMin..RarityMax and MaxDurability row
     Stmt q(db_, kItemSlotsSql);
     if (!q.ok()) {

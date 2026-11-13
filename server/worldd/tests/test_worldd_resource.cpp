@@ -1270,7 +1270,7 @@ static void test_real() {
     }
 
     // one grant of every item into a character with the Sanctus bag and nothing else: the item goes where its kind says, exactly one storage each
-    size_t resource = 0, backpack = 0, other = 0, tag_mismatch = 0, too_big = 0;
+    size_t resource = 0, backpack = 0, quest = 0, other = 0, tag_mismatch = 0, too_big = 0;
     for (const int64_t g : guids) {
         const auto info = catalog.info(g);
         if (!info) {
@@ -1290,10 +1290,11 @@ static void test_real() {
             ++other;
             continue;
         }
-        (o.events[0].container == R0 ? resource : o.events[0].container == Bag ? backpack : other)++;
+        (o.events[0].container == R0 ? resource : o.events[0].container == Bag ? backpack : o.events[0].container == svc::ItemContainer::Quest ? quest : other)++;
         if ((o.events[0].container == R0) != info->resource) ++tag_mismatch;
+        if ((o.events[0].container == svc::ItemContainer::Quest) != (info->quest && !info->wearable() && !info->resource)) ++tag_mismatch;   // the quest bag takes the quest items that are not worn
     }
-    CHECK(resource == 1824 && backpack == 10568 - 1824 && other == 0, "every one of the 10,568 items is granted to exactly one storage: 1,824 to Resource0, the rest to the Backpack");
+    CHECK(resource == 1824 && quest > 0 && quest + backpack == 10568 - 1824 && other == 0, "every one of the 10,568 items is granted to exactly one storage: 1,824 to Resource0, the quest items to the quest bag, the rest to the item bag");
     CHECK(tag_mismatch == 0, "the catalog's flag is the item_tag rule for every item, and the routing follows the flag");
     CHECK(too_big == 0, "no item takes more than the Sanctus bag's 6 x 4, or less than a cell");
 // -- CoA x C-Y-B --

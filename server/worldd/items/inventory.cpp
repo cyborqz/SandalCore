@@ -187,6 +187,7 @@ std::optional<ItemInfo> ContentItemCatalog::info(int64_t record) const {
     i.equip_slots = rec->equip_slots;
     i.two_handed = rec->occupies_all_equip_slots;
     i.resource = rec->resource;
+    i.quest = rec->quest;
     i.inv_w = rec->inv_w;
     i.inv_h = rec->inv_h;
     i.max_stack = std::max(1, rec->max_stack_size);
@@ -534,7 +535,7 @@ int64_t Inventory::count_of(int64_t record) const {
     int64_t n = 0;
     for (const auto& [key, it] : slots_) {
         const svc::ItemContainer c = static_cast<svc::ItemContainer>(key.first);
-        if (it.item_record_id == record && (c == svc::ItemContainer::Backpack || is_resource(c))) n += it.quantity;
+        if (it.item_record_id == record && (c == svc::ItemContainer::Backpack || c == svc::ItemContainer::Quest || is_resource(c))) n += it.quantity;
     }
     return n;
 }
@@ -554,7 +555,7 @@ Outcome Inventory::take(int64_t record, int64_t count) {
     int64_t left = count;
     for (const auto& [key, it] : slots_) {
         const svc::ItemContainer c = static_cast<svc::ItemContainer>(key.first);
-        if (it.item_record_id != record || (c != svc::ItemContainer::Backpack && !is_resource(c))) continue;
+        if (it.item_record_id != record || (c != svc::ItemContainer::Backpack && c != svc::ItemContainer::Quest && !is_resource(c))) continue;
         const int32_t give = static_cast<int32_t>(std::min<int64_t>(left, it.quantity));
         plan.push_back({key, give});
         left -= give;
@@ -875,7 +876,8 @@ GrantResult Inventory::grant_what_fits(std::vector<svc::InventoryItem> items, co
             continue;
         }
         if (info) {
-            grant_item(std::move(it), *info, res);
+            // Quests, "the Quest bag": an item whose record says Quest is kept in the Quest storage, unless it is worn (the rules of wearing look in the item bag only)
+            grant_item(std::move(it), *info, res, info->quest && !info->wearable() ? svc::ItemContainer::Quest : svc::ItemContainer::Backpack);
             continue;
         }
         // a record the file does not know: one stack in the item bag, as it came (there is no max stack or colour to read)
@@ -898,19 +900,17 @@ GrantResult Inventory::grant_what_fits(std::vector<svc::InventoryItem> items, co
     return res;
 }
 
-void Inventory::grant_item(svc::InventoryItem item, const ItemInfo& info, GrantResult& out) {
+void Inventory::grant_item(svc::InventoryItem item, const ItemInfo& info, GrantResult& out, svc::ItemContainer container) {
     const int32_t max_stack = std::max(1, info.max_stack);
     bool used_granted_guid = false;
     // first the stacks the item joins, lowest slot first, one Add of what each takes
-    for (auto it = slots_.lower_bound({static_cast<uint8_t>(svc::ItemContainer::Backpack), 0}); it != slots_.end() && it->first.first == static_cast<uint8_t>(svc::ItemContainer::Backpack) &&
-                                                                                             item.quantity > 0;
-         ++it) {
+    for (auto it = slots_.lower_bound({static_cast<uint8_t>(container), 0}); it != slots_.end() && it->first.first == static_cast<uint8_t>(container) && item.quantity > 0; ++it) {
         svc::InventoryItem& held = it->second;
         if (!stacks_with(held, item, info.rarity) || held.quantity >= max_stack) continue;
         const int32_t take = std::min(item.quantity, max_stack - held.quantity);
         Event add;
         add.type = repl::StorageEventType::Add;
-        add.container = svc::ItemContainer::Backpack;
+        add.container = container;
         add.slot = held.slot;
         add.item = held;
         add.item.quantity = take;
@@ -921,11 +921,11 @@ void Inventory::grant_item(svc::InventoryItem item, const ItemInfo& info, GrantR
     }
     // then new stacks of at most the max stack in the first free slots
     while (item.quantity > 0) {
-        const int slot = first_free(svc::ItemContainer::Backpack);
+        const int slot = first_free(container);
         if (slot < 0) break;
         const int32_t piece = std::min(item.quantity, max_stack);
         svc::InventoryItem placed = item;
-        placed.container = svc::ItemContainer::Backpack;
+        placed.container = container;
         placed.slot = slot;
         placed.quantity = piece;
         if (used_granted_guid) placed.instance_guid = fresh_guid();
@@ -1031,8 +1031,9 @@ Outcome Inventory::grant(std::vector<svc::InventoryItem> items, const ItemCatalo
     if (!r.rest.empty()) {
         Outcome out;
         out.refusal = "the storages have no room for " + std::to_string(r.rest.size()) + " of the granted item(s) (the item bag has " +
-                      std::to_string(static_cast<size_t>(kBackpackSlots) - count(svc::ItemContainer::Backpack)) +
-                      " free slot(s); a material goes into the material bags only, so free slots of the item bag do not help it)";
+                      std::to_string(static_cast<size_t>(kBackpackSlots) - count(svc::ItemContainer::Backpack)) + " free slot(s), the quest bag " +
+                      std::to_string(static_cast<size_t>(kQuestSlots) - count(svc::ItemContainer::Quest)) +
+                      "; a material goes into the material bags only, and a quest item into the quest bag only, so free slots of the item bag do not help them)";
         return out;
     }
     *this = std::move(trial);

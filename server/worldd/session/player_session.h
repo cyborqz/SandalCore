@@ -995,6 +995,10 @@ private:
     bool deliver_quest_rewards(Connection& conn, const std::vector<int64_t>& tables, const char* why, Clock::time_point now, int64_t quest = 0);
     /// The items a RemoveItem action takes (item record, quantity; 0: all) leave the bags.
     void take_quest_items(Connection& conn, const std::vector<std::pair<int64_t, int64_t>>& items);
+    /// The hand-in's take: the stacks the player picked (instance guid, quantity) lose those quantities, wherever they lie (the item bag or the quest bag); the client is told.
+    void take_item_stacks(Connection& conn, const std::vector<std::pair<std::string, int32_t>>& stacks);
+    /// The tail both takes share: marks the inventory changed and sends the storage events.
+    void send_taken_items(Connection& conn, const items::Outcome& all);
     /// A Toast action: the text as a callout.
     void quest_toast(Connection& conn, const std::string& text, Clock::time_point now);
     /// The quest actions a conversation ran (Result::actions), with the NPC the character talks to.

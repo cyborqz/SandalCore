@@ -71,6 +71,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Game-master commands: the world server's admin interface lists every admin command with its fields, and runs any of them on a player who is in the world: heal, set Health or Mana, revive, kill, give experience, start, complete or reset quests and their objectives, clear cooldowns, give a mount, set the time of day and add node experience, beside the teleport, speed, money, items, stations, recipes, tutorials, weapon experience and NPC commands that were there. Each field with a known set of answers (nodes, free plots, stations, items and their rarities, quests, objectives, places, mounts, creatures, recipes, weapon lines) lists them, so a tool can offer a choice instead of a typed name. Every command run is logged.
 - Resisting mobs: a crowd control a mob has kept up is thrown off at its build-up's threshold, and a new one of that kind is resisted for 10 s; a boss is immune to the effects the data gates on the Boss effect, and the caster's client shows the resist or the immunity in its combat log.
 - Mob moves that wait for a clock: a mob's move that waits for the fight's clock (under any of its names) or for the mob's own clock now plays: the Skeletons' long axe swipe, the Tidebreakers' and Otters' rapid bite, the Reapers' guillotine and slice, the Mycellions' spore moves and the Dunzenkell constructs' hammer throw and shield assault among them; a mob's own clock starts again when it respawns.
+- The Quest bag: quest items (the items the game marks as quest items) are kept in the quest bag, not the item bag. Rewards, objects, mob drops and a quest's own start items go there, a stack tops up as in the item bag, a hand-in takes from the quest bag and the item bag, and abandoning a quest takes its items out of the bag. A character who already carries quest items in the item bag keeps them there.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -81,7 +82,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
 
 ### Left
-- Quests: the speech bubbles over NPCs who have an objective for you; the Quest bag; hand-ins that ask for items by tag or rarity, and the pendant of The Great Mirage; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
+- Quests: the speech bubbles over NPCs who have an objective for you; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.
 - Reactions: the Bard's Cheerful, Pensive and Epic melodies at a finisher, the debuffs of its damage melodies, checking the other classes' finisher effects against the game, and the reactions that wait for you being hit or for other events.
 - Consumables: food and drinks (sitting down to eat, the regeneration meals), potions and salves (the heals, the shared cooldown), and buffs that stay through a logout.
 - Crafting ratings from guild perks (there are no guilds yet).

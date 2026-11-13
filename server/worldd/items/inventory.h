@@ -140,6 +140,8 @@ struct ItemInfo {
     bool                 two_handed = false;   // worn, it covers every slot of equip_slots
     /// Gathering stage 3: the item is stored in a resource container (its gameplay tags hold a child of item.resource), takes inv_w x inv_h cells of its grid and stacks to max_stack.
     bool                 resource = false;
+    /// Quests, "the Quest bag": the record's InventoryFilterType is Quest (contentc's quest_item table): a grant keeps the item in the Quest storage, not in the item bag.
+    bool                 quest = false;
     int                  inv_w = 1;
     int                  inv_h = 1;
     int                  max_stack = 1;
@@ -287,9 +289,9 @@ public:
     /// `product` carries its record, quality, durability, a fresh instance guid and its creation time; its container and slot are set here.
     Outcome tier_up(svc::ItemContainer storage, int slot, const std::string& guid, int32_t full, svc::InventoryItem product, const ItemRarityFacts& facts, const ItemCatalog& catalog);
 
-    /// How many items of `record` the character holds in the item bag and the resource containers (what an item currency, Glint, is counted from).
+    /// How many items of `record` the character holds in the item bag, the Quest bag and the resource containers (what an item currency, Glint, is counted from).
     int64_t count_of(int64_t record) const;
-    /// Takes `count` items of `record` from the stacks in the item bag and the resource containers, in the order of their storage and slot.  Each stack that gives something is ONE Remove event
+    /// Takes `count` items of `record` from the stacks in the item bag, the Quest bag and the resource containers, in the order of their storage and slot (the item bag's first).  Each stack that gives something is ONE Remove event
     /// that names the stack as it was and how many leave (the stack keeps the rest in its slot; a stack that is emptied is gone).  Refused, changing nothing, when fewer are held.
     Outcome take(int64_t record, int64_t count);
 
@@ -305,7 +307,7 @@ public:
 
     /// Plan D1: items granted (a GiveItem reward, a purchase, a use): THE routing of Gathering stage 3 -- each item goes where its kind says (see the top of this file): a resource item
     /// tops up the stacks it joins (the same record, colour and state) in the resource containers, lowest slot first, and starts new stacks of at most its max stack at the first free
-    /// rectangle of the first container with room; any other item does the same in the item bag.  A top-up is ONE Add of the amount added (the character as the instigator) and a new
+    /// rectangle of the first container with room; an item whose record says Quest (and that is not worn) does the same in the Quest bag; any other item does the same in the item bag.  A top-up is ONE Add of the amount added (the character as the instigator) and a new
     /// stack ONE Add of the whole piece, in the order given; `items` carry their record, quantity, quality, durability, a fresh instance guid and creation time, their container and slot
     /// are set here.  Refused, changing nothing, when the storages have no room for all of them, an item breaks the table's rules or its guid is one the inventory has.
     Outcome grant(std::vector<svc::InventoryItem> items, const ItemCatalog& catalog);
@@ -341,8 +343,8 @@ private:
     /// The cells a resource container's items cover (one flag per cell), `ignore` and `ignore2` aside.
     std::vector<bool> covered_cells(svc::ItemContainer container, const ItemCatalog& catalog, const std::string* ignore = nullptr,
                                     const std::string* ignore2 = nullptr) const;
-    /// grant_what_fits for an item of the item bag: tops up, then starts stacks; `item.quantity` is what is left.
-    void grant_item(svc::InventoryItem item, const ItemInfo& info, GrantResult& out);
+    /// grant_what_fits for an item of the item bag or, with `container` set to the Quest storage, of the quest bag: tops up, then starts stacks; `item.quantity` is what is left.
+    void grant_item(svc::InventoryItem item, const ItemInfo& info, GrantResult& out, svc::ItemContainer container = svc::ItemContainer::Backpack);
     /// grant_what_fits for one item that is a resource: tops up, then starts stacks; `item.quantity` is what is left.
     void grant_resource(svc::InventoryItem item, const ItemInfo& info, const ItemCatalog& catalog, GrantResult& out, bool harvest);
     Outcome move_resource(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot, const ItemCatalog& catalog);

@@ -240,6 +240,26 @@ void PlayerSession::take_quest_items(Connection& conn, const std::vector<std::pa
         if (!o.ok) continue;
         all.events.insert(all.events.end(), std::make_move_iterator(o.events.begin()), std::make_move_iterator(o.events.end()));
     }
+    send_taken_items(conn, all);
+}
+
+void PlayerSession::take_item_stacks(Connection& conn, const std::vector<std::pair<std::string, int32_t>>& stacks) {
+    items::Outcome all;
+    all.ok = true;
+    for (const auto& [guid, quantity] : stacks) {
+        const svc::InventoryItem* held = inventory_.find_guid(guid);
+        if (!held || quantity <= 0 || quantity > held->quantity) continue;
+        const svc::ItemContainer container = held->container;
+        const int slot = held->slot;
+        items::Outcome o = inventory_.consume(container, slot, guid, quantity);
+        if (!o.ok) continue;
+        for (items::Event& e : o.events) e.instigated = false;   // as take(): the Remove of a hand-in names nobody
+        all.events.insert(all.events.end(), std::make_move_iterator(o.events.begin()), std::make_move_iterator(o.events.end()));
+    }
+    send_taken_items(conn, all);
+}
+
+void PlayerSession::send_taken_items(Connection& conn, const items::Outcome& all) {
     if (all.events.empty()) return;
     inventory_dirty_ = true;
     inventory_changed_ = true;

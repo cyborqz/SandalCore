@@ -14,10 +14,10 @@
 //  The game's server body of the call is not in the client's exe (the slot holds an empty stub), so what the server does is modelled on what the client sends and expects; each point below is a modelling choice:
 //    * the call is taken only while a hand-in panel is open and names the panel's quest; each objective of it must be one the panel lists and active, and each item one the objective's
 //      filter names (a filter by tags or rarities is not served);
-//    * every stack the call names must be in the bag it says (the bag or the quest bag), hold that item and hold the quantity; a stack cannot be named twice beyond what it holds;
+//    * every stack the call names must be in the bag it says (the item bag or the quest bag), hold that item and hold the quantity; a stack cannot be named twice beyond what it holds;
 //      one stack that does not check refuses the whole delivery (nothing is taken, the panel stays open);
 //    * an objective takes no more than it still needs (its CompletionCount less its count): the rest of what was picked stays with the character;
-//    * the items leave the bags, then the objective counts them (and raises the quest variable it names), then the panel ends and the talk goes on to the node the TurnIn names (none: it ends).
+//    * the items leave the stacks the call named (not just any stack of the same record: a character can carry the item in both bags), then the objective counts them (and raises the quest variable it names), then the panel ends and the talk goes on to the node the TurnIn names (none: it ends).
 //  The client sends nothing else for a hand-in and expects nothing but the changes: the bags' events, the quest component and the conversation.
 // ============================================================================
 
@@ -104,10 +104,10 @@ const repl::Value* handin_value(const repl::ElementState& e, uint16_t handle) {
     return it == e.values.end() ? nullptr : &it->second;
 }
 
-/// Where a hand-in looks for a stack: the item bag only.  The quest bag is not one of them yet: Inventory::count_of and take do not read it, so a quest-bag stack would count
-/// for the objective while the items were taken from the item bag (the quest bag joins when it is built).
+/// Where a hand-in looks for a stack: the item bag and the quest bag (a quest item is kept in the quest bag; a character may still carry one in the item bag).
 std::optional<svc::ItemContainer> handin_container(int64_t location) {
     if (location == static_cast<int64_t>(repl::ItemLocation::Backpack)) return svc::ItemContainer::Backpack;
+    if (location == static_cast<int64_t>(repl::ItemLocation::Quest)) return svc::ItemContainer::Quest;
     return std::nullopt;
 }
 
@@ -208,7 +208,7 @@ void PlayerSession::on_item_delivery(Connection& conn, const repl::ClientRpc& rp
     if (rows.empty()) return refuse("it delivers no item");
 
     // ---- what each objective takes, and the items that leave ----
-    std::vector<std::pair<int64_t, int64_t>> leaving;   // item record, quantity
+    std::vector<std::pair<std::string, int32_t>> leaving;   // the picked stacks the items leave: instance guid, quantity
     int64_t total_take = 0;
     for (HandInRow& row : rows) {
         const content::QuestObjectiveRow& r = def->objectives[row.index];
@@ -219,14 +219,7 @@ void PlayerSession::on_item_delivery(Connection& conn, const repl::ClientRpc& rp
             if (left <= 0) break;
             const int64_t part = std::min<int64_t>(p.quantity, left);
             left -= part;
-            bool added = false;
-            for (auto& [record, quantity] : leaving) {
-                if (record == p.item) {
-                    quantity += part;
-                    added = true;
-                }
-            }
-            if (!added) leaving.emplace_back(p.item, part);
+            leaving.emplace_back(p.guid, static_cast<int32_t>(part));
         }
         total_take += row.take;
     }
@@ -247,7 +240,7 @@ void PlayerSession::on_item_delivery(Connection& conn, const repl::ClientRpc& rp
     ++hand_ins_;
     hand_in_items_ += static_cast<size_t>(total_take);
     spdlog::log(level_for(quests_logged_, 100), "[session] {}: hands {} item(s) in to {} for quest {} ({} objective(s))", name(), total_take, npc->npc.name, def->name, rows.size());
-    take_quest_items(conn, leaving);
+    take_item_stacks(conn, leaving);
     int64_t counted = 0;
     quest_engine(conn, now, "items were handed in", [&](quest::Engine& eng) {
         for (const HandInRow& row : rows) counted += eng.turn_in(sub.quest, row.objective, row.take);

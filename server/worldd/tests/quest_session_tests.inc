@@ -1133,7 +1133,7 @@ static void test_quest_hand_in() {
     std::vector<svc::InventoryItem> items = kit();
     items.push_back(make_item(Bag, 2, kBread, 300, 3));
     const qs::Guid128 stack{0xA0000000u + 300u, 0x1000u + 300u, 0x2000u + 300u, 300u};
-    // ... and two more in the quest bag: a hand-in does not take from there (nothing counts or takes a quest-bag stack yet)
+    // ... and two more in the quest bag (where a quest item is kept): a hand-in takes from there too
     items.push_back(make_item(ItemContainer::Quest, 0, kBread, 301, 2));
     const qs::Guid128 quest_bag_stack{0xA0000000u + 301u, 0x1000u + 301u, 0x2000u + 301u, 301u};
     QuestHarness h(api, *data, log_after_start(), cyb_record(items));
@@ -1144,6 +1144,7 @@ static void test_quest_hand_in() {
     }
     h.play();
     h.run(milliseconds(1500));
+    const size_t bag_items_before = h.s->inventory().count(Bag);
     api.queue(kCyb, "give", "RVR_SH_QST_1421_HungryForMore");
     h.commands();
     const qs::QuestInstance* qi = h.s->quest_log().find(kHungryForMore);
@@ -1152,6 +1153,10 @@ static void test_quest_hand_in() {
     const qs::Guid128 context = qi->guid;
     const int64_t bread = h.s->inventory().count_of(kBread);
     CHECK(bread >= 3, "the character carries the bread");
+    // the quest bag's stack of the bread (a quest item) and the item bag's stack lie where they were put; nothing of the quest start moved them or put bread in the item bag
+    CHECK(h.s->inventory().at(ItemContainer::Quest, 0) && h.s->inventory().at(ItemContainer::Quest, 0)->item_record_id == kBread && h.s->inventory().at(ItemContainer::Quest, 0)->quantity >= 2 &&
+              h.s->inventory().at(Bag, 2) && h.s->inventory().at(Bag, 2)->quantity == 3 && h.s->inventory().count(Bag) == bag_items_before,
+          "the bread is in the quest bag (a stack of 2 or more) and in the item bag (a stack of 3), and the quest start put none in a third place");
 
     // the click: his talk starts where the active hand-in objective names; the lines lead to the hand-in node and the panel is queued on top of it
     ClientDialogue client;
@@ -1195,15 +1200,18 @@ static void test_quest_hand_in() {
     refused_call("more than the stack holds is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, stack, 4, 3}}}}));
     refused_call("an objective the panel does not list is refused", delivery_rpc(kHungryForMore, context, {{kPilferedObjective, {{kBread, stack, 1, 3}}}}));
     refused_call("a stack in a bag the hand-in does not look in is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, stack, 1, 4}}}}));
-    refused_call("a stack that lies in the quest bag is refused: the objective counts nothing for it and nothing is taken",
-                 delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, quest_bag_stack, 1, 18}}}}));
+    refused_call("more than a stack of the quest bag holds is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, quest_bag_stack, 40, 18}}}}));
+    refused_call("a stack named in the item bag that lies in the quest bag is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, quest_bag_stack, 1, 3}}}}));
     refused_call("a delivery of no item is refused", delivery_rpc(kHungryForMore, context, {{kBreadObjective, {}}}));
     CHECK(h.s->quest_log().find(kHungryForMore)->objectives[0].count == 0, "the objective has counted nothing");
 
-    // the delivery: three of the bread are picked, the objective takes the one it needs
+    // the delivery: the two of the quest bag's stack are picked, the objective takes the one it needs, from that stack and no other
+    const int32_t quest_stack_before = h.s->inventory().at(ItemContainer::Quest, 0) ? h.s->inventory().at(ItemContainer::Quest, 0)->quantity : 0;
     from = h.got.size();
-    h.client_request(delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, stack, 3, 3}}}}), h.pc_ch);
-    CHECK(h.s->hand_ins() == 1 && h.s->hand_in_items() == 1 && h.s->inventory().count_of(kBread) == bread - 1, "one bread leaves the bag (the objective takes one; the two it does not need stay)");
+    h.client_request(delivery_rpc(kHungryForMore, context, {{kBreadObjective, {{kBread, quest_bag_stack, 2, 18}}}}), h.pc_ch);
+    CHECK(h.s->hand_ins() == 1 && h.s->hand_in_items() == 1 && h.s->inventory().count_of(kBread) == bread - 1, "one bread leaves (the objective takes one; the two it does not need stay)");
+    CHECK(h.s->inventory().at(ItemContainer::Quest, 0) && h.s->inventory().at(ItemContainer::Quest, 0)->quantity == quest_stack_before - 1 && h.s->inventory().at(Bag, 2) && h.s->inventory().at(Bag, 2)->quantity == 3,
+          "it left the quest bag's stack (one fewer), the stack of the item bag was not touched");
     const qs::QuestInstance* after = h.s->quest_log().find(kHungryForMore);
     CHECK(after && after->objectives[0].completed && !after->objectives[0].active && after->objectives[0].count == 1, "the objective counted it and is done");
     CHECK(after && after->objectives[pilfered].active, "its success activated the next objective (the rations)");

@@ -228,6 +228,8 @@ struct ItemRecord : items::ItemRarityFacts {
     int32_t              inv_w = 1;
     int32_t              inv_h = 1;
     bool                 resource = false;
+    /// Quests, "the Quest bag": the record's InventoryFilterType is Quest (contentc version 36's quest_item table).  false for any other item and in a file without that table.
+    bool                 quest = false;
     /// Gathering stage 3, "the pick-up popup" (contentc version 16): the record's ItemName as the player reads it ("Coconut Wood"; item.display_name).  Empty where the record has
     /// no name and in a file older than version 16 (it opens all the same; the popup's text then uses the record's `name`).
     std::string          display_name;
