@@ -337,6 +337,20 @@ bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attack
         effect_tags = def->row.tags;
         effect_tags.insert(effect_tags.end(), def->row.effect_tags.begin(), def->row.effect_tags.end());
         ctx.effect_guid = def->row.guid;
+        // the aspect the caster's accuracy reads: the effect's own Element tag, or the hit's scaling override (the data's EffectAccuracy).  The
+        // target's evasion is the effect's own tag alone (EffectEvasion).  Both tags true without an override reads as physical, as the data's terms do.
+        const auto effect_has = [&](const char* tag) {
+            for (const std::string& t : effect_tags) {
+                if (tag_matches(t, tag)) return true;
+            }
+            return false;
+        };
+        const bool physical_tag = effect_has("Element.Physical");
+        const bool magical_tag = effect_has("Element.Magical");
+        const bool physical_override = ctx.has_tag("ability.PhysicalScalingOverride");
+        const bool magical_override = ctx.has_tag("ability.MagicalScalingOverride");
+        const bool physical = (physical_tag || physical_override) && !magical_override;
+        const bool magical = (magical_tag || magical_override) && !physical_override && !physical;
         double v = 0;
         // the row's own requirement, then its stack count: no expression is one stack, and a count that works out to nothing applies nothing
         if (row.requirement_expr != 0 && (!run(row.requirement_expr, v) || v == 0)) continue;
@@ -352,6 +366,7 @@ bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attack
         effects::Applied a;
         a.def = def;
         a.stacks = stacks;
+        a.disable_aspect = physical ? effects::DisableAspect::Physical : magical ? effects::DisableAspect::Magical : effects::DisableAspect::None;
         // the duration: the row's, else the record's (a number of seconds), else none
         if (row.duration_expr != 0 && run(row.duration_expr, v)) {
             a.duration = std::max(0.0, v);

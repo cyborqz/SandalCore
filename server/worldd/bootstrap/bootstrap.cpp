@@ -2785,6 +2785,15 @@ std::optional<Send> PlayerBootstrap::end_ability(int32_t client_instance_id) {
     return finish(Role::Pawn, false, "ClientEndAbility", repl::client_end_ability(pawn_, *ability, client_instance_id, acks_));
 }
 
+std::optional<Send> PlayerBootstrap::effect_refused(int64_t effect_guid, const emit::FIntrepidNetworkGUID& target, bool immune) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const repl::Subobject* ability = component(setup_.guids.ability);
+    if (!ability) return std::nullopt;
+    return finish(Role::Pawn, false, immune ? "ClientOnEffectImmune" : "ClientOnEffectResisted",
+                  immune ? repl::client_on_effect_immune(pawn_, *ability, effect_guid, target, acks_)
+                         : repl::client_on_effect_resisted(pawn_, *ability, effect_guid, target, acks_));
+}
+
 // ---- plan D2, review: a lingering zone's actor ----------------------------------------------------------------------------------------------
 
 bool PlayerBootstrap::lingering_add(const LingeringSpec& spec) {

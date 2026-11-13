@@ -732,6 +732,10 @@ public:
     /// out of Stamina). Reliable, on the pawn's channel, after whatever update removed the instance's items.
     std::optional<Send> end_ability(int32_t client_instance_id);
 
+    /// A3: ClientOnEffectResisted or ClientOnEffectImmune(EffectGuid, Target) on the ability component: the effect a mob refused, and the mob.
+    /// Reliable, on the pawn's channel; the client shows the combat-log line and no floating text.  nullopt when the call does not build.
+    std::optional<Send> effect_refused(int64_t effect_guid, const emit::FIntrepidNetworkGUID& target, bool immune);
+
     /// Plan D2, stage 2: ClientHitConfirmationsReliable on the PlayerController: the hits of `confirms`, each one on the pawn (HitComp, Instigator
     /// and, for an ability's or an effect's hit, Source are its guid) with the stat mods the client draws its floating numbers from. `at` is the
     /// impact location (the pawn's position, cm). The InstGuid of each hit is the bootstrap's own counter. nullopt for an empty list or a call that

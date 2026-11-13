@@ -112,4 +112,14 @@ std::optional<int32_t> parse_end_ability(const RpcCall& call);
 std::optional<Emission> client_end_ability(const Actor& pawn, const Subobject& ability, int32_t client_instance_id,
                                            const ExportAcks& acks);
 
+/// ClientOnEffectResisted(EffectGuid, Target) on `ability`: the effect a mob resisted, and the mob.  Reliable (function flags 0x01080cc0).
+/// The client shows its combat-log line (`{target} resisted {caster}'s "{effect}"`); no floating text.  nullopt when the class has no such RPC.
+std::optional<Emission> client_on_effect_resisted(const Actor& pawn, const Subobject& ability, int64_t effect_guid,
+                                                  const emit::FIntrepidNetworkGUID& target, const ExportAcks& acks);
+
+/// ClientOnEffectImmune(EffectGuid, Target) on `ability`: the effect a mob was immune to, and the mob.  Reliable (function flags 0x01080cc0).
+/// The client shows its combat-log line (`{target} is immune to {caster}'s "{effect}"`).  nullopt when the class has no such RPC.
+std::optional<Emission> client_on_effect_immune(const Actor& pawn, const Subobject& ability, int64_t effect_guid,
+                                                const emit::FIntrepidNetworkGUID& target, const ExportAcks& acks);
+
 }}}  // namespace aoc::protocol::repl

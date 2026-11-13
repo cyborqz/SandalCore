@@ -1726,7 +1726,7 @@ void test_bard_lullaby_cast(Fixture& f) {
         }
     }
 
-    // ---- 7: an Incapacitated boss takes the last hit's 4 s stun too
+    // ---- 7: a boss is immune to the Incapacitated and to the last hit's stun (the data gates both on the Boss effect)
     {
         const std::string boss_path = creature_path(f, "/GiantCyclops/CyclopsShaman.Default__CyclopsShaman_C");
         CHECK(!boss_path.empty(), "the Blueprint table has a boss (the Cyclops Shaman)");
@@ -1739,11 +1739,17 @@ void test_bard_lullaby_cast(Fixture& f) {
                 asleep.def = incap;
                 asleep.duration = 10.0;
                 bw.world->apply_effects(boss, 77, {asleep}, 100.0);
+                CHECKF(bw.world->effect_stacks(boss, incap->row.guid) == 0, "the boss is immune to Status_Incapacitated (the data's Boss gate)");
                 const double t = 100.0;
                 const double scale = lullaby_scale(bw);
                 const BardCast cast = bard_cast(bw, "Bard_Song_Lullaby", {boss}, "Bard_Song_Lullaby_Enemy", t, t + kLullabyHits[3] * scale + 0.05);
                 const std::vector<double> at = bard_hit_times(cast.seen, "Bard_Song_Lullaby_Enemy", "Bard_Song_Lullaby");
-                CHECKF(cast.cast && at.size() == 4 && bw.world->effect_stacks(boss, stunned->row.guid) == 1, "the Incapacitated boss takes the last hit's 4 s stun");
+                CHECKF(cast.cast && at.size() == 4 && bw.world->effect_stacks(boss, stunned->row.guid) == 0, "the boss is immune to the last hit's 4 s stun too (the data's Boss gate)");
+                int refused = 0;
+                for (const combat::EffectRefusal& r : bw.player->refusals) {
+                    if (r.effect_guid == incap->row.guid || r.effect_guid == stunned->row.guid) ++refused;
+                }
+                CHECKF(refused == 1, "the caster's client is told of the Incapacitated's refusal; the stun's hit never runs, its target requirement unmet (%d)", refused);
             }
         }
     }

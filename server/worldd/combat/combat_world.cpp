@@ -1631,6 +1631,23 @@ bool CombatWorld::takes_crowd_control(const abilities::EffectDef& def) {
 
 void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instigator, double now, uint64_t via_pet) {
     if (n.dead || !a.def) return;
+    // immune, then resist, then apply: a boss is immune to every effect the data gates on the Boss effect, before any roll
+    if (a.def->boss_gated && is_boss(n)) {
+        spdlog::info("[combat] {} ({}) is immune to {} from player {}", n.leaf, n.actor_id, a.def->row.name, instigator);
+        notify_effect_refused(n, *a.def, instigator, true, now);
+        return;
+    }
+    // the two immunity buffs make their holder immune to tagged crowd control while they last, before the roll (their data's +1 forbids it anyway)
+    if (takes_resist_roll(*a.def) && immunity_buff_holds(n)) {
+        spdlog::info("[combat] {} ({}) is immune to {} from player {}", n.leaf, n.actor_id, a.def->row.name, instigator);
+        notify_effect_refused(n, *a.def, instigator, true, now);
+        return;
+    }
+    if (takes_resist_roll(*a.def) && effect_resisted(n, *a.def, a, instigator, via_pet)) {
+        spdlog::info("[combat] {} ({}) resists {} from player {}", n.leaf, n.actor_id, a.def->row.name, instigator);
+        notify_effect_refused(n, *a.def, instigator, false, now);
+        return;
+    }
     // A slow, a root, a freeze, a stun, a trip, a sleep and a push go on like any effect and bind the creature (apply_crowd_control); a silence, a disarm and the rest stay off: the effect would wear its
     // icon and the mob would keep acting
     if (a.def->cc && (a.def->cc->applied_status & content::kCcDisplace) != 0 && is_boss(n)) {   // a boss is not pushed: the effect of a push, and the CC that comes with it, is not put on it
@@ -2110,5 +2127,6 @@ void CombatWorld::tick(double now) {
 }
 
 #include "combat/combat_knockback.inc"   // what throws, pushes and pulls a creature (move_by_hit, track_push, push_wire, origin_actors)
+#include "combat/combat_resist.inc"      // a crowd control the data's UniversalResistChance throws off (takes_resist_roll, effect_resisted)
 
 }  // namespace aoc::worldd::combat

@@ -71,6 +71,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **Social / Emotes** | 15 of the 54 emote commands (/airguitar, /bigcelebrate, /crossarms, /facepalm, /frustrated, /groove, /kiss, /looking, /maybe, /notrouble, /searching, /shakefist, /stinks, /surrender and /wipebrow) have no ability in the game's data and do nothing. | None. | Open. |
 | **Social / Parties** | The group frame lists the members and the leader, but not yet their health, mana, level or position. Party loot settings, the master looter's choices and loot rolls are not built, and a party cannot become a raid. | None. | Open. |
 | **Social / Friends** | The friends window does not show the last time a friend was online or their guild yet, and a friend counts as online only on the same world server. | None. | Open. |
+| **Combat / Crowd-control resistance** | A crowd control that a mob has kept up is thrown off at its build-up's threshold and the tier stat gets +100 for 10 s, so a new crowd control of that kind is resisted; a boss is immune to the 24 exported effects the data gates on the Boss effect, and Rafflesia's Steadfast Root and Shardmaw's Void Rage make their holder immune to tagged crowd control while they last. Not built: the data's CharacterType > 1.5 rule (caravans, destructibles and caravels resist every debuff), which waits for the caravan work. | None. | Open: the caravan, destructible and caravel rule. |
 
 ---
 

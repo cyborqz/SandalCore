@@ -72,6 +72,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <algorithm>
 #include <cstring>
@@ -345,6 +346,12 @@ struct Mirror {
     std::vector<std::pair<double, int32_t>> ends;    // (time, ClientInstanceId) of every ClientEndAbility
     bool   end_before_removal = false;               // a ClientEndAbility came while its instance was still listed
     std::vector<repl::HitInstance> hits;             // plan D2, stage 2: every hit the client was confirmed (ClientHitConfirmationsReliable), in order
+    struct EffectOutcome {
+        int64_t effect_guid = 0;
+        emit::FIntrepidNetworkGUID target;
+        bool immune = false;
+    };
+    std::vector<EffectOutcome> effect_outcomes;      // A3: every ClientOnEffectResisted / ClientOnEffectImmune, in order
     std::vector<std::pair<float, float>> shields;    // the TempHealth item's elements: (Base, Value)
     size_t hit_calls = 0;
     size_t unreadable = 0, chains = 0, chains_with_exports = 0;
@@ -483,6 +490,14 @@ struct Mirror {
                     continue;
                 }
                 for (const repl::RpcCall& c : *calls) {
+                    if (c.decoded && (std::string(c.rpc->name) == "ClientOnEffectResisted" || std::string(c.rpc->name) == "ClientOnEffectImmune")) {
+                        const repl::Value* g = repl::rpcf::value_of(*c.rpc, c.params, "EffectGuid");
+                        const repl::Value* t = repl::rpcf::value_of(*c.rpc, c.params, "Target");
+                        const int64_t* effect = g ? g->get_if<int64_t>() : nullptr;
+                        const emit::FIntrepidNetworkGUID* target = t ? t->get_if<emit::FIntrepidNetworkGUID>() : nullptr;
+                        if (effect && target) effect_outcomes.push_back({*effect, *target, std::string(c.rpc->name) == "ClientOnEffectImmune"});
+                        continue;
+                    }
                     if (!c.decoded || std::string(c.rpc->name) != "ClientEndAbility") continue;
                     const schema::RepCommand* cmd = repl::rpc_command(*c.rpc, "ClientInstanceId");
                     const auto it = cmd ? c.params.values.find(cmd->handle) : c.params.values.end();
@@ -2448,6 +2463,7 @@ struct WolfWorld {
     uint64_t next_actor_id = 5000000;
     bool ground = false;
     int level = 8;
+    std::string motion_path = NPC_MOTION_PATH;   // (a copy of the Blueprint table may carry the Boss tag)
     double ahead = 120;              // how far in front of the player the Wolves stand, cm
     double north = 0;                // ... and this far along +Y, the way the player faces, for the first Wolf (an ability that gathers the enemies in a cone ahead of the caster)
     int extra = 0;                   // E1 stage 3 fix 3: more Wolves, minted right after the first (their blocks follow its), 1 m apart
@@ -2455,7 +2471,7 @@ struct WolfWorld {
     std::vector<uint64_t> wolves;    // their ids
     void prepare(PlayerWorld& w) {
         std::string err;
-        if (!w.load_blueprints(NPC_MOTION_PATH, err)) {
+        if (!w.load_blueprints(motion_path, err)) {
             std::printf("  [FAIL] the Blueprint table: %s\n", err.c_str());
             return;
         }
@@ -2572,6 +2588,115 @@ static void test_e1_inline_target_session() {
     CHECK(!r.h.s->abilities_failed() && r.m.unreadable == 0, "(the session is fine, every chain reads)");
 }
 // C.O.A : C-Y-B
+
+/// A copy of the Blueprint table with the Boss tag on the Wolf's row, for a world in which that Wolf is a boss.
+static std::string a3_boss_motion(const fs::path& dir) {
+    const fs::path path = dir / "npc_motion_boss.tsv";
+    std::ifstream in(NPC_MOTION_PATH, std::ios::binary);
+    std::ofstream out(path, std::ios::binary);
+    std::string line;
+    bool first = true;
+    while (std::getline(in, line)) {
+        std::string tail;
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+            tail = "\r";
+        }
+        if (!first && line.find("/Beast/Canine/Wolf.Default__Wolf_C\t") != std::string::npos) {
+            std::vector<std::string> cells;
+            size_t from = 0;
+            for (;;) {
+                const size_t tab = line.find('\t', from);
+                cells.push_back(line.substr(from, tab == std::string::npos ? std::string::npos : tab - from));
+                if (tab == std::string::npos) break;
+                from = tab + 1;
+            }
+            if (cells.size() > 12) {
+                cells[12] = "Boss";
+                line.clear();
+                for (size_t i = 0; i < cells.size(); ++i) line += (i ? "\t" : "") + cells[i];
+            }
+        }
+        out << line << tail << "\n";
+        first = false;
+    }
+    return path.string();
+}
+
+/// A3: the two client calls.  A resisted chill and a boss's immune stun are put on a Wolf through the world; the session sends
+/// ClientOnEffectResisted / ClientOnEffectImmune on the caster's ability component, and the client's own reader decodes both.
+static void test_a3_effect_outcome_on_the_wire() {
+    std::printf("A3: a resisted chill and a boss's immune stun reach the caster's client as ClientOnEffectResisted / ClientOnEffectImmune\n");
+    // the resist
+    {
+        const svc::Character rec = bard25();
+        WolfWorld ww;
+        Run r(0, true, &rec, [&](PlayerWorld& w) { ww.prepare(w); });
+        CHECK(ww.ground && ww.wolf != 0 && r.h.fx.world->combat() != nullptr, "(a world with the Wolf and its fights)");
+        if (!ww.ground || ww.wolf == 0 || !r.h.fx.world->combat()) return;
+        combat::CombatWorld& cw = *r.h.fx.world->combat();
+        const auto* chilled = r.h.fx.world->ability_catalog()->effect_named("Status_Chilled");
+        const auto* carrier = r.h.fx.world->ability_catalog()->effect_named("DisableEvasion_Movement_T1_Buildup");
+        CHECK(chilled && carrier, "(the data has the chill and a hidden carrier for a hand-set chance)");
+        if (!chilled || !carrier) return;
+        r.play(0.5, false);
+        const uint64_t player = r.h.s->bootstrap().setup().guids.pawn.ObjectId;
+        effects::Applied extra;
+        extra.def = carrier;
+        extra.stacks = 1;
+        extra.duration = effects::kForever;
+        extra.mods.push_back({109343399171804ll, 2.0});
+        cw.apply_effects(ww.wolf, player, {extra}, r.now());
+        effects::Applied chill;
+        chill.def = chilled;
+        chill.stacks = 1;
+        chill.duration = 12.0;
+        cw.apply_effects(ww.wolf, player, {chill}, r.now());
+        r.play(0.2, false);
+        const Mirror::EffectOutcome* got = nullptr;
+        for (const Mirror::EffectOutcome& o : r.m.effect_outcomes) {
+            if (o.effect_guid == chilled->row.guid && o.target.ObjectId == ww.wolf) got = &o;
+        }
+        CHECKF(got && !got->immune, "the caster's client is told the chill was resisted (EffectGuid %lld, Target %llu)", static_cast<long long>(chilled->row.guid),
+               static_cast<unsigned long long>(ww.wolf));
+        CHECKF(cw.effect_stacks(ww.wolf, chilled->row.guid) == 0, "the chill is not on the Wolf (%d stack(s))", cw.effect_stacks(ww.wolf, chilled->row.guid));
+        CHECKF(r.m.unreadable == 0 && !r.h.s->abilities_failed(), "(the session is fine, every chain reads)");
+    }
+    // the immunity
+    {
+        const fs::path dir = content_fixture::make_temp_dir("worldd_a3_boss_");
+        const svc::Character rec = bard25();
+        WolfWorld ww;
+        ww.motion_path = a3_boss_motion(dir);
+        Run r(0, true, &rec, [&](PlayerWorld& w) { ww.prepare(w); });
+        CHECK(ww.ground && ww.wolf != 0 && r.h.fx.world->combat() != nullptr, "(a world with the boss Wolf and its fights)");
+        if (ww.ground && ww.wolf != 0 && r.h.fx.world->combat()) {
+            combat::CombatWorld& cw = *r.h.fx.world->combat();
+            const auto* stunned = r.h.fx.world->ability_catalog()->effect_named("Status_Stunned");
+            CHECK(stunned != nullptr, "(the data has the stun)");
+            if (stunned) {
+                r.play(0.5, false);
+                const uint64_t player = r.h.s->bootstrap().setup().guids.pawn.ObjectId;
+                effects::Applied stun;
+                stun.def = stunned;
+                stun.stacks = 1;
+                stun.duration = 5.0;
+                cw.apply_effects(ww.wolf, player, {stun}, r.now());
+                r.play(0.2, false);
+                const Mirror::EffectOutcome* got = nullptr;
+                for (const Mirror::EffectOutcome& o : r.m.effect_outcomes) {
+                    if (o.effect_guid == stunned->row.guid && o.target.ObjectId == ww.wolf) got = &o;
+                }
+                CHECKF(got && got->immune, "the caster's client is told the boss is immune to the stun (EffectGuid %lld, Target %llu)", static_cast<long long>(stunned->row.guid),
+                       static_cast<unsigned long long>(ww.wolf));
+                CHECKF(cw.effect_stacks(ww.wolf, stunned->row.guid) == 0, "the stun is not on the boss (%d stack(s))", cw.effect_stacks(ww.wolf, stunned->row.guid));
+                CHECKF(r.m.unreadable == 0 && !r.h.s->abilities_failed(), "(the session is fine, every chain reads)");
+            }
+        }
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+}
 
 static void world_play(Run& r, double seconds);   // (defined with the whole-fight tests below)
 
@@ -4637,6 +4762,7 @@ int main() {
         test_d2_class_resource();
         test_e1_combat_session();
         test_e1_inline_target_session();
+        test_a3_effect_outcome_on_the_wire();
         test_e1_npc_cylinder_export();
         test_e1_one_clock();
         test_e1_ranged_book_at_wolf();
