@@ -23,3 +23,4 @@
 #include "session/members/ignore.inc"
 #include "session/members/emotes.inc"
 #include "session/members/node_inventory.inc"
+#include "session/members/buy_orders.inc"

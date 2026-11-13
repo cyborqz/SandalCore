@@ -169,6 +169,58 @@ static void test_dialogue_book() {
 }
 
 /// Node citizenship (contentc version 44): the Node Administrator's (the Sheriff's) lines run the action responses AddNodeCitizenship, with the town hall's shop of the tax
+/// Buy orders: the Buy Order Manager's root goes, while the NPC's node has an order running, first to its quest (zLegacy_CSQ_0154_FTUE_WoodStoneBuildingHomes, while the
+/// character can take it), then, once it is done, to its BuyOrderFulfillment node, whose panel (ESubDialogueType 5) is queued over the conversation and the result says to open
+/// the window; with no order it shows its plain answer.
+static void test_dialogue_buy_orders() {
+    std::printf("the Buy Order Manager's window\n");
+    std::string why;
+    const auto book = dialogue_book(why);
+    if (!book) { std::printf("  [skip] SKIP: %s\n", why.c_str()); return; }
+    constexpr int64_t kRoot = 6064634349883573147ll;      // zLegacy_DD_ServiceNPC_BuyOrderManager
+    constexpr int64_t kQuestNode = 6064634349883573149ll; // its node 99: the quest's start
+    constexpr int64_t kWindow = 6064634772800864256ll;    // its BuyOrderFulfillment node
+    constexpr int64_t kNoOrders = 6064634349883573156ll;  // its node 92
+    struct OrderFacts : CrierFacts {
+        bool orders = false, quest_done = false;
+        std::optional<dl::ExprValue> call(const std::string& name, const std::vector<dl::ExprValue>& args) const override {
+            if (name == "Node_IsBuyOrderActive") return dl::ExprValue::of(orders ? 1 : 0);
+            return CrierFacts::call(name, args);
+        }
+        std::optional<int64_t> quest_count(int64_t, const std::string& query) const override {
+            if (!quest_done) return std::nullopt;   // no quest log: the quest's own rules decide whether it can be taken
+            return query == "Completed" ? 1 : 0;
+        }
+    };
+    OrderFacts facts;
+    facts.orders = true;
+    {
+        dl::Evaluator ev(*book, facts, [](const std::string&) {});
+        dl::Talk t;
+        const dl::Result r = t.begin(*book, ev, 1, kRoot);
+        CHECK(r.outcome == dl::Outcome::Changed && !r.open_buy_orders && t.state().shown_node == kQuestNode,
+              "with an order running and the manager's quest still to take, the greeting is the quest's (the data's first line)");
+    }
+    facts.quest_done = true;
+    {
+        dl::Evaluator ev(*book, facts, [](const std::string&) {});
+        dl::Talk t;
+        const dl::Result r = t.begin(*book, ev, 1, kRoot);
+        CHECK(r.outcome == dl::Outcome::Changed && r.open_buy_orders && t.sub() && t.sub()->type == 5 && t.sub()->node == kWindow && t.state().shown_node == kWindow,
+              "with an order running, the greeting is the BuyOrderFulfillment node: its panel (type 5) is queued and the window is to open");
+        const dl::Result closed = t.close(&*book);
+        CHECK(closed.outcome == dl::Outcome::Changed && closed.offer_answered && !t.open(), "the panel's close ends the talk");
+    }
+    facts.orders = false;
+    {
+        dl::Evaluator ev(*book, facts, [](const std::string&) {});
+        dl::Talk t;
+        const dl::Result r = t.begin(*book, ev, 1, kRoot);
+        CHECK(r.outcome == dl::Outcome::Changed && !r.open_buy_orders && !t.sub() && t.state().shown_node == kNoOrders, "with none, the manager gives its plain answer and no window opens");
+    }
+}
+
+/// Node citizenship (contentc version 45): the Node Administrator's (the Sheriff's) lines run the action responses AddNodeCitizenship, with the town hall's shop of the tax
 /// receipts, and RemoveNodeCitizenship; the shop is one the conversation may open (the join dialog's purchase button).
 static void test_dialogue_citizenship() {
     std::printf("the Node Administrator's citizenship lines\n");

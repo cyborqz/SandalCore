@@ -68,6 +68,11 @@ struct CitizenshipRules {
     /// The limits of `tag` in `node`'s table, from the tag up the tag tree (the first listed); null when the table lists none of them.
     const TaxLimit* tax_limit(int64_t node, const std::string& tag) const;
     std::map<int, int64_t> cooldown_secs;   // the node levels that take citizens, and their renounce cooldown
+    std::map<int, int>     buy_order_slots; // citizenship_node's MinBuyOrderSlots by node level: the buy orders a node runs at once (a level not listed: none)
+    int buy_order_slots_at(int level) const {
+        const auto it = buy_order_slots.find(level);
+        return it == buy_order_slots.end() ? 0 : it->second;
+    }
     std::map<int64_t, int64_t> at_risk_secs;   // city_node.citizenship_at_risk_secs by node (a node not listed, or 0: kDefaultAtRiskSecs)
     static constexpr int64_t kDefaultAtRiskSecs = 604800;
 

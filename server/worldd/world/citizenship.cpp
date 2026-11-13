@@ -131,6 +131,15 @@ std::optional<CitizenshipRules> CitizenshipRules::load(const std::string& path, 
         }
     }
     {
+        Stmt st;   // the buy order slots (a content.db without those columns: no node runs buy orders)
+        if (sqlite3_prepare_v2(db.db, "SELECT level, min_buy_order_slots FROM citizenship_node", -1, &st.s, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st.s) == SQLITE_ROW) {
+                const int level = sqlite3_column_int(st.s, 0), slots = sqlite3_column_int(st.s, 1);
+                if (level >= 0 && level <= 6 && slots > 0 && slots <= 1000) r.buy_order_slots[level] = slots;
+            }
+        }
+    }
+    {
         Stmt st;
         if (sqlite3_prepare_v2(db.db,
                                "SELECT weeks, late_fee, overdue_days, base_dues_guid, rank_impact, level_impact, non_property_owner FROM citizenship_dues_def "

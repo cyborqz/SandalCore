@@ -9,3 +9,4 @@
 #include "elections_mayors_tests.inc"
 #include "elections_dues_tests.inc"
 #include "elections_node_stores_tests.inc"
+#include "elections_buy_orders_tests.inc"

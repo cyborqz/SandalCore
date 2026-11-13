@@ -812,6 +812,156 @@ void test_node_inventory() {
           "ClientShowMayorInventory lists the node's goods as items, with its gold");
 }
 
+/// The node's buy orders through a session (session/player_buy_orders.cpp): the mayor places one (ServerAddBuyOrder: NodeCost from the treasury, the client's ContributionLimit
+/// of 300 brought into the recipe's range), the window's data (ClientUpdateBuyOrderData), and a delivery at the Buy Order Manager (ServerFulfillActiveBuyOrder) that takes the
+/// named stack, counts the units, fills the node's stores and answers ClientBuyOrderFulfilled; a unit over the character's limit is refused with nothing taken.
+void test_buy_orders_session() {
+    std::printf("node citizenship: the buy orders\n");
+    namespace bo = world::buy_orders;
+    CitizenHarness h;
+    h.play();
+    h.run(milliseconds(1500));
+    spdlog::set_level(std::getenv("AOC_TEST_CITIZEN_LOG") ? spdlog::level::info : spdlog::level::off);
+    h.fx.world->set_elections(world::ElectionRules{}, "");
+    world::Elections* el = h.fx.world->elections();
+    el->set_citizen(kTestCitizenNode, world::ElectionPerson{h.record.account_id, kCyb, "cyb", 1});
+    el->set_mayor(kTestCitizenNode, world::ElectionPerson{h.record.account_id, kCyb, "cyb", 1}, 1);
+    el->change_node(kTestCitizenNode, [](world::NodeElection& e) {
+        e.treasury = 100000;
+        return true;
+    });
+    h.s->set_buy_order_slots_for_test(2);
+    const bo::Recipe* r = nullptr;
+    for (const bo::Recipe& x : bo::kRecipes) {
+        if (std::string(x.name) == "Commodity_RVR_Spirits_T1_1") r = &x;
+    }
+    const bo::Commodity* commodity = r ? bo::commodity(r->commodity) : nullptr;
+    CHECK(r && commodity && commodity->item != 0, "(the data's Commodity_RVR_Spirits_T1_1 and the item its commodity makes)");
+    if (!r || !commodity) return;
+    const int64_t m0 = bo::kOptions[bo::kRequirements[r->first].first], m1 = bo::kOptions[bo::kRequirements[r->first + 1].first];
+
+    // the mayor places an order
+    size_t at = h.got.size();
+    h.t += milliseconds(500);
+    h.pc_call("ServerAddBuyOrder", [&](const schema::RpcSchema& rs, repl::RpcParams& p) {
+        repl::ArrayValue mats;
+        for (const int64_t m : {m0, m1}) {
+            repl::ElementState e;
+            e.values[1] = repl::Value::i64(m);
+            e.values[2] = repl::Value::u64(10);
+            mats.elements.push_back(std::move(e));
+        }
+        // (a struct parameter goes whole: every member is set)
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.TimeCreated", repl::Value::i64(0));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.RewardId", repl::Value::i64(r->reward_table));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.NumTimesLimitIncreased", repl::Value::u64(0));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.VisiblyFulfilled", repl::Value::i64(0));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.ExpirationTimeInSeconds", repl::Value::i64(0));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.CommodityId", repl::Value::i64(r->commodity));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.CommodityRecipeId", repl::Value::i64(r->recipe));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.Materials", repl::Value(mats));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.ContributionLimit", repl::Value::i64(300));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.Requested", repl::Value::i64(100));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.NodeCost", repl::Value::i64(20000));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.RewardQuantity", repl::Value::i64(1));
+        repl::set_rpc_param(rs, p, "RequestedBuyOrder.TimeRemainingSeconds", repl::Value::i64(3 * 86400));
+    });
+    h.run(milliseconds(300));
+    const world::NodeBuyOrders* orders = el->buy_orders(kTestCitizenNode);
+    CHECK(h.s->buy_orders_added() == 1 && orders && orders->active.size() == 1 && el->treasury(kTestCitizenNode) == 80000 && orders->active[0].contribution_limit == 100 &&
+              orders->active[0].requested == 100 && orders->active[0].materials.size() == 2,
+          "the mayor's ServerAddBuyOrder places the order: 20,000 copper from the treasury, the client's ContributionLimit of 300 brought to the recipe's 100");
+    auto calls = pc_calls_since(h, at);
+    const repl::RpcCall* c = last_call(calls, "ClientUpdateBuyOrderData");
+    const repl::Value* dv = c ? repl::rpcf::value_of(*c->rpc, c->params, "BuyOrderData") : nullptr;
+    const repl::ClientBuyOrderData* d = dv ? dv->get_if<repl::ClientBuyOrderData>() : nullptr;
+    CHECK(d && d->active.size() == 1 && d->active[0].second.recipe == r->recipe && d->active[0].second.requested == 100 && d->max_slots == 2 && !d->possible.empty(),
+          "ClientUpdateBuyOrderData: the running order, the node's slots and, for the node's mayor, what it may order");
+    CHECK(el->node(kTestCitizenNode) && !el->node(kTestCitizenNode)->news.empty() && el->node(kTestCitizenNode)->news.back().type == 13, "the node's feed: NewBuyOrder");
+    at = h.got.size();
+    h.t += milliseconds(500);
+    h.pc_call("ServerGetPossibleAndActiveBuyOrders", [&](const schema::RpcSchema& rs, repl::RpcParams& p) { repl::set_rpc_param(rs, p, "NodeGuid", repl::Value::i64(kTestCitizenNode)); });
+    h.run(milliseconds(300));
+    calls = pc_calls_since(h, at);
+    CHECK(last_call(calls, "ClientUpdateBuyOrderData") != nullptr, "ServerGetPossibleAndActiveBuyOrders is answered with the node's data");
+
+    // a delivery: an order that takes the character's potions, one a unit, two units a character a day
+    const world::MayorGuid g{1, 2, 3, 4};
+    const int64_t wall = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    el->change_node(kTestCitizenNode, [&](world::NodeElection& e) {
+        world::NodeBuyOrder o;
+        o.guid = g;
+        o.commodity = r->commodity;
+        o.recipe = r->recipe;
+        o.created_ms = wall;
+        o.expires_ms = wall + 86400000;
+        o.materials = {{fi::kPotion, 1}};
+        o.contribution_limit = 2;
+        o.requested = 3;
+        e.buy_orders.active.push_back(o);
+        return true;
+    });
+    std::optional<svc::InventoryItem> potions;
+    for (const svc::InventoryItem& it : h.s->inventory().items()) {
+        if (it.item_record_id == fi::kPotion && it.quantity >= 3) potions = it;
+    }
+    const auto words = potions ? items::guid_of(potions->instance_guid) : std::nullopt;
+    CHECK(potions && words, "(the character carries a stack of potions)");
+    if (!potions || !words) return;
+    const int64_t had = h.s->inventory().count_of(fi::kPotion);
+    const auto deliver = [&](int64_t units, int64_t quantity) {
+        h.t += milliseconds(500);
+        h.pc_call("ServerFulfillActiveBuyOrder", [&](const schema::RpcSchema& rs, repl::RpcParams& p) {
+            repl::ArrayValue combo;
+            repl::ElementState e;
+            e.values[1] = repl::Value::i64(static_cast<int32_t>(words->a));
+            e.values[2] = repl::Value::i64(static_cast<int32_t>(words->b));
+            e.values[3] = repl::Value::i64(static_cast<int32_t>(words->c));
+            e.values[4] = repl::Value::i64(static_cast<int32_t>(words->d));
+            e.values[5] = repl::Value::i64(quantity);
+            e.values[6] = repl::Value::u64(static_cast<uint64_t>(repl::ItemLocation::Backpack));
+            combo.elements.push_back(std::move(e));
+            repl::set_rpc_param(rs, p, "NodeGuid", repl::Value::i64(kTestCitizenNode));
+            repl::set_rpc_param(rs, p, "RequestedBuyOrderGuid.A", repl::Value::i64(1));
+            repl::set_rpc_param(rs, p, "RequestedBuyOrderGuid.B", repl::Value::i64(2));
+            repl::set_rpc_param(rs, p, "RequestedBuyOrderGuid.C", repl::Value::i64(3));
+            repl::set_rpc_param(rs, p, "RequestedBuyOrderGuid.D", repl::Value::i64(4));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.ItemCombination", repl::Value(combo));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.OriginalNumToFulfill", repl::Value::i64(units));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.AdjustedNumToFulfill", repl::Value::i64(units));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.TransactionId.A", repl::Value::i64(7));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.TransactionId.B", repl::Value::i64(8));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.TransactionId.C", repl::Value::i64(9));
+            repl::set_rpc_param(rs, p, "FulfillmentCombo.TransactionId.D", repl::Value::i64(10));
+        });
+        h.run(milliseconds(300));
+    };
+    at = h.got.size();
+    deliver(2, 2);
+    CHECK(h.s->buy_order_deliveries() == 0 && h.s->buy_order_deliveries_refused() == 1 && h.s->inventory().count_of(fi::kPotion) == had,
+          "with no Buy Order Manager's window open, a delivery is refused and nothing is taken");
+    h.s->open_buy_orders_for_test(kTestCitizenNode);
+    at = h.got.size();
+    deliver(2, 2);
+    calls = pc_calls_since(h, at);
+    const repl::RpcCall* ok = last_call(calls, "ClientBuyOrderFulfilled");
+    CHECK(ok && call_int(*ok, "FulfilledBuyOrder.VisiblyFulfilled") == 2 && call_int(*ok, "FulfilledBuyOrder.Requested") == 3 &&
+              call_int(*ok, "FulfillmentCombo.AdjustedNumToFulfill") == 2 && call_int(*ok, "FulfillmentCombo.TransactionId.A") == 7,
+          "ClientBuyOrderFulfilled: the order with its two units, and the combo back");
+    const world::NodeBuyOrders* now_orders = el->buy_orders(kTestCitizenNode);
+    const world::NodeBuyOrder* order = now_orders ? bo::find(*now_orders, g) : nullptr;
+    CHECK(h.s->buy_order_deliveries() == 1 && h.s->inventory().count_of(fi::kPotion) == had - 2 && order && order->fulfilled == 2 && el->stored(kTestCitizenNode) &&
+              el->stored(kTestCitizenNode)->count(commodity->item) && el->stored(kTestCitizenNode)->at(commodity->item) == 2,
+          "the delivery takes the two potions, counts two units and puts two of the commodity's item into the node's stores");
+    at = h.got.size();
+    deliver(1, 1);
+    calls = pc_calls_since(h, at);
+    CHECK(last_call(calls, "ClientBuyOrderFulfillmentRejection") && !last_call(calls, "ClientBuyOrderFulfilled") && h.s->inventory().count_of(fi::kPotion) == had - 2 &&
+              h.s->buy_order_deliveries_refused() == 2,
+          "a third unit over the character's limit of two is refused (ClientBuyOrderFulfillmentRejection) and nothing is taken");
+}
+
+AOC_REGISTER_TEST(test_buy_orders_session);
 AOC_REGISTER_TEST(test_citizenship_flow);
 AOC_REGISTER_TEST(test_mayor_flow);
 AOC_REGISTER_TEST(test_citizenship_gm);

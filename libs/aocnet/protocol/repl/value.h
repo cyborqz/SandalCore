@@ -779,6 +779,54 @@ struct NodeInventoryData {
     bool operator==(const NodeInventoryData&) const = default;
 };
 
+/// A material of a buy order: an item and how many (FBuyOrderFulfillmentData.Materials).
+struct BuyOrderMaterial {
+    int64_t item = 0;
+    int32_t quantity = 0;
+    bool operator==(const BuyOrderMaterial&) const = default;
+};
+/// FBuyOrderFulfillmentData as FClientBuyOrderData carries it (buy_order_codec.h).
+struct BuyOrderData {
+    int64_t commodity = 0, recipe = 0, reward = 0, time_created = 0;
+    std::vector<BuyOrderMaterial> materials;
+    int32_t contribution_limit = 0, requested = 0, visibly_fulfilled = 0;
+    int64_t node_cost = 0;
+    int32_t reward_quantity = 0, time_remaining = 0;
+    int64_t extra = 0;   // the unnamed word at +0x38
+    bool operator==(const BuyOrderData&) const = default;
+};
+/// A recipe the mayor may order a commodity by, with the data's ranges and its material requirements (buy_order_codec.h).
+struct BuyOrderOption {
+    int64_t recipe = 0;
+    int16_t limit_min = 0, limit_max = 0;
+    uint8_t days_min = 0, days_max = 0;
+    int16_t reward_min = 0, reward_max = 0;
+    int32_t cost_min = 0, cost_max = 0;
+    int16_t quantity_min = 0, quantity_max = 0;
+    std::vector<std::vector<int64_t>> materials;   // for each requirement, the items it takes
+    std::vector<int32_t>              quantities;  // ... and how many one unit takes
+    bool operator==(const BuyOrderOption&) const = default;
+};
+struct BuyOrderPossible {
+    int64_t commodity = 0;   // a CommodityDefRecordBase
+    uint8_t category = 0;    // ECommodityCategory
+    std::vector<BuyOrderOption> options;
+    bool operator==(const BuyOrderPossible&) const = default;
+};
+/// FClientBuyOrderData (ClientUpdateBuyOrderData): what a node may order and what it has ordered; its own NetSerialize (buy_order_codec.h).
+struct ClientBuyOrderData {
+    std::vector<BuyOrderPossible> possible;
+    std::vector<std::pair<GuidValue, BuyOrderData>> active;   // ActiveBuyOrders, in the map's order
+    int32_t max_slots = 0;
+    bool operator==(const ClientBuyOrderData&) const = default;
+};
+/// FPlayerBuyOrderContributions (ClientUpdateBuyOrderData): what the player gave each order; its own NetSerialize (buy_order_codec.h).
+struct PlayerBuyOrderContributions {
+    std::vector<std::pair<GuidValue, int32_t>> contributions;
+    int32_t refresh_time = 0;
+    bool operator==(const PlayerBuyOrderContributions&) const = default;
+};
+
 /// How a Value holds the citizenship window's data: on the heap, as EventBox holds an event (the struct is some 300 bytes; boxed, a Value stays at the size of an ItemInstance).
 /// Code never names it: Value(CitizenshipWindowData) and Value::get_if<CitizenshipWindowData>() do.
 class CitizenshipBox {
@@ -842,7 +890,7 @@ public:
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
-        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection, CitizenshipBox, NodeInventoryData>;
+        RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection, CitizenshipBox, NodeInventoryData, ClientBuyOrderData, PlayerBuyOrderContributions>;
 
     Value() = default;
 // built by C | Y | B with C | O | A

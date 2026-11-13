@@ -30,9 +30,13 @@
 //  Objective progress (CompleteDialogueObjective, IncrementDialogueObjective) is the exception: the conversation keeps it (Result::deferred, then Talk::pending_) and hands it over in
 //  Result::actions when the conversation ends, so that a talk quest is marked done after the talk and not when its window opens.
 //
-//  What this milestone does not do (it opens no windows but a shop's): an action that is not a quest action (SetCertificationLevel, a window that is not a shop's ...) is skipped and
-//  reported; a line that ends the conversation but has such an action changes nothing (the window stays); a node of a kind that needs choices this milestone does not offer (a
-//  BuyOrderFulfillment node) is never shown (the line that leads there changes nothing).  ExhaustBehavior is CloseAndClear for all but one node of the data, and every node is treated so.
+//    buy orders  a step (or a greeting) that arrives at a BuyOrderFulfillment node (the Buy Order Manager's, behind Node_IsBuyOrderActive) queues the buy order panel
+//                (ESubDialogueType BuyOrderFulfillment) and says so (Result::open_buy_orders): the session opens the window over the conversation and the player closes it with
+//                the panel's Close, which ends the talk
+//
+//  What this milestone does not do (it opens no windows but a shop's, the warehouse and the buy orders): an action that is not a quest action (SetCertificationLevel, a window that
+//  is not a shop's ...) is skipped and reported; a line that ends the conversation but has such an action changes nothing (the window stays).  ExhaustBehavior is CloseAndClear for
+//  all but one node of the data, and every node is treated so.
 //  A node with no line that shows is shown with its words alone: the talking window adds a close option of its own ("Farewell." for a person, "Close" for anything else) and the
 //  player ends the conversation with it, so the last words of most conversations are seen before the talk ends.  A node with neither words nor a line (a placeholder root) shows
 //  nothing: a click on an NPC that starts at one does nothing, a line that leads to one ends the conversation, and what entering it does still happens.
@@ -68,6 +72,9 @@ struct Result {
     /// (3: the character stands for mayor); the conversation goes on.
     int                      citizenship = 0;
     int64_t                  citizenship_vendor = 0;   // AddNodeCitizenship's shop of the tax receipts (0: none)
+    /// Buy orders: the talk reached a BuyOrderFulfillment node (the Buy Order Manager's), whose panel (ESubDialogueType BuyOrderFulfillment) is queued on top: the caller opens the
+    /// window with the NPC's node (session/player_buy_orders.cpp).
+    bool                     open_buy_orders = false;
     /// Quests, slice 2: the quest actions the conversation ran, in order, for the session to carry out (`node` is the node whose line or enter / exit list holds each).  Objective
     /// progress (CompleteDialogueObjective, IncrementDialogueObjective) is among them only in the result of the step that ends the conversation.
     struct Run {
@@ -92,7 +99,7 @@ public:
 
     /// The panel queued on top of the conversation (SubDialogueInstance: QuestAccept, Confirmation or the hand-in panel).
     struct Sub {
-        uint8_t              type = 2;            // ESubDialogueType: 2 QuestAccept, 3 ItemTurnIn (quests part 3, slice 2), 4 Confirmation (quests, slice 2)
+        uint8_t              type = 2;            // ESubDialogueType: 2 QuestAccept, 3 ItemTurnIn (quests part 3, slice 2), 4 Confirmation (quests, slice 2), 5 BuyOrderFulfillment
         int64_t              quest = 0;           // the quest on offer or handed in for (0 for a confirmation)
         int64_t              node = 0;            // the node that offers it
         int64_t              previous_node = 0;   // the node the player left to get there
@@ -247,6 +254,7 @@ public:
         }
         if (!enter(book, ev, *n, *target, state_.shown_node, s, entered)) { drop(r); r.outcome = Outcome::Nothing; r.why = entered.why; return r; }
         r.offer = entered.offer;
+        r.open_buy_orders = entered.open_buy_orders;
         entering(book, passes, *target, s, r);
         state_ = std::move(s);
         commit(r);
@@ -384,6 +392,15 @@ private:
             if (sub.objectives.empty()) { r.outcome = Outcome::Refused; r.why = "nothing to hand in at node " + std::to_string(guid) + ": no objective it lists is active"; return false; }
             s.sub = std::move(sub);
             r.offer = true;
+            return true;
+        }
+        if (n.type == "BuyOrderFulfillment") {   // buy orders: the Buy Order Manager's window, as a panel over the conversation (UDialogueWidget::HandleBuyOrderFulfillmentSubDialogue)
+            Sub sub;
+            sub.type = 5;
+            sub.node = guid;
+            sub.previous_node = from;
+            s.sub = std::move(sub);
+            r.open_buy_orders = true;
             return true;
         }
         if (n.type != "Response") { r.outcome = Outcome::Refused; r.why = "the node is a " + n.type + " node, which this milestone cannot show"; return false; }

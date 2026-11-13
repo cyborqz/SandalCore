@@ -23,6 +23,7 @@
 #include "protocol/repl/fast_array.h"
 #include "protocol/repl/citizenship_codec.h"
 #include "protocol/repl/node_inventory_codec.h"
+#include "protocol/repl/buy_order_codec.h"
 #include "protocol/repl/node_rpc.h"
 #include "protocol/repl/rpc.h"
 
@@ -444,6 +445,59 @@ void test_node_inventory() {
     CHECK(got && got->get_if<NodeInventoryData>() && *got->get_if<NodeInventoryData>() == d, "... and the schema reads it back");
 }
 
+/// ClientUpdateBuyOrderData's structs (buy_order_codec.h): FClientBuyOrderData and FPlayerBuyOrderContributions as the client's NetSerialize reads them.
+void test_buy_orders() {
+    ClientBuyOrderData d;
+    BuyOrderPossible p;
+    p.commodity = 0x1000000000000001ll;
+    p.category = 1;
+    BuyOrderOption o;
+    o.recipe = 0x2000000000000002ll;
+    o.limit_min = 10; o.limit_max = 100; o.days_min = 3; o.days_max = 8; o.reward_min = 1; o.reward_max = 10; o.cost_min = 10000; o.cost_max = 50000;
+    o.quantity_min = 50; o.quantity_max = 1500;
+    o.materials = {{11, 12}, {13}};
+    o.quantities = {10, 5};
+    p.options.push_back(o);
+    d.possible.push_back(p);
+    BuyOrderData a;
+    a.commodity = p.commodity; a.recipe = o.recipe; a.reward = 77; a.time_created = 1700000000; a.materials = {{11, 10}, {13, 5}};
+    a.contribution_limit = 50; a.requested = 500; a.visibly_fulfilled = 20; a.node_cost = 30000; a.reward_quantity = 2; a.time_remaining = 86400 * 3;
+    d.active.emplace_back(GuidValue{1, 2, 3, 4}, a);
+    d.max_slots = 3;
+    BunchWriter w;
+    const size_t option_bits = 64 + 16 * 2 + 8 * 2 + 16 * 2 + 32 * 2 + 16 * 2 + (32 + (32 + 2 * 64) + (32 + 64)) + (32 + 2 * 32);
+    const size_t order_bits = 64 * 4 + (32 + 2 * 96) + 32 * 3 + 64 + 32 * 2 + 64;
+    const size_t want = 32 + (64 + 8 + 32 + option_bits) + 32 + (128 + order_bits) + 32 + 32;
+    CHECK(write_buy_order_data(w, d) && w.bit_pos() == want, "FClientBuyOrderData: the possible commodity and its option, the active order under its guid, no cooldowns, the slots");
+    const Bits bits(w);
+    const auto back = with_exact(bits, [&](const uint8_t* q, size_t bytes, size_t nbits) {
+        wire::PacketReader r(q, bytes, nbits);
+        return read_buy_order_data(r);
+    });
+    CHECK(back && *back == d, "... and it reads back");
+    PlayerBuyOrderContributions c;
+    c.contributions = {{GuidValue{1, 2, 3, 4}, 40}};
+    c.refresh_time = 86400;
+    BunchWriter cw;
+    CHECK(write_buy_order_contributions(cw, c) && cw.bit_pos() == 32 + 128 + 32 + 32, "FPlayerBuyOrderContributions: an order's guid and what the player gave it, the refresh time");
+    // the RPC carries both through the schema
+    const schema::RpcSchema& rpc = rpc_of("ClientUpdateBuyOrderData");
+    RpcParams params;
+    CHECK(set_rpc_param(rpc, params, "NodeGuid", Value::i64(42)) && set_rpc_param(rpc, params, "BuyOrderData", Value(d)) &&
+              set_rpc_param(rpc, params, "BuyOrderContributions", Value(c)),
+          "ClientUpdateBuyOrderData takes the node, the data and the contributions");
+    const Bits pbits = written(rpc, params);
+    const auto call = read_call(rpc, pbits);
+    bool data_back = false, contributions_back = false;
+    if (call) {
+        for (const auto& [h, v] : call->params.values) {
+            if (const auto* x = v.get_if<ClientBuyOrderData>()) data_back = *x == d;
+            if (const auto* x = v.get_if<PlayerBuyOrderContributions>()) contributions_back = *x == c;
+        }
+    }
+    CHECK(data_back && contributions_back, "... and the schema reads both back");
+}
+
 }  // namespace
 
 int main() {
@@ -453,6 +507,7 @@ int main() {
     test_requests();
     test_citizenship_window();
     test_node_inventory();
+    test_buy_orders();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

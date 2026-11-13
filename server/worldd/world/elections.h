@@ -29,6 +29,8 @@
 // ============================================================================
 #pragma once
 
+#include "world/buy_orders.h"
+
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -112,6 +114,7 @@ struct NodeElection {
     int64_t        dues_anchor_ms = 0;                             // the node's dues schedule: its dates are this plus whole periods (0: none yet)
     std::map<int64_t, int32_t> stored;                             // the node's stores: an item record and its quantity (world/node_inventory_table.h)
     bool           stocked = false;                                // the node has had what its record starts it with (InitialNodeResourcesId)
+    NodeBuyOrders  buy_orders;                                     // the mayor's buy orders (world/buy_orders.h)
     bool operator==(const NodeElection&) const = default;
 };
 
@@ -188,6 +191,9 @@ public:
     bool change_node(int64_t node, const std::function<bool(NodeElection&)>& f);
     /// What the node's record starts it with, once (`stocked`): `money` copper to the treasury and the items to the stores.  True when it did now.
     bool stock(int64_t node, int64_t money, const std::vector<std::pair<int64_t, int32_t>>& items);
+    // ---- the node's buy orders (world/buy_orders.h); they change through change_node
+    /// The node's buy orders (null: a node the store does not hold).
+    const NodeBuyOrders* buy_orders(int64_t node) const;
 
     /// A notification for the node's feed (the oldest goes past kMaxNews).
     void add_news(int64_t node, NodeNews n);

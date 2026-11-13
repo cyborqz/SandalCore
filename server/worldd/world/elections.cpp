@@ -455,6 +455,11 @@ const std::map<int64_t, int32_t>* Elections::stored(int64_t node) const {
     return it == nodes_.end() ? nullptr : &it->second.stored;
 }
 
+const NodeBuyOrders* Elections::buy_orders(int64_t node) const {
+    const auto it = nodes_.find(node);
+    return it == nodes_.end() ? nullptr : &it->second.buy_orders;
+}
+
 bool Elections::change_node(int64_t node, const std::function<bool(NodeElection&)>& f) {
     if (node == 0) return false;
     NodeElection& e = nodes_[node];
@@ -598,6 +603,22 @@ std::string Elections::to_json() const {
             for (const auto& [item, quantity] : e.stored) st.push_back({item, quantity});
             n["stored"] = std::move(st);
         }
+        if (!(e.buy_orders == NodeBuyOrders{})) {
+            nlohmann::json b;
+            b["serial"] = e.buy_orders.serial;
+            b["active"] = nlohmann::json::array();
+            for (const NodeBuyOrder& o : e.buy_orders.active) {
+                nlohmann::json x = {{"guid", {o.guid.a, o.guid.b, o.guid.c, o.guid.d}}, {"commodity", o.commodity}, {"recipe", o.recipe}, {"reward", o.reward},
+                                    {"created", o.created_ms}, {"expires", o.expires_ms}, {"limit", o.contribution_limit}, {"requested", o.requested},
+                                    {"fulfilled", o.fulfilled}, {"reward_quantity", o.reward_quantity}, {"cost", o.node_cost}};
+                x["materials"] = nlohmann::json::array();
+                for (const auto& [item, quantity] : o.materials) x["materials"].push_back({item, quantity});
+                x["given"] = nlohmann::json::array();
+                for (const auto& [character, g] : o.given) x["given"].push_back({{"character", character}, {"units", g.units}, {"since", g.since_ms}});
+                b["active"].push_back(std::move(x));
+            }
+            n["buy_orders"] = std::move(b);
+        }
         for (const NodeNews& w : e.news) {
             n["news"].push_back({{"type", w.type}, {"at", w.at_ms}, {"mayor", w.mayor}, {"plot", w.plot}, {"building", w.building}, {"commission", w.commission},
                                  {"state", w.building_state}});
@@ -643,6 +664,35 @@ bool Elections::from_json(const std::string& text, std::string& error) {
                     if (!x.is_array() || x.size() != 2 || !x[0].is_number_integer() || !x[1].is_number_integer()) continue;
                     const int64_t item = x[0].get<int64_t>(), quantity = x[1].get<int64_t>();
                     if (item != 0 && quantity > 0) e.stored[item] = static_cast<int32_t>(std::min<int64_t>(quantity, INT32_MAX));
+                }
+            }
+            if (n.contains("buy_orders") && n["buy_orders"].is_object()) {
+                const auto& b = n["buy_orders"];
+                e.buy_orders.serial = b.value("serial", uint64_t{0});
+                for (const auto& x : b.value("active", nlohmann::json::array())) {
+                    NodeBuyOrder o;
+                    const auto g = x.value("guid", std::vector<uint32_t>{});
+                    if (g.size() == 4) o.guid = MayorGuid{g[0], g[1], g[2], g[3]};
+                    o.commodity = x.value("commodity", int64_t{0});
+                    o.recipe = x.value("recipe", int64_t{0});
+                    o.reward = x.value("reward", int64_t{0});
+                    o.created_ms = x.value("created", int64_t{0});
+                    o.expires_ms = x.value("expires", int64_t{0});
+                    o.contribution_limit = x.value("limit", int32_t{0});
+                    o.requested = x.value("requested", int32_t{0});
+                    o.fulfilled = x.value("fulfilled", int32_t{0});
+                    o.reward_quantity = x.value("reward_quantity", int32_t{0});
+                    o.node_cost = x.value("cost", int64_t{0});
+                    for (const auto& m : x.value("materials", nlohmann::json::array())) {
+                        if (m.is_array() && m.size() == 2 && m[0].is_number_integer() && m[1].is_number_integer()) {
+                            o.materials.emplace_back(m[0].get<int64_t>(), static_cast<int32_t>(m[1].get<int64_t>()));
+                        }
+                    }
+                    for (const auto& gv : x.value("given", nlohmann::json::array())) {
+                        const std::string character = gv.value("character", std::string());
+                        if (!character.empty()) o.given[character] = BuyOrderGiven{gv.value("units", int32_t{0}), gv.value("since", int64_t{0})};
+                    }
+                    if (!o.guid.zero() && o.recipe != 0 && o.requested > 0) e.buy_orders.active.push_back(std::move(o));
                 }
             }
             if (n.contains("news")) {
