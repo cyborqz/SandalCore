@@ -26,6 +26,7 @@ namespace NpcAbilities;
 ///   hp(V) / nhp(V)   the creature's own health is under V of its maximum / is not
 ///   fc(OP,V)         the seconds since the creature's fight began compare as OP (eq ne lt le gt ge) to V
 ///   fcr(OP,B,P,L,H,N) the same against a number the creature rolls once when its fight begins (the tree's variable N): B, or with the chance P a fresh number between L and H
+///   tt(OP,V)         the seconds the creature's tree has been running (since the creature came into the world, not since its fight began) compare as OP to V
 ///   los / nlos       the creature sees its target / does not
 ///   ?NAME            a condition this tool cannot say (the task is left out)
 /// </summary>
@@ -224,6 +225,25 @@ public static partial class Reader
         return InstanceBool(obj, str, name);
     }
 
+    /// <summary>
+    /// Whether a source is the fight's clock: the elapsed time of a timer task that starts with the fight.  The trees name that task as they like ("Combat Timer", "CombatStartTime", "CombatTimer",
+    /// "Temporary Combat Timer ..."), so the two names the first trees use still count, and so does any plain timer task (AoCSTT_Base) of the state the fight begins in (Aggroed) or runs in (Combat):
+    /// its elapsed time is the seconds since the creature went into the fight.  A timer of any other state (a melee mode, an idle wait, a boss phase) is a clock of its own and does not count.
+    /// </summary>
+    static bool IsFightClock(TreeInfo t, Source l, HashSet<int> path)
+    {
+        if (l.Kind != "Task" || l.Global || l.Path != "TaskElapsedTime" || !path.Contains(l.State)) return false;
+        if (l.Name == "Combat Timer" || l.Name == "CombatStartTime") return true;
+        if (l.Class != "AoCSTT_Base" || l.State < 0 || l.State >= t.States.Length) return false;
+        string state = TextOf(t.States[l.State], "Name");
+        return string.Equals(state, "Aggroed", StringComparison.OrdinalIgnoreCase) || string.Equals(state, "Combat", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Whether a source is the tree's own clock: the seconds the creature's state tree has been running (a timer task's "TreeElapsedTime", or the tree's time tracker the cooldown checks read).</summary>
+    static bool IsTreeClock(Source l, HashSet<int> path) =>
+        (l.Kind == "Task" && !l.Global && l.Class == "AoCSTT_Base" && l.Path == "TreeElapsedTime" && path.Contains(l.State))
+        || (l.Kind == "Evaluator" && l.Class == "AoCSTE_TrackTime" && l.Path == "TreeElapsedTimeInSeconds");
+
     static bool IsSelf(Source s) => s.Kind == "Context" && s.Name == "Actor" && s.Path.Length == 0;
     static bool IsPrimaryTarget(Source s) => s.Kind == "Evaluator" && (s.Class == "AoCSTE_UpdateMostHated" || s.Class == "STE_UpdateMostHated_C") && s.Path == "PrimaryTarget";   // (both name the most hated character)
 
@@ -374,8 +394,10 @@ public static partial class Reader
                 if (atOne == atZero) return Constant(atOne);
                 return Unsaid("Compare(accumulator empty:" + timer.Name + ")");
             }
-            // the fight's clock: the elapsed time of the "Combat Timer" task of a state on the way down to this condition
-            bool clock = binds.TryGetValue("Left", out var l) && l.Kind == "Task" && !l.Global && (l.Name == "Combat Timer" || l.Name == "CombatStartTime") && l.Path == "TaskElapsedTime" && path.Contains(l.State);
+            // the fight's clock: the elapsed time of the fight's timer task, of a state on the way down to this condition
+            bool clock = binds.TryGetValue("Left", out var l) && IsFightClock(t, l, path);
+            // the tree's own clock: how long the creature's tree has been running
+            bool treeClock = binds.TryGetValue("Left", out var tl) && IsTreeClock(tl, path);
             var right = Setting(null, str, binds, prm, "Right");
             if (right == null)
             {
@@ -384,6 +406,7 @@ public static partial class Reader
                 return Unsaid("Compare(right:" + (binds.TryGetValue("Right", out var s1) ? s1.ToString() : "") + ")");
             }
             if (clock) return new Atom { Text = "fc(" + op + "," + Num(right.Value) + ")" };
+            if (treeClock) return new Atom { Text = "tt(" + op + "," + Num(right.Value) + ")" };
             var leftValue = Setting(null, str, binds, prm, "Left");
             if (leftValue == null) return Unsaid("Compare(left:" + (binds.TryGetValue("Left", out var s2) ? s2.ToString() : "") + ")");
             return Constant(Compare(op, leftValue.Value, right.Value));

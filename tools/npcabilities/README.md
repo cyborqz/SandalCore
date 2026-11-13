@@ -29,7 +29,8 @@ It writes three tables (five with `--senses-dir`):
   A tree takes some settings from its parameters (the distance of a bite, whether the creature may pounce); the tool reads them from the Blueprint's reference to the tree and the tree's
   own defaults and folds them in: a condition that compares parameters is decided when the table is made, and a task a parameter switches off for the creature has `why` = `off`.
   A cooldown a task takes from a parameter (the Goblin Flayer's Overhead Slash waits as long as its Blueprint's parameter says) is that parameter's value for the creature. The time into the fight is
-  read from the tree's fight timer, whichever name the tree gives the timer task. A condition that counts the effects the creature itself carries (a rally's) holds none: nothing in the world puts
+  read from the tree's fight timer, whichever name the tree gives the timer task (a plain timer task of the state the fight begins in or runs in); a wait on the tree's own clock (how long the creature's tree has run: the clock the
+  tree's cooldowns read too, not the fight's) is said as `tt(op,seconds)`. A condition that counts the effects the creature itself carries (a rally's) holds none: nothing in the world puts
   one on a creature, so the count is 0.
 - `npc_montages.tsv`: one line per animation montage: its object path as an ability record names it, the ids the network layer knows the montage and its package by,
   its length in seconds at a play rate of 1, its rate scale, its sections (`name:start:next`), its hit notifies (`time:key`; the key picks which hit of the ability lands) and

@@ -76,7 +76,8 @@ public:
     double                                 stand_off_cm = -1;   // a creature whose attacks launch projectiles closes in on its target to this distance (its tree's arrival distance) between two casts; -1: it does not
     double                                 shot_reach_cm = -1;  // ... and starts casting once its target is within this reach (the distance its tree lets it cast from)
     double                                 fight_began = 0;  // when its fight began (the tree asks how long it has gone on)
-    std::map<std::string, double>          fight_rolls;      // the numbers its tree rolled when this fight began, by the tree's variable (a first special attack comes only after one of them)
+    double                                 tree_began = 0;   // when its state tree began to run (the tree asks how long it has run): when the actor was put into the world (NpcInfo::spawned_at; 0 for the creatures the world starts with); a respawn is a new actor, so it starts again
+    std::map<std::string, double>          fight_rolls;     // the numbers its tree rolled when this fight began, by the tree's variable (a first special attack comes only after one of them)
     uint64_t                               killer = 0;
     std::set<uint64_t>                     attackers;
     struct Shield {

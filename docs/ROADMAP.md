@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 13 November 2026
+**Last updated:** 14 November 2026
 
 ---
 
@@ -70,6 +70,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Friends list (social): a player adds another by name from the friends window, and the other player accepts or declines. A request waits up to 14 days and reaches a player who is offline at their next login. The list holds up to 100 friends and 100 waiting requests, shows each friend's level and class and whether they are online, and is kept across logins. Two players who ask each other at the same time become friends at once, and removing a friend is one-sided: the other player keeps the entry, marked as no longer a friend.
 - Game-master commands: the world server's admin interface lists every admin command with its fields, and runs any of them on a player who is in the world: heal, set Health or Mana, revive, kill, give experience, start, complete or reset quests and their objectives, clear cooldowns, give a mount, set the time of day and add node experience, beside the teleport, speed, money, items, stations, recipes, tutorials, weapon experience and NPC commands that were there. Each field with a known set of answers (nodes, free plots, stations, items and their rarities, quests, objectives, places, mounts, creatures, recipes, weapon lines) lists them, so a tool can offer a choice instead of a typed name. Every command run is logged.
 - Resisting mobs: a crowd control a mob has kept up is thrown off at its build-up's threshold, and a new one of that kind is resisted for 10 s; a boss is immune to the effects the data gates on the Boss effect, and the caster's client shows the resist or the immunity in its combat log.
+- Mob moves that wait for a clock: a mob's move that waits for the fight's clock (under any of its names) or for the mob's own clock now plays: the Skeletons' long axe swipe, the Tidebreakers' and Otters' rapid bite, the Reapers' guillotine and slice, the Mycellions' spore moves and the Dunzenkell constructs' hammer throw and shield assault among them; a mob's own clock starts again when it respawns.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

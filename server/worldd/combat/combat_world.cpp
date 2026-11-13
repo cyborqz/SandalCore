@@ -157,6 +157,7 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     const std::string leaf = spawns::blueprint_leaf(a.npc.archetype);
     const npc::MotionStats bp = motion_.get(a.npc.archetype);
     auto n = std::make_unique<Npc>(*this, a.id, bp, leaf, a.npc.level);
+    n->tree_began = a.npc.spawned_at;   // its state tree began to run when the actor was put into the world (a respawn is a new actor)
     std::string err;
     n->cs = book_.make(bp, a.npc.level, err);
     if (!n->cs) {
@@ -602,6 +603,7 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
     }
     ctx.health_fraction = n.max_health() > 0 ? std::clamp(n.health() / n.max_health(), 0.0, 1.0) : 1.0;
     ctx.fight_seconds = std::max(0.0, now_ - n.fight_began);
+    ctx.tree_seconds = std::max(0.0, now_ - n.tree_began);
     ctx.cooldown_over = [&n, this](const std::string& g) {
         const auto until = n.cooldown_until.find(g);
         return until == n.cooldown_until.end() || now_ >= until->second;

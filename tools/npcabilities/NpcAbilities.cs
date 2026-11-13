@@ -506,13 +506,18 @@ public static partial class Reader
 
     /// <summary>
     /// Abilities the world cannot play yet.  A creature's tree skips them, as it skips a task with a condition the table cannot say, instead of landing them as hits nothing shows; the text says what
-    /// each one waits for.  (The fire mage's Flame Burst is a spray of fire in front of it, its Flame Throw a stream it aims by a score among everyone it hates, its Flame Ring a ring of fire on the ground.)
+    /// each one waits for.  (The fire mage's Flame Burst is a spray of fire in front of it, its Flame Throw a stream it aims by a score among everyone it hates, its Flame Ring a ring of fire on the ground;
+    /// the mushrooms' Launch is a montage with no hit notify, which would land as a hit nothing shows once the tree's clock lets the creature use it; the raven's raid carries a bird 15 m backwards
+    /// through the air, which a creature that cannot fly would do along the ground.)
     /// </summary>
     static readonly Dictionary<long, string> Waiting = new()
     {
         [6064631901149396992] = "waits for the spray hit shape (Flame Burst)",
         [6064629308658155610] = "waits for channelled attacks aimed by score (Flame Throw)",
         [6064629308660187227] = "waits for ground zones of a creature (Flame Ring)",
+        [6064631913484518364] = "waits for a hit notify in its montage (Mycellette Launch)",
+        [6064630045035528536] = "waits for a hit notify in its montage (Mycellion Kid Launch)",
+        [6064628816510976000] = "waits for flying creatures (Raven Raid)",
     };
 
     /// <summary>How near its target a creature's approach brings it: the arrival distance of the move-to-target task of a state directly below the Combat state on `path`; -1 when there is none.</summary>

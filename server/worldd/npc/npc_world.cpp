@@ -413,6 +413,7 @@ void NpcWorld::refresh_active(double t) {
 void NpcWorld::tick(double now) {
     if (!std::isfinite(now) || now < now_) return;
     now_ = now;
+    registry_.set_clock(now);   // (an NPC put into the world from here on is stamped with it: NpcInfo::spawned_at)
     if (next_step_ < 0) {
         next_step_ = now;
         // the NPCs' timestamps began at 0 (the loader's clock): the clock they will be moved on starts here, so that no NPC's first move jumps by the age
