@@ -165,7 +165,7 @@ void PlayerSession::run_nodes(Connection& conn) {
         node_summary_wait_.pop_front();
         node_summary_queued_.erase(node);
         const int64_t unix_now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        const auto s = nodes && wire ? wire->summary(node, *nodes, unix_now, elections) : std::nullopt;
+        const auto s = nodes && wire ? wire->summary(node, *nodes, unix_now, elections, account_id_) : std::nullopt;
         if (!s) {
             unknown(node, "for its summary");
             continue;

@@ -39,6 +39,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_quick_make(conn, now);
     run_cargo(conn, now);
     run_chat(conn, now);
+    run_node_boons(conn, now);      // the boons of the nodes' running modifications (contentc version 45)
     run_nodes(conn);
     run_node_levels(conn, now);     // Nodes 2: a level-up's countdown toast, and the node XP gathered goes to citynode
     sync_item_abilities(conn);

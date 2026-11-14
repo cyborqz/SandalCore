@@ -85,6 +85,7 @@ public:
         size_t   stations = 0;         // crafting stations that exist now (crafting, step 0)
         size_t   desired = 0;          // the points the selection has
         size_t   by_source[2] = {0, 0};   // desired, layout and building
+        uint64_t plots_revision = 0;   // CityNodes::plots_revision the people show (the node's buildings)
     };
     const std::map<int64_t, Entry>& entries() const { return entries_; }
     const Entry* entry_of(int64_t node) const;

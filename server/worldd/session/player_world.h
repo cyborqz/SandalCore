@@ -186,8 +186,9 @@ public:
     /// Nodes 2 (session/player_node_xp.cpp): the node XP rate (--node-exp-rate: a node gets the players' base XP times it), the XP gathered for citynode.
     void set_node_experience_rate(double multiplier) { node_experience_rate_ = multiplier >= 0.0 && multiplier <= 1000.0 ? multiplier : 100.0; }
     double node_experience_rate() const { return node_experience_rate_; }
-    /// `base` XP a player earned in node `guid` (before any rate): true when it is a node that grows and the XP is kept for it.
-    bool add_node_experience(int64_t guid, int64_t base, const char* why) const;
+    /// `base` XP a player earned in node `guid` (before any rate): true when it is a node that grows and the XP is kept for it.  `rated` false: the amount is the node's
+    /// XP itself (a construction project's CompletionNodeExperience), not scaled.
+    bool add_node_experience(int64_t guid, int64_t base, const char* why, bool rated = true) const;
     /// Sends what was gathered to citynode, every 10 s (or now with `force`).
     void flush_node_experience(int64_t now_ms, bool force = false) const;
     int64_t node_experience_total() const { return node_xp_total_; }
@@ -356,6 +357,22 @@ public:
     std::vector<world::Elections::Change> tick_elections(int64_t now_ms, bool force = false) const;
     /// Writes the elections' file if they changed since it was last written.
     void save_elections() const;
+    /// Nodes 3 (session/player_node_buildings.cpp): brings every node's service buildings to `now_ms` (from tick_elections): constructions done or run out, expansions,
+    /// demolitions, repairs, the hourly income of the buildings' node effects and the weekly upkeep; a project built gives the node its XP; the news; then the plots shown.
+    void tick_buildings(int64_t now_ms) const;
+    /// The node's plots at its level now as the buildings' rules take them (NodeWire::plot_infos); empty without the node data.
+    std::vector<world::PlotInfo> node_plots(int64_t node) const;
+    /// Shows the node's buildings: its live plots to the registry (CityNodes::set_live_plots: the summary, the scenery and the people follow) and its running
+    /// modifications to the boons (building_mods).
+    void show_node_plots(int64_t node) const;
+    /// The modifications the node's Operational buildings and their expansions run now (their effects are boons, session/player_node_boons.cpp).
+    const std::vector<int64_t>& building_mods(int64_t node) const;
+    /// What the buildings' ticks did so far (the tests and the log).
+    size_t building_events() const { return building_events_; }
+    /// A test: the node's plots, with no node data (node_plots and tick_buildings use them).
+    void set_node_plots_for_test(int64_t node, std::vector<world::PlotInfo> plots) { plots_for_test_[node] = std::move(plots); }
+    /// A test: the modifications the node runs, in place of its buildings' (building_mods); an empty list runs none.
+    void set_building_mods_for_test(int64_t node, std::vector<int64_t> mods) { mods_for_test_[node] = std::move(mods); }
     /// Nodes 1, stage 2: what the client is told about the nodes (world/node_wire.h; built from content.db and the registry), set by main with the registry; null in a world
     /// with no nodes (a GameStateMode::Tier3 join then lists none).  The pointer must outlive this object.
     void set_node_wire(const world::NodeWire* wire) { node_wire_ = wire; }
@@ -613,6 +630,10 @@ private:
     int32_t                              next_player_id_ = 1;
     MovementConfig                       movement_;
     double                               node_experience_rate_ = 100.0;
+    mutable std::map<int64_t, std::vector<int64_t>> building_mods_;   // node -> the modifications its buildings run (show_node_plots)
+    std::map<int64_t, std::vector<world::PlotInfo>> plots_for_test_;
+    std::map<int64_t, std::vector<int64_t>>         mods_for_test_;
+    mutable size_t                       building_events_ = 0;
     mutable std::map<int64_t, int64_t>   node_xp_pending_;      // node -> the XP gathered since the last flush
     mutable int64_t                      node_xp_flushed_ms_ = 0;
     mutable int64_t                      node_xp_total_ = 0;

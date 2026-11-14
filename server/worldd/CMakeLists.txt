@@ -310,6 +310,9 @@ add_library(worldd_core STATIC
     world/node_reputation.h
     world/node_rewards.cpp
     world/node_rewards.h
+    world/node_buildings.cpp
+    world/node_buildings.h
+    world/node_buildings_table.h
     world/city_nodes.cpp
     world/city_nodes.h
     world/node_control.h

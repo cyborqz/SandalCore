@@ -43,6 +43,8 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_buy_orders.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_reputation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_node_xp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_node_boons.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_node_buildings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_nodes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_presence.cpp

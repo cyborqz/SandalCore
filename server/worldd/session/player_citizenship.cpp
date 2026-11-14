@@ -492,6 +492,14 @@ void PlayerWorld::set_elections(world::ElectionRules rules, std::string file) {
     }
     elections_saved_ = elections_->version();
     spdlog::info("[nodes] the elections of {} node(s) read from {}", elections_->all().size(), elections_file_);
+    // Nodes 3: the towns show their buildings from the start (the scenery and the people are built with them), not at the first tick
+    size_t built = 0;
+    for (const auto& [node, e] : elections_->all()) {
+        if (e.buildings.plots.empty()) continue;
+        show_node_plots(node);
+        ++built;
+    }
+    if (built != 0) spdlog::info("[nodes] the buildings of {} node(s) read from the elections file", built);
 }
 
 void PlayerWorld::save_elections() const {
@@ -523,6 +531,7 @@ std::vector<world::Elections::Change> PlayerWorld::tick_elections(int64_t now_ms
     const world::CitizenshipRules* rules = &*citizenship_rules_;
     const world::CityNodes* registry = city_nodes_;
     auto changes = elections_->advance(now_ms, [rules, registry](int64_t node) { return rules->takes_citizens(registry->level_of(node)); }, nodes);
+    tick_buildings(now_ms);   // Nodes 3: the service buildings' phases, income and upkeep (session/player_node_buildings.cpp)
     for (const world::Elections::Change& c : changes) {
         const world::CityNodeInfo* n = city_nodes_->by_guid(c.node);
         spdlog::info("[nodes] the election of {} enters {}{}", n ? n->display_name : std::to_string(c.node), world::election_state_name(c.state),

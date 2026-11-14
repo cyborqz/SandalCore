@@ -114,6 +114,7 @@ std::unique_ptr<NodeWire> NodeWire::load(const std::string& path, const CityNode
             r.plot = sqlite3_column_int64(st.s, 2);
             r.pre_construct = sqlite3_column_int(st.s, 3) != 0;
             const int64_t empty_building = sqlite3_column_int64(st.s, 4);
+            r.empty_building = empty_building;
             const int building_count = sqlite3_column_int(st.s, 5);
             const int64_t first_building = sqlite3_column_int64(st.s, 6);
             // the replicator's rule (spike derive_payload.py): the single building of the plot, else the plot's empty building, else the first
@@ -182,6 +183,24 @@ const std::vector<PlotRow>& NodeWire::plot_rows(int64_t layout, int level) const
 }
 
 std::vector<PlotRow> NodeWire::plot_rows_of(int64_t node_guid, int level) const {
+    std::vector<PlotRow> rows = data_plot_rows_of(node_guid, level);
+    if (!nodes_) return rows;
+    const std::vector<CityNodes::PlotLive> live = nodes_->live_plots(node_guid);
+    if (live.empty()) return rows;
+    for (PlotRow& row : rows) {
+        const auto it = std::lower_bound(live.begin(), live.end(), row.plot, [](const CityNodes::PlotLive& l, int64_t p) { return l.plot < p; });
+        if (it == live.end() || it->plot != row.plot) continue;
+        row.state = it->state;
+        row.building = it->building != 0 ? it->building : (row.empty_building != 0 ? row.empty_building : row.building);
+        row.pre_construct = it->state != 0;   // something stands on it (the scenery sends only such plots)
+        row.asset_sets = it->asset_sets;
+        row.replace_assets = it->replace_assets;
+        row.spawns = it->spawns;
+    }
+    return rows;
+}
+
+std::vector<PlotRow> NodeWire::data_plot_rows_of(int64_t node_guid, int level) const {
     std::vector<PlotRow> rows = plot_rows(layout_of(node_guid), level);
     if (!nodes_) return rows;
     for (const CityNodes::PlotChoice& choice : nodes_->plot_choices(node_guid)) {
@@ -194,6 +213,7 @@ std::vector<PlotRow> NodeWire::plot_rows_of(int64_t node_guid, int level) const 
                 if (c.name.size() < tail.size() || c.name.compare(c.name.size() - tail.size(), tail.size(), tail) != 0) continue;
                 row.building = c.building;
                 row.pre_construct = true;
+                row.seeded = true;
                 row.state = 2;
                 row.starting_state = 2;
                 break;
@@ -288,7 +308,23 @@ repl::NodeStateMaps NodeWire::maps(const CityNodes& nodes, const Elections* elec
     return m;
 }
 
-std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes& nodes, int64_t unix_now, const Elections* elections) const {
+std::vector<PlotInfo> NodeWire::plot_infos(int64_t node_guid, int level) const {
+    std::vector<PlotInfo> out;
+    for (const PlotRow& r : data_plot_rows_of(node_guid, level)) {
+        PlotInfo p;
+        p.plot = r.plot;
+        p.building = r.building;
+        p.state = r.state;
+        p.empty_building = r.empty_building;
+        p.pre_construct = r.pre_construct;
+        p.seeded = r.seeded;
+        p.candidates = plot_buildings(r.plot);
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes& nodes, int64_t unix_now, const Elections* elections, int64_t requester_account) const {
     const CityNodeInfo* info = nodes.by_guid(guid);
     if (!info) return std::nullopt;
     repl::NodeSummary s;
@@ -303,16 +339,46 @@ std::optional<repl::NodeSummary> NodeWire::summary(int64_t guid, const CityNodes
     s.layout = layout_of(guid);
     s.level = level;
     s.culture = 0;
+    const NodeElection* el = elections ? elections->node(guid) : nullptr;
+    static const NodeBuildings kNoBuildings;
+    const NodeBuildings& buildings = el ? el->buildings : kNoBuildings;
+    namespace nb = node_buildings;
+    const auto amounts = [](const std::map<int64_t, int32_t>& m) {
+        std::vector<std::pair<int64_t, uint32_t>> out;
+        for (const auto& [item, q] : m) {
+            if (q > 0) out.emplace_back(item, static_cast<uint32_t>(q));
+        }
+        return out;
+    };
     for (const PlotRow& r : plot_rows_of(guid, level)) {
         repl::PlotEntry e;
         e.plot = r.plot;
         e.building = r.building;
         e.state = r.state;
+        if (const auto it = buildings.plots.find(r.plot); it != buildings.plots.end()) {
+            const PlotState& p = it->second;
+            int64_t ends_ms = 0;
+            if (p.state == kPlotUnderConstruction) ends_ms = p.complete_ms != 0 ? p.complete_ms : p.phase_ends_ms;
+            else if (p.state == kPlotDemolition || p.state == kPlotRepairing) ends_ms = p.phase_ends_ms;
+            e.building_time_end = ends_ms / 1000;
+            e.building_contribution = amounts(p.given);
+            e.expansion_state = p.exp_state;
+            if (const nb::TreeNode* t = nb::rank_node(p.exp_rank)) e.in_progress_expansion = t->expansion;
+            e.expansion_project_time_end = p.exp_ends_ms / 1000;
+            e.expansion_contribution = amounts(p.exp_given);
+            for (const int64_t rank : p.ranks) {
+                if (const nb::TreeNode* t = nb::rank_node(rank); t && t->expansion != 0) e.purchased_expansions.push_back(repl::RecordId{t->expansion, nb::kExpansionTypeId});
+            }
+            for (const auto& [account, yes] : p.votes) e.project_yes_votes += yes ? 1u : 0u;
+            e.project_total_votes = static_cast<uint32_t>(p.votes.size());
+            e.has_requester_voted = requester_account != 0 && p.votes.count(requester_account) != 0;
+        }
         s.plots.push_back(e);
     }
-    s.time_until_next_maintenance = unix_now + 7 * 24 * 3600;
+    for (const auto& [type, q] : nb::skill_points(buildings, plot_infos(guid, level))) s.node_skill_points.emplace_back(repl::RecordId{type, nb::kSkillPointTypeTypeId}, q);
+    s.time_until_next_maintenance = buildings.next_upkeep_ms != 0 ? buildings.next_upkeep_ms / 1000 : unix_now + 7 * 24 * 3600;
     s.next_mayor_message_edit_time = 60;   // retail's value for a node with no mayor
-    if (const NodeElection* el = elections ? elections->node(guid) : nullptr; el && el->mayor.account != 0) {
+    if (el && el->mayor.account != 0) {
         s.mayor_message = el->mayor_message;
         s.next_mayor_message_edit_time = 0;   // the mayor may edit it now (ServerSetMayorMessage has no cooldown)
     }

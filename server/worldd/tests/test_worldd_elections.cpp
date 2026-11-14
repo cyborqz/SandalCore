@@ -13,6 +13,7 @@
 #include "world/elections.h"
 #include "world/node_reputation.h"
 #include "world/node_rewards.h"
+#include "world/node_buildings.h"
 #include "vendor/node_tax.h"
 #include "vendor/town_shops.h"
 #include "world/city_nodes.h"
@@ -26,6 +27,8 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 using namespace aoc::worldd::world;
 

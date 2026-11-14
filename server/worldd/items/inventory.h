@@ -266,6 +266,9 @@ public:
     /// one Add event, `equipment_changed`.  Refused, changing nothing, for an item that is no crate, a quantity other than 1, an instance the inventory holds already, an unknown
     /// record or a cargo slot that holds a crate already.
     Outcome grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog);
+    /// The crate of the instance `guid` leaves the cargo slot for good (given to a construction): one Remove event, `equipment_changed`.  Refused, changing nothing, when the
+    /// slot holds another.
+    Outcome remove_cargo(const std::string& guid);
     /// ServerRequestStorageEvent, Swap: the two whole stacks change places; `to_guid` and `to_count` are what the client says is in the target slot.  Inside the Backpack, or inside
     /// the resource containers (with a `catalog`: each stack must fit the other's rectangle); a material and an item of the Backpack never swap.
     Outcome swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,

@@ -38,11 +38,11 @@ constexpr int64_t kLevelUpCountdownMs = 5000;
 
 }  // namespace
 
-bool PlayerWorld::add_node_experience(int64_t guid, int64_t base, const char* why) const {
+bool PlayerWorld::add_node_experience(int64_t guid, int64_t base, const char* why, bool rated) const {
     if (base <= 0 || !city_nodes_) return false;
     const world::CityNodeInfo* n = city_nodes_->by_guid(guid);
     if (!n || !n->levelable) return false;
-    const double scaled = std::round(static_cast<double>(base) * node_experience_rate_);
+    const double scaled = std::round(static_cast<double>(base) * (rated ? node_experience_rate_ : 1.0));
     if (!(scaled >= 1)) return false;
     int64_t& pending = node_xp_pending_[guid];
     pending = static_cast<int64_t>(std::min<double>(static_cast<double>(pending) + scaled, static_cast<double>(INT64_MAX / 2)));

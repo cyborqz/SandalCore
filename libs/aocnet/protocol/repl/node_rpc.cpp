@@ -273,8 +273,29 @@ std::optional<RpcParams> node_summary_params(const schema::RpcSchema& rpc, const
     if (!plots) return std::nullopt;
     const auto elems = rpcf::elements_of(rpc, *plots);
     const uint16_t h_plot = rpcf::local(elems, "PlotOverview.Plot"), h_building = rpcf::local(elems, "PlotOverview.Building"),
-                   h_state = rpcf::local(elems, "PlotOverview.State"), h_end = rpcf::local(elems, "PlotOverview.BuildingTimeEnd");
-    if (!h_plot || !h_building || !h_state || !h_end) return std::nullopt;
+                   h_state = rpcf::local(elems, "PlotOverview.State"), h_end = rpcf::local(elems, "PlotOverview.BuildingTimeEnd"),
+                   h_bc = rpcf::local(elems, "PlotOverview.BuildingContribution"), h_ec = rpcf::local(elems, "PlotOverview.ExpansionContribution"),
+                   h_es = rpcf::local(elems, "PlotOverview.ExpansionState"), h_ip = rpcf::local(elems, "PlotOverview.InProgressExpansionId"),
+                   h_pe = rpcf::local(elems, "PlotOverview.ExpansionProjectTimeEnd"), h_ids = rpcf::local(elems, "PlotOverview.PurchasedExpansions.IDs"),
+                   h_yes = rpcf::local(elems, "PlotOverview.ProjectYesVotes"), h_total = rpcf::local(elems, "PlotOverview.ProjectTotalVotes"),
+                   h_voted = rpcf::local(elems, "PlotOverview.bHasRequesterVoted");
+    if (!h_plot || !h_building || !h_state || !h_end || !h_bc || !h_ec || !h_es || !h_ip || !h_pe || !h_ids || !h_yes || !h_total || !h_voted) return std::nullopt;
+    // the arrays inside a plot: the contributions (FAoCResourceAmount) and the purchased expansions (FAoCRecordId)
+    const auto bc_elems = rpcf::elements_of(rpc, elems[h_bc - 1]), ec_elems = rpcf::elements_of(rpc, elems[h_ec - 1]), id_elems = rpcf::elements_of(rpc, elems[h_ids - 1]);
+    const uint16_t bc_res = rpcf::local(bc_elems, "BuildingContribution.Resource"), bc_q = rpcf::local(bc_elems, "BuildingContribution.Quantity"),
+                   ec_res = rpcf::local(ec_elems, "ExpansionContribution.Resource"), ec_q = rpcf::local(ec_elems, "ExpansionContribution.Quantity"),
+                   id_guid = rpcf::local(id_elems, "IDs.Guid"), id_type = rpcf::local(id_elems, "IDs.TypeId"), id_name = rpcf::local(id_elems, "IDs.Name");
+    if (!bc_res || !bc_q || !ec_res || !ec_q || !id_guid || !id_type || !id_name) return std::nullopt;
+    const auto amounts = [](const std::vector<std::pair<int64_t, uint32_t>>& list, uint16_t h_res, uint16_t h_q) {
+        ArrayValue a;
+        for (const auto& [res, q] : list) {
+            ElementState x;
+            x.values[h_res] = Value::i64(res);
+            x.values[h_q] = Value::u64(q);
+            a.elements.push_back(std::move(x));
+        }
+        return a;
+    };
     ArrayValue overview;
     for (const PlotEntry& e : s.plots) {
         ElementState es;
@@ -283,11 +304,44 @@ std::optional<RpcParams> node_summary_params(const schema::RpcSchema& rpc, const
         es.values[h_building] = Value::i64(e.building);
         es.values[h_state] = Value::u64(e.state);
         es.values[h_end] = Value::i64(e.building_time_end);
+        es.values[h_bc] = Value(amounts(e.building_contribution, bc_res, bc_q));
+        es.values[h_ec] = Value(amounts(e.expansion_contribution, ec_res, ec_q));
+        es.values[h_es] = Value::u64(e.expansion_state);
+        es.values[h_ip] = Value::i64(e.in_progress_expansion);
+        es.values[h_pe] = Value::i64(e.expansion_project_time_end);
+        ArrayValue ids;
+        for (const RecordId& r : e.purchased_expansions) {
+            ElementState x;
+            x.values[id_guid] = Value::i64(r.guid);
+            x.values[id_type] = Value::i64(r.type_id);
+            x.values[id_name] = Value(NameValue::hardcoded_name(0));
+            ids.elements.push_back(std::move(x));
+        }
+        es.values[h_ids] = Value(std::move(ids));
+        es.values[h_yes] = Value::u64(e.project_yes_votes);
+        es.values[h_total] = Value::u64(e.project_total_votes);
+        es.values[h_voted] = Value::boolean(e.has_requester_voted);
         overview.elements.push_back(std::move(es));
+    }
+    // the node's skill points (FNodeSkillPoint: an FAoCRecordId and a quantity)
+    const RepCommand* points_cmd = rpc_command(rpc, "Summary.NodeSkillPoints");
+    if (!points_cmd) return std::nullopt;
+    const auto sp_elems = rpcf::elements_of(rpc, *points_cmd);
+    const uint16_t sp_guid = rpcf::local(sp_elems, "NodeSkillPoints.SkillPointTypeId.Guid"), sp_type = rpcf::local(sp_elems, "NodeSkillPoints.SkillPointTypeId.TypeId"),
+                   sp_name = rpcf::local(sp_elems, "NodeSkillPoints.SkillPointTypeId.Name"), sp_q = rpcf::local(sp_elems, "NodeSkillPoints.Quantity");
+    if (!sp_guid || !sp_type || !sp_name || !sp_q) return std::nullopt;
+    ArrayValue points;
+    for (const auto& [id, q] : s.node_skill_points) {
+        ElementState x;
+        x.values[sp_guid] = Value::i64(id.guid);
+        x.values[sp_type] = Value::i64(id.type_id);
+        x.values[sp_name] = Value(NameValue::hardcoded_name(0));
+        x.values[sp_q] = Value::i64(q);
+        points.elements.push_back(std::move(x));
     }
     if (!put(rpc, p, "Summary.Node", Value::i64(s.node)) || !put(rpc, p, "Summary.Layout", Value::i64(s.layout)) ||
         !put(rpc, p, "Summary.NodeLevel", Value::i64(s.level)) || !put(rpc, p, "Summary.Culture", Value::u64(s.culture)) ||
-        !put(rpc, p, "Summary.PlotOverview", Value(std::move(overview))) ||
+        !put(rpc, p, "Summary.PlotOverview", Value(std::move(overview))) || !put(rpc, p, "Summary.NodeSkillPoints", Value(std::move(points))) ||
         !put(rpc, p, "Summary.TimeUntilNextMaintenance", Value::i64(s.time_until_next_maintenance)) ||
         !put(rpc, p, "Summary.MayorMessage", Value::str(s.mayor_message)) ||
         !put(rpc, p, "Summary.NextMayorMessageEditTime", Value::i64(s.next_mayor_message_edit_time)) ||
@@ -352,7 +406,23 @@ std::optional<NodeSummary> parse_node_summary(const RpcCall& call) {
     if (plots) {
         const auto elems = rpcf::elements_of(rpc, *plots);
         const uint16_t h_plot = rpcf::local(elems, "PlotOverview.Plot"), h_building = rpcf::local(elems, "PlotOverview.Building"),
-                       h_state = rpcf::local(elems, "PlotOverview.State"), h_end = rpcf::local(elems, "PlotOverview.BuildingTimeEnd");
+                       h_state = rpcf::local(elems, "PlotOverview.State"), h_end = rpcf::local(elems, "PlotOverview.BuildingTimeEnd"),
+                       h_bc = rpcf::local(elems, "PlotOverview.BuildingContribution"), h_ec = rpcf::local(elems, "PlotOverview.ExpansionContribution"),
+                       h_es = rpcf::local(elems, "PlotOverview.ExpansionState"), h_ip = rpcf::local(elems, "PlotOverview.InProgressExpansionId"),
+                       h_pe = rpcf::local(elems, "PlotOverview.ExpansionProjectTimeEnd"), h_ids = rpcf::local(elems, "PlotOverview.PurchasedExpansions.IDs"),
+                       h_yes = rpcf::local(elems, "PlotOverview.ProjectYesVotes"), h_total = rpcf::local(elems, "PlotOverview.ProjectTotalVotes"),
+                       h_voted = rpcf::local(elems, "PlotOverview.bHasRequesterVoted");
+        const auto amounts = [&](const ElementState& e, uint16_t h, const char* res_path, const char* q_path) {
+            std::vector<std::pair<int64_t, uint32_t>> out;
+            if (!h) return out;
+            const auto inner = rpcf::elements_of(rpc, elems[h - 1]);
+            const uint16_t r = rpcf::local(inner, res_path), q = rpcf::local(inner, q_path);
+            const auto it = e.values.find(h);
+            const ArrayValue* a = it == e.values.end() ? nullptr : it->second.get_if<ArrayValue>();
+            if (!a) return out;
+            for (const ElementState& x : a->elements) out.emplace_back(i64_of(x, r), static_cast<uint32_t>(u64_of(x, q)));
+            return out;
+        };
         if (const ArrayValue* a = rpcf::as<ArrayValue>(rpcf::value_of(rpc, call.params, "Summary.PlotOverview"))) {
             for (const ElementState& e : a->elements) {
                 PlotEntry pe;
@@ -360,8 +430,34 @@ std::optional<NodeSummary> parse_node_summary(const RpcCall& call) {
                 pe.building = i64_of(e, h_building);
                 pe.state = static_cast<uint8_t>(u64_of(e, h_state));
                 pe.building_time_end = i64_of(e, h_end);
+                pe.building_contribution = amounts(e, h_bc, "BuildingContribution.Resource", "BuildingContribution.Quantity");
+                pe.expansion_contribution = amounts(e, h_ec, "ExpansionContribution.Resource", "ExpansionContribution.Quantity");
+                pe.expansion_state = static_cast<uint8_t>(u64_of(e, h_es));
+                pe.in_progress_expansion = i64_of(e, h_ip);
+                pe.expansion_project_time_end = i64_of(e, h_pe);
+                if (h_ids) {
+                    const auto inner = rpcf::elements_of(rpc, elems[h_ids - 1]);
+                    const uint16_t g = rpcf::local(inner, "IDs.Guid"), t = rpcf::local(inner, "IDs.TypeId");
+                    const auto it = e.values.find(h_ids);
+                    if (const ArrayValue* ids = it == e.values.end() ? nullptr : it->second.get_if<ArrayValue>()) {
+                        for (const ElementState& x : ids->elements) pe.purchased_expansions.push_back(RecordId{i64_of(x, g), i64_of(x, t)});
+                    }
+                }
+                pe.project_yes_votes = static_cast<uint32_t>(u64_of(e, h_yes));
+                pe.project_total_votes = static_cast<uint32_t>(u64_of(e, h_total));
+                if (const auto it = e.values.find(h_voted); it != e.values.end()) {
+                    if (const bool* b = it->second.get_if<bool>()) pe.has_requester_voted = *b;
+                }
                 s.plots.push_back(pe);
             }
+        }
+    }
+    if (const RepCommand* points = rpc_command(rpc, "Summary.NodeSkillPoints")) {
+        const auto inner = rpcf::elements_of(rpc, *points);
+        const uint16_t g = rpcf::local(inner, "NodeSkillPoints.SkillPointTypeId.Guid"), t = rpcf::local(inner, "NodeSkillPoints.SkillPointTypeId.TypeId"),
+                       q = rpcf::local(inner, "NodeSkillPoints.Quantity");
+        if (const ArrayValue* a = rpcf::as<ArrayValue>(rpcf::value_of(rpc, call.params, "Summary.NodeSkillPoints"))) {
+            for (const ElementState& x : a->elements) s.node_skill_points.emplace_back(RecordId{i64_of(x, g), i64_of(x, t)}, static_cast<int32_t>(i64_of(x, q)));
         }
     }
     return s;

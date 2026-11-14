@@ -157,6 +157,7 @@ size_t NodePopulations::apply(const world::CityNodeInfo& info, int level, double
     Entry& e = entries_[info.guid];
     e.node = info.guid;
     e.level = level;
+    e.plots_revision = nodes_.plots_revision(info.guid);
     e.desired = st.live.size();
     e.by_source[0] = e.by_source[1] = 0;
     e.npcs = 0;
@@ -204,7 +205,7 @@ size_t NodePopulations::tick(double now) {
         const auto e = entries_.find(info.guid);
         if (e == entries_.end()) continue;
         const int level = nodes_.level_of(info.guid);
-        if (level == e->second.level) continue;
+        if (level == e->second.level && nodes_.plots_revision(info.guid) == e->second.plots_revision) continue;   // (the node's buildings changed a plot)
         apply(info, level, now, false);
         ++rebuilds_;
         ++rebuilt;

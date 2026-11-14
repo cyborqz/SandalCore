@@ -12,3 +12,4 @@
 #include "elections_buy_orders_tests.inc"
 #include "elections_citizen_shops_tests.inc"
 #include "elections_reputation_tests.inc"
+#include "elections_node_buildings_tests.inc"

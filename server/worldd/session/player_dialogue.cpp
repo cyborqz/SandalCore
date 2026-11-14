@@ -232,6 +232,7 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
     run_talk_actions(conn, r, npc, now);   // quests: what entering the greeting's nodes does
     send_dialogue(conn, "greeting");
     if (r.open_buy_orders) open_buy_order_window(conn, npc, now);   // the Buy Order Manager's greeting is its window (session/player_buy_orders.cpp)
+    if (r.open_contribution) open_contribution_window(conn, npc, now);   // the Construction Foreman's greeting (session/player_node_buildings.cpp)
     return true;
 }
 
@@ -373,6 +374,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
                         talk_.open() ? "on to node " + std::to_string(talk_.state().shown_node) : std::string("the conversation ends"));
             if (!warehouse_opened) send_dialogue(conn, "a line was chosen");   // (the warehouse's second half sends the clear after its window call)
             if (r.open_buy_orders && talk_.open()) open_buy_order_window(conn, *npc, now);   // a line that leads to the buy order panel (session/player_buy_orders.cpp)
+            if (r.open_contribution) open_contribution_window(conn, *npc, now);   // the Construction Foreman's lines (session/player_node_buildings.cpp)
             break;
         case dialogue::Outcome::Nothing:
             if (r.open_vendor == 0) spdlog::log(level_for(dialogue_logged_), "[session] {}: line {} of node {} changes nothing: {}", name(), response->choice_index, response->node, r.why);

@@ -619,6 +619,7 @@ std::string Elections::to_json() const {
             }
             n["buy_orders"] = std::move(b);
         }
+        if (!(e.buildings == NodeBuildings{})) n["buildings"] = node_buildings::to_json(e.buildings);
         for (const NodeNews& w : e.news) {
             n["news"].push_back({{"type", w.type}, {"at", w.at_ms}, {"mayor", w.mayor}, {"plot", w.plot}, {"building", w.building}, {"commission", w.commission},
                                  {"state", w.building_state}});
@@ -666,6 +667,7 @@ bool Elections::from_json(const std::string& text, std::string& error) {
                     if (item != 0 && quantity > 0) e.stored[item] = static_cast<int32_t>(std::min<int64_t>(quantity, INT32_MAX));
                 }
             }
+            if (n.contains("buildings") && n["buildings"].is_object()) e.buildings = node_buildings::from_json(n["buildings"]);
             if (n.contains("buy_orders") && n["buy_orders"].is_object()) {
                 const auto& b = n["buy_orders"];
                 e.buy_orders.serial = b.value("serial", uint64_t{0});

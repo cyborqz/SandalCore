@@ -133,6 +133,24 @@ public:
     /// Read by apply_seed_file, once at the start; a node's list does not depend on the level the service gives it.
     const std::vector<PlotChoice>& plot_choices(int64_t guid) const;
 
+    /// What stands on a plot now from the node's buildings (world/node_buildings.h): it overrides the data's row (NodeWire::plot_rows_of), so the summary, the
+    /// scenery and the town's people follow a building bought, built, demolished or expanded.
+    struct PlotLive {
+        int64_t plot = 0;
+        int64_t building = 0;            // 0: the plot's empty building
+        uint8_t state = 0;               // EBuildingState
+        int64_t asset_sets = 0;          // an expansion's BuildingNodeAssetSets for the plot (0: the building's own)
+        bool    replace_assets = false;  // it replaces the building's (else it is added)
+        std::vector<std::pair<int64_t, bool>> spawns;   // the expansions' BuildingLevelSpawns, and whether each replaces the building's
+        bool operator==(const PlotLive&) const = default;
+    };
+    /// The node's live plots are `plots` now (the plots the buildings changed; the others are the data's).  When they differ from before, the node's plots revision
+    /// and the registry's version move (the scenery and the people rebuild that node) and true.
+    bool set_live_plots(int64_t guid, std::vector<PlotLive> plots);
+    std::vector<PlotLive> live_plots(int64_t guid) const;
+    /// Counts the changes of the node's live plots (0: none ever).
+    uint64_t plots_revision(int64_t guid) const;
+
 private:
     static constexpr int kMaxLevel = 6;   // Metropolis: the most a level number can be (the service allows 4)
     void set_all(const std::vector<LiveNode>& nodes, LevelSource source);
@@ -148,6 +166,11 @@ private:
     std::atomic<uint64_t>                     version_{0};
     std::map<int64_t, std::vector<PlotChoice>> plot_choices_;
     std::vector<PlotChoice>                   no_plot_choices_;
+    struct LivePlots {
+        std::vector<PlotLive> plots;
+        uint64_t              revision = 0;
+    };
+    std::map<int64_t, LivePlots>              live_plots_;   // by node, under live_mu_
 };
 
 /// The evaluation context of an expression's node reads: where it runs.

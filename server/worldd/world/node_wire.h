@@ -46,6 +46,12 @@ struct PlotRow {
     bool    pre_construct = false;
     std::string name;        // the plot's record name ("Plot_17_Service")
     double  qx = 0, qy = 0, qz = 0, qw = 1, tx = 0, ty = 0, tz = 0, sx = 1, sy = 1, sz = 1;   // the plot's transform in the layout
+    int64_t empty_building = 0;   // ServiceBuildingPlotRecordBase.EmptyBuildingId: what an Empty plot shows
+    bool    seeded = false;       // a workshop the seed placed (CityNodes::plot_choices)
+    // what the node's buildings put on the plot (CityNodes::live_plots, world/node_buildings.h): an expansion's asset sets and building spawns
+    int64_t asset_sets = 0;       // a BuildingNodeAssetSets used for the plot (0: the building's own)
+    bool    replace_assets = false;
+    std::vector<std::pair<int64_t, bool>> spawns;   // BuildingLevelSpawns, and whether each replaces the building's
 };
 
 /// What a node's level grants (the summed NodeModifications of its LevelDetails).
@@ -73,7 +79,12 @@ public:
 
     /// The summary of the node `guid` at its level now; nullopt for a guid that is no city node record.  `unix_now` places the maintenance a week ahead.
     /// With `elections`, a node that has a mayor carries the mayor's message (MayorMessage) and may be edited at once (NextMayorMessageEditTime 0).
-    std::optional<protocol::repl::NodeSummary> summary(int64_t guid, const CityNodes& nodes, int64_t unix_now, const Elections* elections = nullptr) const;
+    /// With the node's buildings (NodeElection::buildings): each plot's times, gifts, expansions and votes (`requester_account`'s vote: bHasRequesterVoted), the node's
+    /// skill points and its next upkeep.
+    std::optional<protocol::repl::NodeSummary> summary(int64_t guid, const CityNodes& nodes, int64_t unix_now, const Elections* elections = nullptr,
+                                                       int64_t requester_account = 0) const;
+    /// The node's plots at `level` as the buildings' rules take them (world/node_buildings.h): the data's rows with what may stand on each.
+    std::vector<PlotInfo> plot_infos(int64_t node_guid, int level) const;
     /// The idle siege summary of the node `guid`; nullopt for a guid that is no city node record.
     std::optional<protocol::repl::SiegeSummary> siege(int64_t guid, const CityNodes& nodes) const;
 
@@ -82,6 +93,8 @@ public:
     /// The plots of the node `node_guid` at `level`: plot_rows() of its layout, with the workshops the seed starts the node with (CityNodes::plot_choices) built on the
     /// service plots it names (Operational, the building of that kind among the plot's own).  The summary, the scenery and the people all read this.
     std::vector<PlotRow> plot_rows_of(int64_t node_guid, int level) const;
+    /// The same before the node's buildings (CityNodes::live_plots): what the data and the seed start the node with, which the buildings' rules start from.
+    std::vector<PlotRow> data_plot_rows_of(int64_t node_guid, int level) const;
     /// The buildings that may be built on a service plot (service_plot_building), in the data's order; empty for a plot that has none.
     std::vector<int64_t> plot_buildings(int64_t plot) const;
     /// The record name of such a building ("Construction_Active_Smithy_Building"); "" when the plot has no such building.

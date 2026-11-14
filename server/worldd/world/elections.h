@@ -30,6 +30,7 @@
 #pragma once
 
 #include "world/buy_orders.h"
+#include "world/node_buildings.h"
 
 #include <cstdint>
 #include <functional>
@@ -115,6 +116,7 @@ struct NodeElection {
     std::map<int64_t, int32_t> stored;                             // the node's stores: an item record and its quantity (world/node_inventory_table.h)
     bool           stocked = false;                                // the node has had what its record starts it with (InitialNodeResourcesId)
     NodeBuyOrders  buy_orders;                                     // the mayor's buy orders (world/buy_orders.h)
+    NodeBuildings  buildings;                                      // the node's service buildings and their expansions (world/node_buildings.h)
     bool operator==(const NodeElection&) const = default;
 };
 

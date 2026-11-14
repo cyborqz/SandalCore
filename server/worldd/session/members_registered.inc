@@ -26,3 +26,5 @@
 #include "session/members/buy_orders.inc"
 #include "session/members/reputation.inc"
 #include "session/members/node_xp.inc"
+#include "session/members/node_boons.inc"
+#include "session/members/node_buildings.inc"

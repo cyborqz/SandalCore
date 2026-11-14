@@ -1274,6 +1274,25 @@ Outcome Inventory::add_at(svc::ItemContainer container, int slot, svc::Inventory
     return out;
 }
 
+Outcome Inventory::remove_cargo(const std::string& guid) {
+    Outcome out;
+    const svc::InventoryItem* crate = find(svc::ItemContainer::Equipment, equip::CargoHold);
+    if (!crate || crate->instance_guid != guid) {
+        out.refusal = "the cargo slot does not hold that crate";
+        return out;
+    }
+    Event remove;
+    remove.type = repl::StorageEventType::Remove;
+    remove.container = svc::ItemContainer::Equipment;
+    remove.slot = equip::CargoHold;
+    remove.item = *crate;
+    slots_.erase({static_cast<uint8_t>(svc::ItemContainer::Equipment), equip::CargoHold});
+    out.events = {std::move(remove)};
+    out.equipment_changed = true;
+    out.ok = true;
+    return out;
+}
+
 Outcome Inventory::grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog) {
     Outcome out;
     const auto refuse = [&](std::string why) {

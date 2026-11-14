@@ -75,6 +75,10 @@ struct Result {
     /// Buy orders: the talk reached a BuyOrderFulfillment node (the Buy Order Manager's), whose panel (ESubDialogueType BuyOrderFulfillment) is queued on top: the caller opens the
     /// window with the NPC's node (session/player_buy_orders.cpp).
     bool                     open_buy_orders = false;
+    /// Nodes 3: the talk ran the Construction Foreman's action response Construction_Constribution_AR (EActionResponse::OpenBuildingContributionWindow): the caller opens the
+    /// node's building contribution window (session/player_node_buildings.cpp).  content.db names no kind for it (contentc keeps the kinds worldd answered before), so the
+    /// lines are known by their nodes: kContributionWindowNodes.
+    bool                     open_contribution = false;
     /// Quests, slice 2: the quest actions the conversation ran, in order, for the session to carry out (`node` is the node whose line or enter / exit list holds each).  Objective
     /// progress (CompleteDialogueObjective, IncrementDialogueObjective) is among them only in the result of the step that ends the conversation.
     struct Run {
@@ -199,6 +203,10 @@ public:
                     r.citizenship = a.response == "AddNodeCitizenship" ? 1 : a.response == "RemoveNodeCitizenship" ? 2 : 3;
                     r.citizenship_vendor = a.vendor;
                 }
+                continue;
+            }
+            if (contribution_line(from->guid, a)) {
+                r.open_contribution = true;
                 continue;
             }
             if (is_quest_action(a)) {
@@ -436,6 +444,17 @@ private:
         return out;
     }
 
+    /// The Construction Foreman's nodes whose lines run Construction_Constribution_AR (OpenBuildingContributionWindow): zLegacy_DD_ServiceNPC_ConstructionForeman_1 (line 3, an
+    /// automatic one), _5 and _7 (line 0).  The record scan of the 12 November content.db: no other node names that response.
+    static constexpr int64_t kContributionWindowNodes[] = {6064634349883575755ll, 6064634349883575758ll, 6064634349883575761ll};
+    static bool contribution_line(int64_t node, const content::DialogueActionRow& a) {
+        if (a.action != "ActionResponse" || !a.response.empty()) return false;
+        for (const int64_t n : kContributionWindowNodes) {
+            if (n == node) return true;
+        }
+        return false;
+    }
+
     /// A quest action: what the session carries out for the character's quests (the others are skipped and listed).
     static bool is_quest_action(const content::DialogueActionRow& a) {
         return a.action == "CompleteDialogueObjective" || a.action == "IncrementDialogueObjective" || a.action == "ActivateObjective" || a.action == "RevealObjective" ||
@@ -460,7 +479,13 @@ private:
     static void entering(const Book& book, const std::vector<Pass>& passes, int64_t node, State& s, Result& r) {
         for (const Pass& p : passes) {
             s.visited.insert(p.node);
-            if (const content::DialogueNodeRow* a = book.node(p.node)) collect(p.node, a->on_enter, "OnEnter", r, s.visited);
+            if (const content::DialogueNodeRow* a = book.node(p.node)) {
+                collect(p.node, a->on_enter, "OnEnter", r, s.visited);
+                // the line an automatic node took: the Construction Foreman's greeting takes the line that opens the contribution window
+                if (p.index >= 0 && static_cast<size_t>(p.index) < a->choices.size()) {
+                    for (const auto& act : a->choices[static_cast<size_t>(p.index)].actions) r.open_contribution = r.open_contribution || contribution_line(p.node, act);
+                }
+            }
         }
         s.visited.insert(node);
         if (const content::DialogueNodeRow* n = book.node(node)) collect(node, n->on_enter, "OnEnter", r, s.visited);

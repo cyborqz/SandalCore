@@ -68,6 +68,7 @@ public:
         size_t   items = 0;
         double   x = 0, y = 0, z = 0, yaw = 0;
         bool     captured_origin = false;
+        uint64_t plots_revision = 0;   // CityNodes::plots_revision the payload shows (the node's buildings)
     };
     const std::map<int64_t, Entry>& entries() const { return entries_; }
     const Entry* entry_of(int64_t node) const;

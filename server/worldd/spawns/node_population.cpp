@@ -166,24 +166,39 @@ std::vector<PlacedSet> placed_sets(const NodePopulationData& data, const world::
     const double yaw = site.yaw * kPi / 180.0;
     const double c = std::cos(yaw), s = std::sin(yaw);
     for (const world::PlotRow& plot : wire.plot_rows_of(site.guid, site.level)) {
-        if (plot.building == 0 || (plot.state != 1 && plot.state != 2)) continue;
-        const int64_t spawn = data.spawn_for(plot.building, site.level);
-        if (spawn == 0) continue;
+        // the data's plots are Empty, UnderConstruction or Operational; the buildings' (world/node_buildings.h) may be in any state, whose sets the spawn lists
+        if (plot.building == 0 || plot.state == 0) continue;
+        // the building's spawn for the level, and an expansion's (it replaces the building's or is added)
+        std::vector<int64_t> spawns;
+        bool replaced = false;
+        for (const auto& [sp, replaces] : plot.spawns) replaced = replaced || replaces;
+        if (!replaced) {
+            if (const int64_t spawn = data.spawn_for(plot.building, site.level); spawn != 0) spawns.push_back(spawn);
+        }
+        for (const auto& [sp, replaces] : plot.spawns) {
+            if (sp != 0 && std::find(spawns.begin(), spawns.end(), sp) == spawns.end()) spawns.push_back(sp);
+        }
+        if (spawns.empty()) continue;
         const double x = site.x + plot.tx * c - plot.ty * s;
         const double y = site.y + plot.tx * s + plot.ty * c;
         const double plot_yaw = site.yaw + quaternion_yaw(plot.qx, plot.qy, plot.qz, plot.qw);
         const int64_t placement = static_cast<int64_t>(static_cast<uint64_t>(site.guid) ^ (static_cast<uint64_t>(plot.plot) * kGolden));
-        for (const int64_t set : data.spawn_sets(spawn, plot.state)) {
-            PlacedSet p;
-            p.placement = placement;
-            p.set = set;
-            p.x = x;
-            p.y = y;
-            p.z = site.z + plot.tz;
-            p.yaw = plot_yaw;
-            p.source = PopSource::Building;
-            p.plot = plot.plot;
-            out.push_back(p);
+        std::vector<int64_t> placed;   // a set two spawns share is placed once
+        for (const int64_t spawn : spawns) {
+            for (const int64_t set : data.spawn_sets(spawn, plot.state)) {
+                if (std::find(placed.begin(), placed.end(), set) != placed.end()) continue;
+                placed.push_back(set);
+                PlacedSet p;
+                p.placement = placement;
+                p.set = set;
+                p.x = x;
+                p.y = y;
+                p.z = site.z + plot.tz;
+                p.yaw = plot_yaw;
+                p.source = PopSource::Building;
+                p.plot = plot.plot;
+                out.push_back(p);
+            }
         }
     }
     return out;
