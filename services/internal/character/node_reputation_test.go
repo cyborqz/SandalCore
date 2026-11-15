@@ -47,7 +47,7 @@ func TestNodeReputationIsTheCharacters(t *testing.T) {
 		t.Fatalf("a new character's reputation = %+v (%v); want none", got, err)
 	}
 	want := []NodeReputation{{NodeGUID: -5, Reputation: -650.5, LastDecayMs: 1700000000000}, {NodeGUID: 753981145547737344, Reputation: 10250, LastDecayMs: 1700000360000}}
-	saved := append([]NodeReputation{{NodeGUID: 42, Reputation: 0}}, want...)   // (a reputation of 0 keeps no row)
+	saved := append([]NodeReputation{{NodeGUID: 42, Reputation: 0}}, want...) // (a reputation of 0 keeps no row)
 	if _, err := s.SaveProgress(ctx, first.ID, Progress{ReplaceNodeReputation: true, NodeReputation: saved}); err != nil {
 		t.Fatal(err)
 	}
