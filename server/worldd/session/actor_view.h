@@ -91,7 +91,8 @@ public:
         /// The highest channel index the view may use (UE's default is far above; retail peaked at 324 and reached index 459).
         uint32_t max_channel = 4000;
         /// The player this connection belongs to: an actor whose `owner` is another player's is never sent (a player's lingering zones), except another player's
-        /// own actors (ActorKind::Player: its pawn), which are; this player's own Player actors never are (the session has them on its own channels).  (#14 review: it said "pawn and PlayerState")
+        /// own actors (ActorKind::Player: its pawn; ActorKind::Mount: its summoned mount, as session/shown_to_others.h shows it), which are; this player's own Player actors never are
+        /// (the session has them on its own channels).  (#14 review: it said "pawn and PlayerState")
         uint64_t player_id = 0;
         /// The player's name, for the log's "X now sees Y" lines.
         std::string player_name;
@@ -162,6 +163,10 @@ public:
     /// The mounts milestone, stage 3: sends what changed on an actor the client holds awake now, without waiting for the next pass (the three packets of getting on a mount
     /// go out together: retail sends them within a millisecond). False when the actor is not awake on this connection, or the update could not go out (the pass sends it).
     bool update_now(Connection& conn, uint64_t actor);
+
+    /// A multicast call on an actor (retail's NetMulticast: every client that holds the actor is sent it): the chain goes out now on the channel the client holds the actor on, when
+    /// the view holds it awake.  False when it does not (the client is not sent the call: a value the actor changed is in its next update or open; an unreliable call is not repeated).
+    bool send_multicast(Connection& conn, uint64_t actor, protocol::repl::Emission& em);
 
     /// An AckEvent of the connection: marks the exports the client acknowledged. (The session forwards every event it takes.)
     void on_ack(const AckEvent& e);
@@ -288,7 +293,7 @@ private:
     void     forget_chains(Entry& e);
     void     on_removed(const world::WorldActor& a);
     void     flush_removed(Connection& conn);
-    /// Whether this connection is sent `a` at all: an actor of nobody's, this player's own (its lingering zones), or another player's pawn.  (#14 review: it said "pawn or PlayerState")
+    /// Whether this connection is sent `a` at all: an actor of nobody's, this player's own (its lingering zones), another player's pawn or any player's summoned mount.  (#14 review: it said "pawn or PlayerState")
     bool     for_this_player(const world::WorldActor& a) const;
     /// Multiplayer visibility: the info line of another player's pawn appearing (`sees`) or going (`why`), the first kPlayersLogged at info, the rest at debug.
     void     log_player(const world::WorldActor& a, bool sees, const char* why);

@@ -4,9 +4,9 @@
 // ============================================================================
 //  tests/actor_view_players_tests.inc: which actors a player's view is sent (players seeing each other)
 //
-//  A view is sent the actors of nobody (owner 0: the NPCs, a summoned pet among them), this player's own zones and mount, and another player's Player actor (its pawn); it is never sent
-//  this player's own Player actor (the session has its own pawn on channels of its own), nor another player's zones or mount.  A Player actor is never dormant: it is open within the
-//  awake ring, closed with Relevancy beyond it, and closed with Destroyed when its player leaves.
+//  A view is sent the actors of nobody (owner 0: the NPCs, a summoned pet among them), this player's own zones, every player's summoned mount (another player's in the form
+//  session/shown_to_others.h makes), and another player's Player actor (its pawn); it is never sent this player's own Player actor (the session has its own pawn on channels of its own),
+//  nor another player's zones.  A Player actor is never dormant: it is open within the awake ring, closed with Relevancy beyond it, and closed with Destroyed when its player leaves.
 // ============================================================================
 
 /// A player's pawn as the registry holds it for the other players' views: an actor of kind Player, never dormant, owned by the player (its PlayerId).  The replicated state is an NPC's, which is
@@ -45,7 +45,7 @@ static void test_view_another_players_pawn_is_sent_and_its_own_is_not() {
 AOC_REGISTER_TEST(test_view_another_players_pawn_is_sent_and_its_own_is_not);
 
 static void test_view_player_actors_pets_zones_and_mounts() {
-    std::printf("the view: a pet and a player's pawn are both sent; another player's zone and mount are not\n");
+    std::printf("the view: a pet, a player's pawn and every player's mount are sent; another player's zone is not\n");
     world::ActorRegistry reg;
     Pair p;
     ActorView::Config cfg = view_config();
@@ -73,9 +73,10 @@ static void test_view_player_actors_pets_zones_and_mounts() {
     CHECK(v.state_of(6000) == world::ClientState::Awake, "the pet (an NPC of nobody's) is sent");
     CHECK(v.state_of(5100) == world::ClientState::Awake, "another player's pawn is sent beside it");
     CHECK(v.state_of(5000) == world::ClientState::None, "this player's own Player actor is not");
-    CHECK(v.state_of(7000) == world::ClientState::None && v.state_of(7100) == world::ClientState::None, "another player's zone and mount are not (they stay its owner's)");
+    CHECK(v.state_of(7000) == world::ClientState::None, "another player's zone is not (it stays its owner's)");
+    CHECK(v.state_of(7100) == world::ClientState::Awake, "another player's mount is (every player near it sees it)");
     CHECK(v.state_of(7200) == world::ClientState::Awake && v.state_of(7300) == world::ClientState::Awake, "this player's own zone and mount are");
-    CHECK(v.tracked() == 4, "four actors in all: the pet, the other pawn, the own zone and the own mount");
+    CHECK(v.tracked() == 5, "five actors in all: the pet, the other pawn, the other player's mount, the own zone and the own mount");
 }
 AOC_REGISTER_TEST(test_view_player_actors_pets_zones_and_mounts);
 

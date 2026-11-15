@@ -48,6 +48,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     // read it, and it makes no difference whether the server runs the view passes on threads.
     sync_presence(now);
     run_emotes(conn, now);   // the emote items of this player's pawn, written to the pawn the other players are shown (session/player_emotes.cpp)
+    run_shown(conn, now);    // the pawn the other players are shown, in line with the player's mount and ride (session/player_shown.cpp)
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
     if (phase_in_done_ && !time_syncs_.empty() && now >= time_syncs_.front() && room_for(1)) {
         time_syncs_.pop_front();

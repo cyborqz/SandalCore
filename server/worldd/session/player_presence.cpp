@@ -14,12 +14,13 @@
 //    - sync_presence runs once a tick, from tick_logic (session/player_view_phases.cpp), and nowhere else.  It used to run from tick(), which the server does not call when the players'
 //      view passes run on threads (the default), and after every accepted move.
 //    - the player's PlayerState is no longer put into the registry: the other players are shown the pawn alone.
-//    - a rider's pawn is not moved while its player rides.
+//    - a rider's pawn is not moved by its own motion while its player rides: it is attached to the mount (session/player_shown.cpp), and follows the mount's place for the other players' rings.
 //    - the movement mode the other players' clients are shown is one a character moves in.
 // ============================================================================
 #include "session/player_session.h"
 
 #include "protocol/repl/move_packed.h"
+#include "session/shown_to_others.h"
 #include "spawns/mount_state.h"
 
 #include <spdlog/spdlog.h>
@@ -38,24 +39,6 @@ constexpr double kPresenceJumpCmPerS = 3500.0;
 /// ... and the moves that stopped: with no new place for this long, the pawn is shown standing (its velocity 0), so another client does not run it on in place.
 /// INFERRED: a client sends a move every frame while it walks; 200 ms is three of the view's passes.
 constexpr auto kPresenceStill = std::chrono::milliseconds(200);
-
-/// #14 review: the movement mode the other players' clients are shown.  A move's mode is the byte the client sent and the move checker keeps it as sent, so a modified client could put any
-/// number into every nearby client's copy of its pawn.  The modes a character moves in are walking, falling, swimming, flying and the custom modes 16, 17 and 18; the client's 0
-/// (none) and any other number are shown as walking.
-uint8_t shown_movement_mode(uint8_t mode) {
-    switch (mode) {
-        case repl::kMoveWalking:
-        case repl::kMoveFalling:
-        case repl::kMoveSwimming:
-        case repl::kMoveFlying:
-        case 16:
-        case 17:
-        case 18:
-            return mode;
-        default:
-            return repl::kMoveWalking;
-    }
-}
 
 void show_movement_mode(world::WorldActor& a, uint8_t mode) {
     repl::ObjectState& obj = a.actor.obj;
@@ -97,9 +80,19 @@ void PlayerSession::sync_presence(Clock::time_point now) {
         spdlog::info("[players] {}: in the world for the other players (pawn {}) at ({:.0f}, {:.0f}, {:.0f}) cm", name(), pid, g.x, g.y, g.z);
         return;
     }
-    // #14 review: a rider's pawn is not moved while its player rides: the place the move checker holds is the mount's (the checker is rebased to the mount at every possession), and the
-    // mount is not shown to the other players yet.  The pawn stays where the player got on, and stands still there; it follows the player again after the dismount.
-    const GoodPosition g = mounted() ? presence_at_ : here;
+    // A rider's pawn is attached to its mount (session/player_shown.cpp): it keeps the ReplicatedMovement it had when it got on, standing, and follows the mount's place in the registry (the
+    // other players' rings), where the move checker's place is the mount's (the checker is rebased to the mount at every possession).  It follows the player again after the dismount.
+    if (mounted()) {
+        if (presence_moving_) {   // it got on walking: it is shown standing where it got on
+            presence_moving_ = false;
+            registry_->modify(world_pawn_, world::Change::Movement, [&](world::WorldActor& a) { spawns::write_motion(a, presence_at_.x, presence_at_.y, presence_at_.z, presence_at_.yaw_degrees, 0, 0, false, stamp); });
+        }
+        if (here.x != presence_at_.x || here.y != presence_at_.y || here.z != presence_at_.z) registry_->move(world_pawn_, here.x, here.y, here.z, here.yaw_degrees);
+        presence_at_ = here;
+        presence_at_.has_time_stamp = false;   // (the mount's moves run on a clock of their own: the first step after the dismount has no time between)
+        return;
+    }
+    const GoodPosition g = here;
     const bool moved = g.x != presence_at_.x || g.y != presence_at_.y || g.z != presence_at_.z || g.yaw_degrees != presence_at_.yaw_degrees ||
                        g.movement_mode != presence_at_.movement_mode;
     if (!moved) {

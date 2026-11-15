@@ -164,6 +164,8 @@ void PlayerSession::finish_level_up(const leveling::XpResult& xp, bool class_cha
     const bool leveled = xp.leveled();
     if (leveled) {
         if (!pb_.set_level(progress_.level)) spdlog::error("[session] {}: the pawn does not take level {}", name(), progress_.level);
+        // Social, gear and level: the pawn the other players are shown takes the new Level and the level-up call at this session's next tick
+        note_shown_level(progress_.level);
         if (stats_) stats_->set_level(progress_.level);
         if (book_) {
             // the ranks the new level grants by itself: the Universal tree's and the class tree's

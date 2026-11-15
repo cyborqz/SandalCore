@@ -44,6 +44,9 @@ const repl::Subobject* sub_of(const world::WorldActor& actor, const char* cls);
 /// ReplicatedMovement (cm x 100, velocity in whole cm/s, the yaw as one byte), its timestamp, CurrentMovementInput, and the open's own location and rotation, as the
 /// retail server writes a running mount (the desummon's run: session/mounts.cpp) and a mount left where it stands.
 void write_motion(world::WorldActor& actor, double x, double y, double z, double yaw_degrees, double vx, double vy, bool moving, double timestamp);
+/// The same on a replicated actor alone, with a vertical velocity too (a mount that flies or swims): the form another player's connection is sent of a mount its owner rides
+/// (session/shown_to_others.h).  `write_motion` above is this one for a registry actor with no vertical velocity.
+void write_motion(repl::Actor& actor, double x, double y, double z, double yaw_degrees, double vx, double vy, double vz, bool moving, double timestamp);
 
 /// The InputEffectStatus value of a mount's interaction [R: 910, 871: 134217732].
 inline constexpr uint64_t kInputEffectStatus = 134217732;

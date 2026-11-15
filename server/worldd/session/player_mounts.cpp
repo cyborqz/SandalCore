@@ -193,6 +193,7 @@ void PlayerSession::apply_mount_effects(Connection& conn, MountController::Effec
         if (pending_ends_.size() < 64) pending_ends_.push_back(id);
     }
     flush_abilities(conn);
+    if (fx.pet_changed) note_shown_pet(fx.pet);   // the pawn the other players are shown names the mount too (session/player_shown.cpp)
     if (fx.pet_changed && world_ && room_for(1)) {
         // The pawn's InteractInfo.MountablePet names the summoned mount (and 0 once it has closed), as retail's does in the packet of the Summon_Mount item [R: 871 packet 210,
         // 898 packets 158 and 601].  The client's bank-18 Mount slot, the dash, is resolved through it (exe: GetActionbarInstigator 0x6aba180 -> GetMountablePet): without it the

@@ -7,3 +7,7 @@
 //  of .gitattributes), so this list does not conflict. The order of the lines does not matter.
 // ============================================================================
 #include "mounts_ride_presence_tests.inc"
+#include "mounts_ride_others_tests.inc"
+#include "mounts_ride_others_ends_tests.inc"
+#include "others_gear_level_tests.inc"
+#include "others_gear_level_edges_tests.inc"
