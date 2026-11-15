@@ -462,6 +462,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
             return;
         }
     }
+    if (fishing_takes_trigger(conn, ability, instance, now)) return;   // Fishing: the cast of Economy_FishingCast is its own (session/player_fishing.cpp)
     if (pet_takes_trigger(conn, ability, instance, info, now)) return;
     // the mounts milestone: Summon_Mount is the mount controller's (the pipeline refuses an ability that names an item)
     if (mounts_ && ability != 0 && ability == mounts_->book().summon_ability()) return on_summon_trigger(conn, instance, item_slot, item_location, now);

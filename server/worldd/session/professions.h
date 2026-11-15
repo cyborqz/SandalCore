@@ -21,7 +21,7 @@
 //      level past the cap (the Adventuring cap rule, leveling.h), or at the curve's last total at level 50;
 //    - Promote is one tier up, from the tier the profession is in, and takes effect only when the profession is at its tier's MaxLevel (the XP before it
 //      in the scrolls is there to bring it to the cap): a Promote below the cap is skipped and the item says so. Demote is one tier down: the level and the
-//      XP are held at the lower tier's cap. A GM item ignores the certification's MaximumAllowable (a character may hold 5 Apprentice, 4 Journeyman ...);
+//      XP are held at the lower tier's cap. A GM item ignores the certification's MaximumAllowable (the certifier counts the professions at a tier or above: 5, 4, 3 and 2);
 //    - the XP of a Profession reward is the compiled expression of the reward (contentc's reward_xp.expr: `xp - cur + 1`) run with the live profession
 //      level (GetPlayerProfessionLevel); it is added to the XP total, never taken away.
 // ============================================================================
@@ -150,6 +150,9 @@ public:
     int64_t xp(int64_t profession) const { return state(profession).xp; }
     /// Whether the profession is certified at `tier` or above and at `level` or above (a tool, a node or a recipe asks this).
     bool    can_use(int64_t profession, int tier, int level) const;
+    /// How many professions the character holds at `tier` or above (the certification's MaximumAllowable counts these: a line of the data's older certification conversations warns that a
+    /// character can only accept up to five apprenticeships, so a profession that went on to Journeyman still counts as one of them).
+    int     certified_from(int tier) const;
 
     /// Adds XP (0 or less adds nothing): the level follows the curve, held at the tier's cap, the XP at what the tier holds.
     Change add_xp(int64_t profession, int64_t delta);

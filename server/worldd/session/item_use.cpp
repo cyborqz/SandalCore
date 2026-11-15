@@ -135,6 +135,7 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
         plan.set_class.reset();
         plan.professions_after = professions::Professions();
         plan.profession_changes.clear();
+        plan.learn_recipes.clear();
         return plan;
     };
     std::string error;
@@ -142,6 +143,40 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
     if (!use) {
         if (!error.empty()) return refuse("content.db failed: " + error);
         return refuse("item record " + std::to_string(item_record) + " is neither worn in a slot nor used (no ItemActivationArchetype)");
+    }
+    if (use->activation == "LearnRecipes") {
+        // Gathering stage 2, the recipe items (contentc version 44): the item teaches the recipes of `item_learn`; the data's own profession and certification are the requirement,
+        // a recipe the character knows already is refused, and the use consumes one of the stack when it teaches one.
+        plan.consume = use->consume_on_use;
+        const auto learn = db.item_learn(item_record, error);
+        if (!learn) {
+            if (!error.empty()) return refuse("content.db failed: " + error);
+            return refuse("the item's activation is LearnRecipes, which this content.db does not model (rebuild it with this checkout's contentc)");
+        }
+        if (learn->empty()) return refuse("the item's activation is LearnRecipes and its record names no recipe");
+        if (!ctx.professions || !ctx.held.valid()) {
+            return refuse("the recipe item " + std::to_string(item_record) + " needs the professions, and worldd has no profession tables (content.db is older than contentc 13?)");
+        }
+        for (const content::ItemLearnRow& row : *learn) {
+            if (row.profession != 0 && row.certification != 0) {
+                const professions::Profession* prof = ctx.professions->find(row.profession);
+                const int tier = prof ? ctx.professions->tier_of_guid(row.certification) : -1;
+                if (!prof || tier < 0) {
+                    return refuse("the recipe item " + std::to_string(item_record) + " names profession " + std::to_string(row.profession) + " and certification " +
+                                  std::to_string(row.certification) + ", which content.db does not give");
+                }
+                if (!ctx.held.can_use(row.profession, tier, 1)) {
+                    const professions::State held = ctx.held.state(row.profession);
+                    return refuse("the recipe needs " + prof->name + " at " + ctx.professions->tier(tier).name + "; the character is " +
+                                  ctx.professions->tier(held.tier).name);
+                }
+            }
+            if (ctx.known_recipe && ctx.known_recipe(row.recipe)) return refuse("the recipe " + std::to_string(row.recipe) + " is known already");
+            plan.learn_recipes.push_back(row.recipe);
+        }
+        plan.ok = true;
+        plan.summary = "learned " + std::to_string(plan.learn_recipes.size()) + " recipe(s)";
+        return plan;
     }
     if (use->activation != "ActivateActionResponses") return refuse("the item's activation is " + use->activation + ", which stage 1 does not run");
     if (use->actions.empty()) return refuse("the item has an activation archetype and no action");

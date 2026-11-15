@@ -25,7 +25,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Combat and the class abilities; weapon combo finishers and weapon swaps; magic weapon scaling (caster weapons scale with Magical Power, and melee combos hit for their full share).
 - The walking map and NPC spawning; mobs that notice by hearing and sight and give up 140 m from where the fight began; loot rolls that change on every server start.
 - Mounts: ground, aquatic and flying.
-- Gathering, hunting and professions.
+- Gathering, hunting, fishing and professions.
 - City nodes: node levels and experience, the towns' scenery, people and floor, and the towns' crafting stations.
 - NPC conversations (the talking window).
 - Vendors: currency, buying, selling, repairing and destroying items; talking shopkeepers.
@@ -93,7 +93,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Mobs: the remaining mob families' own fights and abilities (the Goblin Flame Shamans' fire bombs and the arsonists' fire spray, stream and ring among them), smooth movement for goblins and bandits while their attack animations play, pack aggro, damage matched to retail, and flying mobs.
 - Abilities: the bars of Deliverance (a held cast) and Disengage follow the game's recorded timeline.
 - The walking map: walls, fences, water and holes.
-- The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
+- The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
 - Economy: player trading, marketplaces, node currency and crates.
 - Social: guilds, raids and mail.
@@ -101,6 +101,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Caravans and trade routes.
 - Conversations: NPC voice and animation while they talk.
 - Infrastructure: multi-process cell sharding for crowded worlds.
+- Fishing: sport fishing (the lure, the fish that is fought with the line, and the fishing grounds with their fish).
 
 ---
 
@@ -113,7 +114,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
 6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: food and potions.
 7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.
-8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
+8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations. Still to come: sport fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Still to come: citizenship, mayors, taxes and vassal nodes.
 11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events.

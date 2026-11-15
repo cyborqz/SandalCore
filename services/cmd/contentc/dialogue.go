@@ -58,6 +58,9 @@ type actionJSON struct {
 	Quest   int64   `json:"q,omitempty"`
 	Obj     int64   `json:"o,omitempty"`
 	Rewards []int64 `json:"rw,omitempty"`
+	// The certification (version 44): a SetCertificationLevel action's profession ("p", a CharacterProfessions record) and its CertificationAction ("ca": 1 Promote, 2 Demote).
+	Profession int64 `json:"p,omitempty"`
+	Certify    int   `json:"ca,omitempty"`
 }
 
 // answeredResponses are the action response kinds actionJSON names; the others are left out of the JSON.
@@ -201,6 +204,15 @@ func readActions(v designdb.Value, responses map[int64]actionResponse) (string, 
 				x.Obj = idGuid(a["ObjectiveId"])
 			case "GiveItems":
 				x.Rewards = idsOf(a["RewardIds"])
+			case "SetCertificationLevel":
+				// the profession the choice certifies and which way (the action's own record keeps no other field of it)
+				x.Profession = idGuid(a["ProfessionId"])
+				switch enumValue(strOf(a["CertificationAction"])) {
+				case "Promote":
+					x.Certify = 1
+				case "Demote":
+					x.Certify = 2
+				}
 			}
 			if x.Action == "OpenWindow" {
 				x.Window = enumValue(strOf(a["WindowType"]))

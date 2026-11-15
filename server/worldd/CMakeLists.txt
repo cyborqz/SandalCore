@@ -183,6 +183,14 @@ add_library(worldd_core STATIC
     combat/rewards.h
     content/content_db.cpp
     content/content_db.h
+    fishing/cast.cpp
+    fishing/cast.h
+    fishing/fishing.cpp
+    fishing/fishing.h
+    fishing/predicate.cpp
+    fishing/predicate.h
+    fishing/water_map.cpp
+    fishing/water_map.h
     foliage/foliage.cpp
     foliage/foliage.h
     foliage/foliage_cells.cpp
@@ -471,6 +479,16 @@ worldd_add_test(test_worldd_foliage_session)
 target_compile_definitions(test_worldd_foliage_session PRIVATE
     GATHER_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
     FOLIAGE_TSV_PATH="${PROJECT_SOURCE_DIR}/dist/content/region_foliage.tsv")
+
+# Fishing (milestone 1): the reward predicates, the rolls, the water, the throw and the cast's timeline, on the real content.db and water file of the working tree
+worldd_add_test(test_worldd_fishing)
+target_compile_definitions(test_worldd_fishing PRIVATE
+    FISHING_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+    FISHING_WATER_PATH="${PROJECT_SOURCE_DIR}/dist/content/fishing_water.tsv")
+
+worldd_add_test(test_worldd_fishing_session)
+target_compile_definitions(test_worldd_fishing_session PRIVATE
+    FISHING_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db")
 
 # Hunting (Gathering stage 3): the huntable creature's template, the 53 hunting interactions and their rewards, and the corpse's wire against the retail capture, on the real content.db of the working tree
 worldd_add_test(test_worldd_hunting)

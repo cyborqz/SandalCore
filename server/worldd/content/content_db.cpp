@@ -123,6 +123,9 @@ constexpr const char* kProfessionSql =
 constexpr const char* kCertificationSql =
     "SELECT guid, name, tier, min_level, max_level, has_max_allowable, max_allowable FROM certification_level ORDER BY tier";
 constexpr const char* kCertificationActionSql = "SELECT action_guid, name, profession_guid, action FROM action_certification ORDER BY action_guid";
+// The recipe items (contentc version 44): schema.go's item_learn (internal/content/recipes.go).  A file without the table is an older one: no recipe item is learned.
+constexpr const char* kItemLearnTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'item_learn'";
+constexpr const char* kItemLearnSql = "SELECT recipe_guid, profession_guid, certification_guid FROM item_learn WHERE item_guid = ?1 ORDER BY ord";
 // Gathering stage 2, "Harvesting": schema.go's gather_def, gather_tool and item_variation (internal/content/gather.go)
 constexpr const char* kGatherTableSql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('gather_def', 'gather_tool', 'item_variation')";
 constexpr const char* kGatherDefSql =
@@ -1001,6 +1004,53 @@ std::optional<ItemUse> ContentDb::item_use(int64_t item_guid, std::string& error
     return u;
 }
 // -- CoA . C-Y-B --
+
+std::optional<std::vector<ItemLearnRow>> ContentDb::item_learn(int64_t item_guid, std::string& error) const {
+    error.clear();
+    {
+        // the table is contentc version 44's: a file without it is an older one (no recipe item is learned, as before)
+        Stmt q(db_, kItemLearnTableSql);
+        if (!q.ok()) {
+            error = "content.db item_learn query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+        const int step = sqlite3_step(q.get());
+        if (step == SQLITE_DONE) return std::nullopt;
+        if (step != SQLITE_ROW) {
+            error = "content.db item_learn query failed: " + db_message(db_);
+            return std::nullopt;
+        }
+    }
+    std::vector<ItemLearnRow> out;
+    Stmt q(db_, kItemLearnSql);
+    if (!q.ok()) {
+        error = "content.db item_learn query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    sqlite3_bind_int64(q.get(), 1, item_guid);
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) {
+        sqlite3_stmt* s = q.get();
+        if (!column_is_int(s, 0) || !column_is_int(s, 1) || !column_is_int(s, 2)) {
+            error = "content.db item_learn of item " + std::to_string(item_guid) + " has a column of the wrong storage class";
+            return std::nullopt;
+        }
+        ItemLearnRow r;
+        r.recipe = sqlite3_column_int64(s, 0);
+        r.profession = sqlite3_column_int64(s, 1);
+        r.certification = sqlite3_column_int64(s, 2);
+        if (r.recipe == 0) {
+            error = "content.db item_learn of item " + std::to_string(item_guid) + " names no recipe";
+            return std::nullopt;
+        }
+        out.push_back(r);
+    }
+    if (step != SQLITE_DONE) {
+        error = "content.db item_learn query failed: " + db_message(db_);
+        return std::nullopt;
+    }
+    return out;
+}
 
 std::optional<ActionResponse> ContentDb::action_response(int64_t guid, std::string& error) const {
     error.clear();
@@ -3004,6 +3054,9 @@ bool parse_dialogue_actions(const std::string& text, std::vector<DialogueActionR
                 if (v.is_number_integer()) r.rewards.push_back(v.get<int64_t>());
             }
         }
+        // the certification (contentc version 44): "ca" 1 Promote or 2 Demote and "p" the profession
+        if (const auto it = a.find("ca"); it != a.end() && it->is_number_integer()) r.certification = static_cast<int>(it->get<int64_t>());
+        if (const auto it = a.find("p"); it != a.end() && it->is_number_integer()) r.profession = it->get<int64_t>();
         out.push_back(std::move(r));
     }
     return true;

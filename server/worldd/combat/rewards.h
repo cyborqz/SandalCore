@@ -39,6 +39,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <map>
 #include <string>
 #include <vector>
@@ -134,6 +135,9 @@ struct RollContext {
     const world::CityNodes* nodes = nullptr;
     int     node = -1;
     int     biome = 0;
+    /// An expression the stat programs cannot run (its program is -1) answered another way: the value, or nullopt to count it as "does not run" as before.  Fishing's reward predicates
+    /// (fishing/predicate.h) use it; empty for every other roll.
+    std::function<std::optional<double>(int64_t expr)> fallback;
 };
 
 class RewardBook {

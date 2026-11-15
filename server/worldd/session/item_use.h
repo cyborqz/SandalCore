@@ -5,8 +5,8 @@
 //  session/item_use.h
 //
 //  Using an item (plan D1, stage 1) as pure logic over content.db: the item's ItemActivationArchetype says what a use does
-//  (ActivateActionResponses runs the item's ActionResponses; ConsumeOnUse takes one of the stack) and each ActionResponse's
-//  ResponseType says what it is. Stage 1 runs what the GM items use:
+//  (ActivateActionResponses runs the item's ActionResponses; LearnRecipes teaches the recipes of `item_learn` when the character's profession and certification
+//  allow it and the recipe is new; ConsumeOnUse takes one of the stack) and each ActionResponse's ResponseType says what it is. Stage 1 runs what the GM items use:
 //
 //    GiveItem                 the action's RewardTables: every ItemRewards entry is granted into the bag as fresh instances
 //                             (quantity split into stacks of the record's MaxStackSize), every ExperienceRewards entry of type
@@ -39,6 +39,7 @@
 #include "session/professions.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -67,6 +68,8 @@ struct Plan {
     /// differs from before (before and after, in profession order). A use that moves no level and no tier leaves the professions as they were.
     professions::Professions         professions_after;
     std::vector<professions::Change> profession_changes;
+    /// The recipes a LearnRecipes item teaches (contentc version 44): the session adds them to the character's known list, which is saved with it.
+    std::vector<int64_t>             learn_recipes;
     std::vector<std::string> notes;           // what was skipped
     std::string              summary;         // one line for the log ("+418,410 XP, 19 items")
 };
@@ -83,6 +86,8 @@ struct Context {
     const professions::Book*  professions = nullptr;
     professions::Professions  held;
     professions::XpRunner     profession_xp;
+    /// The recipes the character knows already (its list); a recipe item that would teach one of them is refused and not consumed. Empty: none is known.
+    std::function<bool(int64_t recipe)> known_recipe;
     /// Glint tiers: the currency kinds that are items.  The Glint a use grants is paid in kinds, the biggest first, each under its rate (items/currency.h); without a table (null) as the table gives it.
     const items::CurrencyTable* currencies = nullptr;
 };

@@ -241,6 +241,7 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     ctx.professions = world_->professions();
     ctx.currencies = world_->currencies();
     ctx.held = professions_;
+    ctx.known_recipe = [this](int64_t recipe) { return std::find(taught_.begin(), taught_.end(), recipe) != taught_.end(); };
     const abilities::Catalog* ability_catalog = world_->ability_catalog();
     std::shared_ptr<professions::XpRunner> runner;
     if (ctx.professions && ability_catalog && stats_ && stats_->started()) {
@@ -256,6 +257,11 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     }
     const use::Plan plan = use::plan_use(*db, item.item_record_id, ctx);
     if (!plan.ok) return refuse(plan.refusal);
+    // Gathering stage 2, the recipe items (contentc version 44): the recipes are learned, the item consumed as the data says and the client told; the inventory's save carries them
+    if (!plan.learn_recipes.empty()) {
+        if (const std::string why = learn_recipes_from_use(conn, plan, use, item); !why.empty()) return refuse(why);
+        return;
+    }
     // what the use grants, as fresh instances (their kind decides where the inventory puts them: a resource item to a resource container, the rest to the Backpack)
     std::vector<svc::InventoryItem> fresh;
     {
@@ -468,6 +474,41 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     }
 }
 // C | O | A and Cyb
+
+std::string PlayerSession::learn_recipes_from_use(Connection& conn, const use::Plan& plan, const repl::ItemUse& use, const svc::InventoryItem& item) {
+    if (taught_.size() + plan.learn_recipes.size() > bootstrap::kMaxKnownRecipes) {
+        return "the character knows " + std::to_string(taught_.size()) + " recipes already: the most is " + std::to_string(bootstrap::kMaxKnownRecipes);
+    }
+    items::Outcome all;
+    all.ok = true;
+    if (plan.consume) {
+        const items::Outcome c = inventory_.consume(svc::ItemContainer::Backpack, use.slot, item.instance_guid, 1);
+        if (!c.ok) return c.refusal;
+        all.events = c.events;
+    }
+    for (const int64_t recipe : plan.learn_recipes) taught_.push_back(recipe);
+    ++uses_applied_;
+    ++items_applied_;
+    if (!all.events.empty()) {
+        inventory_dirty_ = true;
+        inventory_changed_ = true;
+        const std::vector<bootstrap::ItemEvent> events = item_events_for(all);
+        for (size_t at = 0; at < events.size(); at += bootstrap::kMaxEventsPerChain) {
+            const std::vector<bootstrap::ItemEvent> part(events.begin() + static_cast<std::ptrdiff_t>(at),
+                                                         events.begin() + static_cast<std::ptrdiff_t>(std::min(events.size(), at + bootstrap::kMaxEventsPerChain)));
+            queue("ClientReceiveStorageEvent", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
+        }
+    }
+    // the known recipes are saved with the inventory (character_known_recipes); the client's OwnerInfo lists them, which is the list the station window filters by
+    hand_over_inventory("a recipe was learned", /*periodic=*/false);
+    if (!pb_.set_known_recipes(taught_)) spdlog::warn("[session] {}: the recipe list does not fit the player's state: the client is not told of it", name());
+    queue("OwnerInfo", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, /*must_build=*/true);
+    std::string names;
+    for (const int64_t recipe : plan.learn_recipes) names += (names.empty() ? "" : ", ") + std::to_string(recipe);
+    spdlog::info("[session] {}: used item {}: learned recipe(s) {} ({} known in all); the item is {}.", name(), item.item_record_id, names, taught_.size(),
+                 plan.consume ? "consumed" : "kept");
+    return {};
+}
 
 std::vector<professions::Change> PlayerSession::set_professions(const professions::Professions& after) {
     std::vector<professions::Change> changes = professions::Professions::diff(professions_, after);

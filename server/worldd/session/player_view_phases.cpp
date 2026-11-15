@@ -28,6 +28,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_ride(conn, now);
     run_timers(conn, now);
     run_gather(conn, now);
+    run_fishing(conn, now);
     run_foliage(conn, now);
     run_floor_net(conn, now);
     run_embersprings(conn, now);   // Embersprings: a shrine whose radius holds the player is discovered

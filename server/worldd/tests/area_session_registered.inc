@@ -18,3 +18,4 @@
 #include "friend_removal_load_tests.inc"
 #include "friend_unknown_line_tests.inc"
 #include "friend_wire_edges_tests.inc"
+#include "certification_session_tests.inc"

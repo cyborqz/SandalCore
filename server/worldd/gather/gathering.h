@@ -46,6 +46,10 @@
 #include <string>
 #include <vector>
 
+namespace aoc::worldd::fishing {
+struct Facts;
+}
+
 namespace aoc::worldd::gather {
 
 /// Gathering stage 3, "Hunting": the PlayerInteractionDefs of the huntable creatures (the Hunting_<kind> defs: every def whose gathering interaction is the Hunting profession's).  The
@@ -124,6 +128,8 @@ public:
     size_t classify_hunting(stats::CharacterStats::Evaluation& probe);
     /// How many hunting roots had their NumberOfSubtablesToSelect read as 1 (the data says 2: see gathering.cpp).
     size_t hunting_one_of() const { return hunting_one_of_; }
+    /// How many fishing tier tables had their NumberOfSubtablesToSelect read as 1 (the data says 2: see gathering.cpp).
+    size_t fishing_one_of() const { return fishing_one_of_; }
     /// The kind a PlayerInteractionDef names; nullptr when it is no hunting one (a vendor's, a quest's ...).
     const HuntKind* hunt_kind(int64_t interaction_def) const;
     /// Every kind, by PlayerInteractionDef.
@@ -137,9 +143,10 @@ public:
     std::optional<double> channel_seconds(const content::GatherDefRow& def, stats::CharacterStats::Evaluation& player, std::string& why);
 
     /// One harvest: the reward table of the node's def rolled for the player (`player` is its stat run, `level` its level); `site` is the node's place (the biome the bonus tables read).
-    /// nullopt, with `why`, when the table is missing.
+    /// nullopt, with `why`, when the table is missing.  `facts` (Fishing): the character's certification and the rod it wears, for the reward predicates the stat programs cannot run
+    /// (fishing/predicate.h); null for every other harvest.
     std::optional<Harvest> harvest(const content::GatherDefRow& def, stats::CharacterStats::Evaluation& player, double level, const world::NodeSite& site,
-                                   const world::CityNodes* nodes, stats::SplitMix& rng, std::string& why);
+                                   const world::CityNodes* nodes, stats::SplitMix& rng, std::string& why, const fishing::Facts* facts = nullptr);
 
 private:
     Gathering(NodeBoard::Config board, world::ActorRegistry& registry, Config config) : board_(registry, board), cfg_(config) {}
@@ -153,6 +160,7 @@ private:
     std::map<int64_t, content::GatherDefRow> interactions_;   // by GatheringInteractionData guid
     std::map<int64_t, HuntKind>     hunting_;                  // by PlayerInteractionDef guid
     size_t                          hunting_one_of_ = 0;
+    size_t                          fishing_one_of_ = 0;
     std::optional<combat::RewardBook> rewards_;
     stats::SplitMix                 rng_;
     std::map<int64_t, double>       ratings_;

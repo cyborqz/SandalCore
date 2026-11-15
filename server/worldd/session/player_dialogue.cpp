@@ -280,7 +280,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
         return;
     }
     const dialogue::Book* book = world_ ? world_->dialogue() : nullptr;
-    if (dead_ || !book || !talk_.open() || !room_for(1)) {
+    if (dead_ || !book || !talk_.open() || !room_for(2)) {   // (the answer, and the XPTracker a certification choice sends)
         ++dialogue_refused_;
         spdlog::log(level_for(dialogue_logged_), "[session] {}: a talking-window choice is refused: {}", name(), dead_ ? "the player is dead" : !talk_.open() ? "no conversation is open" : "the world has no conversations");
         return;
@@ -299,7 +299,7 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
     dialogue::Evaluator ev(*book, *facts, [this](const std::string& what) {
         if (dialogue_told_.insert(what).second) spdlog::info("[session] {}: a condition of a conversation could not be answered and does not hold: {} (told once)", name(), what);
     });
-    const dialogue::Result r = talk_.choose(*book, ev, *response);
+    const dialogue::Result r = talk_.choose(*book, ev, *response, [this](int64_t profession, bool promote, std::string& why) { return certification_allowed(profession, promote, why); });
     for (const std::string& s : r.skipped) {
         if (dialogue_told_.insert("skipped " + s).second) spdlog::info("[session] {}: a conversation action is not done yet: {} (told once)", name(), s);
     }
@@ -314,6 +314,8 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
         spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the shop {}", name(), response->choice_index, response->node, r.open_vendor);
         open_talk_shop(conn, *npc, r.open_vendor, now);
     }
+    // the artisan certifier: the line certifies the profession (the choice was checked before the line took it) and the XPTracker follows it
+    if (r.outcome == dialogue::Outcome::Changed && !r.certifications.empty()) apply_certifications(conn, r.certifications);
     if (r.outcome == dialogue::Outcome::Changed) run_talk_actions(conn, r, *npc, now);   // quests: the line's actions, the node left and the nodes entered
     switch (r.outcome) {
         case dialogue::Outcome::Changed:
@@ -345,6 +347,73 @@ void PlayerSession::run_dialogue(Connection& conn, Clock::time_point /*now*/) {
 /// The client calls of the talking window (session/rpc_table.h).
 void PlayerSession::register_dialogue_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerSelectDialogueChoice", [](PlayerSession& s, const RpcContext& c) { s.on_dialogue_choice(c.conn, c.rpc, c.now); });
+}
+
+// ---- the artisan certifier --------------------------------------------------------------------------------------------------------------------------
+
+bool PlayerSession::certification_allowed(int64_t profession, bool promote, std::string& why) const {
+    if (!professions_.valid()) {
+        why = "worldd has no profession tables";
+        return false;
+    }
+    const professions::Book& book = *professions_.book();
+    const professions::Profession* p = book.find(profession);
+    if (!p) {
+        why = "the choice names profession " + std::to_string(profession) + ", which is none of the " + std::to_string(book.size()) + " professions";
+        return false;
+    }
+    const professions::State before = professions_.state(profession);
+    if (promote) {
+        if (before.tier >= professions::kTierGrandMaster) {
+            why = p->name + " is " + book.tier(before.tier).name + " already: there is no higher tier";
+            return false;
+        }
+        const int cap = book.tier(before.tier).max_level;
+        if (before.level < cap) {
+            why = p->name + " is level " + std::to_string(before.level) + ", below the " + book.tier(before.tier).name + " cap of " + std::to_string(cap) + " its Promote asks";
+            return false;
+        }
+        const professions::Tier& next = book.tier(before.tier + 1);
+        if (next.limited) {
+            // the limit counts the professions at the next tier or above (a Journeyman was an Apprentice first), so five Apprentices and Journeymen between them fill the Apprentice tier
+            const int at = professions_.certified_from(next.tier);
+            if (at >= next.max_allowable) {
+                why = "the character holds " + std::to_string(at) + " profession(s) at " + next.name + " or above, the data's limit of " + std::to_string(next.max_allowable) + ": " + p->name +
+                      " cannot join them";
+                return false;
+            }
+        }
+    } else if (before.tier <= professions::kTierNovice) {
+        why = p->name + " is Novice already: there is no tier below";
+        return false;
+    }
+    return true;
+}
+
+void PlayerSession::apply_certifications(Connection& conn, const std::vector<dialogue::Certification>& list) {
+    professions::Professions after = professions_;
+    for (const dialogue::Certification& c : list) {
+        if (c.promote) after.promote(c.profession, /*needs_cap=*/true);
+        else after.demote(c.profession);
+    }
+    const std::vector<professions::Change> changes = set_professions(after);
+    if (changes.empty()) return;   // (the choices were checked: this is a data fault rather than a player's)
+    const std::vector<ProfessionWire> wire = profession_wire(changes);
+    queue("XPTracker", [wire](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+        for (const ProfessionWire& w : wire) {
+            if (!pb.set_profession(w.leveling_type, w.xp, w.certification)) return std::nullopt;
+        }
+        return pb.leveling_update();
+    }, conn, /*must_build=*/true);
+    queue_profession_level_ups(conn, changes);
+    hand_over_progress("a certification");
+    for (const professions::Change& c : changes) {
+        const professions::Profession* p = professions_.book()->find(c.profession);
+        if (!p) continue;
+        const professions::Book& book = *professions_.book();
+        spdlog::info("[session] {}: the certifier: {} is {} (level {}, {} XP), it was {} (level {}, {} XP)", name(), p->name, book.tier(c.after.tier).name, c.after.level, c.after.xp,
+                     book.tier(c.before.tier).name, c.before.level, c.before.xp);
+    }
 }
 
 }}  // namespace aoc::worldd

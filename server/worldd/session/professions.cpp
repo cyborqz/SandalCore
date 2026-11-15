@@ -143,6 +143,12 @@ bool Professions::can_use(int64_t profession, int tier_needed, int level_needed)
     return s.tier >= tier_needed && s.level >= level_needed;
 }
 
+int Professions::certified_from(int tier) const {
+    int n = 0;
+    for (const State& s : states_) n += s.tier >= tier ? 1 : 0;
+    return n;
+}
+
 void Professions::settle(int index) {
     State& s = at(index);
     const Profession& p = book_->all()[static_cast<size_t>(index)];

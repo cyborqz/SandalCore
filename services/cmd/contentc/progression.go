@@ -68,7 +68,21 @@ func byGuid(rows []designdb.Row) map[int64]*designdb.Row {
 // ~ C-O-A :: Cyb ~
 
 type progressionSummary struct {
-	uses, actions, tables, modelled, xpRewards, xpModelled, levelingTypes, grants int
+	uses, actions, tables, modelled, xpRewards, xpModelled, levelingTypes, grants, learned int
+}
+
+// readRecipeItem reads what a LearnRecipes item teaches (contentc version 44): the recipes its record lists (LearnableRecipeIds; the data has one item whose list holds a single
+// null id, and a null id is no recipe) and the profession and the certification level its record asks to use it (0: none).  Every item record of the data carries the three
+// fields, so a record that lacks one is an error here, as it is for every other field read from a record.
+func readRecipeItem(f *fields) (recipes []int64, profession, certification int64) {
+	for _, g := range f.ids("LearnableRecipeIds") {
+		if g != 0 {
+			recipes = append(recipes, g)
+		}
+	}
+	profession, _ = f.id("RequiredProfessionId")
+	certification, _ = f.id("RequiredCertificationLevelId")
+	return recipes, profession, certification
 }
 
 // buildProgression fills the plan D1 tables. curves are the StatCurve rows as buildCurves read them (EvalCurve of the XP
@@ -119,6 +133,21 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 				return err
 			}
 			actionsWanted[g] = true
+		}
+		// the recipe items (version 44): the recipes the item teaches and the profession and certification its record asks to use it.  A LearnRecipes item
+		// whose record names no recipe gets no row (worldd refuses the use and keeps it).
+		if activation == "LearnRecipes" {
+			recipes, profession, certification := readRecipeItem(f)
+			if f.err != nil {
+				return f.err
+			}
+			for i, recipe := range recipes {
+				if err := w.exec(`INSERT INTO item_learn (item_guid, ord, recipe_guid, profession_guid, certification_guid) VALUES (?, ?, ?, ?, ?)`,
+					r.Guid, i, recipe, profession, certification); err != nil {
+					return err
+				}
+			}
+			sum.learned += len(recipes)
 		}
 		sum.uses++
 	}
@@ -337,8 +366,8 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 		}
 	}
 
-	opt.logf("item_use: %d items; action_response: %d; reward_table: %d (%d modelled); reward_xp: %d (%d the level scrolls' formula); leveling_type: %d; skill_auto_grant: %d",
-		sum.uses, sum.actions, sum.tables, sum.modelled, sum.xpRewards, sum.xpModelled, sum.levelingTypes, sum.grants)
+	opt.logf("item_use: %d items; action_response: %d; reward_table: %d (%d modelled); reward_xp: %d (%d the level scrolls' formula); leveling_type: %d; skill_auto_grant: %d; item_learn: %d",
+		sum.uses, sum.actions, sum.tables, sum.modelled, sum.xpRewards, sum.xpModelled, sum.levelingTypes, sum.grants, sum.learned)
 	meta["typed.item_use"] = strconv.Itoa(sum.uses)
 	meta["typed.action_response"] = strconv.Itoa(sum.actions)
 	meta["typed.reward_table"] = strconv.Itoa(sum.tables)
@@ -346,6 +375,7 @@ func buildProgression(w *writer, src *source, curves *aocexpr.CurveMap, statName
 	meta["typed.reward_xp_modelled"] = strconv.Itoa(sum.xpModelled)
 	meta["typed.leveling_type"] = strconv.Itoa(sum.levelingTypes)
 	meta["typed.skill_auto_grant"] = strconv.Itoa(sum.grants)
+	meta["typed.item_learn"] = strconv.Itoa(sum.learned)
 	return nil
 }
 

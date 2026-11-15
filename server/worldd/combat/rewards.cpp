@@ -106,6 +106,9 @@ private:
     std::optional<double> value(int64_t expr) {
         if (expr == 0) return std::nullopt;
         const int program = catalog_.program(expr);
+        if (program < 0 && ctx_.fallback) {
+            if (const std::optional<double> answered = ctx_.fallback(expr)) return answered;
+        }
         if (program < 0 || !ctx_.npc) {
             ++out_.gated;
             return std::nullopt;

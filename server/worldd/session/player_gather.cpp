@@ -319,6 +319,7 @@ void PlayerSession::make_gather_pile(GatherPile& pile) {
 }
 
 void PlayerSession::end_gathering(const char* why) {
+    end_fishing(why);   // Fishing: a cast that runs ends with the session
     cancel_gather(nullptr, why);   // Gathering stage 2: a node this player channels is available again
     // a pile that still waits for its time is made now: the stacks a full bag could not take are not lost with the session
     while (!gather_piles_.empty()) {

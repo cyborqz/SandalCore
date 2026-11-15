@@ -766,6 +766,9 @@ func Create(db *sql.DB) error {
 	if err := createGather(db); err != nil {
 		return err
 	}
+	if err := createRecipes(db); err != nil {
+		return err
+	}
 	if err := createResource(db); err != nil {
 		return err
 	}

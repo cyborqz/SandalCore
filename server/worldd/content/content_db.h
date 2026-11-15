@@ -837,6 +837,16 @@ struct DialogueActionRow {
     /// Quests, slice 2 (contentc version 27): the quest and objective an ActivateObjective / RevealObjective / FailObjective names (0: none), and the reward tables a GiveItems gives.
     int64_t              quest = 0, objective = 0;
     std::vector<int64_t> rewards;
+    /// The certification (contentc version 44): a SetCertificationLevel action's profession and whether it is a Promote (1) or a Demote (2); 0 for every other action.
+    int64_t              profession = 0;
+    int                  certification = 0;
+};
+
+/// A row of `item_learn` (contentc version 44): a recipe a LearnRecipes item teaches, with the profession and the certification level the item's record names (0: none).
+struct ItemLearnRow {
+    int64_t recipe = 0;
+    int64_t profession = 0;
+    int64_t certification = 0;
 };
 
 struct DialogueChoiceRow {
@@ -1549,6 +1559,9 @@ public:
 
     /// Plan D1: how an item is used. nullopt with `error` empty for an item that is not used; with `error` set when a query failed.
     std::optional<ItemUse> item_use(int64_t item_guid, std::string& error) const;
+    /// The recipes an item teaches (`item_learn`, contentc version 44), in the record's order.  nullopt with `error` empty for a file without the table (an older contentc:
+    /// no recipe item is learned then); an empty list for an item that teaches none; `error` set when a query failed.
+    std::optional<std::vector<ItemLearnRow>> item_learn(int64_t item_guid, std::string& error) const;
     /// Whether the item carries the gameplay tag `tag` or a child of it ("Item.Consumable.Scroll" matches itself and "Item.Consumable.Scroll.Anything").
     bool item_has_tag(int64_t item_guid, const std::string& tag, std::string& error) const;
     /// The ability a consumable item casts when it is used, for the kinds the server runs (scrolls and elixirs); 0 for any other item, a meal, a potion or a mount among them.

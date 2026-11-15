@@ -914,6 +914,14 @@ the writer). The raw records stay in `record`; these tables join them:
 | `certification_level` | 5 | Novice (tier 0, levels 1-10), Apprentice (1, 10-20, at most 5 professions), Journeyman (2, 20-30, 4), Master (3, 30-40, 3), GrandMaster (4, 40-50, 2): `min_level`, `max_level`, `has_max_allowable`, `max_allowable` |
 | `action_certification` | 98 | the `SetCertificationLevel` action responses: the profession and `Promote` (70) or `Demote` (28). **No item uses a Demote action** |
 
+**Certification and recipe learning (contentc version 44; `internal/content/recipes.go`).** A `SetCertificationLevel` line of a conversation keeps the profession it names and its direction in
+`dialogue_choice.actions` (`"p"`, a `CharacterProfessions` guid, and `"ca"`: 1 Promote, 2 Demote; a bare action of an older file has neither and worldd skips it). The data has 94 such lines, each the only
+action of its line: 44 in the menus of the 8 artisan buildings' certifier NPCs (one Promote and one Demote for each of the 22 professions), 44 at the Artisan quest giver, 4 in the Mining and
+Herbalism quests and 2 development lines. `item_learn (item_guid, ord, recipe_guid, profession_guid, certification_guid)` holds the recipes a `LearnRecipes` item teaches (its `LearnableRecipeIds`, in the
+record's order) with the `RequiredProfessionId` and `RequiredCertificationLevelId` of its record (0: none). 2,858 items have the activation and 2,829 rows are written, one recipe for each item: 29 items name
+no recipe (28 Journeyman items whose recipes the data does not have, and one whose list holds a single null id) and get none; of the 2,829, 2,397 ask for a profession and a certification level, 360 a
+profession alone (Novice) and 72 nothing.
+
 `reward_xp` gets a column `expr`: the `ab_expr` id of a `Profession` reward's expression (88 rows of 67 tables: the GM artisan scrolls' `xp - cur + 1`), all compiled. The 22 profession `LevelingTypeDef`s
 and the three `StatCurve`s `Gathering_`, `Processing_` and `Crafting_LevelUpCurve` held only a placeholder (0 XP at level 0, 50,000 at level 50; no keys): the real curves are pak assets
 (`ExternalCurve`; Unreal ignores a curve's own keys when it is set), which `mapc artisan-curves` (`tools/mapc/README.md`) reads into `dist/content/artisan_curves.tsv` (150 keys). contentc reads
