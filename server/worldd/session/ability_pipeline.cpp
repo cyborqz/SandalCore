@@ -1270,10 +1270,17 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
         if (!(dur >= 0)) dur = 0;
     }
-    // the values of its stat mods, for one stack, as the character is now
+    // the values of its stat mods, for one stack, as the character is now (another player's effect: as its caster worked them out)
+    const GivenEffect* given = given_effect_;
+    given_effect_ = nullptr;   // (the effect's own Apply hits below work theirs out)
     std::vector<stats::EffectMod> mods;
     std::optional<float> shield;   // a mod on TempHealth is a shield: its amount is held by the instance, not run through the engine
-    for (const content::ModRow& m : def.mods) {
+    if (given) {
+        mods = given->mods;
+        if (std::isfinite(given->shield) && given->shield > 0) shield = static_cast<float>(given->shield);
+    }
+    static const std::vector<content::ModRow> kNoMods;
+    for (const content::ModRow& m : given ? kNoMods : def.mods) {
         if (m.shield_absorb || m.value_expr == 0) continue;
         double v = 0;
         std::string why;
@@ -1590,9 +1597,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
                                    std::find(ability->row.tags.begin(), ability->row.tags.end(), "ability.Melee") != ability->row.tags.end());
     // whether the hit reaches a target: it is there and alive, on a side the hit helps or harms, and within reach (a ball's hit has no reach to keep: it hurts what the ball touches, wherever the caster is by now)
     const auto reached = [&](const combat::TargetInfo& ti) {
-        if (!ti.exists || !ti.alive) return false;
-        const bool hostile = ti.relation == combat::Relation::Hostile;
-        if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
+        if (!ti.exists || ti.alive == (hit.resurrect != 0)) return false;   // (a Resurrect is for the dead and nothing else is)
+        if (!combat::mask_reaches(mask, ti)) return false;   // a side this hit does not reach (another player: Ally, or Party and Raid in one group)
         return src.reach_free || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
     };
     // the hit's primary target, for the formulas that tell it from the others (the melee combos give every other target a smaller share): the caster's
@@ -1667,6 +1673,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         origin.ability_tags = meta.ability_tags;
         const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
+        if (hit.resurrect != 0) combat_->resurrect(id, t);   // a dead player is asked (abilities between players)
         if (hit.row.name == "Summoner_Transpose") transpose_with_ = id;   // (TeleportId: bSwapLocationWithTarget; the session moves the two)
         event.targets.push_back(id);
         event.flags = static_cast<uint8_t>(event.flags | d.flags);
@@ -1860,9 +1867,21 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
             h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective)});
         }
     }
+    // abilities between players: what another player's hit takes off the character, then what it puts on him, with the numbers its caster worked out
+    if (in.removes) remove_by_hit(c, *in.removes);
+    for (size_t i = 0; i < in.effects.size(); ++i) {
+        const effects::Applied& a = in.effects[i];
+        if (!a.def) continue;
+        const GivenEffect given{a.mods, i < in.effect_shields.size() ? in.effect_shields[i] : 0.0};
+        given_effect_ = &given;
+        apply_effect(c, *a.def, a.stacks, std::isinf(a.duration) ? std::nullopt : std::optional<double>(a.duration), now_);
+        given_effect_ = nullptr;
+        sync_engine_effects();
+    }
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;   // (the hit took the last Health)
     h.flags = flags;
-    confirmations_.push_back(std::move(h));
+    // (what another player's hit puts on or takes off comes after the hit itself, which was confirmed: it has no confirmation of its own)
+    if (in.hit_guid != 0 || !in.mods.empty()) confirmations_.push_back(std::move(h));
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
@@ -3221,13 +3240,20 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     if (combat_) {
         const bool melee = row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                            std::find(row.tags.begin(), row.tags.end(), "ability.Melee") != row.tags.end();
+        // (abilities between players: a Resurrect's target is a dead player, and only that)
+        bool raises = false;
+        for (const content::AbilityHitRow& h : def->hits) {
+            const HitDef* hd = catalog_->hit(h.hit_guid);
+            raises = raises || (hd && hd->resurrect != 0);
+        }
         for (const uint64_t id : info.target_actors) {
             if (target_actors.size() >= 16) break;
             const combat::TargetInfo ti = combat_->inspect(id);
-            if (!ti.exists || !ti.alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
+            if (!ti.exists || ti.alive == raises) return refused(Refusal::BadTarget, raises ? " (the target is not there or is alive)" : " (the target is not there or is dead)");
             const bool hostile = ti.relation == combat::Relation::Hostile;
-            // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493])
-            if (hostile ? (row.applicable_targets & 2) == 0 : row.applicable_targets != 0 && (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
+            // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493]; another player is reached by Ally, or by Party
+            // and Raid in one group: combat_world.h mask_reaches)
+            if (row.applicable_targets != 0 ? !combat::mask_reaches(row.applicable_targets, ti) : hostile) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
             if (ti.surface_distance_cm > combat_->reach_cm(melee) + combat_->data().activation_leeway_cm()) return refused(Refusal::OutOfRange);
             // Line of sight is NOT a refusal for a player's cast (E1 review I4): `TargetInfo::in_line_of_sight` is the navmesh's 2D raycast, which a
             // bank, a ledge or a gap in the walkable ground stops as a wall would; the client enforces its own sight rules, and retail's server refused

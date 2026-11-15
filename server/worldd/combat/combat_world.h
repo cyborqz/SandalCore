@@ -56,14 +56,20 @@ inline bool notices_players(bool hostile_to_players, const world::NpcInfo& npc) 
 /// How much faster than their Blueprint's rotation rate the goblins and bandits turn (the tests check a creature's facing against it).
 inline constexpr double kHumanoidTurnGain = 1.2;
 
-/// What an NPC attack did to a player: the hit as the confirmation and the player's Health need it.
+/// What an NPC attack did to a player: the hit as the confirmation and the player's Health need it.  Another player's hit on him comes the same way
+/// (CombatWorld::apply_hit_to_player): `from_player` is set, and it can carry the effects the caster worked out for him and what it takes off him.
 struct IncomingHit {
-    uint64_t                 instigator = 0;      // the NPC's actor id (its ObjectId)
+    uint64_t                 instigator = 0;      // the NPC's actor id (its ObjectId), or the other player's pawn
     int64_t                  hit_guid = 0;
     int64_t                  source_type = 0;     // content::kSourceType...: the ability or projectile that made the hit
     int64_t                  source_guid = 0;
     uint8_t                  flags = 0;           // Miss, Block, Crit (Lethal is the player's session's: its Health decides)
     std::vector<ResolvedMod> mods;
+    // abilities between players
+    bool                         from_player = false;   // another player's hit (a heal, a buff, a cleanse): it lands on the rider and not on his mount
+    std::vector<effects::Applied> effects;              // what it puts on him, its numbers worked out by the caster (HitResolver::resolve_effects_with)
+    std::vector<double>          effect_shields;        // per effect: the shield its TempHealth mod gives him (HitResolver::effect_shield; 0: none)
+    const abilities::HitDef*     removes = nullptr;     // the hit takes effects off him (a Purify on an ally): its removal list or filter
     double                   at = 0;
 };
 // built with C-Y-B and CoA
@@ -149,6 +155,12 @@ public:
     /// A crowd control of this player's hit (or of his pet's) was resisted or was immune on a creature: the session tells his client (ClientOnEffectResisted /
     /// ClientOnEffectImmune).  The default does nothing (a port that has no client).
     virtual void effect_refused(const EffectRefusal& /*refusal*/, double /*now*/) {}
+
+    // ---- abilities between players (combat/combat_players.cpp)
+    /// The party the player is in, as a key two players share when they are in one (0: none): what a hit's Party mask reads.  A pet's port has none.
+    virtual uint64_t group_key() const { return 0; }
+    /// Another player's Resurrect landed on this dead player: the session asks him (the CharacterGuid is who the client's alert names).
+    virtual void prompt_resurrect(const std::array<uint32_t, 4>& /*by*/, double /*now*/) {}
 };
 
 /// What a player asks about a target before it acts on it.
@@ -163,7 +175,17 @@ struct TargetInfo {
     double   radius_cm = 50.0;
     double   half_height_cm = 88.0;   // the capsule's half height (the motion table's; the NPCPawn default)
     bool     is_player = false;
+    bool     other_player = false;      // another player: Ally, Raid and Party in a mask differ for him
+    int      group = 0;                 // ... who shares the player's raid or party (1) or squad (2); 0: neither.  A party is one squad
 };
+
+/// Whether a mask of EAffectedTarget (Self 1, Enemy 2, Ally 4, Party 8, Raid 16) reaches a target: an enemy by Enemy; another player by Ally, by Raid in one group,
+/// or by Party in one squad; anything else friendly by any of them but Enemy.
+inline bool mask_reaches(int mask, const TargetInfo& ti) {
+    if (ti.relation == Relation::Hostile) return (mask & 2) != 0;
+    if (!ti.other_player) return (mask & (1 | 4 | 8 | 16)) != 0;
+    return (mask & 4) != 0 || ((mask & 16) != 0 && ti.group >= 1) || ((mask & 8) != 0 && ti.group >= 2);
+}
 
 /// An enemy an area ahead of a player holds (a cone, a line), and how far its centre is from the player.
 struct GatheredTarget {
@@ -270,6 +292,19 @@ public:
     /// The port of the player whose pawn is `actor_id` (null: none joined).
     PlayerPort* find_player(uint64_t actor_id) { return player(actor_id); }
     const std::vector<PlayerPort*>& players() const { return players_; }
+
+    // ---- abilities between players (combat/combat_players.cpp): a player's hit on another player, whose pawn the other players' views hold (the registry's
+    // Player actor: session/player_presence.cpp).  The hit is worked out by the caster's pipeline and goes to the target's session as an IncomingHit, which applies it.
+    /// The player whose pawn this actor is (null for anything else: a pet stands in the players' list too, and a player not yet in the registry is no target).
+    PlayerPort* player_pawn(uint64_t actor_id);
+    /// A player's resolved hit on another player: it goes to his session (PlayerPort::receive_hit); `effective` is what it takes effect for as he is now (what the
+    /// caster's confirmation draws).  A dead target takes nothing but a Resurrect's hit.
+    Delivery apply_hit_to_player(uint64_t target, uint64_t attacker, const Resolved& hit, double now, const HitOrigin* origin);
+    /// The effects a player's hit puts on another player (worked out by the caster), and what it takes off him.
+    void apply_effects_to_player(uint64_t target, uint64_t attacker, const std::vector<effects::Applied>& effects, double now);
+    void remove_effects_from_player(uint64_t target, uint64_t attacker, const abilities::HitDef& hit, double now);
+    /// A Resurrect of `caster` landed on a dead player: his session asks him (ClientPromptResurrect).
+    void resurrect_player(uint64_t target, uint64_t caster, double now);
 
     // ---- NPCs
     /// The NPC's fighter (its combatant made when it is not yet); null for an actor that is no NPC of a kind that has stats.
@@ -641,6 +676,8 @@ private:
     /// stats component).  Never makes a combatant: the NPC has no AI, no threat and no fight state.
     bool  fill_stats(const world::WorldActor& a);
     PlayerPort* player(uint64_t actor_id);
+    /// What a player asks about another player's pawn (combat/combat_players.cpp): where he is and whether he lives, on the caster's side, and how the two are grouped.
+    TargetInfo  inspect_player(PlayerPort& target, const Fighter& from);
     void  player_exchange(uint64_t player_id, double now);
 
     world::ActorRegistry&  registry_;

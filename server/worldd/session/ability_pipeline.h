@@ -980,6 +980,13 @@ void   step_multi_hit(Cast& cast, double t);
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
                         int64_t owner = 0);
+    /// The numbers another player's hit worked out for an effect it puts on the character (abilities between players: receive_hit): the next apply_effect takes
+    /// them instead of working its own out from the character, and forgets them.
+    struct GivenEffect {
+        std::vector<stats::EffectMod> mods;   // one stack's stat mods, the caster's
+        double                        shield = 0;   // what its TempHealth mod gives (0: none)
+    };
+    const GivenEffect* given_effect_ = nullptr;
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
     void   restore_stacks(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, double t);   // stacks a cost took go back on (the instance keeps its time; one that has gone comes back whole)

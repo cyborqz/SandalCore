@@ -60,6 +60,8 @@ void PlayerSession::sync_presence(Clock::time_point now) {
             p.actor = std::move(*pawn);
             p.never_dormant = true;   // a player is never dormancy-closed (evidence 4): awake within the NPCs' 150 m, closed beyond
             p.owner = static_cast<uint64_t>(pb_.setup().player_id);
+            // abilities between players: the pawn's collision cylinder, which another player's hit may name as its target, is indexed as the pawn's (CombatWorld::actor_of_object)
+            p.npc.collision_cylinder = pb_.setup().guids.collision_cylinder.ObjectId;
             p.player.name = name();
             p.label = name();
             p.x = g.x, p.y = g.y, p.z = g.z, p.yaw_degrees = g.yaw_degrees;

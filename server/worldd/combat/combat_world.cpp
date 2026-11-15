@@ -236,7 +236,10 @@ CombatWorld::Npc* CombatWorld::combatant(uint64_t actor_id) {
     return make_combatant(*a);
 }
 
-Fighter* CombatWorld::fighter_of(uint64_t actor_id) { return combatant(actor_id); }
+Fighter* CombatWorld::fighter_of(uint64_t actor_id) {
+    if (PlayerPort* p = player_pawn(actor_id)) return &p->fighter();   // another player (abilities between players)
+    return combatant(actor_id);
+}
 
 uint64_t CombatWorld::actor_of_object(uint64_t object_id) const {
     if (registry_.find(object_id)) return object_id;
@@ -252,6 +255,10 @@ uint64_t CombatWorld::hit_component_of(uint64_t actor_id) const {
 }
 
 TargetInfo CombatWorld::inspect(uint64_t target_actor, const Fighter& from) {
+    // another player (abilities between players, combat/combat_players.cpp); the caster's own pawn is no target of its hits (its own side runs them)
+    if (target_actor != from.id()) {
+        if (PlayerPort* p = player_pawn(target_actor)) return inspect_player(*p, from);
+    }
     TargetInfo t;
     const world::WorldActor* a = registry_.find(target_actor);
     if (!a || a->kind != world::ActorKind::Npc) return t;

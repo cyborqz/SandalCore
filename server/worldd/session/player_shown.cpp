@@ -55,6 +55,9 @@ constexpr double kShownJumpCmPerS = 3500.0;
 constexpr double kShownDiveCmPerS = Ride::kMaxFlyFallSpeed * 1.10;
 /// ... and the moves that stopped: with no new place for this long the mount is shown standing, so another client does not run it on in place.
 constexpr auto kShownStill = std::chrono::milliseconds(200);
+/// Abilities between players: how often the shown pawn's Health and Mana are brought in line (sync_shown_vitals).  Ours: retail's server replicates its stats at the net
+/// update rate, which no recording of an observer shows; 150 ms keeps a health bar smooth for the eye at a sixth of a 30 Hz tick's updates.
+constexpr auto kShownVitalsEvery = std::chrono::milliseconds(150);
 }  // namespace
 
 /// The world's clock as the mount's own stamps run on it (the mount's open and the ride's effects are stamped from the ability runtime's clock).
@@ -68,6 +71,38 @@ void PlayerSession::run_shown(Connection& conn, Clock::time_point now) {
     sync_shown_weapon();
     sync_shown_level();
     sync_shown_level_ups(conn);
+    sync_shown_vitals(now);
+}
+
+void PlayerSession::sync_shown_vitals(Clock::time_point now) {
+    // death first, at once: a fallen player is shown dead in the update that takes his Health to 0
+    if (dead_ != shown_dead_) {
+        const bool dead = dead_;
+        bool ok = true;
+        const bool done = show_in_pawn(world::Change::State, [&](world::WorldActor& w) {
+            ok = pb_.set_observer_dead(w.actor, dead);
+            ok = pb_.set_observer_stats(w.actor) && ok;
+        });
+        if (!done || !ok) {
+            if (++shown_failures_ <= kLoggedPerKind) {
+                spdlog::warn("[players] {}: the pawn the other players are shown does not take its death ({}): they do not see it", name(), done ? "a value does not fit" : "the pawn is not in the world");
+            }
+            return;   // (tried again at the next tick)
+        }
+        shown_dead_ = dead;
+        shown_vitals_at_ = now;
+        return;
+    }
+    // Health and Mana: a few updates a second at most (a regeneration moves them every second, a fight more often)
+    if (now - shown_vitals_at_ < kShownVitalsEvery) return;
+    shown_vitals_at_ = now;
+    const world::WorldActor* shown = registry_->find(world_pawn_);
+    if (!shown || !pb_.observer_stats_differ(shown->actor)) return;
+    bool ok = true;
+    const bool done = show_in_pawn(world::Change::State, [&](world::WorldActor& w) { ok = pb_.set_observer_stats(w.actor); });
+    if ((!done || !ok) && ++shown_failures_ <= kLoggedPerKind) {
+        spdlog::warn("[players] {}: the pawn the other players are shown does not take its Health ({}): they do not see it", name(), done ? "a value does not fit" : "the pawn is not in the world");
+    }
 }
 
 void PlayerSession::sync_shown_mount(Clock::time_point now) {

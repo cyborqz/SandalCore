@@ -63,6 +63,7 @@ struct HitDef {
     std::vector<content::ModRow>       mods;      // the hit's own stat mods (a heal: Health +amount)
     std::vector<int64_t>               remove_effects;   // plan D2, stage 2: the effects it takes off its targets (EffectsToRemoveIds)
     int                                max_remove = 0;   // MaxNumEffectsToRemove (0: no limit)
+    int64_t                            resurrect = 0;    // extra's ResurrectId: it raises a dead player (Cleric_Resurrect: 25% Health, 25% Mana, all Stamina; he is asked first)
     /// What EffectRemovalFilter lets the hit take off when it names no effect. Unknown: a content.db from before contentc read the filter; Other: a filter that is not served.
     enum class Removal : uint8_t { Unknown, None, Debuff, Buff, Other };
     Removal                            removal = Removal::Unknown;

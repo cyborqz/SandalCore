@@ -185,6 +185,8 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
                 const std::string kind = rk->get<std::string>();
                 d.removal = kind == "none" ? HitDef::Removal::None : kind == "debuff" ? HitDef::Removal::Debuff : kind == "buff" ? HitDef::Removal::Buff : HitDef::Removal::Other;
             }
+            const auto rs = extra.find("ResurrectId");   // (abilities between players: the hit raises a dead player)
+            if (rs != extra.end() && rs->is_number_integer()) d.resurrect = rs->get<int64_t>();
             const auto rd = extra.find("RemoveAsDispel");
             if (rd != extra.end() && rd->is_boolean()) d.remove_as_dispel = rd->get<bool>();
             const auto rt = extra.find("EffectRemovalTag");   // contentc version 42: a filter that asks for one tag names it

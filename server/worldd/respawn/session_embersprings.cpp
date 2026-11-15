@@ -270,16 +270,18 @@ void PlayerSession::on_plain_respawn(Connection& conn, Clock::time_point now) {
     finish_respawn(conn, spot, now);
 }
 
-void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now) {
-    // alive again: full Health and Mana, the pawn not dead, the character at the spot (the move checker moves with it, the client is snapped)
+void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now, float health_ratio, float mana_ratio) {
+    // alive again: Health and Mana (all of them, but for another player's Resurrect), the pawn not dead, the character at the spot (the move checker moves with it, the
+    // client is snapped)
     dead_ = false;
+    resurrect_offered_ = false;   // (a respawn of his own ends another player's offer: session/player_resurrect.cpp)
     ++respawns_;
     if (pipeline_) pipeline_->set_dead(false);
     pb_.set_dead(false);
     const stats::StatValue* hp = stats_ ? stats_->find(content::kGuidMaxHealth) : nullptr;
     const stats::StatValue* mp = stats_ ? stats_->find(content::kGuidMaxMana) : nullptr;
-    if (hp) set_current_value(content::kGuidHealth, hp->value);
-    if (mp) set_current_value(content::kGuidMana, mp->value);
+    if (hp) set_current_value(content::kGuidHealth, hp->value * health_ratio);
+    if (mp) set_current_value(content::kGuidMana, mp->value * mana_ratio);
     checker_.teleport(spot.x, spot.y, spot.z, spot.yaw, now);
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
     // The death's ClientRestart restarted the client's pawn, and with it its movement clock (the TimeStamp of every move starts again near 0): the checker's last good TimeStamp is
@@ -290,7 +292,8 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     queue("pawn state (respawn)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("respawn"); }, conn, /*must_build=*/true);
     queue("respawn teleport", [ts, spot, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{spot.x, spot.y, spot.z}, repl::Vec3d{}, mode); }, conn,
           /*must_build=*/true);
-    spdlog::log(level_for(death_logged_), "[session] {}: comes back at {} ({:.0f}, {:.0f}, {:.0f}) with full Health and Mana", name(), spot.name, spot.x, spot.y, spot.z);
+    spdlog::log(level_for(death_logged_), "[session] {}: comes back at {} ({:.0f}, {:.0f}, {:.0f}) with {:.0f}% of its Health and {:.0f}% of its Mana", name(), spot.name, spot.x, spot.y,
+                spot.z, health_ratio * 100, mana_ratio * 100);
 }
 
 /// The client calls of Embersprings: respawn choices and the home (session/rpc_table.h).

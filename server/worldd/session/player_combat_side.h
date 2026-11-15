@@ -85,6 +85,9 @@ public:
     void effect_refused(const combat::EffectRefusal& refusal, double) override {
         if (effect_refusals.size() < 64) effect_refusals.push_back(refusal);
     }
+    // abilities between players (combat/combat_players.cpp): the party is the key two members share; another player's Resurrect is asked at the session's tick
+    uint64_t group_key() const override { return reinterpret_cast<uintptr_t>(s_.party_group_); }
+    void prompt_resurrect(const std::array<uint32_t, 4>& by, double) override { resurrect_by = by; }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }
@@ -111,6 +114,7 @@ public:
     std::vector<std::pair<int64_t, int64_t>> pet_hits; // the hits of his pet that land on him: (hit record, ability)
     std::vector<combat::EffectRefusal> effect_refusals; // A3: the crowd controls of his (or his pet's) hits a mob refused, to tell his client
     bool                             wants_in_combat = false;
+    std::optional<std::array<uint32_t, 4>> resurrect_by; // who just raised this dead player (abilities between players)
 
 private:
     PlayerSession&       s_;

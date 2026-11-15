@@ -224,4 +224,31 @@ bool PlayerBootstrap::set_observer_stats(repl::Actor& shown) {
     return true;
 }
 
+// ---- Health, Mana and death, kept current on the pawn the other players are shown (abilities between players: another player's health bar moves) -------
+
+bool PlayerBootstrap::observer_stats_differ(const repl::Actor& shown) const {
+    if (!ok_ || !second_state_added_) return false;
+    const repl::Subobject* dst = shown.find(setup_.guids.stats);
+    const repl::Subobject* src = pawn_.find(setup_.guids.stats);
+    if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
+    for (const std::string_view name : {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}) {
+        const repl::FastArrayState* from = observer_array(*src, name);
+        const repl::FastArrayState* to = observer_array(*dst, name);
+        if (!from || !to) return false;
+        if (from->items().size() != to->items().size()) return true;
+        for (const repl::FastArrayItem& it : from->items()) {
+            const repl::FastArrayItem* have = to->find(it.id);
+            if (!have || !(have->values == it.values)) return true;
+        }
+    }
+    return false;
+}
+
+bool PlayerBootstrap::set_observer_dead(repl::Actor& shown, bool dead) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* combat = shown.find(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema || !combat->obj.schema->command("bIsDead")) return false;
+    return combat->obj.state.set(*combat->obj.schema, "bIsDead", Value::boolean(dead));
+}
+
 }  // namespace aoc::worldd::bootstrap

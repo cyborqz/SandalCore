@@ -791,6 +791,14 @@ public:
     bool set_observer_ranged(repl::Actor& shown, bool ranged);
     /// ... the two EveryoneProxy stat arrays, from this player's pawn: only the items whose values changed are marked, so their deltas alone go out.
     bool set_observer_stats(repl::Actor& shown);
+    /// Abilities between players: whether the shown pawn's two EveryoneProxy stat arrays differ from this player's (his Health and Mana moved), so that the other players'
+    /// health bars follow him (set_observer_stats brings them in line); and his CombatInfo.bIsDead on it.
+    bool observer_stats_differ(const repl::Actor& shown) const;
+    bool set_observer_dead(repl::Actor& shown, bool dead);
+
+    // ---- abilities between players (bootstrap/between_players.cpp)
+    /// The PlayerController's ClientPromptResurrect(InstigatorGuid): the alert that asks a dead player whether another player (his CharacterGuid) may raise him.
+    std::optional<Send> prompt_resurrect(const std::array<uint32_t, 4>& by);
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 

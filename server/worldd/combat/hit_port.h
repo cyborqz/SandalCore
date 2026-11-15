@@ -37,6 +37,8 @@ public:
     /// What a hit takes off the target (its EffectsToRemoveIds, or its filter), and every instance of one effect (Dimensional Bolt's mark).
     virtual void remove_effects(uint64_t /*target_actor*/, const abilities::HitDef& /*hit*/, double /*now*/) {}
     virtual void remove_effect(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) {}
+    /// A Resurrect landed on a dead player (abilities between players).
+    virtual void resurrect(uint64_t /*target_actor*/, double /*now*/) {}
     /// The player's pet in the world (0: none).
     virtual uint64_t own_pet() const { return 0; }
     /// Seconds left of an effect record on the target (0: it is not on): what GetEffectRemainingDuration(GetTarget(), effect) reads.
@@ -76,17 +78,32 @@ public:
     Fighter* fighter(uint64_t target_actor) override { return world_.fighter_of(target_actor); }
     HitResolver& resolver() override { return world_.resolver(); }
     const CombatData& data() const override { return world_.data(); }
+    // (another player's pawn takes a hit, its effects and what it takes off through his own session: combat/combat_players.cpp)
     Delivery deliver(uint64_t target_actor, const Resolved& hit, double now) override {
+        if (world_.player_pawn(target_actor)) return world_.apply_hit_to_player(target_actor, self_.id(), hit, world_time(now), nullptr);
         return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now));
     }
     Delivery deliver_from(uint64_t target_actor, const Resolved& hit, double now, const HitOrigin& origin) override {
+        if (world_.player_pawn(target_actor)) return world_.apply_hit_to_player(target_actor, self_.id(), hit, world_time(now), &origin);
         return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now), 0, &origin);
     }
-    void shield(uint64_t target_actor, double amount, double seconds, double now) override { world_.add_shield(target_actor, amount, seconds, world_time(now)); }
-    void remove_effects(uint64_t target_actor, const abilities::HitDef& hit, double now) override { world_.remove_effects_from_npc(target_actor, hit, world_time(now)); }
+    /// (a player's shield is the effect instance's that his session holds: apply_effects_to_player works it out with the effect)
+    void shield(uint64_t target_actor, double amount, double seconds, double now) override {
+        if (world_.player_pawn(target_actor)) return;
+        world_.add_shield(target_actor, amount, seconds, world_time(now));
+    }
+    void remove_effects(uint64_t target_actor, const abilities::HitDef& hit, double now) override {
+        if (world_.player_pawn(target_actor)) return world_.remove_effects_from_player(target_actor, self_.id(), hit, world_time(now));
+        world_.remove_effects_from_npc(target_actor, hit, world_time(now));
+    }
     void remove_effect(uint64_t target_actor, int64_t effect_guid, double now) override { world_.remove_npc_effect(target_actor, effect_guid, world_time(now)); }
     uint64_t own_pet() const override { return world_.pet_of(self_.id()); }
-    void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now) override { world_.apply_effects(target_actor, self_.id(), effects, world_time(now)); }
+    void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now) override {
+        if (world_.player_pawn(target_actor)) return world_.apply_effects_to_player(target_actor, self_.id(), effects, world_time(now));
+        world_.apply_effects(target_actor, self_.id(), effects, world_time(now));
+    }
+    /// A Resurrect landed on a dead player.
+    void resurrect(uint64_t target_actor, double now) override { world_.resurrect_player(target_actor, self_.id(), world_time(now)); }
     double effect_remaining(uint64_t target_actor, int64_t effect_guid, double now) const override { return world_.effect_remaining(target_actor, effect_guid, world_time(now)); }
     /// The world's clock for a time of the runtime's.
     double world_time(double runtime_now) const { return runtime_now + clock_offset_; }

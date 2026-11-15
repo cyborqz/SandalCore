@@ -98,8 +98,10 @@ std::vector<uint64_t> PlayerSession::actors_of(const std::vector<protocol::emit:
 
 void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& h, Clock::time_point now) {
     if (!pipeline_) return;
-    // the mounts milestone, stage 3: a hit aimed at a mounted rider lands on the MOUNT's Health; the rider's own is untouched
-    if (mounted()) return hit_on_mount(conn, h, now);
+    if (h.from_player && dead_) return;   // another player's hit that left its caster before this player fell (a Resurrect asks him instead)
+    // the mounts milestone, stage 3: a hit aimed at a mounted rider lands on the MOUNT's Health; the rider's own is untouched.  Another player's hit (a heal, a buff)
+    // is for the rider
+    if (mounted() && !h.from_player) return hit_on_mount(conn, h, now);
     pipeline_->receive_hit(h, ability_seconds(now));
     if (mounts_ && (h.flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : h.mods) {
@@ -118,6 +120,12 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
     std::vector<combat::IncomingHit> hits;
     hits.swap(combat_side_->inbox);
     for (const combat::IncomingHit& h : hits) take_hit(conn, h, now);
+    // another player's Resurrect landed on this dead player: his client is asked (session/player_resurrect.cpp)
+    if (combat_side_->resurrect_by) {
+        const std::array<uint32_t, 4> by = *combat_side_->resurrect_by;
+        combat_side_->resurrect_by.reset();
+        offer_resurrect(conn, by);
+    }
     // the hits of the effects he put on creatures (a burn's damage each second): confirmed to his client, which draws the number
     std::vector<combat::EffectHitNote> notes;
     notes.swap(combat_side_->effect_notes);

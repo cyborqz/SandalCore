@@ -32,6 +32,9 @@ private:
     void sync_shown_level();
     /// ... the level-up calls of every player whose announcement this session has not answered yet: one call of its own on each of those pawns' channels (the call is a multicast in the game).
     void sync_shown_level_ups(Connection& conn);
+    /// Abilities between players: the character's Health and Mana (the two EveryoneProxy stat arrays, at most every kShownVitalsEvery) and his death (CombatInfo.bIsDead), so that the
+    /// other players' health bars follow him and a fallen player is shown dead.
+    void sync_shown_vitals(Clock::time_point now);
     /// The player's equipment changed in an update that moved `marks` equipment slots: the pawn the others are shown takes its look, held items and stats at the next tick.
     void note_shown_gear(size_t marks) {
         shown_gear_dirty_ = true;
@@ -72,4 +75,7 @@ private:
     std::unordered_map<uint64_t, uint64_t> shown_level_ups_;
     uint64_t                             shown_level_ups_seen_ = 0;     // the registry's count when it last looked
     uint64_t                             shown_players_seen_ = 0;       // ... and its count of the players that came in or went (a new player is looked at once before it levels)
+    // Health, Mana and death (sync_shown_vitals)
+    bool                                 shown_dead_ = false;           // what the shown pawn's bIsDead says
+    Clock::time_point                    shown_vitals_at_{};            // when its stat arrays were last looked at
 private:
