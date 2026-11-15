@@ -270,7 +270,7 @@ void PlayerSession::on_plain_respawn(Connection& conn, Clock::time_point now) {
     finish_respawn(conn, spot, now);
 }
 
-void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now, float health_ratio, float mana_ratio) {
+void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now, float health_ratio, float mana_ratio, bool pvp_protection) {
     // alive again: Health and Mana (all of them, but for another player's Resurrect), the pawn not dead, the character at the spot (the move checker moves with it, the
     // client is snapped)
     dead_ = false;
@@ -283,6 +283,16 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     }
     if (pipeline_) pipeline_->set_dead(false);
     pb_.set_dead(false);
+    // PvP: a respawn point's opt-in protection (every respawn record's Emberspring_PVPOptInProtection, 60 s); its requirement, !IsCombatant(GetOwner()) &&
+    // !IsCorrupted(GetOwner()), is checked here (aocexpr does not run IsCombatant): a corrupted player comes back unprotected
+    if (pvp_protection && pipeline_ && pvp_state_ == combat::pvp::Flag::NonCombatant) {
+        if (pipeline_->grant_effect(combat::pvp::kEffectEmberspringProtection, 1, pipeline_->now())) {
+            ++pvp_protections_;
+            take_ability_events();
+        } else {
+            spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: the respawn's PvP protection is not in the ability tables (content.db older than contentc version 47?)", name());
+        }
+    }
     const stats::StatValue* hp = stats_ ? stats_->find(content::kGuidMaxHealth) : nullptr;
     const stats::StatValue* mp = stats_ ? stats_->find(content::kGuidMaxMana) : nullptr;
     if (hp) set_current_value(content::kGuidHealth, hp->value * health_ratio);

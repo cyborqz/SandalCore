@@ -19,3 +19,4 @@
 #include "ability_session_players_tests.inc"
 #include "ability_session_pvp_rules_tests.inc"
 #include "ability_session_pvp_tests.inc"
+#include "ability_session_duels_tests.inc"

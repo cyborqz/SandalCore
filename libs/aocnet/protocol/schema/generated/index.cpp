@@ -30,6 +30,7 @@
 #include "protocol/schema/generated/ACharacter.h"
 #include "protocol/schema/generated/AController.h"
 #include "protocol/schema/generated/ACraftingStationBase.h"
+#include "protocol/schema/generated/ADuelCenter.h"
 #include "protocol/schema/generated/AFastCraftingActor.h"
 #include "protocol/schema/generated/AGameStateBase.h"
 #include "protocol/schema/generated/AGatherableActor.h"
@@ -106,6 +107,7 @@ constexpr Entry kByName[] = {
     {"ACharacter", &kACharacter},
     {"AController", &kAController},
     {"ACraftingStationBase", &kACraftingStationBase},
+    {"ADuelCenter", &kADuelCenter},
     {"AFastCraftingActor", &kAFastCraftingActor},
     {"AGameStateBase", &kAGameStateBase},
     {"AGatherableActor", &kAGatherableActor},
@@ -202,6 +204,7 @@ constexpr const ClassSchema* kAll[] = {
     &kACharacter,
     &kAController,
     &kACraftingStationBase,
+    &kADuelCenter,
     &kAFastCraftingActor,
     &kAGameStateBase,
     &kAGatherableActor,

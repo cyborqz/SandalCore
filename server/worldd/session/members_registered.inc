@@ -28,3 +28,4 @@
 #include "session/members/certification.inc"
 #include "session/members/resurrect.inc"
 #include "session/members/pvp.inc"
+#include "session/members/duels.inc"

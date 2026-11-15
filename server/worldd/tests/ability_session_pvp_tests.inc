@@ -4,7 +4,9 @@
 // ============================================================================
 //  tests/ability_session_pvp_tests.inc: PvP, slice 1, through two real sessions in one world: who may hit whom (combat/pvp.h), the attacker's flag
 //  (the pawn's Alignments, the removal timer, NotifyFlaggingReason), bInPVPCombat, the flag's end, a corrupted target, the kill and a combatant's death debt,
-//  a party member, whom nothing harms, and (step 2) corruption: from the record, a creature's kill, a non-combatant's kill, a corrupted death, the save
+//  a party member, whom nothing harms, (step 2) corruption: from the record, a creature's kill, a non-combatant's kill, a corrupted death, the save, and
+//  (step 3) a duel: the request, the accept, the countdown, the fight without a flag, the blow that would kill, a forfeit, and (step 4) a respawn's
+//  PvP protection
 //  (registered with AOC_REGISTER_TEST: test_worldd_ability_session.cpp runs it through aoc_tests::run; it is included from ability_session_registered.inc)
 // ============================================================================
 
@@ -144,6 +146,34 @@ void wear(svc::Character& c, int64_t record, int32_t slot, uint32_t serial) {
 }
 
 bool about(double a, double b, double eps = 1e-3) { return std::fabs(a - b) < eps; }
+
+
+/// ServerRequestDuel(InCharacterName) on the pawn: the /duel command.
+BunchWriter duel_request(const std::string& name) {
+    const schema::ClassSchema& pawn = class_named("PlayerPawn_C");
+    const schema::RpcSchema* rpc = pawn.rpc("ServerRequestDuel");
+    repl::RpcParams p;
+    if (!rpc || !repl::set_rpc_param(*rpc, p, "InCharacterName", repl::Value::str(name))) {
+        std::printf("  [FAIL] ServerRequestDuel's parameters do not fit\n");
+        return BunchWriter();
+    }
+    return actor_bunch(pawn, "ServerRequestDuel", p);
+}
+
+/// ServerAcceptDuel / ServerDeclineDuel / ServerForfeitDuel(DuelGuid) on the pawn.
+BunchWriter duel_call(const char* name, const std::array<uint32_t, 4>& g) {
+    const schema::ClassSchema& pawn = class_named("PlayerPawn_C");
+    const schema::RpcSchema* rpc = pawn.rpc(name);
+    repl::RpcParams p;
+    bool ok = rpc != nullptr;
+    const char* const words[] = {"DuelGuid.A", "DuelGuid.B", "DuelGuid.C", "DuelGuid.D"};
+    for (size_t i = 0; ok && i < 4; ++i) ok = repl::set_rpc_param(*rpc, p, words[i], repl::Value::i64(static_cast<int32_t>(g[i])));
+    if (!ok) {
+        std::printf("  [FAIL] %s's parameters do not fit\n", name);
+        return BunchWriter();
+    }
+    return actor_bunch(pawn, name, p);
+}
 
 }  // namespace pvp_tests
 
@@ -382,3 +412,145 @@ void test_pvp_corruption() {
     CHECK(!a.h.s->abilities_failed() && !b.h.s->abilities_failed(), "(nothing failed)");
 }
 AOC_REGISTER_TEST(test_pvp_corruption);
+
+void test_pvp_duel() {
+    using namespace pvp_tests;
+    namespace pvp = combat::pvp;
+    std::printf("PvP, slice 1, step 3: a duel: the request on the pawn, the banner, the accept, the countdown, the fight (the Duel alignment, no flag), the blow that "
+                "would kill, the end %s\n", kAftermathNote);
+    Duo d;
+    const bool started = d.start();
+    CHECK(started, "two players in one world with ground, both with the 1H axe combo");
+    if (!started) return;
+    Run& a = *d.a;
+    Run& b = *d.b;
+    PlayerWorld& world = *a.h.fx.world;
+    const world::DuelBook* book = a.h.s->duel_book_for_test();
+    CHECK(book && book == b.h.s->duel_book_for_test() && book->connected(d.sa.character_guid) && book->connected(d.sb.character_guid),
+          "both sessions are in the world's duel book");
+    if (!book) return;
+
+    // 1. the request (the two stand together: in range)
+    send_on_pawn(a, duel_request("ashesrival"));
+    d.both(0.5);
+    const world::DuelBook::Duel* duel = book->duel_of(d.sa.character_guid);
+    CHECK(duel && duel->phase == world::DuelBook::Phase::Asked && duel->b == d.sb.character_guid && duel->id == d.sa.character_guid,
+          "ServerRequestDuel(ashesrival): a request to AshesRival, the duel's guid the instigator's");
+    CHECK(world.registry().count(world::ActorKind::DuelBanner) == 1, "the banner is in the world (its Duel opens the recipient's window)");
+    send_on_pawn(b, duel_request(d.ra.name));
+    d.both(0.3);
+    CHECK(book->duels() == 1, "his own request back is refused: he is in that one");
+
+    // 2. the accept, the countdown, the fight
+    send_on_pawn(b, duel_call("ServerAcceptDuel", d.sa.character_guid));
+    d.both(0.5);
+    duel = book->duel_of(d.sa.character_guid);
+    CHECK(duel && duel->phase == world::DuelBook::Phase::Counting, "ServerAcceptDuel(the duel's guid): the countdown runs");
+    d.both(5.0);
+    CHECK(book->fighting_key(d.sa.character_guid) != 0, "5 s later the fight begins");
+    const repl::AlignmentContainer* own = alignments_of(a.h.s->bootstrap().pawn(), d.sa.guids.alignment);
+    const world::WorldActor* seen = world.registry().find(d.sb.guids.pawn.ObjectId);
+    CHECK(holds(own, pvp::kDuel) && seen && holds(alignments_of(seen->actor, d.sb.guids.alignment), pvp::kDuel), "both pawns hold the Duel alignment (the others see it)");
+
+    // 3. the partner is harmed without the force flag, and nobody is flagged
+    const float full = b.m.stats[content::kGuidHealth];
+    d.swing(a, d.sa, d.sb, false);
+    CHECKF(b.m.stats[content::kGuidHealth] < full - 1.0f, "his duel partner is harmed without the force flag (%.0f of %.0f)", b.m.stats[content::kGuidHealth], full);
+    CHECK(a.h.s->pvp_flag_state() == pvp::Flag::NonCombatant && a.h.s->pvp_flaggings() == 0, "... and nobody is flagged (Duel FlaggingActions 0)");
+
+    // 4. a blow that would kill: 1 Health, the duel is lost, the end gives both their Health back
+    combat::Resolved blow;
+    blow.mods.push_back({1, content::kGuidHealth, -1.0e9});
+    world.combat()->apply_hit_to_player(d.sb.guids.pawn.ObjectId, d.sa.guids.pawn.ObjectId, blow, a.now(), nullptr);
+    d.both(0.5);
+    CHECK(!b.h.s->dead(), "a blow of his partner's that would kill him leaves him alive");
+    CHECK(book->duels() == 0 && world.registry().count(world::ActorKind::DuelBanner) == 0, "the duel is over, the banner gone");
+    CHECK(a.h.s->duels_won() == 1 && b.h.s->duels_won() == 0 && a.h.s->duels_fought() == 1 && b.h.s->duels_fought() == 1, "AshesCyb won, AshesRival lost");
+    d.both(0.5);
+    CHECKF(b.m.stats[content::kGuidHealth] >= b.m.stats[content::kGuidMaxHealth] - 0.5f, "both get their Health back (%.0f of %.0f)", b.m.stats[content::kGuidHealth],
+           b.m.stats[content::kGuidMaxHealth]);
+    own = alignments_of(a.h.s->bootstrap().pawn(), d.sa.guids.alignment);
+    CHECK(!holds(own, pvp::kDuel), "the Duel alignment is gone");
+    CHECK(a.h.s->corruption() == 0 && b.h.s->corruption() == 0 && a.h.s->pvp_kills() == 0, "no kill, no corruption");
+
+    // 5. a second duel, forfeited
+    send_on_pawn(b, duel_request(d.ra.name));
+    d.both(0.3);
+    send_on_pawn(a, duel_call("ServerAcceptDuel", d.sb.character_guid));
+    d.both(5.5);
+    CHECK(book->fighting_key(d.sb.character_guid) != 0, "AshesRival challenges, AshesCyb accepts: a second fight");
+    send_on_pawn(a, duel_call("ServerForfeitDuel", d.sb.character_guid));
+    d.both(0.5);
+    CHECK(book->duels() == 0 && b.h.s->duels_won() == 1, "ServerForfeitDuel (the instigator's guid): AshesCyb gives it up, AshesRival wins");
+    CHECK(!a.h.s->abilities_failed() && !b.h.s->abilities_failed(), "(nothing failed)");
+}
+AOC_REGISTER_TEST(test_pvp_duel);
+
+void test_pvp_respawn_protection() {
+    using namespace pvp_tests;
+    namespace pvp = combat::pvp;
+    std::printf("PvP, slice 1, step 4: a respawn's PvP protection (Emberspring_PVPOptInProtection): no harm from another player, force flag or not; his own attack "
+                "ends it; none for a corrupted player; 60 s %s\n", kAftermathNote);
+    Duo d;
+    const bool started = d.start();
+    CHECK(started, "two players in one world with ground, both with the 1H axe combo");
+    if (!started) return;
+    Run& a = *d.a;
+    Run& b = *d.b;
+    PlayerWorld& world = *a.h.fx.world;
+    const auto die_and_respawn = [&](Run& r, const bs::PlayerSetup& s) {
+        combat::Resolved blow;
+        blow.mods.push_back({1, content::kGuidHealth, -1.0e9});
+        world.combat()->apply_hit_to_player(s.guids.pawn.ObjectId, 0, blow, a.now(), nullptr);
+        d.both(0.5);
+        const bool died = r.h.s->dead();
+        send_on_pawn(r, actor_bunch(class_named("PlayerPawn_C"), "Respawn", {}));
+        d.both(1.0);
+        return died && !r.h.s->dead();
+    };
+    const auto poke = [&](const bs::PlayerSetup& target, const bs::PlayerSetup& by) {
+        combat::Resolved hit;
+        hit.mods.push_back({1, content::kGuidHealth, -50.0});
+        world.combat()->apply_hit_to_player(target.guids.pawn.ObjectId, by.guids.pawn.ObjectId, hit, a.now(), nullptr);
+        d.both(0.5);
+    };
+
+    // 1. the respawn protects him
+    CHECK(die_and_respawn(b, d.sb), "(he dies and respawns)");
+    CHECK(b.h.s->pvp_protected() && b.h.s->pvp_protections() == 1 && b.h.s->pipeline()->stacks_of(pvp::kEffectEmberspringProtection) == 1,
+          "the respawn gives him the PvP protection (Emberspring_PVPOptInProtection, a stack on his pipeline: his client shows it)");
+    send_on_pc(a, pvp_key(true));
+    d.both(0.2);
+    const float hp = b.m.stats[content::kGuidHealth];
+    poke(d.sb, d.sa);
+    CHECKF(b.m.stats[content::kGuidHealth] >= hp - 0.5f && a.h.s->pvp_flaggings() == 0, "another player's harm does not reach him, even with the force flag, and flags nobody (%.0f of %.0f)",
+           b.m.stats[content::kGuidHealth], hp);
+    send_on_pc(a, pvp_key(false));
+    d.both(0.2);
+
+    // 2. his own attack ends it
+    send_on_pc(b, pvp_key(true));
+    d.both(0.2);
+    poke(d.sa, d.sb);
+    send_on_pc(b, pvp_key(false));
+    d.both(0.3);
+    CHECK(b.h.s->pvp_flag_state() == pvp::Flag::Combatant && !b.h.s->pvp_protected(), "his own attack flags him, and his protection is over");
+    const float hp2 = b.m.stats[content::kGuidHealth];
+    poke(d.sb, d.sa);
+    CHECKF(b.m.stats[content::kGuidHealth] < hp2 - 1.0f, "now he is harmed (a combatant, without the force flag: %.0f of %.0f)", b.m.stats[content::kGuidHealth], hp2);
+
+    // 3. a corrupted player comes back unprotected (the requirement's !IsCorrupted)
+    CHECK(b.h.s->gm_pvp(b.h.conn, "noncombatant", 0, b.h.t, "the test").ok && b.h.s->gm_pvp(b.h.conn, "corruption", 10.0, b.h.t, "the test").ok, "(a GM makes him corrupted: 10, so the death leaves 5)");
+    d.both(0.5);
+    CHECK(die_and_respawn(b, d.sb), "(he dies and respawns)");
+    CHECK(!b.h.s->pvp_protected() && b.h.s->pvp_protections() == 1, "corrupted, he gets no protection");
+
+    // 4. it lasts its 60 s
+    CHECK(die_and_respawn(a, d.sa) && a.h.s->pvp_protected(), "(the other dies and respawns: protected)");
+    d.both(58.0);
+    CHECK(a.h.s->pvp_protected(), "58 s later: still protected");
+    d.both(3.0);
+    CHECK(!a.h.s->pvp_protected(), "after 60 s it is gone");
+    CHECK(!a.h.s->abilities_failed() && !b.h.s->abilities_failed(), "(nothing failed)");
+}
+AOC_REGISTER_TEST(test_pvp_respawn_protection);

@@ -63,6 +63,7 @@ enum class ActorKind : uint8_t {
     Player,      // multiplayer visibility, stage A: a logged-in player as the OTHER players see it, its pawn (PlayerPawn_C, a simulated proxy); `owner` is its
                  // PlayerId: that player's own view never sends it (its own four actors are the session's), every other view does, by the NPCs' rings, never dormant
                  // (#14 review: the pawn alone, there is no PlayerState actor for a player)
+    DuelBanner,  // a duel's ADuelCenter (BP_DuelCenter_C; PvP, world/duels.h): the request, the countdown and the fight are its replicated Duel; never dormant
 };
 // [C | Y | B ~ C-O-A]
 

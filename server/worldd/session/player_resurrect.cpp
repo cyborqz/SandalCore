@@ -38,7 +38,8 @@ void PlayerSession::on_resurrect_response(Connection& conn, const repl::ClientRp
         return;
     }
     // the record Cleric_Resurrect: HealthRatio 0.25, ManaRatio 0.25, StaminaRatio 1, where it fell
-    finish_respawn(conn, PlayerWorld::RespawnSpot{death_x_, death_y_, death_z_, checker_.good().yaw_degrees, false, "where it fell, raised by another player"}, now, 0.25f, 0.25f);
+    finish_respawn(conn, PlayerWorld::RespawnSpot{death_x_, death_y_, death_z_, checker_.good().yaw_degrees, false, "where it fell, raised by another player"}, now, 0.25f, 0.25f,
+                   /*pvp_protection=*/false);
     if (abilities_) {
         bootstrap::AbilityChange refill;
         abilities_->refill_stamina(refill);

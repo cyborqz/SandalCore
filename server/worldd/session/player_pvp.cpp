@@ -58,10 +58,18 @@ void PlayerSession::pvp_side_of(pvp::Side& out, bool& force) const {
     out.require_force_to_harm_combatants = pb_.controller_bool("CharacterInGameSettings.CombatSettings.PVP.bRequireForceFlagToHarmCombatants", false);
     out.require_force_to_support_unaffiliated = pb_.controller_bool("CharacterInGameSettings.CombatSettings.PVP.bRequireForceFlagToSupportUnaffiliatedCombatants", false);
     force = pvp_flag_ || pvp_trigger_flag_;
+    if (duel_book_) out.duel = duel_book_->fighting_key(pb_.setup().character_guid);   // step 3: the duel he fights (Duel -> Duel: Hostile)
+    out.protection = pvp_protected();   // step 4: an opt-in protection (no harm from another player outside a duel)
+}
+
+bool PlayerSession::pvp_protected() const {
+    return pipeline_ && (pipeline_->stacks_of(pvp::kEffectEmberspringProtection) > 0 || pipeline_->stacks_of(pvp::kEffectGeneralProtection) > 0);
 }
 
 bool PlayerSession::pvp_mark_flagged(double world_now) {
     if (pvp_state_ == pvp::Flag::Corrupted) return false;   // (a corrupted player is not made a combatant: he stays corrupted)
+    // step 4: an action that flags him ends his opt-in protection (taken off at the session's tick: the world is in the middle of his hit)
+    if (pvp_protected()) pvp_drop_protection_ = true;
     const bool was = pvp_state_ == pvp::Flag::Combatant;
     pvp_state_ = pvp::Flag::Combatant;
     pvp_combatant_since_ = world_now;
@@ -71,11 +79,22 @@ bool PlayerSession::pvp_mark_flagged(double world_now) {
 
 void PlayerSession::pvp_send_alignments(Connection& conn, const char* why) {
     const double since = pvp_state_ == pvp::Flag::Combatant ? pvp_combatant_since_ : -1;
-    if (pvp_state_ == pvp_sent_state_ && since == pvp_sent_since_) return;
+    // step 3: while he fights a duel, the Duel alignment {its guid}, its timer from the fight's start
+    std::array<uint32_t, 4> duel{};
+    double duel_since = 0;
+    if (duel_book_) {
+        if (const auto d = duel_book_->fighting(pb_.setup().character_guid)) {
+            duel = *d;
+            if (const world::DuelBook::Duel* x = duel_book_->duel_of(pb_.setup().character_guid)) duel_since = bootstrap::effect_clock(std::max(0.0, x->began_at));
+        }
+    }
+    if (pvp_state_ == pvp_sent_state_ && since == pvp_sent_since_ && duel == pvp_sent_duel_) return;
     pvp::Alignments a;
     a.flag = pvp_state_;
     a.combatant_since = bootstrap::effect_clock(std::max(0.0, since));   // (the removal timer's SetTimeStamp: the synchronized clock of ClientSetTime)
     a.self = pb_.setup().character_guid;
+    a.duel = duel;
+    a.duel_since = duel_since;
     const protocol::repl::AlignmentContainer shown = pvp::container(a);
     if (!pb_.set_alignments(shown)) return;   // (before the possession: the component comes with it, and this is tried again at the next tick)
     // the pawn the other players are shown (a pawn not in the world yet copies the player's own when it goes in: session/player_presence.cpp)
@@ -84,12 +103,23 @@ void PlayerSession::pvp_send_alignments(Connection& conn, const char* why) {
     if (!ok) spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: the pawn the other players are shown does not take the flag", name());
     pvp_sent_state_ = pvp_state_;
     pvp_sent_since_ = since;
+    pvp_sent_duel_ = duel;
     queue("pawn state (PvP flag)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("PvP flag"); }, conn, /*must_build=*/true);
-    spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: is {} now ({})", name(), flag_name(pvp_state_), why);
+    spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: is {} now ({}){}", name(), flag_name(pvp_state_), why, duel != std::array<uint32_t, 4>{} ? ", in a duel" : "");
 }
 
 void PlayerSession::drain_pvp(Connection& conn, Clock::time_point now) {
     if (!combat_side_) return;
+    drain_duels(conn, now);   // step 3: the duels' notices (the alignments below follow the fight)
+    if (pvp_drop_protection_ && pipeline_) {   // step 4: he flagged himself: his opt-in protection is over
+        pvp_drop_protection_ = false;
+        const double sec = pipeline_->now();
+        for (const int64_t e : {pvp::kEffectEmberspringProtection, pvp::kEffectGeneralProtection}) {
+            if (pipeline_->stacks_of(e) > 0) pipeline_->remove_effect(e, sec);
+        }
+        take_ability_events();
+        spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: a flagging action of his ends his PvP protection", name());
+    }
     const double world_now = pvp_world_now(now);
     // the flag ends 60 s after the last action that flagged
     if (pvp_state_ == pvp::Flag::Combatant && world_now - pvp_combatant_since_ >= pvp::kCombatantSeconds) pvp_state_ = pvp::Flag::NonCombatant;

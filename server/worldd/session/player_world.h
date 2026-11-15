@@ -75,6 +75,7 @@
 #include "warehouse/warehouse.h"
 #include "world/actor_registry.h"
 #include "world/city_nodes.h"
+#include "world/duels.h"
 #include "world/node_control.h"
 #include "dialogue/requirement.h"
 #include "world/node_layout_data.h"
@@ -198,6 +199,8 @@ public:
     /// The world's other actors (NPCs, resource nodes, a player's effects): what every session's ActorView draws from. Empty until load_area().
     world::ActorRegistry&       registry() { return registry_; }
     const world::ActorRegistry& registry() const { return registry_; }
+    /// PvP: the world's duels (world/duels.h), shared by the sessions of their players.
+    std::shared_ptr<world::DuelBook> duel_book() const { return duel_book_; }
     /// Fills the registry with the area around the login spot (spawns/area_loader.h): content.db's population chain, the retail captures' NPCs and
     /// nodes, and the GM vendors. False, with `error`, when content.db is not loaded or lacks the version-7 tables (the registry stays empty). Once.
     bool load_area(const spawns::AreaConfig& area, std::string& error);
@@ -599,6 +602,7 @@ private:
     PositionSink*                        sink_ = nullptr;
     mutable std::unique_ptr<FriendLookups> friend_lookups_;   // created at the first friend lookup; destroyed with the world (before the sink it holds)
     world::ActorRegistry                 registry_;
+    std::shared_ptr<world::DuelBook>     duel_book_ = std::make_shared<world::DuelBook>(&registry_, [this] { return guids_.next(); });   // PvP: the duels (after the registry it names)
     spawns::AreaConfig                   area_;
     std::optional<spawns::CapturedData>  captured_;
     std::optional<vendor::GmVendors>     gm_;

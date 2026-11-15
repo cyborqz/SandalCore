@@ -97,9 +97,12 @@ std::vector<uint64_t> PlayerSession::actors_of(const std::vector<protocol::emit:
 }
 // C.O.A with C | Y | B
 
-void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& h, Clock::time_point now) {
+void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& in, Clock::time_point now) {
     if (!pipeline_) return;
-    if (h.from_player && dead_) return;   // another player's hit that left its caster before this player fell (a Resurrect asks him instead)
+    if (in.from_player && dead_) return;   // another player's hit that left its caster before this player fell (a Resurrect asks him instead)
+    // PvP: a duel partner's blow leaves him 1 Health (and the duel is lost); another player's harm ends his duel (session/player_duels.cpp)
+    combat::IncomingHit h = in;
+    const bool duel_lost = duel_filter(h, now);
     // PvP: who landed the last harmful blow (another player's, or 0 for a creature's): the killer the world is told when this player falls
     if ((h.flags & stats::kHitMiss) == 0 && (!h.from_player || h.hostile)) {
         for (const combat::ResolvedMod& m : h.mods) {
@@ -113,6 +116,7 @@ void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& h, Clo
     // buff) is for the rider; his harmful hit lands on the mount, as a creature's does
     if (mounted() && (!h.from_player || h.hostile)) return hit_on_mount(conn, h, now);
     pipeline_->receive_hit(h, ability_seconds(now));
+    if (duel_lost && duel_book_) duel_book_->defeated(pb_.setup().character_guid, pvp_world_now(now));
     if (mounts_ && (h.flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : h.mods) {
             if (m.stat_guid == content::kGuidHealth && m.value < 0) {
@@ -245,6 +249,7 @@ void PlayerSession::check_death(Connection& conn, Clock::time_point now) {
 void PlayerSession::die(Connection& conn, Clock::time_point now) {
     dead_ = true;
     ++deaths_;
+    duel_died(now);   // PvP: a death of anything but his partner's blow ends his duel
     cancel_quick_make(&conn, "the player died");   // Crafting, step 3
     cancel_gather(&conn, "the player died", Interrupt::Death);   // Gathering stage 2
     if (pipeline_) pipeline_->set_dead(true);

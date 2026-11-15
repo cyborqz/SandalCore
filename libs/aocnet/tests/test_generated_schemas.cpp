@@ -541,12 +541,34 @@ static void test_index() {
     bool sorted = true;
     auto all = all_class_schemas();
     for (size_t i = 0; i + 1 < all.size(); ++i) sorted = sorted && std::strcmp(all[i]->name, all[i + 1]->name) < 0;
-    CHECK(all.size() == 64 && sorted, "64 schemas (60 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with the quests, the pawn's two warehouse container classes with storage clerks, step 0, the two Emberspring classes (AAoCPlayerSpawner, AAoCAttunablePlayerSpawner) with the Embersprings, the quest objects' actor class (AInteractableStateMachineBase) with the quest objects, the PlayerController's social component (UIntrepidSocialComponent) with the friends list");
+    CHECK(all.size() == 65 && sorted, "65 schemas (61 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with the quests, the pawn's two warehouse container classes with storage clerks, step 0, the two Emberspring classes (AAoCPlayerSpawner, AAoCAttunablePlayerSpawner) with the Embersprings, the quest objects' actor class (AInteractableStateMachineBase) with the quest objects, the PlayerController's social component (UIntrepidSocialComponent) with the friends list, the duel's banner (ADuelCenter) with PvP's duels");
     const ClassSchema* res = find_class_schema("UResourceStorageComponent");   // the pawn's dynamic subobject (pkt#107)
     CHECK(res && !res->is_actor && same(res->super_name, "UItemStorageComponent") && res->command("ItemLocationType") &&
               res->command("ItemLocationType")->type == PropType::Enum && res->command("ItemLocationType")->width_bits == 5,
           "UResourceStorageComponent: a UItemStorageComponent with ItemLocationType, a 5-bit enum");
     CHECK(!kUAoCStatsComponent.is_actor && kAAoCPlayerController.is_actor, "is_actor distinguishes components from actors");
+}
+
+static void test_duel_center() {
+    std::printf("ADuelCenter (the duel's banner, BP_DuelCenter_C)\n");
+    const ClassSchema* dc = find_class_schema("ADuelCenter");
+    CHECK(dc != nullptr && dc->is_actor && same(dc->super_name, "AActor"), "ADuelCenter: an actor class on AActor");
+    if (!dc) return;
+    const ClassSchema& s = *dc;
+    CHECK(s.commands.size() == 25 && s.num_fields() == 19 && s.field_max() == 20 && s.rpcs.size() == 5 && s.element_commands.size() == 6 && s.first_own_handle == 19 &&
+              s.first_own_field == 13,
+          "25 commands, 19 net fields (SerializeInt max 20: its five InterServer RPCs are fields too), 6 element commands, its own from handle 19 and field 13");
+    CHECK(cmd_is(s, 19, "Duel.InstanceGuid.A", PropType::Int32, 32) && cmd_is(s, 22, "Duel.InstanceGuid.D", PropType::Int32, 32) &&
+              cmd_is(s, 23, "Duel.Participants", PropType::DynamicArray, 0) && cmd_is(s, 24, "Duel.SyncBeginTime", PropType::Double, 64) &&
+              cmd_is(s, 25, "Duel.bIsActive", PropType::Bool, 1),
+          "handles: 19-22 Duel.InstanceGuid, 23 Participants, 24 SyncBeginTime, 25 bIsActive");
+    const auto parts = s.elements(*s.command(23));
+    CHECK(parts.size() == 6 && same(parts[0].path, "Participants.Role") && parts[0].width_bits == 2 && same(parts[1].path, "Participants.CharacterGuid.A") &&
+              same(parts[5].path, "Participants.ExitRadiusTimestamp") && parts[5].type == PropType::Double,
+          "a participant: Role (2 bits), CharacterGuid A-D, ExitRadiusTimestamp (a double)");
+    CHECK(field_is(s, 13, "Duel", FieldKind::Property) && s.field(13)->handle == 19 && field_is(s, 14, "InterServerAcceptDuel", FieldKind::Function) &&
+              field_is(s, 18, "InterserverWinDuel", FieldKind::Function),
+          "fields: Duel 13, then the InterServer RPCs 14-18 by name");
 }
 
 int main() {
@@ -560,6 +582,7 @@ int main() {
     test_social_component();
     test_invariants();
     test_index();
+    test_duel_center();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

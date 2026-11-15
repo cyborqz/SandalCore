@@ -58,6 +58,11 @@ inline constexpr double kDuelSeconds = 1200.0;
 /// The Corruption stat (GameStatProfile.CorruptionId: a float every client is told) and its tier (Floor of the Corruption->CorruptionTier curve).
 inline constexpr int64_t kStatCorruption = 109228544644730ll;
 inline constexpr int64_t kStatCorruptionTier = 6064630485796716545ll;
+/// The PvP opt-in protections (step 4): Emberspring_PVPOptInProtection (60 s after a respawn at a respawn point; its requirement !IsCombatant && !IsCorrupted is the
+/// server's to check, aocexpr does not run it) and General_PVPOptInProtection (GamePvpSettings.PvpOptInProtectionEffectId).  While one holds, another player cannot harm
+/// him outside a duel (Side::protection); a flagging action of his own takes it off.
+inline constexpr int64_t kEffectEmberspringProtection = 6064632587050614784ll;
+inline constexpr int64_t kEffectGeneralProtection = 6064632581294587904ll;
 
 /// EFlaggableActions: what an action is.
 inline constexpr uint8_t kAttack = 1;

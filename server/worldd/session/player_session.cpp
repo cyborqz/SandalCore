@@ -154,6 +154,7 @@ PlayerSession::~PlayerSession() {
     finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
     leave_friends("the session is destroyed");
     forget_party();
+    leave_duels(last_now_);   // PvP: his duel ends (System)
     forget_friends();   // social, step 7: the reverse index loses this session
     clear_pet();
     cancel_quick_make(nullptr, "the session is destroyed");
@@ -386,6 +387,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         }
         spdlog::info("[session] {}: {} weapon lines, {} with XP{}", setup.name, p->weapon_.lines()->size(), p->weapon_.with_xp().size(), lines.empty() ? std::string() : ": " + lines);
     }
+    p->connect_duels(world);    // PvP: the world's duels
     p->list_item_chunk(conn);   // storage clerks, step 0: the base item chunk is on the pawn from the join, listed in OwnerInfo (queued behind the join)
     p->pump(conn);
     if (refusal) *refusal = bootstrap::SetupRefusal::None;
@@ -585,6 +587,7 @@ void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
     leave_party_on_finish();
+    leave_duels(last_now_);   // PvP: his duel ends (System)
     leave_friends(why);   // social, step 7: the sessions that list this character are told it is offline
     clear_pet();
     cancel_quick_make(nullptr, why);   // Crafting, step 3: nothing was taken, so nothing is given back

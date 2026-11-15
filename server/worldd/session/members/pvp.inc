@@ -14,6 +14,9 @@ public:
     int64_t           corruption_debuff() const { return pvp_tier_effect_; }
     size_t            gear_dropped_last() const { return gear_dropped_last_; }
     bool              in_pvp_combat() const { return pvp_combat_; }
+    /// Step 4: he holds a PvP opt-in protection (a respawn's Emberspring_PVPOptInProtection, or General_PVPOptInProtection), and how many respawns gave him one.
+    bool              pvp_protected() const;
+    uint64_t          pvp_protections() const { return pvp_protections_; }
     /// How many times an action of his flagged him, and how many players he killed (the tests and the log).
     uint64_t          pvp_flaggings() const { return pvp_flaggings_; }
     uint64_t          pvp_kills() const { return pvp_kills_; }
@@ -71,6 +74,9 @@ private:
     bool     pvp_combat_ = false;           // CombatInfo.bInPVPCombat as the client was told
     combat::pvp::Flag pvp_sent_state_ = combat::pvp::Flag::NonCombatant;   // what the pawn's Alignments say
     double   pvp_sent_since_ = -1;
+    std::array<uint32_t, 4> pvp_sent_duel_{};   // the duel the pawn's Alignments name (step 3)
+    bool     pvp_drop_protection_ = false;   // step 4: a flagging action of his: the protection comes off at the next tick
+    uint64_t pvp_protections_ = 0;
     uint64_t last_blow_by_ = 0;
     uint64_t pvp_flaggings_ = 0, pvp_kills_ = 0;
     size_t   pvp_logged_ = 0;

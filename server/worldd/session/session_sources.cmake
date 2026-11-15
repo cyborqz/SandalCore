@@ -22,6 +22,8 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp_corruption.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp_corruption.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/duels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/duels.h
     ${CMAKE_CURRENT_SOURCE_DIR}/net/endpoint_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_givers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_handin.cpp
@@ -37,6 +39,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_combat_side.h
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_craft.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_dialogue.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_duels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_fishing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_ignore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_emotes.cpp
