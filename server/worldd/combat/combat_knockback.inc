@@ -56,7 +56,7 @@ bool CombatWorld::is_boss(const Npc& n) const {
 }
 
 void CombatWorld::spare_boss(const Npc& n, const std::string& by, const char* verb) {
-    if (boss_spared_.insert({n.actor_id, verb}).second) spdlog::info("[combat] {} ({}) carries the Boss tag: {} does not {} it", n.leaf, n.actor_id, by, verb);
+    if (boss_spared_.insert({n.actor_id, verb}).second) spdlog::info("[combat] {} ({}) carries the Boss tag: {} does not {} it", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, by, verb);
 }
 
 OriginActors CombatWorld::origin_actors(const Npc& n, PlayerPort* by) {
@@ -123,7 +123,7 @@ void CombatWorld::move_by_hit(Npc& n, uint64_t attacker, const Resolved& r, cons
                 if (npcs_world_->displaced(n.actor_id)) note_moved(n);
                 if (airborne) drop_attack(n);   // a creature thrown into the air loses the swing it had begun [modelled]
                 if (im.rotation_behavior.find("FaceOrigin") != std::string::npos) npcs_world_->face_toward(n.actor_id, frame.pos.x, frame.pos.y);
-                spdlog::info("[combat] {} ({}) is thrown by {}{}: {:.0f} cm/s at {:.0f} degrees{}", n.leaf, n.actor_id, hit.row.name, where, speed, lift, airborne ? ", into the air" : "");
+                spdlog::info("[combat] {} ({}) is thrown by {}{}: {:.0f} cm/s at {:.0f} degrees{}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, hit.row.name, where, speed, lift, airborne ? ", into the air" : "");
             }
         }
     }
@@ -144,7 +144,7 @@ void CombatWorld::move_by_hit(Npc& n, uint64_t attacker, const Resolved& r, cons
             double ground = 0;
             if (ground_height(x, y, me.pos.z, &ground) && npcs_world_->warp(n.actor_id, x, y, ground)) {
                 npcs_world_->face_toward(n.actor_id, me.pos.x, me.pos.y);
-                spdlog::info("[combat] {} ({}) is pulled in front of player {} by {}", n.leaf, n.actor_id, attacker, hit.row.name);
+                spdlog::info("[combat] {} ({}) is pulled in front of player {} by {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, attacker, hit.row.name);
             }
         }
     }
@@ -231,7 +231,7 @@ void CombatWorld::track_push(Npc& n, const effects::Book::Crowd& was, const effe
     };
     if (!npcs_world_->begin_push(n.actor_id, std::move(play))) return;
     note_moved(n);
-    spdlog::info("[push] {} ({}) is pushed by {}", n.leaf, n.actor_id, rec.name);
+    spdlog::info("[push] {} ({}) is pushed by {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, rec.name);
 }
 
 void CombatWorld::note_moved(const Npc& n) {
@@ -252,7 +252,7 @@ void CombatWorld::log_rests() {
             continue;
         }
         const Npc& n = *found->second;
-        spdlog::log(rests_logged_++ < kLoggedRests ? spdlog::level::info : spdlog::level::debug, "[combat] {} ({}) came to rest {:.1f} m from where it was moved", n.leaf, n.actor_id,
+        spdlog::log(rests_logged_++ < kLoggedRests ? spdlog::level::info : spdlog::level::debug, "[combat] {} ({}) came to rest {:.1f} m from where it was moved", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id,
                     distance_xy_cm(it->second, Vec3{w->x, w->y, w->z}) / 100.0);
         it = moved_from_.erase(it);
     }

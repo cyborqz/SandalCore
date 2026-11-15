@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <string_view>
@@ -111,6 +112,16 @@ CombatWorld::CombatWorld(world::ActorRegistry& registry, npc::NpcWorld* npcs, co
     : registry_(registry), npcs_world_(npcs), nav_(nav), data_(data), catalog_(catalog), book_(book), motion_(motion), cfg_(std::move(config)),
       resolver_(catalog, data, cfg_.seed ? cfg_.seed : 1) {
     rng_.state = cfg_.seed * 0x9E3779B97F4A7C15ull + 7;
+    if (!cfg_.display_names_path.empty()) {
+        const size_t named = load_display_names(cfg_.display_names_path);
+        if (named > 0) spdlog::info("[combat] mob display names: {} Blueprints from {}", named, cfg_.display_names_path);
+        else spdlog::info("[combat] no mob display names in {}: the mob log lines name the Blueprint's leaf only", cfg_.display_names_path);
+    }
+    if (!cfg_.population_names_path.empty()) {
+        const size_t lists = load_population_names(cfg_.population_names_path);
+        if (lists > 0) spdlog::info("[combat] mob display names: {} population name lists from {}", lists, cfg_.population_names_path);
+        else spdlog::info("[combat] no population names in {}: a creature its instance names is logged by its Blueprint's name", cfg_.population_names_path);
+    }
 }
 
 CombatWorld::~CombatWorld() = default;
@@ -1177,13 +1188,13 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         if (npc_casts_logged_ < kLoggedNpcCasts) {
             ++npc_casts_logged_;
             p.logged = true;
-            spdlog::info("[combat] {} ({}) plays {}: {} hit(s) and {} projectile(s) over {:.2f} s{}", n.actor_id, n.leaf, a.ability->row.name, plan.hits.size(), plan.fires.size(), plan.seconds,
+            spdlog::info("[combat] {} ({}) plays {}: {} hit(s) and {} projectile(s) over {:.2f} s{}", n.actor_id, log_name(n.actor_id, n.archetype, n.leaf), a.ability->row.name, plan.hits.size(), plan.fires.size(), plan.seconds,
                          a.task && a.task->stop_movement ? ", standing still" : "");
         }
         // an alert's cast is named on its own, past the run's first cast lines, at most once a second for each creature: the lines of the effects it lands say where they went
         if (is_alert_move(*a.ability, catalog_, data_.ids().health) && now - n.alert_cast_logged_at >= kAlertCastLogSeconds) {
             n.alert_cast_logged_at = now;
-            spdlog::info("[combat] {} ({}) plays the alert {}: no target, any effects it has land at its montage's hits", n.actor_id, n.leaf, a.ability->row.name);
+            spdlog::info("[combat] {} ({}) plays the alert {}: no target, any effects it has land at its montage's hits", n.actor_id, log_name(n.actor_id, n.archetype, n.leaf), a.ability->row.name);
         }
         p.animated = true;
         for (const PlannedHit& h : plan.hits) {
@@ -1271,7 +1282,7 @@ void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::Ability
         const stats::CharacterStats& target_stats = port.fighter().stats();
         const stats::StatValue* physical = target_stats.find(data_.profile().physical.mitigation);
         const stats::StatValue* magical = target_stats.find(data_.profile().magical.mitigation);
-        spdlog::info("[combat] {} (level {}) hit the player (level {}): Health {:.2f}, {:.2f} before the damage setting; the player's PhysicalMitigation {:.4f}, MagicalMitigation {:.4f}{}", n.leaf,
+        spdlog::info("[combat] {} (level {}) hit the player (level {}): Health {:.2f}, {:.2f} before the damage setting; the player's PhysicalMitigation {:.4f}, MagicalMitigation {:.4f}{}", log_name(n.actor_id, n.archetype, n.leaf),
                      n.lvl, port.fighter().level(), health, raw_health, physical ? physical->value : 0.0, magical ? magical->value : 0.0,
                      (r.flags & stats::kHitCrit) ? ", a critical hit" : "");
     }
@@ -1366,7 +1377,7 @@ void CombatWorld::resolve_pending(double now) {
                     const world::WorldActor* w = registry_.find(n.actor_id);
                     const Vec3 at = port->fighter().position();
                     if (w) {
-                        spdlog::info("[combat] {} ({}) {} is over: {:.0f} cm between its centre and the player's, the player {:.0f} deg off its facing", n.actor_id, n.leaf, p.ability->row.name,
+                        spdlog::info("[combat] {} ({}) {} is over: {:.0f} cm between its centre and the player's, the player {:.0f} deg off its facing", n.actor_id, log_name(n.actor_id, n.archetype, n.leaf), p.ability->row.name,
                                      std::hypot(at.x - w->x, at.y - w->y), angle_between_degrees(std::atan2(at.y - w->y, at.x - w->x) * 180.0 / 3.14159265358979323846, w->yaw_degrees));
                     }
                 }
@@ -1513,7 +1524,7 @@ void CombatWorld::advance_flights(double now) {
         if (it == npcs_.end() || !port || !port->fighter().alive()) continue;
         if (projectiles_logged_ < kLoggedProjectiles) {
             ++projectiles_logged_;
-            spdlog::info("[combat] {} ({}) projectile of {} reached player {} after {:.2f} s and {:.1f} m", it->second->actor_id, it->second->leaf, l.flight.ability->row.name, l.player, now - l.flight.launched,
+            spdlog::info("[combat] {} ({}) projectile of {} reached player {} after {:.2f} s and {:.1f} m", it->second->actor_id, log_name(it->second->actor_id, it->second->archetype, it->second->leaf), l.flight.ability->row.name, l.player, now - l.flight.launched,
                          l.flight.travelled / 100.0);
         }
         for (const int64_t hit : l.flight.hits) deliver_hit(*it->second, *port, *l.flight.ability, hit, now, l.flight.projectile);
@@ -1601,7 +1612,7 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
         }
     }
     if (log) {
-        spdlog::info("[combat] player {} hit {} ({}, level {}): {}Health {:.1f} -> {:.1f}, threat {:.1f}", attacker, n->leaf, npc_actor, n->lvl, r.miss() ? "a miss, " : "", health_before,
+        spdlog::info("[combat] player {} hit {} ({}, level {}): {}Health {:.1f} -> {:.1f}, threat {:.1f}", attacker, log_name(n->actor_id, n->archetype, n->leaf), npc_actor, n->lvl, r.miss() ? "a miss, " : "", health_before,
                      n->health(), std::max(threat, 1.0));
     }
     if (burn_moved) {
@@ -1609,7 +1620,7 @@ Delivery CombatWorld::land_hit(Npc& nn, uint64_t attacker, const Resolved& r, do
         const stats::StatValue* pool = id.status_burning ? n->cs->find(id.status_burning) : nullptr;
         const stats::StatValue* dur = id.status_burning_dur ? n->cs->find(id.status_burning_dur) : nullptr;
         if (log && pool && dur && (pool->value != burn_before || dur->value != burn_dur_before)) {
-            spdlog::info("[combat] {} ({}) is burning: {:.1f} fire damage to burn over {:.1f} s (it was {:.1f} over {:.1f} s)", n->leaf, npc_actor, pool->value, dur->value, burn_before, burn_dur_before);
+            spdlog::info("[combat] {} ({}) is burning: {:.1f} fire damage to burn over {:.1f} s (it was {:.1f} over {:.1f} s)", log_name(n->actor_id, n->archetype, n->leaf), npc_actor, pool->value, dur->value, burn_before, burn_dur_before);
         }
     }
     if (!lethal && origin) move_by_hit(*n, attacker, r, *origin, now);   // (a hit that throws the creature or pulls it does so before the creature looks again)
@@ -1655,6 +1666,7 @@ void CombatWorld::kill(Npc& n, uint64_t killer, double now, bool gm) {
         e.level = n.lvl;
         e.position = n.position();
         e.blueprint = n.leaf;
+        e.archetype = n.archetype;
         e.info = a ? &a->npc : nullptr;
         e.motion = &n.bp;
         e.attackers = n.attackers;
@@ -1783,7 +1795,7 @@ void CombatWorld::log_crowd_control() {
         if (n.cc.flags & content::kCcNoAbilities) binds += "no attack, ";
         if (n.cc.flags & content::kCcDisplace) binds += "pushed, ";
         if (!binds.empty()) binds = " (" + binds.substr(0, binds.size() - 2) + ")";
-        spdlog::log(cc_logged_++ < kLoggedCc ? spdlog::level::info : spdlog::level::debug, "[cc] {} ({}) snare {:.2f} speed {:.0f} flags {}{}", n.leaf, n.actor_id, n.cc.snare,
+        spdlog::log(cc_logged_++ < kLoggedCc ? spdlog::level::info : spdlog::level::debug, "[cc] {} ({}) snare {:.2f} speed {:.0f} flags {}{}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, n.cc.snare,
                     held ? 0.0 : n.ai.params().chase_speed_cm_s * kept, n.cc.flags, binds);
     }
     cc_unlogged_.clear();
@@ -1813,7 +1825,7 @@ void CombatWorld::drop_effects_of(uint64_t instigator) {
                 if (stat != 0) n.cs->set_current(stat, 0.0f);
             }
         }
-        spdlog::info("[effects] the effects of player {} on {} ({}) end: he is gone", instigator, n.leaf, n.actor_id);
+        spdlog::info("[effects] the effects of player {} on {} ({}) end: he is gone", instigator, log_name(n.actor_id, n.archetype, n.leaf), n.actor_id);
     }
 }
 
@@ -1830,7 +1842,7 @@ void CombatWorld::drop_effects_of_pet(uint64_t pet) {
                 if (stat != 0) n.cs->set_current(stat, 0.0f);
             }
         }
-        spdlog::info("[effects] the effects of pet {} on {} ({}) end: it is gone", pet, n.leaf, n.actor_id);
+        spdlog::info("[effects] the effects of pet {} on {} ({}) end: it is gone", pet, log_name(n.actor_id, n.archetype, n.leaf), n.actor_id);
     }
 }
 
@@ -1869,7 +1881,7 @@ void CombatWorld::wake_on_damage(Npc& n, const Resolved& r, const HitOrigin* ori
     for (const int64_t guid : broken) {
         if (n.dead) return;
         const abilities::EffectDef* def = catalog_.effect(guid);
-        spdlog::info("[effects] {} ({}) is hit by {}: {} ends", n.leaf, n.actor_id, origin && origin->hit ? origin->hit->row.name : std::string("a hit"), def ? def->row.name : std::string("an effect"));
+        spdlog::info("[effects] {} ({}) is hit by {}: {} ends", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, origin && origin->hit ? origin->hit->row.name : std::string("a hit"), def ? def->row.name : std::string("an effect"));
         remove_npc_effect(n.actor_id, guid, now);   // (as the end of any effect: its items go, its crowd control state clears, its Remove and End hits run)
     }
 }
@@ -1893,18 +1905,18 @@ void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instig
     if (n.dead || !a.def) return;
     // immune, then resist, then apply: a boss is immune to every effect the data gates on the Boss effect, before any roll
     if (a.def->boss_gated && is_boss(n)) {
-        spdlog::info("[combat] {} ({}) is immune to {} from player {}", n.leaf, n.actor_id, a.def->row.name, instigator);
+        spdlog::info("[combat] {} ({}) is immune to {} from player {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, a.def->row.name, instigator);
         notify_effect_refused(n, *a.def, instigator, true, now);
         return;
     }
     // the two immunity buffs make their holder immune to tagged crowd control while they last, before the roll (their data's +1 forbids it anyway)
     if (takes_resist_roll(*a.def) && immunity_buff_holds(n)) {
-        spdlog::info("[combat] {} ({}) is immune to {} from player {}", n.leaf, n.actor_id, a.def->row.name, instigator);
+        spdlog::info("[combat] {} ({}) is immune to {} from player {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, a.def->row.name, instigator);
         notify_effect_refused(n, *a.def, instigator, true, now);
         return;
     }
     if (takes_resist_roll(*a.def) && effect_resisted(n, *a.def, a, instigator, via_pet)) {
-        spdlog::info("[combat] {} ({}) resists {} from player {}", n.leaf, n.actor_id, a.def->row.name, instigator);
+        spdlog::info("[combat] {} ({}) resists {} from player {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, a.def->row.name, instigator);
         notify_effect_refused(n, *a.def, instigator, false, now);
         return;
     }
@@ -1918,9 +1930,9 @@ void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instig
         if (refused_effects_.insert(a.def->row.guid).second) {
             if (a.def->cc) {
                 spdlog::info("[effects] {} is a crowd control mobs do not take yet (status {}: a silence, a disarm or an animation of its own), so it is not put on {}", a.def->row.name,
-                             a.def->cc->applied_status, n.leaf);
+                             a.def->cc->applied_status, log_name(n.actor_id, n.archetype, n.leaf));
             } else {
-                spdlog::info("[effects] {} names a crowd-control record the data does not have, so it is not put on {}", a.def->row.name, n.leaf);
+                spdlog::info("[effects] {} names a crowd-control record the data does not have, so it is not put on {}", a.def->row.name, log_name(n.actor_id, n.archetype, n.leaf));
             }
         }
         return;
@@ -1931,7 +1943,7 @@ void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instig
     send_effects(n, changes);
     if (a.by_creature && !changes.empty()) refresh_creature_stats(n);
     if (!changes.empty() && a.def->row.category.find("Hidden") == std::string::npos) {   // (the hidden one-second effects are not named)
-        spdlog::log(effects_logged_++ < kLoggedEffects ? spdlog::level::info : spdlog::level::debug, "[effects] {} ({}) takes {}: {} stack(s), {:.1f} s left, from {} {}", n.leaf, n.actor_id,
+        spdlog::log(effects_logged_++ < kLoggedEffects ? spdlog::level::info : spdlog::level::debug, "[effects] {} ({}) takes {}: {} stack(s), {:.1f} s left, from {} {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id,
                     a.def->row.name, n.book.stacks_of(a.def->row.guid), n.book.remaining(a.def->row.guid, now), a.by_creature ? "creature" : "player", instigator);
     }
     if (made && effect_depth_ < kMaxEffectDepth) {   // its Apply hits run now that it is on
@@ -2043,7 +2055,7 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
             const stats::StatValue* pool = id.status_burning ? n.cs->find(id.status_burning) : nullptr;
             const stats::StatValue* dur = id.status_burning_dur ? n.cs->find(id.status_burning_dur) : nullptr;
             spdlog::log(effect_hits_logged_++ < kLoggedEffectHits ? spdlog::level::info : spdlog::level::debug,
-                        "[combat] {} ({}) takes {:.1f} from {} of player {}{}: Health {:.1f} -> {:.1f}{}", n.leaf, n.actor_id, note.mods[0].value, hit->row.name, e.instigator,
+                        "[combat] {} ({}) takes {:.1f} from {} of player {}{}: Health {:.1f} -> {:.1f}{}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, note.mods[0].value, hit->row.name, e.instigator,
                         (r.flags & stats::kHitCrit) ? " (a critical hit)" : "", health_before, n.health(),
                         pool && dur && pool->value > 0 ? fmt::format("; {:.1f} fire damage left to burn over {:.1f} s", pool->value, dur->value) : std::string());
         }
@@ -2245,14 +2257,14 @@ void CombatWorld::think(Npc& n, double now) {
         if (n.ai.params().senses.enabled) {
             const npc::ai::Params& pr = n.ai.params();
             PlayerPort* who = player(o.target);
-            spdlog::info("[combat] {} ({}, level {}) began a fight with player {}{}: it notices within {:.1f} m (hears {:.1f} m, sees {:.1f} m in front), leashes {:.0f} m from {}", n.leaf, n.actor_id, a->npc.level, o.target,
+            spdlog::info("[combat] {} ({}, level {}) began a fight with player {}{}: it notices within {:.1f} m (hears {:.1f} m, sees {:.1f} m in front), leashes {:.0f} m from {}", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, a->npc.level, o.target,
                          who ? fmt::format(", {:.1f} m away", distance_xy_cm(who->fighter().position(), s.self) / 100.0) : std::string(), pr.aggro_radius_cm / 100.0, pr.senses.hearing_radius_cm / 100.0,
                          pr.senses.sight_radius_cm / 100.0, pr.leash_radius_cm / 100.0, pr.anchor_at_fight_start ? "where the fight began" : "home");
         }
     }
     if (o.began_reset) {
         if (n.ai.params().senses.enabled) {
-            spdlog::info("[combat] {} ({}, level {}) leashed: {}; {:.1f} m from {}, {:.1f} m from home", n.leaf, n.actor_id, a->npc.level, o.reset_reason,
+            spdlog::info("[combat] {} ({}, level {}) leashed: {}; {:.1f} m from {}, {:.1f} m from home", log_name(n.actor_id, n.archetype, n.leaf), n.actor_id, a->npc.level, o.reset_reason,
                          distance_xy_cm(s.self, n.ai.leash_anchor(s.home)) / 100.0, n.ai.params().anchor_at_fight_start ? "where the fight began" : "home", distance_xy_cm(s.self, s.home) / 100.0);
         }
         begin_reset(n, now);
@@ -2419,6 +2431,7 @@ void CombatWorld::tick(double now) {
     tick_pets(now);
 }
 
+#include "combat/combat_display_names.inc"   // what the mob log lines call a creature (load_display_names, load_population_names, shown_name, log_name)
 #include "combat/combat_knockback.inc"   // what throws, pushes and pulls a creature (move_by_hit, track_push, push_wire, origin_actors)
 #include "combat/combat_resist.inc"      // a crowd control the data's UniversalResistChance throws off (takes_resist_roll, effect_resisted)
 #include "combat/alert_effects.inc"      // where an alert's hits land and the effects they put on the caster and its allies

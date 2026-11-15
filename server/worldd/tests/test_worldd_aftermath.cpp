@@ -26,6 +26,9 @@
 #include "world/corpse.h"
 
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <set>
 
 #ifndef NPC_MOTION_PATH
@@ -286,6 +289,39 @@ void test_kill(Fixture& f) {
     CHECK(c2 && !c2->parts && near(c2->close_at - c2->died_at, 15.0, 1e-6), "a corpse with nothing to loot lasts 15.0 s (retail: 7 of 7)");
     const world::WorldActor* b = s.w.registry.find(without);
     CHECK(b && count_sub(*b, "ULootComponent", true) == 0, "and has no loot components");
+}
+
+void test_kill_reward_names_the_creature(Fixture& f) {
+    std::printf("the kill reward carries what the logs call the creature, and its nameplate stays as it was\n");
+    const std::filesystem::path table = std::filesystem::temp_directory_path() / ("aoc_aftermath_names_" + std::to_string(reinterpret_cast<std::uintptr_t>(&f)) + ".tsv");
+    {
+        std::ofstream out(table, std::ios::binary);
+        out << "blueprint\tdisplay_name\tsource\n" << f.wolf_path << "\tSlate Wolf\tinfo\n";
+    }
+    Scene s(f, 12);
+    CHECKF(s.ok(), "the scene: %s %s", s.rig.problem.c_str(), s.w.problem.c_str());
+    if (!s.ok()) {
+        std::filesystem::remove(table);
+        return;
+    }
+    // no table: the name it had
+    const uint64_t plain = s.wolf(10, 100);
+    s.kill(plain);
+    CHECK(s.player->kills.size() == 1 && s.player->kills[0].shown == "Wolf" && s.player->kills[0].name == "Wolf", "with no table the reward says what it said: Wolf");
+    // a table: the game's name beside the leaf; the nameplate, which is a wire value, is what it was
+    CHECK(s.world->load_display_names(table.string()) == 1, "the table names the Wolf");
+    const uint64_t named = s.wolf(10, 500);
+    s.kill(named);
+    CHECK(s.player->kills.size() == 2 && s.player->kills[1].shown == "Slate Wolf (Wolf)", "the reward shows the name the game shows beside the Blueprint's leaf");
+    CHECK(s.player->kills.size() == 2 && s.player->kills[1].name == "Wolf" && s.player->kills[1].blueprint == "Wolf", "...and its nameplate and its Blueprint are what they were");
+    const combat::Corpse* c = s.after->corpse_of(named);
+    CHECK(c != nullptr && c->name == "Wolf", "...as is the corpse's name");
+    // a creature that names itself keeps its name
+    const uint64_t own = s.wolf(10, 900);
+    s.w.registry.modify(own, world::Change::State, [&](world::WorldActor& a) { a.npc.name = "Marrowrot Flamespeaker"; });
+    s.kill(own);
+    CHECK(s.player->kills.size() == 3 && s.player->kills[2].name == "Marrowrot Flamespeaker" && s.player->kills[2].shown == "Marrowrot Flamespeaker", "a creature that names itself keeps its own name in the reward");
+    std::filesystem::remove(table);
 }
 
 // ---- the respawn -----------------------------------------------------------------------------------------------------------------
@@ -567,6 +603,7 @@ int main() {
         return 1;
     }
     test_kill(f);
+    test_kill_reward_names_the_creature(f);
     test_respawn(f);
     test_hostile(f);
     test_huntable(f);

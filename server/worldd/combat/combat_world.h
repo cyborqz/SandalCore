@@ -86,6 +86,7 @@ struct KillReward {
     uint64_t    npc = 0;
     std::string name;             // the creature's nameplate
     std::string blueprint;        // its Blueprint's leaf ("Wolf")
+    std::string shown;            // what the logs call it: the name the game shows beside the Blueprint's leaf ("Slate Wolf (Wolf)"); the same as `name` when the creature names itself
     int         level = 0;
     int64_t     instance = 0;     // quests, slice 2: its population instance (0: none), what a Kill objective names
     int64_t     adventuring_xp = 0;
@@ -189,6 +190,7 @@ struct DeathEvent {
     int                    level = 0;
     Vec3                   position;
     std::string            blueprint;         // the Blueprint's leaf without "_C": "Wolf"
+    std::string            archetype;         // the Blueprint's archetype path (the mob display name table's key)
     const world::NpcInfo*  info = nullptr;    // valid during the call
     const npc::MotionStats* motion = nullptr; // the Blueprint's row (its reward tables ...), null when the table has none
     std::set<uint64_t>     attackers;         // everyone with threat on it: who may loot and gets XP
@@ -214,6 +216,11 @@ struct CombatWorldConfig {
     uint64_t seed = 1;
     /// Multiplies the Health an NPC's hit takes from a player (1: the data's own; worldd's --npc-damage-mult sets it, 1 by default).  Misses, heals and every other stat are untouched.
     double npc_damage_mult = 1.0;
+    /// The name table the mob log lines use (`dist/content/npc_display_names.tsv`): read in the constructor when set; empty, or a missing file, keeps the Blueprint's leaf.
+    std::string display_names_path;
+    /// The population data's names (`dist/content/npc_names.tsv`, the same file the people are named from): the name a spawn point's instance or asset gives its creature (a skeleton the data
+    /// calls "Cursed Defender"), read in the constructor when set; empty, or a missing file, leaves the creatures to the Blueprint's name.
+    std::string population_names_path;
     /// The ability a creature with no kit attacks with: a plain basic attack that does 1.0 x the shared damage equation, so its damage follows the creature's level and stats, the player's
     /// mitigation and the level difference.  (The data's NPC_Bandit_Melee_Slash_ABL_1 takes a flat 50 Health whatever the creature, the player and their levels are.)
     std::string fallback_ability = "Ramkin_Hunter_SpearStrike";
@@ -246,6 +253,22 @@ public:
         player_effect_sources_.clear();
         effect_sources_ready_ = false;
     }
+    /// Reads npc_display_names.tsv (blueprint, display_name, source), the names the game shows for the mobs (tools/npcabilities writes it beside npc_motion.tsv).  A missing file is not an
+    /// error: the table stays empty and the log lines keep the Blueprint's leaf.  Returns the number of names read; a line with no name is skipped.
+    size_t load_display_names(const std::string& path);
+    /// The name the game shows for the mob of `archetype` ("" when the table names none).
+    const std::string& display_name(const std::string& archetype) const;
+    /// What the mob log lines call it: the display name with the Blueprint's leaf beside it ("Gravehide Flamespeaker (Goblin_FlameShaman_Gravehide)"), else the leaf.
+    std::string log_name(const std::string& archetype, const std::string& leaf) const;
+    size_t display_names() const { return display_names_.size(); }
+    /// Reads npc_names.tsv (kind, source, member, text): the names the population data gives an instance or an asset.  A missing file is not an error; returns the number of lists read.
+    size_t load_population_names(const std::string& path);
+    size_t population_names() const { return instance_names_.size() + asset_names_.size(); }
+    /// The name the game shows for the creature of `actor_id`: the name its own spawn carries (a person the data names), else the name its population instance or asset gives it, else its
+    /// Blueprint's (display_name); "" when none names it.  Only what the logs say: nothing here reaches a client.
+    std::string shown_name(uint64_t actor_id, const std::string& archetype, const std::string& leaf) const;
+    /// shown_name with the Blueprint's leaf beside it, as log_name has it for a Blueprint alone; the leaf when no name is known.
+    std::string log_name(uint64_t actor_id, const std::string& archetype, const std::string& leaf) const;
     /// Whether the ability launches projectiles: a montage of it has a notify that launches one, and the ability carries a projectile row of that notify's key (what a creature that shoots stands off for).
     bool launches_projectiles(const abilities::AbilityDef& def) const;
     /// What each creature notices and how far it follows (npc/motion_table.h, the senses table): a creature whose Blueprint the table lists notices by its Blueprint's aggro radius (scaled by its
@@ -721,6 +744,9 @@ private:
     bool                   effect_sources_ready_ = false;
     const npc::SensesTable* senses_ = nullptr;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
+    std::map<std::string, std::string> display_names_;   // the Blueprints npc_display_names.tsv names -> the name the game shows
+    std::map<int64_t, std::vector<std::string>> instance_names_;   // npc_names.tsv: the names a population instance lists (the game picks one of them)
+    std::map<int64_t, std::vector<std::string>> asset_names_;      // ... and a population asset
     HuntablePredicate      huntable_;
     std::set<uint64_t>     stats_filled_;     // the NPCs that are no combatants and whose stats were filled (or whose open has none)
     std::set<uint64_t>     effect_holders_;   // the combatants whose effect book is not empty

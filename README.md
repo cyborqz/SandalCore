@@ -136,6 +136,7 @@ The game folder is the one that holds `AOCClient.exe` and the `AOC` folder; with
 | `item_names.tsv` | the words the Glint kinds and some quest items are named with | `tools\itemnames` (from the game's containers) |
 | `npc_abilities.tsv`, `npc_montages.tsv`, `npc_targeting.tsv`, `npc_senses.tsv`, `npc_aggro_curves.tsv` | what the mobs attack with, how their attack animations carry them, where each hit lands, and what each mob notices and how far it follows | `tools\npcabilities` (from the game's containers and `content.db`) |
 | `npc_looks.tsv`, `npc_appearances.tsv`, `npc_names.tsv`, `npc_trees.tsv` | how the people (humanoid NPCs) look, what they are called, and whether they wander or patrol | `tools\npcabilities` (from the game's containers and `content.db`) |
+| `npc_display_names.tsv` | the name the game shows for each creature and person Blueprint, which the server's mob log lines carry | `tools\npcabilities` (from the game's containers) |
 | `fishing_water.tsv` (0.7 MB) | the lakes and rivers of the Riverlands that can be fished: outlines and swim volumes with their fishing data | `tools\waterbodies` (from the game's containers) |
 | `town_platforms.bin` (4 MB) | the floor of the five towns | `tools\mapc` (from two of the game's map packages) |
 | `town_layout_items.tsv` (6 MB), `town_layouts.bin` (13 MB) | the buildings, walls and terraces of the five towns at the level each town starts at | a list made from the design data by `tools\capture\gen_town_layouts.py`, then their collision from the game's packages by `tools\mapc` |

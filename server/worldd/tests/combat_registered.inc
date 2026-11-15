@@ -33,3 +33,4 @@
 #include "combat_self_effects_tests.inc"
 #include "combat_alert_effects_tests.inc"
 #include "combat_rally_group_tests.inc"
+#include "combat_display_names_tests.inc"

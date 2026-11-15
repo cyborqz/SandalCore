@@ -51,10 +51,10 @@ catch (ArgumentException ex)
 var game = new Game(paks, usmap);
 if (cmd == "looks")
 {
-    string looksText = Looks.Collect(game, out int lookPackages, out int lookFailed, out int lookRows, out string treesText, out int treeRows);
+    string looksText = Looks.Collect(game, out int lookPackages, out int lookFailed, out int lookRows, out string treesText, out int treeRows, out string displayText, out int displayRows);
     if (lookFailed > 0) { Console.Error.WriteLine($"{lookFailed} of {lookPackages} packages could not be read"); return 1; }
-    Console.WriteLine($"npcabilities looks: {lookPackages} packages, {lookRows} Blueprints with a look, {treeRows} Blueprints with a state tree");
-    var lookFiles = new (string Name, string Text)[] { (Looks.File, looksText), (Looks.TreesFile, treesText) };
+    Console.WriteLine($"npcabilities looks: {lookPackages} packages, {lookRows} Blueprints with a look, {treeRows} Blueprints with a state tree, {displayRows} Blueprints read for their display name");
+    var lookFiles = new (string Name, string Text)[] { (Looks.File, looksText), (Looks.TreesFile, treesText), (Looks.DisplayFile, displayText) };
     if (check)
     {
         int different = 0;

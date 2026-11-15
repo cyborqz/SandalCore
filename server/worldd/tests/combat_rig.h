@@ -11,6 +11,7 @@
 #pragma once
 
 #include "ability_rig.h"
+#include "combat/aftermath.h"
 #include "combat/alert_move.h"
 #include "combat/combat_world.h"
 #include "combat/knockback.h"

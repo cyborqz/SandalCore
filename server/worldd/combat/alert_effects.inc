@@ -124,14 +124,14 @@ void CombatWorld::land_alert_hit(Npc& caster, const abilities::AbilityDef& abili
             if (a.def && target->book.stacks_of(a.def->row.guid) > 0 && logged.insert({a.def->row.guid, target->actor_id}).second) {
                 const auto line = std::find_if(landed.begin(), landed.end(), [&](const Landed& l) { return l.effect == a.def; });
                 Landed& entry = line != landed.end() ? *line : landed.emplace_back(Landed{a.def, {}, 0});
-                if (entry.count < kAlertLandingNames) entry.names += fmt::format("{}{} ({})", entry.count == 0 ? "" : ", ", target->actor_id, target->leaf);
+                if (entry.count < kAlertLandingNames) entry.names += fmt::format("{}{} ({})", entry.count == 0 ? "" : ", ", target->actor_id, log_name(target->actor_id, target->archetype, target->leaf));
                 ++entry.count;
             }
         }
     }
     // (the cast's own line names the move; these say where its effects went)
     for (const Landed& l : landed) {
-        spdlog::info("[combat] alert {} of caster {} ({}): {} ({}) lands on {}: {}{}", ability.row.name, caster.actor_id, caster.leaf, l.effect->row.name, l.effect->row.guid, l.count, l.names,
+        spdlog::info("[combat] alert {} of caster {} ({}): {} ({}) lands on {}: {}{}", ability.row.name, caster.actor_id, log_name(caster.actor_id, caster.archetype, caster.leaf), l.effect->row.name, l.effect->row.guid, l.count, l.names,
                      l.count > kAlertLandingNames ? fmt::format(" and {} more", l.count - kAlertLandingNames) : std::string());
     }
 }
