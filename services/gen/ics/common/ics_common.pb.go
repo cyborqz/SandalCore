@@ -97,7 +97,7 @@ const (
 	IcsStatusCode_ICS_STATUS_CODE_ERROR_ESCROW_ACCOUNT_REC_NOT_FOUND         IcsStatusCode = 71
 	IcsStatusCode_ICS_STATUS_CODE_ERROR_K8S_API_ERROR                        IcsStatusCode = 72
 	IcsStatusCode_ICS_STATUS_CODE_ERROR_WORLD_OP_CONFLICT                    IcsStatusCode = 73
-	IcsStatusCode_ICS_STATUS_CODE_ERROR_END                                  IcsStatusCode = 99
+	IcsStatusCode_ICS_STATUS_CODE_ERROR_END                                  IcsStatusCode = 99 // [CoA + C | Y | B]
 	// Session termination errors (100-109)
 	IcsStatusCode_ICS_STATUS_CODE_ERROR_TERM_SESSION_BEGIN                    IcsStatusCode = 100
 	IcsStatusCode_ICS_STATUS_CODE_ERROR_TERM_SESSION_ADMIN_KICK               IcsStatusCode = 101

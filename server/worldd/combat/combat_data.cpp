@@ -51,6 +51,15 @@ std::optional<CombatData> CombatData::build(const content::CombatRows& rows, con
     s.magical_accuracy = find("MagicalAccuracy");
     s.physical_evasion = find("PhysicalEvasion");
     s.magical_evasion = find("MagicalEvasion");
+    s.physical_disable_evasion = find("PhysicalDisableEvasion");
+    s.magical_disable_evasion = find("MagicalDisableEvasion");
+    s.physical_disable_accuracy = find("PhysicalDisableAccuracy");
+    s.magical_disable_accuracy = find("MagicalDisableAccuracy");
+    s.disable_evasion_movement_t1 = find("DisableEvasion_Movement_T1");
+    s.disable_evasion_movement_t2 = find("DisableEvasion_Movement_T2");
+    s.disable_evasion_hard_t1 = find("DisableEvasion_Hard_T1");
+    s.disable_evasion_hard_t2 = find("DisableEvasion_Hard_T2");
+    s.disable_evasion_activation = find("DisableEvasion_Activation");
     s.physical_block_chance = find("PhysicalBlockChance");
     s.magical_block_chance = find("MagicalBlockChance");
     s.threat_generation = find("ThreatGeneration");

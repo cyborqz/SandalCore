@@ -397,7 +397,9 @@ bool Connection::send_close(uint32_t reason) {
     h.close_reason = reason;
     h.reliable = true;
     h.channel = 0;
-    return send(h, emit::BunchWriter(1));
+    if (!send(h, emit::BunchWriter(1))) return false;
+    close_queued_ = true;
+    return true;
 }
 
 emit::BunchWriter Connection::start_packet() const {

@@ -122,6 +122,13 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
     std::vector<combat::EffectHitNote> notes;
     notes.swap(combat_side_->effect_notes);
     for (const combat::EffectHitNote& n : notes) pipeline_->confirm_effect_hit(n, sec);
+    // A3: a crowd control of his (or his pet's) that a mob resisted or was immune to: the client's combat-log line, on his own ability component
+    std::vector<combat::EffectRefusal> refusals;
+    refusals.swap(combat_side_->effect_refusals);
+    for (const combat::EffectRefusal& r : refusals) {
+        queue(r.immune ? "ClientOnEffectImmune" : "ClientOnEffectResisted",
+              [r](bootstrap::PlayerBootstrap& pb) { return pb.effect_refused(r.effect_guid, r.target, r.immune); }, conn, /*must_build=*/true);
+    }
     // the experience of the kills (a level-up sends a dozen chains: it waits for room)
     while (!combat_side_->kills.empty()) {
         if (!room_for(12 + (world_ ? world_->auto_grants().size() : 0))) break;

@@ -26,6 +26,7 @@ const (
 	CharacterService_CreateCharacter_FullMethodName    = "/aoc.character.v1.CharacterService/CreateCharacter"
 	CharacterService_ListCharacters_FullMethodName     = "/aoc.character.v1.CharacterService/ListCharacters"
 	CharacterService_GetCharacter_FullMethodName       = "/aoc.character.v1.CharacterService/GetCharacter"
+	CharacterService_GetCharacterByName_FullMethodName = "/aoc.character.v1.CharacterService/GetCharacterByName"
 	CharacterService_SaveCharacterState_FullMethodName = "/aoc.character.v1.CharacterService/SaveCharacterState"
 	CharacterService_DeleteCharacter_FullMethodName    = "/aoc.character.v1.CharacterService/DeleteCharacter"
 	CharacterService_SaveInventory_FullMethodName      = "/aoc.character.v1.CharacterService/SaveInventory"
@@ -52,6 +53,8 @@ type CharacterServiceClient interface {
 	ListCharacters(ctx context.Context, in *ListCharactersRequest, opts ...grpc.CallOption) (*ListCharactersResponse, error)
 	// NotFound when there is no such character.
 	GetCharacter(ctx context.Context, in *GetCharacterRequest, opts ...grpc.CallOption) (*GetCharacterResponse, error)
+	// Social, step 7: the character with this name, without regard to the case of the letters, for the friend request by name and the name check. NotFound when no character has it.
+	GetCharacterByName(ctx context.Context, in *GetCharacterByNameRequest, opts ...grpc.CallOption) (*GetCharacterByNameResponse, error)
 	// Position, region and level after play; NotFound for an unknown id,
 	// InvalidArgument for input the store rejects (a negative level, a
 	// non-finite position, or text PostgreSQL refuses such as NUL).
@@ -108,6 +111,16 @@ func (c *characterServiceClient) GetCharacter(ctx context.Context, in *GetCharac
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetCharacterResponse)
 	err := c.cc.Invoke(ctx, CharacterService_GetCharacter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) GetCharacterByName(ctx context.Context, in *GetCharacterByNameRequest, opts ...grpc.CallOption) (*GetCharacterByNameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetCharacterByNameResponse)
+	err := c.cc.Invoke(ctx, CharacterService_GetCharacterByName_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +187,8 @@ type CharacterServiceServer interface {
 	ListCharacters(context.Context, *ListCharactersRequest) (*ListCharactersResponse, error)
 	// NotFound when there is no such character.
 	GetCharacter(context.Context, *GetCharacterRequest) (*GetCharacterResponse, error)
+	// Social, step 7: the character with this name, without regard to the case of the letters, for the friend request by name and the name check. NotFound when no character has it.
+	GetCharacterByName(context.Context, *GetCharacterByNameRequest) (*GetCharacterByNameResponse, error)
 	// Position, region and level after play; NotFound for an unknown id,
 	// InvalidArgument for input the store rejects (a negative level, a
 	// non-finite position, or text PostgreSQL refuses such as NUL).
@@ -214,6 +229,9 @@ func (UnimplementedCharacterServiceServer) ListCharacters(context.Context, *List
 }
 func (UnimplementedCharacterServiceServer) GetCharacter(context.Context, *GetCharacterRequest) (*GetCharacterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetCharacter not implemented")
+}
+func (UnimplementedCharacterServiceServer) GetCharacterByName(context.Context, *GetCharacterByNameRequest) (*GetCharacterByNameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetCharacterByName not implemented")
 }
 func (UnimplementedCharacterServiceServer) SaveCharacterState(context.Context, *SaveCharacterStateRequest) (*SaveCharacterStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SaveCharacterState not implemented")
@@ -298,6 +316,24 @@ func _CharacterService_GetCharacter_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CharacterServiceServer).GetCharacter(ctx, req.(*GetCharacterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_GetCharacterByName_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetCharacterByNameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).GetCharacterByName(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_GetCharacterByName_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).GetCharacterByName(ctx, req.(*GetCharacterByNameRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -392,6 +428,10 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetCharacter",
 			Handler:    _CharacterService_GetCharacter_Handler,
+		},
+		{
+			MethodName: "GetCharacterByName",
+			Handler:    _CharacterService_GetCharacterByName_Handler,
 		},
 		{
 			MethodName: "SaveCharacterState",

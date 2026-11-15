@@ -14,6 +14,7 @@
 //    - UAoCStatsComponent 3/5/6/10 with SerializeInt max 23;
 //    - ULevelingComponent (plan D1, the PlayerController's XPTracker): five fast maps (fields 2-6) and three RPCs, with SerializeInt max 11;
 //    - UMountComponent (mounts, stage 1): 12 commands, 11 net fields, the three export names of a mount's component and the alias MountComponent_C;
+//    - UIntrepidSocialComponent (friends): the PlayerController's SocialComponent, 6 commands, 17 net fields, 11 RPCs (all mail), the friend list's and the pending requests' item layouts;
 //  plus the invariants the replicator relies on: handle == index + 1, field
 //  index == position, sorted lookup tables, RPC <-> field cross references,
 //  element ranges in bounds, and the index's native / Blueprint / component
@@ -395,6 +396,76 @@ static void test_mount_component() {
 }
 // (C-O-A | C.Y.B)
 
+/// The element command `i` of an array's element span: its handle (restarts at 1 in each array), path, type and width.
+static bool elem_is(std::span<const RepCommand> e, size_t i, const char* path, PropType type, uint16_t width) {
+    return i < e.size() && e[i].handle == i + 1 && same(e[i].path, path) && e[i].type == type && e[i].width_bits == width;
+}
+
+/// Friends: the PlayerController's SocialComponent.  Its two fast arrays carry the friend list and the pending requests; the component's own
+/// RPCs are all mail (the friend calls are the PlayerController's).  The retail captures export the component under the name SocialComponent.
+static void test_social_component() {
+    std::printf("UIntrepidSocialComponent (the PlayerController's SocialComponent, friends)\n");
+    const ClassSchema* sc = find_component_schema("SocialComponent");
+    CHECK(sc != nullptr, "SocialComponent resolves by its export name");
+    if (!sc) return;
+    const ClassSchema& s = *sc;
+    CHECK(find_class_schema("UIntrepidSocialComponent") == &s && same(s.name, "UIntrepidSocialComponent") && same(s.super_name, "UIntrepidRepKeyComponent") && !s.is_actor,
+          "UIntrepidSocialComponent by its class name too: a component class on UIntrepidRepKeyComponent");
+    CHECK(s.commands.size() == 6 && s.num_fields() == 17 && s.field_max() == 18 && s.rpcs.size() == 11 && s.element_commands.size() == 35,
+          "6 commands, 17 net fields (SerializeInt max 18), 11 RPCs, 35 element commands");
+    CHECK(cmd_is(s, 1, "bReplicates", PropType::Bool, 1) && cmd_is(s, 2, "bIsActive", PropType::Bool, 1) &&
+              cmd_is(s, 3, "FriendsList.Items", PropType::DynamicArray, 0) && cmd_is(s, 4, "PendingFriendRequests.Items", PropType::DynamicArray, 0) &&
+              cmd_is(s, 5, "PlayerStatsReplication.Items", PropType::DynamicArray, 0) && cmd_is(s, 6, "NumUnreadMail", PropType::Int32, 32),
+          "handles: 3 FriendsList, 4 PendingFriendRequests, 5 PlayerStatsReplication, 6 NumUnreadMail (a 32-bit integer)");
+    CHECK(s.command(3)->flags == (kRepCustomDelta | kRepFastArray) && s.command(4)->flags == (kRepCustomDelta | kRepFastArray) &&
+              s.command(5)->flags == (kRepCustomDelta | kRepFastArray | kRepNotify) && s.command(6)->flags == kRepNotify,
+          "the two friend arrays are custom-delta fast arrays; PlayerStatsReplication adds a repnotify; NumUnreadMail is a plain repnotify integer");
+    CHECK(field_is(s, 2, "FriendsList", FieldKind::Property) && s.field(2)->handle == 3 && field_is(s, 3, "PendingFriendRequests", FieldKind::Property) &&
+              s.field(3)->handle == 4 && field_is(s, 4, "PlayerStatsReplication", FieldKind::Property) && field_is(s, 5, "NumUnreadMail", FieldKind::Property) &&
+              s.field(5)->handle == 6,
+          "fields: FriendsList 2, PendingFriendRequests 3, PlayerStatsReplication 4, NumUnreadMail 5");
+
+    // The friend list's item: 12 element commands (the friend's character guid, name, level, class and subclass, guild, online, last online, still a friend).
+    const auto friends = s.elements(*s.command(3));
+    CHECK(friends.size() == 12 &&
+              elem_is(friends, 0, "Items.FriendData.CharacterGuid.A", PropType::Int32, 32) && elem_is(friends, 3, "Items.FriendData.CharacterGuid.D", PropType::Int32, 32) &&
+              elem_is(friends, 4, "Items.FriendData.CharacterName", PropType::Str, 0) && elem_is(friends, 5, "Items.FriendData.CharacterLevel", PropType::Int32, 32) &&
+              elem_is(friends, 6, "Items.FriendData.Archetype", PropType::Enum, 5) && elem_is(friends, 7, "Items.FriendData.SubArchetype", PropType::Enum, 5) &&
+              elem_is(friends, 8, "Items.FriendData.GuildName", PropType::Str, 0) && elem_is(friends, 9, "Items.FriendData.bIsOnline", PropType::Bool, 1) &&
+              elem_is(friends, 10, "Items.FriendData.LastOnlineTimestamp", PropType::Int64, 64) && elem_is(friends, 11, "Items.FriendData.bIsStillFriend", PropType::Bool, 1),
+          "FriendsList item: guid 4x32, name (string), level 32, class 5, subclass 5, guild (string), online 1, last online 64, still a friend 1 (12 commands)");
+    CHECK(friends.size() == 12 && same(friends[6].enum_name, "ECharacterClass") && same(friends[7].enum_name, "ECharacterClass") &&
+              elem_is(friends, 1, "Items.FriendData.CharacterGuid.B", PropType::Int32, 32) && elem_is(friends, 2, "Items.FriendData.CharacterGuid.C", PropType::Int32, 32),
+          "both class fields are ECharacterClass (5 bits)");
+
+    // The pending request's item: 10 element commands (the sender's guid and name, the recipient's guid, when the request expires).
+    const auto pending = s.elements(*s.command(4));
+    CHECK(pending.size() == 10 &&
+              elem_is(pending, 0, "Items.FriendRequest.SenderCharacterGuid.A", PropType::Int32, 32) && elem_is(pending, 3, "Items.FriendRequest.SenderCharacterGuid.D", PropType::Int32, 32) &&
+              elem_is(pending, 4, "Items.FriendRequest.SenderCharacterName", PropType::Str, 0) &&
+              elem_is(pending, 5, "Items.FriendRequest.RecipientCharacterGuid.A", PropType::Int32, 32) && elem_is(pending, 8, "Items.FriendRequest.RecipientCharacterGuid.D", PropType::Int32, 32) &&
+              elem_is(pending, 9, "Items.FriendRequest.RequestExpiresTimestamp", PropType::Int64, 64),
+          "PendingFriendRequests item: sender guid 4x32, sender name (string), recipient guid 4x32, expiry 64 (10 commands)");
+    CHECK(s.elements(*s.command(5)).size() == 13 && friends.size() + pending.size() + s.elements(*s.command(5)).size() == s.element_commands.size(),
+          "PlayerStatsReplication's item is the other 13 element commands (the party frame's channel, not friends)");
+
+    // The component's RPCs are the mail ones: fields 6-16, sorted by name.
+    CHECK(field_is(s, 6, "ClientClaimMailCurrency", FieldKind::Function) && field_is(s, 8, "ClientGetMailData", FieldKind::Function) &&
+              field_is(s, 10, "ServerBulkUpdateMailStatus", FieldKind::Function) && field_is(s, 15, "ServerRefreshMailHeaders", FieldKind::Function) &&
+              field_is(s, 16, "ServerUpdateMailStatus", FieldKind::Function),
+          "RPC fields 6-16: ClientClaimMailCurrency ... ServerUpdateMailStatus (all mail, no friend call)");
+    const RpcSchema* refresh = s.rpc("ServerRefreshMailHeaders");
+    const RpcSchema* bulk = s.rpc("ServerBulkUpdateMailStatus");
+    const RpcSchema* claim = s.rpc("ServerClaimMailItem");
+    CHECK(refresh && refresh->params.size() == 1 && same(refresh->params[0].name, "MailboxGuid") &&
+              bulk && bulk->params.size() == 3 && same(bulk->params[1].name, "MailGuids") && bulk->params[1].type == PropType::DynamicArray && same(bulk->params[2].name, "Status") &&
+              claim && claim->params.size() == 3 && same(claim->params[2].name, "MailItemIndex") && claim->params[2].type == PropType::Int32,
+          "ServerRefreshMailHeaders(MailboxGuid); ServerBulkUpdateMailStatus(MailboxGuid, MailGuids[], Status); ServerClaimMailItem(MailboxGuid, MailGuid, MailItemIndex)");
+    bool listed = false;
+    for (const ClassSchema* c : all_class_schemas()) listed = listed || c == &s;
+    CHECK(listed, "UIntrepidSocialComponent is among all_class_schemas()");
+}
+
 static void test_invariants() {
     std::printf("table invariants over every generated schema\n");
     bool handles = true, fields = true, by_path = true, by_name = true, rpcs = true, elems = true, supers = true;
@@ -470,7 +541,7 @@ static void test_index() {
     bool sorted = true;
     auto all = all_class_schemas();
     for (size_t i = 0; i + 1 < all.size(); ++i) sorted = sorted && std::strcmp(all[i]->name, all[i + 1]->name) < 0;
-    CHECK(all.size() == 63 && sorted, "63 schemas (59 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with quests, slice 1, the pawn's two warehouse container classes with storage clerks, step 0, the two Emberspring classes (AAoCPlayerSpawner, AAoCAttunablePlayerSpawner) with the Embersprings, the quest objects' actor class (AInteractableStateMachineBase) with quests, part 3, slice 1");
+    CHECK(all.size() == 64 && sorted, "64 schemas (60 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with the quests, the pawn's two warehouse container classes with storage clerks, step 0, the two Emberspring classes (AAoCPlayerSpawner, AAoCAttunablePlayerSpawner) with the Embersprings, the quest objects' actor class (AInteractableStateMachineBase) with the quest objects, the PlayerController's social component (UIntrepidSocialComponent) with the friends list");
     const ClassSchema* res = find_class_schema("UResourceStorageComponent");   // the pawn's dynamic subobject (pkt#107)
     CHECK(res && !res->is_actor && same(res->super_name, "UItemStorageComponent") && res->command("ItemLocationType") &&
               res->command("ItemLocationType")->type == PropType::Enum && res->command("ItemLocationType")->width_bits == 5,
@@ -486,6 +557,7 @@ int main() {
     test_leveling_component();
     test_npc_and_gatherable_schemas();
     test_mount_component();
+    test_social_component();
     test_invariants();
     test_index();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

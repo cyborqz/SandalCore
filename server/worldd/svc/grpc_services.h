@@ -42,6 +42,7 @@ public:
     RedeemResult redeem_ticket(const std::string& ticket, const std::string& character_id,
                                uint32_t server_id) override;
     CharacterResult get_character(const std::string& id) override;
+    CharacterResult get_character_by_name(const std::string& name) override;
     CallStatus save_position(const std::string& id, const Position& position) override;
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items) override;
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet) override;

@@ -133,6 +133,10 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         auto row = db->effect(g, error);
         if (!row) return std::nullopt;
         d.row = std::move(*row);
+        // the data's Boss effect gate: the requirement asks GetEffectCount(GetTarget(), Boss) == 0 (the Boss tag on the actor stands for the effect)
+        if (const content::ExprRow* req = d.row.requirement_expr != 0 ? c.expr(d.row.requirement_expr) : nullptr) {
+            d.boss_gated = req->text.find(std::to_string(content::kGuidBossEffect)) != std::string::npos;
+        }
         if (!db->mods("effect", g, d.mods, error)) return std::nullopt;
         std::vector<content::EffectHitRow> hits;
         if (!db->effect_hits(g, hits, error)) return std::nullopt;

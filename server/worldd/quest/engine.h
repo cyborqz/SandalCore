@@ -182,6 +182,18 @@ public:
         return finish_event(true);
     }
 
+    /// The GM console's complete-objective: the objective `objective` of the character's active quest `quest` is done now, with its success actions and rewards (and the quest's, when
+    /// every required objective is done or this one completes the quest).  False when the log has no such active, unfinished objective.
+    bool succeed(int64_t quest, int64_t objective) {
+        QuestInstance* q = log_.find(quest);
+        if (!q || q->status != Status::Active) return false;
+        const int i = index_of(*q, objective);
+        if (i < 0) return false;
+        const content::QuestRow* d = book_.quest(q->record);
+        if (!d || static_cast<size_t>(i) >= d->objectives.size()) return false;
+        return finish_event(complete_objective(*q, static_cast<size_t>(i)));
+    }
+
     /// The character killed the creature `instance` (a population instance) of elite rank `elite`.
     bool kill(int64_t instance, int elite) {
         bool any = false;

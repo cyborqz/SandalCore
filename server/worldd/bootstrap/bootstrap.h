@@ -173,6 +173,46 @@ struct LootRemoval {
     repl::ItemInstance item;
 };
 
+/// One member of a party as ClientUpdateGroup draws it (social step 8): the name and the character GUID the frame shows, and the class.
+/// The frame's stats are the waiting state of the step (zero health and mana, level 1); step 9 fills them.
+struct GroupMember {
+    std::string             name;
+    std::array<uint32_t, 4> guid{};
+    int32_t                 primary_class = 0;
+};
+
+/// The whole group a ClientUpdateGroup carries: the group's GUID, its leader and its master looter, and the members in squad order.
+struct GroupClientData {
+    std::array<uint32_t, 4>  group_guid{};
+    std::array<uint32_t, 4>  leader_guid{};
+    std::array<uint32_t, 4>  master_looter_guid{};
+    std::vector<GroupMember> members;
+};
+
+/// One friend as the client's SocialComponent (UIntrepidSocialComponent) carries it: the friend's character GUID as four words, the name, level,
+/// class and subclass, the guild's name, the online flag (the session's: a session of this world has the character now), the last online time
+/// (Unix seconds; not stored yet, so 0) and whether the friend still counts the character as a friend (the one-way removal's flag).
+struct FriendWire {
+    std::array<uint32_t, 4> guid{};
+    std::string             name;
+    int32_t                 level = 0;
+    int32_t                 class_id = 0;
+    int32_t                 sub_archetype = 0;
+    std::string             guild_name;
+    bool                    online = false;
+    int64_t                 last_online = 0;
+    bool                    still_friend = true;
+};
+
+/// One pending friend request as the client's SocialComponent carries it: the sender's GUID and name, the recipient's GUID and the expiry
+/// (Unix seconds on the wire; the store keeps milliseconds and the session converts).
+struct FriendRequestWire {
+    std::array<uint32_t, 4> sender_guid{};
+    std::string             sender_name;
+    std::array<uint32_t, 4> recipient_guid{};
+    int64_t                 expires = 0;
+};
+
 /// The most ClientReceiveStorageEvent calls one chain carries (a Backpack's 70 Adds go out in five).
 inline constexpr size_t kMaxEventsPerChain = 16;
 
@@ -184,6 +224,11 @@ inline constexpr size_t kMaxCompletedFtues = 1024;
 
 /// The most names OwnerInfo.IgnoredCharacterNames holds, and the most IgnoredGuildNames holds: the longest list of ignored players (or guilds) a character may keep.
 inline constexpr size_t kMaxIgnoredNames = 50;
+
+/// Social, step 7: the most friends a character may have (the game data's MaximumFriendsListCount) and the most pending friend requests it may hold (the owner's pick).  The
+/// character service refuses a list over either; the session cuts a record that is over one, so that what it saves back is what the rules allow.
+inline constexpr size_t kMaxFriends = 100;
+inline constexpr size_t kMaxFriendRequests = 100;
 /// Missing systems, step 1: how many triggers that carried the PvP flag are remembered for their ability items.
 inline constexpr size_t kMaxTriggerFlags = 64;
 
@@ -242,6 +287,16 @@ public:
     repl::FastArrays* quest_arrays();
     /// What changed on the quest component since the last update, as one PlayerController chain, reliable; nullopt when nothing did (or before the join's last chain).
     std::optional<Send> quest_update();
+
+    /// Social, step 7: the character's friends and pending requests as the PlayerController's SocialComponent carries them, each list in its
+    /// order (oldest first).  Before the component is on the actor the lists are kept for the join; after a change they are brought to the
+    /// FastArrays and friends_update() sends exactly the items that differ.  False when the component's schema is missing or a value does not fit.
+    bool set_friends(const std::vector<FriendWire>& friends, const std::vector<FriendRequestWire>& requests);
+    /// What set_friends changed on the SocialComponent since the last update, as one PlayerController chain, reliable; nullopt when nothing did
+    /// (or before the join's last chain).
+    std::optional<Send> friends_update();
+    /// The answer to ServerCheckIfCharacterNameExistsRequest: ClientCheckIfCharacterNameExistsResponse(name, exists) on the PlayerController.
+    std::optional<Send> name_check_answer(const std::string& name, bool exists);
 
     // ---- replies ----------------------------------------------------------------------------------------------------
 
@@ -468,6 +523,14 @@ public:
     /// ClientUpdateGroup of an empty group, and the class's default action bar (ClientReceiveActionbarSlotPayload,
     /// as captured): the replies to ServerRequestClientLoad.
     std::optional<Send> empty_group();
+    /// ClientUpdateGroup(NewGroup): the group as the client's frame draws it.  A group of one member is the waiting state of an
+    /// invitation; the caller sends the two-member state when the invitation is accepted.
+    std::optional<Send> group_update(const GroupClientData& group);
+    /// ClientRequestJoinGroup(GroupGuid, InviterName, GroupType): the invitation the invitee's client answers with
+    /// ServerAcceptJoinGroup or ServerDeclineJoinGroup.
+    std::optional<Send> group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name);
+    /// ClientUpdateGroupSettings with the settings a party starts with (member shouts on, the loot methods of the party frame).
+    std::optional<Send> group_settings();
     std::optional<Send> default_action_bar();
     /// Plan D1, stage 2: the character's own action bar as one ClientReceiveActionbarSlotPayload on the PlayerController (reliable): the reply to
     /// ServerRequestClientLoad, and the clearing of a class's slots when the class changes.
@@ -680,6 +743,10 @@ public:
     /// out of Stamina). Reliable, on the pawn's channel, after whatever update removed the instance's items.
     std::optional<Send> end_ability(int32_t client_instance_id);
 
+    /// A3: ClientOnEffectResisted or ClientOnEffectImmune(EffectGuid, Target) on the ability component: the effect a mob refused, and the mob.
+    /// Reliable, on the pawn's channel; the client shows the combat-log line and no floating text.  nullopt when the call does not build.
+    std::optional<Send> effect_refused(int64_t effect_guid, const emit::FIntrepidNetworkGUID& target, bool immune);
+
     /// Plan D2, stage 2: ClientHitConfirmationsReliable on the PlayerController: the hits of `confirms`, each one on the pawn (HitComp, Instigator
     /// and, for an ability's or an effect's hit, Source are its guid) with the stat mods the client draws its floating numbers from. `at` is the
     /// impact location (the pawn's position, cm). The InstGuid of each hit is the bootstrap's own counter. nullopt for an empty list or a call that
@@ -766,6 +833,12 @@ private:
     /// Missing systems, step 0: puts the tutorial component on the PlayerController with the setup's list (once); false when it does not build.
     bool add_ftue_component();
     bool add_quest_component();
+    /// Social, step 7: puts the social component on the PlayerController after the quest and tutorial components (once) and brings its two arrays
+    /// to the lists set_friends holds.
+    bool add_social_component();
+    /// Social, step 7: brings a FastArrays' FriendsList and PendingFriendRequests to the lists set_friends holds (adds, changes and removes exactly
+    /// what differs, so a delta carries the changed items only).
+    bool sync_social(repl::FastArrays& arrays);
     std::optional<Send> update(Role role, const char* what, repl::Actor& actor, repl::ActorShadow& shadow);
     std::optional<Send> rpcs(Role role, const char* what, std::span<const repl::RpcRequest> calls);
     std::optional<Send> verbatim_block(Role role, const char* what, const char* hex, size_t bits);
@@ -811,6 +884,10 @@ private:
     bool                ftue_added_ = false;   // missing systems, step 0: the tutorial component is on the PlayerController
     bool                quest_added_ = false;  // quests, slice 1: the quest component is on the PlayerController
     repl::FastArrays    quest_arrays_;         // ... and, until it is, its two arrays
+    bool                          social_added_ = false;   // social, step 7: the social component is on the PlayerController
+    repl::FastArrays              social_arrays_;          // ... and, until it is, its two arrays
+    std::vector<FriendWire>        friend_wire_;           // the lists set_friends was given, for the join and the diff
+    std::vector<FriendRequestWire> friend_request_wire_;
     /// Nodes 1, stage 2: the GameState's node maps as they were before the last node_maps_update that built an update (it changes them before the chain exists); restore()
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;

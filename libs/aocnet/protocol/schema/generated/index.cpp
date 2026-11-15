@@ -63,6 +63,7 @@
 #include "protocol/schema/generated/UInteractableComponent.h"
 #include "protocol/schema/generated/UIntrepidFoliageStateComponent.h"
 #include "protocol/schema/generated/UIntrepidRepKeyComponent.h"
+#include "protocol/schema/generated/UIntrepidSocialComponent.h"
 #include "protocol/schema/generated/UItemStorageComponent.h"
 #include "protocol/schema/generated/ULevelingComponent.h"
 #include "protocol/schema/generated/ULootComponent.h"
@@ -139,6 +140,7 @@ constexpr Entry kByName[] = {
     {"UInteractableComponent", &kUInteractableComponent},
     {"UIntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
     {"UIntrepidRepKeyComponent", &kUIntrepidRepKeyComponent},
+    {"UIntrepidSocialComponent", &kUIntrepidSocialComponent},
     {"UItemStorageComponent", &kUItemStorageComponent},
     {"ULevelingComponent", &kULevelingComponent},
     {"ULootComponent", &kULootComponent},
@@ -180,6 +182,7 @@ constexpr Entry kComponents[] = {
     {"QuestConsumerComponent", &kUQuestConsumerComponent},
     {"QuestStorageComponent", &kUItemStorageComponent},
     {"RewardStorageComponent", &kURewardStorageComponent},
+    {"SocialComponent", &kUIntrepidSocialComponent},
     {"StatsComponent", &kUAoCStatsComponent},
     {"XPTracker", &kULevelingComponent},
 };
@@ -232,6 +235,7 @@ constexpr const ClassSchema* kAll[] = {
     &kUInteractableComponent,
     &kUIntrepidFoliageStateComponent,
     &kUIntrepidRepKeyComponent,
+    &kUIntrepidSocialComponent,
     &kUItemStorageComponent,
     &kULevelingComponent,
     &kULootComponent,

@@ -29,6 +29,12 @@
 //	                                                  (wand); a word that fits several lines is refused with the list. The client is told at once and the character is saved
 //	worldctl npc kill|respawn|reset|heal|despawn <id> a game master's action on one mob, named by its actor id (npc.go says what each does)
 //	worldctl npc move <id> <x> <y> [<z>]              stands a mob at a point (cm; without z, the ground under it); its leash is centred there, its spawn point stays
+//	worldctl commands [<command>]                     every command the admin API offers, with its group, description and fields; one command only when it is named
+//	worldctl run <command> <field>=<value> ...        runs any command from that list with its fields, checked by worldd against the list's own rules; one line back
+//	worldctl options [--filter <text>] [--limit N] [--offset N] <command> <field> [<field>=<value> ...]
+//	                                                  the values one field of one command can take, read from worldd's own data (the places, nodes, free plots of a node, stations, items,
+//	                                                  rarities, recipes, quests, objectives, mounts, weapon lines and mobs): one value and its label a line. The fields given as <field>=<value>
+//	                                                  are what is chosen so far, which a dependent list follows (node=Joeva for the plots); the flags search and page a long list
 //	worldctl watch [--area minx,miny,maxx,maxy] [--density [--cell 50000]] [--layers all|players,npcs,nodes,mounts,loot] [--seconds N]
 //	                                                  watches worldd's world stream (WorldStreamService, AOC_WORLD_STREAM_ADDR, default 127.0.0.1:50057): one line a second with the
 //	                                                  frames that came, the entities held and the cost of a publish (watch.go)
@@ -90,6 +96,9 @@ const usage = `usage: worldctl <command> [flags] [arguments]
   weapon-xp <character> <line> <level|xp=N>   set a weapon line's experience: a level (1 to 25) or an XP total (xp=12000); the line is its name or a word that ends it, such as wand (a test command)
   npc kill|respawn|reset|heal|despawn <id>   a game master's action on one mob, by its actor id
   npc move <id> <x> <y> [<z>]       stand a mob at a point (cm); its leash is centred there, its spawn point stays
+  commands [<command>]              every command the admin API offers, with its fields; one command when it is named
+  run <command> <field>=<value> ... run any command from that list; worldd checks every field against the list's rules
+  options [--filter t] [--limit n] [--offset n] <command> <field> [<field>=<value> ...]   the values a field of a command can take, from worldd's data (a drop-down's list)
   watch [--area minx,miny,maxx,maxy] [--density] [--layers l] [--seconds n]   watch worldd's world stream (its own address, AOC_WORLD_STREAM_ADDR): one line a second
 every command takes --addr and --token-file`
 
@@ -199,7 +208,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
-	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "tutorials", "weapon-xp", "npc":
+	case "players", "places", "tp", "speed", "give-money", "give-item", "place-station", "remove-station", "craft", "tutorials", "weapon-xp", "npc", "commands", "run", "options":
 	case "watch":
 		return runWatch(ctx, rest, out, errw)
 	case "help", "-h", "--help":
@@ -214,6 +223,7 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	cfg := config.Load()
 	addr := fs.String("addr", cfg.WorldAdminAddr, "worldd's admin API address")
 	tokenFile := fs.String("token-file", defaultTokenFile(cfg.ServiceTokenFile), "the service token file")
+	filter, limit, offset := fs.String("filter", "", "options: only the values whose label or value holds this text"), fs.Int("limit", 0, "options: the page size (0: the field's own)"), fs.Int("offset", 0, "options: how many matches to skip")
 	if err := fs.Parse(rest); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -222,7 +232,13 @@ func run(ctx context.Context, args []string, out, errw io.Writer) int {
 	}
 
 	// What the command line needs is checked before any connection is made.
-	call, err := parse(cmd, fs.Args())
+	var call call
+	var err error
+	if cmd == "options" {
+		call, err = parseOptions(fs.Args(), *filter, *limit, *offset)
+	} else {
+		call, err = parse(cmd, fs.Args())
+	}
 	if err != nil {
 		fmt.Fprintf(errw, "worldctl %s: %v\n", cmd, err)
 		return 2
@@ -298,6 +314,13 @@ func parse(cmd string, pos []string) (call, error) {
 		return parseTeleport(pos)
 	case "npc":
 		return parseNpc(pos)
+	case "commands":
+		if len(pos) > 1 {
+			return nil, usageError("takes no arguments, or one command to show its fields: worldctl commands [<command>]")
+		}
+		return doCommands(pos), nil
+	case "run":
+		return parseRun(pos)
 	case "craft":
 		if len(pos) >= 1 && (pos[0] == "teach" || pos[0] == "forget") {
 			if len(pos) != 3 {

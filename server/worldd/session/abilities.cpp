@@ -543,6 +543,16 @@ void AbilityRuntime::end_dodge_items(double t) {
     emit({std::move(c), std::nullopt, t, "the Dodge ends: its cooldown is over"});
 }
 
+bool AbilityRuntime::clear_cooldowns(double t) {
+    if (dodge_cooldown_until_ < 0 || t >= dodge_cooldown_until_) return false;
+    AbilityChange c;
+    if (rules_.dodge.triggers_cooldown && rules_.dodge.cooldown > 0) c.cooldowns_removed.push_back(rules_.dodge.guid);
+    dodge_cooldown_until_ = -1;
+    if (dodge_) dodge_->until = std::max(t, evasion_ ? evasion_->until : t);   // the ability item stays until the Evasion it belongs to is over
+    emit({std::move(c), std::nullopt, t, "the GM ended the Dodge's cooldown"});
+    return true;
+}
+
 // ---- Rest -----------------------------------------------------------------------------------------------------------
 // Cyb - C | O | A
 

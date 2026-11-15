@@ -40,6 +40,7 @@ bool ActorRegistry::add(WorldActor actor) {
     const uint64_t id = actor.id;
     actor.shape = repl::shape_of(actor.actor);   // (what it lost before it was added is lost to every connection alike)
     actor.shape_epoch = 0;
+    if (actor.kind == ActorKind::Npc) actor.npc.spawned_at = clock_;   // (a creature's tree begins to run when it is put into the world: a respawn is a new actor, so a new tree)
     const auto it = actors_.emplace(id, std::move(actor)).first;
     grid_add(it->second);
     if (it->second.awake_radius_cm > kWideCm) wide_.push_back(id);

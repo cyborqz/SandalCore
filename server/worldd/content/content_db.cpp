@@ -616,6 +616,13 @@ std::optional<ItemRecord> ContentDb::item(int64_t guid, std::string& error) cons
             if (sqlite3_step(q.get()) == SQLITE_ROW) rec.display_name = column_text(q.get(), 0);
         }
     }
+    {   // Quests, "the Quest bag" (contentc version 36's quest_item): the items whose record says Quest; a file without the table reads no item as one
+        Stmt q(db_, "SELECT 1 FROM quest_item WHERE item_guid = ?1");
+        if (q.ok()) {
+            sqlite3_bind_int64(q.get(), 1, guid);
+            rec.quest = sqlite3_step(q.get()) == SQLITE_ROW;
+        }
+    }
     read_item_rarity(db_, guid, rec);   // item rarities, step 0: its quality curve, RarityMin..RarityMax and MaxDurability row
     Stmt q(db_, kItemSlotsSql);
     if (!q.ok()) {
@@ -3606,7 +3613,7 @@ ContentDb::ChestTable ContentDb::chest_table(int64_t item, std::string& error) c
         Stmt q(db_, "SELECT table_guid FROM item_reward_selection WHERE item_guid = ?1");
         if (!q.ok()) {
             error = "content.db item_reward_selection query failed: " + db_message(db_) +
-                    " (the chest selectors are contentc version 42's: rebuild the file with this checkout's contentc)";
+                    " (the chest selectors are contentc version 43's: rebuild the file with this checkout's contentc)";
             return {};
         }
         sqlite3_bind_int64(q.get(), 1, item);
@@ -3644,6 +3651,48 @@ std::vector<int64_t> ContentDb::items_named(const std::string& name, std::string
     sqlite3_bind_text(q.get(), 1, name.c_str(), static_cast<int>(name.size()), SQLITE_TRANSIENT);
     int step;
     while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.push_back(sqlite3_column_int64(q.get(), 0));
+    if (step != SQLITE_DONE) error = "content.db item query failed: " + db_message(db_);
+    return out;
+}
+
+std::vector<ContentDb::ItemListRow> ContentDb::list_items(const std::string& filter, size_t limit, size_t offset, size_t& total, std::string& error) const {
+    std::vector<ItemListRow> out;
+    total = 0;
+    // the filter is a plain text: its LIKE wildcards are escaped
+    std::string pattern = "%";
+    for (const char c : filter) {
+        if (c == '%' || c == '_' || c == '\\') pattern.push_back('\\');
+        pattern.push_back(c);
+    }
+    pattern += "%";
+    // a file older than contentc version 16 has no display_name column: it is searched and shown by the record's name
+    bool with_display = true;
+    {
+        Stmt probe(db_, "SELECT display_name FROM item LIMIT 1");
+        with_display = probe.ok();
+    }
+    const char* where = with_display ? "(name LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\' OR CAST(guid AS TEXT) LIKE ?1 ESCAPE '\\')" : "(name LIKE ?1 ESCAPE '\\' OR CAST(guid AS TEXT) LIKE ?1 ESCAPE '\\')";
+    {
+        Stmt q(db_, (std::string("SELECT COUNT(*) FROM item WHERE ") + where).c_str());
+        if (!q.ok()) {
+            error = "content.db item query failed: " + db_message(db_);
+            return out;
+        }
+        sqlite3_bind_text(q.get(), 1, pattern.c_str(), static_cast<int>(pattern.size()), SQLITE_TRANSIENT);
+        if (sqlite3_step(q.get()) == SQLITE_ROW) total = static_cast<size_t>(sqlite3_column_int64(q.get(), 0));
+    }
+    const std::string select = with_display ? "SELECT guid, name, display_name FROM item WHERE " : "SELECT guid, name, '' FROM item WHERE ";
+    const std::string order = with_display ? " ORDER BY LOWER(CASE WHEN display_name IS NULL OR display_name = '' THEN name ELSE display_name END), guid LIMIT ?2 OFFSET ?3" : " ORDER BY LOWER(name), guid LIMIT ?2 OFFSET ?3";
+    Stmt q(db_, (select + where + order).c_str());
+    if (!q.ok()) {
+        error = "content.db item query failed: " + db_message(db_);
+        return out;
+    }
+    sqlite3_bind_text(q.get(), 1, pattern.c_str(), static_cast<int>(pattern.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_int64(q.get(), 2, static_cast<int64_t>(limit));
+    sqlite3_bind_int64(q.get(), 3, static_cast<int64_t>(offset));
+    int step;
+    while ((step = sqlite3_step(q.get())) == SQLITE_ROW) out.push_back({sqlite3_column_int64(q.get(), 0), column_text(q.get(), 1), column_text(q.get(), 2)});
     if (step != SQLITE_DONE) error = "content.db item query failed: " + db_message(db_);
     return out;
 }

@@ -7,7 +7,8 @@
 //
 //  A pet is an NPC combatant that stands in players_ through a PetPort, so the creatures' code sees a body on their tables that takes their hits; its AI does not run, its fight is its owner's order.
 //  What a pet holds is an effects::Book like any creature's, and what its hits leave goes through land_effect: a slow, a root, a stun, a trip and a sleep bind the creature, a silence is left off it and does not
-//  land, and a pet's knock-back, throw or pull moves nothing (the push works from a player).  The ability still plays, and its other hits and effects do.
+//  land.  A pet's hit is landed in its owner's name (land_for_player), so a knock-back, throw or pull on a pet's hit would move the creature as the owner's own does, worked out from
+//  the owner's place and not the pet's; no pet ability of the data carries one, and no test covers it.  The ability plays, and its other hits and effects do.
 //
 //  Modelled, no recording shows them: both ways a pet's ability can be asked for, a pet's cooldowns, Lunge's leap (the record's 600 cm), a Taunt that puts the creature on the Guardian, the reach of a
 //  melee and of a ranged attack, its regeneration, and that its numbers are its owner's.

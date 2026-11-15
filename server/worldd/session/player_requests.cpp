@@ -56,6 +56,8 @@ using bootstrap::Role;
 using protocol::emit::FIntrepidNetworkGUID;
 
 void PlayerSession::on_combat_settings(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
+    // the budget first: a request over it pays for nothing, not even for the copy of its values below
+    if (!within_budget(combat_budget_, "ServerUpdateAccountCombatSettings", now)) return;
     // every value the request carries goes back as the PlayerController's own: the client's options page and its combat code read that block,
     // and nothing but this update fills it (the paths are built here, so the lambda below owns them together with the values)
     std::vector<std::string> paths;
@@ -73,7 +75,7 @@ void PlayerSession::on_combat_settings(Connection& conn, const repl::ClientRpc& 
         spdlog::log(level_for(combat_empty_logged_), "[session] {}: the client's combat settings carry no value worldd can echo", name());
         return;
     }
-    if (!within_budget(combat_budget_, "ServerUpdateAccountCombatSettings", now) || !room_for(1)) return;
+    if (!room_for(1)) return;
     spdlog::log(level_for(combat_logged_), "[session] {}: the client's combat settings: echoing {} of the {} values", name(), paths.size(), total);
     queue("combat settings echo",
           [paths = std::move(paths), held = std::move(held)](bootstrap::PlayerBootstrap& pb) {
@@ -314,7 +316,7 @@ void PlayerSession::on_client_load(Connection& conn, Clock::time_point now) {
         queue("ClientReceiveStoragePayload", [k](bootstrap::PlayerBootstrap& pb) { return pb.storage_payload(k, Role::PlayerController); },
               conn);
     }
-    queue("ClientUpdateGroup", [](bootstrap::PlayerBootstrap& pb) { return pb.empty_group(); }, conn);
+    queue_party_or_empty(conn);
     if (book_) {
         // plan D1, stage 2: the bar the character arranged, or the default (the weapon bank and the class's skills), once, as retail's
         const repl::ActionbarPayload payload = bar_payload();
@@ -335,5 +337,9 @@ void PlayerSession::register_requests_rpcs(RpcTable& t) {
     t.add(RpcScope::Pawn, "ServerSetHoverTargetGuid", [](PlayerSession& s, const RpcContext& c) { s.on_set_hover_target(c.conn, c.rpc, c.now); });
     t.add(RpcScope::FtueComponent, "Server_RemoveLocaleFTUEs", [](PlayerSession& s, const RpcContext& c) { s.on_remove_ftues(c.conn, c.rpc, c.now); });
 }
+
+// The party (social step 8): its handlers, the group registry and the frame builder.  It is part of this file so that the feature
+// adds no source-list line of its own.
+#include "session/player_party.inc"
 
 }}  // namespace aoc::worldd

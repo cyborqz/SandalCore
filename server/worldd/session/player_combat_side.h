@@ -82,6 +82,9 @@ public:
     void hit_from_pet(int64_t hit_guid, int64_t ability, double) override {
         if (pet_hits.size() < 16) pet_hits.emplace_back(hit_guid, ability);
     }
+    void effect_refused(const combat::EffectRefusal& refusal, double) override {
+        if (effect_refusals.size() < 64) effect_refusals.push_back(refusal);
+    }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }
@@ -106,6 +109,7 @@ public:
     std::vector<combat::EffectHitNote> effect_notes;   // the hits of the effects this player put on creatures, to confirm to his client
     std::vector<combat::DealtHit>      dealt;          // the hits of his pet and his reactions on creatures, to confirm to his client
     std::vector<std::pair<int64_t, int64_t>> pet_hits; // the hits of his pet that land on him: (hit record, ability)
+    std::vector<combat::EffectRefusal> effect_refusals; // A3: the crowd controls of his (or his pet's) hits a mob refused, to tell his client
     bool                             wants_in_combat = false;
 
 private:

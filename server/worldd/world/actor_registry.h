@@ -107,6 +107,7 @@ struct NpcInfo {
     std::vector<int64_t> loot_tables;   // the RewardTables its asset and instance name (its Blueprint's come from the motion table)
     std::string respawn_rule;           // the instance's: Refill, AllDead, NoRespawn
     uint32_t    spawn_ref = 0;          // 1-based index of the spawn point's recipe (spawns::AreaReport::recipes): what a respawn is made from (0: none)
+    double      spawned_at = 0;         // the world's clock (seconds) when the actor was put into the world; the registry stamps it in `add`.  A creature's state tree begins to run then: the tree's own clock counts from it
     bool        is_gm_vendor = false;
     bool        ground_by_terrain = false;   // its height is not known (a PopulationArea's random point): the ground under it decides
     bool        ground_by_data = false;      // its height is known and right (a city node's people: retail's z to 1-168 cm) while the baked terrain under a bowl is not: the data's height
@@ -315,6 +316,10 @@ public:
 
     double cell_cm() const { return config_.cell_cm; }
 
+    /// The world's clock in seconds, kept by the NPC world's tick: `add` stamps each NPC it puts in with it (NpcInfo::spawned_at).  0 until the first tick, so the NPCs the world starts with count from its start.
+    void   set_clock(double seconds) { clock_ = seconds; }
+    double clock() const { return clock_; }
+
     /// While the players' view passes run on several threads (net/endpoint.cpp) the registry is read by all of them and written by none: every call that changes it (add, remove, modify, move,
     /// touch, set_interact_component, on_remove, off_remove) throws std::logic_error while it is frozen.  Set and cleared by the thread that starts and joins the passes.
     void freeze(bool on) { frozen_ = on; }
@@ -340,6 +345,7 @@ private:
     uint32_t                                      next_listener_ = 1;
     Observer*                                     observer_ = nullptr;
     bool                                          frozen_ = false;
+    double                                        clock_ = 0;
 };
 
 }  // namespace aoc::worldd::world

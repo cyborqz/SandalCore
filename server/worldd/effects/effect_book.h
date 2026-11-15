@@ -39,6 +39,10 @@ namespace aoc::worldd::effects {
 
 inline constexpr double kForever = std::numeric_limits<double>::infinity();
 
+/// The aspect the caster's accuracy is read by (the data's EffectAccuracy term).  Unset: the resolver did not say, and the effect's own tags decide; the
+/// target's evasion always reads the effect's own Element tag (EffectEvasion).
+enum class DisableAspect : uint8_t { Unset, Physical, Magical, None };
+
 /// One application of an effect with all its numbers worked out.
 struct Applied {
     const abilities::EffectDef*   def = nullptr;
@@ -48,6 +52,7 @@ struct Applied {
     std::vector<stats::EffectMod> mods;                  // one stack's stat mod values
     double                        extension = -1;        // seconds one more application adds under ExtendDuration; negative: the record gives none, the duration is refreshed in full
     double                        extended_max = 0;      // the most seconds an extended instance has left; 0: no limit
+    DisableAspect                 disable_aspect = DisableAspect::Unset;   // which of the two disable stats the resist roll reads
 };
 
 /// An effect on its holder.

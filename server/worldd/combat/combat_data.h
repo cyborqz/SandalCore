@@ -38,6 +38,12 @@ struct CombatStatIds {
     int64_t physical_crit_avoidance = 0, magical_crit_avoidance = 0;
     int64_t physical_accuracy = 0, magical_accuracy = 0;
     int64_t physical_evasion = 0, magical_evasion = 0;
+    /// The disable (crowd-control) stats the data's UniversalResistChance reads: the target's evasion by aspect and crowd-control tier, and the caster's accuracy.
+    int64_t physical_disable_evasion = 0, magical_disable_evasion = 0;
+    int64_t physical_disable_accuracy = 0, magical_disable_accuracy = 0;
+    int64_t disable_evasion_movement_t1 = 0, disable_evasion_movement_t2 = 0;
+    int64_t disable_evasion_hard_t1 = 0, disable_evasion_hard_t2 = 0;
+    int64_t disable_evasion_activation = 0;
     int64_t physical_block_chance = 0, magical_block_chance = 0;
     int64_t threat_generation = 0;
     int64_t health = 0, max_health = 0, mana = 0, max_mana = 0;

@@ -24,9 +24,9 @@
 #include "protocol/repl/block_reader.h"
 #include "protocol/repl/move_packed.h"
 #include "protocol/repl/replicator.h"
+#include "session/summoner_pets.h"
 #include "spawns/captured_spawns.h"
 #include "spawns/generic_npc.h"
-
 #include <bit>
 #include <chrono>
 #include <cmath>

@@ -10,3 +10,6 @@ private:
     void make_gather_pile(GatherPile& pile);
     /// The end of the session for gathering: the channel is cancelled and the piles that still wait for their time are made now.
     void end_gathering(const char* why);
+    /// The client's ServerInterruptChannel calls: a budget of their own, as large as the abilities' cancels have.  A client may send the interrupt every frame while its player
+    /// moves, and such a burst must not use up the budget of an ability's end or cancel.
+    RequestBudget interrupt_budget_{kCancelBurst, kCancelInterval};

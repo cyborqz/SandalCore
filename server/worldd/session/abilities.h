@@ -257,6 +257,8 @@ public:
     bool   regeneration_blocked(double now) const;
     double regen_pause_until() const { return pause_until_; }
     double dodge_cooldown_until() const { return dodge_cooldown_until_; }
+    /// Ends the Dodge's cooldown now (a GM's clear-cooldowns): the client's Cooldowns item goes with the next update. True when one was running.
+    bool clear_cooldowns(double now);
     bool   moving(double now) const { return moving_ && now - moving_at_ <= kMovingStale; }
     size_t refused() const { return refused_; }
     /// The ServerInstanceId of the running (or released, for a Rest) instance the client knows as `client_instance_id`.

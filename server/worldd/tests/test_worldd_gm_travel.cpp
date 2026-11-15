@@ -18,10 +18,12 @@
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
+#include "test_registry.h"
 #include "bootstrap/character_setup.h"
 #include "content/content_db.h"
 #include "items/inventory.h"
 #include "nav_fixture.h"
+#include "protocol/repl/rpc_fields.h"
 #include "session/gm_travel.h"
 #include "svc/world_admin.h"
 #include "town_platform_fixture.h"
@@ -194,10 +196,29 @@ struct Fixture {
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
 
-    Fixture() {
+    Fixture() { init({}); }
+    /// `extra_items` (guid, name): item rows the test world's content.db gets on top of the fixture's, for a command that names a real item the small db does not hold.
+    explicit Fixture(const std::vector<std::pair<int64_t, std::string>>& extra_items) { init(extra_items); }
+
+    void init(const std::vector<std::pair<int64_t, std::string>>& extra_items) {
         dir = cf::make_temp_dir("worldd_mounts_ride_");
         const fs::path db = dir / "content.db";
         if (!cf::make_db(db)) std::exit(2);
+        if (!extra_items.empty()) {
+            sqlite3* raw = nullptr;
+            if (sqlite3_open_v2(db.string().c_str(), &raw, SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
+                std::printf("  [FAIL] the content.db does not open to add the test's item rows\n");
+                std::exit(2);
+            }
+            for (const auto& [guid, name] : extra_items) {
+                const std::string sql = "INSERT OR IGNORE INTO item (guid, name, level, can_equip, occupies_all_equip_slots) VALUES (" + std::to_string(guid) + ", '" + name + "', 1, 0, 0)";
+                if (!cf::exec(raw, sql.c_str())) {
+                    sqlite3_close(raw);
+                    std::exit(2);
+                }
+            }
+            sqlite3_close(raw);
+        }
         std::string error;
         content = content::ContentDb::open(db.string(), error);
         if (!content) {
@@ -249,7 +270,8 @@ struct Harness {
     uint32_t pawn_ch = 0, pc_ch = 0;
     svc::Character record;
 
-    explicit Harness(svc::Character r, const std::function<void(PlayerWorld&)>& setup = nullptr) : record(std::move(r)) {
+    explicit Harness(svc::Character r, const std::function<void(PlayerWorld&)>& setup = nullptr, const std::vector<std::pair<int64_t, std::string>>& extra_items = {})
+        : fx(extra_items), record(std::move(r)) {
         fx.world->set_position_sink(&sink);
         if (setup) setup(*fx.world);
         s = PlayerSession::join(conn, *fx.world, record, identity(), world_time_at(t), error);
@@ -1743,6 +1765,9 @@ static void test_admin_queue() {
 }
 // C-Y-B and C O A
 
+#include "gm_admin_commands_tests.inc"
+#include "gm_options_tests.inc"
+
 int main() {
     spdlog::set_level(std::getenv("AOC_TEST_LOG") ? spdlog::level::debug : spdlog::level::off);
     std::string error;
@@ -1782,6 +1807,7 @@ int main() {
     test_client_text_in_the_log();
     test_admin_api();
     test_admin_queue();
+    g_fail += aoc_tests::run();   // every check registered in gm_admin_commands_tests.inc and gm_options_tests.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

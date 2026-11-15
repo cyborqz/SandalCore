@@ -78,12 +78,38 @@ struct Characters final : characterv1::CharacterService::Service {
     // Social step 6: SaveProgress's ignored names as the service received them, and what GetCharacter answers with
     bool got_replace_ignored = false;
     std::vector<std::string> got_ignored_characters, got_ignored_guilds, reply_ignored_characters, reply_ignored_guilds;
+    // Social step 7: SaveProgress's friends and pending requests as the service received them, and what GetCharacter answers with
+    bool got_replace_friends = false, got_replace_friend_requests = false;
+    std::vector<svc::Friend> got_friends, reply_friends;
+    std::vector<svc::FriendRequest> got_friend_requests, reply_friend_requests;
     int progress_calls = 0;
     int32_t got_level = 0;
     std::chrono::milliseconds save_delay{0};   // a service that hangs on SaveCharacterState
     bool with_position = true;
     std::string auth;
     SavedState saved;
+    // Social step 7: GetCharacterByName's answer and what the call carried
+    grpc::StatusCode name_code = grpc::StatusCode::OK;
+    std::string got_name;
+    int name_calls = 0;
+    grpc::Status GetCharacterByName(grpc::ServerContext* ctx, const characterv1::GetCharacterByNameRequest* req,
+                                    characterv1::GetCharacterByNameResponse* resp) override {
+        auth = auth_of(ctx);
+        ++name_calls;
+        got_name = req->name();
+        if (name_code != grpc::StatusCode::OK) return grpc::Status(name_code, "no");
+        auto* c = resp->mutable_character();
+        c->set_id("11112222333344445555666677778888");
+        c->set_account_id(3);
+        c->set_name("Dee");
+        c->set_race_id(1);
+        c->set_gender_id(0);
+        c->set_class_id(4);
+        c->set_archetype_id(17748);
+        c->set_class_name("Fighter");
+        c->set_level(9);
+        return grpc::Status::OK;
+    }
     grpc::Status SaveCharacterState(grpc::ServerContext* ctx, const characterv1::SaveCharacterStateRequest* req,
                                     characterv1::SaveCharacterStateResponse*) override {
         auth = auth_of(ctx);
@@ -108,6 +134,12 @@ struct Characters final : characterv1::CharacterService::Service {
         got_replace_ignored = req->replace_ignored_names();
         got_ignored_characters.assign(req->ignored_character_names().begin(), req->ignored_character_names().end());
         got_ignored_guilds.assign(req->ignored_guild_names().begin(), req->ignored_guild_names().end());
+        got_replace_friends = req->replace_friends();
+        got_friends.clear();
+        for (const auto& f : req->friends()) got_friends.push_back({f.guid(), f.name(), f.level(), f.class_id(), f.sub_archetype(), f.guild_name(), f.still_friend()});
+        got_replace_friend_requests = req->replace_friend_requests();
+        got_friend_requests.clear();
+        for (const auto& q : req->friend_requests()) got_friend_requests.push_back({q.sender_guid(), q.sender_name(), q.recipient_guid(), q.expires_at_ms()});
         return save_code == grpc::StatusCode::OK ? grpc::Status::OK : grpc::Status(save_code, "no");
     }
     grpc::Status GetCharacter(grpc::ServerContext* ctx, const characterv1::GetCharacterRequest* req,
@@ -128,6 +160,23 @@ struct Characters final : characterv1::CharacterService::Service {
         c->set_last_region("Riverlands");
         for (const std::string& n : reply_ignored_characters) c->add_ignored_character_names(n);
         for (const std::string& n : reply_ignored_guilds) c->add_ignored_guild_names(n);
+        for (const svc::Friend& f : reply_friends) {
+            auto* x = c->add_friends();
+            x->set_guid(f.guid);
+            x->set_name(f.name);
+            x->set_level(f.level);
+            x->set_class_id(f.class_id);
+            x->set_sub_archetype(f.sub_archetype);
+            x->set_guild_name(f.guild_name);
+            x->set_still_friend(f.still_friend);
+        }
+        for (const svc::FriendRequest& q : reply_friend_requests) {
+            auto* x = c->add_friend_requests();
+            x->set_sender_guid(q.sender_guid);
+            x->set_sender_name(q.sender_name);
+            x->set_recipient_guid(q.recipient_guid);
+            x->set_expires_at_ms(q.expires_at_ms);
+        }
         for (const Prof& p : reply_professions) {
             auto* x = c->add_professions();
             x->set_profession_guid(p.guid);
@@ -164,6 +213,86 @@ struct Mesh final : meshv1::MeshService::Service {
         return heartbeat_code == grpc::StatusCode::OK ? grpc::Status::OK : grpc::Status(heartbeat_code, "no");
     }
 };
+
+/// Social, step 7: GetCharacter's friends and pending requests reach the character record, SaveProgress sends both lists back with their replace flags, and the progress equality sees
+/// every new field (the saver skips a save only when nothing changed).
+static void test_friends_mapping(svc::GrpcServices& s, Characters& ch) {
+    std::printf("friends (social step 7)\n");
+    CHECK(s.get_character("x").character.friends.empty() && s.get_character("x").character.friend_requests.empty(),
+          "a character record with no friends and no pending requests maps to none");
+    const std::vector<svc::Friend> friends = {{"0123456789abcdef0123456789abcdef", "Brannoc", 25, 7, 2, "Sandal Makers", true},
+                                              {"fedcba9876543210fedcba9876543210", "Mirelle", 1, 0, 0, "", false}};
+    const std::vector<svc::FriendRequest> requests = {{"11111111111111111111111111111111", "Brannoc", "0123456789abcdef0123456789abcdef", 1772209600000},
+                                                      {"22222222222222222222222222222222", "Mirelle", "0123456789abcdef0123456789abcdef", 1772209601000}};
+    ch.reply_friends = friends;
+    ch.reply_friend_requests = requests;
+    {
+        const auto fr = s.get_character("x");
+        CHECK(fr.status == svc::CallStatus::Ok && fr.character.friends == friends && fr.character.friend_requests == requests,
+              "GetCharacter maps the friends and the pending requests, each list in order and with every field");
+    }
+    {
+        svc::Progress p;
+        p.level = 3;
+        p.replace_friends = true;
+        p.friends = friends;
+        p.replace_friend_requests = true;
+        p.friend_requests = requests;
+        CHECK(s.save_progress("x", p) == svc::CallStatus::Ok && ch.got_replace_friends && ch.got_friends == friends && ch.got_replace_friend_requests && ch.got_friend_requests == requests,
+              "SaveProgress sends replace_friends and replace_friend_requests with both lists, each in order and with every field");
+        svc::Progress none;
+        none.level = 3;
+        CHECK(s.save_progress("x", none) == svc::CallStatus::Ok && !ch.got_replace_friends && ch.got_friends.empty() && !ch.got_replace_friend_requests && ch.got_friend_requests.empty(),
+              "a save that does not replace the lists sends neither flag nor an entry");
+        svc::Progress emptied;
+        emptied.replace_friends = true;
+        emptied.replace_friend_requests = true;
+        CHECK(s.save_progress("x", emptied) == svc::CallStatus::Ok && ch.got_replace_friends && ch.got_friends.empty() && ch.got_replace_friend_requests && ch.got_friend_requests.empty(),
+              "an empty replacement sends both flags alone");
+        svc::Progress a = p, b = p;
+        CHECK(a == b, "equal progress with equal friends and pending requests");
+        b.friends[0].still_friend = false;
+        CHECK(!(a == b), "progress that differs in a friend's still-friend flag is not equal");
+        b = p;
+        b.friends[1].level += 1;
+        CHECK(!(a == b), "progress that differs in a friend's level is not equal");
+        b = p;
+        b.friend_requests[1].expires_at_ms += 1000;
+        CHECK(!(a == b), "progress that differs in a request's expiry is not equal");
+        b = p;
+        b.replace_friend_requests = false;
+        CHECK(!(a == b), "progress that differs in replace_friend_requests is not equal");
+    }
+    ch.reply_friends.clear();
+    ch.reply_friend_requests.clear();
+    ch.progress_calls = 0;
+}
+
+/// Social, step 7: the real by-name call (GrpcServices::get_character_by_name) against the character fake: the fields the friend request and the name check
+/// need, and the two statuses the call can meet.  Its cost is measured beside it so the check on the network thread can be judged.
+static void test_name_lookup(svc::GrpcServices& s, Characters& ch) {
+    std::printf("name lookup (social step 7)\n");
+    const auto found = s.get_character_by_name("Dee");
+    CHECK(found.status == svc::CallStatus::Ok && found.character.id == "11112222333344445555666677778888" && found.character.name == "Dee" &&
+              found.character.level == 9 && found.character.class_id == 4,
+          "get_character_by_name maps the id, name, level and class of the character it finds");
+    CHECK(ch.got_name == "Dee", "the call carries the name the client sent");
+    ch.name_code = grpc::StatusCode::NOT_FOUND;
+    CHECK(s.get_character_by_name("Nobody_xyz").status == svc::CallStatus::NotFound, "NotFound -> NotFound");
+    ch.name_code = grpc::StatusCode::UNAVAILABLE;
+    CHECK(s.get_character_by_name("Dee").status == svc::CallStatus::Unavailable, "Unavailable -> Unavailable (worth retrying)");
+    ch.name_code = grpc::StatusCode::OK;
+    // the cost of one call: how many a 33.3 ms tick (30 a second) can carry
+    constexpr int kCalls = 200;
+    const auto start = std::chrono::steady_clock::now();
+    svc::CallStatus last = svc::CallStatus::Failed;
+    for (int i = 0; i < kCalls; ++i) last = s.get_character_by_name("Dee").status;
+    const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / kCalls;
+    const double per_tick = (1000.0 / 30.0) * 1000.0 / us;
+    std::printf("    one by-name call: %.1f us (loopback, in-process service); a 33.3 ms tick carries %.0f of them\n", us, per_tick);
+    CHECK(last == svc::CallStatus::Ok && us > 0.0 && us < (1000.0 / 30.0) * 1000.0, "one by-name call costs less than one tick");
+    ch.name_calls = 0;
+}
 
 int main() {
     Gateway gw;
@@ -283,6 +412,9 @@ int main() {
     ch.reply_ignored_characters.clear();
     ch.reply_ignored_guilds.clear();
     ch.progress_calls = 0;
+
+    test_friends_mapping(s, ch);
+    test_name_lookup(s, ch);
 
     std::printf("save_position (plan A6)\n");
     ch.auth.clear();

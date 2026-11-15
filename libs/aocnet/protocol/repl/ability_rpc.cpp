@@ -137,4 +137,28 @@ std::optional<Emission> client_end_ability(const Actor& pawn, const Subobject& a
     return call_rpc(pawn, &ability, "ClientEndAbility", params, {}, acks);
 }
 
+namespace {
+
+/// The two client calls of an effect a mob refused: the same two parameters, EffectGuid then Target, as the schema's header has them.
+std::optional<Emission> client_on_effect(const char* name, const Actor& pawn, const Subobject& ability, int64_t effect_guid,
+                                         const emit::FIntrepidNetworkGUID& target, const ExportAcks& acks) {
+    const schema::RpcSchema* rpc = ability.obj.schema ? ability.obj.schema->rpc(name) : nullptr;
+    if (!rpc) return std::nullopt;
+    RpcParams params;
+    if (!set_rpc_param(*rpc, params, "EffectGuid", Value::i64(effect_guid)) || !set_rpc_param(*rpc, params, "Target", Value(target))) return std::nullopt;
+    return call_rpc(pawn, &ability, name, params, {}, acks);
+}
+
+}  // namespace
+
+std::optional<Emission> client_on_effect_resisted(const Actor& pawn, const Subobject& ability, int64_t effect_guid,
+                                                  const emit::FIntrepidNetworkGUID& target, const ExportAcks& acks) {
+    return client_on_effect("ClientOnEffectResisted", pawn, ability, effect_guid, target, acks);
+}
+
+std::optional<Emission> client_on_effect_immune(const Actor& pawn, const Subobject& ability, int64_t effect_guid,
+                                                const emit::FIntrepidNetworkGUID& target, const ExportAcks& acks) {
+    return client_on_effect("ClientOnEffectImmune", pawn, ability, effect_guid, target, acks);
+}
+
 }}}  // namespace aoc::protocol::repl

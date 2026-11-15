@@ -8,7 +8,7 @@
 //    npc_abilities.tsv   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate  arrival
 //                        the ability records the creature Blueprint's state tree uses, the seconds it waits before it uses one again, whether it stands
 //                        still for it, and the conditions the tree puts on using it (the tree is tried in `order`; -1: no such condition); `fight` says the task is one of the
-//                        attacks of the creature's fight, `conds` the other conditions (a roll, its health, the seconds into the fight, line of sight ...) and `why` what the table
+//                        attacks of the creature's fight, `conds` the other conditions (a roll, its health, the seconds into the fight or the seconds its tree has run, line of sight ...) and `why` what the table
 //                        could not say (`unknown`) or "off" for a task a parameter of the tree switches off for the creature, and `starts` the other cooldowns the creature starts
 //                        when it takes the task (a fixed "name=seconds", or "name=low~high" when the tree rolls the seconds anew each time: the tree's timers that hold a charge once their seconds have
 //                        passed are cooldowns named "acc.<identifier>"), `rotate` ("speed:duration") the turning towards its target that runs with the ability, and `arrival` how near its target the
@@ -48,11 +48,11 @@ namespace aoc::worldd::combat {
 
 /// One condition of a task, as the creature table says it (tools/npcabilities writes these as text; see its Conditions.cs for the grammar).
 struct CondAtom {
-    enum class Kind : uint8_t { True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, FightRoll, Sees, NotSees };
+    enum class Kind : uint8_t { True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, FightRoll, TreeTime, Sees, NotSees };
     enum Op : int { Eq, Ne, Lt, Le, Gt, Ge };
     Kind        kind = Kind::True;
     double      value = 0;   // the distance (cm), angle (degrees), probability, health fraction or seconds; FightRoll: the number it is when the chance does not come up
-    int         op = Eq;     // FightTime and FightRoll: how the seconds compare with `value` / the creature's number
+    int         op = Eq;     // FightTime, FightRoll and TreeTime: how the seconds compare with `value` / the creature's number
     std::string name;        // Cooldown: the cooldown's name; FightRoll: the tree's variable
     double      chance = 0, low = 0, high = 0;   // FightRoll: with this chance the number is a fresh one between `low` and `high`
 };
@@ -75,18 +75,19 @@ struct CondContext {
     std::function<bool()> sees;         // whether the creature sees its target (asked only by a condition that needs it)
     double health_fraction = 1;         // the creature's own health over its maximum
     double fight_seconds = 0;           // since its fight began
+    double tree_seconds = 0;            // since its state tree began to run, that is since the creature has been in the world (the fight's clock is the one above)
     std::function<bool(const std::string&)> cooldown_over;
     std::function<double()> roll;       // a fresh number in [0, 1)
     /// The number a FightRoll condition compares the fight's seconds with: rolled the first time it is asked in a fight and the same for the rest of that fight.  Null: the condition's own `value`.
     std::function<double(const CondAtom&)> fight_roll;
-    /// Asked only about the fight clock and the creature's health (hp, fc, fcr): every other condition counts as holding.  Tells whether those timers alone keep a task shut.
+    /// Asked only about the fight clock, the tree's clock and the creature's health (hp, fc, fcr, tt): every other condition counts as holding.  Tells whether those timers alone keep a task shut.
     bool timers_only = false;
 };
 
-/// Whether a condition is about the fight clock or the creature's health, which the course of a fight changes (not about where the target stands, a cooldown, a roll or whether the creature sees).
+/// Whether a condition is about a clock or the creature's health, which the course of a fight changes (not about where the target stands, a cooldown, a roll or whether the creature sees).
 inline bool is_timer_atom(CondAtom::Kind kind) {
     using K = CondAtom::Kind;
-    return kind == K::HealthUnder || kind == K::HealthNotUnder || kind == K::FightTime || kind == K::FightRoll;
+    return kind == K::HealthUnder || kind == K::HealthNotUnder || kind == K::FightTime || kind == K::FightRoll || kind == K::TreeTime;
 }
 
 /// Whether `x` compares as `op` with `y`.
@@ -120,6 +121,7 @@ inline bool eval_atom(const CondAtom& a, const CondContext& c) {
         case K::HealthNotUnder: return c.preview || !(c.health_fraction < a.value);
         case K::FightTime: return c.preview || compare_values(a.op, c.fight_seconds, a.value);
         case K::FightRoll: return c.preview || compare_values(a.op, c.fight_seconds, c.fight_roll ? c.fight_roll(a) : a.value);
+        case K::TreeTime: return c.preview || compare_values(a.op, c.tree_seconds, a.value);
         case K::Sees: return !c.has_target || !c.sees || c.sees();
         case K::NotSees: return !c.has_target || (c.sees && !c.sees());
     }
@@ -570,15 +572,16 @@ private:
                         if (args.size() != 1) return false;
                         t.atom.kind = K::Cooldown;
                         t.atom.name = percent_decoded(args[0]);
-                    } else if (name == "fc" || name == "fcr") {
-                        // fc(OP,V): the fight's seconds against V.  fcr(OP,BASE,CHANCE,LOW,HIGH,NAME): against the creature's number for the tree's variable NAME, rolled once per fight: BASE, or with the chance a fresh one in [LOW, HIGH]
+                    } else if (name == "fc" || name == "fcr" || name == "tt") {
+                        // fc(OP,V): the fight's seconds against V.  fcr(OP,BASE,CHANCE,LOW,HIGH,NAME): against the creature's number for the tree's variable NAME, rolled once per fight: BASE, or with the chance a fresh one in [LOW, HIGH].
+                        // tt(OP,V): the seconds its state tree has run (since the creature has been in the world) against V.
                         const bool rolled = name == "fcr";
                         if (args.size() != (rolled ? 6u : 2u) || !number(args[1], t.atom.value)) return false;
                         if (rolled && (!number(args[2], t.atom.chance) || !number(args[3], t.atom.low) || !number(args[4], t.atom.high) || t.atom.chance < 0 || t.atom.chance > 1 || t.atom.low > t.atom.high || args[5].empty())) return false;
                         static const std::map<std::string, int> ops = {{"eq", CondAtom::Eq}, {"ne", CondAtom::Ne}, {"lt", CondAtom::Lt}, {"le", CondAtom::Le}, {"gt", CondAtom::Gt}, {"ge", CondAtom::Ge}};
                         const auto it = ops.find(args[0]);
                         if (it == ops.end()) return false;
-                        t.atom.kind = rolled ? K::FightRoll : K::FightTime;
+                        t.atom.kind = rolled ? K::FightRoll : name == "tt" ? K::TreeTime : K::FightTime;
                         t.atom.op = it->second;
                         if (rolled) t.atom.name = percent_decoded(args[5]);
                     } else {

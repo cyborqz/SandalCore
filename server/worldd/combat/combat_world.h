@@ -113,6 +113,13 @@ struct DealtHit {
     std::vector<double>      effective;
 };
 
+/// A crowd control the world refused for a player's hit: the effect, the creature it was meant for, and whether the creature was immune or the roll resisted it.
+struct EffectRefusal {
+    int64_t                          effect_guid = 0;
+    protocol::emit::FIntrepidNetworkGUID target;
+    bool                             immune = false;
+};
+
 /// What the world asks of a player's session.
 class PlayerPort {
 public:
@@ -139,6 +146,9 @@ public:
     virtual void hit_dealt(const DealtHit& /*hit*/, double /*now*/) {}
     /// A hit of the player's pet or a reaction lands on the player (a heal, a cleanse).
     virtual void hit_from_pet(int64_t /*hit_guid*/, int64_t /*ability*/, double /*now*/) {}
+    /// A crowd control of this player's hit (or of his pet's) was resisted or was immune on a creature: the session tells his client (ClientOnEffectResisted /
+    /// ClientOnEffectImmune).  The default does nothing (a port that has no client).
+    virtual void effect_refused(const EffectRefusal& /*refusal*/, double /*now*/) {}
 };
 
 /// What a player asks about a target before it acts on it.
@@ -569,6 +579,19 @@ private:
     uint64_t pet_of_owner(uint64_t owner) const;
     double flight_seconds(const content::AbilityHitRow& row, const Vec3& from, const Vec3& to) const;
     // ---- the effects a creature holds
+    /// Whether the effect is one the data's resist formula rolls: it carries the data's CrowdControlConstraint tag.  A knock-back, a launch, a pull and a debuff
+    /// that is not a crowd control carry none, so they are never resisted.
+    static bool takes_resist_roll(const abilities::EffectDef& def);
+    /// The data's UniversalResistChance for `def` on `n`: the target's EffectEvasion (the effect's own Element tag's Physical or Magical DisableEvasion and
+    /// the tier stat the crowd control names) less the caster's EffectAccuracy (its Physical or Magical DisableAccuracy, by the effect's tag or the applying
+    /// hit's scaling override; a pet's own when `via_pet` names it), clamped at 0 and rolled in steps of 1/1000.  False when the effect is not rolled, the
+    /// chance is under the first step, or the roll fails; true when this application is resisted.
+    bool  effect_resisted(const Npc& n, const abilities::EffectDef& def, const effects::Applied& applied, uint64_t instigator, uint64_t via_pet);
+    /// Whether the creature holds one of the two immunity buffs the data gives a family (Rafflesia's Steadfast Root, Shardmaw's Void Rage): tagged crowd control
+    /// is immune while it lasts.
+    bool  immunity_buff_holds(const Npc& n) const;
+    /// Tells the caster's client that the effect was refused (`immune` or resisted), with the creature it was meant for; a pet's hit is its Summoner's line.
+    void  notify_effect_refused(const Npc& n, const abilities::EffectDef& def, uint64_t instigator, bool immune, double now);
     void  land_effect(Npc& n, const effects::Applied& applied, uint64_t instigator, double now, uint64_t via_pet = 0);
     /// A hit that took Health from the creature breaks the effects that break at the first damage (a sleep: the data's InstantBreak), but for the hit records the effect leaves out (a lullaby's hit, a
     /// poison's tick), and adds what it took to the effects that break once the damage adds up to a share of the instigator's maximum Health (the dance's tenth).  Called by land_hit before the creature's

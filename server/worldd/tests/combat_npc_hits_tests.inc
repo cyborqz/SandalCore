@@ -135,3 +135,38 @@ void test_combat_flag(Fixture& f) {
 }
 
 AOC_REGISTER_TEST(test_combat_flag);
+
+// A creature's projectile that lands on a player's mount is confirmed as one that lands on the player himself is: the projectile's record is the source, no source actor, and the
+// hit is predicted on the autonomous and on the simulated side.  A creature's own hit (a bite) on the mount keeps the creature as its source actor.
+void test_creature_projectile_on_a_mount(Fixture& f) {
+    (void)f;
+    std::printf("a creature's projectile hit on a player's mount is confirmed like one on the player: no source actor, predicted on both sides\n");
+    Rig rig(4, 20, {});
+    if (!rig.ok()) return;
+    aoc::protocol::emit::FIntrepidNetworkGUID mount, cylinder;
+    mount.ObjectId = 9001;
+    cylinder.ObjectId = 9002;
+    const auto confirmed = [&](int64_t source_type, double at) -> std::optional<bootstrap::HitConfirm> {
+        combat::IncomingHit in;
+        in.instigator = 300;
+        in.hit_guid = 109234434627193;
+        in.source_type = source_type;
+        in.source_guid = 109184795825810;
+        in.mods.push_back({109234434627194, content::kGuidHealth, -50.0});
+        rig.pipe->confirm_hit_on(in, at, mount, cylinder, 50.0, false);
+        std::optional<bootstrap::HitConfirm> out;
+        for (const Seen& s : rig.take()) {
+            for (const bootstrap::HitConfirm& c : s.confirmations) out = c;
+        }
+        return out;
+    };
+    const auto rock = confirmed(content::kSourceTypeProjectile, 2.0);
+    CHECK(rock && rock->targets.size() == 1 && rock->targets[0].component == mount, "(the hit on the mount is confirmed, with the mount as its target)");
+    CHECK(rock && !rock->source_is_actor, "a projectile's hit on the mount names no source actor: its source is the projectile's record");
+    CHECK(rock && rock->predicted_autonomous && rock->predicted_simulated, "and it is predicted on the autonomous and on the simulated side");
+    const auto bite = confirmed(content::kSourceTypeAbility, 2.1);
+    CHECK(bite && bite->source_is_actor && bite->predicted_autonomous && !bite->predicted_simulated, "a creature's own hit on the mount keeps the creature as its source actor, as before");
+    CHECK(rig.pawn.broken.empty(), "(the pawn took every change)");
+}
+
+AOC_REGISTER_TEST(test_creature_projectile_on_a_mount);

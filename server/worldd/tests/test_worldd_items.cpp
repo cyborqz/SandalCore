@@ -703,6 +703,65 @@ static void test_stack_consume() {
     CHECK(inv.at(Bag, 1) && inv.at(Bag, 1)->quantity == 11 && inv.at(Bag, 1)->instance_guid == guid_n(1), "the stack keeps 11 and its guid");
 }
 
+// ---- the Quest bag --------------------------------------------------------------------------------------------------------------
+// The quest bag: an item whose record says Quest is kept in the Quest storage; what a character already carries in the item bag stays there, and is counted and taken as before.
+
+static void test_quest_bag() {
+    std::printf("quest items go to the Quest bag\n");
+    constexpr int64_t kNote = 6064634700000000001ll, kPamphlet = 6064634700000000002ll, kWornCrest = 6064634700000000003ll;
+    const ItemContainer QuestBag = ItemContainer::Quest;
+    FakeCatalog catalog = fixture_catalog();
+    catalog.add(kNote, {}, false, 100);
+    catalog.m[kNote].quest = true;
+    catalog.add(kPamphlet, {}, false, 1);
+    catalog.m[kPamphlet].quest = true;
+    catalog.add(kWornCrest, {10, 11}, false, 1);   // a quest item that is worn: the rules of wearing only look in the item bag
+    catalog.m[kWornCrest].quest = true;
+
+    Inv inv = inventory_of({make_item(Bag, 0, fi::kPotion, 1, 2)});
+    auto r = inv.grant_what_fits({make_item(Bag, 0, kPamphlet, 2)}, catalog);
+    CHECK(r.outcome.ok && r.rest.empty() && r.outcome.events.size() == 1 && same_event(r.outcome.events[0], Add, QuestBag, 0, kPamphlet, true),
+          "a quest item is granted into slot 0 of the Quest bag: one Add that names the Quest storage");
+    CHECK(inv.at(QuestBag, 0) && inv.at(QuestBag, 0)->item_record_id == kPamphlet && inv.count(Bag) == 1 && inv.count(QuestBag) == 1, "...the item bag holds what it held and nothing more");
+
+    // a stack of a quest item tops up and starts new stacks in the Quest bag, as the item bag does
+    r = inv.grant_what_fits({make_item(Bag, 0, kNote, 3, 40)}, catalog);
+    CHECK(r.outcome.ok && r.rest.empty() && r.outcome.events.size() == 1 && same_event(r.outcome.events[0], Add, QuestBag, 1, kNote, true) && r.outcome.events[0].item.quantity == 40,
+          "40 notes start a stack in slot 1 of the Quest bag (slot 0 holds the pamphlet)");
+    r = inv.grant_what_fits({make_item(Bag, 0, kNote, 4, 70)}, catalog);
+    CHECK(r.outcome.ok && r.outcome.events.size() == 2 && same_event(r.outcome.events[0], Add, QuestBag, 1, kNote, true) && r.outcome.events[0].item.quantity == 60 &&
+              same_event(r.outcome.events[1], Add, QuestBag, 2, kNote, true) && r.outcome.events[1].item.quantity == 10,
+          "70 more notes: one Add of 60 tops up the stack (max 100) and 10 start a new stack in slot 2");
+    CHECK(inv.at(QuestBag, 1) && inv.at(QuestBag, 1)->quantity == 100 && inv.at(QuestBag, 2) && inv.at(QuestBag, 2)->quantity == 10, "the stacks are 100 and 10");
+
+    // an item that is not a quest item, and a quest item that is worn, stay in the item bag
+    r = inv.grant_what_fits({make_item(Bag, 0, fi::kRingA, 5), make_item(Bag, 0, kWornCrest, 6)}, catalog);
+    CHECK(r.outcome.ok && r.outcome.events.size() == 2 && same_event(r.outcome.events[0], Add, Bag, 1, fi::kRingA, true) && same_event(r.outcome.events[1], Add, Bag, 2, kWornCrest, true),
+          "a ring and a worn quest item take the next slots of the item bag");
+
+    // an old character: quest items already in the item bag stay there; they are counted and taken with the Quest bag's, the item bag first
+    Inv old = inventory_of({make_item(Bag, 5, kNote, 1, 3), make_item(QuestBag, 0, kNote, 2, 4)});
+    CHECK(old.count_of(kNote) == 7, "count_of counts the item bag's 3 and the Quest bag's 4");
+    const auto took = old.take(kNote, 5);
+    CHECK(took.ok && took.events.size() == 2 && same_event(took.events[0], Remove, Bag, 5, kNote, false) && took.events[0].count == 0 &&
+              same_event(took.events[1], Remove, QuestBag, 0, kNote, false) && took.events[1].count == 2,
+          "taking 5 removes the item bag's stack whole and 2 of the Quest bag's stack");
+    CHECK(!old.at(Bag, 5) && old.at(QuestBag, 0) && old.at(QuestBag, 0)->quantity == 2 && old.count_of(kNote) == 2, "2 notes are left, in the Quest bag");
+    const Inv before_all = old;
+    const auto too_many = old.take(kNote, 3);
+    CHECK(!too_many.ok && too_many.events.empty() && unchanged_by(before_all, old), "taking more than the bags hold is refused and changes nothing");
+
+    // a full Quest bag: what does not fit comes back as the rest, and grant refuses (nothing is placed in the item bag instead)
+    std::vector<svc::InventoryItem> full;
+    for (int s = 0; s < 100; ++s) full.push_back(make_item(QuestBag, s, kPamphlet, 100 + static_cast<uint32_t>(s)));
+    Inv packed = inventory_of(full);
+    r = packed.grant_what_fits({make_item(Bag, 0, kPamphlet, 300)}, catalog);
+    CHECK(r.outcome.ok && r.outcome.events.empty() && r.rest.size() == 1 && packed.count(Bag) == 0, "a full Quest bag places nothing and returns the item as the rest");
+    const Inv before_full = packed;
+    const auto refused = packed.grant({make_item(Bag, 0, kPamphlet, 301)}, catalog);
+    CHECK(!refused.ok && !refused.refusal.empty() && unchanged_by(before_full, packed), "grant is refused and changes nothing");
+}
+
 // ---- the visible gear ----------------------------------------------------------------------------------------------------------
 
 static void test_visible_gear() {
@@ -1595,6 +1654,15 @@ static void test_content_items() {
     const fs::path dir = cf::make_temp_dir("worldd_items_db_");
     const fs::path path = dir / "content.db";
     if (!cf::make_db(path)) std::exit(2);
+    const fs::path no_quest_path = dir / "no_quest_item.db";
+    if (!cf::make_db(no_quest_path)) std::exit(2);   // (a file as it was before contentc 36: no quest_item table)
+    {   // Quests, "the Quest bag": contentc's quest_item table names the items whose record says Quest
+        sqlite3* raw = nullptr;
+        const std::string sql = "CREATE TABLE quest_item (item_guid INTEGER PRIMARY KEY, major INTEGER NOT NULL); INSERT INTO quest_item VALUES (" + std::to_string(fi::kRingB) + ", 0)";
+        const bool made = sqlite3_open(path.string().c_str(), &raw) == SQLITE_OK && sqlite3_exec(raw, sql.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK;
+        sqlite3_close(raw);
+        if (!made) std::exit(2);
+    }
     std::string error;
     auto db = content::ContentDb::open(path.string(), error);
     CHECK(db.has_value(), "the fixture opens, with the item tables");
@@ -1611,6 +1679,19 @@ static void test_content_items() {
         CHECK(book && book->occupies_all_equip_slots && book->equip_slots == std::vector<uint8_t>({17, 18}), "a Book is two-handed");
         const auto potion = db->item(fi::kPotion, error);
         CHECK(potion && potion->equip_slots.empty(), "a potion lists no slot");
+        const auto marked = db->item(fi::kRingB, error);
+        CHECK(marked && marked->quest && chest && !chest->quest && potion && !potion->quest, "an item the quest_item table names reads as a quest item, any other does not");
+        {
+            items::ContentItemCatalog quest_catalog(*db);
+            const auto qi = quest_catalog.info(fi::kRingB);
+            CHECK(qi && qi->quest && !quest_catalog.info(fi::kChest)->quest, "ContentItemCatalog carries the flag into the rules' facts");
+        }
+        {
+            std::string e3;
+            auto older = content::ContentDb::open(no_quest_path.string(), e3);
+            const auto o = older ? older->item(fi::kRingB, e3) : std::nullopt;
+            CHECK(older && o && !o->quest && e3.empty(), "a file with no quest_item table opens and reads no item as a quest item");
+        }
         error = "stale";
         const auto none = db->item(1234567, error);
         CHECK(!none && error.empty(), "an item the file does not know is no item and no error");
@@ -1647,6 +1728,8 @@ static void test_content_items() {
     CHECK(book && book->occupies_all_equip_slots && book->equip_slots == std::vector<uint8_t>({17, 18}), "the real Book: two-handed, Ranged and RangedOffHand");
     const auto bag = rdb->item(6064629382556287782ll, e2);
     CHECK(bag && bag->equip_slots == std::vector<uint8_t>({23, 24, 25}), "the real resource bag: the three bag slots");
+    const auto feather = rdb->item(108803826669176ll, e2);   // MA_0002_SP_StoneBeakFeather: InventoryFilterType Quest
+    CHECK(feather && feather->quest && chest && !chest->quest && book && !book->quest && bag && !bag->quest, "the real file: a quest item reads as one, the chest, the book and the bag do not");
     // the Bard's kit through the rules: each piece is worn where the record says
     Inv kit = inventory_of({make_item(Bag, 0, 6064630214426886486ll, 1), make_item(Bag, 1, 6064631131688402948ll, 2), make_item(Bag, 2, 6064631670974054529ll, 3),
                             make_item(Bag, 3, 6064630695486029824ll, 4)});
@@ -2116,6 +2199,7 @@ int main() {
     test_stack_split();
     test_stack_pickups();
     test_stack_consume();
+    test_quest_bag();
     test_visible_gear();
     test_retail_equips();
     test_captured_corpora();

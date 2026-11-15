@@ -176,6 +176,10 @@ struct EffectRow {
     int64_t     extension_expr = 0;
 };
 
+/// The game's Boss effect record: an effect whose requirement asks GetEffectCount(GetTarget(), Boss) == 0 is one a boss is immune to.  The actor marker is the
+/// Blueprint's Boss tag; the effect itself is not exported.
+inline constexpr int64_t kGuidBossEffect = 6064631680720502784ll;
+
 /// The bits of CrowdControlRow::applied_status (Stun and Trip are 7, Frozen 11, a push 36): the feet are held (a root), the facing is held, the abilities are off, and so on.
 inline constexpr int64_t kCcRoot = 1, kCcNoTurn = 2, kCcNoAbilities = 4, kCcEmplace = 8, kCcSnare = 16, kCcDisplace = 32;
 /// The animation a crowd control asks the client to play (CrowdControlRow::animation_request), as the crowd control state names it: a stun's, a trip's, or none.

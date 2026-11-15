@@ -36,6 +36,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -182,6 +183,33 @@ struct GmNpcResult {
     double      respawn_in_seconds = 0;  // a kill or a despawn: until its spawn point makes it again (0: it does not)
 };
 
+/// One admin command run: the command, the character it acted on (empty when it names none), and one plain result line (or why it was refused).
+struct GmRunResult {
+    GmStatus    status = GmStatus::Ok;
+    std::string message;
+    std::string command;
+    std::string character;
+};
+
+/// One value a field of a command can take (WorldAdmin ListFieldOptions): the text RunCommand carries for it and the words a form shows.
+struct GmFieldOption {
+    std::string value, label;
+};
+
+/// The options of one field for what is chosen so far (GmTravel::field_options).
+struct GmOptions {
+    GmStatus                   status = GmStatus::Ok;
+    std::string                message;   // why the call was refused
+    std::vector<GmFieldOption> options;   // the page (the whole list for a field that is not searchable)
+    size_t                     total = 0; // how many options match the filter
+    bool                       more = false;   // a searchable field: there are options after this page
+    std::string                note;      // why the list is empty or short, in plain words
+};
+
+/// What a creature is called (its nameplate, else its Blueprint's name) and whether it is dead: the words of the creature list (session/gm_options.cpp).
+std::string gm_creature_name(const world::WorldActor& a);
+bool        gm_creature_dead(PlayerWorld& world, uint64_t id);
+
 /// The GM travel tools on the network thread.  `directory` lists the players of the world (Endpoint::players), `now` is the Endpoint's clock.
 class GmTravel : public GmPort {
 public:
@@ -234,6 +262,16 @@ public:
     GmNpcResult move_npc(uint64_t id, double x, double y, double z, bool has_z, const std::string& by);
 
     size_t teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) override;
+
+    /// Runs one admin command by its name with its fields as text: every field is held to the list's own rules first (session/admin_commands.h), then the command runs and the
+    /// answer says in one line what was done, or why nothing was.  A character the command names must be in the world (NotFound, "not in the world").
+    GmRunResult run_command(const std::string& command, const std::map<std::string, std::string>& fields, const std::string& by);
+
+    /// The values the field `field` of the command `command` can take, read from the world's own data (session/gm_options.cpp), for a form's drop-down: the places, the city nodes, the free
+    /// plots of a node and the stations a plot takes, the items (searched by `filter`, `limit` at a time from the `offset`th), the rarities one item can show, the recipes, the quests and the
+    /// objectives of a quest a character has taken, the mounts, the weapon lines and the creatures.  `chosen` holds the values picked so far, by field name: a field that depends on others
+    /// (the command list says which) follows them.  InvalidArgument for a command or a field that is not in the list or has no options.
+    GmOptions field_options(const std::string& command, const std::string& field, const std::map<std::string, std::string>& chosen, const std::string& filter, size_t limit, size_t offset);
 
     /// The player named `name` (case does not count), or an empty handle.
     PlayerHandle find_player(const std::string& name);

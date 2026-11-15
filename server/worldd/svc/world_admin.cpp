@@ -7,6 +7,7 @@
 #include "svc/world_admin.h"
 
 #include "aoc/worldadmin/v1/worldadmin.grpc.pb.h"
+#include "session/admin_commands.h"
 #include "svc/service_token.h"
 #include "svc/world_stream_impl.h"   // the world stream's server (svc/world_stream.h) is built in this file: its implementation is a header of its own, included here only
 
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <map>
 
 namespace aoc { namespace worldd { namespace svc {
 
@@ -122,6 +124,19 @@ void put(adminv1::Position* out, const GmPosition& p) {
     out->set_x(p.x);
     out->set_y(p.y);
     out->set_z(p.z);
+}
+
+adminv1::CommandFieldType field_type_of(admin::FieldType t) {
+    switch (t) {
+        case admin::FieldType::WholeNumber: return adminv1::COMMAND_FIELD_TYPE_WHOLE_NUMBER;
+        case admin::FieldType::Number: return adminv1::COMMAND_FIELD_TYPE_NUMBER;
+        case admin::FieldType::Text: return adminv1::COMMAND_FIELD_TYPE_TEXT;
+        case admin::FieldType::Character: return adminv1::COMMAND_FIELD_TYPE_CHARACTER;
+        case admin::FieldType::Item: return adminv1::COMMAND_FIELD_TYPE_ITEM;
+        case admin::FieldType::Place: return adminv1::COMMAND_FIELD_TYPE_PLACE;
+        case admin::FieldType::Choice: return adminv1::COMMAND_FIELD_TYPE_CHOICE;
+    }
+    return adminv1::COMMAND_FIELD_TYPE_UNSPECIFIED;
 }
 
 }  // namespace
@@ -457,6 +472,70 @@ struct WorldAdminServer::Service final : adminv1::WorldAdminService::Service {
         resp->set_node(out.node);
         resp->set_plot(out.plot);
         resp->set_station(out.station);
+        return grpc::Status::OK;
+    }
+
+    // ---- the command list and the run call ----------------------------------------------------------------------------------------------------
+
+    grpc::Status ListCommands(grpc::ServerContext* ctx, const adminv1::ListCommandsRequest*, adminv1::ListCommandsResponse* resp) override {
+        if (auto s = authorize(ctx, "ListCommands"); !s.ok()) return s;
+        for (const admin::AdminCommand& c : admin::admin_commands()) {
+            adminv1::AdminCommand* out = resp->add_commands();
+            out->set_name(c.name);
+            out->set_description(c.description);
+            out->set_group(c.group);
+            out->set_acts_on_character(c.acts_on_character);
+            for (const admin::CommandField& f : c.fields) {
+                adminv1::CommandField* field = out->add_fields();
+                field->set_name(f.name);
+                field->set_label(f.label);
+                field->set_type(field_type_of(f.type));
+                field->set_required(f.required);
+                field->set_hint(f.hint);
+                for (const std::string& choice : f.choices) field->add_choices(choice);
+                field->set_has_minimum(f.has_minimum);
+                field->set_minimum(f.minimum);
+                field->set_has_maximum(f.has_maximum);
+                field->set_maximum(f.maximum);
+                field->set_has_options(f.has_options);
+                field->set_searchable(f.searchable);
+                field->set_page_size(f.page_size);
+                for (const std::string& d : f.depends_on) field->add_depends_on(d);
+            }
+        }
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ListFieldOptions(grpc::ServerContext* ctx, const adminv1::ListFieldOptionsRequest* req, adminv1::ListFieldOptionsResponse* resp) override {
+        if (auto s = authorize(ctx, "ListFieldOptions"); !s.ok()) return s;
+        std::map<std::string, std::string> chosen(req->chosen().begin(), req->chosen().end());
+        const std::string command = req->command(), field = req->field(), filter = req->filter();
+        const size_t limit = req->limit(), offset = req->offset();
+        GmOptions out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.field_options(command, field, chosen, filter, limit, offset); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        for (const GmFieldOption& o : out.options) {
+            adminv1::FieldOption* option = resp->add_options();
+            option->set_value(o.value);
+            option->set_label(o.label);
+        }
+        resp->set_total(static_cast<uint32_t>(out.total));
+        resp->set_more(out.more);
+        resp->set_note(out.note);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status RunCommand(grpc::ServerContext* ctx, const adminv1::RunCommandRequest* req, adminv1::RunCommandResponse* resp) override {
+        if (auto s = authorize(ctx, "RunCommand"); !s.ok()) return s;
+        const std::string by = "the admin API (" + ctx->peer() + ")";
+        std::map<std::string, std::string> fields(req->fields().begin(), req->fields().end());
+        const std::string command = req->command();
+        GmRunResult out;
+        if (auto s = on_net_thread([&] { out = owner.travel_.run_command(command, fields, by); }); !s.ok()) return s;
+        if (out.status != GmStatus::Ok) return grpc::Status(code_of(out.status), out.message);
+        resp->set_command(out.command);
+        resp->set_character(out.character);
+        resp->set_result(out.message);
         return grpc::Status::OK;
     }
 };

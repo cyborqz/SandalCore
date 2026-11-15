@@ -52,6 +52,8 @@ struct EffectDef {
     std::optional<BreakOnDamage>                breaks_on_damage;
     /// Set for an effect that breaks once the damage its holder takes adds up to a share of the instigator's maximum Health (the dance's tenth); empty for the rest.
     std::optional<BreakOnDamageTaken>           breaks_on_damage_taken;
+    /// The data gates this effect on the game's Boss effect (GetEffectCount(GetTarget(), Boss) == 0): a boss is immune to it.
+    bool                                        boss_gated = false;
 };
 // [C Y B x CoA]
 
@@ -167,6 +169,8 @@ public:
 
     size_t abilities() const { return abilities_.size(); }
     size_t effects() const { return effects_.size(); }
+    /// Every effect record by guid (a test reads the data's own set, not a list written in the test).
+    const std::map<int64_t, EffectDef>& all_effects() const { return effects_; }
     size_t hits() const { return hits_.size(); }
     size_t reactions() const { return reactions_.size(); }
     size_t exprs() const { return exprs_.size(); }

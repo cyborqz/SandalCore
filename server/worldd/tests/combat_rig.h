@@ -113,8 +113,11 @@ public:
     std::vector<combat::EffectHitNote>       effect_notes, confirmed_notes;
     void hit_dealt(const combat::DealtHit& hit, double) override { dealt.push_back(hit); }
     void hit_from_pet(int64_t hit_guid, int64_t, double) override { from_pet.push_back(hit_guid); }
+    /// A crowd control of this player's or his pet's was resisted or was immune on a creature: the session's line.
+    void effect_refused(const combat::EffectRefusal& refusal, double) override { refusals.push_back(refusal); }
     std::vector<combat::DealtHit>            dealt;
     std::vector<int64_t>                     from_pet;
+    std::vector<combat::EffectRefusal>       refusals;
     std::array<uint32_t, 4>                  guid = {0x11111111u, 0x22222222u, 0x33333333u, 0x44444444u};
     std::vector<combat::KillReward>          kills;
     std::vector<combat::IncomingHit>         hits;

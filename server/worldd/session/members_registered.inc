@@ -28,3 +28,6 @@
 #include "session/members/node_xp.inc"
 #include "session/members/node_boons.inc"
 #include "session/members/node_buildings.inc"
+#include "session/members/party.inc"
+#include "session/members/friends.inc"
+#include "session/members/gm_admin.inc"

@@ -6,6 +6,13 @@
 // ============================================================================
 #include "session/gm_travel.h"
 
+#include "content/content_db.h"
+#include "quest/quest_book.h"
+#include "session/admin_commands.h"
+#include "session/leveling.h"
+#include "spawns/mount_spawn.h"
+#include "world/world_clock.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -13,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <span>
 
 namespace aoc { namespace worldd {
 
@@ -74,7 +82,7 @@ GmTeleportResult GmTravel::teleport(const GmTeleportRequest& request, const std:
     const PlayerHandle handle = find_player(request.character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + request.character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + request.character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     // where to: a place by name, or a point (with the ground's height when no z is given)
@@ -144,7 +152,7 @@ GmSpeedResult GmTravel::set_speed(const std::string& character, double multiplie
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     const PlayerSession::GmSpeedChange change = handle.player->gm_set_speed(*handle.connection, multiplier, now_(), by);
@@ -164,7 +172,7 @@ GmMoneyGrant GmTravel::give_money(const std::string& character, int64_t copper, 
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     const PlayerSession::GmMoneyResult r = handle.player->gm_give_money(*handle.connection, copper, now_(), by);
@@ -219,7 +227,7 @@ GmFinishResult GmTravel::finish_jobs(const std::string& character, const std::st
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     out.character = handle.player->name();
@@ -270,7 +278,7 @@ GmRecipeResult GmTravel::teach_recipe(const std::string& character, const std::s
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     out.character = handle.player->name();
@@ -296,7 +304,7 @@ GmRecipeResult GmTravel::forget_recipe(const std::string& character, const std::
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     out.character = handle.player->name();
@@ -317,7 +325,7 @@ GmTutorialResult GmTravel::reset_tutorials(const std::string& character, const s
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     out.character = handle.player->name();
@@ -334,7 +342,7 @@ GmWeaponXpResult GmTravel::set_weapon_xp(const std::string& character, const std
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     out.character = handle.player->name();
@@ -391,7 +399,7 @@ GmTaughtList GmTravel::list_taught(const std::string& character) {
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     out.character = handle.player->name();
@@ -418,7 +426,7 @@ GmItemGrant GmTravel::give_item(const std::string& character, const std::string&
     const PlayerHandle handle = find_player(character);
     if (!handle) {
         out.status = GmStatus::NotFound;
-        out.message = "no player named \"" + character + "\" is in the world (worldctl players lists them)";
+        out.message = "the character \"" + character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
     const content::ContentDb* db = world_.content();
@@ -551,6 +559,10 @@ GmNpcResult refused(GmNpcResult out, GmStatus status, std::string message) {
 }
 
 }  // namespace
+
+std::string gm_creature_name(const world::WorldActor& a) { return npc_name_of(a); }
+
+bool gm_creature_dead(PlayerWorld& world, uint64_t id) { return npc_is_dead(world, id); }
 
 GmNpcResult GmTravel::kill_npc(uint64_t id, const std::string& by) {
     GmNpcResult out;
@@ -738,6 +750,291 @@ GmNpcResult GmTravel::move_npc(uint64_t id, double x, double y, double z, bool h
     return out;
 }
 
+namespace {
+
+/// The fields of a run, one line for the log: every value cut short and with control characters shown as '?' (a newline would start a log line of the caller's making).
+std::string fields_for_log(const std::map<std::string, std::string>& fields) {
+    std::string out;
+    for (const auto& [name, value] : fields) {
+        if (!out.empty()) out += " ";
+        out += log_text(name) + "=\"" + log_text(value.size() > 80 ? value.substr(0, 80) + "..." : value) + "\"";
+    }
+    return out.empty() ? std::string("(none)") : out;
+}
+
+std::string coords3(double x, double y, double z) {
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "(%.0f, %.0f, %.0f)", x, y, z);
+    return buf;
+}
+
+std::string num_text(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%g", v);
+    return buf;
+}
+
+}  // namespace
+
+GmRunResult GmTravel::run_command(const std::string& command, const std::map<std::string, std::string>& fields, const std::string& by) {
+    using admin::FieldValue;
+    GmRunResult out;
+    out.command = command;
+    const admin::AdminCommand* def = admin::find_command(command);
+    if (!def) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = "no command is named \"" + log_text(command) + "\" (ListCommands lists them)";
+        spdlog::info("[admin] run {} by {}: fields={} -> refused: {}", log_text(command), log_text(by), fields_for_log(fields), log_text(out.message));
+        return out;
+    }
+    admin::FieldValues values;
+    std::string why;
+    if (!admin::check_command_fields(*def, fields, &values, &why)) {
+        out.status = GmStatus::InvalidArgument;
+        out.message = why;
+        spdlog::info("[admin] run {} by {}: fields={} -> refused: {}", log_text(def->name), log_text(by), fields_for_log(fields), log_text(out.message));
+        return out;
+    }
+    const auto value = [&values](const char* name) -> const FieldValue* { return admin::field_value(values, name); };
+    const auto text = [&](const char* name) -> std::string {
+        const FieldValue* v = value(name);
+        return v ? v->text : std::string();
+    };
+    const auto number = [&](const char* name, double fallback = 0.0) -> double {
+        const FieldValue* v = value(name);
+        return v ? v->number : fallback;
+    };
+    const auto whole = [&](const char* name, int64_t fallback = 0) -> int64_t {
+        const FieldValue* v = value(name);
+        return v ? v->whole : fallback;
+    };
+    PlayerHandle handle;
+    if (def->acts_on_character) {
+        handle = find_player(text("character"));
+        if (!handle) {
+            out.status = GmStatus::NotFound;
+            out.message = "the character \"" + text("character") + "\" is not in the world";
+            // (the log line below still says which command and fields were refused)
+            spdlog::info("[admin] run {} by {}: character=\"{}\" fields={} -> refused: {}", log_text(def->name), log_text(by), log_text(text("character")),
+                         fields_for_log(fields), log_text(out.message));
+            return out;
+        }
+        out.character = handle.player->name();
+    }
+
+    const auto failed = [&](GmStatus status, std::string message) {
+        out.status = status;
+        out.message = std::move(message);
+        spdlog::info("[admin] run {} by {}: character=\"{}\" fields={} -> refused: {}", log_text(def->name), log_text(by), log_text(out.character), fields_for_log(fields),
+                     log_text(out.message));
+        return out;
+    };
+
+    if (def->name == "list-players") {
+        const std::vector<GmPlayerInfo> players = list_players();
+        if (players.empty()) {
+            out.message = "no players are in the world";
+        } else {
+            out.message = std::to_string(players.size()) + " player(s) in the world:";
+            for (size_t i = 0; i < players.size() && i < 8; ++i) {
+                out.message += " " + players[i].name + " " + coords3(players[i].position.x, players[i].position.y, players[i].position.z);
+            }
+            if (players.size() > 8) out.message += " and " + std::to_string(players.size() - 8) + " more";
+        }
+    } else if (def->name == "list-places") {
+        const std::vector<world::Place> places = list_places();
+        out.message = std::to_string(places.size()) + " place(s):";
+        for (size_t i = 0; i < places.size() && i < 10; ++i) out.message += " " + places[i].display_name;
+        if (places.size() > 10) out.message += " and " + std::to_string(places.size() - 10) + " more";
+    } else if (def->name == "teleport") {
+        GmTeleportRequest rq;
+        rq.character = text("character");
+        const bool has_place = value("place") != nullptr;
+        const bool has_x = value("x") != nullptr, has_y = value("y") != nullptr, has_z = value("z") != nullptr;
+        if (has_place && (has_x || has_y || has_z)) return failed(GmStatus::InvalidArgument, "give a place or a point, not both");
+        if (!has_place && (!has_x || !has_y)) return failed(GmStatus::InvalidArgument, "give a place, or x and y for a point");
+        if (has_z && !has_x) return failed(GmStatus::InvalidArgument, "z needs x and y");
+        if (has_place) {
+            rq.place = text("place");
+        } else {
+            rq.x = number("x");
+            rq.y = number("y");
+            rq.z = number("z");
+            rq.has_z = has_z;
+        }
+        const GmTeleportResult r = teleport(rq, by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + " moved from " + coords3(r.from.x, r.from.y, r.from.z) + " to " + coords3(r.to.x, r.to.y, r.to.z) +
+                      (r.place.empty() ? std::string() : " (" + r.place + ")") + (r.dismounted ? "; dismounted first" : "");
+    } else if (def->name == "speed") {
+        const GmSpeedResult r = set_speed(text("character"), number("multiplier"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + (r.multiplier == 1.0 ? " runs at normal speed again (was x" + num_text(r.previous) + ")"
+                                                       : " runs at x" + num_text(r.multiplier) + " (was x" + num_text(r.previous) + ")");
+    } else if (def->name == "give-money") {
+        const GmMoneyGrant r = give_money(text("character"), whole("copper"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + ": +" + std::to_string(r.added) + " copper, the purse holds " + std::to_string(r.balance) + " (was " + std::to_string(r.previous) + ")" +
+                      (r.added < whole("copper") ? "; the purse is full" : "");
+    } else if (def->name == "give-item") {
+        const GmItemGrant r = give_item(text("character"), text("item"), static_cast<int32_t>(whole("count", 1)), by, text("rarity"), static_cast<int32_t>(whole("quality")));
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + ": " + std::to_string(r.count) + " x " + r.item + " (" + std::to_string(r.item_guid) + ") given" +
+                      (r.rarity.empty() ? std::string() : " as " + r.rarity + " (quality " + std::to_string(r.quality) + ")") + ", into " + r.container;
+    } else if (def->name == "place-station") {
+        const GmStationResult r = place_station(text("node"), text("plot"), text("station"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.node + " " + r.plot + ": " + r.station + " of " + r.building + " placed (actor " + std::to_string(r.actor) + ")";
+    } else if (def->name == "remove-station") {
+        const GmStationResult r = remove_station(text("node"), text("plot"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.node + " " + r.plot + ": " + r.station + " removed";
+    } else if (def->name == "finish-jobs") {
+        const GmFinishResult r = finish_jobs(text("character"), text("station"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + ": " + std::to_string(r.finished) + " job(s) finished" + (text("station").empty() ? "" : " at " + text("station")) + "; they are ready to collect";
+    } else if (def->name == "teach-recipe") {
+        const GmRecipeResult r = teach_recipe(text("character"), text("recipe"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + " was taught " + r.recipe + " (" + std::to_string(r.recipe_guid) + "); " + std::to_string(r.taught) + " recipe(s) taught in all";
+    } else if (def->name == "forget-recipe") {
+        const GmRecipeResult r = forget_recipe(text("character"), text("recipe"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + " forgot " + r.recipe + " (" + std::to_string(r.recipe_guid) + "); " + std::to_string(r.taught) + " recipe(s) taught in all";
+    } else if (def->name == "list-taught-recipes") {
+        const GmTaughtList r = list_taught(text("character"));
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + " was taught " + std::to_string(r.recipes.size()) + " recipe(s)";
+        for (const auto& [name, guid] : r.recipes) out.message += "; " + name + " (" + std::to_string(guid) + ")";
+    } else if (def->name == "reset-tutorials") {
+        const GmTutorialResult r = reset_tutorials(text("character"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + ": " + std::to_string(r.cleared) + " finished tutorial(s) put back; the hints can start again";
+    } else if (def->name == "weapon-xp") {
+        const bool by_level = value("level") != nullptr;
+        const bool by_xp = value("xp") != nullptr;
+        if (by_level == by_xp) return failed(GmStatus::InvalidArgument, "give a level or an XP total, not both");
+        const GmWeaponXpResult r = set_weapon_xp(text("character"), text("line"), by_level, by_level ? whole("level") : whole("xp"), by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.character + ": " + r.line + " is at level " + std::to_string(r.level) + " with " + std::to_string(r.xp) + " XP (was level " + std::to_string(r.level_before) +
+                      ", " + std::to_string(r.xp_before) + " XP); " + std::to_string(r.points_earned) + " Weapon point(s) earned, " + std::to_string(r.points_left) + " left";
+    } else if (def->name == "npc-kill" || def->name == "npc-respawn" || def->name == "npc-reset" || def->name == "npc-heal" || def->name == "npc-despawn" || def->name == "npc-move") {
+        GmNpcResult r;
+        const uint64_t id = static_cast<uint64_t>(whole("id"));
+        if (def->name == "npc-kill") r = kill_npc(id, by);
+        else if (def->name == "npc-respawn") r = respawn_npc(id, by);
+        else if (def->name == "npc-reset") r = reset_npc(id, by);
+        else if (def->name == "npc-heal") r = heal_npc(id, by);
+        else if (def->name == "npc-despawn") r = despawn_npc(id, by);
+        else r = move_npc(id, number("x"), number("y"), number("z"), value("z") != nullptr, by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = r.message;
+    } else if (def->name == "heal") {
+        const PlayerSession::GmHealResult r = handle.player->gm_heal(*handle.connection, now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + " healed to full Health and Mana (" + num_text(r.health.after) + " Health, " + num_text(r.mana.after) + " Mana)";
+    } else if (def->name == "set-health" || def->name == "set-mana") {
+        const bool health = def->name == "set-health";
+        const PlayerSession::GmValueResult r = health ? handle.player->gm_set_health(*handle.connection, number("value"), now_(), by)
+                                                      : handle.player->gm_set_mana(*handle.connection, number("value"), now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + ": " + (health ? "Health" : "Mana") + " set to " + num_text(r.after) + " of " + num_text(r.maximum) + " (was " + num_text(r.before) + ")" +
+                      (health && handle.player->dead() ? "; it died" : "");
+    } else if (def->name == "revive") {
+        const PlayerSession::GmReviveResult r = handle.player->gm_revive(*handle.connection, now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + " came back at " + r.place + " " + coords3(r.x, r.y, r.z) + ", alive with full Health and Mana";
+    } else if (def->name == "kill") {
+        const PlayerSession::GmKillResult r = handle.player->gm_kill(*handle.connection, now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + " was killed (death " + std::to_string(r.deaths) + " of this session)";
+    } else if (def->name == "give-experience") {
+        const PlayerSession::GmXpResult r = handle.player->gm_give_experience(*handle.connection, whole("amount"), now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + ": +" + std::to_string(whole("amount")) + " Adventuring XP (now " + std::to_string(r.after) + ", level " + std::to_string(r.level_after) + ")" +
+                      (r.leveled ? "; level " + std::to_string(r.level_before) + " -> " + std::to_string(r.level_after) : "");
+    } else if (def->name == "start-quest" || def->name == "complete-quest") {
+        const bool start = def->name == "start-quest";
+        const bool bypass = text("bypass") == "yes";
+        const PlayerSession::GmQuestResult r = start ? handle.player->gm_start_quest(*handle.connection, text("quest"), bypass, now_(), by)
+                                                     : handle.player->gm_complete_quest(*handle.connection, text("quest"), now_(), by);
+        if (!r.ok) {
+            const bool missing = r.refusal.rfind("no quest is named", 0) == 0 || r.refusal.find(" has not taken ") != std::string::npos;
+            return failed(missing ? GmStatus::NotFound : GmStatus::FailedPrecondition, r.refusal);
+        }
+        out.message = out.character + ": " + (start ? "started " : "completed ") + r.quest + " (" + std::to_string(r.quest_guid) + ")";
+    } else if (def->name == "complete-objective") {
+        if (value("quest") != nullptr) {   // a quest was named: the objective must be one of its own
+            const quest::QuestBook* book = world_.quests();
+            const content::QuestRow* named = book ? book->find(text("quest")) : nullptr;
+            if (!named) return failed(GmStatus::NotFound, "no quest is named \"" + log_text(text("quest")) + "\"");
+            const bool its = std::any_of(named->objectives.begin(), named->objectives.end(), [&](const content::QuestObjectiveRow& o) { return o.guid == whole("objective"); });
+            if (!its) return failed(GmStatus::InvalidArgument, "the objective " + std::to_string(whole("objective")) + " is not an objective of " + named->name);
+        }
+        const content::QuestRow* of_quest = value("quest") != nullptr && world_.quests() ? world_.quests()->find(text("quest")) : nullptr;
+        const PlayerSession::GmObjectiveResult r = handle.player->gm_complete_objective(*handle.connection, whole("objective"), now_(), by, of_quest ? of_quest->guid : 0);
+        if (!r.ok) {
+            const bool missing = r.refusal.rfind("no quest of", 0) == 0;
+            return failed(missing ? GmStatus::NotFound : GmStatus::FailedPrecondition, r.refusal);
+        }
+        out.message = out.character + ": completed objective " + std::to_string(r.objective) + " of " + r.quest_name + " (" + std::to_string(r.quest) + ")";
+    } else if (def->name == "reset-quests") {
+        const PlayerSession::GmResetQuestsResult r = handle.player->gm_reset_quests(*handle.connection, now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + ": forgot " + std::to_string(r.completed) + " finished quest(s) and " + std::to_string(r.variables) + " variable(s); " +
+                      std::to_string(r.taken) + " taken quest(s) stay";
+    } else if (def->name == "clear-cooldowns") {
+        const PlayerSession::GmCooldownResult r = handle.player->gm_clear_cooldowns(*handle.connection, now_(), by);
+        if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
+        out.message = out.character + ": " + std::to_string(r.cleared) + " cooldown group(s) ended";
+    } else if (def->name == "give-mount") {
+        const spawns::MountBook* book = world_.mounts();
+        if (!book) return failed(GmStatus::FailedPrecondition, "this world has no mounts (its content.db lacks the mount tables)");
+        const content::MountRow* found = nullptr;
+        size_t count = 0;
+        for (const content::MountRow& row : book->data().mounts) {
+            if (!iequal(row.item_name, text("mount"))) continue;
+            if (!found) found = &row;
+            ++count;
+        }
+        if (!found) {
+            for (const content::MountRow& row : book->data().mounts) {
+                if (!iequal(row.blueprint, text("mount"))) continue;
+                if (!found) found = &row;
+                ++count;
+            }
+        }
+        if (!found) return failed(GmStatus::NotFound, "no mount is called \"" + text("mount") + "\" (give its item's name, such as Mount_Grounded_Horse_0)");
+        if (count > 1) return failed(GmStatus::InvalidArgument, "\"" + text("mount") + "\" names " + std::to_string(count) + " mounts: give the whole item's name or its Guid");
+        const GmItemGrant r = give_item(out.character, std::to_string(found->item), 1, by);
+        if (r.status != GmStatus::Ok) return failed(r.status, r.message);
+        out.message = out.character + ": the mount " + found->item_name + " (" + std::to_string(found->item) + ") is in its bag; summon it as any mount";
+    } else if (def->name == "set-time") {
+        double hour = number("hour");
+        if (hour >= 24.0) hour = 0.0;
+        if (hour < 0.0) hour = 0.0;
+        const double now = world_.world_clock();
+        const double game_time = world_.day_clock().game_time(now);
+        const double day = std::floor(game_time / world::WorldClock::kGameDay);
+        world_.set_day_clock(world::WorldClock::reading(day * world::WorldClock::kGameDay + hour * 3600.0, now));
+        size_t sent = 0;
+        for (const PlayerHandle& h : directory_()) {
+            if (h && h.player->gm_send_clock(*h.connection, now_())) ++sent;
+        }
+        out.message = "the world clock reads " + world::hour_text(hour) + "; " + std::to_string(sent) + " player(s) were sent the new time";
+    } else if (def->name == "node-xp") {
+        world::NodeControl* control = world_.node_control();
+        if (!control) return failed(GmStatus::FailedPrecondition, "worldd has no city node service: the node commands are unavailable");
+        control->add_experience(text("node"), whole("amount"), by);
+        out.message = "asked the city node service to add " + std::to_string(whole("amount")) + " XP to " + text("node") + " (its answer is in the log)";
+    } else {
+        return failed(GmStatus::InvalidArgument, "no command is named \"" + log_text(def->name) + "\"");
+    }
+
+    spdlog::info("[admin] run {} by {}: character=\"{}\" fields={} -> {}", log_text(def->name), log_text(by), log_text(out.character), fields_for_log(fields), log_text(out.message));
+    return out;
+}
+
 size_t GmTravel::teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) {
     size_t moved = 0;
     std::string token;
@@ -745,7 +1042,7 @@ size_t GmTravel::teleport_characters(const std::string& names, double x, double 
         if (token.empty()) return;
         const PlayerHandle h = find_player(token);
         if (!h) {
-            spdlog::warn("[gm] {}: no player named \"{}\" is in the world", by, log_text(token));
+            spdlog::warn("[gm] {}: the character \"{}\" is not in the world", by, log_text(token));
         } else if (h.player->gm_teleport(*h.connection, x, y, z, now, by).status == PlayerSession::GmMoveResult::Status::Moved) {
             ++moved;
         }
@@ -758,5 +1055,8 @@ size_t GmTravel::teleport_characters(const std::string& names, double x, double 
     flush();
     return moved;
 }
+
+// The session side of the game-master test commands (a file of its own, included here: CMakeLists is not this change's to edit).
+#include "session/gm_admin.inc"
 
 }}  // namespace aoc::worldd
