@@ -16,7 +16,12 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/bootstrap/observer_rider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_pets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_players.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_pvp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/combat/combat_world_npc.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp_corruption.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/combat/pvp_corruption.h
     ${CMAKE_CURRENT_SOURCE_DIR}/net/endpoint_phases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_givers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/quest/session_handin.cpp
@@ -45,6 +50,7 @@ target_sources(worldd_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_presence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_processing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_progress.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/player_pvp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_quests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_resurrect.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/player_requests.cpp

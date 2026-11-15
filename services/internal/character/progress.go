@@ -57,6 +57,9 @@ type Progress struct {
 	Friends               []Friend
 	ReplaceFriendRequests bool
 	FriendRequests        []FriendRequest
+	// PvP: with ReplacePvP the character's corruption and blight become exactly PvP (pvp.go); without it they are left alone.
+	ReplacePvP bool
+	PvP        PvP
 }
 
 // C-Y-B x C O A
@@ -146,6 +149,13 @@ func (p Progress) Validate() error {
 		}
 	} else if len(p.FriendRequests) > 0 {
 		return fmt.Errorf("%w: friend requests are given without replace_friend_requests", ErrInvalid)
+	}
+	if p.ReplacePvP {
+		if err := ValidatePvP(p.PvP); err != nil {
+			return err
+		}
+	} else if p.PvP != (PvP{}) {
+		return fmt.Errorf("%w: a PvP state is given without replace_pvp", ErrInvalid)
 	}
 	return nil
 }
@@ -278,6 +288,11 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	}
 	if p.ReplaceFriendRequests {
 		if err := replaceFriendRequests(ctx, tx, characterID, p.FriendRequests); err != nil {
+			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplacePvP {
+		if err := replacePvP(ctx, tx, characterID, p.PvP); err != nil {
 			return Character{}, itemsError(err)
 		}
 	}

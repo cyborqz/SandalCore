@@ -423,6 +423,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
         if (t->first_target_place) trigger_place = nav::Vec3{t->first_target_place->x, t->first_target_place->y, t->first_target_place->z};
         instance = t->client_instance_id;
         pb_.note_trigger_pvp_flag(instance, t->pvp_force);   // (the item this trigger makes carries the flag the trigger carried)
+        pvp_trigger_flag_ = t->pvp_force;                    // PvP: the cast's hits are judged with the flag it was cast with (GamePvpSettings.bCachePvpForceFlagOnAbilities)
         item_slot = t->item_slot;
         item_location = t->item_location;
         info.animation_index = t->animation_index;

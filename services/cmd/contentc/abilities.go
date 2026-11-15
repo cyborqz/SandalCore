@@ -37,6 +37,10 @@ var montageIDs string
 //go:embed ability_names.tsv
 var abilityNames string
 
+// pvpEffectNames are the effects the PvP rules put on characters (version 47): the corruption tiers, the opt-in protections and the force flag's.
+var pvpEffectNames = []string{"Corruption_1", "Corruption_2", "Corruption_3", "Corruption_4", "Corruption_5",
+	"Emberspring_PVPOptInProtection", "General_PVPOptInProtection", "General_PVPForceFlag"}
+
 // montageAssets lists the NetGUID of the montage ASSETS every consumable's ability plays (contentc version 38), by the asset's first soft path: a consumable
 // ability that montage_ids.tsv has no row for takes the id of its asset.
 //
@@ -405,6 +409,27 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	}
 	itemRows.Close()
 	opt.logf("consumable items: %d abilities, %d of them not seeded before", consumables, consumablesNew)
+	// ... and the PvP effects (version 47): the corruption tiers' debuffs (Corruption_1..5: their stat mods read the holder's Corruption_Tier), the PvP opt-in protection
+	// (Emberspring_PVPOptInProtection, which a respawn record applies; General_PVPOptInProtection) and the force flag's (General_PVPForceFlag). worldd applies them through the
+	// ability runtime, which needs their rows, stat mods and expressions. No ability names them: they come from the rules, not from a cast.
+	pvpEffects := 0
+	for _, name := range pvpEffectNames {
+		var g int64
+		for guid, r := range b.effects {
+			if r.Name == name {
+				g = guid
+			}
+		}
+		if g == 0 {
+			opt.logf("warning: no Effect row is called %s: the PvP rules go without it", name)
+			continue
+		}
+		if !effectSeed[g] {
+			pvpEffects++
+		}
+		effectSeed[g] = true
+	}
+	opt.logf("PvP: %d more effects", pvpEffects)
 	opt.logf("skill_rank: %d distinct ability/effect pairs, %d abilities, %d effects granted by ranks (and the always-on ones)", nranks, len(abilitySeed), len(effectSeed))
 
 	// ---- the closure ----

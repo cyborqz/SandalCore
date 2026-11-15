@@ -39,6 +39,8 @@ public:
     virtual void remove_effect(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) {}
     /// A Resurrect landed on a dead player (abilities between players).
     virtual void resurrect(uint64_t /*target_actor*/, double /*now*/) {}
+    /// PvP: a tick of an effect another player (`from`) left on this one: his hit, worked out and judged by the world (CombatWorld::player_effect_hit).
+    virtual void player_effect_hit(uint64_t /*from*/, int64_t /*hit_guid*/, int64_t /*effect_guid*/, double /*now*/) {}
     /// The player's pet in the world (0: none).
     virtual uint64_t own_pet() const { return 0; }
     /// Seconds left of an effect record on the target (0: it is not on): what GetEffectRemainingDuration(GetTarget(), effect) reads.
@@ -104,6 +106,9 @@ public:
     }
     /// A Resurrect landed on a dead player.
     void resurrect(uint64_t target_actor, double now) override { world_.resurrect_player(target_actor, self_.id(), world_time(now)); }
+    void player_effect_hit(uint64_t from, int64_t hit_guid, int64_t effect_guid, double now) override {
+        world_.player_effect_hit(from, self_.id(), hit_guid, effect_guid, world_time(now));
+    }
     double effect_remaining(uint64_t target_actor, int64_t effect_guid, double now) const override { return world_.effect_remaining(target_actor, effect_guid, world_time(now)); }
     /// The world's clock for a time of the runtime's.
     double world_time(double runtime_now) const { return runtime_now + clock_offset_; }

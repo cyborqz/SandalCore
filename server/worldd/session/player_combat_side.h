@@ -88,6 +88,18 @@ public:
     // abilities between players (combat/combat_players.cpp): the party is the key two members share; another player's Resurrect is asked at the session's tick
     uint64_t group_key() const override { return reinterpret_cast<uintptr_t>(s_.party_group_); }
     void prompt_resurrect(const std::array<uint32_t, 4>& by, double) override { resurrect_by = by; }
+    // PvP (session/player_pvp.cpp): the flag changes at once (the rules of the next hit read it), the client hears of it at the session's tick
+    bool pvp_side(combat::pvp::Side& out, bool& force) const override {
+        s_.pvp_side_of(out, force);
+        return true;
+    }
+    void pvp_flagged(uint64_t target, uint8_t intention, double now) override {
+        if (s_.pvp_mark_flagged(now) && pvp_notices.size() < 16) pvp_notices.emplace_back(target, intention);
+    }
+    void set_in_pvp_combat(bool on, double) override { wants_pvp_combat = on; }
+    void pvp_kill(const combat::PvpKill& kill, double) override {
+        if (pvp_kills.size() < 16) pvp_kills.push_back(kill);
+    }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }
@@ -115,6 +127,9 @@ public:
     std::vector<combat::EffectRefusal> effect_refusals; // A3: the crowd controls of his (or his pet's) hits a mob refused, to tell his client
     bool                             wants_in_combat = false;
     std::optional<std::array<uint32_t, 4>> resurrect_by; // who just raised this dead player (abilities between players)
+    std::vector<std::pair<uint64_t, uint8_t>> pvp_notices;   // PvP: the first flagging's (the other player's pawn, the intention)
+    std::vector<combat::PvpKill>     pvp_kills;
+    bool                             wants_pvp_combat = false;
 
 private:
     PlayerSession&       s_;

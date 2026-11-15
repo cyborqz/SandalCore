@@ -27,6 +27,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Mounts: ground, aquatic and flying.
 - Gathering, hunting, fishing and professions.
 - City nodes: node levels and experience, the towns' scenery, people and floor, and the towns' crafting stations.
+- PvP, first slice: the rules between players (the PvP key, the account's PvP settings, parties), the purple combatant flag and the red corruption with its costs on death, kept on the character. Still to come: duels and the respawn's protection, suppression areas, guards and pets, guild and node wars.
 - NPC conversations (the talking window).
 - Vendors: currency, buying, selling, repairing and destroying items; talking shopkeepers.
 - Crafting: processing jobs, quick make and collecting finished jobs; the artisan gear a crafter wears (shirt, pants and tool belt of a profession) changes the result: a crafted piece's quality and experience, and a job's time, extra units, units that come out a rarity higher, and experience.

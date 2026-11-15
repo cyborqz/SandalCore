@@ -24,6 +24,8 @@
 
 #include "content/content_db.h"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -49,6 +51,15 @@ TargetInfo CombatWorld::inspect_player(PlayerPort& target, const Fighter& from) 
     if (PlayerPort* me = player(from.id())) {
         const uint64_t group = me->group_key();
         if (group != 0 && group == target.group_key()) t.group = 2;   // one party: one squad
+        // PvP: what the rules between players let the caster do to him (a pet, which keeps no side, stays on its owner's side as before)
+        pvp::Side a, b;
+        pvp::Pair pair;
+        bool force = false;
+        if (pvp_pair(*me, target, a, force, b, pair)) {
+            t.pvp = true;
+            t.pvp_permissions = pvp::permissions(a, b, pair, force);
+            t.relation = t.pvp_permissions == pvp::kHarm ? Relation::Hostile : t.pvp_permissions == (pvp::kHarm | pvp::kHelp) ? Relation::Neutral : Relation::Friendly;
+        }
     }
     return t;
 }
@@ -59,6 +70,26 @@ Delivery CombatWorld::apply_hit_to_player(uint64_t target, uint64_t attacker, co
     PlayerPort* p = player_pawn(target);
     const abilities::HitDef* hit = origin ? origin->hit : nullptr;
     if (!p || (!p->fighter().alive() && !(hit && hit->resurrect != 0))) return d;
+    // PvP: a hit between two players is harmful when its mask has Enemy and the rules let the attacker harm him (or, a hit that names no mask, when it takes
+    // Health); a harmful hit the rules do not allow lands nowhere (the client would not have sent it: a forged or a stale one)
+    bool hostile = false;
+    PlayerPort* by = attacker != target ? player_pawn(attacker) : nullptr;
+    pvp::Side side_a, side_b;
+    pvp::Pair pair;
+    bool force = false;
+    const bool between_players = by && pvp_pair(*by, *p, side_a, force, side_b, pair);
+    if (between_players) {
+        const uint8_t perms = pvp::permissions(side_a, side_b, pair, force);
+        bool takes = false;
+        for (const ResolvedMod& m : r.mods) takes = takes || (m.stat_guid == content::kGuidHealth && m.value < 0);
+        const int mask = hit ? hit->row.applicable_targets : 0;
+        const bool harmful = mask != 0 ? (mask & 2) != 0 && (perms & pvp::kHarm) != 0 : takes;
+        if ((harmful || takes) && (perms & pvp::kHarm) == 0) {
+            spdlog::debug("[pvp] {} -> {}: a harmful hit the rules do not allow is dropped", attacker, target);
+            return d;
+        }
+        hostile = harmful;
+    }
     d.applied = true;
     d.flags = r.flags;
     d.effective.assign(r.mods.size(), 0.0);
@@ -84,7 +115,14 @@ Delivery CombatWorld::apply_hit_to_player(uint64_t target, uint64_t attacker, co
             d.effective[i] = cur && max && v > 0 ? std::clamp(v, 0.0, std::max(0.0, static_cast<double>(max->value) - cur->value)) : v;
         }
     }
+    in.hostile = hostile;
     p->receive_hit(in, now);
+    if (between_players) {
+        // the attacker's flag: harming a non-combatant or a combatant, or supporting a combatant, makes him a combatant (InterServerHandleFlaggingOnHitInstigated)
+        const uint8_t action = hostile ? pvp::kAttack : pvp::kSupport;
+        if (pvp::flags(side_a, side_b, pair, action)) by->pvp_flagged(target, hostile ? pvp::kIntentionHarm : pvp::kIntentionSupport, now);
+        if (hostile) pvp_exchange(attacker, target, now);
+    }
     return d;
 }
 
@@ -96,8 +134,25 @@ void CombatWorld::apply_effects_to_player(uint64_t target, uint64_t attacker, co
     in.instigator = attacker;
     in.from_player = true;
     in.at = now;
-    in.effects = list;
+    // PvP: a non-combatant is immune to another player's crowd control (the NonCombatant alignment's bGrantNonCombatantCrowdControlImmunity) where the rules between
+    // players decide; a duel and a party are not that tier [modelled: the data holds the flag, no recording shows where retail reads it]
+    bool immune = false;
+    if (PlayerPort* other = attacker != target ? player_pawn(attacker) : nullptr) {
+        pvp::Side a, b;
+        pvp::Pair pair;
+        bool force = false;
+        immune = pvp_pair(*other, *p, a, force, b, pair) && b.flag == pvp::Flag::NonCombatant && pvp::deciding_tier(a, b, pair) == pvp::Tier::Players;
+    }
     for (const effects::Applied& a : list) {
+        if (immune && a.def && a.def->row.crowd_control_guid != 0) {
+            ++pvp_cc_immunities_;
+            spdlog::debug("[pvp] {} -> {}: a non-combatant is immune to another player's {}", attacker, target, a.def->row.name);
+            continue;
+        }
+        in.effects.push_back(a);
+    }
+    if (in.effects.empty()) return;
+    for (const effects::Applied& a : in.effects) {
         double shield = 0;
         if (by && a.def) {
             const bool has = std::any_of(a.def->mods.begin(), a.def->mods.end(), [](const content::ModRow& m) {

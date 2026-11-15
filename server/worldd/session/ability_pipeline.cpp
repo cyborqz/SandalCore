@@ -5,6 +5,7 @@
 //  session/ability_pipeline.cpp  (see ability_pipeline.h)
 // ============================================================================
 #include "session/ability_pipeline.h"
+#include "combat/pvp_corruption.h"
 
 #include "bootstrap/constants.h"
 #include "content/content_db.h"
@@ -846,7 +847,10 @@ AbilityPipeline::AbilityPipeline(const abilities::Catalog* catalog, stats::Chara
                                  uint64_t seed)
     : catalog_(catalog), stats_(stats), a7_(a7), worn_(std::move(worn)), world_time_at_zero_(world_time_at_zero) {
     rng_.state = seed;
-    stats_.set_resources(std::set<int64_t>(std::begin(content::kResourceStats), std::end(content::kResourceStats)));
+    std::set<int64_t> held(std::begin(content::kResourceStats), std::end(content::kResourceStats));
+    held.insert(combat::pvp::kStatCorruption);   // PvP: the corruption and the blight are values the character holds (session/player_pvp.cpp), not formulas
+    held.insert(combat::pvp::kStatBlight);
+    stats_.set_resources(std::move(held));
     resolve_resource();
 }
 
@@ -1347,6 +1351,7 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         e.def = &def;
         e.owner = owner;
         e.zone = zone_owner_;
+        e.from_player = given ? given->from : 0;   // (PvP: another player's effect ticks as his hit)
         e.stacks = stacks;
         e.start = t;
         e.end = std::isinf(dur) ? kInf : t + dur;
@@ -1489,7 +1494,12 @@ void AbilityPipeline::run_effect_hits(AbilityChange& c, const EffectInst& e, con
         bool wanted = false;
         for (size_t i = 0; i < n; ++i) wanted = wanted || phase == phases[i];
         if (!wanted) continue;
-        if (const HitDef* h = catalog_->hit(hit_guid)) apply_hit(c, *h, t, false, src);
+        const HitDef* h = catalog_->hit(hit_guid);
+        if (!h) continue;
+        // PvP: another player's bleed or burn on the character: the tick aims at an enemy of whoever left it, so it is that player's hit on the character (judged by the
+        // rules between the two: combat/combat_pvp.cpp), not one the character makes
+        if (e.from_player != 0 && combat_ && (h->row.applicable_targets & 2) != 0) combat_->player_effect_hit(e.from_player, hit_guid, e.def->row.guid, t);
+        else apply_hit(c, *h, t, false, src);
     }
 }
 
@@ -1624,7 +1634,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         if (static_cast<double>(outs.size()) >= max_targets) break;
         const combat::TargetInfo ti = combat_->inspect(id);
         if (!reached(ti)) continue;
-        const bool hostile = ti.relation == combat::Relation::Hostile;
+        const bool hostile = combat::harms(mask, ti);   // (another player the caster may both harm and support: a hit with Enemy harms him)
         combat::Fighter* tf = combat_->fighter(id);
         if (!tf) continue;
         std::string err;
@@ -1872,7 +1882,7 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     for (size_t i = 0; i < in.effects.size(); ++i) {
         const effects::Applied& a = in.effects[i];
         if (!a.def) continue;
-        const GivenEffect given{a.mods, i < in.effect_shields.size() ? in.effect_shields[i] : 0.0};
+        const GivenEffect given{a.mods, i < in.effect_shields.size() ? in.effect_shields[i] : 0.0, in.from_player ? in.instigator : 0};
         given_effect_ = &given;
         apply_effect(c, *a.def, a.stacks, std::isinf(a.duration) ? std::nullopt : std::optional<double>(a.duration), now_);
         given_effect_ = nullptr;

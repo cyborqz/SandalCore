@@ -27,3 +27,4 @@
 #include "session/members/fishing.inc"
 #include "session/members/certification.inc"
 #include "session/members/resurrect.inc"
+#include "session/members/pvp.inc"

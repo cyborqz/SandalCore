@@ -244,6 +244,13 @@ bool PlayerBootstrap::observer_stats_differ(const repl::Actor& shown) const {
     return false;
 }
 
+bool PlayerBootstrap::set_observer_alignments(repl::Actor& shown, const repl::AlignmentContainer& alignments) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* alignment = shown.find(setup_.guids.alignment);
+    if (!alignment || !alignment->obj.schema || !alignment->obj.schema->command("Alignments")) return false;
+    return alignment->obj.state.set(*alignment->obj.schema, "Alignments", Value(alignments));
+}
+
 bool PlayerBootstrap::set_observer_dead(repl::Actor& shown, bool dead) {
     if (!ok_ || !second_state_added_) return false;
     repl::Subobject* combat = shown.find(setup_.guids.combat_info);

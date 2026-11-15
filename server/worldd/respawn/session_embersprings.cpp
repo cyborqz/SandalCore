@@ -276,6 +276,11 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     dead_ = false;
     resurrect_offered_ = false;   // (a respawn of his own ends another player's offer: session/player_resurrect.cpp)
     ++respawns_;
+    // PvP: the respawn points unflag combatants (RespawnRecord.bUnflagCombatants, true for all but a forward operating base); a corrupted player stays corrupted
+    if (pvp_state_ == combat::pvp::Flag::Combatant) {
+        pvp_state_ = combat::pvp::Flag::NonCombatant;
+        pvp_send_alignments(conn, "the respawn");
+    }
     if (pipeline_) pipeline_->set_dead(false);
     pb_.set_dead(false);
     const stats::StatValue* hp = stats_ ? stats_->find(content::kGuidMaxHealth) : nullptr;

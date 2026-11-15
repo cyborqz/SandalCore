@@ -120,6 +120,15 @@ message Character {
   // A character with none has none; a request at or past its expiry is not sent.
   repeated Friend friends = 33;
   repeated FriendRequest friend_requests = 34;
+  // PvP (migration 0025): the character's corruption and blight, with the items (include_items). Unset when it has neither. (35 to 37 are taken by a branch in progress.)
+  PvpState pvp = 38;
+}
+
+// A character's PvP state between sessions (migration 0025): the Corruption stat (GameStatProfile.CorruptionId, every client is told it) and Corruption_Blight
+// (CorruptionSoulburnId, which grows with each player killed). Both 0 or more and under a million.
+message PvpState {
+  double corruption = 1;
+  double blight = 2;
 }
 
 // One friend of a character (social, step 7, migration 0024): the friend's character GUID, its name, level, class and subclass, its guild's name and whether it still counts this character
@@ -408,6 +417,10 @@ message SaveProgressRequest {
   repeated Friend friends = 20;
   bool replace_friend_requests = 21;
   repeated FriendRequest friend_requests = 22;
+  // PvP: with replace_pvp the character's corruption and blight become exactly `pvp` (both 0 keeps no row; unset is both 0); without it they are left alone.
+  // InvalidArgument, with nothing changed, for a value that is not finite, below 0 or not under a million. (23 to 26 are taken by a branch in progress.)
+  bool replace_pvp = 27;
+  PvpState pvp = 28;
 }
 
 message SaveProgressResponse {

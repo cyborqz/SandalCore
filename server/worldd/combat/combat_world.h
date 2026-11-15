@@ -27,6 +27,7 @@
 #include "combat/npc_replicator.h"
 #include "combat/npc_stats.h"
 #include "combat/origin_frame.h"
+#include "combat/pvp.h"
 #include "effects/effect_book.h"
 #include "nav/area_nav.h"
 #include "npc/ai/npc_ai.h"
@@ -70,9 +71,20 @@ struct IncomingHit {
     std::vector<effects::Applied> effects;              // what it puts on him, its numbers worked out by the caster (HitResolver::resolve_effects_with)
     std::vector<double>          effect_shields;        // per effect: the shield its TempHealth mod gives him (HitResolver::effect_shield; 0: none)
     const abilities::HitDef*     removes = nullptr;     // the hit takes effects off him (a Purify on an ally): its removal list or filter
+    bool                         hostile = false;       // PvP: another player's harmful hit (it lands on the mount of a mounted rider, as a creature's does, and counts as the last PvP blow)
     double                   at = 0;
 };
 // built with C-Y-B and CoA
+
+/// PvP: a player another player killed, as he was when he fell (what the killer's corruption reads: combat/pvp_corruption.h).
+struct PvpKill {
+    uint64_t                victim = 0;           // the victim's pawn
+    std::array<uint32_t, 4> victim_guid{};        // his CharacterGuid
+    pvp::Flag               victim_flag = pvp::Flag::NonCombatant;
+    int                     victim_level = 0;
+    bool                    duel = false;         // the two fought a duel
+    bool                    grouped = false;      // the two are in one party (a blow among friends: no corruption)
+};
 
 /// One hit of an effect a player put on a creature (a burn's damage each second), worked out by the world: the player's session confirms it to the player's client, which draws the
 /// number over the creature.
@@ -161,6 +173,17 @@ public:
     virtual uint64_t group_key() const { return 0; }
     /// Another player's Resurrect landed on this dead player: the session asks him (the CharacterGuid is who the client's alert names).
     virtual void prompt_resurrect(const std::array<uint32_t, 4>& /*by*/, double /*now*/) {}
+
+    // ---- PvP (combat/pvp.h, combat/combat_pvp.cpp)
+    /// The player's side of the PvP rules and whether his force flag is on now (the PvP key, or the flag his last trigger carried).  False for a port that
+    /// keeps none (a pet): it is then on its owner's side as before, and no rule between players applies to it.
+    virtual bool pvp_side(pvp::Side& /*out*/, bool& /*force_flag*/) const { return false; }
+    /// An action of this player's on another player flags him (`intention`: pvp::kIntentionHarm or kIntentionSupport; `target`: the other's pawn).
+    virtual void pvp_flagged(uint64_t /*target*/, uint8_t /*intention*/, double /*now*/) {}
+    /// The player is in a fight with another player (a harmful hit either way), or no longer is (the in-combat time after the last one): CombatInfo.bInPVPCombat.
+    virtual void set_in_pvp_combat(bool /*on*/, double /*now*/) {}
+    /// The player's harmful hit was the last one another player took before he fell.
+    virtual void pvp_kill(const PvpKill& /*kill*/, double /*now*/) {}
 };
 
 /// What a player asks about a target before it acts on it.
@@ -177,15 +200,35 @@ struct TargetInfo {
     bool     is_player = false;
     bool     other_player = false;      // another player: Ally, Raid and Party in a mask differ for him
     int      group = 0;                 // ... who shares the player's raid or party (1) or squad (2); 0: neither.  A party is one squad
+    // PvP: another player judged by the rules between players (combat/pvp.h): what the caster may do to him now (pvp::kHarm | kHelp).  `relation` says the same:
+    // Hostile for harm only (a duel), Neutral for both (Neutral_Player), Friendly for support only.
+    bool     pvp = false;
+    uint8_t  pvp_permissions = 0;
 };
 
 /// Whether a mask of EAffectedTarget (Self 1, Enemy 2, Ally 4, Party 8, Raid 16) reaches a target: an enemy by Enemy; another player by Ally, by Raid in one group,
 /// or by Party in one squad; anything else friendly by any of them but Enemy.
+/// Another player the PvP rules judge is reached by Enemy when the caster may harm him, and by Ally, Party or Raid when he may support him.
 inline bool mask_reaches(int mask, const TargetInfo& ti) {
+    if (ti.pvp) {
+        const bool harm = (mask & 2) != 0 && (ti.pvp_permissions & pvp::kHarm) != 0;
+        const bool help = (ti.pvp_permissions & pvp::kHelp) != 0 && ((mask & 4) != 0 || ((mask & 16) != 0 && ti.group >= 1) || ((mask & 8) != 0 && ti.group >= 2));
+        return harm || help;
+    }
     if (ti.relation == Relation::Hostile) return (mask & 2) != 0;
     if (!ti.other_player) return (mask & (1 | 4 | 8 | 16)) != 0;
     return (mask & 4) != 0 || ((mask & 16) != 0 && ti.group >= 1) || ((mask & 8) != 0 && ti.group >= 2);
 }
+
+/// Whether a hit of this mask on the target is a harmful one: an enemy's, or another player's the caster may harm (a hit that would both harm and help a
+/// Neutral_Player harms him).  What the resolver's rolls and the hit's "enemy" read.
+inline bool harms(int mask, const TargetInfo& ti) {
+    if (ti.pvp) return (mask & 2) != 0 && (ti.pvp_permissions & pvp::kHarm) != 0;
+    return ti.relation == Relation::Hostile;
+}
+
+/// Whether a target is one an area of the player's gathers to harm: a creature hostile to him, or another player he may harm.
+inline bool harmable(const TargetInfo& ti) { return ti.pvp ? (ti.pvp_permissions & pvp::kHarm) != 0 : ti.relation == Relation::Hostile; }
 
 /// An enemy an area ahead of a player holds (a cone, a line), and how far its centre is from the player.
 struct GatheredTarget {
@@ -288,7 +331,9 @@ public:
     void add_player(PlayerPort* port);
     void remove_player(PlayerPort* port);
     /// The player is dead (his Health ran out): everything he put on the creatures ends at once, and so does what his pet put on them (it stands under his name), instead of at the next hit of an effect.
-    void player_died(uint64_t actor_id);
+    /// PvP: `killer` is the player whose harmful hit was the last blow he took (0: a creature's, or none): that player is told (PlayerPort::pvp_kill), with the
+    /// victim's side as it was when he fell.
+    void player_died(uint64_t actor_id, uint64_t killer = 0, double now = 0);
     /// The port of the player whose pawn is `actor_id` (null: none joined).
     PlayerPort* find_player(uint64_t actor_id) { return player(actor_id); }
     const std::vector<PlayerPort*>& players() const { return players_; }
@@ -305,6 +350,11 @@ public:
     void remove_effects_from_player(uint64_t target, uint64_t attacker, const abilities::HitDef& hit, double now);
     /// A Resurrect of `caster` landed on a dead player: his session asks him (ClientPromptResurrect).
     void resurrect_player(uint64_t target, uint64_t caster, double now);
+    /// PvP: a hit of an effect `from` (a player) left on another player (a bleed's tick): it is `from`'s hit, resolved from his stats as he is now and judged by the
+    /// rules between the two; his client is told of it (PlayerPort::hit_dealt).  A player who is gone or dead hits no more.
+    void player_effect_hit(uint64_t from, uint64_t target, int64_t hit_guid, int64_t effect_guid, double now);
+    /// PvP: the crowd controls of a player that a non-combatant was immune to (apply_effects_to_player; the tests and the log).
+    size_t pvp_cc_immunities() const { return pvp_cc_immunities_; }
 
     // ---- NPCs
     /// The NPC's fighter (its combatant made when it is not yet); null for an actor that is no NPC of a kind that has stats.
@@ -679,6 +729,14 @@ private:
     /// What a player asks about another player's pawn (combat/combat_players.cpp): where he is and whether he lives, on the caster's side, and how the two are grouped.
     TargetInfo  inspect_player(PlayerPort& target, const Fighter& from);
     void  player_exchange(uint64_t player_id, double now);
+    /// PvP: a harmful hit between two players: both are in combat, and in PvP combat (CombatInfo.bInPVPCombat), for the in-combat time.
+    void  pvp_exchange(uint64_t a, uint64_t b, double now);
+    /// PvP: the two players' sides and how they are grouped; false when either keeps none (a pet) or they are the same.
+    bool  pvp_pair(PlayerPort& self, PlayerPort& target, pvp::Side& a, bool& force, pvp::Side& b, pvp::Pair& pair);
+    /// PvP: the PvP combat flags whose time ran out end (tick()): the player is told.
+    void  expire_pvp_combat(double now);
+    /// PvP: a player died (player_died): the one whose blow it was hears of the kill, with the victim as he was when he fell, and the victim's PvP combat ends.
+    void  pvp_player_died(uint64_t victim, uint64_t killer, double now);
 
     world::ActorRegistry&  registry_;
     npc::NpcWorld*         npcs_world_;
@@ -693,6 +751,8 @@ private:
     std::unordered_map<uint64_t, std::unique_ptr<Npc>> npcs_;
     std::vector<PlayerPort*> players_;
     std::map<uint64_t, double> player_combat_until_;   // actor id -> when its combat flag ends
+    std::map<uint64_t, double> player_pvp_until_;      // PvP: actor id -> when its PvP combat flag ends
+    size_t                     pvp_cc_immunities_ = 0;  // PvP: another player's crowd controls a non-combatant was immune to
     std::vector<Pending>   pending_;
     std::vector<Flight>    flights_;
     std::map<uint64_t, PetFight> pet_fights_;   // pet actor -> its fight

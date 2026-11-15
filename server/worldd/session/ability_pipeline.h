@@ -801,6 +801,7 @@ private:
         double                      start = 0, end = 0;           // end: infinity for an infinite effect
         double                      next_tick = 0;                // infinity: none
         std::vector<stats::EffectMod> mods;                       // one stack's values
+        uint64_t                    from_player = 0;              // PvP: the other player whose hit left it (0: the character's own, or a creature's): its ticks that aim at an enemy are his hits
     };
     /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect) and the infinite effects its overlap hits
     /// put on the caster, which end with the dance.
@@ -985,6 +986,7 @@ void   step_multi_hit(Cast& cast, double t);
     struct GivenEffect {
         std::vector<stats::EffectMod> mods;   // one stack's stat mods, the caster's
         double                        shield = 0;   // what its TempHealth mod gives (0: none)
+        uint64_t                      from = 0;     // the caster's pawn (PvP: what its ticks aimed at an enemy are, EffectInst::from_player)
     };
     const GivenEffect* given_effect_ = nullptr;
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);

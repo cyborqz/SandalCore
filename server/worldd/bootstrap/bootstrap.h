@@ -796,9 +796,24 @@ public:
     bool observer_stats_differ(const repl::Actor& shown) const;
     bool set_observer_dead(repl::Actor& shown, bool dead);
 
-    // ---- abilities between players (bootstrap/between_players.cpp)
+    /// PvP: the shown pawn's AlignmentComponent.Alignments (the flag the other players' nameplates of him are drawn with).
+    bool set_observer_alignments(repl::Actor& shown, const repl::AlignmentContainer& alignments);
+
+    // ---- abilities between players and PvP (bootstrap/between_players.cpp)
     /// The PlayerController's ClientPromptResurrect(InstigatorGuid): the alert that asks a dead player whether another player (his CharacterGuid) may raise him.
     std::optional<Send> prompt_resurrect(const std::array<uint32_t, 4>& by);
+    /// PvP: CombatInfo.bInPVPCombat (a harmful hit between two players, for the in-combat time); the caller sends the pawn's update.
+    bool set_in_pvp_combat(bool on);
+    /// PvP: the pawn's AlignmentComponent.Alignments (combat/pvp.h container: the flag's alignment and its removal timer); the caller sends the pawn's update.
+    /// False before the possession added the component.
+    bool set_alignments(const repl::AlignmentContainer& alignments);
+    /// A bool of the PlayerController by its schema path (the account's settings echoed there: "CharacterInGameSettings.CombatSettings.PVP...."); `fallback` when it holds none.
+    bool controller_bool(std::string_view path, bool fallback) const;
+    /// PvP: NotifyFlaggingReason(Intention, Target): the chat line "Flagged as combatant for harming / supporting {Target}".  `target` is the other player's pawn.
+    std::optional<Send> notify_flagging_reason(uint8_t intention, const emit::FIntrepidNetworkGUID& target);
+    /// PvP: NotifyCorruptionDeltaForKill(CorruptionDelta, Target) ("Gained {0} corruption for killing {1}") and NotifyCorruptionLostForDying(CorruptionDelta).
+    std::optional<Send> notify_corruption_for_kill(float delta, const emit::FIntrepidNetworkGUID& target);
+    std::optional<Send> notify_corruption_lost_for_dying(float delta);
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 

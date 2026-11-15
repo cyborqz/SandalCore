@@ -34,11 +34,11 @@ func before21(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// schemaWithoutIgnoredNames lists every column, constraint, index and table but those of character_ignored_names and the later migration 0024 (the friend tables): what 0021 must not
+// schemaWithoutIgnoredNames lists every column, constraint, index and table but those of character_ignored_names and the later migrations 0024 (the friend tables) and 0025 (PvP): what 0021 must not
 // change.
 func schemaWithoutIgnoredNames(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	const skip = `('character_ignored_names', 'character_friends', 'character_friend_requests')`
+	const skip = `('character_ignored_names', 'character_pvp', 'character_friends', 'character_friend_requests')`
 	var out []string
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
