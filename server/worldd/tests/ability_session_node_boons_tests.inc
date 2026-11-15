@@ -7,21 +7,21 @@
 //
 //  A citizen's boon that can be applied globally reaches the node's citizen wherever it stands: a running modification of the node's buildings puts it on as an
 //  effect of the ability runtime, a second running modification that gives it makes two stacks, and the boon goes when the modifications stop.  The node's
-//  running modifications are set by hand (the effect is one the real content.db has had since contentc version 43).
+//  running modifications are set by hand (the effect is a service building's own boon, which the real content.db's ability tables have had since contentc version 45).
 // ============================================================================
 #include "world/elections.h"
 #include "world/node_rewards.h"
 
 static constexpr int64_t kBoonNode = 108646610851452ll;   // Verra_RVR_Halcyon
 static constexpr int64_t kBoonMod = 7790001, kBoonMod2 = 7790002;
-static constexpr int64_t kArmorTypeHeavy1 = 6064633946081984518ll;   // ArmorType_Heavy_1 (PhysicalMitigation +0.1): an effect of the real tables
+static constexpr int64_t kBoonEffect = 6064634123617239068ll;   // Effect_ServiceBuilding_AdventuringXP_Small, "Lesser Boon of Adventuring XP": infinite, stacks in place up to 10
 
 static void test_node_boons() {
     std::printf("the nodes' boons (contentc version 45): a citizen's global boon from the node's running modifications, stacked per modification, gone when they stop\n");
     const auto prepare = [](PlayerWorld& w) {
         world::NodeRewards book;
         world::NodeBoon b;
-        b.effect = kArmorTypeHeavy1;   // (an effect of the real tables)
+        b.effect = kBoonEffect;   // (a boon of the real tables)
         b.on_character = true;
         b.citizens = true;
         b.global = true;
@@ -45,7 +45,7 @@ static void test_node_boons() {
     world::Elections* el = a.h.fx.world->elections();
     CHECK(p && el && a.h.s->citizenship().node_guid == kBoonNode, "(a citizen of Halcyon, on the real content.db's ability runtime)");
     if (!p || !el) return;
-    CHECK(a.h.s->node_boons().empty() && p->stacks_of(kArmorTypeHeavy1) == 0, "no running modification: no boon");
+    CHECK(a.h.s->node_boons().empty() && p->stacks_of(kBoonEffect) == 0, "no running modification: no boon");
 
     std::vector<int64_t> running;
     const auto run_mod = [&](int64_t mod) {
@@ -55,14 +55,14 @@ static void test_node_boons() {
         a.play(0.5, false);
     };
     run_mod(kBoonMod);
-    CHECK(a.h.s->node_boons().size() == 1 && a.h.s->node_boons().count(kArmorTypeHeavy1) && a.h.s->node_boons().at(kArmorTypeHeavy1) == 1 && p->stacks_of(kArmorTypeHeavy1) == 1,
+    CHECK(a.h.s->node_boons().size() == 1 && a.h.s->node_boons().count(kBoonEffect) && a.h.s->node_boons().at(kBoonEffect) == 1 && p->stacks_of(kBoonEffect) == 1,
           "a running modification of the citizen's node puts its global boon on, wherever the citizen stands: one stack");
     run_mod(kBoonMod2);
-    CHECK(a.h.s->node_boons().at(kArmorTypeHeavy1) == 2 && p->stacks_of(kArmorTypeHeavy1) == 2, "a second modification that gives the same boon: two stacks");
+    CHECK(a.h.s->node_boons().count(kBoonEffect) && a.h.s->node_boons().at(kBoonEffect) == 2 && p->stacks_of(kBoonEffect) == 2, "a second modification that gives the same boon: two stacks");
     a.h.fx.world->set_building_mods_for_test(kBoonNode, {});
     a.h.s->refresh_node_boons_for_test();
     a.play(0.5, false);
-    CHECK(a.h.s->node_boons().empty() && p->stacks_of(kArmorTypeHeavy1) == 0, "the modifications stop: the boon is taken off");
+    CHECK(a.h.s->node_boons().empty() && p->stacks_of(kBoonEffect) == 0, "the modifications stop: the boon is taken off");
 
     // the rules: a citizen's boon asks the node's citizenship and its rank, a zone's boon the zone
     world::NodeBoon citizen_boon;
