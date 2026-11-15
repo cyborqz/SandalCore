@@ -85,6 +85,14 @@ struct DbOptions {
     /// skill_node_exclusive, skill_rank, skill_rank_cost and item_weapon, with the real rows of talent_fixture.sql (tools/worldd/gen_talent_fixture.py):
     /// the class, Universal, weapon and gathering trees, and the starting kits' weapons. Needs progress_tables (skill_rank_stat_mod is theirs).
     bool        talent_tables = true;
+    /// Gathering stage 2 and the certification (contentc version 44): the 22 professions on their curves, the five certification levels and an empty action_certification,
+    /// for a dialogue promotion test.  Needs progress_tables (leveling_type and leveling_curve are theirs).
+    bool        profession_tables = false;
+    /// The certifier's conversation of the dialogue tables: one root, a greeting that leads to a menu whose lines carry the certification actions as contentc 44 writes them
+    /// ("ca" 1 Promote or 2 Demote, "p" the profession), for the dialogue promotion test.
+    bool        dialogue_tables = false;
+    /// The recipe items' item_learn table (contentc version 44), with the Tailoring Level 15 recipe item and one that names no recipe.  Needs item_tables and progress_tables.
+    bool        recipe_tables = false;
 };
 
 /// Plan D1: the GM items of the fixture (real record Guids; the actions and tables of the 10 and gear scrolls are the real ones).
@@ -386,6 +394,101 @@ inline bool exec(sqlite3* db, const char* sql) {
 }
 // == C_Y_B | C O A ==
 
+/// Gathering stage 2 (contentc version 44): the 22 professions on their real curves (400 x level^2, the same for every profession) and the five certification levels, so that a
+/// session on the fixture has a book to certify in.  The certification actions (the GM items') are not needed here and the table is empty.
+inline bool write_professions(sqlite3* db) {
+    struct P {
+        int64_t     guid, leveling;
+        const char* name;
+        const char* category;
+    };
+    static const P kProfessions[] = {
+        {108752746862200ll, 108651600696952ll, "Weaponsmithing", "Crafting"},      {108752746927737ll, 109460729190018ll, "Carpentry", "Crafting"},
+        {108752746927738ll, 109460729190017ll, "ArcaneEngineering", "Crafting"},   {108752746927739ll, 109460729190016ll, "Armorsmithing", "Crafting"},
+        {108752746927740ll, 109460729190015ll, "Leatherworking", "Crafting"},      {108752746993277ll, 109460729190014ll, "Tailoring", "Crafting"},
+        {108752746993278ll, 109460729190013ll, "Jeweler", "Crafting"},             {108752746993279ll, 109460729190012ll, "Scribe", "Crafting"},
+        {108752756889216ll, 109460747540099ll, "Metalworking", "Processing"},      {108752756889217ll, 109460747540100ll, "Stonemasonry", "Processing"},
+        {108752756889218ll, 109460747540101ll, "Weaving", "Processing"},           {108752756954755ll, 109460747540102ll, "Tanning", "Processing"},
+        {108752756954756ll, 109460747540103ll, "LumberMilling", "Processing"},     {108752756954757ll, 109460747540104ll, "Farming", "Processing"},
+        {108752756954758ll, 109460747540105ll, "AnimalHusbandry", "Processing"},   {108752757020295ll, 109460747540106ll, "Alchemy", "Processing"},
+        {108752757020296ll, 109460747540107ll, "Cooking", "Processing"},           {108752769996425ll, 109460719621753ll, "Mining", "Gathering"},
+        {108752769996426ll, 109273709237880ll, "Lumberjacking", "Gathering"},      {108752770061963ll, 109460724995707ll, "Herbalism", "Gathering"},
+        {108752770061964ll, 109460713264760ll, "Fishing", "Gathering"},            {108752770061965ll, 109460722964090ll, "Hunting", "Gathering"},
+    };
+    bool ok = exec(db, "CREATE TABLE profession (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, leveling_type_guid INTEGER NOT NULL, "
+                      "skill_tree_guid INTEGER NOT NULL)");
+    ok = exec(db, "CREATE TABLE certification_level (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, tier INTEGER NOT NULL, min_level INTEGER NOT NULL, max_level INTEGER NOT NULL, "
+                  "has_max_allowable INTEGER NOT NULL, max_allowable INTEGER NOT NULL)") && ok;
+    ok = exec(db, "CREATE TABLE action_certification (action_guid INTEGER PRIMARY KEY, name TEXT NOT NULL, profession_guid INTEGER NOT NULL, action TEXT NOT NULL)") && ok;
+    ok = exec(db, "INSERT INTO certification_level VALUES "
+                  "(108906339653240, 'Novice', 0, 1, 10, 0, 0), (108906340767353, 'Apprentice', 1, 10, 20, 1, 5), (108906342012538, 'Journeyman', 2, 20, 30, 1, 4), "
+                  "(108906343061115, 'Master', 3, 30, 40, 1, 3), (108906343782012, 'GrandMaster', 4, 40, 50, 1, 2)") && ok;
+    std::string types = "INSERT INTO leveling_type (guid, name, experience_type, level_cap, uses_debt, xp_mult_stat_guid) VALUES ";
+    std::string curves;
+    std::string professions = "INSERT INTO profession (guid, name, category, leveling_type_guid, skill_tree_guid) VALUES ";
+    for (size_t i = 0; i < sizeof(kProfessions) / sizeof(kProfessions[0]); ++i) {
+        const P& p = kProfessions[i];
+        types += std::string(i ? ", " : "") + "(" + std::to_string(p.leveling) + ", 'LevelingTypeDef_" + p.name + "', 'Gathering', 0, 0, 0)";
+        professions += std::string(i ? ", " : "") + "(" + std::to_string(p.guid) + ", '" + p.name + "', '" + p.category + "', " + std::to_string(p.leveling) + ", 0)";
+        curves += std::string("INSERT INTO leveling_curve (type_guid, level, xp) VALUES ");
+        for (int level = 1; level <= 50; ++level) {
+            curves += std::string(level > 1 ? ", " : "") + "(" + std::to_string(p.leveling) + ", " + std::to_string(level) + ", " + std::to_string(400ll * level * level) + ")";
+        }
+        curves += ";\n";
+    }
+    ok = exec(db, types.c_str()) && ok;
+    ok = exec(db, curves.c_str()) && ok;
+    ok = exec(db, professions.c_str()) && ok;
+    return ok;
+}
+
+/// The conversations' tables with one certifier: a greeting that leads to a menu of certification actions (the JSON contentc version 44 writes: "ca" 1 Promote or 2 Demote,
+/// "p" the profession).  The lines end the conversation, as the data's own certification lines do.  The greeting's second line leads to a menu of an older contentc's file: one
+/// bare SetCertificationLevel action that names no profession (the worldd side skips it, as before version 44).
+inline bool write_certifier_dialogue(sqlite3* db) {
+    bool ok = exec(db, "CREATE TABLE dialogue_root (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, top_node INTEGER NOT NULL)");
+    ok = exec(db, "CREATE TABLE dialogue_node (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, node_type TEXT NOT NULL, exhaust TEXT NOT NULL, quest_guid INTEGER NOT NULL, "
+                  "on_enter TEXT NOT NULL, on_exit TEXT NOT NULL, has_text INTEGER NOT NULL)") && ok;
+    ok = exec(db, "CREATE TABLE dialogue_choice (node_guid INTEGER NOT NULL, idx INTEGER NOT NULL, next_node INTEGER NOT NULL, requirement TEXT NOT NULL, actions TEXT NOT NULL, "
+                  "PRIMARY KEY (node_guid, idx)) WITHOUT ROWID") && ok;
+    ok = exec(db, "CREATE TABLE dialogue_quest (guid INTEGER PRIMARY KEY, name TEXT NOT NULL, disabled INTEGER NOT NULL, repeatable INTEGER NOT NULL, activation TEXT NOT NULL)") && ok;
+    ok = exec(db, "CREATE TABLE npc_dialogue (source_kind TEXT NOT NULL, source_guid INTEGER NOT NULL, root_guid INTEGER NOT NULL, PRIMARY KEY (source_kind, source_guid)) WITHOUT ROWID") && ok;
+    ok = exec(db, "INSERT INTO dialogue_root VALUES (6064634370000000001, 'Fixture_Certifier', 6064634370000000002)") && ok;
+    ok = exec(db, "INSERT INTO dialogue_node VALUES "
+                  "(6064634370000000002, 'Fixture_Certifier_Greeting', 'Response', 'CloseAndClear', 0, '[]', '[]', 1), "
+                  "(6064634370000000003, 'Fixture_Certifier_Menu', 'Response', 'CloseAndClear', 0, '[]', '[]', 1), "
+                  "(6064634370000000004, 'Fixture_Certifier_OlderMenu', 'Response', 'CloseAndClear', 0, '[]', '[]', 1)") && ok;
+    ok = exec(db, "INSERT INTO dialogue_choice VALUES "
+                  "(6064634370000000002, 0, 6064634370000000003, '', '[]'), "
+                  "(6064634370000000002, 1, 6064634370000000004, '', '[]'), "
+                  "(6064634370000000004, 0, 0, '', '[{\"a\":\"SetCertificationLevel\"}]'), "
+                  "(6064634370000000003, 0, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":1,\"p\":108752746862200}]'), "
+                  "(6064634370000000003, 1, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":2,\"p\":108752746862200}]'), "
+                  "(6064634370000000003, 2, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":1,\"p\":108752746927739}]'), "
+                  "(6064634370000000003, 3, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":2,\"p\":108752746927739}]'), "
+                  "(6064634370000000003, 4, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":1,\"p\":108752757020295}]'), "
+                  "(6064634370000000003, 5, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":2,\"p\":108752757020295}]'), "
+                  "(6064634370000000003, 6, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":1,\"p\":108752757020296}]'), "
+                  "(6064634370000000003, 7, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":2,\"p\":108752757020296}]'), "
+                  "(6064634370000000003, 8, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":1,\"p\":108752769996425}]'), "
+                  "(6064634370000000003, 9, 0, '', '[{\"a\":\"SetCertificationLevel\",\"ca\":2,\"p\":108752769996425}]')") && ok;
+    return ok;
+}
+
+/// The recipe items (contentc version 44): a real Tailoring recipe item (Apprentice, recipe 6064631200434094179) and one that names no recipe (a T3 item whose recipe the data
+/// does not have).  The activation is LearnRecipes and the use consumes one.
+inline bool write_recipe_items(sqlite3* db) {
+    bool ok = exec(db, "CREATE TABLE item_learn (item_guid INTEGER NOT NULL, ord INTEGER NOT NULL, recipe_guid INTEGER NOT NULL, profession_guid INTEGER NOT NULL, "
+                      "certification_guid INTEGER NOT NULL, PRIMARY KEY (item_guid, ord)) WITHOUT ROWID");
+    ok = exec(db, "INSERT INTO item (guid, name, level, can_equip, occupies_all_equip_slots) VALUES "
+                  "(6064631200504938606, 'Consumable_Recipe_Tailoring_T2_Armor_Annalist_Chest', 15, 0, 0), "
+                  "(6064634597980045319, 'Consumable_Recipe_Weaponsmithing_T3_Weapon_Sword_2H_Xiryth', 30, 0, 0)") && ok;
+    ok = exec(db, "INSERT INTO item_use (item_guid, activation, consume_on_use, cooldown, disabled_in_combat) VALUES "
+                  "(6064631200504938606, 'LearnRecipes', 1, 0, 0), (6064634597980045319, 'LearnRecipes', 1, 0, 0)") && ok;
+    ok = exec(db, "INSERT INTO item_learn VALUES (6064631200504938606, 0, 6064631200434094179, 108752746993277, 108906340767353)") && ok;
+    return ok;
+}
+
 /// Writes the small content.db at `path`; false when it could not be written.
 inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
     sqlite3* db = nullptr;
@@ -549,6 +652,9 @@ inline bool make_db(const fs::path& path, const DbOptions& o = {}) {
             }
         }
     }
+    if (o.profession_tables && o.progress_tables) ok = write_professions(db) && ok;
+    if (o.dialogue_tables) ok = write_certifier_dialogue(db) && ok;
+    if (o.recipe_tables && o.item_tables && o.progress_tables) ok = write_recipe_items(db) && ok;
     sqlite3_close(db);
     return ok;
 }

@@ -6,6 +6,8 @@
 // ============================================================================
 #include "gather/gathering.h"
 
+#include "fishing/predicate.h"
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -115,6 +117,31 @@ std::map<int64_t, std::string> hunting_names(const content::FoliageData& data) {
     return out;
 }
 
+namespace {
+
+/// The slot of the fishing rod: the interactions that use it are the fishing waters'.
+constexpr int kFishingRodSlot = 35;
+
+/// Fishing: the tables of one water pick ONE fish.  Each tier's table lists its fish and weights one more slot than it has fish (Fish_Riverlands_T1: Bluegill 25, Largemouth Bass 25 and a
+/// third slot of 50 that names nothing: a cycle that catches nothing), and the data's NumberOfSubtablesToSelect is the default 2 it has everywhere; picked twice the table would give a fish
+/// at every cycle and often two [R: the retail recordings show at most one fish a cycle and most cycles with none].  The picks of the tier tables under `root` are set to one; the number of
+/// tables changed.
+size_t pick_one_fish(std::map<int64_t, content::LootTable>& tables, int64_t root, std::set<int64_t>& seen) {
+    if (root == 0 || !seen.insert(root).second) return 0;
+    const auto it = tables.find(root);
+    if (it == tables.end()) return 0;
+    size_t changed = 0;
+    if (it->second.algo == "PerElementWeightedRandom" && it->second.n > 1) {
+        it->second.n = 1;
+        ++changed;
+    }
+    const std::vector<int64_t> subs = it->second.subs;
+    for (const int64_t sub : subs) changed += pick_one_fish(tables, sub, seen);
+    return changed;
+}
+
+}  // namespace
+
 uint64_t fresh_seed() {
     std::random_device random;
     const uint64_t drawn = (static_cast<uint64_t>(random()) << 32) ^ static_cast<uint64_t>(random());
@@ -171,7 +198,15 @@ std::unique_ptr<Gathering> Gathering::make(const content::ContentDb& db, world::
             }
         }
     }
+    size_t fish_one_of = 0;
+    if (foliage) {
+        std::set<int64_t> seen;
+        for (const auto& [guid, i] : foliage->interactions) {
+            if (i.tool_slot == kFishingRodSlot) fish_one_of += pick_one_fish(*tables, i.reward_guid, seen);
+        }
+    }
     std::unique_ptr<Gathering> g(new Gathering(config.board, registry, config));
+    g->fishing_one_of_ = fish_one_of;
     g->db_ = &db;
     g->catalog_ = &catalog;
     g->data_ = std::move(*data);
@@ -311,7 +346,7 @@ std::optional<double> Gathering::channel_seconds(const content::GatherDefRow& de
 }
 
 std::optional<Harvest> Gathering::harvest(const content::GatherDefRow& def, stats::CharacterStats::Evaluation& player, double level, const world::NodeSite& site,
-                                          const world::CityNodes* nodes, stats::SplitMix& rng, std::string& why) {
+                                          const world::CityNodes* nodes, stats::SplitMix& rng, std::string& why, const fishing::Facts* facts) {
     if (!rewards_ || !rewards_->table(def.reward_guid)) {
         why = "the reward table " + std::to_string(def.reward_guid) + " of " + def.name + " is not loaded";
         return std::nullopt;
@@ -332,6 +367,12 @@ std::optional<Harvest> Gathering::harvest(const content::GatherDefRow& def, stat
     ctx.nodes = nodes;
     ctx.node = site.node_rank;
     ctx.biome = site.biome;
+    if (facts) {   // Fishing: the predicates on the player's certification and rod (fishing/predicate.h)
+        ctx.fallback = [this, facts](int64_t expr) -> std::optional<double> {
+            const content::ExprRow* e = catalog_->expr(expr);
+            return e ? fishing::evaluate_predicate(e->text, *facts) : std::nullopt;
+        };
+    }
     const combat::Rolled rolled = rewards_->roll({def.reward_guid}, ctx);
     Harvest h;
     h.items = rolled.loot;

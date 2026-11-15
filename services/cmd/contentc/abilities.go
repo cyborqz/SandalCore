@@ -405,7 +405,7 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 	}
 	itemRows.Close()
 	opt.logf("consumable items: %d abilities, %d of them not seeded before", consumables, consumablesNew)
-	// ... and the boons the node rewards put on characters (version 45, node_effect_zoi), applied through the ability runtime the same way
+	// ... and the boons the node rewards put on characters (version 46, node_effect_zoi), applied through the ability runtime the same way
 	boons := 0
 	for _, r := range src.rows["NodeEffectRecordBase"] {
 		nf := newFields(fmt.Sprintf("NodeEffect %s (%d)", r.Name, r.Guid), r.Fields)

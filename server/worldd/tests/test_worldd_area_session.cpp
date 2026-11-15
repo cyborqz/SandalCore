@@ -153,9 +153,15 @@ static double world_time_at(Clock::time_point t) { return std::chrono::duration<
 
 struct RecordingSink : PositionSink {
     std::vector<std::vector<svc::InventoryItem>> inventories;
+    std::vector<svc::Progress>                   progress;        // the professions and the rest of a hand-over
+    std::vector<int64_t>                         known_recipes;   // the recipes the last inventory save carried
     void save(const std::string&, const svc::Position&) override {}
     void save_inventory(const std::string&, std::vector<svc::InventoryItem> items) override { inventories.push_back(std::move(items)); }
-    std::vector<svc::Progress> progress;   // node citizenship: what each progress save carried
+    void save_inventory(const std::string& id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> /*wallet*/, std::vector<svc::ProcessingJob> /*jobs*/,
+                        std::vector<int64_t> known) override {
+        known_recipes = std::move(known);
+        save_inventory(id, std::move(items));
+    }
     void save_progress(const std::string&, svc::Progress p) override { progress.push_back(std::move(p)); }
 };
 
@@ -169,10 +175,10 @@ struct Fixture {
     std::optional<spawns::CapturedData> captured;
 // (C.O.A) (Cyb)
 
-    Fixture() {
+    explicit Fixture(const content_fixture::DbOptions& options = {}) {
         dir = cf::make_temp_dir("worldd_area_session_");
         const fs::path db = dir / "content.db";
-        if (!cf::make_db(db)) std::exit(2);
+        if (!cf::make_db(db, options)) std::exit(2);
         std::string error;
         content = content::ContentDb::open(db.string(), error);
         if (!content) {
@@ -270,7 +276,7 @@ struct Harness {
 
     svc::Character record;
 
-    explicit Harness(svc::Character r = cyb_record()) : record(std::move(r)) { fx.world->set_position_sink(&sink); }
+    explicit Harness(svc::Character r = cyb_record(), const content_fixture::DbOptions& options = {}) : fx(options), record(std::move(r)) { fx.world->set_position_sink(&sink); }
     virtual ~Harness() = default;
     /// The derived harness fills the registry, then joins (a base constructor cannot call the derived populate()).
     void start() {

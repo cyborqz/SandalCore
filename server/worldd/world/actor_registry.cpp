@@ -43,6 +43,10 @@ bool ActorRegistry::add(WorldActor actor) {
     if (actor.kind == ActorKind::Npc) actor.npc.spawned_at = clock_;   // (a creature's tree begins to run when it is put into the world: a respawn is a new actor, so a new tree)
     const auto it = actors_.emplace(id, std::move(actor)).first;
     grid_add(it->second);
+    if (it->second.kind == ActorKind::Player) {
+        player_ids_.push_back(id);
+        ++player_epoch_;
+    }
     if (it->second.awake_radius_cm > kWideCm) wide_.push_back(id);
     if (it->second.npc.interact_component != 0) by_component_[it->second.npc.interact_component] = id;
     if (it->second.npc.collision_cylinder != 0) by_component_[it->second.npc.collision_cylinder] = id;
@@ -63,6 +67,10 @@ bool ActorRegistry::remove(uint64_t id) {
     wide_.erase(std::remove(wide_.begin(), wide_.end(), id), wide_.end());
     if (it->second.npc.interact_component != 0) by_component_.erase(it->second.npc.interact_component);
     if (it->second.npc.collision_cylinder != 0) by_component_.erase(it->second.npc.collision_cylinder);
+    if (it->second.kind == ActorKind::Player) {
+        player_ids_.erase(std::remove(player_ids_.begin(), player_ids_.end(), id), player_ids_.end());
+        ++player_epoch_;
+    }
     actors_.erase(id);
     return true;
 }

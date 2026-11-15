@@ -385,6 +385,13 @@ int main(int argc, char** argv) {
     app.add_option("--foliage-map", foliage_map_path,
                    "the painted foliage of the area, dist/content/region_foliage.tsv (tools/mapc `mapc extract`: 84,218 instances of the Riverlands; a missing file: the foliage is seen and not harvested)")
         ->envname("AOC_FOLIAGE_MAP")->capture_default_str();
+    // Fishing, milestone 1: the water a line can be cast into (fishing/fishing.h); --no-gathering switches it off with the nodes
+    bool no_fishing = false;
+    std::string fishing_water_path = "dist/content/fishing_water.tsv";
+    app.add_flag("--no-fishing", no_fishing, "the kill switch for fishing: the fishing ability's cast is the generic runtime's (an item and a cooldown, no loop)")->envname("AOC_NO_FISHING");
+    app.add_option("--fishing-water", fishing_water_path,
+                   "the lakes and rivers a line can be cast into, dist/content/fishing_water.tsv (tools/waterbodies, the extractor's waterbodies step; a missing file: no fishing)")
+        ->envname("AOC_FISHING_WATER")->capture_default_str();
     app.add_option("--max-sessions", endpoint_config.max_sessions,
                    "the most client sessions at once; further handshakes are ignored (0: no limit)")
         ->capture_default_str();
@@ -845,6 +852,14 @@ int main(int argc, char** argv) {
                 trees.regrow_mult = foliage_regrow_mult;
                 std::string foliage_error;
                 if (!players.start_foliage(trees, foliage_error)) spdlog::warn("[foliage] harvesting is off: {} (the trees, plants and stones of the world are seen and not harvested)", foliage_error);
+                if (no_fishing) {
+                    spdlog::info("[fishing] --no-fishing: the fishing ability's cast is the generic runtime's");
+                } else {
+                    fishing::Config lines;
+                    lines.water_path = fishing_water_path;
+                    std::string fishing_error;
+                    if (!players.start_fishing(lines, fishing_error)) spdlog::warn("[fishing] fishing is off: {} (the fishing ability's cast is the generic runtime's)", fishing_error);
+                }
             }
         }
     } else if (area_radius_m == 0) {

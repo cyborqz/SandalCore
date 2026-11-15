@@ -34,9 +34,11 @@
 //                (ESubDialogueType BuyOrderFulfillment) and says so (Result::open_buy_orders): the session opens the window over the conversation and the player closes it with
 //                the panel's Close, which ends the talk
 //
-//  What this milestone does not do (it opens no windows but a shop's, the warehouse and the buy orders): an action that is not a quest action (SetCertificationLevel, a window that
-//  is not a shop's ...) is skipped and reported; a line that ends the conversation but has such an action changes nothing (the window stays).  ExhaustBehavior is CloseAndClear for
-//  all but one node of the data, and every node is treated so.
+//  What this milestone does not do (it opens no windows but a shop's, the warehouse and the buy orders): an action that is not a quest action or a certification action (a window
+//  that is not a shop's ...) is skipped and reported; a line that ends the conversation but has such an action changes nothing (the window stays).  ExhaustBehavior is
+//  CloseAndClear for all but one node of the data, and every node is treated so.  A certification action of a line is put in Result::certifications for the caller to apply (the
+//  conversation changes no profession); the caller's `CertifyAllowed` decides whether the player may take it, and one it refuses leaves the conversation as it was.  A
+//  certification action of a node's OnEnter or OnExit list is still skipped (the data has none).
 //  A node with no line that shows is shown with its words alone: the talking window adds a close option of its own ("Farewell." for a person, "Close" for anything else) and the
 //  player ends the conversation with it, so the last words of most conversations are seen before the talk ends.  A node with neither words nor a line (a placeholder root) shows
 //  nothing: a click on an NPC that starts at one does nothing, a line that leads to one ends the conversation, and what entering it does still happens.
@@ -47,6 +49,7 @@
 #include "protocol/repl/dialogue_rpc.h"
 
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <set>
@@ -60,11 +63,23 @@ inline constexpr int kMaxAutomaticSteps = 8;
 
 enum class Outcome { Changed, Nothing, Refused };
 
+/// A certification action a line asks for: one tier up (Promote) or down (Demote) for a profession.  The conversation changes no profession itself: the caller applies it after
+/// the step (`Result::certifications`) and passes `CertifyAllowed` so that a step the player may not take changes nothing.
+struct Certification {
+    int64_t profession = 0;
+    bool    promote = true;
+};
+
+/// Whether the player may take a certification action; `why` says why not.  False keeps the conversation as it was (the line changes nothing, as a line whose action is not done).
+using CertifyAllowed = std::function<bool(int64_t profession, bool promote, std::string& why)>;
+
 struct Result {
     Outcome                  outcome = Outcome::Nothing;
     std::string              why;       // for the log: why nothing changed, or what was skipped
     std::vector<std::string> skipped;   // actions of a line or node that were not done ("GiveItems")
     int64_t                  open_vendor = 0;   // the line opens this shop (a VendorDef): the caller opens its window; the conversation itself is left as it is
+    /// The certification actions the step took, in the order the line lists them (SetCertificationLevel with a profession): the caller moves each profession one tier.
+    std::vector<Certification> certifications;
     bool                     offer = false;     // the conversation now shows a quest offer (state().sub)
     bool                     offer_answered = false;   // the quest offer was answered or refused: the update carries the cleared queue and ExhaustBehavior
     int                      open_warehouse = 0;   // storage, step 0: the line opens the character's warehouse (the action response OpenPlayerWarehouse): its StorageAccessConfig; the conversation ends
@@ -172,7 +187,8 @@ public:
 
     /// The player chose a line (ResponseType Choice).  Refused, changing nothing, for a conversation that is not open, a node other than the one shown or a line that
     /// is not shown.  Otherwise the line's actions are skipped (and listed); it leads to the next node, ends the conversation (no actions) or changes nothing.
-    Result choose(const Book& book, Evaluator& ev, const protocol::repl::DialogueResponse& response) {
+    /// A certification action is asked of `certify` (when given): refused there, the line changes nothing and the conversation stays as it is.
+    Result choose(const Book& book, Evaluator& ev, const protocol::repl::DialogueResponse& response, const CertifyAllowed& certify = {}) {
         Result r;
         r.outcome = Outcome::Refused;
         if (!open()) { r.why = "no conversation is open"; return r; }
@@ -211,6 +227,20 @@ public:
             }
             if (is_quest_action(a)) {
                 note(r, from->guid, a, state_.visited);
+                continue;
+            }
+            if (a.action == "SetCertificationLevel" && a.profession != 0 && (a.certification == 1 || a.certification == 2)) {
+                // a certification action: the player may take it now (the caller checks the level, the cap and the tier's limit); the caller moves the profession after the step
+                if (certify) {
+                    std::string why;
+                    if (!certify(a.profession, a.certification == 1, why)) {
+                        drop(r);
+                        r.outcome = Outcome::Nothing;
+                        r.why = why;
+                        return r;
+                    }
+                }
+                r.certifications.push_back({a.profession, a.certification == 1});
                 continue;
             }
             ++others;
@@ -509,6 +539,7 @@ private:
     static void drop(Result& r) {
         r.actions.clear();
         r.deferred.clear();
+        r.certifications.clear();
     }
 
     State                    state_;

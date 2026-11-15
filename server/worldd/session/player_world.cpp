@@ -1287,6 +1287,24 @@ bool PlayerWorld::start_gathering(const gather::Config& config, std::string& err
     return true;
 }
 
+bool PlayerWorld::start_fishing(const fishing::Config& config, std::string& error) {
+    error.clear();
+    if (fishing_) return true;
+    if (!gathering_) {
+        error = "gathering is off";
+        return false;
+    }
+    if (!ability_catalog()) {
+        error = "no ability catalog";
+        return false;
+    }
+    auto f = fishing::Fishing::make(config, *ability_catalog(), *gathering_, error);
+    if (!f) return false;
+    fishing_ = std::move(f);
+    spdlog::info("[fishing] on: {}", fishing_->describe());
+    return true;
+}
+
 bool PlayerWorld::start_foliage(const foliage::Config& config, std::string& error) {
     error.clear();
     if (foliage_) return true;

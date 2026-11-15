@@ -796,7 +796,7 @@ func buildNodes(w *writer, src *source, opt *Options, meta map[string]string) er
 	return nil
 }
 
-// writeNodeRewards fills node_reward, node_reward_mod and the node_effect tables (contentc version 45): a mayoral commission's reward is NodeMods, each a
+// writeNodeRewards fills node_reward, node_reward_mod and the node_effect tables (contentc version 46): a mayoral commission's reward is NodeMods, each a
 // NodeModification for a Duration; a modification's EffectsIds name NodeEffect rows, each with the effects it puts on characters (or caravans, mounts) in the
 // node's zone of influence and the commodities it gives the node's stores.
 func writeNodeRewards(rows func(string) []designdb.Row, insert func(table, query string, args ...any) error) error {

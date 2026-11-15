@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 14 November 2026
+**Last updated:** 15 November 2026
 
 ---
 
@@ -25,7 +25,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Combat and the class abilities; weapon combo finishers and weapon swaps; magic weapon scaling (caster weapons scale with Magical Power, and melee combos hit for their full share).
 - The walking map and NPC spawning; mobs that notice by hearing and sight and give up 140 m from where the fight began; loot rolls that change on every server start.
 - Mounts: ground, aquatic and flying.
-- Gathering, hunting and professions.
+- Gathering, hunting, fishing and professions.
 - City nodes: node levels and experience, the towns' scenery, people and floor, and the towns' crafting stations.
 - Node citizenship: joining a Village or Town node at its Sheriff (level 10, 1 Tax Voucher), the citizenship tab of the node window with the node's news, dues on the node's dates every two weeks from the data's formulas (the account's highest level, citizen rank) with the missed-dues increase and a late fee, renouncing, and a citizenship that lapses when dues stay unpaid; one citizenship per account, saved (migration 0020).
 - Mayors: each node's elections on the data's calendar (the first once the node has the citizens it needs, then monthly), standing at the Sheriff and voting from the node window's election notification, a ranked vote of up to 3 counted by instant runoff, the mayor and the citizen count in the node window and on the map, the mayor's message and list of citizens, the mayor's taxes on the town shops and the node's treasury, the GM console's citizenship calls; kept in `elections.json` across restarts.
@@ -80,7 +80,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Reactions (first iteration): the game's reactions run for your own hits and for paying an ability's cost. The Bard's Resonance follows the game's rule (the Resonant Weapon passive from level 5) and its Menacing and Cathartic melodies add their damage at a combo finisher and spend up to 3 Resonance. The weapon talents that react at a finisher (the wand's Burning, Chilled and Volatile, the axes' Bleed, Snare and Wound, and the like) fire at the deadly finishing hit of the weapon in hand, the wand's Burning puts the Burning debuff on the mob, and the damage talents of the weapon trees count for its hits. The other classes' reactions run from the game's data and are not checked against the game yet.
 - Crates: construction crates and trade crates are made at the crate stations and carried in the cargo slot, which slows the carrier; a trade crate's rarity follows its materials, a quest can give a crate, and the Drop Crate ability takes the crate off the back. Next: the crate lying on the ground for others to pick up, then putting crates into building sites and selling them. The other crate types stay under Left.
 - Summoner pets: the Guardian, Hunter and Mystic come with the summon, follow, fight, take commands and stances, play their ten abilities and come back when more than 40 m away.
-- Seeing other players (first part): players within 150 m of each other are shown to each other as their characters, standing, walking and stopping, and leave each other's world when they log out. Still to come: riders on their mounts, gear and level changes, live Health and Mana, death, combat stances, and abilities and hits on other players.
+- Seeing other players (first three parts): players within 150 m of each other see each other's characters standing, walking, stopping and riding their mounts, with the gear they wear, the weapons in their hands and their level kept current as they change. Still to come: live Health and Mana, death, combat stances, and abilities and hits on other players.
 - The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
 
 ### Left
@@ -95,7 +95,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Mobs: the remaining mob families' own fights and abilities (the Goblin Flame Shamans' fire bombs and the arsonists' fire spray, stream and ring among them), smooth movement for goblins and bandits while their attack animations play, pack aggro, damage matched to retail, and flying mobs.
 - Abilities: the bars of Deliverance (a held cast) and Disengage follow the game's recorded timeline.
 - The walking map: walls, fences, water and holes.
-- The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, fishing, random gatherables, and camp props (tents, totems, caches, doors).
+- The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, and the mayor's commissions and buildings.
 - Economy: player trading, marketplaces, node currency and crates.
 - Social: guilds, raids and mail.
@@ -103,6 +103,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Caravans and trade routes.
 - Conversations: NPC voice and animation while they talk.
 - Infrastructure: multi-process cell sharding for crowded worlds.
+- Fishing: sport fishing (the lure, the fish that is fought with the line, and the fishing grounds with their fish).
 
 ---
 
@@ -115,12 +116,12 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 5. **5- Mounts** — [Done] Ground, flying and swimming mounts, sprinting and roads.
 6. **6- Progression and items** — [In progress] XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. Still to come: food and potions.
 7. **7- Combat and abilities** — [In progress] Most classes' abilities, weapon combos and finishers, buffs, death and respawn. Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.
-8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. Still to come: fishing and the rest of the 22 professions.
+8. **8- Gathering and professions** — [In progress] Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations. Still to come: sport fishing and the rest of the 22 professions.
 9. **9- Living world** — [In progress] Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. Still to come: the other mob families, flying mobs, and day and night spawns.
 10. **10- City nodes** — [In progress] Node levels and XP, and the five towns with their people, buildings and crafting stations. Citizenship, mayoral elections and the mayor's taxes. Still to come: the mayor's commissions and buildings, and vassal nodes.
 11. **11- Quests** — [In progress] NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. Still to come: more quests, group quests and events.
 12. **12- Economy** — [In progress] Gold, silver, copper and Glint, the NPC vendors, crates and storage. Still to come: node currencies and more crates.
-13. **13- Social** — [In progress] Players within 150 m of each other see each other as their characters, standing, walking and stopping. Still to come: riders on their mounts, gear and level changes, live Health and Mana, death and combat stances, abilities and hits on other players, guilds, parties and raids, chat and mail, player trading and the marketplace.
+13. **13- Social** — [In progress] Players within 150 m of each other see each other's characters standing, walking, stopping and riding their mounts, with their gear, weapons in hand and level kept current. Still to come: live Health and Mana, death and combat stances, abilities and hits on other players, guilds, parties and raids, chat and mail, player trading and the marketplace.
 14. **14- Node sieges** — [Planned] Node sieges and territory wars.
 15. **15- Caravans** — [Planned] Caravans and trade routes.
 16. **16- World events** — [Planned] Corruption events and other world events.

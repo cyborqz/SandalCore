@@ -46,7 +46,7 @@ std::optional<NodeRewards> NodeRewards::load(const std::string& path, std::strin
     }
     const auto prepare = [&](Stmt& st, const char* sql, const char* what) {
         if (sqlite3_prepare_v2(db.db, sql, -1, &st.s, nullptr) == SQLITE_OK) return true;
-        error = path + " has no " + what + " (" + sqlite3_errmsg(db.db) + "; contentc version 45 writes it)";
+        error = path + " has no " + what + " (" + sqlite3_errmsg(db.db) + "; contentc version 46 writes it)";
         return false;
     };
     NodeRewards r;

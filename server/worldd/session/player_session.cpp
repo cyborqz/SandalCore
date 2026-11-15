@@ -160,6 +160,7 @@ PlayerSession::~PlayerSession() {
     cancel_gather(nullptr, "the session is destroyed");
     leave_combat();
     leave_presence("the session is destroyed");   // (a session dropped without finish(): the other players' views still close it)
+    if (mounts_) mounts_->shutdown();             // ... and its mount, which they see too (a no-op after finish())
 }
 
 std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld& world, const svc::Character& character,

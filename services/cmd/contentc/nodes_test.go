@@ -94,7 +94,7 @@ func syntheticNodes() *source {
 		{Key: st{"TagName": "NodeTax.GoodsTax.Marketplace"}, Value: st{"AvailabilityPredicate": "Node_NumOfServiceBuilding(GetNodeRecord(), $#1:2$) > 0", "TaxDetails": idv(930, 0, "None")}}}})}
 	src.rows["NodeToPlayerReputationTierRecordBase"] = []designdb.Row{mkRow(940, "NodeToPlayerReputation_Tier2", st{"TierRank": "ENodeReputationRank::Commoner", "NodeTaxModifier": "0.95",
 		"CanVoteMayoral": true, "CanVoteBuildingAndExpansion": true, "CanVoteDemolition": false})}
-	// version 45: a commission's reward of two modifications, a citizen's boon (Commoner, anywhere, the NodeCitizen alignment) and a node effect of commodities
+	// version 46: a commission's reward of two modifications, a citizen's boon (Commoner, anywhere, the NodeCitizen alignment) and a node effect of commodities
 	src.rows["NodeRewardRecordBase"] = []designdb.Row{mkRow(970, "MCOM_RVR_ANY_Gather_Lumber", st{"NodeMods": list{
 		st{"Duration": st{"Duration": int64(86400000)}, "DurationModifier": "", "Mod": idv(610, 0, "None")},
 		st{"Duration": st{"Duration": int64(3600000)}, "DurationModifier": "", "Mod": idv(611, 0, "None")}}})}

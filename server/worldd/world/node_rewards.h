@@ -5,7 +5,7 @@
 //  world/node_rewards.h  (node citizenship: what a done mayoral commission gives its node)
 //
 //  A mayoral commission's RewardId is a NodeRewardRecordBase: NodeMods, each a NodeModification for a Duration (24 h for every commission's).  A modification's
-//  EffectsIds are NodeEffect records (content.db's node_reward_mod, node_modification_ref and node_effect_* tables, contentc version 45):
+//  EffectsIds are NodeEffect records (content.db's node_reward_mod, node_modification_ref and node_effect_* tables, contentc version 46):
 //
 //    the boons       ZOIEffects: an effect (Effect_ZOI_*, "Lesser Boon of Dexterity" ...) on the characters, caravans or mounts in the node's zone of influence.
 //                    One that asks the NodeCitizen alignment or an org affiliation is a citizen's: the account must be a citizen of the node, at its
@@ -53,7 +53,7 @@ struct RewardMod {
 
 class NodeRewards {
 public:
-    /// content.db's node reward tables; nullopt with `error` for a file older than contentc version 45.
+    /// content.db's node reward tables; nullopt with `error` for a file older than contentc version 46.
     static std::optional<NodeRewards> load(const std::string& content_db_path, std::string& error);
 
     /// The modifications reward `reward` gives (null: the tables do not list it).

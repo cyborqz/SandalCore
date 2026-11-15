@@ -38,12 +38,12 @@ flowchart LR
 | | ✅ | **5 · Mounts** | Ground, flying and swimming mounts, sprinting and roads |
 | | 🛠️ | **6 · Progression and items** | XP and levels, talents, the action bar, bags, item rarities, weapon XP, scrolls and elixirs. *Still to come: splitting and joining stacks, food and potions.* |
 | | 🛠️ | **7 · Combat and abilities** | Most classes' abilities, weapon combos and finishers, buffs, death and respawn. *Mobs take the Burning debuff, the bleeds, poisons and stat debuffs of a hit, slow down for a slow or a snare, stand still under a root, a freeze, a stun, a trip or a sleep (a sleeper wakes at the first damage), are thrown, pushed or pulled by the abilities that do it, and the Summoner's Guardian, Hunter and Mystic fight at their owner's side. Still to come: mobs resisting CC.* |
-| 🌍 **The world** | 🛠️ | **8 · Gathering and professions** | Mining, logging, herbalism and hunting, and processing and crafting at the towns' stations. *Still to come: fishing and the rest of the 22 professions.* |
+| 🌍 **The world** | 🛠️ | **8 · Gathering and professions** | Mining, logging, herbalism, hunting and fishing, the artisan certifiers and the recipe items, and processing and crafting at the towns' stations. *Still to come: sport fishing and the rest of the 22 professions.* |
 | | 🛠️ | **9 · Living world** | Navigation, and mobs that see, hear, chase and fight with their own attacks, with loot and respawns. *Still to come: the other mob families, flying mobs, and day and night spawns.* |
 | | 🛠️ | **10 · City nodes** | Node levels and XP, and the five towns with their people, buildings and crafting stations. *Still to come: citizenship, mayors, taxes and vassal nodes.* |
 | | 🛠️ | **11 · Quests** | NPC conversations, quest offers, objectives, rewards and map markers, for the first quests of the starting area. *Still to come: more quests, group quests and events.* |
 | 🤝 **Playing together** | 🛠️ | **12 · Economy** | Gold, silver, copper and Glint, the NPC vendors, crates and storage. *Still to come: node currencies and more crates.* |
-| | 🛠️ | **13 · Social** | Players within 150 m of each other see each other as their characters, standing, walking and stopping. *Still to come: riders on their mounts, gear and level changes, live Health and Mana, death and combat stances, abilities and hits on other players, guilds, parties and raids, chat and mail, player trading and the marketplace.* |
+| | 🛠️ | **13 · Social** | Players within 150 m of each other see each other's characters standing, walking, stopping and riding their mounts, with their gear, weapons in hand and level kept current. *Still to come: live Health and Mana, death and combat stances, abilities and hits on other players, guilds, parties and raids, chat and mail, player trading and the marketplace.* |
 | ⚔️ **Wars and world events** | ⬜ | **14 · Node sieges** | Node sieges and territory wars |
 | | ⬜ | **15 · Caravans** | Caravans and trade routes |
 | | ⬜ | **16 · World events** | Corruption events and other world events |
@@ -85,7 +85,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 | **Git** | any current version | fetches CUE4Parse and vcpkg |
 | **[vcpkg](https://github.com/microsoft/vcpkg)** | current | the C++ libraries (grpc, protobuf, openssl, ...); found through `VCPKG_ROOT`, `%USERPROFILE%\vcpkg`, `C:\vcpkg`, `\vcpkg` on the repository's drive, or the Visual Studio copy |
 | **Go** | 1.27.3 or newer (`services/go.mod`; `install.bat` upgrades an older Go, or take the installer from [go.dev/dl](https://go.dev/dl/)) | the backend services and `contentc` |
-| **.NET SDK** | 8.0 (any 8.x; with the 8.0 runtime) | `tools/mapc`, `tools/itemnames` and `tools/npcabilities`, which read the game's files |
+| **.NET SDK** | 8.0 (any 8.x; with the 8.0 runtime) | `tools/mapc`, `tools/itemnames`, `tools/npcabilities` and `tools/waterbodies`, which read the game's files |
 | **Python** | 3.10 or newer | the generators that `scripts\extract_game_data.ps1` runs |
 | **Docker Desktop** | current | PostgreSQL, to run the servers (not needed to build); or run PostgreSQL 15+ yourself |
 
@@ -136,6 +136,7 @@ The game folder is the one that holds `AOCClient.exe` and the `AOC` folder; with
 | `item_names.tsv` | the words the Glint kinds and some quest items are named with | `tools\itemnames` (from the game's containers) |
 | `npc_abilities.tsv`, `npc_montages.tsv`, `npc_targeting.tsv`, `npc_senses.tsv`, `npc_aggro_curves.tsv` | what the mobs attack with, how their attack animations carry them, where each hit lands, and what each mob notices and how far it follows | `tools\npcabilities` (from the game's containers and `content.db`) |
 | `npc_looks.tsv`, `npc_appearances.tsv`, `npc_names.tsv`, `npc_trees.tsv` | how the people (humanoid NPCs) look, what they are called, and whether they wander or patrol | `tools\npcabilities` (from the game's containers and `content.db`) |
+| `fishing_water.tsv` (0.7 MB) | the lakes and rivers of the Riverlands that can be fished: outlines and swim volumes with their fishing data | `tools\waterbodies` (from the game's containers) |
 | `town_platforms.bin` (4 MB) | the floor of the five towns | `tools\mapc` (from two of the game's map packages) |
 | `town_layout_items.tsv` (6 MB), `town_layouts.bin` (13 MB) | the buildings, walls and terraces of the five towns at the level each town starts at | a list made from the design data by `tools\capture\gen_town_layouts.py`, then their collision from the game's packages by `tools\mapc` |
 | `area_nav.bin` (974 MB), `area_geom.bin` (232 MB) | the navigation mesh, with the towns' buildings in it | `tools\mapc` and `aoc_navbuild` |
@@ -156,7 +157,7 @@ Run `powershell -File scripts\extract_game_data.ps1` by hand to use its options 
 | `-Skip <step>` | leaves one step out |
 | `-Force` | runs everything again |
 
-The steps are `tools`, `config`, `curves`, `names`, `database`, `region`, `headers`, `fixtures`, `navbuild`, `roads`, `townfloors`, `townlayouts`, `npcabilities`, `navmesh`. The output of every program is kept in `dist\content\.extract\`; `last_run.log` has all of it.
+The steps are `tools`, `config`, `curves`, `names`, `database`, `region`, `headers`, `fixtures`, `navbuild`, `roads`, `townfloors`, `townlayouts`, `npcabilities`, `waterbodies`, `navmesh`. The output of every program is kept in `dist\content\.extract\`; `last_run.log` has all of it.
 
 **Network.** The first run needs it once, for CUE4Parse (a git clone of github.com/FabianFG/CUE4Parse at a pinned commit; the script keeps its 7.5 MB of source), the NuGet packages that `tools\mapc\mapc.csproj` names (from nuget.org), the Go modules that `services\go.mod` names, and, in the first C++ build, the vcpkg libraries. Nothing is downloaded after that.
 

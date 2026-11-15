@@ -31,3 +31,6 @@
 #include "session/members/party.inc"
 #include "session/members/friends.inc"
 #include "session/members/gm_admin.inc"
+#include "session/members/shown.inc"
+#include "session/members/fishing.inc"
+#include "session/members/certification.inc"

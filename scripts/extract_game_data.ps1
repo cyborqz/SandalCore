@@ -14,6 +14,7 @@
     dist\content\artisan_curves.tsv,           profession curves, mount speeds and riders        (mapc, from the game's containers)
       mount_speeds.tsv, mount_riders.tsv
     dist\content\npc_motion.tsv, region_foliage.tsv, roads_raw.tsv, roads.tsv, roads_levels.tsv
+    dist\content\fishing_water.tsv           the lakes and rivers of the Riverlands a line can be cast into: outlines and swim volumes with their fishing data   (tools\waterbodies, from the game's containers)
     dist\content\item_names.tsv                the words the items are named with (the Glint kinds, some quest items)   (tools\itemnames, from the game's containers)
     dist\content\npc_abilities.tsv,          what the creatures that attack with their own animation do: their Blueprints' ability tasks with the conditions they are
       npc_montages.tsv, npc_targeting.tsv      used under, the animation montages' lengths, hit notifies and root motion, and where each ability's hit lands
@@ -44,7 +45,7 @@
 .PARAMETER GameRoot
   The game's "Game" folder (the one that holds AOCClient.exe and AOC\). Default: GAME_ROOT, config\paths.json, Steam's libraries, the usual folders.
 .PARAMETER Only
-  Run only these steps: tools, config, curves, names, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, npcabilities, navmesh.
+  Run only these steps: tools, config, curves, names, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, npcabilities, waterbodies, navmesh.
 .PARAMETER Skip
   Leave these steps out (for example -Skip fixtures when you do not build the tests).
 .PARAMETER Force
@@ -79,6 +80,7 @@ $usmapSrc  = Join-Path $repoRoot 'layouts\aoc.usmap'
 $mapcDll   = Join-Path $repoRoot 'tools\mapc\bin\Release\net8.0\mapc.dll'
 $npcAbilitiesDll = Join-Path $repoRoot 'tools\npcabilities\bin\Release\net8.0\npcabilities.dll'
 $itemNamesDll = Join-Path $repoRoot 'tools\itemnames\bin\Release\net8.0\itemnames.dll'
+$waterBodiesDll = Join-Path $repoRoot 'tools\waterbodies\bin\Release\net8.0\waterbodies.dll'
 $contentc  = Join-Path $toolsDir 'contentc.exe'
 $statprog  = Join-Path $toolsDir 'statprog.exe'
 $navbuild  = Join-Path $distDir 'Release\aoc_navbuild.exe'
@@ -394,6 +396,7 @@ function Get-CodeMapc     { Get-CodeHash @('tools\mapc') }
 function Get-CodeContentc { Get-CodeHash @('services\cmd\contentc', 'services\internal\content', 'services\internal\designdb', 'services\internal\usmap', 'services\internal\aocexpr', 'services\internal\chardef', 'services\internal\statprog', 'services\go.mod', 'services\go.sum') }
 function Get-CodeNpcAbilities { Get-CodeHash @('tools\npcabilities') }
 function Get-CodeItemNames { Get-CodeHash @('tools\itemnames') }
+function Get-CodeWaterBodies { Get-CodeHash @('tools\waterbodies') }
 function Get-CodeGens     { Get-CodeHash @('tools\capture\gen_zoi_surface.py', 'tools\capture\gen_region_rects.py', 'tools\capture\gen_region.py', 'tools\capture\gen_node_constants.py', 'tools\capture\gen_gm_garden.py', 'tools\capture\gen_tooltips.py', 'tools\worldd\gen_gear_fixture.py', 'tools\worldd\gen_talent_fixture.py') }
 function Get-CodeNav      { Get-CodeHash @('server\worldd\nav', 'server\worldd\world\town_platform.cpp', 'server\worldd\world\town_platform.h', 'third_party\recastnavigation', 'CMakeLists.txt', 'server\worldd\CMakeLists.txt', 'vcpkg.json') }     # aoc_navbuild links the towns' platform code from world\ as well as nav\
 # The level each node starts at in the server's seed file (deploy\citynode_seed.json): the towns' buildings are listed at those levels (tools\capture\gen_town_layouts.py), so a change of a
@@ -453,6 +456,7 @@ function Get-Id([string]$step) {
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
         'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-CodeLayouts) + (Get-Id 'database')) }
         'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + ($NpcAnimEndFolders -join ';') + ($NpcSensesFolders -join ';') + (Get-Id 'database')) }
+        'waterbodies' { Get-TextHash ("waterbodies $gameId $usmap " + (Get-CodeMapc) + (Get-CodeWaterBodies) + (Get-Id 'region')) }
         'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-NavmeshInputs)) }
     }
     if ($step -ne 'navmesh') { $ids[$step] = $v }      # the navigation mesh step's id is asked for again each time: the steps before it write what it reads while the script runs
@@ -492,6 +496,8 @@ $steps = @(
         Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll') 'the npcabilities build did not produce it'
         Invoke-Checked $dotnet @('build', '-c', 'Release', (Join-Path $repoRoot 'tools\itemnames'), '-v', 'q', '-nologo', '-nodeReuse:false', '-p:UseSharedCompilation=false') 'dotnet_build_itemnames'
         Assert-Files @('tools\itemnames\bin\Release\net8.0\itemnames.dll') 'the itemnames build did not produce it'
+        Invoke-Checked $dotnet @('build', '-c', 'Release', (Join-Path $repoRoot 'tools\waterbodies'), '-v', 'q', '-nologo', '-nodeReuse:false', '-p:UseSharedCompilation=false') 'dotnet_build_waterbodies'
+        Assert-Files @('tools\waterbodies\bin\Release\net8.0\waterbodies.dll') 'the waterbodies build did not produce it'
         New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
         $svc = Join-Path $repoRoot 'services'
         Invoke-Checked $go @('build', '-trimpath', '-buildvcs=false', '-o', $contentc, './cmd/contentc') 'go_build_contentc' $svc
@@ -583,6 +589,10 @@ $steps = @(
         if (-not $env:DOTNET_GCHeapHardLimit) { $env:DOTNET_GCHeapHardLimit = '0x100000000' }     # reading the people's looks peaks at 7.6 GB without this limit and at 4.0 GB with it, with the same tables
         try { Invoke-Checked $dotnet @($npcAbilitiesDll, 'looks', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'npcabilities_looks' } finally { $env:DOTNET_GCHeapHardLimit = $savedHeap }
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\npcabilities\looks.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out-dir', $outDir)) 'npcabilities_names'
+    } },
+    @{ Name = 'waterbodies'; Title = "Read the lakes and rivers a line can be cast into from the map's Water grid (tools/waterbodies; a few seconds)"; Outputs = @('dist\content\fishing_water.tsv'); Run = {
+        Assert-Files @('tools\mapc\region_rects.tsv', 'tools\waterbodies\bin\Release\net8.0\waterbodies.dll') 'run the tools and region steps first'
+        Invoke-Checked $dotnet @($waterBodiesDll, 'read', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'waterbodies_read'
     } },
     @{ Name = 'navmesh'; Title = 'Read the map and build the navigation mesh, the NPC motion table and the foliage (mapc; the longest step)'; Outputs = @('dist\content\npc_motion.tsv', 'dist\content\region_foliage.tsv', 'dist\content\area_geom.bin', 'dist\content\area_nav.bin'); Run = {
         Assert-Files @('tools\mapc\region_rects.tsv', 'dist\Release\aoc_navbuild.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll', 'dist\content\town_platforms.bin', 'dist\content\town_layouts.bin', 'dist\content\content.db') 'run the earlier steps first'

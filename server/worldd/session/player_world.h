@@ -41,6 +41,7 @@
 #include "combat/combat_world.h"
 #include "combat/rewards.h"
 #include "content/content_db.h"
+#include "fishing/fishing.h"
 #include "foliage/foliage.h"
 #include "gather/gathering.h"
 #include "items/currency.h"
@@ -356,7 +357,7 @@ public:
     /// Node reputation (world/node_reputation.h): its rules from content.db, set by main; a world without them uses the data's numbers (ReputationRules{}).
     void set_reputation_rules(world::ReputationRules rules) { reputation_rules_ = std::move(rules); }
     const world::ReputationRules& reputation_rules() const { return reputation_rules_; }
-    /// The mayoral commissions' node rewards (world/node_rewards.h): set by main from content.db; null for a file older than contentc version 45 (a done commission
+    /// The mayoral commissions' node rewards (world/node_rewards.h): set by main from content.db; null for a file older than contentc version 46 (a done commission
     /// then gives its first NodeModification, which puts nothing on anyone).
     void set_node_rewards(std::optional<world::NodeRewards> rewards) { node_rewards_ = std::move(rewards); }
     const world::NodeRewards* node_rewards() const { return node_rewards_ ? &*node_rewards_ : nullptr; }
@@ -424,6 +425,11 @@ public:
     bool start_foliage(const foliage::Config& config, std::string& error);
     foliage::Foliage*        foliage() { return foliage_.get(); }
     const foliage::Foliage*  foliage() const { return foliage_.get(); }
+    /// Fishing, milestone 1: the lakes and rivers a line can be cast into (the water file) and the fishing ability's data, over start_gathering's tables.  False, with `error`, when gathering is
+    /// off or the ability tables or the water file are missing; the world then has no fishing and the ability's cast is the generic runtime's, as before.
+    bool start_fishing(const fishing::Config& config, std::string& error);
+    fishing::Fishing*        fishing() { return fishing_.get(); }
+    const fishing::Fishing*  fishing() const { return fishing_.get(); }
     /// Gathering stage 2: the stacks of a harvest that a full bag could not take, as a pile where the player stands (the aftermath's public loot pile, the one a death makes).
     /// The pile's actor id; 0, with `error`, when the world has no loot piles (--no-loot, or no area).  `pile_hook` replaces the aftermath in a test that has none.
     uint64_t drop_harvest_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<combat::LootStack> stacks, std::string& error);
@@ -719,6 +725,7 @@ private:
     std::unique_ptr<spawns::NodePopulations> node_pops_;   // after the NPC world, the fights and the aftermath: their hooks point at them
     std::unique_ptr<gather::Gathering>   gathering_;       // Gathering stage 2: the registry's nodes' harvest
     std::unique_ptr<foliage::Foliage>    foliage_;         // Gathering stage 3: the painted foliage (after gathering_: it points into it)
+    std::unique_ptr<fishing::Fishing>    fishing_;         // Fishing, milestone 1: the water and the cast's planning (after gathering_: it points into it)
     PileHook                             pile_hook_;
     int                                  road_default_level_ = 0;
     uint64_t                             roads_seen_version_ = ~0ull;

@@ -29,6 +29,8 @@ _deps/
 /tools/npcabilities/obj/
 /tools/itemnames/bin/
 /tools/itemnames/obj/
+/tools/waterbodies/bin/
+/tools/waterbodies/obj/
 /tools/mapc/tests/bin/
 /tools/mapc/tests/obj/
 

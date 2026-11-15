@@ -148,17 +148,10 @@ void PlayerSession::apply_outcome(Connection& conn, const items::Outcome& outcom
     queue("ClientReceiveStorageEvent", [events](bootstrap::PlayerBootstrap& pb) { return pb.item_events(events); }, conn, /*must_build=*/true);
     follow_linked_stack(conn, events);
     if (outcome.equipment_changed) {
-        const std::vector<bootstrap::HeldItem> held = bootstrap::held_items_for(inventory_);
-        const std::vector<repl::AppearanceId> appearance = items::appearance_ids(inventory_);
         // the retail server marks the 23 held items once for each change of the Equipment storage its answer holds
         size_t marks = 0;
         for (const items::Event& e : outcome.events) marks += e.container == svc::ItemContainer::Equipment ? 1 : 0;
-        queue("HeldItems and AppearanceIDs",
-              [held, appearance, marks](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
-                  if (!pb.apply_equipment(held, appearance, marks ? marks : 1)) return std::nullopt;
-                  return pb.equipment_update();
-              },
-              conn, /*must_build=*/true);
+        queue_worn_gear(conn, marks);   // (the player's own client, and the pawn the other players are shown: session/player_shown.cpp)
     }
     spdlog::log(level_for(item_applied_logged_), "[session] {}: {}: {} storage event(s){}", name(), what, outcome.events.size(),
                 outcome.equipment_changed ? ", the visible gear is updated" : "");

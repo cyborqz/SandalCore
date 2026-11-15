@@ -29,6 +29,7 @@
 
 #include "protocol/repl/replicator.h"
 #include "session/view_worker.h"
+#include "world/shown_to_others.h"
 
 #include <array>
 #include <chrono>
@@ -191,6 +192,11 @@ public:
 struct PlayerInfo {
     std::string name;             // the character's name (the log's "X now sees Y")
     // #14 review: `pawn` (its pawn, or false for its PlayerState) is gone: a Player actor is always the pawn
+    /// Social, gear and level: the last level-up the players around it are shown.  The level-up call is a multicast on the pawn (every client that holds it is sent it), so the player's session
+    /// counts the level-ups here and every other session reads the serial (a call of its own on the pawn's channel, session/player_shown.cpp).  0: none since the pawn joined.
+    uint64_t level_up_serial = 0;
+    int64_t  level_up_category = 0;   // BroadcastPlayLevelUpEffects' Category (the LevelingTypeDef) and its InLevel
+    int      level_up_level = 0;
 };
 
 struct WorldActor {
@@ -217,6 +223,9 @@ struct WorldActor {
     /// Exports that go with the AbilityComponent's block of an update or an open while a creature's attack names a montage (its path: the client has no other way to find the
     /// asset): set when the attack starts, cleared when it ends.  Each connection is sent a chain until it has acknowledged it.
     std::vector<repl::ExportChain> ability_exports;
+    /// Exports that go with the actor's own block of its open AND of every update of it, until each connection has acknowledged them: an object that a value which changes later names by
+    /// path (a rider's pawn names the mount's CharacterMesh0 as its AttachComponent when it mounts: session/player_shown.cpp).  Set when the value is set, cleared when it is cleared.
+    std::vector<repl::ExportChain> actor_exports;
     uint32_t   version = 1;               // every change of the replicated state
     uint32_t   reliable_version = 1;      // the changes that must not be lost
     /// Shared updates (session/shared_updates.h).  `shape` is the actor's shape (repl::shape_of) as the registry last counted it and `shape_epoch` counts the changes of it that can leave two
@@ -233,6 +242,7 @@ struct WorldActor {
     SceneryInfo scenery;                  // ActorKind::NodeLayout only
     GatherSeen gather;                    // ActorKind::Gatherable only (gather/node_wire.h)
     PlayerInfo player;                    // ActorKind::Player only
+    MountShown mount_shown;               // ActorKind::Mount only: what the players who do not own it are shown (world/shown_to_others.h)
 };
 
 struct RegistryConfig {
@@ -274,6 +284,26 @@ public:
     /// answers from follows; the actor's version is not touched (the caller changed the replicated state itself).  False for an unknown actor, an actor
     /// that has the component already, or a component another actor owns.
     bool set_interact_component(uint64_t id, uint64_t component);
+
+    /// Social, gear and level: how many level-ups the players' pawns have announced.  A session that sees it move reads the Player actors once (their `PlayerInfo::level_up_serial`
+    /// says whose) instead of every tick.
+    uint64_t level_up_serial() const { return level_up_serial_; }
+    /// Counts one level-up the players around a pawn are shown (the announcing session, in its own tick; the registry is not frozen then).
+    void note_level_up() {
+        check_not_frozen("note_level_up");
+        ++level_up_serial_;
+    }
+    /// How many Player actors have come in or gone (a session reads the players' announcements when this moves too: a player that joined has to be watched for its next level-up, also in
+    /// a tick in which another player left, where the number of players stays).
+    uint64_t player_epoch() const { return player_epoch_; }
+    /// Calls `fn` for every Player actor, in the order they came in (a walk of the players alone, not of every actor).
+    template <class F>
+    void for_each_player(F&& fn) const {
+        for (const uint64_t id : player_ids_) {
+            const auto it = actors_.find(id);
+            if (it != actors_.end()) fn(it->second);
+        }
+    }
 
     /// Moves an actor (the grid follows); counts a Movement change. False for an unknown actor or a position that is not a number.
     bool move(uint64_t id, double x, double y, double z, double yaw_degrees);
@@ -346,6 +376,9 @@ private:
     Observer*                                     observer_ = nullptr;
     bool                                          frozen_ = false;
     double                                        clock_ = 0;
+    uint64_t                                      level_up_serial_ = 0;   // every level-up counted by note_level_up
+    uint64_t                                      player_epoch_ = 0;      // every Player actor that came in or went (player_epoch)
+    std::vector<uint64_t>                         player_ids_;            // the Player actors held, in the order they came in (for_each_player)
 };
 
 }  // namespace aoc::worldd::world

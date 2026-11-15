@@ -792,6 +792,17 @@ public:
     /// ?Name= text, which the client chooses and which names the player's PC, and no other player's client is sent it.  Defined in bootstrap/observer_actor.cpp.
     std::optional<repl::Actor> observer_pawn() const;
 
+    /// Social, gear and level: the pawn the other players are shown (observer_pawn) brought in line with this player's, in the place the player's own reply changes it.
+    /// The 23 held items are marked `marks` times (their items and the array's key move, as the player's own equipment reply does: once per change of the Equipment storage) and the
+    /// appearance list is set.  False when the shown pawn's components do not take it (never with the schemas in the tree).
+    bool set_observer_gear(repl::Actor& shown, std::span<const HeldItem> held, std::span<const repl::AppearanceId> appearance, size_t marks);
+    /// ... the character's level (BaseCharacterInfo.Level, which the client's nameplate follows).
+    bool set_observer_level(repl::Actor& shown, int level);
+    /// ... the weapon set in hand (CombatInfo.bIsUsingRangedWeapon, which the client draws the two weapons in hand from).
+    bool set_observer_ranged(repl::Actor& shown, bool ranged);
+    /// ... the two EveryoneProxy stat arrays, from this player's pawn: only the items whose values changed are marked, so their deltas alone go out.
+    bool set_observer_stats(repl::Actor& shown);
+
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 
     /// The GUIDs whose export the client acknowledged (Emission::exported_by_bunch[i] of a delivered export part).

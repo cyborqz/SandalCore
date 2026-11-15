@@ -660,15 +660,8 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     pb_.set_currency(items::kCopperCurrency, wallet_.copper());
     pb_.set_currency(items::kNodeCurrency, wallet_.balance(items::kNodeCurrency));
     queue_later("OwnerInfo", [](bootstrap::PlayerBootstrap& pb) { return pb.currencies_update(); }, conn, tick, /*must_build=*/true);
-    if (cargo) {   // the crate shows on the carrier's back: the pawn's held items and appearance follow the Add, as for any item put on
-        const std::vector<bootstrap::HeldItem> held = bootstrap::held_items_for(inventory_);
-        const std::vector<repl::AppearanceId> appearance = items::appearance_ids(inventory_);
-        queue_later("HeldItems and AppearanceIDs",
-                    [held, appearance](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
-                        if (!pb.apply_equipment(held, appearance, 1)) return std::nullopt;
-                        return pb.equipment_update();
-                    },
-                    conn, tick, /*must_build=*/true);
+    if (cargo) {   // the crate shows on the carrier's back: the pawn's held items and appearance follow the Add, as for any item put on (the other players are shown it too)
+        queue_worn_gear(conn, 1, tick);
         for (const items::Outcome& o : granted) note_cargo_crate(o);   // the quest module is told a construction crate is carried now
         sync_cargo(conn, tick);   // the crate's effects and the Drop Crate slot of the bar follow the Add
     }

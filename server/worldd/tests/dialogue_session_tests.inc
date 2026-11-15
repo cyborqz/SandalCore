@@ -168,7 +168,6 @@ static void test_dialogue_book() {
     CHECK(n && n->choices.size() == 3 && n->type == "Response", "node 6064634349883578023 has exactly 3 lines (the 3 retail sent), indexes 0 to 2");
 }
 
-/// Node citizenship (contentc version 44): the Node Administrator's (the Sheriff's) lines run the action responses AddNodeCitizenship, with the town hall's shop of the tax
 /// Buy orders: the Buy Order Manager's root goes, while the NPC's node has an order running, first to its quest (zLegacy_CSQ_0154_FTUE_WoodStoneBuildingHomes, while the
 /// character can take it), then, once it is done, to its BuyOrderFulfillment node, whose panel (ESubDialogueType 5) is queued over the conversation and the result says to open
 /// the window; with no order it shows its plain answer.
@@ -247,7 +246,7 @@ static void test_dialogue_citizenship() {
         CHECK(r.outcome == dl::Outcome::Changed && r.citizenship == 2, "the renounce node's first line runs RemoveNodeCitizenship");
     }
     CHECK(book->vendor_defs(kRoot).count(kShop) == 1, "the conversation may open the shop of the tax receipts (the dialog's purchase button)");
-    // stage 2 (contentc version 44): the Sheriff's line 4 of node 14 runs AddNodeMayorCandidate, in the registration ("prevote") for a citizen who does not stand yet
+    // stage 2 (contentc version 45): the Sheriff's line 4 of node 14 runs AddNodeMayorCandidate, in the registration ("prevote") for a citizen who does not stand yet
     const auto* stand = book->node(6064634349883573185ll);
     bool candidate_line = false;
     if (stand && stand->choices.size() > 4) {

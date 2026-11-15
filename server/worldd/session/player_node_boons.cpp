@@ -77,7 +77,7 @@ void PlayerSession::run_node_boons(Connection& conn, Clock::time_point now) {
         if (node_boons_.count(effect) || node_boons_refused_.count(effect)) continue;
         if (!pipeline_->grant_effect(effect, stacks, sec)) {
             node_boons_refused_.insert(effect);
-            spdlog::warn("[nodes] {}: the node boon {} is not in the ability tables (content.db older than contentc version 45?): it gives nothing", name(), effect);
+            spdlog::warn("[nodes] {}: the node boon {} is not in the ability tables (content.db older than contentc version 46?): it gives nothing", name(), effect);
             continue;
         }
         node_boons_[effect] = stacks;

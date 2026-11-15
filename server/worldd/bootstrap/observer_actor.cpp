@@ -111,7 +111,7 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
         {&g.base_character_info,
          {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D", "CharacterName", "Race", "Gender", "Level", "ServerId", "bHasBeenPossessed"},
          {"HeldItems"}},
-        {&g.combat_info, {"bIsDead", "PrimaryClassId.Guid"}, {}},
+        {&g.combat_info, {"bIsDead", "PrimaryClassId.Guid", "bIsUsingRangedWeapon"}, {}},
         {&g.ability, {}, {}},   // the emotes: observer_ability_component
         {&g.stats, {}, {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}},
         {&g.appearance, {"SharedAppearanceInfoId.Guid", "CharacterCustomization", "AppearanceIDs"}, {}},
@@ -126,6 +126,102 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
     }
     if (!ok) return std::nullopt;
     return a;
+}
+
+// ---- gear, weapons and level, kept current on the pawn the other players are shown (Social, seeing other players: gear and level changes) -------------
+
+namespace {
+repl::FastArrayState* observer_array(repl::Subobject& sub, std::string_view name) {
+    if (!sub.obj.schema) return nullptr;
+    return sub.obj.arrays.get(*sub.obj.schema, name);
+}
+const repl::FastArrayState* observer_array(const repl::Subobject& sub, std::string_view name) {
+    if (!sub.obj.schema) return nullptr;
+    const schema::NetField* f = sub.obj.schema->field(name);
+    return f ? sub.obj.arrays.find(f->index) : nullptr;
+}
+}  // namespace
+
+bool PlayerBootstrap::set_observer_gear(repl::Actor& shown, std::span<const HeldItem> held, std::span<const repl::AppearanceId> appearance, size_t marks) {
+    if (!ok_ || !second_state_added_ || marks == 0 || marks > 64) return false;
+    repl::Subobject* base = shown.find(setup_.guids.base_character_info);
+    repl::Subobject* app = shown.find(setup_.guids.appearance);
+    if (!base || !app) return false;
+    repl::FastArrayState* array = observer_array(*base, "HeldItems");
+    if (!array || !app->obj.schema) return false;
+    const auto state_of = [](const HeldItem& h) {
+        repl::ElementState e;
+        e.values[1] = Value::u64(h.slot);
+        e.values[2] = Value::i64(h.item_guid);
+        e.values[3] = Value::u64(h.enchantment);
+        return e;
+    };
+    // the first items of a shown pawn that never had a list: an insert alone replicates nothing, so the array is marked once
+    const bool first = array->items().empty();
+    if (first) {
+        for (const HeldItem& h : held) {
+            if (!array->insert(h.id, state_of(h))) return false;
+        }
+        array->mark_array_dirty();
+    } else {
+        for (size_t m = 0; m < marks; ++m) {
+            for (const HeldItem& h : held) {
+                if (!array->change(h.id, state_of(h))) return false;
+            }
+        }
+    }
+    repl::ArrayValue ids;
+    for (const repl::AppearanceId& id : appearance) {
+        repl::ElementState e;
+        e.values[1] = Value(id);
+        ids.elements.push_back(std::move(e));
+    }
+    return app->obj.state.set(*app->obj.schema, "AppearanceIDs", Value(std::move(ids)));
+}
+
+bool PlayerBootstrap::set_observer_level(repl::Actor& shown, int level) {
+    if (!ok_ || !second_state_added_ || level < 1 || level > 255) return false;
+    repl::Subobject* base = shown.find(setup_.guids.base_character_info);
+    if (!base || !base->obj.schema) return false;
+    return base->obj.state.set(*base->obj.schema, "Level", Value::i64(level));
+}
+
+bool PlayerBootstrap::set_observer_ranged(repl::Actor& shown, bool ranged) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* combat = shown.find(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema || !combat->obj.schema->command("bIsUsingRangedWeapon")) return false;
+    return combat->obj.state.set(*combat->obj.schema, "bIsUsingRangedWeapon", Value::boolean(ranged));
+}
+
+bool PlayerBootstrap::set_observer_stats(repl::Actor& shown) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* dst = shown.find(setup_.guids.stats);
+    const repl::Subobject* src = pawn_.find(setup_.guids.stats);
+    if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
+    for (const std::string_view name : {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}) {
+        const repl::FastArrayState* from = observer_array(*src, name);
+        repl::FastArrayState* to = observer_array(*dst, name);
+        if (!from || !to) return false;
+        std::vector<int32_t> gone;   // (what the shown pawn has and the player no longer has)
+        for (const repl::FastArrayItem& it : to->items()) {
+            if (!from->find(it.id)) gone.push_back(it.id);
+        }
+        for (const int32_t id : gone) {
+            if (!to->remove(id)) return false;
+        }
+        bool added = false;
+        for (const repl::FastArrayItem& it : from->items()) {
+            const repl::FastArrayItem* have = to->find(it.id);
+            if (!have) {
+                if (!to->insert(it.id, it.values)) return false;
+                added = true;
+            } else if (!(have->values == it.values)) {
+                if (!to->change(it.id, it.values)) return false;
+            }
+        }
+        if (added) to->mark_array_dirty();   // an insert alone replicates nothing
+    }
+    return true;
 }
 
 }  // namespace aoc::worldd::bootstrap

@@ -80,7 +80,11 @@ const repl::Subobject* sub_of(const world::WorldActor& a, const char* cls) {
 }
 
 void write_motion(world::WorldActor& a, double x, double y, double z, double yaw, double vx, double vy, bool moving, double stamp) {
-    repl::ObjectState& obj = a.actor.obj;
+    write_motion(a.actor, x, y, z, yaw, vx, vy, 0.0, moving, stamp);
+}
+
+void write_motion(repl::Actor& actor, double x, double y, double z, double yaw, double vx, double vy, double vz, bool moving, double stamp) {
+    repl::ObjectState& obj = actor.obj;
     if (!obj.schema) return;
     repl::RepMovement m;
     if (const repl::Value* v = obj.state.get(7)) {
@@ -89,7 +93,7 @@ void write_motion(world::WorldActor& a, double x, double y, double z, double yaw
     m.simulated_physic_sleep = false;
     m.rep_physics = false;
     m.location = repl::quantize_location(obj.opts, x, y, z);
-    m.linear_velocity = repl::quantize_velocity(obj.opts, vx, vy, 0.0);
+    m.linear_velocity = repl::quantize_velocity(obj.opts, vx, vy, vz);
     m.angular_velocity = repl::QuantVec{repl::QuantVec::Mode::Scaled, 0, 0, 0};
     m.acceleration.reset();
     m.rotation = repl::Rot{0, obj.opts.rep_movement_short_rotation ? util::angle16(yaw) : util::angle8(yaw), 0};
@@ -98,9 +102,9 @@ void write_motion(world::WorldActor& a, double x, double y, double z, double yaw
         obj.state.set(*obj.schema, "ReplicatedServerLastTransformUpdateTimeStamp", repl::Value::f32(static_cast<float>(stamp)));
     if (obj.schema->command("CurrentMovementInput"))
         obj.state.set(*obj.schema, "CurrentMovementInput", repl::Value(repl::PlayerMovementInput{static_cast<uint8_t>(moving ? repl::PlayerMovementInput::kForward : 0)}));
-    a.actor.open.spawn.location = repl::quantize_vector(10, x, y, z);
-    a.actor.open.spawn.rotation = repl::Rot{0, util::angle16(yaw), 0};
-    a.actor.open.spawn.velocity.reset();
+    actor.open.spawn.location = repl::quantize_vector(10, x, y, z);
+    actor.open.spawn.rotation = repl::Rot{0, util::angle16(yaw), 0};
+    actor.open.spawn.velocity.reset();
 }
 
 static bool possess_in(world::WorldActor& mount, const Possession& p, std::string& error) {
@@ -171,14 +175,21 @@ static bool release_in(world::WorldActor& mount, const repl::GuidValue& owner, s
 
 bool possess(world::WorldActor& mount, const Possession& p, std::string& error) {
     world::WorldActor backup = mount;
-    if (possess_in(mount, p, error)) return true;
+    if (possess_in(mount, p, error)) {
+        mount.mount_shown.possessed = true;   // the players who do not own it are shown it moving, without the owner's parts (world/shown_to_others.h)
+        mount.mount_shown.rode = true;
+        return true;
+    }
     mount = std::move(backup);   // a refused part leaves nothing half done
     return false;
 }
 
 bool release(world::WorldActor& mount, const repl::GuidValue& owner, std::string& error) {
     world::WorldActor backup = mount;
-    if (release_in(mount, owner, error)) return true;
+    if (release_in(mount, owner, error)) {
+        mount.mount_shown.possessed = false;
+        return true;
+    }
     mount = std::move(backup);
     return false;
 }

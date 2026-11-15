@@ -229,9 +229,10 @@ struct Fixture {
 // ---- the harness -------------------------------------------------------------------------------------------------------------------
 
 struct Harness {
-    Fixture fx;
+    std::unique_ptr<Fixture> own_fx;   // the world of this player, unless it shares another harness's (a second player in the world: `shared`)
+    Fixture& fx;
     RecordingSink sink;
-    Connection conn{ConnectionConfig{conn::OuterHeader{0x500c7696u, 0, 5}, conn::CustomField{0x38, 0x21, 0xc7, 0x0d, 0x43, 0x5d}, 14265, 15870}, t0};
+    Connection conn;
     fake::Client client{conn::OuterHeader{0x500c7696u, 0, 5}, conn::CustomField{0x38, 0x21, 0xc7, 0x0d, 0x43, 0x5d}, 14265, 15870};
     std::unique_ptr<PlayerSession> s;
     Clock::time_point t = t0;
@@ -241,8 +242,14 @@ struct Harness {
     uint32_t pawn_ch = 0, pc_ch = 0;
     svc::Character record;
 
-    explicit Harness(svc::Character r, const std::function<void(PlayerWorld&)>& setup = nullptr) : record(std::move(r)) {
-        fx.world->set_position_sink(&sink);
+    /// `shared`: the world another harness made, which this player joins at the time `start` (a step of one is a step of all: `group`, tests/mounts_ride_others_rig.h).  Without it a world of its own.
+    explicit Harness(svc::Character r, const std::function<void(PlayerWorld&)>& setup = nullptr, Fixture* shared = nullptr, Clock::time_point start = t0)
+        : own_fx(shared ? nullptr : std::make_unique<Fixture>()),
+          fx(shared ? *shared : *own_fx),
+          conn(ConnectionConfig{conn::OuterHeader{0x500c7696u, 0, 5}, conn::CustomField{0x38, 0x21, 0xc7, 0x0d, 0x43, 0x5d}, 14265, 15870}, start),
+          t(start),
+          record(std::move(r)) {
+        if (!shared) fx.world->set_position_sink(&sink);
         if (setup) setup(*fx.world);
         s = PlayerSession::join(conn, *fx.world, record, identity(), world_time_at(t), error);
         if (!s) {
@@ -269,9 +276,23 @@ struct Harness {
         for (const InBunch& b : in) s->on_bunch(conn, b, t);
         s->end_of_datagram(conn);
     }
+    /// The players of this world, when there are several (tests/mounts_ride_others_rig.h): a step of any of them is a step of all, on the first one's clock.
+    std::vector<Harness*>* group = nullptr;
     void step(milliseconds d = milliseconds(20)) {
+        if (group && !group->empty() && group->front() != this) return group->front()->step(d);
         t += d;
         fx.world->tick_world(world_time_at(t));
+        step_session();
+        if (group) {
+            for (Harness* h : *group) {
+                if (h == this) continue;
+                h->t = t;
+                h->step_session();
+            }
+        }
+    }
+    /// This player's part of a step: its session ticks, its packets reach its client, its client answers.
+    void step_session() {
         s->tick(conn, t);
         flush();
         s->take_acks(conn);

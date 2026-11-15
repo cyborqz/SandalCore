@@ -28,6 +28,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_ride(conn, now);
     run_timers(conn, now);
     run_gather(conn, now);
+    run_fishing(conn, now);
     run_foliage(conn, now);
     run_floor_net(conn, now);
     run_embersprings(conn, now);   // Embersprings: a shrine whose radius holds the player is discovered
@@ -39,7 +40,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_quick_make(conn, now);
     run_cargo(conn, now);
     run_chat(conn, now);
-    run_node_boons(conn, now);      // the boons of the nodes' running modifications (contentc version 45)
+    run_node_boons(conn, now);      // the boons of the nodes' running modifications (contentc version 46)
     run_friends(conn, now);
     run_party(conn, now);
     run_nodes(conn);
@@ -50,6 +51,7 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     // read it, and it makes no difference whether the server runs the view passes on threads.
     sync_presence(now);
     run_emotes(conn, now);   // the emote items of this player's pawn, written to the pawn the other players are shown (session/player_emotes.cpp)
+    run_shown(conn, now);    // the pawn the other players are shown, in line with the player's mount and ride (session/player_shown.cpp)
     // E1 stage 3 fix: the client's synchronized clock, set again after the phase-in and every 120 s (see the phase-in above)
     if (phase_in_done_ && !time_syncs_.empty() && now >= time_syncs_.front() && room_for(1)) {
         time_syncs_.pop_front();

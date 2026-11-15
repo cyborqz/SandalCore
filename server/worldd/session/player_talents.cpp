@@ -415,6 +415,8 @@ void PlayerSession::on_set_ranged(Connection& conn, const repl::ClientRpc& rpc, 
     if (*use == use_ranged_) return;
     use_ranged_ = *use;
     ++weapon_swaps_;
+    // Social, gear and level: the pawn the other players are shown takes the same flag (and the stats of the line in hand) at this session's next tick
+    note_shown_weapon();
     // E1 stage 3 fix: the pawn's CombatInfo.bIsUsingRangedWeapon follows the request (retail 403, every swap: an 18-bit UPlayerCombatInfo block in the
     // same chain as the AbilityComponent's, the StatsComponent's and OwnerInfo's); the client's weapon in hand follows this flag, not KnownAbilities
     if (!pb_.set_using_ranged_weapon(use_ranged_)) spdlog::warn("[session] {}: the pawn does not take CombatInfo.bIsUsingRangedWeapon", name());

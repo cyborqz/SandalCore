@@ -9,6 +9,7 @@
 #include "session/actor_view.h"
 #include "net/tick_profile.h"
 #include "session/scan_order.h"
+#include "session/shown_to_others.h"
 
 #include "gather/node_wire.h"
 #include "world/interaction_state.h"
@@ -41,12 +42,20 @@ void add_ability_exports(std::vector<repl::ContentBlock>& blocks, const std::vec
     }
 }
 
+/// The exports of WorldActor::actor_exports go with the actor's own block (a value of it names an object by path).
+void add_actor_exports(std::vector<repl::ContentBlock>& blocks, const std::vector<repl::ExportChain>& exports) {
+    for (repl::ContentBlock& b : blocks) {
+        if (b.sub) continue;
+        for (const repl::ExportChain& x : exports) b.exports.push_back(x);
+    }
+}
+
 /// repl::update_actor with the exports of a creature's attack added to the AbilityComponent's block, collected on the shadow itself and not on a copy of it (the copy of every
 /// actor's whole shadow, for every update of every player's view, was the larger part of an update's cost).  `undo` receives what the collect changed: the caller puts the shadow
 /// back with undo.rollback when the connection does not take the chain.  A failure, or an update with nothing to send, leaves the shadow as it was.  The emission is the one
 /// repl::update_actor builds from the same shadow.  `keep_blocks` (when given) receives the content blocks the emission was assembled from, for the views that share the update.
 std::optional<repl::Emission> update_in_place(const repl::Actor& actor, repl::ActorShadow& shadow, const repl::ExportAcks& acks, const std::vector<repl::ExportChain>& exports,
-                                              bool* failed, repl::SentRecord* record, repl::ShadowUndo& undo, std::vector<repl::ContentBlock>* keep_blocks = nullptr) {
+                                              const std::vector<repl::ExportChain>& actor_exports, bool* failed, repl::SentRecord* record, repl::ShadowUndo& undo, std::vector<repl::ContentBlock>* keep_blocks = nullptr) {
     *failed = false;
     std::vector<repl::ContentBlock> blocks;
     if (!repl::collect_update_blocks(actor, shadow, blocks, &undo)) {   // (it put the shadow back itself)
@@ -58,6 +67,7 @@ std::optional<repl::Emission> update_in_place(const repl::Actor& actor, repl::Ac
         return std::nullopt;
     }
     if (!exports.empty()) add_ability_exports(blocks, exports);
+    if (!actor_exports.empty()) add_actor_exports(blocks, actor_exports);
     auto e = repl::assemble_blocks(actor, blocks, acks);
     if (!e) {
         undo.rollback(shadow);
@@ -169,6 +179,7 @@ void ActorView::forget_chains(Entry& e) {
 }
 
 const repl::Actor& ActorView::view_of(const world::WorldActor& a, repl::Actor& scratch) const {
+    if (a.kind == world::ActorKind::Mount && a.owner != config_.player_id) return form_for_others(a, scratch);   // another player's mount: the form every player but its owner is sent (session/shown_to_others.h)
     if (!config_.player_guid || !world::is_interactable(a.actor)) return a.actor;
     scratch = a.actor;
     world::set_player(scratch, *config_.player_guid, true);
@@ -189,16 +200,17 @@ std::optional<repl::Emission> ActorView::build_open(const world::WorldActor& a, 
     }
     if (private_form) *private_form = shown != &a.actor;
     const repl::Actor& actor = *shown;
-    if (a.open_exports.empty() && a.ability_exports.empty()) return repl::open_actor(actor, work, acks_, &failed);
+    if (a.open_exports.empty() && a.ability_exports.empty() && a.actor_exports.empty()) return repl::open_actor(actor, work, acks_, &failed);
     // the blocks by hand: the actor's block carries the exports its values name by path, the AbilityComponent's those of the attack it shows
     std::vector<repl::ContentBlock> blocks;
     repl::ShadowUndo undo;
     work.forget_sent();
-    if (!repl::collect_open_blocks(actor, work, blocks, &undo) || blocks.empty() || (!a.open_exports.empty() && blocks[0].sub)) {
+    if (!repl::collect_open_blocks(actor, work, blocks, &undo) || blocks.empty() || ((!a.open_exports.empty() || !a.actor_exports.empty()) && blocks[0].sub)) {
         undo.rollback(work);
         return std::nullopt;
     }
     for (const repl::ExportChain& x : a.open_exports) blocks[0].exports.push_back(x);
+    add_actor_exports(blocks, a.actor_exports);
     add_ability_exports(blocks, a.ability_exports);
     auto em = repl::assemble_open(actor, blocks, acks_);
     if (!em) undo.rollback(work);
@@ -352,7 +364,7 @@ void ActorView::build_update(const world::WorldActor& a, Entry& e, Built& built)
     repl::Actor scratch;
     const repl::Actor& shown = view_of(a, scratch);
     built.private_form = &shown != &a.actor;
-    built.em = update_in_place(shown, e.shadow, acks_, a.ability_exports, &built.failed, &built.record, built.undo);
+    built.em = update_in_place(shown, e.shadow, acks_, a.ability_exports, a.actor_exports, &built.failed, &built.record, built.undo);
 }
 
 void ActorView::build_update_shared(SharedUpdates& sharing, const world::WorldActor& a, Entry& e, Built& built) {
@@ -388,7 +400,7 @@ void ActorView::build_update_shared(SharedUpdates& sharing, const world::WorldAc
     // the update is kept for the other views when this shadow is a clean copy and the actor is drawn as the registry has it for every connection (not interactable)
     const bool publish = sharing.active() && clean && !built.private_form && (config_.player_guid.has_value() || !world::is_interactable(a.actor));
     std::vector<repl::ContentBlock> blocks;
-    built.em = update_in_place(shown, e.shadow, acks_, a.ability_exports, &built.failed, &built.record, built.undo, publish ? &blocks : nullptr);
+    built.em = update_in_place(shown, e.shadow, acks_, a.ability_exports, a.actor_exports, &built.failed, &built.record, built.undo, publish ? &blocks : nullptr);
     if (!publish || built.failed) {
         ++stats.private_builds;
         return;
@@ -403,7 +415,7 @@ bool ActorView::shared_update_holds(const world::WorldActor& a, const Entry& e, 
     repl::ShadowUndo undo;
     repl::SentRecord record;
     bool failed = false;
-    const auto plain = update_in_place(a.actor, copy, acks_, a.ability_exports, &failed, &record, undo);
+    const auto plain = update_in_place(a.actor, copy, acks_, a.ability_exports, a.actor_exports, &failed, &record, undo);
     std::optional<repl::Emission> shared;
     if (!hit.blocks.empty()) shared = repl::assemble_blocks(a.actor, hit.blocks, acks_);
     if (failed || plain.has_value() != shared.has_value()) return false;
@@ -458,7 +470,8 @@ void ActorView::on_removed(const world::WorldActor& a) {
 
 bool ActorView::for_this_player(const world::WorldActor& a) const {
     if (a.kind == world::ActorKind::Player) return a.owner != config_.player_id;   // another player's pawn; never this player's own   (#14 review: it said "and PlayerState")
-    return a.owner == 0 || a.owner == config_.player_id;                           // (another player's lingering zones and mount are not for this connection)
+    if (a.kind == world::ActorKind::Mount) return true;                            // a summoned mount is for every player who is near it (Social: riders on their mounts); getting on it is its owner's alone
+    return a.owner == 0 || a.owner == config_.player_id;                           // (another player's lingering zones are not for this connection)
 }
 
 void ActorView::log_player(const world::WorldActor& a, bool sees, const char* why) {
@@ -612,6 +625,15 @@ bool ActorView::update_now(Connection& conn, uint64_t actor) {
     if (it == entries_.end() || it->second.state != ClientState::Awake || it->second.broken) return false;
     const world::WorldActor* a = reg().find(actor);
     return a && send_update(conn, *a, it->second);
+}
+
+bool ActorView::send_multicast(Connection& conn, uint64_t actor, repl::Emission& em) {
+    if (finished_) return false;
+    const auto it = entries_.find(actor);
+    if (it == entries_.end() || it->second.state != ClientState::Awake || it->second.channel == 0) return false;
+    // a client drops an unreliable bunch for a channel whose open it has not acknowledged: such a call waits behind the open, as an update does
+    const bool reliable = em.reliable || !it->second.open_acked;
+    return send(conn, it->second.channel, /*open=*/false, reliable, em);
 }
 
 void ActorView::tick(Connection& conn, double x, double y, Clock::time_point now) {

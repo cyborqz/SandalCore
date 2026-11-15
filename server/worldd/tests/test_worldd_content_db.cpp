@@ -589,6 +589,51 @@ static void test_real_content_db() {
     CHECK(ambiguous == 7, "7 of them are rounding-ambiguous (services/README.md)");
     error.clear();
     CHECK(!db->primary_attributes(kBard, 51, error) && !error.empty(), "level 51 has none");
+    {
+        // contentc version 44 on the real file: the certification lines of the conversations keep their profession and direction, and the recipe items' item_learn
+        const int version = std::atoi(db->meta().contentc_version.c_str());
+        if (version < 44) {
+            std::printf("    [skip] contentc version %d: the certification actions and item_learn are version 44's (rebuild with this checkout's contentc)\n", version);
+            return;
+        }
+        std::string derror;
+        const auto data = db->dialogue_data(derror);
+        CHECK(data.has_value(), "the real file's conversations read");
+        if (data) {
+            size_t lines = 0, named = 0, promote = 0, demote = 0, building = 0;
+            std::map<int64_t, std::pair<int, int>> menu;   // the 8 building menus: each profession's Promote and Demote lines
+            for (const auto& [guid, node] : data->nodes) {
+                const bool building_menu = node.name.find("CertProfChoice") != std::string::npos;
+                for (const content::DialogueChoiceRow& line : node.choices) {
+                    for (const content::DialogueActionRow& a : line.actions) {
+                        if (a.action != "SetCertificationLevel") continue;
+                        ++lines;
+                        named += a.profession != 0 && (a.certification == 1 || a.certification == 2);
+                        promote += a.certification == 1;
+                        demote += a.certification == 2;
+                        if (!building_menu) continue;
+                        ++building;
+                        (a.certification == 1 ? menu[a.profession].first : menu[a.profession].second) += 1;
+                    }
+                }
+            }
+            CHECK(lines == 94 && named == 94 && promote == 47 && demote == 47, "94 conversation lines carry a SetCertificationLevel action: each names a profession and a direction (47 Promote, 47 Demote)");
+            bool one_each = menu.size() == 22;
+            for (const auto& [profession, count] : menu) one_each = one_each && count.first == 1 && count.second == 1;
+            CHECK(building == 44 && one_each, "the 8 artisan buildings' certifier menus: 44 lines, one Promote and one Demote for each of the 22 professions");
+        } else {
+            std::printf("    %s\n", derror.c_str());
+        }
+        std::string ierror;
+        const auto annalist = db->item_learn(6064631200504938606ll, ierror);   // Consumable_Recipe_Tailoring_T2_Armor_Annalist_Chest
+        CHECK(annalist && ierror.empty() && annalist->size() == 1 && annalist->front().recipe == 6064631200434094179ll && annalist->front().profession == 108752746993277ll &&
+                  annalist->front().certification == 108906340767353ll,
+              "a Tailoring recipe item teaches one recipe and asks for Tailoring at Apprentice");
+        const auto no_recipe = db->item_learn(6064634597980045319ll, ierror);   // a Journeyman Weaponsmithing recipe item whose recipe the data does not have
+        CHECK(no_recipe && ierror.empty() && no_recipe->empty(), "a recipe item whose record names no recipe has no rows");
+        const auto not_a_recipe = db->item_learn(6064630214426886486ll, ierror);   // the Bard's starter chest
+        CHECK(not_a_recipe && not_a_recipe->empty(), "an item that is no recipe item has none");
+    }
 }
 
 int main() {
