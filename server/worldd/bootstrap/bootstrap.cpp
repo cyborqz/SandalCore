@@ -17,6 +17,7 @@
 //      parameters are libaocnet's typed storage RPCs (storage_rpc.h), an empty slot as the original sent it.
 // ============================================================================
 #include "bootstrap/bootstrap.h"
+#include "bootstrap/stealth_effects.h"
 
 #include "content/content_db.h"
 
@@ -2631,15 +2632,23 @@ bool PlayerBootstrap::apply_ability_change(const AbilityChange& c) {
         item.values[2] = Value(std::move(values));
         if (!shield_array->change(*shield_item, std::move(item))) return fail("the TempHealth item does not take its shields");
     }
+    const bool was_stealthed = !stealth_keys_.empty();
     for (const int64_t k : c.effects_removed) {
         effects->remove(effect_ids_.at(k));
         effects->mark_array_dirty();   // the original server's removals move the key by two (test_repl_fast_array)
         effect_ids_.erase(k);
+        stealth_keys_.erase(k);
     }
     for (const EffectItem& e : c.effects_added) {
         const auto id = effects->add(effect_state(setup_, e));
         if (!id) return fail("an effect item does not fit CurrentEffects");
         effect_ids_[e.effect_id] = *id;
+        if (applies_stealth(e.effect_guid)) stealth_keys_.insert(e.effect_id);
+    }
+    // the pawn says it is stealthed while an effect that stealths it is on, in the packet that changes the effects [R: the recordings of Camouflage on and off, Rogue's Stealth and Phase Out]
+    if (was_stealthed != !stealth_keys_.empty() &&
+        !pawn_.obj.state.set(*pawn_.obj.schema, "StealthInfo.bInStealth", Value::boolean(!stealth_keys_.empty()))) {
+        return fail("the pawn does not take StealthInfo.bInStealth");
     }
     for (const EffectItem& e : c.effects_changed) {
         if (!effects->change(effect_ids_.at(e.effect_id), effect_state(setup_, e))) return fail("an effect item does not take its change");

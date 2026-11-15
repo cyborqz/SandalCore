@@ -540,8 +540,8 @@ private:
     bool  montages_readable(const abilities::AbilityDef& def) const;
     void  think(Npc& n, double now);
     /// Sends the creature after its target (the NPC world re-plans the walk to the target's place at every step, so it never runs to where the target was and waits there).  A rooted creature is sent
-    /// nowhere: every chase, from every place that asks for one, ends here.
-    void  pursue(Npc& n, uint64_t target, double speed_cm_s, double stop_distance_cm);
+    /// nowhere: every chase, from every place that asks for one, ends here.  False when the world finds no way to the target; true when it does, and when the creature's feet are held (the order is not tried).
+    bool  pursue(Npc& n, uint64_t target, double speed_cm_s, double stop_distance_cm);
     /// Whether the creature faces `at` to within `tolerance_degrees`.
     bool  faces(const Npc& n, const Vec3& at, double tolerance_degrees) const;
     /// `picked` is the attack the tree allowed a moment ago (its conditions, a roll among them, are not asked twice); null: the tree is asked here.

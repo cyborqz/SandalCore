@@ -614,6 +614,7 @@ constexpr bool timings_sorted() {
 static_assert(timings_sorted(), "ability_timings.h is sorted by ability, then aimed");
 
 const char* const kExpirePhases[] = {"Expire", "End"};
+const char* const kEndPhases[] = {"End"};   // an effect taken off by a hit does not expire, but it ends
 const char* const kTickPhases[] = {"Tick"};
 const char* const kApplyPhases[] = {"Apply"};
 
@@ -1441,8 +1442,9 @@ void AbilityPipeline::sync_engine_effects() {
     if (stats_.started()) stats_.set_effects(engine_effects());
 }
 
-void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
+void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit, double t) {
     int left = hit.max_remove > 0 ? hit.max_remove : 1 << 20;
+    std::vector<EffectInst> ended;   // the instances that are gone altogether: their End hits fire (Camouflage's 60 s cooldown after the action that ended it)
     const auto remove_where = [&](auto&& wanted) {
         for (size_t i = 0; i < effects_.size() && left > 0;) {
             if (!wanted(*effects_[i].def)) {
@@ -1453,6 +1455,7 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
             const int take = std::min(left, effects_[i].stacks);
             left -= take;
             if (take >= effects_[i].stacks) {
+                ended.push_back(effects_[i]);
                 remove_instance(c, i);   // (the next instance, if any, is at i now)
             } else {
                 effects_[i].stacks -= take;
@@ -1465,6 +1468,7 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
     // a cleanse names no effect: its filter chooses them, and an effect item goes with the hit's confirmation [R: Purify, 141]
     if (hit.remove_effects.empty()) remove_where([&](const EffectDef& e) { return hit.removes(e); });
     sync_engine_effects();
+    for (const EffectInst& gone : ended) run_effect_hits(c, gone, kEndPhases, 1, t);
 }
 // C:Y:B with C-O-A
 
@@ -1948,7 +1952,7 @@ void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double
     std::string why;
     if (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok) return;
     // (what the hit takes off goes before what it applies)
-    if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) remove_by_hit(c, hit);
+    if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) remove_by_hit(c, hit, t);
     modify_cooldowns(c, hit, t);
     for (const content::HitEffectRow& row : hit.effects) {
         bool applies = true;
@@ -4256,8 +4260,21 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         apply_effect(c, *resource_, 1, std::nullopt, t);
         cast.resource_added = std::max(0, stacks_of(resource_->row.guid) - held);
     }
+    paying_group_ = cast.group;
+    paying_extra_ = 0;
     if (!cast.toggle_off) raise_ability_event(c, def, t);   // reactions: the ability was consumed (the Bard's Resonance gain)
+    paying_group_.clear();
     use_charge(c, cast, t);
+    if (paying_extra_ > 0) {   // a reaction's hit asked for more cooldown on this ability than it has (Camouflage: its action ends the effect, whose End hit adds 60 s): the item says the sum [R: 61 s]
+        if (const auto g = groups_.find(cast.group); g != groups_.end() && g->second.timer_end >= 0) {
+            g->second.cooldown += paying_extra_;
+            g->second.timer_end += paying_extra_;
+            c.cooldowns_set.erase(std::remove_if(c.cooldowns_set.begin(), c.cooldowns_set.end(), [&](const bootstrap::CooldownItem& cd) { return g->second.items.count(cd.ability_guid) != 0; }),
+                                  c.cooldowns_set.end());
+            for (const int64_t a : g->second.items) c.cooldowns_set.push_back(cooldown_item(a, g->second));
+        }
+    }
+    paying_extra_ = 0;
     // An ability with no hit, zone or effect of its own has nothing that goes out for the server: its payment is its launch, and a Dodge after the cost step changes nothing.
     if (def.hits.empty() && def.zones.empty() && cast.own_effects.empty() && !cast.toggle_off) mark_launched(cast.client_id);
     if (cast.toggle_off) {

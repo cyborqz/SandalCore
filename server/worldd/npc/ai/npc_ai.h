@@ -59,6 +59,14 @@ struct Params {
     double chase_stop_fraction = 0.8;     // a chase ends when the target is within this share of the attack's range
     double repath_interval = 0.5;         // seconds between two orders to walk to a moving target
     double repath_distance_cm = 150.0;    // ... unless the target moved less than this
+    /// The game's count of the seconds a creature has tried to find a way to its target (the nav-abuse check in the leash check of its state tree): it leashes at
+    /// once when the count reaches SecondsTryingToFindAPath, the check's own default of 5.0 s (a creature's tree sets another only for the guards: 1.0 s, not
+    /// built).  The count grows by a second for each second the way is missing and falls by `unreachable_decay` of a second for each second it is there.
+    double unreachable_give_up_seconds = 5.0;
+    double unreachable_decay = 0.25;
+    /// An order that found no way counts as the way missing for this long: the walk is ordered again every `repath_interval` while it fails, so a creature that is
+    /// no longer ordered to walk (its target is in reach) is not counted against.
+    double unreachable_memory_seconds = 1.0;
     double reset_arrive_cm = 150.0;       // within this of home it is home
     double proximity_threat = 1.0;        // what coming into the aggro radius adds
     double chase_speed_cm_s = 600.0;
@@ -115,6 +123,11 @@ public:
     void revive();
     /// A game master's reset: the threat table is cleared and the NPC goes home as after a broken leash (its walk home and its healing are the caller's).  No effect on a dead NPC.
     void reset_now();
+    /// The last order to walk to its target found no way (the world's path search failed): until `unreachable_memory_seconds` after it (or a later order that finds a way)
+    /// the seconds count against the creature, which leashes when they reach `unreachable_give_up_seconds`.
+    void no_path_to_target(double now);
+    /// The last order to walk to its target found a way: the count stops growing and falls.
+    void path_to_target_found();
 
     Orders think(const Sense& sense);
 
@@ -129,6 +142,7 @@ public:
     bool in_combat() const { return state_ == State::Chase || state_ == State::Attack; }
 
 private:
+    void forget_no_path();
     bool within_leash(const combat::Vec3& self, const combat::Vec3& home) const;
     /// Whether the creature notices the candidate: its distance from the creature in `distance` (the plane, or all three directions with Senses).
     bool notices(const Sense& s, const Candidate& c, double& distance) const;
@@ -142,6 +156,9 @@ private:
     combat::Vec3 last_order_dest_;
     combat::Vec3 anchor_;               // where the fight began
     bool        pending_fight_ = false;
+    double      no_path_at_ = -1;       // when the last order that found no way was given (-1: none, or a way was found since)
+    double      no_path_seconds_ = 0;   // the game's count of the seconds spent trying to find a way to the target
+    double      nav_clock_ = -1;        // when the count was last brought up to date (-1: not running)
 };
 
 }  // namespace aoc::worldd::npc::ai

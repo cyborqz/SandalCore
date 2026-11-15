@@ -1000,7 +1000,7 @@ void   step_multi_hit(Cast& cast, double t);
     std::set<int64_t> effects_applied_by_hits(const abilities::AbilityDef& def) const;
     void   end_loop(bootstrap::AbilityChange& c, int64_t ability, double t);
     /// What the hit takes off its targets (the caster): the effects of EffectsToRemoveIds, at most MaxNumEffectsToRemove of them.
-    void   remove_by_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit);
+    void   remove_by_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t);
     /// The engine's effect list follows effects_ at once, so that a formula run now reads the effects that were just applied.
     void   sync_engine_effects();
     // hit requests and slots
@@ -1077,6 +1077,10 @@ void   step_multi_hit(Cast& cast, double t);
     std::vector<Cast>         casts_;
     std::vector<EffectInst>   effects_;
     std::map<std::string, Group> groups_;
+    /// While a cast pays (the reactions to its cost run before its cooldown starts): the cooldown group being paid for, and the seconds a hit of those reactions
+    /// asked to add to a cooldown that is not running yet (Camouflage's End hit: the 60 s on top of the ability's 1 s).
+    std::string paying_group_;
+    double      paying_extra_ = 0;
     std::deque<int32_t>       recent_ids_;
     std::optional<int64_t>    item_instance_;                       // the ability item on the pawn
     int32_t                   animation_counter_ = 0;

@@ -351,15 +351,15 @@ void Aftermath::put_back(uint64_t npc, size_t slot) {
 // Cyb captures, C O A code
 
 uint64_t Aftermath::drop_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<LootStack> stacks, double now,
-                              std::string& error) {
+                              std::string& error, bool item_drop) {
     if (stacks.empty()) return 0;
     int top = 0;
     for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));
-    const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, top, error);
+    const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, top, error, item_drop);
     if (!pile) return 0;
     Corpse c;
     c.npc = pile->actor;
-    c.name = name + "'s pile";
+    c.name = item_drop ? "Dropped loot" : name + "'s pile";
     c.died_at = now;
     c.close_at = now + cfg_.pile_seconds;
     c.loot = std::move(stacks);

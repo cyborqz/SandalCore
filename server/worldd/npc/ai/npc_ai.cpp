@@ -65,6 +65,7 @@ void NpcAi::kill() {
     state_ = State::Dead;
     threat_.clear();
     target_ = 0;
+    forget_no_path();
 }
 
 void NpcAi::revive() {
@@ -72,6 +73,7 @@ void NpcAi::revive() {
     threat_.clear();
     target_ = 0;
     pending_fight_ = false;
+    forget_no_path();
 }
 
 void NpcAi::reset_now() {
@@ -80,7 +82,18 @@ void NpcAi::reset_now() {
     threat_.clear();
     target_ = 0;
     pending_fight_ = false;
+    forget_no_path();
 }
+
+void NpcAi::forget_no_path() {
+    no_path_at_ = -1;
+    no_path_seconds_ = 0;
+    nav_clock_ = -1;
+}
+
+void NpcAi::no_path_to_target(double now) { no_path_at_ = now; }
+
+void NpcAi::path_to_target_found() { no_path_at_ = -1; }
 
 Orders NpcAi::think(const Sense& s) {
     Orders o;
@@ -139,12 +152,14 @@ Orders NpcAi::think(const Sense& s) {
         target_ = 0;
         pending_fight_ = false;
         anchor_ = s.self;   // where the fight began
+        forget_no_path();   // (a new fight counts from nothing)
     }
 
     // chase and attack: the leash first
     const auto leash = [&](const char* reason) {
         threat_.clear();
         target_ = 0;
+        forget_no_path();
         state_ = State::Reset;
         o.began_reset = true;
         o.reset_reason = reason;
@@ -164,6 +179,16 @@ Orders NpcAi::think(const Sense& s) {
     }
     // a creature with senses also gives up on a target that has got farther from it than the leash radius
     if (params_.senses.enabled && combat::distance_xy_cm(s.self, t->pos) > params_.leash_radius_cm) return leash("its target is farther from it than its leash distance");
+    // the game's nav-abuse count: the seconds it has tried to find a way to its target grow while the last walk it was ordered found none (and for a moment after,
+    // until it is ordered again) and fall by a quarter of a second per second while there is one; at the check's 5 s it leashes at once, as one that was led out of its leash would
+    {
+        const double dt = nav_clock_ >= 0 ? std::clamp(s.now - nav_clock_, 0.0, 1.0) : 0.0;
+        nav_clock_ = s.now;
+        const bool missing = no_path_at_ >= 0 && s.now - no_path_at_ <= params_.unreachable_memory_seconds;
+        if (missing) no_path_seconds_ += dt;
+        else no_path_seconds_ = std::max(0.0, no_path_seconds_ - params_.unreachable_decay * dt);
+        if (no_path_seconds_ >= params_.unreachable_give_up_seconds) return leash("its target cannot be reached");
+    }
     o.target = target_;
     o.in_combat = true;
     const double surface = combat::distance_xy_cm(s.self, t->pos) - s.self_radius_cm - t->radius_cm;

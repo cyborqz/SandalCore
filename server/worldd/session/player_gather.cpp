@@ -15,8 +15,8 @@
 //                     profession's XP and Adventuring's, as debt removal first) and BroadcastPlayLevelUpEffects for a level; the node is Gathered in the same step [R: 1427 packet 674:
 //                     the node's done update, the pawn's clear, then the PlayerController's XPTracker maps]
 //    a cancel         the pawn's ChannelingData cleared in the same form [inferred: no capture shows a cancel]
-//    a full bag       the stacks that do not fit are not lost: an APlayerLootPile where the player stands, 100 ms after the experience frame, and a callout "Unable to loot, not
-//                     enough inventory space." (3 s) in that frame [R: 1461]
+//    a full bag       the stacks that do not fit are not lost: an ALootPile (the class the game spawns dropped items in, not a dead player's pile) where the player stands,
+//                     100 ms after the experience frame, and a callout "Unable to loot, not enough inventory space." (3 s) in that frame [R: 1461]
 //
 //  Every refusal and every cancellation is logged and counted; the first few of each kind at info.  The log lines the user's test reads start with "[gather]".
 // ============================================================================

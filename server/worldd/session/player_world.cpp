@@ -1261,7 +1261,7 @@ size_t PlayerWorld::apply_road_levels() {
 uint64_t PlayerWorld::drop_harvest_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<combat::LootStack> stacks,
                                         std::string& error) {
     error.clear();
-    if (aftermath_) return aftermath_->drop_pile(x, y, z, owner, name, std::move(stacks), world_clock_, error);
+    if (aftermath_) return aftermath_->drop_pile(x, y, z, owner, name, std::move(stacks), world_clock_, error, /*item_drop=*/true);
     if (pile_hook_) return pile_hook_(x, y, z, owner, name, stacks);
     error = "the world has no loot piles (no area, or --no-loot)";
     return 0;

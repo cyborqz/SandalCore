@@ -82,7 +82,7 @@ struct Corpse {
     std::set<uint64_t>           rights;        // the pawns of the players that may take from it
     std::optional<world::CorpseLoot> parts;     // its components, when it has loot
     int                          top_rarity = 0;
-    bool                         is_pile = false;   // a dead player's pile (public loot: anyone may take from it)
+    bool                         is_pile = false;   // a pile: a dead player's (public loot) or a full bag's overflow (the session lets anyone take from either; the drop is offered to its owner alone)
     bool                         huntable = false;  // a huntable creature's corpse: no loot, hunted with a Bow
     bool                         hunted = false;    // ... and the hunt is done
     bool                         living = false;    // a huntable creature that is being hunted ALIVE (no death yet): the record holds the hunt's time; the hunt's end is its death
@@ -171,10 +171,11 @@ public:
     /// The corpse holds nothing more: its loot components say so and it closes emptied_seconds later.
     void emptied(uint64_t npc, double now);
 
-    /// A dead player's pile (research/combat 5): an actor where the player fell, holding `stacks`, public loot that stays pile_seconds and closes
-    /// emptied_seconds after it is emptied.  The pile's actor id (0, with `error`, when it cannot be made).
+    /// A pile of `stacks` where the player fell (a death's, public loot that stays pile_seconds and closes emptied_seconds after it is emptied), or,
+    /// with `item_drop`, the pile a full bag's overflow makes: an ALootPile, the class and look the game gives dropped items, that the same loot window opens.
+    /// The pile's actor id (0, with `error`, when it cannot be made).
     uint64_t drop_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<LootStack> stacks, double now,
-                       std::string& error);
+                       std::string& error, bool item_drop = false);
 
     const Stats& stats() const { return stats_; }
     size_t corpses() const { return corpses_.size(); }

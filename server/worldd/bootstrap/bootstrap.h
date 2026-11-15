@@ -860,6 +860,7 @@ private:
     std::string       error_;
     // plan A7: the runtime's keys and the fast arrays' ReplicationIDs (ability_replication.h "Keys")
     std::map<int64_t, int32_t>     effect_ids_, ability_ids_, cooldown_ids_;
+    std::set<int64_t>              stealth_keys_;   // the EffectId keys of the effects on the pawn that stealth it (bootstrap/stealth_effects.h): the pawn's StealthInfo.bInStealth is up while there is one
     std::set<int64_t>              trigger_pvp_;       // missing systems, step 1: the instances whose trigger carried the PvP flag (their item copies it)
     bool                           pawn_mounted_ = false;   // the mounts milestone, stage 3: pawn_mounted() ran and pawn_dismounted() has not
     std::map<uint64_t, int32_t>    callout_ids_;       // the mounts milestone: the callouts keys and their ReplicationIDs

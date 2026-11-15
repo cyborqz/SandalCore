@@ -2197,9 +2197,9 @@ void CombatWorld::begin_reset(Npc& n, double now) {
     if (npcs_world_) npcs_world_->order_return_home(n.actor_id);
 }
 
-void CombatWorld::pursue(Npc& n, uint64_t target, double speed_cm_s, double stop_distance_cm) {
-    if (!npcs_world_ || (n.cc.flags & content::kCcRoot) != 0) return;   // (a rooted creature takes no chase: the NPC world would hold its feet anyway, and it is not asked for a path at every look)
-    npcs_world_->order_pursue(
+bool CombatWorld::pursue(Npc& n, uint64_t target, double speed_cm_s, double stop_distance_cm) {
+    if (!npcs_world_ || (n.cc.flags & content::kCcRoot) != 0) return true;   // (a rooted creature takes no chase: the NPC world would hold its feet anyway, and it is not asked for a path at every look; no path is not "no way")
+    return npcs_world_->order_pursue(
         n.actor_id,
         [this, target](nav::Vec3& out) {
             PlayerPort* p = player(target);
@@ -2250,6 +2250,13 @@ void CombatWorld::think(Npc& n, double now) {
     }
     const npc::ai::State before = n.ai.state();
     const npc::ai::Orders o = n.ai.think(s);
+    // the walk to the target: what the world says of the way to it goes to the AI's count of the seconds the creature has tried (it leashes at the game's 5 s); an
+    // order not tried (a rooted creature's) says nothing
+    const auto chase = [&](uint64_t target, double speed, double stop) {
+        if (!npcs_world_ || (n.cc.flags & content::kCcRoot) != 0) return;
+        if (pursue(n, target, speed, stop)) n.ai.path_to_target_found();
+        else n.ai.no_path_to_target(now);
+    };
     if (o.began_fight) {
         ++stats_.aggros;
         n.fight_began = now;
@@ -2284,7 +2291,7 @@ void CombatWorld::think(Npc& n, double now) {
             case npc::ai::Orders::Move::ChaseTo: {
                 // (an attack that does not stop the creature may let it walk on during its montage, at the speed of the tree's own move-to-target task: a share of its run speed)
                 const double speed = now < n.next_attack_at ? o.speed_cm_s * n.attack_walk_share : o.speed_cm_s;
-                pursue(n, o.target, speed, o.stop_distance_cm);
+                chase(o.target, speed, o.stop_distance_cm);
                 break;
             }
             case npc::ai::Orders::Move::Stand:
@@ -2317,7 +2324,7 @@ void CombatWorld::think(Npc& n, double now) {
                     allowed = false;
                 } else if (gap > picked.range_cm) {   // (the AI asks for an attack at the reach of the tree's attack: it walks up to the reach of the swing)
                     allowed = false;
-                    pursue(n, o.target, n.ai.params().chase_speed_cm_s, std::max(0.0, picked.range_cm * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm());
+                    chase(o.target, n.ai.params().chase_speed_cm_s, std::max(0.0, picked.range_cm * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm());
                 } else {
                     have_pick = true;
                 }
@@ -2331,10 +2338,10 @@ void CombatWorld::think(Npc& n, double now) {
                     // raider's heavy slash) would otherwise park the creature at its reach until the timer ran out, looking at its target
                     const double reach = why.reach_cm >= 0 ? why.reach_cm : static_cast<double>(n.next.range_cm);
                     const double stop = std::max(0.0, reach * n.ai.params().chase_stop_fraction) + n.radius_cm() + port->fighter().radius_cm();
-                    pursue(n, o.target, n.ai.params().chase_speed_cm_s, stop);
+                    chase(o.target, n.ai.params().chase_speed_cm_s, stop);
                 } else if (n.stand_off_cm > 0 && distance_xy_cm(Vec3{a->x, a->y, a->z}, at) - n.radius_cm() - port->fighter().radius_cm() > n.stand_off_cm + 5.0) {
                     // a creature that shoots closes in on its target between two casts, up to the arrival distance of its tree's approach (it does not back away when it is nearer)
-                    pursue(n, o.target, n.ai.params().chase_speed_cm_s, n.stand_off_cm + n.radius_cm() + port->fighter().radius_cm());
+                    chase(o.target, n.ai.params().chase_speed_cm_s, n.stand_off_cm + n.radius_cm() + port->fighter().radius_cm());
                 }
             } else if (port && have_pick && picked.task && picked.task->stop_movement && !picked.task->rotates && !faces(n, port->fighter().position(), 2.0)) {
                 // a task that stands for its montage and does not turn the creature during it begins with the creature facing its target: it turns first, at its rate, and begins at a later look
