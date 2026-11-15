@@ -5,14 +5,15 @@
 //  combat/npc_ability_data.h
 //
 //  What a creature does when it attacks, from the game's own files (tools/npcabilities writes the three tables):
-//    npc_abilities.tsv   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate  arrival
+//    npc_abilities.tsv   archetype  ability  task  cooldown  stop_movement  order  min_distance  max_distance  max_angle  gates  unknown  fight  conds  why  starts  rotate  arrival  next
 //                        the ability records the creature Blueprint's state tree uses, the seconds it waits before it uses one again, whether it stands
 //                        still for it, and the conditions the tree puts on using it (the tree is tried in `order`; -1: no such condition); `fight` says the task is one of the
 //                        attacks of the creature's fight, `conds` the other conditions (a roll, its health, the seconds into the fight or the seconds its tree has run, line of sight ...) and `why` what the table
 //                        could not say (`unknown`) or "off" for a task a parameter of the tree switches off for the creature, and `starts` the other cooldowns the creature starts
 //                        when it takes the task (a fixed "name=seconds", or "name=low~high" when the tree rolls the seconds anew each time: the tree's timers that hold a charge once their seconds have
-//                        passed are cooldowns named "acc.<identifier>"), `rotate` ("speed:duration") the turning towards its target that runs with the ability, and `arrival` how near its target the
-//                        creature's approach brings it (cm; -1: none)
+//                        passed are cooldowns named "acc.<identifier>"), `rotate` ("speed:duration") the turning towards its target that runs with the ability, `arrival` how near its target the
+//                        creature's approach brings it (cm; -1: none), and `next` the abilities of the later tasks of the same tree that wait on a cooldown this one starts (the tree plays one of them
+//                        next; a table without the column has no sequences)
 //    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires
 //                        every animation montage beside the Blueprints: its object path, the ids the network layer knows it by, how long it
 //                        plays at a play rate of 1, the hit notifies ("time:key") that tell when each of the ability's hits lands, and how far the
@@ -48,13 +49,17 @@ namespace aoc::worldd::combat {
 
 /// One condition of a task, as the creature table says it (tools/npcabilities writes these as text; see its Conditions.cs for the grammar).
 struct CondAtom {
-    enum class Kind : uint8_t { True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, FightRoll, TreeTime, Sees, NotSees };
+    enum class Kind : uint8_t {
+        True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, FightRoll, TreeTime, Sees, NotSees,
+        HasEffect, NotHasEffect, TargetHasEffect, TargetNotHasEffect
+    };
     enum Op : int { Eq, Ne, Lt, Le, Gt, Ge };
     Kind        kind = Kind::True;
     double      value = 0;   // the distance (cm), angle (degrees), probability, health fraction or seconds; FightRoll: the number it is when the chance does not come up
     int         op = Eq;     // FightTime, FightRoll and TreeTime: how the seconds compare with `value` / the creature's number
     std::string name;        // Cooldown: the cooldown's name; FightRoll: the tree's variable
     double      chance = 0, low = 0, high = 0;   // FightRoll: with this chance the number is a fresh one between `low` and `high`
+    int64_t     effect = 0;  // HasEffect and its kin: the effect record the condition asks about
 };
 
 /// A condition with how it joins the ones before it: `operand` 'c' (the first of a list), 'a' (and) or 'o' (or), and `delta` the brackets it opens before itself (> 0) or closes after itself (< 0).
@@ -78,6 +83,10 @@ struct CondContext {
     double tree_seconds = 0;            // since its state tree began to run, that is since the creature has been in the world (the fight's clock is the one above)
     std::function<bool(const std::string&)> cooldown_over;
     std::function<double()> roll;       // a fresh number in [0, 1)
+    /// Whether the creature itself carries an effect record (its own effects: the ones its abilities put on it and its Blueprint's from spawn).
+    std::function<bool(int64_t)> has_effect;
+    /// Whether its primary target carries an effect record (a player's effects, or another creature's).
+    std::function<bool(int64_t)> target_has_effect;
     /// The number a FightRoll condition compares the fight's seconds with: rolled the first time it is asked in a fight and the same for the rest of that fight.  Null: the condition's own `value`.
     std::function<double(const CondAtom&)> fight_roll;
     /// Asked only about the fight clock, the tree's clock and the creature's health (hp, fc, fcr, tt): every other condition counts as holding.  Tells whether those timers alone keep a task shut.
@@ -124,6 +133,10 @@ inline bool eval_atom(const CondAtom& a, const CondContext& c) {
         case K::TreeTime: return c.preview || compare_values(a.op, c.tree_seconds, a.value);
         case K::Sees: return !c.has_target || !c.sees || c.sees();
         case K::NotSees: return !c.has_target || (c.sees && !c.sees());
+        case K::HasEffect: return c.preview || !c.has_effect || c.has_effect(a.effect);
+        case K::NotHasEffect: return c.preview || !c.has_effect || !c.has_effect(a.effect);
+        case K::TargetHasEffect: return c.preview || !c.has_target || !c.target_has_effect || c.target_has_effect(a.effect);
+        case K::TargetNotHasEffect: return c.preview || !c.has_target || !c.target_has_effect || !c.target_has_effect(a.effect);
     }
     return false;
 }
@@ -194,6 +207,8 @@ struct CreatureAbility {
     bool        off = false;       // a parameter of the tree switches the task off for this creature
     std::string why;               // what the table does not say, when `unknown`
     std::vector<CooldownStart> starts;   // the other cooldowns the creature starts when it takes the task: the tasks of the states above it start them
+    std::vector<int64_t> next;         // the abilities of the later tasks this one readies (they wait on a cooldown it starts): the tree plays one of them next
+    bool        follow_up = false;     // a state the tree only enters after another move: it has no timer of its own and waits on one another fight task starts (the Bear's Pound after its Rear Up)
     double      arrival_cm = -1;       // how near its target the creature's approach brings it (the arrival distance of the tree's move-to-target task; -1: none)
     bool        rotates = false;       // the creature keeps turning towards its target while the ability plays
     double      rotate_speed = -1;     // ... at this many degrees a second (<= 0: its own rate) ...
@@ -284,8 +299,29 @@ public:
         std::map<int64_t, std::map<int, BiteArea>>          areas;
         std::vector<std::vector<std::string>>               rows;
         const std::string abilities_header = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
-        if (!read_table(abilities_path, abilities_header, rows, error)) return false;
-        const std::vector<std::string> ability_columns = split(abilities_header, '\t');
+        const std::string abilities_header_next = abilities_header + "\tnext";
+        bool with_next = false;
+        {
+            // the table has the sequence column or not: a table made before it has no sequences, and both are read
+            std::ifstream probe(abilities_path, std::ios::binary);
+            if (!probe) {
+                error = abilities_path + " cannot be opened";
+                return false;
+            }
+            std::string head;
+            if (!std::getline(probe, head)) {
+                error = abilities_path + " is empty";
+                return false;
+            }
+            if (!head.empty() && head.back() == '\r') head.pop_back();
+            if (head == abilities_header_next) with_next = true;
+            else if (head != abilities_header) {
+                error = abilities_path + ": the header is not the one this build reads";
+                return false;
+            }
+        }
+        if (!read_table(abilities_path, with_next ? abilities_header_next : abilities_header, rows, error)) return false;
+        const std::vector<std::string> ability_columns = split(with_next ? abilities_header_next : abilities_header, '\t');
         for (const auto& r : rows) {
             const auto bad_at = [&](size_t column) { return bad(abilities_path, r[0], ability_columns[column], r[column], error); };   // (the error names the column that does not read)
             CreatureAbility a;
@@ -325,9 +361,59 @@ public:
                 if (colon == std::string::npos || !number(r[15].substr(0, colon), a.rotate_speed) || !number(r[15].substr(colon + 1), a.rotate_seconds)) return bad_at(15);
                 a.rotates = true;
             }
+            if (with_next) {   // the abilities of the later tasks this one readies, ';'-joined
+                for (const std::string& n : split(r[17], ';')) {
+                    if (n.empty()) continue;
+                    int64_t id = 0;
+                    if (!number(n, id)) return bad_at(17);
+                    a.next.push_back(id);
+                }
+            }
             a.off = !a.unknown && a.why == "off";
             if (!parse_conditions(r[12], a.groups)) return bad_at(12);
             abilities[r[0]].push_back(std::move(a));
+        }
+        // A state that only follows another move: no timer of its own, and it waits on a cooldown another fight task of the tree starts (the Bear's Pound after its Rear Up).  It is not a
+        // move the creature approaches with or stands ready with; the chain that plays it opens the link between the two.
+        for (auto& [archetype, tasks] : abilities) {
+            for (CreatureAbility& t : tasks) {
+                if (!t.fight || t.off || t.unknown || (!t.task.empty() && t.cooldown > 0)) continue;
+                for (const std::string& gate : t.gates) {
+                    bool started = false;
+                    for (const CreatureAbility& other : tasks) {
+                        if (&other == &t || !other.fight || other.off || other.unknown) continue;
+                        if (!other.task.empty() && other.cooldown > 0 && other.task == gate) started = true;
+                        for (const CooldownStart& c : other.starts) {
+                            if (c.name == gate) started = true;
+                        }
+                        if (started) break;
+                    }
+                    if (started) {
+                        t.follow_up = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // A state whose task has no timer of its own but waits on one a timed state after it carries (the goblin shamans' Rally and the aura that follows it, the Withered Shambler's
+        // fallback Maw): the tree enters the timed state next, so the move's whole timer is that state's, started when the pair is over.  The untimed task starts that timer too and
+        // readies the timed one, so the pair plays in the tree's order and the timer holds both back afterwards.  A pair the rows already link (the untimed task starts a cooldown the
+        // timed one waits on) is left as it is, so a table whose reader writes this itself is not changed again.  The timed state is chained to only when it is a later state and another
+        // move: a chain from a move to itself would play it twice.
+        for (auto& [archetype, tasks] : abilities) {
+            for (CreatureAbility& a : tasks) {
+                if (!a.fight || a.off || a.unknown || a.task.empty() || a.cooldown > 0) continue;
+                for (const CreatureAbility& b : tasks) {
+                    if (&b == &a || !b.fight || b.off || b.task != a.task || !(b.cooldown > 0)) continue;
+                    if (!waits_on(a, b.task)) continue;
+                    bool linked = false;
+                    for (const CooldownStart& started : a.starts) linked = linked || waits_on(b, started.name);
+                    if (linked) continue;
+                    a.starts.push_back({b.task, b.cooldown, b.cooldown});
+                    if (!b.unknown && b.order > a.order && b.ability != a.ability && std::find(a.next.begin(), a.next.end(), b.ability) == a.next.end()) a.next.push_back(b.ability);
+                    break;
+                }
+            }
         }
         for (auto& [archetype, tasks] : abilities) {
             std::stable_sort(tasks.begin(), tasks.end(), [](const CreatureAbility& x, const CreatureAbility& y) { return x.order < y.order; });
@@ -524,6 +610,20 @@ public:
     }
 
 private:
+    /// Whether a task waits on a cooldown: by its own name, a gate, or a condition that asks for it (`cd(x)`).
+    static bool waits_on(const CreatureAbility& t, const std::string& name) {
+        if (!t.task.empty() && t.task == name) return true;
+        for (const std::string& gate : t.gates) {
+            if (gate == name) return true;
+        }
+        for (const CondGroup& group : t.groups) {
+            for (const CondToken& token : group) {
+                if (token.atom.kind == CondAtom::Kind::Cooldown && token.atom.name == name) return true;
+            }
+        }
+        return false;
+    }
+
     static std::string percent_decoded(const std::string& s) {
         std::string out;
         for (size_t i = 0; i < s.size(); ++i) {
@@ -584,6 +684,12 @@ private:
                         t.atom.kind = rolled ? K::FightRoll : name == "tt" ? K::TreeTime : K::FightTime;
                         t.atom.op = it->second;
                         if (rolled) t.atom.name = percent_decoded(args[5]);
+                    } else if (name == "eff" || name == "neff" || name == "teff" || name == "tneff") {
+                        // eff(G): the creature carries effect record G; neff(G): it does not; teff(G) / tneff(G): the same about its primary target
+                        if (args.size() != 1 || !number(args[0], t.atom.effect) || t.atom.effect <= 0) return false;
+                        const bool target = name == "teff" || name == "tneff";
+                        const bool absent = name == "neff" || name == "tneff";
+                        t.atom.kind = target ? (absent ? K::TargetNotHasEffect : K::TargetHasEffect) : (absent ? K::NotHasEffect : K::HasEffect);
                     } else {
                         static const std::map<std::string, K> by_name = {{"in", K::In},   {"out", K::Out},   {"cin", K::CentreIn},          {"cout", K::CentreOut},
                                                                        {"ang", K::Angle}, {"rand", K::Random}, {"hp", K::HealthUnder}, {"nhp", K::HealthNotUnder}};

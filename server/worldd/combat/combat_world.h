@@ -149,6 +149,8 @@ public:
     /// A crowd control of this player's hit (or of his pet's) was resisted or was immune on a creature: the session tells his client (ClientOnEffectResisted /
     /// ClientOnEffectImmune).  The default does nothing (a port that has no client).
     virtual void effect_refused(const EffectRefusal& /*refusal*/, double /*now*/) {}
+    /// Whether the player carries an effect record (his session's effect state): what a creature's "its target carries effect E" condition asks.  The default: none.
+    virtual bool holds_effect(int64_t /*effect_guid*/) const { return false; }
 };
 
 /// What a player asks about a target before it acts on it.
@@ -238,7 +240,12 @@ public:
     /// The creatures that attack with their own animation (combat/npc_ability_data.h): a creature whose Blueprint the tables list starts each attack with the ability's montage, lands
     /// each hit when the montage's notify says and starts its next attack when the montage is over; every other creature swings as it always did.  Null (the default) for none.
     /// The tables outlive the world.
-    void set_ability_data(const NpcAbilityData* data) { anim_ = data; }
+    void set_ability_data(const NpcAbilityData* data) {
+        anim_ = data;
+        alert_effect_sources_.clear();
+        player_effect_sources_.clear();
+        effect_sources_ready_ = false;
+    }
     /// Whether the ability launches projectiles: a montage of it has a notify that launches one, and the ability carries a projectile row of that notify's key (what a creature that shoots stands off for).
     bool launches_projectiles(const abilities::AbilityDef& def) const;
     /// What each creature notices and how far it follows (npc/motion_table.h, the senses table): a creature whose Blueprint the table lists notices by its Blueprint's aggro radius (scaled by its
@@ -273,8 +280,7 @@ public:
 
     // ---- NPCs
     /// The NPC's fighter (its combatant made when it is not yet); null for an actor that is no NPC of a kind that has stats.
-    Fighter* fighter_of(uint64_t actor_id);
-    /// The registry actor an object id names: the actor itself, or a component the registry indexes (its CollisionCylinder, minted in the actor's own
+    Fighter* fighter_of(uint64_t actor_id);    /// The registry actor an object id names: the actor itself, or a component the registry indexes (its CollisionCylinder, minted in the actor's own
     /// block: NpcInfo::collision_cylinder; its InteractableComponent). 0 for an id that names nothing.
     uint64_t actor_of_object(uint64_t object_id) const;
     /// What `from` (a player's fighter) would be acting on in `target`: for the validations of a targeted cast and a hit.
@@ -315,9 +321,19 @@ public:
     /// How many stacks of an effect record an NPC holds, and how many instances of effects it holds in all (for the tests and the log).
     int    effect_stacks(uint64_t npc_actor, int64_t effect_guid) const;
     size_t effect_count(uint64_t npc_actor) const;
+    /// The abilities a creature's tree has waiting to play next (its cast ended and its chain has not been tried yet): what a test reads to see a chain consumed or dropped.
+    size_t npc_chain_size(uint64_t npc_actor) const;
+    /// The speed the AI walks at when it chases (the stat's MoveSpeedMult applied, as make_combatant set it): what a test reads to see a speed buff reach the feet.
+    double npc_chase_speed(uint64_t npc_actor) const;
+    /// A test's hand on a creature's starting effects (the records its captured open lists, a fixture when the test file's captures do not carry them): the creature carries
+    /// them from now and a reset keeps them, as the records that persist through death are kept.
+    void seed_own_effect(uint64_t npc_actor, int64_t effect_guid);
     /// Takes every instance of the effect off the creature (Dimensional Bolt's mark, spent by its second press), and what a hit takes off it (its EffectsToRemoveIds, or its filter).
     void remove_npc_effect(uint64_t npc_actor, int64_t effect_guid, double now);
     void remove_effects_from_npc(uint64_t npc_actor, const abilities::HitDef& hit, double now);
+    /// Whether an NPC or a player carries an effect record now: a creature's own effects (the ones its abilities put on it and its Blueprint's from spawn) and the effects the world
+    /// keeps on it, or a player's own effect state.  What a tree's "carries effect E" condition asks about the creature and its target.
+    bool holds_effect(uint64_t actor_id, int64_t effect_guid, double now) const;
 
     // ---- a player's pet (combat/combat_pets.cpp): it chases `target` and plays `ability` at it until the target dies or it is told otherwise.  Its hits resolve from its owner's stats and the kill and
     // the loot are its owner's; the creature it hurts fights it back (from then on it is on the creature's table, as a player is), and a pet whose Health runs out is dead(pet) for its session to take away.
@@ -388,10 +404,13 @@ public:
     std::string next_attack_name(uint64_t actor_id) const;
     /// Gives an NPC combatant a hand: threat from outside (a test, a pet).
     void add_threat(uint64_t npc_actor, uint64_t attacker, double amount, double now);
+    /// A test's hand on the log's budget for the attacks with their own animation: the next cast is logged as if the run had already written its first
+    /// `kLoggedNpcCasts` cast lines, so a test shows what the alert lines still say after them.
+    void spend_the_cast_log_budget() { npc_casts_logged_ = kLoggedNpcCasts; }
 // C O A - Cyb
 
     /// A shield on an NPC (an effect's TempHealth amount): damage takes from the oldest first; it ends at `now + seconds` (0: when used up).
-    void add_shield(uint64_t npc_actor, double amount, double seconds, double now);
+    void add_shield(uint64_t npc_actor, double amount, double seconds, double now, int64_t effect_guid = 0, bool by_creature = false);
     /// What the NPC's shields hold now.
     double shield_of(uint64_t npc_actor, double now) const;
 
@@ -427,6 +446,7 @@ private:
         double   due = 0;
         uint64_t npc = 0, target = 0;
         const abilities::AbilityDef* ability = nullptr;
+        const CreatureAbility*        task = nullptr;   // the tree's task that picked it (its `next` moves are tried when the cast is over)
         std::vector<int64_t> hits;
         // an attack with its own animation: every hit at the time of its notify, then the end of the montage
         bool     animated = false;
@@ -437,6 +457,7 @@ private:
         std::vector<BiteArea> timed_areas;   // where each of those hits lands (the targeting record of the hit's key): a hit that reaches nobody sends nothing
         std::vector<std::pair<double, PlannedFire>> timed_fires;   // (when, the projectile) for every notify of the montage that launches one, in time order
         size_t   next_fire = 0;
+        std::set<std::pair<int64_t, uint64_t>> alert_logged;   // the (effect, creature) pairs this cast's alert has put a line in the log for (an alert's hit lands at every notify)
     };
     /// A projectile in the air.  A homing one follows its target until it reaches it; a straight one flies the line it was launched on and lands on the players whose bodies it meets.  What it
     /// lands is the hits of its record, through the same hit rules as every other hit of a creature.
@@ -478,6 +499,9 @@ private:
     /// `single_swing`: the attack every creature had before the trees (its kit's, else the generic slash), whatever animation the creature has.
     Attack choose_attack(Npc& n, bool single_swing = false);
     Attack choose_animated(Npc& n, const Fighter* target, TreeWhy* why = nullptr);
+    /// The move the tree plays next after the cast that just ended (`CreatureAbility::next`): the first of those tasks whose own conditions hold with the cooldown that links the pair open
+    /// (the timer named for the move that ended or for the next one; a cooldown the pair shares stays shut).  An empty attack when none does (the chain is dropped and the tree is asked as usual).
+    Attack choose_chain(Npc& n, CondContext ctx, double distance, double angle);
     /// Whether a hit of `area` lands on `body` now (the creature as it stands and faces): see combat/bite_area.h.  `is_target`: the body is the one the record's target part finds.
     bool  hit_reaches(const Npc& n, const Fighter& body, const BiteArea& area, bool is_target) const;
     /// The player the target part of `area` finds for a hit of an attack aimed at `cast_target`: the creature's own target and the one the cast was aimed at, in the order the record says (0: none).
@@ -505,6 +529,10 @@ private:
     /// dropped (a death, a reset and a stun do this; a projectile already in the air flies on).  The cooldowns it started keep running.
     void  drop_attack(Npc& n);
     void  resolve_pending(double now);
+    /// Where an alert's hit lands, from the hit's mask and its targeting record: the caster itself (Self) and the living creatures on its friendly side (Ally: the relation of the alignments, not the
+    /// Blueprint's family) inside the record's volumes, nearest first up to the hit's cap; each gets the hit's effects through the same resolver and land_effect a player's debuffs use.  `logged`: the
+    /// (effect, creature) pairs this cast has already named in the log (one line for each effect and pulse, listing the creatures it newly landed on, however many pulses put it there).
+    void  land_alert_hit(Npc& caster, const abilities::AbilityDef& ability, const BiteArea& area, int64_t hit_guid, double now, std::set<std::pair<int64_t, uint64_t>>& logged);
     bool  animates(const Npc& n, const abilities::AbilityDef& def) const;
     /// Whether any task of the creature's tree that a fight can use is an attack it can play (its ability is in the data, its open lists it, its montage is read): a creature with none keeps the
     /// single swing every creature had before the trees.
@@ -512,6 +540,16 @@ private:
     bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
     /// `projectile`: the record of the projectile that carried the hit (0: the ability itself made it), which the confirmation names as its source.
     void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now, int64_t projectile = 0);
+    /// The effects of one of the creature's own hits that reach the creature itself (the hit's mask names Self): it carries them for its tree's checks, with each effect's own
+    /// duration.  Its abilities' effects on itself only: nothing of them moves its stats or reaches another creature.
+    void  land_self_effects(Npc& n, const abilities::HitDef& hit, double now);
+    /// The effects an ability itself lists for the state move it plays (a Skeleton's Block): they go on the creature through the world's effect code, with the shield a TempHealth mod
+    /// gives, and end with their own time or with the creature's death or reset.
+    void  land_ability_effects(Npc& n, const abilities::AbilityDef& ability, double now);
+    /// Takes off the shields an effect record added once none of its applications is held any more (its end, a removal, a reset).
+    void  remove_effect_shields(Npc& n, int64_t effect_guid);
+    /// The effects its Blueprint gives it from spawn (its equipment and passives), as the open it is made from carries them: they do not end by themselves.
+    void  start_with_effects(Npc& n, const world::WorldActor& a);
     /// For a creature whose attacks launch projectiles: the arrival distance of its tree's approach (it closes in to it between two casts) and the farthest its tree lets it cast from; both -1 for a
     /// creature that does not shoot.
     void  stand_off_of(const Npc& n, double& arrival, double& reach) const;
@@ -557,6 +595,10 @@ private:
     void  pet_land_on_self(Npc& pet, uint64_t owner, const abilities::HitDef& hit, double now);
     /// A hit of the player's that the session did not make (a pet's, a reaction's) lands on `target`: its requirement, its numbers, the delivery, the confirmation and what it leaves.
     void  land_for_player(uint64_t by, uint64_t target, const abilities::HitDef& hit, const LandSource& src, double now, int depth = 0);
+    /// A reaction a creature's own effect carries, landing on the player whose hit raised it (the Fire Shield's damage to the attacker): the creature's numbers, the reaction as the source.
+    void  deliver_reaction_hit(Npc& caster, PlayerPort& target, const abilities::HitDef& hit, int64_t reaction_guid, const HolderEvent& event, double now);
+    /// The same on a creature (the Blood Fury's heal of its holder): resolved for the two, the event's hit read by the formula, and its Health and Mana mods applied.
+    void  land_reaction_on_npc(Npc& caster, Npc& holder, const abilities::HitDef& hit, int64_t reaction_guid, const HolderEvent& event, double now);
     /// The hits a hit fires through its targeting records, around `target`.
     void  land_children(uint64_t by, uint64_t target, const abilities::HitDef& hit, const LandSource& src, double now, int depth);
     /// The effects `hit` puts on `n` for its player, each through land_effect (so a crowd control a mob does not take stays off), and the shield a TempHealth mod of one gives.  `via_pet`: the pet that
@@ -609,6 +651,8 @@ private:
     /// Writes a change of the creature's book into its CurrentEffects, and the crowd control the book holds now into its crowd control state and its walk (apply_crowd_control).  Every way an effect goes on, comes
     /// off or is cleared passes here.
     void  send_effects(Npc& n, const effects::Book::Changes& changes);
+    /// Recomputes the creature's stat values from its book and writes them to the clients (a buff a creature's ability put on it, or that buff's end): its numbers follow the effect while it lasts.
+    void  refresh_creature_stats(Npc& n);
     /// The crowd control of the creature's book, when it differs from what was last written: its state (the flags, the snare, the override of the client's movement and the animation, in the update of the
     /// effect items), the share of its speed it keeps (1 minus the snare) and the locks on its feet and its facing, which the NPC world holds for every walk and turn.  When its abilities go off (a stun) the
     /// attack it had begun is dropped.  The log names it at the next step (log_crowd_control).
@@ -633,6 +677,12 @@ private:
     /// One `[cc]` line for each creature whose crowd control is not what the log last named, with the speed the world uses for it; a change that undid itself within the step is not named.
     void  log_crowd_control();
     void  clear_effects(Npc& n);
+    /// The effects the world can ever put on a creature: what its own tree gives it, what any alert puts on its allies, and what a player's abilities put on a creature.  An effect outside
+    /// them can never answer a tree's carries-effect condition, so a task that asks about it is held (not played) instead of answering false or true.
+    void  build_effect_sources();
+    /// The effects of the tree's carries-effect conditions that no source can ever put on `n` (see build_effect_sources); `task_held` reads them.
+    void  mark_held_effects(Npc& n);
+    bool  task_held(const Npc& n, const CreatureAbility& task) const;
     /// Everything the player applied goes (he left the area or died).
     void  drop_effects_of(uint64_t instigator);
     void  begin_reset(Npc& n, double now);
@@ -666,6 +716,9 @@ private:
     std::set<int64_t>      reaction_noted_;     // the reactions said once in the log
     double                 pet_regen_at_ = 0;
     const NpcAbilityData*  anim_ = nullptr;
+    std::set<int64_t>      alert_effect_sources_;   // the effects any alert's hit can put on its own side
+    std::set<int64_t>      player_effect_sources_;  // the effects a player's abilities can put on a creature
+    bool                   effect_sources_ready_ = false;
     const npc::SensesTable* senses_ = nullptr;
     std::unordered_map<std::string, bool> hostile_by_archetype_;
     HuntablePredicate      huntable_;

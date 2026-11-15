@@ -373,14 +373,17 @@ void test_swing_faces_its_target(Fixture& f) {
     double worst_turn = 0;
     for (size_t i = 1; i < samples.size(); ++i) worst_turn = std::max(worst_turn, std::fabs(wrap180(samples[i].yaw - samples[i - 1].yaw)));
     // every swing: the facing a client holds when it begins is the server's, and the lunge goes towards the player
-    size_t swings = 0, sent_off = 0, lunges = 0, wrong_way = 0;
+    size_t swings = 0, sent_off = 0, lunges = 0, wrong_way = 0, missing_montage = 0;
     double worst_sent = 0, worst_lunge = 0;
     for (size_t i = 0; i < samples.size(); ++i) {
         if (!samples[i].cast_began) continue;
         ++swings;
         if (samples[i].has_mv_yaw) {
             const double d8 = std::fabs(wrap180(samples[i].mv_yaw - samples[i].yaw));
-            const double d16 = samples[i].has_rrm_yaw ? std::fabs(wrap180(samples[i].rrm_yaw - samples[i].yaw)) : 0.0;
+            // (a cast that carries the creature along its montage sends the facing in RepRootMotion; one that stays in place, the Bear's Rear Up, sends none and the last one seen is not its)
+            const combat::MontageData* played = montage_of_cast(f, tables, samples[i].ability, samples[i].montage);
+            if (!played) ++missing_montage;
+            const double d16 = samples[i].has_rrm_yaw && played && !played->root_motion.empty() ? std::fabs(wrap180(samples[i].rrm_yaw - samples[i].yaw)) : 0.0;
             worst_sent = std::max(worst_sent, std::max(d8, d16));
             if (d8 > 0.75 * 360.0 / 256.0 || d16 > 0.05) ++sent_off;
         }
@@ -403,6 +406,7 @@ void test_swing_faces_its_target(Fixture& f) {
     std::printf("  %zu swings in 40 s, %zu hits on the runner: the facing a client holds at their start is the server's within %.2f deg (%zu off); %zu lunges of 60 cm or more, the worst %.0f deg off the way to the player when the "
                 "hit lands (%zu over 45); its facing turned %.1f deg at the most in a tick (its rate allows %.1f)\n", swings, got.size(), worst_sent, sent_off, lunges, worst_lunge, wrong_way, worst_turn, bp->rotation_rate_yaw / 15.0);
     CHECKF(swings >= 8, "the Bear swings again and again at a player who runs round it (%zu swings)", swings);
+    CHECKF(missing_montage == 0, "every cast's montage is found, so the facing check never silently passes one (%zu of %zu casts have none)", missing_montage, swings);
     CHECKF(sent_off == 0, "the facing a client is sent when a swing begins is the server's (%zu of %zu swings differ)", sent_off, swings);
     CHECKF(lunges >= 3 && wrong_way == 0, "every lunge goes towards the player, within 45 deg of the way to him at the hit (%zu of %zu do not, the worst %.0f deg)", wrong_way, lunges, worst_lunge);
     CHECKF(worst_turn <= bp->rotation_rate_yaw / 15.0 + 1.0, "its facing turns at its rotation rate and never jumps (%.1f deg in a tick, %.1f allowed)", worst_turn, bp->rotation_rate_yaw / 15.0 + 1.0);

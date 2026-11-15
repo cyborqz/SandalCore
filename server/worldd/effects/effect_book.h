@@ -53,6 +53,8 @@ struct Applied {
     double                        extension = -1;        // seconds one more application adds under ExtendDuration; negative: the record gives none, the duration is refreshed in full
     double                        extended_max = 0;      // the most seconds an extended instance has left; 0: no limit
     DisableAspect                 disable_aspect = DisableAspect::Unset;   // which of the two disable stats the resist roll reads
+    /// A creature's own ability put it on (a rally, a yawp, a prayer), not a player's: it has no player to run its Apply, Tick and Expire hits from, and a reset takes it off.
+    bool                          by_creature = false;
 };
 
 /// An effect on its holder.
@@ -66,6 +68,7 @@ struct Instance {
     uint64_t                      instigator = 0;        // the actor that applied it (the one it is shown to be from); 0: none
     uint64_t                      pet = 0;               // the pet whose hit put it on (its owner is the instigator); 0: the instigator's own.  It ends with the pet
     double                        damage_taken = 0;      // what the fragility that ends at a share of the instigator's Health has counted so far
+    bool                          by_creature = false;   // a creature's own ability put it on (Applied::by_creature)
 };
 
 class Book {
@@ -116,6 +119,7 @@ public:
         const auto refresh = [&](Instance& e) {
             e.mods = a.mods;
             e.instigator = instigator;   // (a record that compares sources only reaches an instance of this same instigator)
+            e.by_creature = a.by_creature;
             // the pet's hit refreshes an instance that was the pet's own (it stays with the pet it is now from); one the owner put on himself stays the owner's: the pet's going does not take it off.
             // The owner's own application makes an instance his, whoever it was from before
             if (via_pet == 0 || e.pet != 0) e.pet = via_pet;
@@ -143,6 +147,7 @@ public:
             e.next_tick = row.tick_timer > 0 ? (row.ignore_initial_tick ? t + row.tick_timer : t) : kForever;
             e.instigator = instigator;
             e.pet = via_pet;
+            e.by_creature = a.by_creature;
             items_.push_back(e);
             out.added.push_back(e);
             if (created) *created = e;
@@ -214,6 +219,20 @@ public:
             if (items_[i].instigator == instigator) {
                 out.removed.push_back(items_[i].key);
                 items_.erase(items_.begin() + static_cast<std::ptrdiff_t>(i));
+                ++n;
+            } else {
+                ++i;
+            }
+        }
+        return n;
+    }
+
+    /// Takes off what a creature's own ability put on the holder (Applied::by_creature): a fight that resets ends the buffs an ally gave it (a player's effects stay).
+    size_t remove_by_creature(Changes& out) {
+        size_t n = 0;
+        for (size_t i = 0; i < items_.size();) {
+            if (items_[i].by_creature) {
+                remove_key(items_[i].key, out);
                 ++n;
             } else {
                 ++i;

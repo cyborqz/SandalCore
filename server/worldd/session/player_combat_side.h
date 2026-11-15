@@ -85,6 +85,7 @@ public:
     void effect_refused(const combat::EffectRefusal& refusal, double) override {
         if (effect_refusals.size() < 64) effect_refusals.push_back(refusal);
     }
+    bool holds_effect(int64_t effect_guid) const override { return s_.pipeline_ && s_.pipeline_->stacks_of(effect_guid) > 0; }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }

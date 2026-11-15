@@ -200,6 +200,8 @@ void CombatWorld::remove_effects_from_npc(uint64_t npc_actor, const abilities::H
         effects::Book::Changes changes;
         if (!n.book.remove(e.key, changes)) continue;
         send_effects(n, changes);
+        remove_effect_shields(n, e.def->row.guid);
+        if (e.by_creature) refresh_creature_stats(n);
         run_effect_hits(n, e, kRemovePhases, 2, now);
         --left;
     }
@@ -215,6 +217,8 @@ void CombatWorld::remove_npc_effect(uint64_t npc_actor, int64_t effect_guid, dou
         effects::Book::Changes changes;
         if (!n.book.remove(e.key, changes)) continue;
         send_effects(n, changes);
+        remove_effect_shields(n, e.def->row.guid);
+        if (e.by_creature) refresh_creature_stats(n);
         run_effect_hits(n, e, kRemovePhases, 2, now);
     }
 }
@@ -293,7 +297,7 @@ void CombatWorld::land_effects_of_hit(Npc& n, PlayerPort& port, const abilities:
     for (const effects::Applied& a : gate.effects) {
         if (n.dead) return;
         const double shield = resolver_.effect_shield(port.fighter(), n, *a.def);
-        if (shield > 0) add_shield(n.actor_id, shield, std::isinf(a.duration) ? 0.0 : a.duration, now);
+        if (shield > 0) add_shield(n.actor_id, shield, std::isinf(a.duration) ? 0.0 : a.duration, now, a.def->row.guid);
         land_effect(n, a, port.actor_id(), now, via_pet);
     }
 }
@@ -455,10 +459,13 @@ void CombatWorld::holder_reacts(uint64_t holder, const HolderEvent& event, doubl
             const bool on_hit = event.origin && (row.bind_hit & hit_bit) != 0;
             const bool on_death = hit_bit == 2 && event.lethal && (row.bind_stat & 2) != 0;
             if (!on_hit && !on_death) continue;
-            // who casts it: the one who left the effect or the one whose hit this is; a creature's hit on a player's effect has no fighter to run from
+            // who casts it: the one who left the effect or the one whose hit this is.  A player's port runs its stats and its hits; a creature's own effect (an alert's rage, a Fire
+            // Shield) casts it from the creature's stats, and its hits land on the creature's side or on the player whose hit raised it.
             const uint64_t caster = row.instigator == "HitInstigator" ? event.attacker : by;
             PlayerPort* port = player(caster);
-            if (!port || is_pet(caster)) continue;
+            if (port && is_pet(caster)) continue;
+            Npc* by_npc = port ? nullptr : combatant(caster);
+            if (!port && !by_npc) continue;
             const auto holder_it = npcs_.find(holder);
             if (holder_it == npcs_.end()) return;
             if (row.trigger_expr != 0) {
@@ -470,8 +477,16 @@ void CombatWorld::holder_reacts(uint64_t holder, const HolderEvent& event, doubl
                 // GetEffectInstigator() reads as the caster: the trigger's comparison of the two is made here
                 if (e->text.find("GetEffectInstigator") != std::string::npos && caster != by) continue;
                 std::string err;
-                auto a = port->fighter().stats().evaluation(port->fighter().worn(), err, true);
-                auto t = holder_it->second->stats().evaluation(holder_it->second->worn(), err, true);
+                std::unique_ptr<stats::CharacterStats::Evaluation> a, t;
+                if (port) {
+                    a = port->fighter().stats().evaluation(port->fighter().worn(), err, true);
+                    t = holder_it->second->stats().evaluation(holder_it->second->worn(), err, true);
+                } else {
+                    a = by_npc->stats().evaluation(by_npc->worn(), err, true);
+                    PlayerPort* who = event.target != 0 ? player(event.target) : nullptr;
+                    t = who && who->fighter().alive() ? who->fighter().stats().evaluation(who->fighter().worn(), err, true)
+                                                      : holder_it->second->stats().evaluation(holder_it->second->worn(), err, true);
+                }
                 if (!a || !t || !a->set_actor(stats::kRoleTarget, *t, err)) continue;
                 HitContext ctx;
                 ctx.profile = &data_.profile();
@@ -501,14 +516,90 @@ void CombatWorld::holder_reacts(uint64_t holder, const HolderEvent& event, doubl
             for (const int64_t hit_guid : row.hits) {
                 const abilities::HitDef* hit = catalog_.hit(hit_guid);
                 if (!hit) continue;
-                if ((row.targets_mask & (1 | 8 | 16)) != 0) land_for_player(caster, holder, *hit, src, now);   // the holder, the hit's target, what the hit was for
-                if ((row.targets_mask & 2) != 0) port->hit_from_pet(hit_guid, guid, now);                       // the effect's instigator
-                if ((row.targets_mask & 4) != 0 && event.attacker != caster) land_for_player(caster, event.attacker, *hit, src, now);   // who struck the holder (Brace)
-                if ((row.targets_mask & 8192) != 0) {   // the hit instigator's pet
+                Npc* holder_n = holder_it->second.get();
+                if ((row.targets_mask & (1 | 8)) != 0) {   // the holder, or what the hit was for
+                    if (port) land_for_player(caster, holder, *hit, src, now);
+                    else land_reaction_on_npc(*by_npc, *holder_n, *hit, guid, event, now);
+                }
+                if ((row.targets_mask & 16) != 0) {   // who struck the holder (the Fire Shield's damage to the attacker)
+                    PlayerPort* who = player(event.attacker);
+                    if (who && !port) deliver_reaction_hit(*by_npc, *who, *hit, guid, event, now);
+                    else if (port) land_for_player(caster, holder, *hit, src, now);   // (a player's effect keeps its old target: the holder)
+                }
+                if ((row.targets_mask & 2) != 0 && port) port->hit_from_pet(hit_guid, guid, now);   // the effect's instigator
+                if ((row.targets_mask & 4) != 0 && event.attacker != caster && port) land_for_player(caster, event.attacker, *hit, src, now);   // who struck the holder (Brace)
+                if ((row.targets_mask & 8192) != 0 && port) {   // the hit instigator's pet
                     if (const uint64_t pet = pet_of_owner(caster)) land_for_player(caster, pet, *hit, src, now);
                 }
             }
         }
+    }
+}
+
+void CombatWorld::deliver_reaction_hit(Npc& caster, PlayerPort& target, const abilities::HitDef& hit, int64_t reaction_guid, const HolderEvent& event, double now) {
+    if (caster.dead || !target.fighter().alive()) return;
+    std::string err;
+    auto a = caster.stats().evaluation(caster.worn(), err, true);
+    auto t = target.fighter().stats().evaluation(target.fighter().worn(), err, true);
+    if (!a || !t) return;
+    HitMeta meta;
+    meta.source_type = content::kSourceTypeReaction;
+    meta.source_guid = reaction_guid;
+    HeldView held(*this, target.actor_id(), now);
+    meta.target_effects = &held;
+    EventHost host(rng_, event, caster.actor_id);
+    Resolved r;
+    std::string why;
+    const Relation rel = data_.relation(caster.aligns, target.fighter().alignments());
+    if (!resolver_.resolve_with(*a, host, t.get(), distance_cm(caster.position(), target.fighter().position()), rel == Relation::Hostile, rel == Relation::Neutral, hit, meta, r, why)) {
+        spdlog::debug("[combat] the reaction hit {} does not run on player {}: {}", hit.row.name, target.actor_id(), why);
+        return;
+    }
+    for (ResolvedMod& m : r.mods) {
+        if (m.stat_guid == data_.ids().health && m.value < 0) m.value *= cfg_.npc_damage_mult;
+    }
+    IncomingHit in;
+    in.instigator = caster.actor_id;
+    in.hit_guid = hit.row.guid;
+    in.source_type = meta.source_type;
+    in.source_guid = meta.source_guid;
+    in.flags = r.flags;
+    in.mods = r.mods;
+    in.at = now;
+    r.miss() ? ++stats_.npc_misses : ++stats_.npc_hits;
+    target.receive_hit(in, now);
+    player_exchange(target.actor_id(), now);
+}
+
+void CombatWorld::land_reaction_on_npc(Npc& caster, Npc& holder, const abilities::HitDef& hit, int64_t reaction_guid, const HolderEvent& event, double now) {
+    if (caster.dead || holder.dead) return;
+    std::string err;
+    auto a = caster.stats().evaluation(caster.worn(), err, true);
+    auto t = holder.stats().evaluation(holder.worn(), err, true);
+    if (!a || !t) return;
+    HitMeta meta;
+    meta.source_type = content::kSourceTypeReaction;
+    meta.source_guid = reaction_guid;
+    HeldView held(*this, holder.actor_id, now);
+    meta.target_effects = &held;
+    EventHost host(rng_, event, caster.actor_id);
+    Resolved r;
+    std::string why;
+    const Relation rel = data_.relation(caster.aligns, holder.aligns);
+    if (!resolver_.resolve_with(*a, host, t.get(), distance_cm(caster.position(), holder.position()), rel == Relation::Hostile, rel == Relation::Neutral, hit, meta, r, why)) {
+        spdlog::debug("[combat] the reaction hit {} does not run on {} ({}): {}", hit.row.name, holder.leaf, holder.actor_id, why);
+        return;
+    }
+    if (r.miss()) return;
+    const CombatStatIds& id = data_.ids();
+    for (const ResolvedMod& m : r.mods) {
+        if (m.stat_guid != id.health && m.stat_guid != id.mana) continue;
+        const stats::StatValue* cur = holder.cs->find(m.stat_guid);
+        const stats::StatValue* max = holder.cs->find(m.stat_guid == id.health ? id.max_health : id.max_mana);
+        if (!cur || !max) continue;
+        const double after = std::clamp(cur->value + m.value, 0.0, static_cast<double>(max->value));
+        holder.cs->set_current(m.stat_guid, static_cast<float>(after));
+        write_stat(registry_, holder.actor_id, m.stat_guid, static_cast<float>(after));
     }
 }
 

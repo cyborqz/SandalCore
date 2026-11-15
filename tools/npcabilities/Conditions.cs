@@ -27,6 +27,8 @@ namespace NpcAbilities;
 ///   fc(OP,V)         the seconds since the creature's fight began compare as OP (eq ne lt le gt ge) to V
 ///   fcr(OP,B,P,L,H,N) the same against a number the creature rolls once when its fight begins (the tree's variable N): B, or with the chance P a fresh number between L and H
 ///   tt(OP,V)         the seconds the creature's tree has been running (since the creature came into the world, not since its fight began) compare as OP to V
+///   eff(G) / neff(G) the creature carries the effect record G / does not (its own effects: the ones its abilities put on it and its Blueprint's from spawn)
+///   teff(G) / tneff(G) the same about its primary target (a player's effects, or another creature's)
 ///   los / nlos       the creature sees its target / does not
 ///   ?NAME            a condition this tool cannot say (the task is left out)
 /// </summary>
@@ -245,7 +247,90 @@ public static partial class Reader
         || (l.Kind == "Evaluator" && l.Class == "AoCSTE_TrackTime" && l.Path == "TreeElapsedTimeInSeconds");
 
     static bool IsSelf(Source s) => s.Kind == "Context" && s.Name == "Actor" && s.Path.Length == 0;
-    static bool IsPrimaryTarget(Source s) => s.Kind == "Evaluator" && (s.Class == "AoCSTE_UpdateMostHated" || s.Class == "STE_UpdateMostHated_C") && s.Path == "PrimaryTarget";   // (both name the most hated character)
+    /// <summary>The condition's target is the creature's primary target: the hate list's most hated character, or the creature's own picker for it (the Raptor's Courage target is
+    /// the player its Smell of Blood and Courage moves look at).</summary>
+    static bool IsPrimaryTarget(Source s) =>
+        (s.Kind == "Evaluator" && (s.Class == "AoCSTE_UpdateMostHated" || s.Class == "STE_UpdateMostHated_C") && s.Path == "PrimaryTarget")
+        || s.Class == "STC_Raptor_PickCourageTarget_C";
+    /// <summary>The target a Rotate To task of a state on the way down stored (the creature turned to it): for the condition of the move that follows, it is the creature's target.</summary>
+    static bool IsStoredTarget(Source s, HashSet<int> path) =>
+        s.Kind == "Task" && !s.Global && s.State >= 0 && path.Contains(s.State) && s.Class.Contains("RotateTo", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The names a tree's condition may give the effect it asks about and the setting that flips it (the C++ condition names the effect EffectToCheck and the flip bInverse; the Blueprints' say Effect and Invert).</summary>
+    static readonly string[] EffectNames = { "Effect", "EffectToCheck", "EffectId" };
+    static readonly string[] InvertNames = { "Invert", "bInvert", "Inverse", "bInverse" };
+
+    /// <summary>The effect record a condition names: the Guid of the struct it holds, the number itself, or the value of the parameter it is bound to; 0 when it cannot be read.</summary>
+    static long EffectOf(UObject? obj, FStructFallback? str, Dictionary<string, Source> binds, Dictionary<string, object> prm, string name)
+    {
+        if (binds.TryGetValue(name, out var src))
+        {
+            // a setting bound to one of the tree's parameters takes the parameter's own value (the Mummy's Earth Split and the Coal Element's checks name their effect so)
+            if (src.Kind != "Parameter" || !prm.TryGetValue(src.Path, out var bound)) return 0;
+            return bound switch
+            {
+                long l => l,
+                ulong u => (long)u,
+                int i => i,
+                uint ui => ui,
+                double d => (long)d,
+                float fl => (long)fl,
+                _ => 0
+            };
+        }
+        object? v = obj != null ? obj.Properties.FirstOrDefault(p => p.Name.Text == name)?.Tag?.GenericValue : str?.Properties.FirstOrDefault(p => p.Name.Text == name)?.Tag?.GenericValue;
+        if (v is FScriptStruct ss && ss.StructType is FStructFallback f) return GuidOf(f);
+        return v switch
+        {
+            long l => l,
+            ulong u => (long)u,
+            int i => i,
+            uint ui => ui,
+            _ => 0
+        };
+    }
+
+    /// <summary>The effect a condition asks about, by the first of its names that holds one.</summary>
+    static long EffectOf(UObject? obj, FStructFallback? str, Dictionary<string, Source> binds, Dictionary<string, object> prm)
+    {
+        foreach (string name in EffectNames)
+        {
+            long effect = EffectOf(obj, str, binds, prm, name);
+            if (effect != 0) return effect;
+        }
+        return 0;
+    }
+
+    /// <summary>Whether a condition inverts its test (null: the setting is bound to a value the table does not follow, so the answer is not known).</summary>
+    static bool? InvertOf(UObject? obj, FStructFallback? str, Dictionary<string, Source> binds, Dictionary<string, object> prm)
+    {
+        foreach (string name in InvertNames)
+        {
+            if (!binds.ContainsKey(name) && !HasInstanceProperty(obj, str, name)) continue;
+            return SettingBool(obj, str, binds, prm, name);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Whom a condition asks about: true for the primary target, false for the creature itself.  Null when one of its settings is bound to another actor or picker (a family's own
+    /// target), which this table does not follow.  A condition with no such setting asks about the creature, as the game's own condition does.
+    /// </summary>
+    static bool? AboutTarget(Dictionary<string, Source> binds)
+    {
+        bool target = false;
+        foreach (var b in binds)
+        {
+            if (Array.IndexOf(EffectNames, b.Key) >= 0 || Array.IndexOf(InvertNames, b.Key) >= 0) continue;
+            Source src = b.Value;
+            if (src.Kind == "Parameter") continue;
+            if (IsPrimaryTarget(src)) target = true;
+            else if (IsSelf(src)) { }
+            else return null;
+        }
+        return target;
+    }
+
 
     static string Escape(string s)
     {
@@ -288,10 +373,11 @@ public static partial class Reader
         InstanceData(node, t.Shared, out var obj, out var str);
         var binds = BindingsOf(t, node);
         bool Inv(string name) => (SettingBool(obj, str, binds, prm, name) ?? false);
+        bool KnownTarget(Source s) => IsPrimaryTarget(s) || IsStoredTarget(s, path);
         bool Targeted(string a, string b, bool ordered)
         {
             if (!binds.TryGetValue(a, out var sa) || !binds.TryGetValue(b, out var sb)) return false;
-            return (IsSelf(sa) && IsPrimaryTarget(sb)) || (!ordered && IsPrimaryTarget(sa) && IsSelf(sb));
+            return (IsSelf(sa) && KnownTarget(sb)) || (!ordered && KnownTarget(sa) && IsSelf(sb));
         }
         switch (cls)
         {
@@ -361,6 +447,19 @@ public static partial class Reader
                 if (!binds.TryGetValue("Agent", out var agent) || !IsSelf(agent) || !binds.TryGetValue("TargetActor", out var target) || !IsPrimaryTarget(target)) return Unsaid(cls + "(other target)");
                 return new Atom { Text = Inv("Inverse") ? "nlos" : "los" };
             }
+            case "STC_HasEffect_C":
+            case "AoCSTCBot_HasEffect":
+            {
+                // the effect's record, whether it must be absent, and whom the condition asks (the creature itself unless the tree binds it to the primary target)
+                long effect = EffectOf(obj, str, binds, prm);
+                if (effect == 0) return Unsaid(cls + "(effect)");
+                bool? effectInvert = InvertOf(obj, str, binds, prm);
+                if (effectInvert == null) return Unsaid(cls + "(invert)");
+                bool? aboutTarget = AboutTarget(binds);
+                if (aboutTarget == null) return Unsaid(cls + "(other target)");
+                string prefix = aboutTarget.Value ? (effectInvert.Value ? "tneff(" : "teff(") : (effectInvert.Value ? "neff(" : "eff(");
+                return new Atom { Text = prefix + effect.ToString(CultureInfo.InvariantCulture) + ")" };
+            }
         }
         if (cls.Length > 0) return Unsaid(cls);
         // an engine condition: it is told apart by the settings of its instance data
@@ -425,15 +524,18 @@ public static partial class Reader
     static readonly Regex EffectCount = new(@"^\s*GetEffectCount\(\s*Get(?:Self|Source)\(\)\s*,\s*\$#\d+:\d+\$\s*\)\s*(>=|<=|==|!=|>|<)\s*(" + NumberText + @")\s*$", RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// A number the tree rolls when the fight begins and then compares the fight's clock with: the "Stored Value" of a "Set BBFloat" task in a state the fight began in.  The task's expression is a number, a range
+    /// A number the tree rolls when the fight begins and then compares the fight's clock with: the "Stored Value" of a "Set BBFloat" task in a state the fight began in, or the output of a "Generate Random Float In Range"
+    /// task of a state on the way down (its Min and Max are the range).  The task's expression is a number, a range
     /// ("RandDoubleRange(6.0, 9.0)") or a chance of one ("var Result = 0.; if (RandDouble() < 0.65) { set Result = RandDoubleRange(6.0, 9.0); } Result").  Said as "base,chance,low,high,name": the number is
     /// `base`, or with that chance a fresh one between `low` and `high`.  Null when the binding is anything else or the expression is of another form.
     /// </summary>
     static string? FightRoll(TreeInfo t, Source src, HashSet<int> path)
     {
         // a "Set BBFloat" task's stored value, or a "Generate Float" task's value (a tree's "initial cooldown" of a special attack)
+        // or a "Generate Random Float In Range" task's output (the goblins' wait before they rally: a number between the task's Min and Max)
         bool stored = src.Class == "STT_SetBBFloat_C" && src.Path == "Stored Value", generated = src.Class == "STT_GenerateFloat_C" && src.Path == "Value";
-        if (src.Kind != "Task" || src.Global || !(stored || generated) || src.Handle == null || !path.Contains(src.State)) return null;
+        bool ranged = src.Class == "STT_GenerateRandomFloatInRange_C" && src.Path == "Output";
+        if (src.Kind != "Task" || src.Global || !(stored || generated || ranged) || src.Handle == null || !path.Contains(src.State)) return null;
         foreach (var node in t.Nodes)
         {
             if (node == null || ClassOf(node, "TaskClass") != src.Class) continue;
@@ -442,6 +544,14 @@ public static partial class Reader
             if (node.TryGetValue(out bool enabled, "bTaskEnabled") && !enabled) return null;
             var task = InstanceOf(node, t.Defaults);
             if (task == null) return null;
+            if (ranged)
+            {
+                // the number is drawn once between Min and Max (when the task's state is entered), so it is said as a roll that always comes up: the chance 1 of a fresh number in [Min, Max]
+                var bound = BindingsOf(t, node);
+                double? least = InstanceNumber(task, null, "Min"), most = InstanceNumber(task, null, "Max");
+                if (bound.ContainsKey("Min") || bound.ContainsKey("Max") || least == null || most == null || !(least.Value <= most.Value) || src.Name.Length == 0) return null;
+                return "0,1," + Num(least.Value) + "," + Num(most.Value) + "," + Escape(src.Name);
+            }
             string name = stored ? NameOf(task, "Variable Name") : src.Name;
             var expression = task.Properties.FirstOrDefault(p => p.Name.Text == (stored ? "Value Expression" : "Value Expr"))?.Tag?.GenericValue is FScriptStruct ss ? ss.StructType as FStructFallback : null;
             if (name.Length == 0 || expression == null || !expression.TryGetValue(out string text, "Expression")) return null;

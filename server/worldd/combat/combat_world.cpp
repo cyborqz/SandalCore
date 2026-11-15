@@ -7,6 +7,7 @@
 #include "combat/combat_world.h"
 
 #include "bootstrap/constants.h"
+#include "combat/alert_move.h"
 #include "combat/combat_world_npc.h"
 #include "combat/knockback.h"
 #include "combat/npc_ability_replicator.h"
@@ -158,6 +159,7 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     const npc::MotionStats bp = motion_.get(a.npc.archetype);
     auto n = std::make_unique<Npc>(*this, a.id, bp, leaf, a.npc.level);
     n->tree_began = a.npc.spawned_at;   // its state tree began to run when the actor was put into the world (a respawn is a new actor)
+    start_with_effects(*n, a);          // the effects its Blueprint gives it from spawn, as the open it is made from lists them
     std::string err;
     n->cs = book_.make(bp, a.npc.level, err);
     if (!n->cs) {
@@ -209,6 +211,8 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     if (npcs_world_ && runs_at_stat_speed(a.npc.archetype)) npcs_world_->set_yaw_rate(a.id, bp.rotation_rate_yaw * kHumanoidTurnGain);
     n->archetype = a.npc.archetype;
     n->anim = anim_ ? anim_->abilities_of(a.npc.archetype) : nullptr;
+    build_effect_sources();
+    mark_held_effects(*n);
     // a creature whose tree has no attack it can play (a Blueprint with no open of its own, whose generic open lists none of the tree's abilities) keeps the single swing every creature had: the tree
     // would otherwise find nothing to use and the creature would stand and stare.  A tree that merely allows none right now (range, angle, cooldown, a roll) is not this: that creature waits.
     // (A tree whose every attack waits on the fight clock or on the creature's health keeps its animation, and the creature swings the single swing until one of them opens: see think.)
@@ -234,6 +238,116 @@ CombatWorld::Npc* CombatWorld::combatant(uint64_t actor_id) {
     const world::WorldActor* a = registry_.find(actor_id);
     if (!a || a->kind != world::ActorKind::Npc) return nullptr;
     return make_combatant(*a);
+}
+
+void CombatWorld::start_with_effects(Npc& n, const world::WorldActor& a) {
+    // what the open lists in its stats component's CurrentEffects: the effects retail carried on the creature from spawn (equipment and passives, a hidden shield marker), which
+    // the tree's "carries effect E" conditions ask about.  They do not end by themselves (0), and only their presence is kept.
+    for (const repl::Subobject& s : a.actor.subobjects) {
+        if (!s.obj.schema || std::string(s.obj.schema->name) != "UAoCStatsComponent") continue;
+        const repl::FastArrayState* effects = const_cast<repl::FastArrays&>(s.obj.arrays).get(*s.obj.schema, "CurrentEffects");
+        if (!effects) continue;
+        for (const repl::FastArrayItem& item : effects->items()) {
+            const auto value = item.values.values.find(2);   // CurrentEffects item: EffectGuid
+            const int64_t* guid = value == item.values.values.end() ? nullptr : value->second.get_if<int64_t>();
+            if (guid && *guid != 0) {
+                n.own_effects.insert_or_assign(*guid, 0.0);
+                n.starting_effects.insert(*guid);
+            }
+        }
+    }
+}
+
+void CombatWorld::build_effect_sources() {
+    if (effect_sources_ready_ || !anim_) return;
+    std::set<int64_t> npc_abilities;
+    for (const auto& [archetype, tasks] : anim_->by_kind()) {
+        for (const CreatureAbility& t : tasks) npc_abilities.insert(t.ability);
+    }
+    const auto collect = [&](const abilities::AbilityDef& d, bool hits_only, std::set<int64_t>& into) {
+        for (const content::AbilityHitRow& r : d.hits) {
+            const abilities::HitDef* hit = catalog_.hit(r.hit_guid);
+            if (!hit) continue;
+            for (const content::HitEffectRow& e : hit->effects) {
+                if (e.effect_guid != 0) into.insert(e.effect_guid);
+            }
+        }
+        if (!hits_only) {
+            for (const auto& [key, guid] : d.effects) {
+                (void)key;
+                if (guid != 0) into.insert(guid);
+            }
+        }
+    };
+    // a player's abilities: every ability no NPC tree uses (the creatures' own trees are the other source, asked per creature)
+    for (const auto& [guid, d] : catalog_.all_abilities()) {
+        if (npc_abilities.count(guid) != 0) continue;
+        collect(d, false, player_effect_sources_);
+    }
+    // the alerts of the creatures' trees: their hits' effects go on their own side (land_alert_hit), their own listed effects are not applied by the show
+    std::set<int64_t> seen;
+    for (const auto& [archetype, tasks] : anim_->by_kind()) {
+        for (const CreatureAbility& t : tasks) {
+            if (t.unknown || t.off || !t.fight || !seen.insert(t.ability).second) continue;
+            const abilities::AbilityDef* d = catalog_.ability(t.ability);
+            if (d && is_alert_move(*d, catalog_, data_.ids().health)) collect(*d, true, alert_effect_sources_);
+        }
+    }
+    effect_sources_ready_ = true;
+}
+
+void CombatWorld::mark_held_effects(Npc& n) {
+    if (!n.anim) return;
+    std::set<int64_t> reachable;
+    for (const auto& [guid, end] : n.own_effects) reachable.insert(guid);   // the Blueprint's from spawn
+    for (const CreatureAbility& t : *n.anim) {
+        if (t.unknown || t.off || !t.fight) continue;   // a source the tree never plays gives nothing
+        const abilities::AbilityDef* d = catalog_.ability(t.ability);
+        if (!d) continue;
+        for (const content::AbilityHitRow& r : d->hits) {
+            const abilities::HitDef* hit = catalog_.hit(r.hit_guid);
+            if (!hit) continue;
+            for (const content::HitEffectRow& e : hit->effects) reachable.insert(e.effect_guid);
+        }
+        for (const auto& [key, guid] : d->effects) {
+            (void)key;
+            reachable.insert(guid);
+        }
+    }
+    reachable.insert(alert_effect_sources_.begin(), alert_effect_sources_.end());
+    reachable.insert(player_effect_sources_.begin(), player_effect_sources_.end());
+    for (const CreatureAbility& t : *n.anim) {
+        for (const CondGroup& group : t.groups) {
+            for (const CondToken& token : group) {
+                const CondAtom::Kind kind = token.atom.kind;
+                if (kind != CondAtom::Kind::HasEffect && kind != CondAtom::Kind::NotHasEffect) continue;
+                if (token.atom.effect == 0 || reachable.count(token.atom.effect) != 0) continue;
+                if (!catalog_.effect(token.atom.effect)) continue;   // a marker the design data does not export: no state the tree can wait for, and no source can be missing
+                if (n.held_effects.insert(token.atom.effect).second) {
+                    spdlog::debug("[combat] {} ({}): its {}({}) condition stays unplayed: no source in the world can put that effect on it", n.leaf, n.actor_id,
+                                  kind == CondAtom::Kind::HasEffect ? "eff" : "neff", token.atom.effect);
+                }
+            }
+        }
+    }
+}
+
+bool CombatWorld::task_held(const Npc& n, const CreatureAbility& task) const {
+    if (n.held_effects.empty()) return false;
+    for (const CondGroup& group : task.groups) {
+        for (const CondToken& token : group) {
+            if (n.held_effects.count(token.atom.effect) != 0) return true;
+        }
+    }
+    return false;
+}
+
+bool CombatWorld::holds_effect(uint64_t actor_id, int64_t effect_guid, double now) const {    const auto it = npcs_.find(actor_id);   // (a pet is an NPC as well as a port: its own effects and its book are the ones that count)
+    if (it != npcs_.end()) return it->second->holds_effect(effect_guid, now);
+    for (const PlayerPort* p : players_) {
+        if (p->actor_id() == actor_id) return p->holds_effect(effect_guid);
+    }
+    return false;
 }
 
 Fighter* CombatWorld::fighter_of(uint64_t actor_id) { return combatant(actor_id); }
@@ -433,6 +547,8 @@ void CombatWorld::stop_cast(Npc& n) {
 
 void CombatWorld::drop_attack(Npc& n) {
     stop_cast(n);
+    n.chain.clear();
+    n.chain_from = nullptr;
     n.hold_until = 0;
     n.attack_walk_share = 1.0;
     pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const Pending& p) { return p.npc == n.actor_id; }), pending_.end());
@@ -461,11 +577,16 @@ bool CombatWorld::fill_stats(const world::WorldActor& a) {
     return true;
 }
 
-void CombatWorld::add_shield(uint64_t npc_actor, double amount, double seconds, double now) {
+void CombatWorld::add_shield(uint64_t npc_actor, double amount, double seconds, double now, int64_t effect_guid, bool by_creature) {
     Npc* n = combatant(npc_actor);
     if (!n || n->dead || !std::isfinite(amount) || amount <= 0) return;
     if (n->shields.size() >= 16) n->shields.erase(n->shields.begin());
-    n->shields.push_back({amount, seconds > 0 ? now + seconds : 0.0});
+    n->shields.push_back({amount, seconds > 0 ? now + seconds : 0.0, effect_guid, by_creature});
+}
+
+void CombatWorld::remove_effect_shields(Npc& n, int64_t effect_guid) {
+    if (effect_guid == 0 || n.book.stacks_of(effect_guid) > 0) return;
+    n.shields.erase(std::remove_if(n.shields.begin(), n.shields.end(), [effect_guid](const Npc::Shield& s) { return s.effect == effect_guid; }), n.shields.end());
 }
 
 double CombatWorld::shield_of(uint64_t npc_actor, double now) const {
@@ -491,18 +612,33 @@ namespace {
 // C_Y_B.C.O.A
 
 /// Whether an ability does harm to enemies: some hit of it is aimed at enemies and moves Health.
-bool is_attack(const abilities::AbilityDef& d, const abilities::Catalog& catalog, int64_t health_stat) {
-    for (const content::AbilityHitRow& h : d.hits) {
-        const abilities::HitDef* hit = catalog.hit(h.hit_guid);
-        if (!hit || (hit->row.applicable_targets & 2) == 0) continue;
-        for (const content::ModRow& m : hit->mods) {
-            if (m.stat_guid == health_stat && m.value_expr != 0 && catalog.program(m.value_expr) >= 0) return true;
+bool is_attack(const abilities::AbilityDef& d, const abilities::Catalog& catalog, int64_t health_stat) { return hurts_enemies(d, catalog, health_stat); }
+
+/// Whether an alert of a creature's tree starts the cooldown of an attack of the same tree (the cooldown that attack goes by, not a gate that every attack shares).  The tree plays such an alert as the
+/// first step of a sequence (a sneer, then the spinning attack it readies); when that attack is the alert's own chain step it is played next, and the pair is let through.  Any other alert of that
+/// kind is not played: played alone it would only keep that attack from ever being ready again.  The timers it starts are the ones its task lists and its own task's timer (a birdperson's Shift
+/// starts ShiftCooldown, the attack's own gate).
+bool readies_an_attack(const CreatureAbility& alert, const std::vector<CreatureAbility>& tree, const abilities::Catalog& catalog, int64_t health_stat) {
+    std::vector<std::string> starts;
+    for (const CooldownStart& started : alert.starts) starts.push_back(started.name);
+    if (!alert.task.empty() && alert.cooldown > 0) starts.push_back(alert.task);
+    for (const std::string& name : starts) {
+        for (const CreatureAbility& other : tree) {
+            if (other.unknown || other.off || !other.fight || other.ability == alert.ability) continue;
+            const abilities::AbilityDef* d = catalog.ability(other.ability);
+            if (!d || !is_attack(*d, catalog, health_stat)) continue;
+            if (!other.task.empty() && other.task == name) {
+                if (std::find(alert.next.begin(), alert.next.end(), other.ability) != alert.next.end()) continue;   // (its chain plays that attack next)
+                return true;   // (the attack's own cooldown: not a gate that every attack of the tree shares, such as "Attack")
+            }
         }
     }
     return false;
 }
 
 }  // namespace
+
+#include "combat/combat_sequence.inc"   // the move a creature's tree plays next after the one that just ended (choose_chain)
 
 namespace {
 
@@ -523,6 +659,9 @@ private:
 
 /// No hit lands sooner than this after its attack begins: the client has its animation by then, and the confirmation never overtakes it.
 constexpr double kMinHitDelay = 0.1;
+
+/// The shortest time between two alert cast lines of one creature: a creature that plays an alert again and again cannot flood the log, and every ordinary cast is still named.
+constexpr double kAlertCastLogSeconds = 1.0;
 
 /// A stun's or a trip's animation ends this long before its effect does [modelled]: the client works the end out for itself from the length of the creature's end montage, so the end it is sent is
 /// only a first value for that.
@@ -609,6 +748,12 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         return until == n.cooldown_until.end() || now_ >= until->second;
     };
     ctx.roll = [this]() { return rng_.rand_double(); };
+    // the effects the creature carries (its own, from its abilities and from spawn) and those its target carries: the tree's "carries effect E" conditions
+    ctx.has_effect = [this, &n](int64_t effect) { return n.holds_effect(effect, now_); };
+    if (target) {
+        const uint64_t who = target->id();
+        ctx.target_has_effect = [this, who](int64_t effect) { return holds_effect(who, effect, now_); };
+    }
     // a number the tree rolls once when a fight begins (its first special attack waits for it): rolled the first time it is asked, the same until the fight is over
     ctx.fight_roll = [&n, this](const CondAtom& a) {
         const auto known = n.fight_rolls.find(a.name);
@@ -621,17 +766,35 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
     // PR #10 review: for each attack the creature can play, whether the fight clock or its health alone keep it shut now (every other condition counted as holding: no roll is drawn for this)
     CondContext timers = ctx;
     timers.timers_only = true;
+    // the move the tree plays next after the one that just ended, before the tree is asked (a chain step that cannot play is dropped and the tree decides as usual)
+    if (target) {
+        Attack chained = choose_chain(n, ctx, distance, angle);
+        if (chained.ability) return chained;
+    }
     size_t playable = 0, shut_by_timers = 0;
     // the tree is tried in order and the first task whose conditions hold is used
     for (const CreatureAbility& t : *n.anim) {
         if (t.unknown || t.off || !t.fight) continue;
+        if (task_held(n, t)) continue;
         const abilities::AbilityDef* d = catalog_.ability(t.ability);
-        if (!d || !is_attack(*d, catalog_, data_.ids().health) || !animates(n, *d)) continue;
-        ++playable;
-        for (const CondGroup& g : t.groups) {
-            if (!eval_group(g, timers)) {
-                ++shut_by_timers;
-                break;
+        if (!d || !animates(n, *d)) continue;
+        // an attack, or an alert (a growl, a yawp, a rally: a move that hurts nobody, played as a show), or a state the creature enters (an empty hit and the ability's own effects on it: the
+        // Skeletons' Block); a move that is neither is not the creature's to use
+        const bool attack = is_attack(*d, catalog_, data_.ids().health);
+        const bool alert = is_alert_move(*d, catalog_, data_.ids().health);
+        const bool state = is_state_move(*d, catalog_, data_.ids().health);
+        if (!attack && (!target || (!alert && !state))) continue;   // (a creature that only stands ready is not made to stand ready with a show: its approach is the attack's reach)
+        if (!attack && readies_an_attack(t, *n.anim, catalog_, data_.ids().health)) continue;
+        // a state the tree only enters after another move (no timer of its own, gated on one another fight task starts) is not the move the creature stands ready with: it does not set
+        // the reach the creature waits at (the Bear's Pound, whose follow-up lunge reaches 24 m, after its Rear Up)
+        if (ctx.preview && t.follow_up) continue;
+        if (attack) {   // (an alert is no reason to wait: a creature whose attacks all wait on the clocks swings the single swing, whatever alerts it has)
+            ++playable;
+            for (const CondGroup& g : t.groups) {
+                if (!eval_group(g, timers)) {
+                    ++shut_by_timers;
+                    break;
+                }
             }
         }
         bool ready = true;
@@ -718,6 +881,7 @@ bool CombatWorld::can_animate(const Npc& n) const {
     if (!anim_ || !n.anim) return false;
     for (const CreatureAbility& t : *n.anim) {
         if (t.unknown || t.off || !t.fight) continue;
+        if (task_held(n, t)) continue;
         const abilities::AbilityDef* d = catalog_.ability(t.ability);
         if (d && is_attack(*d, catalog_, data_.ids().health) && animates(n, *d)) return true;
     }
@@ -886,7 +1050,7 @@ bool CombatWorld::plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& 
         }
         if (fire.projectile != 0 && catalog_.projectile(fire.projectile)) out.fires.push_back(std::move(fire));
     }
-    if (out.hits.empty() && out.fires.empty()) return false;
+    if (out.hits.empty() && out.fires.empty() && !is_alert_move(def, catalog_, data_.ids().health) && !is_state_move(def, catalog_, data_.ids().health)) return false;   // (an alert has no hit to land: the montage is the whole cast; a state carries the ability's own effects)
     out.montage = montage;
     out.seconds = montage->seconds(1.0);
     return true;
@@ -912,12 +1076,15 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         if (montage) {
             NpcCast cast;
             cast.ability = a.ability->row.guid;
-            cast.target = target;
-            cast.target_guid = port->cylinder_guid();   // (the client's targeting finds the player by his collision cylinder's NetGUID, in full)
             at = port->fighter().position();
-            cast.tx = at.x;
-            cast.ty = at.y;
-            cast.tz = at.z;
+            // an alert (a growl, a yawp, a rally) names no target: the recorded casts of such moves carry an empty list of targets and a transform at the origin; so does a state (the Block)
+            if (!is_alert_move(*a.ability, catalog_, data_.ids().health) && !is_state_move(*a.ability, catalog_, data_.ids().health)) {
+                cast.target = target;
+                cast.target_guid = port->cylinder_guid();   // (the client's targeting finds the player by his collision cylinder's NetGUID, in full)
+                cast.tx = at.x;
+                cast.ty = at.y;
+                cast.tz = at.z;
+            }
             cast.montage = plan.montage->guid;
             // The creature stops where it is for the attack (the chase it was in ends with the state of the attack) and keeps the facing it has: a task that stands for its montage and does not turn
             // the creature during it began facing its target within a few degrees (think waits for that), and a task that does turn it does so from here, at the creature's rate, below.
@@ -964,6 +1131,8 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         }
     }
     if (animated) {
+        // the state the ability itself puts on the creature begins with the cast (the Skeletons' Block and its shield)
+        if (is_state_move(*a.ability, catalog_, data_.ids().health)) land_ability_effects(n, *a.ability, now);
         // where the tables have the montage's animation-end notify (a bandit's), the creature's task is done there and the cooldowns it starts run from there; else they run from the cast's start
         const double done = plan.montage ? plan.montage->task_done_after(1.0) : 0.0;
         if (a.task && !a.task->task.empty() && a.task->cooldown > 0) n.cooldown_until[a.task->task] = now + done + a.task->cooldown;
@@ -1003,12 +1172,18 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
     p.npc = n.actor_id;
     p.target = target;
     p.ability = a.ability;
+    p.task = a.task;
     if (animated) {
         if (npc_casts_logged_ < kLoggedNpcCasts) {
             ++npc_casts_logged_;
             p.logged = true;
             spdlog::info("[combat] {} ({}) plays {}: {} hit(s) and {} projectile(s) over {:.2f} s{}", n.actor_id, n.leaf, a.ability->row.name, plan.hits.size(), plan.fires.size(), plan.seconds,
                          a.task && a.task->stop_movement ? ", standing still" : "");
+        }
+        // an alert's cast is named on its own, past the run's first cast lines, at most once a second for each creature: the lines of the effects it lands say where they went
+        if (is_alert_move(*a.ability, catalog_, data_.ids().health) && now - n.alert_cast_logged_at >= kAlertCastLogSeconds) {
+            n.alert_cast_logged_at = now;
+            spdlog::info("[combat] {} ({}) plays the alert {}: no target, any effects it has land at its montage's hits", n.actor_id, n.leaf, a.ability->row.name);
         }
         p.animated = true;
         for (const PlannedHit& h : plan.hits) {
@@ -1034,6 +1209,39 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
     }
     pending_.push_back(std::move(p));
     ++stats_.npc_attacks;
+}
+
+void CombatWorld::land_self_effects(Npc& n, const abilities::HitDef& hit, double now) {
+    if ((hit.row.applicable_targets & 1) == 0 || n.dead) return;
+    HitMeta meta;
+    meta.source_type = content::kSourceTypeAbility;
+    // what the hit applies to its target (the creature itself, when its own ability carries it) and what its self rows put on its caster: a creature carries both for its tree's checks
+    for (const bool self_rows : {false, true}) {
+        Resolved gate;
+        std::string why;
+        if (!resolver_.resolve_effects(n, n, hit, meta, gate, why, self_rows)) return;
+        for (const effects::Applied& a : gate.effects) {
+            if (n.dead || !a.def) return;
+            n.own_effects.insert_or_assign(a.def->row.guid, std::isinf(a.duration) ? 0.0 : now + a.duration);
+        }
+    }
+}
+
+void CombatWorld::land_ability_effects(Npc& n, const abilities::AbilityDef& ability, double now) {
+    if (n.dead || ability.effects.empty()) return;
+    Resolved gate;
+    std::string why;
+    if (!resolver_.resolve_ability_effects(n, ability, gate, why)) {
+        spdlog::debug("[combat] {} ({}): the effects of {}: {}", n.actor_id, n.leaf, ability.row.name, why);
+        return;
+    }
+    for (effects::Applied a : gate.effects) {
+        if (n.dead || !a.def) return;
+        a.by_creature = true;
+        const double shield = resolver_.effect_shield(n, n, *a.def);
+        if (shield > 0) add_shield(n.actor_id, shield, std::isinf(a.duration) ? 0.0 : a.duration, now, a.def->row.guid, true);
+        land_effect(n, a, n.actor_id, now);
+    }
 }
 
 void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t guid, double now, int64_t projectile) {
@@ -1078,6 +1286,26 @@ void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::Ability
     r.miss() ? ++stats_.npc_misses : ++stats_.npc_hits;
     port.receive_hit(in, now);
     player_exchange(port.actor_id(), now);
+    // the creature's own hit raises what its effects react to (the Blood Fury drains health from a bleeding target): the hit's numbers and its target are what the triggers read
+    if (!n.book.empty()) {
+        HitOrigin origin;
+        origin.landed_here = true;
+        origin.hit = hit;
+        origin.source_type = meta.source_type;
+        origin.source_guid = meta.source_guid;
+        origin.ability_tags = meta.ability_tags;
+        HolderEvent ev;
+        ev.attacker = port.actor_id();
+        ev.target = port.actor_id();
+        ev.origin = &origin;
+        ev.flags = r.flags;
+        for (size_t i = 0; i < r.mods.size(); ++i) {
+            ev.mods[r.mods[i].stat_guid] += r.mods[i].value;
+            ev.effective[r.mods[i].stat_guid] += r.mods[i].value;
+        }
+        for (const effects::Instance& e : n.book.instances()) ev.held.emplace_back(e.def, e.instigator);
+        holder_reacts(n.actor_id, ev, now, 4);
+    }
 }
 
 void CombatWorld::resolve_pending(double now) {
@@ -1115,6 +1343,8 @@ void CombatWorld::resolve_pending(double now) {
                 const size_t at_hit = p.next_hit++;
                 const int64_t guid = p.timed_hits[at_hit].second;
                 const BiteArea& area = p.timed_areas[at_hit];
+                // the hit's own effects on the creature itself (a rage, a tracker): its tree's "carries effect E" checks read them
+                if (const abilities::HitDef* hit = catalog_.hit(guid); hit && (hit->row.applicable_targets & 1) != 0) land_self_effects(n, *hit, now);
                 // a hit lands by its targeting record when its notify falls due (where the creature is by then, facing as it faces): on the player the record's target part finds, wherever he stands
                 // unless the record measures, and on every player inside one of its volumes; a hit that reaches nobody sends nothing
                 const uint64_t aimed = area.has_target_part() ? aimed_at(n, area, p.target) : 0;
@@ -1123,6 +1353,8 @@ void CombatWorld::resolve_pending(double now) {
                     if (!q->fighter().alive() || !hit_reaches(n, q->fighter(), area, aimed != 0 && q->actor_id() == aimed)) continue;
                     deliver_hit(n, *q, *p.ability, guid, now);
                 }
+                // an alert's hit reaches only its own side: the caster and its allies, by the same targeting record, and puts its effects on them
+                if (is_alert_move(*p.ability, catalog_, data_.ids().health)) land_alert_hit(n, *p.ability, area, guid, now, p.alert_logged);
             }
             while (p.next_fire < p.timed_fires.size() && p.timed_fires[p.next_fire].first <= now && !stunned()) {
                 const PlannedFire fire = p.timed_fires[p.next_fire++].second;
@@ -1137,6 +1369,11 @@ void CombatWorld::resolve_pending(double now) {
                         spdlog::info("[combat] {} ({}) {} is over: {:.0f} cm between its centre and the player's, the player {:.0f} deg off its facing", n.actor_id, n.leaf, p.ability->row.name,
                                      std::hypot(at.x - w->x, at.y - w->y), angle_between_degrees(std::atan2(at.y - w->y, at.x - w->x) * 180.0 / 3.14159265358979323846, w->yaw_degrees));
                     }
+                }
+                // the cast played to its end: the tree's next move follows, and the cooldown that links the pair is open for it (a death, a reset or a stun drops the chain with the cast)
+                if (p.task && !p.task->next.empty()) {
+                    n.chain = p.task->next;
+                    n.chain_from = p.task;
                 }
                 stop_cast(n);
                 continue;
@@ -1160,7 +1397,10 @@ void CombatWorld::resolve_pending(double now) {
         const double reach = static_cast<double>(n.next.range_cm) * 1.5 + 300.0;
         const double d = distance_xy_cm(n.position(), port->fighter().position()) - n.radius_cm() - port->fighter().radius_cm();
         if (d > std::max(reach, 600.0)) continue;
-        for (const int64_t guid : p.hits) deliver_hit(n, *port, *p.ability, guid, now);
+        for (const int64_t guid : p.hits) {
+            if (const abilities::HitDef* hit = catalog_.hit(guid); hit && (hit->row.applicable_targets & 1) != 0) land_self_effects(n, *hit, now);
+            deliver_hit(n, *port, *p.ability, guid, now);
+        }
     }
     for (Pending& p : keep) pending_.push_back(std::move(p));
 }
@@ -1454,6 +1694,22 @@ bootstrap::EffectItem item_of(const effects::Instance& e) {
     return item;
 }
 
+/// The CharacterGuid words of an actor's UNPCInfo (the FGuid a creature is known by: the player path writes the player's own in the effect item's Instigator and Source).
+std::array<uint32_t, 4> actor_character_guid(const world::WorldActor& a) {
+    std::array<uint32_t, 4> words = {0, 0, 0, 0};
+    for (const repl::Subobject& s : a.actor.subobjects) {
+        if (!s.obj.schema || std::string(s.obj.schema->name) != "UNPCInfo") continue;
+        const char* names[4] = {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D"};
+        for (int i = 0; i < 4; ++i) {
+            const repl::Value* v = s.obj.state.get(*s.obj.schema, names[i]);
+            const int64_t* n = v ? v->get_if<int64_t>() : nullptr;
+            if (n) words[static_cast<size_t>(i)] = static_cast<uint32_t>(static_cast<int32_t>(*n));
+        }
+        break;
+    }
+    return words;
+}
+
 }  // namespace
 
 void CombatWorld::send_effects(Npc& n, const effects::Book::Changes& changes) {
@@ -1464,6 +1720,7 @@ void CombatWorld::send_effects(Npc& n, const effects::Book::Changes& changes) {
         EffectItemWrite w;
         w.item = item_of(e);
         if (const PlayerPort* p = player(e.instigator)) w.applier = p->character_guid();
+        else if (const world::WorldActor* who = registry_.find(e.instigator)) w.applier = actor_character_guid(*who);
         return w;
     };
     std::vector<EffectItemWrite> added, changed;
@@ -1536,6 +1793,7 @@ void CombatWorld::clear_effects(Npc& n) {
     effects::Book::Changes changes;
     n.book.clear(changes);
     send_effects(n, changes);
+    n.own_effects.clear();
     effect_holders_.erase(n.actor_id);
 }
 
@@ -1671,9 +1929,10 @@ void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instig
     effects::Instance created;
     const bool made = n.book.apply(a, instigator, now, changes, &created, via_pet);
     send_effects(n, changes);
+    if (a.by_creature && !changes.empty()) refresh_creature_stats(n);
     if (!changes.empty() && a.def->row.category.find("Hidden") == std::string::npos) {   // (the hidden one-second effects are not named)
-        spdlog::log(effects_logged_++ < kLoggedEffects ? spdlog::level::info : spdlog::level::debug, "[effects] {} ({}) takes {}: {} stack(s), {:.1f} s left, from player {}", n.leaf, n.actor_id,
-                    a.def->row.name, n.book.stacks_of(a.def->row.guid), n.book.remaining(a.def->row.guid, now), instigator);
+        spdlog::log(effects_logged_++ < kLoggedEffects ? spdlog::level::info : spdlog::level::debug, "[effects] {} ({}) takes {}: {} stack(s), {:.1f} s left, from {} {}", n.leaf, n.actor_id,
+                    a.def->row.name, n.book.stacks_of(a.def->row.guid), n.book.remaining(a.def->row.guid, now), a.by_creature ? "creature" : "player", instigator);
     }
     if (made && effect_depth_ < kMaxEffectDepth) {   // its Apply hits run now that it is on
         ++effect_depth_;
@@ -1706,8 +1965,27 @@ size_t CombatWorld::effect_count(uint64_t npc_actor) const {
     return it == npcs_.end() ? 0 : it->second->book.size();
 }
 
+size_t CombatWorld::npc_chain_size(uint64_t npc_actor) const {
+    const auto it = npcs_.find(npc_actor);
+    return it == npcs_.end() ? 0 : it->second->chain.size();
+}
+
+double CombatWorld::npc_chase_speed(uint64_t npc_actor) const {
+    const auto it = npcs_.find(npc_actor);
+    return it == npcs_.end() ? 0.0 : it->second->ai.params().chase_speed_cm_s;
+}
+
+void CombatWorld::seed_own_effect(uint64_t npc_actor, int64_t effect_guid) {
+    Npc* n = combatant(npc_actor);
+    if (!n || effect_guid == 0) return;
+    n->own_effects.insert_or_assign(effect_guid, 0.0);
+    n->starting_effects.insert(effect_guid);
+    n->held_effects.erase(effect_guid);   // (a test's fixture may give an effect the tree marks as held: the fixture is the source)
+}
+
 void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char* const* phases, size_t count, double at) {
     if (!e.def || n.dead) return;
+    if (e.by_creature) return;   // a creature's own effect has no player to run its Apply, Tick and Expire hits from: it ends by its own time (and with the holder's death or reset)
     PlayerPort* port = player(e.instigator);
     if (!port || !port->fighter().alive()) {   // the player who applied it left or died: what he put on the creatures ends
         drop_effects_of(e.instigator);
@@ -1813,6 +2091,8 @@ void CombatWorld::advance_effects(double now) {
                 effects::Book::Changes changes;
                 if (!n.book.end_of(due.key, gone, changes)) break;
                 send_effects(n, changes);
+                if (gone.def) remove_effect_shields(n, gone.def->row.guid);
+                if (gone.by_creature) refresh_creature_stats(n);
                 run_effect_hits(n, gone, kExpirePhases, 2, due.at);
             } else {
                 effects::Instance ticking;
@@ -1885,12 +2165,22 @@ void CombatWorld::begin_reset(Npc& n, double now) {
     ++stats_.resets;
     n.returning = true;
     n.attackers.clear();
+    // the buffs an ally gave it end with the fight it was in; a player's effects stay (a burn follows the creature home)
+    effects::Book::Changes changes;
+    if (n.book.remove_by_creature(changes) > 0) {
+        send_effects(n, changes);
+        refresh_creature_stats(n);
+    }
+    // a shield a creature's own effect added goes with that effect (an infinite TempHealth effect's would stay otherwise)
+    n.shields.erase(std::remove_if(n.shields.begin(), n.shields.end(), [](const Npc::Shield& s) { return s.by_creature; }), n.shields.end());
     // it heals to full as it walks home
     if (const stats::StatValue* max = n.cs->find(data_.ids().max_health)) {
         n.cs->set_current(content::kGuidHealth, max->value);
         write_stat(registry_, n.actor_id, content::kGuidHealth, max->value);
     }
     drop_attack(n);   // ... and with a fight that is reset
+    // its own effects are of the fight: a reset takes them off, except the ones its Blueprint gave it from spawn (the records are infinite and persist through death)
+    for (auto it = n.own_effects.begin(); it != n.own_effects.end();) it = n.starting_effects.count(it->first) == 0 ? n.own_effects.erase(it) : std::next(it);
     set_flags(n, false, 0);
     if (npcs_world_) npcs_world_->order_return_home(n.actor_id);
 }
@@ -1916,6 +2206,7 @@ bool CombatWorld::faces(const Npc& n, const Vec3& at, double tolerance_degrees) 
 
 void CombatWorld::think(Npc& n, double now) {
     if (n.dead) return;
+    n.expire_own_effects(now);   // (an effect of its own that has run out is gone: its tree's checks stop finding it)
     const world::WorldActor* a = registry_.find(n.actor_id);
     if (!a) return;
     npc::ai::Sense s;
@@ -2130,5 +2421,6 @@ void CombatWorld::tick(double now) {
 
 #include "combat/combat_knockback.inc"   // what throws, pushes and pulls a creature (move_by_hit, track_push, push_wire, origin_actors)
 #include "combat/combat_resist.inc"      // a crowd control the data's UniversalResistChance throws off (takes_resist_roll, effect_resisted)
+#include "combat/alert_effects.inc"      // where an alert's hits land and the effects they put on the caster and its allies
 
 }  // namespace aoc::worldd::combat

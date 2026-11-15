@@ -254,10 +254,10 @@ void fill_context(HitContext& ctx, const CombatData& data, const abilities::HitD
 
 }  // namespace
 
-bool HitResolver::resolve_effects(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why) {
+bool HitResolver::resolve_effects(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why, bool self_rows) {
     // a hit with no effect row for its target has nothing to work out (resolve_effects_with says the same): no stat run is built for it. The tick of a damage-over-time debuff is
     // such a hit, and it comes every second for every debuff on every mob.
-    if (std::none_of(hit.effects.begin(), hit.effects.end(), [](const content::HitEffectRow& row) { return row.kind != "self"; })) return true;
+    if (std::none_of(hit.effects.begin(), hit.effects.end(), [self_rows](const content::HitEffectRow& row) { return (row.kind == "self") == self_rows; })) return true;
     std::string err;
     auto a = attacker.stats().evaluation(attacker.worn(), err, true);
     if (!a) {
@@ -272,13 +272,13 @@ bool HitResolver::resolve_effects(Fighter& attacker, Fighter& target, const abil
     ResolverHost host(rng_);
     const double dist = distance_cm(attacker.position(), target.position());
     const Relation rel = data_.relation(attacker.alignments(), target.alignments());
-    return resolve_effects_with(*a, host, t.get(), dist, rel == Relation::Hostile, rel == Relation::Neutral, hit, meta, out, why);
+    return resolve_effects_with(*a, host, t.get(), dist, rel == Relation::Hostile, rel == Relation::Neutral, hit, meta, out, why, self_rows);
 }
 
 bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attacker, ContextHost& host, const stats::CharacterStats::Evaluation* target, double distance_cm,
-                                       bool enemy, bool neutral, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why) {
+                                       bool enemy, bool neutral, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why, bool self_rows) {
     bool any = false;
-    for (const content::HitEffectRow& row : hit.effects) any = any || row.kind != "self";
+    for (const content::HitEffectRow& row : hit.effects) any = any || ((row.kind == "self") == self_rows);
     if (!any) return true;
     const EvalView attacker_view(attacker);
     const EvalView target_view(target ? *target : attacker);
@@ -331,7 +331,7 @@ bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attack
         return number(expr, v);
     };
     for (const content::HitEffectRow& row : hit.effects) {
-        if (row.kind == "self") continue;
+        if ((row.kind == "self") != self_rows) continue;
         const abilities::EffectDef* def = catalog_.effect(row.effect_guid);
         if (!def) continue;
         effect_tags = def->row.tags;
@@ -388,6 +388,55 @@ bool HitResolver::resolve_effects_with(stats::CharacterStats::Evaluation& attack
             if (run(m.value_expr, v)) a.mods.push_back({m.stat_guid, v});
         }
         out.effects.push_back(std::move(a));
+    }
+    return true;
+}
+
+bool HitResolver::resolve_ability_effects(Fighter& caster, const abilities::AbilityDef& ability, Resolved& out, std::string& why) {
+    if (ability.effects.empty()) return true;
+    std::string err;
+    auto a = caster.stats().evaluation(caster.worn(), err, true);
+    if (!a) {
+        why = "the caster's stats do not run: " + err;
+        return false;
+    }
+    ResolverHost host(rng_);
+    const EvalView caster_view(*a);
+    HitContext ctx;
+    ctx.profile = &data_.profile();
+    ctx.instigator = &caster_view;
+    host.set_context(&ctx);
+    struct Forget {   // whatever way this returns, the host forgets the context
+        ContextHost& h;
+        ~Forget() { h.set_context(nullptr); }
+    } forget{host};
+    const auto number = [&](int64_t expr, double& v) {
+        const content::ExprRow* e = catalog_.expr(expr);
+        std::string ewhy;
+        return e && e->program >= 0 && a->eval(e->program, host, v, ewhy) && std::isfinite(v);
+    };
+    for (const auto& [key, guid] : ability.effects) {
+        (void)key;
+        const abilities::EffectDef* def = catalog_.effect(guid);
+        if (!def) continue;
+        if (def->row.requirement_expr != 0) {
+            double v = 0;
+            if (!number(def->row.requirement_expr, v) || v == 0) continue;
+        }
+        effects::Applied applied;
+        applied.def = def;
+        applied.stacks = 1;
+        if (!def->row.infinite_duration && def->row.duration_expr != 0) {
+            double v = 0;
+            if (number(def->row.duration_expr, v)) applied.duration = std::max(0.0, v);
+        }
+        applied.in_place_limit = std::max(1, def->row.global_stack_limit);
+        for (const content::ModRow& m : def->mods) {
+            if (m.shield_absorb || m.value_expr == 0 || m.stat_guid == content::kGuidTempHealth) continue;
+            double v = 0;
+            if (number(m.value_expr, v)) applied.mods.push_back({m.stat_guid, v});
+        }
+        out.effects.push_back(std::move(applied));
     }
     return true;
 }

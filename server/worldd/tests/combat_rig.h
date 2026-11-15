@@ -11,6 +11,7 @@
 #pragma once
 
 #include "ability_rig.h"
+#include "combat/alert_move.h"
 #include "combat/combat_world.h"
 #include "combat/knockback.h"
 #include "combat/npc_replicator.h"
@@ -18,6 +19,7 @@
 #include "npc/area_npcs.h"
 #include "spawns/captured_spawns.h"
 
+#include <array>
 #include <memory>
 #include <spdlog/sinks/ostream_sink.h>   // (the tests of the crowd control read the log lines the world writes)
 #include <spdlog/spdlog.h>
@@ -115,6 +117,10 @@ public:
     void hit_from_pet(int64_t hit_guid, int64_t, double) override { from_pet.push_back(hit_guid); }
     /// A crowd control of this player's or his pet's was resisted or was immune on a creature: the session's line.
     void effect_refused(const combat::EffectRefusal& refusal, double) override { refusals.push_back(refusal); }
+    /// The player carries an effect record: what his session's effect state says (the pipeline the rig plays his abilities through).
+    bool holds_effect(int64_t effect_guid) const override { return rig_.pipe && rig_.pipe->stacks_of(effect_guid) > 0; }
+    /// The rig this player belongs to: a test's hand on his effect state and his pipeline (a bleed put on him, a spell cast).
+    ability_rig::Rig& rig() { return rig_; }
     std::vector<combat::DealtHit>            dealt;
     std::vector<int64_t>                     from_pet;
     std::vector<combat::EffectRefusal>       refusals;
@@ -243,6 +249,22 @@ inline uint64_t active_target(const world::WorldActor& a) {
         return g ? g->ObjectId : 0;
     }
     return 0;
+}
+
+/// The CharacterGuid words of an NPC's UNPCInfo (the FGuid its effect items name as their instigator and source).
+inline std::array<uint32_t, 4> character_guid_words(const world::WorldActor& a) {
+    std::array<uint32_t, 4> words = {0, 0, 0, 0};
+    for (const repl::Subobject& s : a.actor.subobjects) {
+        if (!s.obj.schema || std::string(s.obj.schema->name) != "UNPCInfo") continue;
+        const char* names[4] = {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D"};
+        for (int i = 0; i < 4; ++i) {
+            const repl::Value* v = s.obj.state.get(*s.obj.schema, names[i]);
+            const int64_t* n = v ? v->get_if<int64_t>() : nullptr;
+            if (n) words[static_cast<size_t>(i)] = static_cast<uint32_t>(static_cast<int32_t>(*n));
+        }
+        break;
+    }
+    return words;
 }
 
 }  // namespace combat_rig

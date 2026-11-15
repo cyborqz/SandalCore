@@ -49,7 +49,7 @@ void test_bandit_raider_fights_a_standing_player(Fixture& f) {
         combat::CombatWorld::Stats stats;
         CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 800, nullptr, samples, &hits, false, -1, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 8 m away runs", kSeconds);
         if (samples.empty()) return;
-        check_targets_named_in_full(samples, name.c_str());
+        check_targets_named_in_full(samples, name.c_str(), alert_abilities(f));
 
         // the casts as the client sees them: the start of each montage element, its ability and its montage
         struct Cast {
@@ -243,7 +243,7 @@ void test_arsonist_fires_at_a_standing_player(Fixture& f) {
         combat::CombatWorld::Stats stats;
         CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 2000, nullptr, samples, &hits, false, 0.5, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 20 m away runs", kSeconds);
         if (samples.empty()) return;
-        check_targets_named_in_full(samples, name.c_str());
+        check_targets_named_in_full(samples, name.c_str(), alert_abilities(f));
         const std::vector<ShotCast> casts = shot_casts(f, samples);
         std::map<std::string, std::vector<double>> by_name;
         for (const ShotCast& c : casts) by_name[c.name].push_back(c.t);
