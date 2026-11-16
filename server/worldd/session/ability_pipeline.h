@@ -180,6 +180,16 @@ struct BranchedCast {
     int64_t     charged_branch = 0;
     double      charged_answer = 0;
     double      charged_cost = 0;
+    /// A held ability's full charge in the wall seconds the data gives (the Resplendent Beam's MaximumHoldTime of 3.0 s): the fill a branch request and
+    /// a release read (0: the recorded bar `full`, or the old rule).
+    double      charge_seconds = 0;
+    /// A held ability whose full charge is the montage reaching a section (the Deliverance's data has no MaximumHoldTime): that section's seconds into
+    /// the montage, 2.9629629 for the Deliverance (0: none).  A release's CancelledTime is in these montage seconds, and a request for the section's
+    /// branch has played this many at the caster's play rate, so the fill is the montage played over it, whatever the rate.
+    double      release_fill_seconds = 0;
+    /// A branch that ends the bar where it stands: the client's CancelIfFalling (the Disengage's backflip) moves no montage, and the montage's
+    /// clear follows the request by `end` (with no request the timing table's clear stands).
+    bool        no_jump = false;
 };
 
 /// An ability whose cast shoots again and again until its charges or its mana are gone, and then ends with a branch of its montage that the SERVER decides (the Ranger's Salvo: "fire all
@@ -937,6 +947,16 @@ void   step_multi_hit(Cast& cast, double t);
     /// A hit that names itself in its RecursiveHit (Chain Lightning): the same hit is applied to the nearest enemy within the recursive targeting's sphere of the one just hit,
     /// again from each enemy it reaches, up to the rule's number of enemies in all; none of them twice (ability_pipeline_chain.inc has the table and the evidence).
     void   chain_from(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& first, double t, const HitSource& src, const abilities::AbilityDef* ability);
+    /// The Resplendent Beam's own hit bounces from the target it landed on to the allies within 1,250 cm of it (the injured first, the nearest first, one
+    /// hit each, up to the data's maximum: progress x 4 + 1), each confirmed with the target just hit as its Source, all in the caller's event.
+    /// Another player's pawn takes his hit through his own session's ally path; the caster's own through this runtime.
+    void   beam_bounces(bootstrap::AbilityChange& c, const CastRecord& rec, const abilities::HitDef& hit, uint64_t first, double t, const HitSource& src,
+                        const abilities::AbilityDef* ability);
+    /// How many times this cast has fired the hit before (GetHitTriggerCount for its heal formula).
+    double hit_trigger_count(int64_t record) const;
+    /// The Redemptive passive's factor over the Deliverance's BaseValue for a heal at the caster himself, where the stat engine reads the term's 5.0 (1.0 for every other hit, and without
+    /// the passive); a heal at another actor runs the data's own formula, which already reads the passive.
+    double deliverance_passive_scale(const abilities::HitDef& hit, double health, double max_health) const;
     /// An ordinary cast that sends several projectiles at its target (kNoteCasts): each is a Fly step at the montage's notify of its own, and none of the cast's hits lands before its projectile gets there.
     void   plan_notes(Cast& cast, double t);
     /// A Fly step: the projectile leaves now; its landing is the target's distance (from the caster, or from the enemy a bounce left) over its speed away, never before the cast's cost step.
@@ -1057,6 +1077,7 @@ void   step_multi_hit(Cast& cast, double t);
     static constexpr size_t kMaxDelayed = 64;
     void   land_delayed(const DelayedChild& child, double t);
     bool   chaining_ = false;   // a chain's own jumps apply their hit without starting another chain (chain_from)
+    int    resplendent_hits_ = 0;   // the Resplendent Beam's hits this cast has fired (GetHitTriggerCount: the heal's formula counts them)
     const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
     /// `mods_override`: the one stack's mod values are the caller's (a hit of another player, worked out for the two actors), not the record's formulas run here.
@@ -1124,9 +1145,10 @@ void   step_multi_hit(Cast& cast, double t);
     // hit requests and slots
     CastRecord*  record_of(int32_t client_id);
     void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting);
-    /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target.
+    /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target;
+    /// `first_landed` (when given) is the first actor the hit took effect on (0: none), for a hit that goes on from the one it landed on.
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                const abilities::AbilityDef* ability, bool* landed = nullptr);
+                                const abilities::AbilityDef* ability, bool* landed = nullptr, uint64_t* first_landed = nullptr);
     // reactions (session/ability_reactions.cpp)
     /// An expression of the reaction tables run for the event: the hit's tags and flags, the stat mods it resolved, the ability whose cost was paid.
     bool   eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why);

@@ -339,6 +339,9 @@ public:
     /// The joined players' pawns that are no pet, with their Health and whether they are of `self`'s party (the caster included: self), for the
     /// targeting of an ally hit (a Bard's Saga).
     std::vector<AllyInfo> player_allies(uint64_t self) const;
+    /// Every living player within `radius_cm` of `centre` whose side is not hostile to the player `from` (a hit that jumps from one ally to the next
+    /// looks for the injured ones among them, the nearest first).  The players' list is read, never the registry, where a player's pawn stands too.
+    std::vector<AllyInfo> players_around(uint64_t from, const Vec3& centre, double radius_cm) const;
 
     // ---- NPCs
     /// The NPC's fighter (its combatant made when it is not yet); null for an actor that is no NPC of a kind that has stats.

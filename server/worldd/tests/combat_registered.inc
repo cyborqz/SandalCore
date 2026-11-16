@@ -44,3 +44,5 @@
 #include "combat_fixes_review_tests.inc"
 #include "combat_bard_saga_tests.inc"
 #include "combat_bard_saga_review_tests.inc"
+#include "combat_deliverance_beam_bars_tests.inc"
+#include "combat_deliverance_review_tests.inc"

@@ -125,8 +125,13 @@ const SwingGap* swing_gap_of(const std::string& ability) {
 //    before the bar is full (ServerNotifyHeldAbilityCancelled, the call's CancelledTime = how long the key was held) ends the bar at the fill reached, and the cast goes on from there as from a request: the
 //    montage jumps, the cost is paid, and the damage follows the fill (the Lightning Strike's formula: Lerp(100%, 300%, GetAbilityProgressRatio())). The client sends no request for such a release [R: the owner's
 //    run: nine Lightning Strikes, seven released early, five requests in all, all from full bars; eight releases, seven ends] and the recorded releases of the Deliverance, the third held ability, jumped the
-//    montage 61 ms after the release. Not here: the Air Strike and the Barrage (kTimedCasts), the Disengage (its recordings show no jump) and the Deliverance (a held cast: its release fires it).
+//    montage 61 ms after the release. The Deliverance's own row is its full charge: the client's branch request at the recorded 3.534 s (its jump to 2.9629629 s at the montage's rate) or its held
+//    key's release, whose CancelledTime is montage seconds, so its fill is that time over 2.9629629 s [R: the fourteen recorded casts: the item 71 ms, the jump 48 to 111 ms after the release, the heal 203 to
+//    311 ms after it and the montage cleared 1.291 to 1.356 s after it]. The Disengage's bar ends on the client's CancelIfFalling branch request, which moves no montage: it clears the montage 0.37 s after the
+//    request (the recorded 85 to 551 ms) and, with no request, at the timing table's 1,345 ms [R: the ten recorded casts]. Also not here: the Air Strike and the Barrage (kTimedCasts).
 constexpr double kHoldStart = 0.2;   // a HELD ability's key is held from this long after the trigger [R: the Deliverance's recorded releases: CancelledTime was 0.2 to 0.3 s less than the release came after the trigger]
+// A held release's CancelledTime runs a few ms past the montage time the bar has played (0.4 % in the recorded releases): the cut allows this much.
+constexpr double kFillSlack = 0.05;
 constexpr BranchedCast kBranchedCasts[] = {
     {"Mage_ArcaneVolley", 6064628901575655424ll, 2.0003722f, 0.099, 3.25, 0.082, 0.069, 1.170},
     {"Ranger_ScatterShot", 6064630600000733338ll, 1.1363468f, 0.087, 0.100, 0.120, 0.036, 1.275, -1, false, false, 0.0, 6064630644737576924ll, 3.0, 0.100, 6064629886734172383ll, 0.082, 0.0},
@@ -134,10 +139,11 @@ constexpr BranchedCast kBranchedCasts[] = {
     {"Cleric_ChainsOfRestraint", 109341746222712ll, 1.6668f, 0.067, 5.20, 0.069, 0.100, 1.285},   // n=3, request 2066 ms (1569..2067)
     {"Cleric_CommunalRestoration", 109382755440251ll, 1.8588f, 0.258, 4.45, 0.232, 0.036, 1.062},   // n=3, request 1766 ms (1757..2281)
     {"Cleric_Condemn", 6064629326169899648ll, 1.4024f, 0.087, 4.30, 0.107, 0.101, 0.903},   // n=3, request 1710 ms (907..1716)
+    {"Cleric_Deliverance", 6064629301877604633ll, 2.9629629f, 0.071, 5.30, 0.066, 0.070, 1.170, -1, false, true, 3.534, 0, 0, 0, 0, 0, 0, 0, 2.9629629, false},   // n=14, full charge 3534 ms (3526..3541) at the recorded play rate; the release's montage time is 2.9629629 s; the deadline is 1.5 times the recorded full charge (a client that plays slower than the recorded one is not cut short); no cost step in the recordings: modelled
     {"Cleric_Judgment", 109313609651832ll, 2.9978f, 0.065, 9.15, 0.094, 0.068, 1.237, 0, false},   // n=10, request 3648 ms (3644..3657); no end in the recordings: the other montage's
     {"Cleric_Judgment", 109315044890234ll, 2.9981f, 0.070, 8.85, 0.089, 0.034, 1.237, 1, false},   // n=3, request 3540 ms (2054..3648)
     {"Cleric_Purify", 6064630996510049918ll, 0.9975f, 0.302, 2.40, 0.315, 0.070, 0.965},   // n=4, request 951 ms (945..1174); no cost step in the recordings: modelled
-    {"Cleric_ResplendentBeam", 6064629659855553923ll, 1.3333f, 0.071, 3.15, 0.066, 0.168, 1.171, -1, false, true, 1.241},   // n=1, request 1241 ms (1241..1241)
+    {"Cleric_ResplendentBeam", 6064629659855553923ll, 1.3333f, 0.071, 3.15, 0.066, 0.168, 1.171, -1, false, true, 1.241, 0, 0, 0, 0, 0, 0, 3.0, 0.0, false},   // n=1, request 1241 ms (1241..1241); the 3 s hold its data gives
     {"Cleric_Smite", 6064630407207993048ll, 0.8672f, 0.072, 2.75, 0.096, 0.000, 1.236, 0, true},   // n=36, request 1097 ms (808..1128)
     {"Mage_ArcaneCircle", 6064629093978406920ll, 1.7333f, 0.075, 2.10, 0.099, 0.000, 0.768, -1, true},   // n=2, request 826 ms (825..827)
     {"Mage_BallLightning", 6064629048751489028ll, 2.0000f, 0.090, 3.20, 0.061, 0.035, 1.709},   // n=1, request 1262 ms (1262..1262)
@@ -147,6 +153,7 @@ constexpr BranchedCast kBranchedCasts[] = {
     {"Mage_LightningStrike", 6064628894971461633ll, 3.0000f, 0.089, 6.05, 0.080, 0.102, 2.147, -1, false, true, 2.416},   // n=1, request 2416 ms (2416..2416)
     {"Mage_MagmaField", 6064629060044980230ll, 2.9327f, 0.076, 3.20, 0.065, 0.036, 1.404},   // n=1, request 1277 ms (1277..1277)
     {"Mage_Slumber", 6064629064360525827ll, 2.7670f, 0.096, 5.40, 0.074, 0.333, 2.175},   // n=1, request 2159 ms (2159..2159)
+    {"Ranger_Disengage", 6064630690278670336ll, 0.0000f, 0.093, 2.55, 0.000, 0.000, 0.370, -1, false, true, 0.0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, true},   // n=10, request 920..1053 ms, clear 85..551 ms after it; no montage jump
     {"Summoner_ExtractVessel", 6064633645892571971ll, 2.0000f, 0.051, 4.00, 0.059, 0.070, 1.302},   // n=1, request 1592 ms (1592..1592); no cost step in the recordings: modelled
     {"Summoner_MassAffliction", 6064633572821731033ll, 2.9998f, 0.074, 5.35, 0.068, 0.101, 2.319},   // n=4, request 2136 ms (2125..2137)
     {"Summoner_MortalBlast", 6064633391727706791ll, 2.0000f, 0.064, 4.00, 0.058, 0.199, 1.268},   // n=6, request 1589 ms (1478..1594)
@@ -804,6 +811,7 @@ protected:
             case stats::kHostMovementKey: return p_.moving_ ? 1.0 : 0.0;
             case stats::kHostStatDelta: return p_.stat_delta_over_time(std::strtoll(name.c_str(), nullptr, 10), args[0]);
             case stats::kHostNow: return p_.clock_;
+            case stats::kHostHitTriggerCount: return p_.hit_trigger_count(std::strtoll(name.c_str(), nullptr, 10));
             case stats::kHostProgressDuration: return name == "DefaultGroup" ? kCastSeconds : 0.0;
             case stats::kHostRandIntRange: {
                 const double lo = std::floor(args[0]), hi = std::floor(args[1]);
@@ -1619,8 +1627,9 @@ double AbilityPipeline::take_damage(double amount, double now) {
 }
 
 void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                           const AbilityDef* ability, bool* landed) {
+                                           const AbilityDef* ability, bool* landed, uint64_t* first_landed) {
     if (landed) *landed = false;
+    if (first_landed) *first_landed = 0;
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
@@ -1738,6 +1747,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         origin.source_type = src.type;
         origin.source_guid = src.guid;
         origin.ability_tags = meta.ability_tags;
+        // (the Redemptive passive needs nothing here: this resolver runs the data's own formula, SelectFloat and Lerp over the target's Health, so another actor's heal
+        // already has BaseValueMax 10.0 with the passive; only the caster's own heal is short of it, see apply_hit_here)
         const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
         // a hit that leaves a lasting area on the ground (LingeringZonesIds): one zone opens where it landed, whatever the number of targets it reached
@@ -1747,6 +1758,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         }
         if (hit.row.name == "Summoner_Transpose") transpose_with_ = id;   // (TeleportId: bSwapLocationWithTarget; the session moves the two)
         event.targets.push_back(id);
+        if (first_landed && *first_landed == 0) *first_landed = id;
         event.flags = static_cast<uint8_t>(event.flags | d.flags);
         for (size_t i = 0; i < r.mods.size(); ++i) {
             event.mods[r.mods[i].stat_guid] += r.mods[i].value;
@@ -2130,10 +2142,12 @@ void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double
     // confirmation carries the value and the part that took effect, which is where the client draws its floating number
     std::vector<bootstrap::HitStatModOut> outs;
     HitEvent event;   // reactions: what this hit resolved
+    const double passive = deliverance_passive_scale(hit, stat_now(content::kGuidHealth), stat_now(content::kGuidMaxHealth));
     for (const content::ModRow& m : hit.mods) {
         if (m.shield_absorb || m.value_expr == 0) continue;
         double amount = 0;
         if (!eval(m.value_expr, amount, why) || !std::isfinite(amount)) continue;
+        if (passive != 1.0 && m.stat_guid == content::kGuidHealth && amount > 0) amount *= passive;
         const double effective = apply_delta(c, m.stat_guid, amount);
         outs.push_back({m.stat_mod_guid, static_cast<float>(amount), static_cast<float>(effective)});
         event.mods[m.stat_guid] += amount;
@@ -2150,6 +2164,7 @@ void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double
         h.source_guid = src.guid;
         h.source_is_actor = src.actor;
         h.mods = std::move(outs);
+        if (src.source_actor != 0 && combat_) h.source = combat_->guid_of(src.source_actor);   // (the Beam's first hit names the caster, as the recording does)
         h.predicted_autonomous = src.autonomous;
         h.predicted_simulated = src.simulated;
         h.response = src.response;
@@ -2602,6 +2617,43 @@ const AllyTargeting* ally_targeting_named(const std::string& record) {
     }
     return nullptr;
 }
+
+// The hits that jump from the ally they landed on to the next when they land (the Cleric's Resplendent Beam).  The hit names itself in its
+// RecursiveHit, and the recursive targeting is a sphere of 1,250 cm with two sorting entries: the first wants an injured target (Health < MaxHealth)
+// and scores minus the distance to the hit's Source (the one just hit), the second has no filter and scores the same.  So the injured come first,
+// the nearest of them, and then the nearest of the others: the tooltip says "up to 4 additional friendly targets closest to the original target",
+// and the recorded cast healed three targets that were all at full Health.  The data's MaxHitsGlobally is the progress ratio's `p * 4 + 1`, a
+// MAXIMUM: a charge of 0.414 (the recorded 1.241 s of the ability's 3 s hold) gives 2.65, so three hits, the caster and the two allies the recording
+// shows.  The rounding is modelled (the maximum is compared with the number of hits, so a fractional one allows the next hit); no recording settles it.
+struct AllyChain {
+    const char* hit;
+    double      radius_cm;
+    double      per_progress;    // the hits in all: 1 + per_progress x the progress ratio
+    int         max_hits;
+    bool        injured_first;   // the recursive targeting's filtered entry: an injured target (Health < MaxHealth) before the others
+};
+constexpr AllyChain kAllyChains[] = {
+    {"Cleric_ResplendentBeam_Hit", 1250.0, 4.0, 5, true},
+};
+const AllyChain* ally_chain_of(const abilities::HitDef& hit) {
+    for (const AllyChain& c : kAllyChains) {
+        if (hit.row.name == c.hit) return &c;
+    }
+    return nullptr;
+}
+
+// The Resplendent Beam's hit: whose GetHitTriggerCount its heal formula reads.
+constexpr int64_t kResplendentBeamHitGuid = 109201325905529ll;
+// The Deliverance's Redemptive passive (a skill): its heal's BaseValueMax is 10.0 with it, 5.0 without (the data's SelectFloat).
+constexpr int64_t kDeliveranceRedemptiveSkill = 6064630599209517058ll;
+// The hits a cast takes one client request for (one heal a cast, however often a client asks).
+constexpr const char* kOneRequestHits[] = {"Cleric_Deliverance_Hit", "Cleric_ResplendentBeam_Hit"};
+bool one_request_hit(const std::string& hit) {
+    for (const char* h : kOneRequestHits) {
+        if (hit == h) return true;
+    }
+    return false;
+}
 }  // namespace
 
 bool AbilityPipeline::ally_targets(const AbilityDef& def, const HitDef& hit, size_t max, int64_t named, const std::string& fallback, std::vector<uint64_t>& out) {
@@ -2672,6 +2724,77 @@ std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_
         out.push_back(c.actor);
     }
     return out;
+}
+
+double AbilityPipeline::hit_trigger_count(int64_t record) const {
+    return record == kResplendentBeamHitGuid ? static_cast<double>(resplendent_hits_) : 0.0;
+}
+
+double AbilityPipeline::deliverance_passive_scale(const abilities::HitDef& hit, double health, double max_health) const {
+    // The Deliverance's stat mod runs in the stat engine with its BaseValue at 5.0 (the formula's other end) and the progress ratio; the Redemptive
+    // passive's BaseValueMax of 10.0, `Lerp(10, 5, the target's Health / MaxHealth)`, is not read there, so its factor over the 5.0 is applied here.
+    if (hit.row.name != "Cleric_Deliverance_Hit" || !holds_skill(kDeliveranceRedemptiveSkill)) return 1.0;
+    const double hpp = max_health > 0 ? std::clamp(health / max_health, 0.0, 1.0) : 1.0;
+    return 2.0 - hpp;   // Lerp(10, 5, h) / 5
+}
+
+void AbilityPipeline::beam_bounces(AbilityChange& c, const CastRecord& rec, const HitDef& hit, uint64_t first, double t, const HitSource& src,
+                                   const AbilityDef* ability) {
+    const AllyChain* rule = ally_chain_of(hit);
+    if (!rule || !combat_ || dead_ || first == 0) return;
+    // the data's maximum: 1 + 4 x the cast's progress ratio, a limit (a fractional one allows the next hit)
+    const double wanted = std::min(static_cast<double>(rule->max_hits), 1.0 + rule->per_progress * std::clamp(rec.fill, 0.0, 1.0));
+    const int hits = std::clamp(static_cast<int>(std::ceil(wanted - 1e-6)), 1, rule->max_hits);
+    std::set<uint64_t> tried{first};   // (each target once: the record's MaxHitsPerTarget is 1)
+    int landed_hits = 1;               // (the first hit has landed: the caller's)
+    uint64_t from = first;
+    for (size_t guard = 0; landed_hits < hits && guard < 16; ++guard) {
+        const combat::TargetInfo at = combat_->inspect(from);
+        if (!at.exists) break;
+        // the allies within the record's sphere of the one just hit: the injured first (its filtered sorting entry), the nearest of them, and when none is
+        // hurt the nearest of the others (its second entry has no filter)
+        uint64_t next = 0;
+        double best = 0;
+        bool next_hurt = false;
+        for (const combat::AllyInfo& a : combat_->players_around(at.position, rule->radius_cm)) {
+            if (tried.count(a.actor)) continue;
+            const combat::TargetInfo ti = combat_->inspect(a.actor);
+            if (!ti.exists || !ti.alive || ti.relation == combat::Relation::Hostile) continue;
+            const bool hurt = a.health < a.max_health;
+            const double d = std::hypot(ti.position.x - at.position.x, ti.position.y - at.position.y);
+            bool wins = next == 0 || d < best || (d == best && a.actor < next);
+            if (next != 0 && rule->injured_first && hurt != next_hurt) wins = hurt;
+            if (wins) {
+                next = a.actor;
+                best = d;
+                next_hurt = hurt;
+            }
+        }
+        if (next == 0) {
+            spdlog::info("[abilities] {}: no ally within {:.1f} m of the one just hit: the beam stops after {} hit(s)", ability ? ability->row.name : std::string("?"),
+                         rule->radius_cm / 100.0, landed_hits);
+            break;
+        }
+        tried.insert(next);
+        HitSource fired = src;
+        fired.source_actor = from;   // (the confirmation's Source is the target just hit)
+        fired.autonomous = false;    // [R: the bounce's confirmation is predicted on neither side]
+        fired.simulated = false;
+        fired.response = false;
+        fired.reach_free = true;     // (the next ally is reached wherever the caster stands by now)
+        bool landed = true;
+        if (combat_->self().id() == next) {
+            apply_hit(c, hit, t, true, fired);   // (the caster's own runtime: never through another session's ally path)
+        } else {
+            uint64_t on = 0;
+            apply_hit_on_targets(c, hit, {next}, t, fired, ability, nullptr, &on);
+            landed = on == next;
+        }
+        if (!landed) continue;   // (a hit that did not land is no hit of the cast: the chain looks on from the same ally)
+        ++resplendent_hits_;
+        ++landed_hits;
+        from = next;
+    }
 }
 
 std::set<int64_t> AbilityPipeline::reach_of(const AbilityDef& def) const {
@@ -2799,17 +2922,25 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
 }
 
 void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting) {
+    // (a request the client made before the caster died runs after it: nothing of him lands any more)
+    if (dead_) return;
     rec.launched = true;   // (a hit of the cast is out: a Dodge no longer cancels it)
     const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
     const ConsumedScope consumed(*this, rec.item_cast);   // (a consumable's hit reads the item's numbers)
     AbilityChange c;
     const AbilityDef* def = catalog_->ability(rec.ability);
+    const AllyChain* chain = slot.hit ? ally_chain_of(*slot.hit) : nullptr;   // (the Resplendent Beam's hit jumps to the allies near the one it hit)
     HitSource src;
     src.type = content::kSourceTypeAbility;
     src.guid = rec.ability;
     src.actor = true;
     src.confirm = true;
     src.response = response;
+    bool bounced = false;
+    if (chain) {
+        resplendent_hits_ = 0;   // (the heal formula counts this cast's hits before each one)
+        if (combat_) src.source_actor = combat_->self().id();   // (the first hit's Source is the caster, as the recording shows)
+    }
     // The Bard's Saga's ally hits: the server picks their targets from the targeting record's own rule (the client names the caster, or the party it found; the
     // projectiles fly at the allies the record picks), and a launcher that fires a projectile has its confirmation held to the landing (fire_ally_from_hit).  The Saga's
     // other hits (the notes' consuming and the Resonance on the caster, the Apocalypse's and the Horrors' on the creatures the client names) take the ordinary path below.
@@ -2854,8 +2985,14 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
         return;
     }
     if (!targets.empty()) {
-        apply_hit_on_targets(c, *slot.hit, targets, t, src, def);
-        if (!found) {
+        uint64_t first_hit = 0;   // (the one the hit took effect on: a chain goes on from him, and from nobody when the hit reached none)
+        apply_hit_on_targets(c, *slot.hit, targets, t, src, def, nullptr, chain ? &first_hit : nullptr);
+        if (chain && combat_ && !bounced && first_hit != 0) {
+            bounced = true;
+            ++resplendent_hits_;   // (the hit that just landed on the target the client named)
+            beam_bounces(c, rec, *slot.hit, first_hit, t, src, def);
+        }
+        if (!found || (chain && first_hit != 0)) {   // (a chain's hit has one first target: the caster is not healed besides)
             recompute(c);
             emit({std::move(c), std::nullopt, t,
                   "the hit " + slot.hit->row.name + " of " + (def ? def->row.name : std::string("?")) + " on " + std::to_string(targets.size()) + " other actor(s) (the client asked)"});
@@ -2874,6 +3011,11 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
         if (!slot.hit->mods.empty() || slot.hit->row.has_fx || (slot.hit->row.applicable_targets & 8) != 0) confirmations_.push_back(std::move(h));
     } else {
         apply_hit(c, *slot.hit, t, true, src);
+        if (chain && combat_ && !bounced) {
+            bounced = true;
+            ++resplendent_hits_;   // (the hit that just landed on the caster)
+            beam_bounces(c, rec, *slot.hit, combat_->self().id(), t, src, def);
+        }
         if (!slot.hit->fires.empty() && !slot.fired) {   // (they leave once a cast, however often the client asks for the hit)
             slot.fired = true;
             fire_from_hit(rec, *slot.hit, t);
@@ -2919,6 +3061,15 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held
 double AbilityPipeline::held_fill(const Cast& cast, double held_seconds) const {
     // the key cannot have been held longer than the cast has run: a CancelledTime beyond that is cut there (a forged one would fill the bar at once)
     const double ran = std::max(0.0, now_ - cast.trigger_at);
+    // A held ability whose full charge the data gives (the Resplendent Beam's 3 s hold) or whose montage the release's CancelledTime counts (the
+    // Deliverance: montage seconds): the fill is the time held over the full charge's own seconds.  Every other held cast keeps the rule below.
+    if (cast.branched && (cast.branched->release_fill_seconds > 0 || cast.branched->charge_seconds > 0)) {
+        // (a CancelledTime beyond the montage the bar has played is cut there; the recorded ones run a few ms over it, so kFillSlack is allowed)
+        const double montage = ran * client_rate(true) + kFillSlack;
+        const double held = held_seconds > 0 ? std::min(held_seconds, montage) : montage - kFillSlack;
+        const double full = cast.branched->release_fill_seconds > 0 ? cast.branched->release_fill_seconds : cast.branched->charge_seconds * client_rate(true);
+        return std::clamp(held / std::max(0.1, full), 0.0, 1.0);
+    }
     const double held = held_seconds > 0 ? std::min(held_seconds, ran) : std::max(0.0, ran - kHoldStart);
     const auto shown = full_bars_.find(cast.def->row.guid);
     const double bar = shown != full_bars_.end() ? shown->second : cast.branched->full;
@@ -2970,6 +3121,7 @@ void AbilityPipeline::abort_cast(size_t index, double t, const char* why, bool g
 // A cast with no bar (a weapon swing, a song, a looping or channelled cast, a held stance) has none to end.
 bool AbilityPipeline::in_cast_bar(const Cast& cast) const {
     if (pets::for_ability(cast.def->row.guid)) return cast.cost_due.has_value();
+    if (cast.branched && cast.branched->no_jump) return false;   // (the ability moved at the press: its bar is the client's, and a Dodge leaves it alone)
     return cast.branched != nullptr && cast.branch_due && !cast.request_heard && !cast.charged && !cast.released;
 }
 
@@ -3217,6 +3369,17 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
             // a cast bar's request names its cast by the instance: the end of the bar is the end of the bar whichever branch the client names (a variant the table has no row for must not lose its cast)
             spdlog::info("[abilities] the client asked for the branch {} of {}, which the table does not list (it has {}): taken as the end of the cast bar", branch_guid, cast.def->row.name, b.branch);
         }
+        if (b.no_jump) {
+            // the branch ends the bar where it stands (the Disengage's CancelIfFalling: the record's section is none): no montage jump, the cost and the
+            // hits keep the times the recordings give them, and the montage is cleared `end` after the request
+            if (cast.request_heard) return true;
+            cast.request_heard = true;
+            cast.heard_at = now_;
+            if (cast.end_due) cast.end_due = now_ + b.end;   // (a montage that is cleared already stays cleared: a late request clears nothing twice)
+            spdlog::info("[abilities] the client's branch of {} ends its bar {:.3f} s after the trigger: the montage is cleared {:.3f} s later", cast.def->row.name,
+                         now_ - cast.trigger_at, b.end);
+            return true;
+        }
         if (cast.held) return true;   // (the talent makes this branch invalid: the request is not answered; the release or the full charge goes on)
         const bool first = !cast.request_heard;   // (the cast goes on from the first request or release: how full the bar was is that one's to say)
         cast.request_heard = true;
@@ -3227,9 +3390,18 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
         spdlog::info("[abilities] the client asked for the branch of {} {:.3f} s after the trigger{}", cast.def->row.name, now_ - cast.trigger_at,
                      earlier < 0 ? ": the cast goes on " + std::to_string(-earlier).substr(0, 5) + " s sooner" : std::string(": the cast goes on as planned"));
         if (b.full > 0 && now_ - cast.trigger_at >= 0.5 * b.full) full_bars_[cast.def->row.guid] = std::max(full_bars_[cast.def->row.guid], now_ - cast.trigger_at);   // (a HELD ability's full bar, as this client shows it)
-        // a HELD ability's request: a bar that ran out asks at its end (a full charge), but a tap asks at once (retail's own quick Lightning Strike asked 171 ms after its trigger) and has the charge the key
-        // had given it by then
-        if (first && b.full > 0 && now_ - cast.trigger_at < 0.5 * b.full) {
+        // A held ability's fill from the request that ends its bar: the charge the client's bar had run.  The data's own full charge where it gives one
+        // (the Resplendent Beam's 3 s hold), the montage's own section where the charge is one (the Deliverance's), else the recorded bar.  A tap has the charge the key had given it by then.
+        if (first && b.release_fill_seconds > 0) {
+            // the request is the montage reaching its full-charge section (the Deliverance's): the fill is the montage the bar has played, at this caster's
+            // rate, over the section's own seconds (a faster caster reaches it sooner than the recorded 3.534 s, a slower one later: the recorded requests
+            // came a few ms short of it, which kFillSlack allows)
+            if (CastRecord* rec = record_of(cast.client_id)) {
+                rec->fill = std::clamp(((now_ - cast.trigger_at) * client_rate(true) + kFillSlack) / b.release_fill_seconds, 0.0, 1.0);
+            }
+        } else if (first && b.charge_seconds > 0) {
+            if (CastRecord* rec = record_of(cast.client_id)) rec->fill = std::clamp((now_ - cast.trigger_at) / b.charge_seconds, 0.0, 1.0);
+        } else if (first && b.full > 0 && now_ - cast.trigger_at < 0.5 * b.full) {
             if (CastRecord* rec = record_of(cast.client_id)) rec->fill = held_fill(cast, 0);
         }
         if (earlier >= 0) return true;
@@ -3758,6 +3930,13 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         // a character whose talent makes the cast a held one waits for the key's release or the full charge: the plan is the fallback for neither being heard
         cast.held = b.held_skill != 0 && holds_skill(b.held_skill);
         if (cast.held) spdlog::info("[abilities] {}: the character's talent makes it a held cast: it waits for the key's release or the full charge", row.name);
+        if (b.no_jump) {
+            // the bar only ends on the client's branch request (the Disengage's CancelIfFalling): the cost and the montage's clear are the recordings',
+            // and a request that comes clears the montage `end` after it
+            cast.branch_due = t + b.request + b.answer;
+            cast.end_due = t + (table_end >= 0 ? table_end : 1.345);
+            break;
+        }
         cast.branch_due = cast.held ? t + b.hold_limit + b.release : t + b.request + b.answer;
         if (b.cost_first) {   // the cost step was paid before the bar's end (the timing table's moment, set above): the request moves the jump and the end
             cast.end_due = *cast.branch_due + b.end;
@@ -3941,6 +4120,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         slot.hit = hit;
         slot.targeting = tg;
         slot.max_requests = beam_requests;
+        if (one_request_hit(hit->row.name)) slot.max_requests = 1;   // (one heal a cast: the Deliverance's and the Beam's hits are asked for once)
         slot.reaches = hits_caster(hit->row);
         slot.aims_others = combat_ != nullptr && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0;
         if (pets::for_ability(ability) && hit->row.applicable_targets == 1 && hit->row.fallback_target.find("SelfOnly") != std::string::npos) {
@@ -4070,6 +4250,7 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
     land_by_flight(cast, t);
     // a ball (the Mage's Ball Lightning) leaves when the montage's notify gets there, whoever is or is not the cast's target
     launch_ball(cast, t);
+    if (cast.branched && cast.branched->no_jump) return;   // (the branch ends the bar where it stands: the record's section is none and no montage jump is sent)
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
     if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
     if (cast.charged && cast.gathered && cast.gathered->charged_montage[0] != '\0') {   // the charged shot has a montage of its own

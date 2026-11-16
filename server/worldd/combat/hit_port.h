@@ -64,6 +64,9 @@ public:
     virtual std::vector<ZoneTarget> actors_in_area(const Vec3& /*centre*/, const ZoneArea& /*area*/, size_t /*max*/) { return {}; }
     /// The joined players that stand with the caster (his party and himself; see CombatWorld::player_allies), for the targeting of an ally hit.
     virtual std::vector<AllyInfo> allies() { return {}; }
+    /// Every living player whose side is not hostile to the caster within `radius_cm` of `centre` (see CombatWorld::players_around): who a hit
+    /// that jumps from one ally to the next may reach.  Another player's pawn is named by the players' list, never by the registry (where his pawn stands too).
+    virtual std::vector<AllyInfo> players_around(const Vec3& /*centre*/, double /*radius_cm*/) { return {}; }
     /// The height of the ground under (x, y), nearest to `z_hint` (see CombatWorld::ground_height); false where the world has none.
     virtual bool ground_height(double /*x*/, double /*y*/, double /*z_hint*/, double* /*z*/) const { return false; }
 };
@@ -123,6 +126,7 @@ public:
         return world_.enemies_in_cone(self_, angle_degrees, length_cm, behind_cm, max);
     }
     std::vector<AllyInfo> allies() override { return world_.player_allies(self_.id()); }
+    std::vector<AllyInfo> players_around(const Vec3& centre, double radius_cm) override { return world_.players_around(self_.id(), centre, radius_cm); }
     std::vector<GatheredTarget> enemies_in_line(double length_cm, double radius_cm, size_t max) override { return world_.enemies_in_line(self_, length_cm, radius_cm, max); }
     std::vector<GatheredTarget> enemies_around(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_around(self_, centre, radius_cm, max); }
     std::vector<GatheredTarget> enemies_touching(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_touching(self_, centre, radius_cm, max); }

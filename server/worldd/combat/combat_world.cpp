@@ -173,6 +173,37 @@ std::vector<AllyInfo> CombatWorld::player_allies(uint64_t self) const {
     return out;
 }
 
+std::vector<AllyInfo> CombatWorld::players_around(uint64_t from, const Vec3& centre, double radius_cm) const {
+    std::vector<AllyInfo> out;
+    if (!(radius_cm > 0)) return out;
+    PlayerPort* caster = nullptr;
+    for (PlayerPort* p : players_) {
+        if (p && p->actor_id() == from) caster = p;
+    }
+    if (!caster) return out;
+    const std::vector<int64_t>& aligns = caster->fighter().alignments();
+    for (PlayerPort* p : players_) {
+        if (!p) continue;
+        const uint64_t id = p->actor_id();
+        if (id == 0 || is_pet(id)) continue;   // (a pet stands in players_ for the creatures' code: its owner is the ally)
+        Fighter& f = p->fighter();
+        if (!f.alive()) continue;
+        const Vec3 at = f.position();
+        if (distance_xy_cm(centre, at) > radius_cm) continue;
+        if (data_.relation(aligns, f.alignments()) == Relation::Hostile) continue;
+        AllyInfo a;
+        a.actor = id;
+        const stats::StatValue* h = f.stats().find(content::kGuidHealth);
+        const stats::StatValue* m = f.stats().find(content::kGuidMaxHealth);
+        a.health = h ? h->value : 0;
+        a.max_health = m ? m->value : 0;
+        a.self = id == from;
+        a.party = a.self || p->in_party_with(from);
+        out.push_back(a);
+    }
+    return out;
+}
+
 void CombatWorld::player_exchange(uint64_t player_id, double now) {
     const double until = now + data_.in_combat_timer();
     const auto it = player_combat_until_.find(player_id);
