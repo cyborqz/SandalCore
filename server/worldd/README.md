@@ -1581,6 +1581,21 @@ not hold (Frostflash, Grouper, Kings Coin, Spotted Trout), a hunt kind it does n
 the PTR recipe vendors sell, or a quest item. The 20 recipes that have to be learned are taught by their `Consumable_Recipe_Cooking_*` items. **Held back:** eating a cooked meal (the consumables pull requests), the Cookhouse's
 T3 station and the 74 Journeyman recipes (the node buildings), and the 44 Harbinger event recipes.
 
+**Animal Husbandry at the towns' stations.** The live Animal Husbandry - Apprentice station (`ProcessingStation_AnimalHusbandry_T2`, tier 1 at most, a queue of 2) holds 21 of the profession's
+33 live recipes: the 6 Novice and the 15 Apprentice ones. (The Animal Husbandry - Novice station, tier 0, holds the 6 and Train Deer, which its own tier can never make; the Journeyman station holds
+the 11 above Apprentice and comes with the Agricultural Supply building, held back.) The Apprentice list's own availability row is the data's `cCount` placeholder, the reason enum's count rather
+than one of its reasons: it names no condition (`crafting/rules.h`), so the Apprentice recipes are served, where before the whole list was refused as an unknown condition (modelled: the data does
+not say what the row means). Each job pays ten times a processing job's experience (500 a Novice unit, 600 an Apprentice one at Common), the recipe's price with the station's tax, and one product
+from the recipe's reward table; the 33 live recipes name 58 products, 31 of them mounts (all in the mount table with `Summon_Mount`: the mount code summons and rides them), 21 beasts of burden,
+4 livestock and 2 retired mounts. 9 of the 21 start from a `Resource_Raw_Trainable_Adult_*` a Riverlands hunt gives: Horse, Pallas Cat, Deer and Tidesnapper on every roll, and Bear, Wolf, Raptor
+(a Swiftclaw's), Skinwalker and Tidebreaker (an otter's) on a part of them. Only 4 of the 9 are within a player's reach in the live world: Bear, Horse, Pallas Cat and Wolf are Novice hunts, made
+with the Crude Hunting Bow every class starts with. The other 5 (Deer, Raptor, Skinwalker, Tidesnapper and Tidebreaker) are Apprentice hunts: they need Apprentice Hunting and an Apprentice Hunting
+Bow, which no open shop sells (only the test vendors do) and no craft gives yet (the Carpentry recipe delivers it into the equipment slot, which a job or a quick make does not serve), so a game
+master gives the bow. The other 12 of the 21 wait on an item the live world has no source for: the two crate mules' vendors (not open), the hunting
+kinds outside the Riverlands (Scorpion Broodling, Daystrider, Hippo, Scorpion, Shoalskipper, Verdant Voyager), the two livestock recipes whose adult is made by Farming's recipe that takes the
+baby they make, and Bork and Crab, which have no source at all. The livestock babies feed Farming's adult recipes and, through the egg and the milk, the 28 Cooking recipes that wait on that
+chain; the chain has no first adult in the live world (a baby needs two adults and an adult needs a baby), so a game master gives the first two. **Held back:** the Journeyman station and its 11 recipes (the node buildings), freeholds and their animals, the crate mules' vendors, and the beast of burden's caravan.
+
 **People who talk offer a conversation (`GenericNpcs`).** A humanoid Blueprint that no capture opened is made from a recorded citizen, which in the game is a Construction Crate Vendor: its interactable carries that
 vendor's one input, "sell a crate", which the client shows at all times. So the interactable of a person who talks is replaced by that of a plain conversation (a component whose only input opens the dialogue), taken
 from another recorded open; the log says which at the start (`the people who talk are given the interactable of a plain conversation`). The same holds for the recorded opens themselves: the citizen's and the

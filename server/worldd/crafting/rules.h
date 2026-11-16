@@ -218,6 +218,8 @@ inline std::vector<std::string> split_tags(const std::string& csv) {
 
 /// Whether an availability predicate holds at the node; `why` says which does not.
 inline bool predicate_holds(const content::CraftPred& p, const NodeFacts& n, std::string& why) {
+    // (the data's placeholder for a list with no condition: the reason enum's own count, which names no reason; one recipe list carries it)
+    if (p.type == "cCount") return true;
     if (p.type == "NodeLevel") {
         if (n.level >= p.node_level && p.node_level >= 0) return true;
         why = "it needs a node of level " + std::to_string(p.node_level) + " and the node is " + (n.level < 0 ? std::string("not known") : "level " + std::to_string(n.level));
