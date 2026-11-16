@@ -102,8 +102,13 @@ static std::string table_with_next(const std::string& dir, const std::string& ar
         if (mode == NextColumn::None) {
             write_cells(c, next_at);
         } else {
-            for (size_t i = 0; i < next_at && i < c.size(); ++i) o << c[i] << '\t';
-            o << next << '\n';
+            // (the columns after `next` - the branches - are kept as the file has them)
+            for (size_t i = 0; i < c.size(); ++i) {
+                if (i != 0) o << '\t';
+                o << (i == next_at ? next : c[i]);
+            }
+            if (next_at == c.size()) o << '\t' << next;
+            o << '\n';
         }
     }
     if (first) {
@@ -341,8 +346,13 @@ void test_goblin_rally_with_held_partners(Fixture& f) {
     const std::string table = sequences::table_with_next(dir, path, {{rally->row.guid, std::to_string(head->row.guid) + ";" + std::to_string(still->row.guid), {}}}, error);
     SEQ_CHECKF(!table.empty(), "the goblin's tree with its sequence column is written (%s)", error.c_str());
     if (table.empty()) return;
+    // the build's tables carry the hit windows once the reader writes them: then the chain partners can play; until then the reader holds them
+    std::ifstream montages(dir + "npc_montages.tsv", std::ios::binary);
+    std::string montage_header;
+    std::getline(montages, montage_header);
+    const bool windows_written = montage_header.find("\thit_windows") != std::string::npos;
     {
-        // the two chain partners are held, as the real table says (nothing waits on them: the chain is dropped)
+        // the two chain partners are held while their montages have no hit; with the windows they are known (nothing waits on them: the chain plays them)
         combat::NpcAbilityData loaded;
         const bool goblin_loaded = loaded.load(table, dir + "npc_montages.tsv", dir + "npc_targeting.tsv", error);
         if (goblin_loaded) {
@@ -358,7 +368,8 @@ void test_goblin_rally_with_held_partners(Fixture& f) {
         if (!loaded.abilities_of(path)) return;
         for (const combat::CreatureAbility& t : *loaded.abilities_of(path)) {
             if (t.ability != head->row.guid && t.ability != still->row.guid) continue;
-            SEQ_CHECKF(t.unknown && t.why.find("hit notify") != std::string::npos, "the chain partner %s is held back as before (%s)", f.catalog->ability(t.ability)->row.name.c_str(), t.why.c_str());
+            SEQ_CHECKF(windows_written ? (!t.unknown && t.why.empty()) : (t.unknown && t.why.find("hit notify") != std::string::npos), "the chain partner %s is %s (%s)",
+                       f.catalog->ability(t.ability)->row.name.c_str(), windows_written ? "known: its window is in the montage table" : "held back as before", t.why.c_str());
         }
     }
     sequences::SequenceFight fight;
@@ -386,7 +397,11 @@ void test_goblin_rally_with_held_partners(Fixture& f) {
     }
     std::printf("  %zu casts before the first Rally, the first Rally at %.2f s, %zu after it, %zu headbutts\n", before, first_rally, after, headbutts);
     SEQ_CHECKF(rallies >= 1, "the goblin rallies (%zu)", rallies);
-    SEQ_CHECKF(headbutts == 0, "it never plays the held Headbutts its Rally is chained to (%zu)", headbutts);
+    if (windows_written) {
+        SEQ_CHECKF(headbutts >= 1, "the chain plays a Headbutt once the tables carry its window (%zu)", headbutts);
+    } else {
+        SEQ_CHECKF(headbutts == 0, "it never plays the held Headbutts its Rally is chained to (%zu)", headbutts);
+    }
     SEQ_CHECKF(before >= 3, "it fights from the start with the moves it had before (%zu casts before the Rally)", before);
     SEQ_CHECKF(after >= 3, "it fights on after the Rally: nothing waits on the held chain partner (%zu casts after it)", after);
     // the Rally's chain is set when its cast ends and the tree's next look consumes it: a partner the table holds drops it there (without the chain code it is never set)

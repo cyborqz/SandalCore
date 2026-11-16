@@ -27,6 +27,10 @@ It writes three tables (five with `--senses-dir`):
   time) for the task whose completion empties it; a task that compares the fight's clock with a number the tree generates at the start of the fight (a stored or generated number, or the
   random number a "Generate Random Float In Range" task draws between its Min and Max: the goblins' wait before they rally) is said with `fcr`. A few abilities the world
   cannot play yet are left out whatever their conditions say: their rows are `unknown`, and `why` says what they wait for (a bird's flight, a blink, a change of form, a spawn, a montage with no hit).
+  `targeting.py` finishes the table: its last column `branches` lists the montages an ability enters when its root motion is obstructed, `obstructed:montage` separated by ';' (the conditional branch of
+  the ability record is bound to the movement event RootMotionObstructed, a body in the ability's freeze box; a branch bound to another movement event or entering a named section of a montage is not
+  listed), and a row held for "a hit notify in its montage" is played (`unknown` 0, `why` empty) once the ability's montage has a hit window of a key the ability has a hit for, or such a branch montage has
+  a hit notify of one.
   A move that hurts nobody (a growl, a yawp, a rally) is read like any other; whether the world plays it as a show is decided by its ability record, not by this table.
   A tree takes some settings from its parameters (the distance of a bite, whether the creature may pounce); the tool reads them from the Blueprint's reference to the tree and the tree's
   own defaults and folds them in: a condition that compares parameters is decided when the table is made, and a task a parameter switches off for the creature has `why` = `off`.
@@ -47,6 +51,9 @@ It writes three tables (five with `--senses-dir`):
   done at that time, and the cooldowns the task starts run from there. It is filled for the folders the extractor lists as `$NpcAnimEndFolders` (the bandits) and empty for the others,
   whose cooldowns run from the start of the cast. `fires` is `time:key` for every notify of the montage that launches a projectile (the time in seconds at a play rate of 1; the key picks the
   ability's projectile record, 0 when the notify names none): the projectile leaves the creature there, flies by its record's speed and path, and lands the hits of its record when it arrives.
+  `hit_windows` is `start:end:key` for every hit-window notify state of the montage (`AoCAnimNotifyState_AbilityHit`, kept in the event's `NotifyStateClass`, with the key in its `AbilityHitKey`): while
+  the state is open its tick lands the hit of the ability that the key names, once on each target the hit's targeting record reaches; a state that allows several hits (`bEnableMultipleHits`) has a
+  fourth field, `interval` (`HitIntervalInSeconds`, 0.001 when it names none), and lands the hit on a target again every `interval` seconds the target stays in reach.
 - `npc_targeting.tsv` (`targeting.py`, from content.db): where each listed ability's hit lands, one line per targeting record of the ability (`key`):
   - `discovery` is how the record finds its target: `none`, `prefers_active` (what the creature fights now, else the one the cast was aimed at), `only_locked` (the one the cast was aimed at),
     `only_active` or `prefers_locked`.

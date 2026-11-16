@@ -12,15 +12,19 @@
 //                        could not say (`unknown`) or "off" for a task a parameter of the tree switches off for the creature, and `starts` the other cooldowns the creature starts
 //                        when it takes the task (a fixed "name=seconds", or "name=low~high" when the tree rolls the seconds anew each time: the tree's timers that hold a charge once their seconds have
 //                        passed are cooldowns named "acc.<identifier>"), `rotate` ("speed:duration") the turning towards its target that runs with the ability, `arrival` how near its target the
-//                        creature's approach brings it (cm; -1: none), and `next` the abilities of the later tasks of the same tree that wait on a cooldown this one starts (the tree plays one of them
-//                        next; a table without the column has no sequences)
-//    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires
+//                        creature's approach brings it (cm; -1: none), `next` the abilities of the later tasks of the same tree that wait on a cooldown this one starts (the tree plays one of them
+//                        next; a table without the column has no sequences), and `branches` the montages an ability enters on one of its movement events ("event:montage"; the only event the world
+//                        decides is `obstructed`, the moment a body in the ability's freeze box holds the creature that its montage carries; a table without the column has no branches)
+//    npc_montages.tsv    montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires  hit_windows
 //                        every animation montage beside the Blueprints: its object path, the ids the network layer knows it by, how long it
 //                        plays at a play rate of 1, the hit notifies ("time:key") that tell when each of the ability's hits lands, and how far the
 //                        montage carries the creature ("time:x:y:z": its root bone's travel, in cm ahead, to the right and up from where the creature
 //                        stood when the montage began; empty for a montage that stays in place, or for one whose animation the tables could not read: `root_unreadable`); `anim_end` is the time
 //                        of its animation-end notify, where the creature's ability task is done and the cooldowns it starts begin to run (empty: they begin with the cast); `fires` ("time:key")
-//                        the notifies that launch a projectile: when, and the key of the ability's projectile record that flies (see CombatWorld)
+//                        the notifies that launch a projectile: when, and the key of the ability's projectile record that flies (see CombatWorld); `hit_windows` ("start:end:key" or
+//                        "start:end:key:interval") the hit-window notify states: while such a window is open the game lands the hit of the ability that carries the key, once on each target the hit's
+//                        record reaches, or again on a target every `interval` seconds it stays in reach when the state allows several hits (empty: the montage has no such state, and a table
+//                        without the column has none)
 //    npc_targeting.tsv   ability  key  distance  min_distance  angle  angle_center  cone_check  freeze  freeze_distance  freeze_scale  ignore_non_target  discovery  check_validity  los_check  distance_center  volumes  shapes
 //                        where an ability's hit lands (see combat/bite_area.h): how the record finds its target (`discovery`), whether it measures anything at all (`check_validity`, with the
 //                        cone's distance and angle behind `cone_check` and the line of sight behind `los_check`), and the volumes it sweeps (`volumes` of them, `shapes` places the ones that can be
@@ -216,6 +220,13 @@ struct CreatureAbility {
     std::vector<CondGroup> groups; // the other conditions, one group per state of the task's way down: every group has to hold
 };
 
+/// A montage an ability enters on one of its movement events (the `branches` column of the creature table): `event` names the condition the world can decide ("obstructed": a body in the
+/// ability's freeze box holds the creature the chosen montage carries) and `montage` the animation it plays then, whose hit notifies land the ability's harm.
+struct AbilityBranch {
+    std::string event;
+    std::string montage;
+};
+
 /// What an ability's root motion does when a body comes ahead of the creature (the ability record's RootMotionFreeze fields): the creature's body, `radius_scale` times as wide, is looked at
 /// `distance` cm ahead of it and as wide as itself; a body (the ability's target, or any player unless `ignore_non_target`) in that box stops the lunge for good (Stop) or while it stays there
 /// (Pause).
@@ -246,6 +257,12 @@ struct MontageData {
         int    key = 0;            // which projectile record of the ability flies (the ability's projectile rows carry the same key)
     };
     std::vector<Fire> fires;       // the notifies that launch a projectile, in time order
+    struct Window {
+        double start = 0, end = 0;   // seconds into the montage at a play rate of 1
+        int    key = 0;              // which hit of the ability the window lands (the ability's hit rows carry the same key)
+        double interval = 0;         // seconds between two hits on one target (the state allows several hits); 0: one hit on each target
+    };
+    std::vector<Window> windows;   // the hit-window notify states, in time order: the hit of the state's key lands on every tick the state is open
     /// How far the montage carries the creature: where its root bone is (cm ahead and to the right of where the creature faces, from where it stood when the montage began) at each
     /// time (seconds into the montage at a play rate of 1), in time order from 0.  Empty: the montage stays in place.
     struct Step {
@@ -297,12 +314,15 @@ public:
         std::map<std::string, std::vector<CreatureAbility>> abilities;
         std::map<std::string, MontageData>                  montages;
         std::map<int64_t, std::map<int, BiteArea>>          areas;
+        std::map<int64_t, std::vector<AbilityBranch>>       branches;
         std::vector<std::vector<std::string>>               rows;
         const std::string abilities_header = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
         const std::string abilities_header_next = abilities_header + "\tnext";
-        bool with_next = false;
+        const std::string abilities_header_branches = abilities_header + "\tbranches";
+        const std::string abilities_header_next_branches = abilities_header_next + "\tbranches";
+        bool with_next = false, with_branches = false;
         {
-            // the table has the sequence column or not: a table made before it has no sequences, and both are read
+            // the table has the sequence and branch columns or not: a table made before them has none, and every form is read
             std::ifstream probe(abilities_path, std::ios::binary);
             if (!probe) {
                 error = abilities_path + " cannot be opened";
@@ -314,14 +334,20 @@ public:
                 return false;
             }
             if (!head.empty() && head.back() == '\r') head.pop_back();
-            if (head == abilities_header_next) with_next = true;
-            else if (head != abilities_header) {
+            if (head == abilities_header_next_branches) {
+                with_next = with_branches = true;
+            } else if (head == abilities_header_next) {
+                with_next = true;
+            } else if (head == abilities_header_branches) {
+                with_branches = true;
+            } else if (head != abilities_header) {
                 error = abilities_path + ": the header is not the one this build reads";
                 return false;
             }
         }
-        if (!read_table(abilities_path, with_next ? abilities_header_next : abilities_header, rows, error)) return false;
-        const std::vector<std::string> ability_columns = split(with_next ? abilities_header_next : abilities_header, '\t');
+        if (!read_table(abilities_path, with_next ? (with_branches ? abilities_header_next_branches : abilities_header_next) : (with_branches ? abilities_header_branches : abilities_header), rows, error)) return false;
+        const std::vector<std::string> ability_columns = split(with_next ? (with_branches ? abilities_header_next_branches : abilities_header_next) : (with_branches ? abilities_header_branches : abilities_header), '\t');
+        const size_t branch_at = with_next ? 18u : 17u;
         for (const auto& r : rows) {
             const auto bad_at = [&](size_t column) { return bad(abilities_path, r[0], ability_columns[column], r[column], error); };   // (the error names the column that does not read)
             CreatureAbility a;
@@ -367,6 +393,17 @@ public:
                     int64_t id = 0;
                     if (!number(n, id)) return bad_at(17);
                     a.next.push_back(id);
+                }
+            }
+            if (with_branches) {   // "event:montage" entries, ';'-joined: the montages the ability enters on an event of the montage it plays
+                for (const std::string& entry : split(r[branch_at], ';')) {
+                    if (entry.empty()) continue;
+                    const size_t colon = entry.find(':');
+                    AbilityBranch b;
+                    if (colon == std::string::npos || colon == 0 || colon + 1 == entry.size()) return bad_at(branch_at);
+                    b.event = entry.substr(0, colon);
+                    b.montage = entry.substr(colon + 1);
+                    branches[a.ability].push_back(std::move(b));
                 }
             }
             a.off = !a.unknown && a.why == "off";
@@ -419,8 +456,29 @@ public:
             std::stable_sort(tasks.begin(), tasks.end(), [](const CreatureAbility& x, const CreatureAbility& y) { return x.order < y.order; });
         }
         const std::string montages_header = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires";
-        if (!read_table(montages_path, montages_header, rows, error)) return false;
-        const std::vector<std::string> montage_columns = split(montages_header, '\t');
+        const std::string montages_header_windows = montages_header + "\thit_windows";
+        bool with_windows = false;
+        {
+            // the table has the hit-window column or not: a table made before it has no windows, and both are read
+            std::ifstream probe(montages_path, std::ios::binary);
+            if (!probe) {
+                error = montages_path + " cannot be opened";
+                return false;
+            }
+            std::string head;
+            if (!std::getline(probe, head)) {
+                error = montages_path + " is empty";
+                return false;
+            }
+            if (!head.empty() && head.back() == '\r') head.pop_back();
+            if (head == montages_header_windows) with_windows = true;
+            else if (head != montages_header) {
+                error = montages_path + ": the header is not the one this build reads";
+                return false;
+            }
+        }
+        if (!read_table(montages_path, with_windows ? montages_header_windows : montages_header, rows, error)) return false;
+        const std::vector<std::string> montage_columns = split(with_windows ? montages_header_windows : montages_header, '\t');
         for (const auto& r : rows) {
             const auto bad_at = [&](size_t column) { return bad(montages_path, r[0], montage_columns[column], r[column], error); };
             MontageData m;
@@ -454,6 +512,16 @@ public:
                 if (f.size() != 4 || !number(f[0], step.time) || !number(f[1], step.x) || !number(f[2], step.y) || !number(f[3], up)) return bad_at(8);
                 if (!m.root_motion.empty() && step.time < m.root_motion.back().time) return bad_at(8);
                 m.root_motion.push_back(step);
+            }
+            if (with_windows) {
+                for (const std::string& w : split(r[12], ';')) {
+                    if (w.empty()) continue;
+                    const std::vector<std::string> f = split(w, ':');
+                    MontageData::Window window;
+                    if ((f.size() != 3 && f.size() != 4) || !number(f[0], window.start) || !number(f[1], window.end) || !number(f[2], window.key) || (f.size() == 4 && !number(f[3], window.interval))) return bad_at(12);
+                    if (window.start < 0 || window.end < window.start || window.interval < 0) return bad_at(12);
+                    m.windows.push_back(window);
+                }
             }
             montages[m.path] = std::move(m);
         }
@@ -525,6 +593,7 @@ public:
         montages_ = std::move(montages);
         areas_ = std::move(areas);
         freezes_ = std::move(freezes);
+        branches_ = std::move(branches);
         return true;
     }
 
@@ -555,6 +624,11 @@ public:
     const RootMotionFreezeRule* freeze_of(int64_t ability) const {
         const auto it = freezes_.find(ability);
         return it == freezes_.end() ? nullptr : &it->second;
+    }
+    /// The montages an ability enters on one of its montage events (the `branches` column); null when the tables have none for it.
+    const std::vector<AbilityBranch>* branches_of(int64_t ability) const {
+        const auto it = branches_.find(ability);
+        return it == branches_.end() ? nullptr : &it->second;
     }
     /// The montage with the object path an ability record names; null when the tables do not have it.
     const MontageData* montage(const std::string& path) const {
@@ -775,6 +849,7 @@ private:
     std::map<std::string, MontageData>                  montages_;
     std::map<int64_t, std::map<int, BiteArea>>          areas_;
     std::map<int64_t, RootMotionFreezeRule>             freezes_;
+    std::map<int64_t, std::vector<AbilityBranch>>       branches_;
 };
 
 }  // namespace aoc::worldd::combat

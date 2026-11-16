@@ -538,6 +538,25 @@ private:
         double   end_at = 0;
         bool     logged = false;    // the log has the line of its beginning, so it gets the line of its end
         std::vector<BiteArea> timed_areas;   // where each of those hits lands (the targeting record of the hit's key): a hit that reaches nobody sends nothing
+        // a hit-window notify state of the montage: while it is open the hit lands on each player its record reaches, once for each (again every `interval` seconds when the state allows several
+        // hits), and one who comes in is hit then
+        struct PendingWindow {
+            double   start = 0, end = 0;
+            int64_t  hit = 0;
+            BiteArea area;
+            double   interval = 0;                 // seconds between two hits on one player; 0: one hit on each
+            std::map<uint64_t, double> struck;     // the players this window has hit, and when it hit each of them last
+            bool     self_landed = false;          // the hit's own effects on the creature have landed (once for the window)
+        };
+        std::vector<PendingWindow> windows;   // in time order
+        // the hits of the montage the ability enters when a body obstructs the creature's root motion (the game's movement event of that name): `delay` after the obstruction
+        struct PendingBranch {
+            double   delay = 0;
+            int64_t  hit = 0;
+            BiteArea area;
+        };
+        std::vector<PendingBranch> branch;
+        bool     branch_watch = false;   // the creature's root motion is watched for that obstruction, until it happens or the montage no longer carries the creature
         std::vector<std::pair<double, PlannedFire>> timed_fires;   // (when, the projectile) for every notify of the montage that launches one, in time order
         size_t   next_fire = 0;
         std::set<std::pair<int64_t, uint64_t>> alert_logged;   // the (effect, creature) pairs this cast's alert has put a line in the log for (an alert's hit lands at every notify)
@@ -575,6 +594,17 @@ private:
         double             seconds = 0;
         std::vector<PlannedHit> hits;
         std::vector<PlannedFire> fires;   // the projectiles its montage launches
+        /// A hit the montage lands while one of its hit-window notify states is open (seconds after the cast begins), once on each player its record reaches.
+        struct PlannedWindow {
+            double   start = 0, end = 0;
+            int64_t  hit = 0;
+            int      key = 0;
+            double   interval = 0;   // seconds between two hits on one player; 0: one hit on each
+            BiteArea area;
+        };
+        std::vector<PlannedWindow> windows;   // in time order
+        /// The hits of the montage an ability enters when a body obstructs its root motion, `delay` seconds after the obstruction (the montage's own notifies, at its play rate).
+        std::vector<PlannedHit> branch_hits;
     };
     class Npc;
     Npc*  combatant(uint64_t actor_id);
@@ -621,6 +651,22 @@ private:
     /// single swing every creature had before the trees.
     bool  can_animate(const Npc& n) const;
     bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
+    /// Adds the montage's hit windows to a cast: each lands the hit record of the ability that carries the window's key, once on each player its record reaches.
+    void  plan_windows(const abilities::AbilityDef& def, const MontageData& montage, CastPlan& out);
+    /// Adds the hits of the montage an ability enters when a body obstructs the root motion of the chosen montage (the movement event its conditional branch is bound to).
+    void  plan_branch_hits(const abilities::AbilityDef& def, const MontageData& montage, CastPlan& out);
+    /// Queues a cast's windows on its pending attack (`p.end_at` is the end of the cast's montage): a window opens at its own time after the cast began.
+    void  queue_windows(const CastPlan& plan, Pending& p, double now);
+    /// Queues the hits of the montage the cast's ability enters on the obstruction of its root motion, and has the pending attack watch for it.
+    void  queue_branch(const CastPlan& plan, Pending& p);
+    /// Lands the hits of every window that is open at `now`: once for each player the window's record reaches (again after the window's interval, when it has one), and not again otherwise.
+    void  sweep_windows(Npc& n, Pending& p, double now);
+    /// Whether a window of an attack under way is open at `now`.
+    bool  window_open(const Pending& p, double now) const;
+    /// Whether an attack under way is looked at on every tick: a window of it is open, or its creature's root motion is watched for an obstruction.
+    bool  looks_every_tick(const Pending& p, double now) const;
+    /// When the creature's root motion is obstructed for the first time, the hits of the montage its ability enters then fall due after their own delays.
+    void  watch_branch(Npc& n, Pending& p, double now);
     /// `projectile`: the record of the projectile that carried the hit (0: the ability itself made it), which the confirmation names as its source.
     void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now, int64_t projectile = 0);
     /// As what a creature's hit lands: the place its children fire from and its zones open at, the confirmation's shape, the record a child, an effect's tick or a zone names, and

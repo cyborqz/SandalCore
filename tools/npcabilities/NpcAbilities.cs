@@ -42,16 +42,20 @@ namespace NpcAbilities;
 /// as a cooldown named "acc.<identifier>": the task's `gates` hold it, and `starts` has it as "acc.<identifier>=seconds" (or "=low~high" when the tree rolls the seconds anew each time) for the
 /// task whose completion empties it.  `next` (the last column) is the sequence: the abilities of the later fight tasks of the same tree that wait on a cooldown this task starts (a tree's own
 /// readying: a cooldown started by at most three of its tasks and waited on by at most four), which the creature plays one after the other.  A few abilities the world cannot play yet are left out
-/// whatever their conditions say (`Waiting`), with a `why` that names what they wait for.
+/// whatever their conditions say (`Waiting`), with a `why` that names what they wait for; a hold for a hit notify is lifted by targeting.py once the ability's montage has a hit window of one of
+/// the ability's hit keys, or the ability enters a montage with such hit notifies when its root motion is obstructed.  targeting.py also appends the last column of this table, `branches`.
 ///
 /// The settings a tree takes from its parameters (the distance of a bite, whether the creature may pounce) are read from the Blueprint's reference to the tree and the
 /// tree's own defaults (Params.cs).
 ///
 /// The montages are the animation assets of the Blueprint's folder.  `npc_montages.tsv` has one line per montage:
-///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires
+///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires  hit_windows
 /// `anim_end` is the time of the montage's "animation end" notify in seconds at a play rate of 1 (the animation is over there and the rest of the montage is its blend out; an ability's task
 /// is done at that notify, and the cooldowns it starts run from there), empty for a montage of a folder that `--anim-end-dir` does not list.  `fires` is "time:key" separated by ';' for every
-/// notify that launches a projectile (the time in seconds at a play rate of 1; `key` picks the ability's projectile record, 0 when the notify names none), in time order.
+/// notify that launches a projectile (the time in seconds at a play rate of 1; `key` picks the ability's projectile record, 0 when the notify names none), in time order.  `hit_windows` is
+/// "start:end:key" separated by ';' for every hit-window notify state (AoCAnimNotifyState_AbilityHit), in time order: while the state is open its tick lands the hit of the ability's hit that
+/// the key names, once on each target; "start:end:key:interval" when the state allows several hits (bEnableMultipleHits): it lands the hit on a target again every `interval` seconds the target
+/// stays in reach (HitIntervalInSeconds; 0.001 when the state names none: every tick).
 /// `montage` is the asset's object path as an ability record names it ("/Game/.../Name.Name"), `length` the montage's length in seconds at a play rate of 1
 /// (the time a montage runs is length / rate_scale / the play rate), `sections` "name:start:next" separated by ';' and `hits` "time:key" separated by
 /// ';' for every hit notify of the montage, in time order.  `key` picks the hit record of the ability the notify fires (the ability's hits are keyed the
@@ -69,7 +73,7 @@ public static partial class Reader
     public const string AbilitiesFile = "npc_abilities.tsv";
     public const string MontagesFile = "npc_montages.tsv";
     public const string AbilitiesHeader = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival\tnext";
-    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires";
+    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires\thit_windows";
 
     public sealed class AbilityRow
     {
@@ -94,6 +98,7 @@ public static partial class Reader
         public List<(string Name, float Start, string Next)> Sections = new();
         public List<(float Time, int Key)> Hits = new();
         public List<(float Time, int Key)> Fires = new();   // the notifies that launch a projectile: when, and the key of the ability's projectile record
+        public List<(float Start, float End, int Key, float Interval)> Windows = new();   // the hit-window notify states: when they open and close, the key of the ability's hit they land, and the seconds between two hits on one target (0: one hit)
         public List<(float Time, float X, float Y, float Z)> RootMotion = new();
     }
 
@@ -844,11 +849,35 @@ public static partial class Reader
         }
         foreach (var nt in StructsOf(e, "Notifies"))
         {
-            if (!nt.TryGetValue(out FPackageIndex idx, "Notify") || idx == null || idx.IsNull) continue;
+            // an event holds a point notify in its `Notify` or a notify state in its `NotifyStateClass`, never both
+            FPackageIndex idx = null;
+            bool isState = false;
+            if (nt.TryGetValue(out FPackageIndex pointIdx, "Notify") && pointIdx != null && !pointIdx.IsNull) idx = pointIdx;
+            else if (nt.TryGetValue(out FPackageIndex stateIdx, "NotifyStateClass") && stateIdx != null && !stateIdx.IsNull)
+            {
+                idx = stateIdx;
+                isState = true;
+            }
+            if (idx == null) continue;
             var obj = Lv.Resolve(idx);
             if (obj == null) continue;
             float time = nt.TryGetValue(out float lv, "LinkValue") ? lv : 0f;
             if (nt.TryGetValue(out float off, "TriggerTimeOffset")) time += off;
+            if (isState)
+            {
+                // a hit window: the state is open from here for `Duration` seconds and its tick lands the hit of `AbilityHitKey` (a 64-bit property, and a property at its default is not saved: none is key 0)
+                if (obj.ExportType != "AoCAnimNotifyState_AbilityHit") continue;
+                long windowKey = obj.TryGetValue(out long key64, "AbilityHitKey") ? key64 : obj.TryGetValue(out int key32, "AbilityHitKey") ? key32 : 0;
+                if (windowKey < 0 || windowKey > 1000) continue;   // (a key no ability hit carries: the table would not read)
+                float closes = time + (nt.TryGetValue(out float duration, "Duration") ? Math.Max(0f, duration) : 0f);
+                float repeat = 0f;
+                if (obj.TryGetValue(out bool several, "bEnableMultipleHits") && several)
+                {
+                    repeat = obj.TryGetValue(out float every, "HitIntervalInSeconds") && every > 0f ? every : 0.001f;
+                }
+                r.Windows.Add((time, closes, (int)windowKey, repeat));
+                continue;
+            }
             if (obj.ExportType == "AoCAnimNotify_AnimEnd")
             {
                 // the montage's animation is over here (the rest is the blend out): the ability's task is done at this notify
@@ -867,6 +896,7 @@ public static partial class Reader
         }
         r.Hits.Sort((a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Key.CompareTo(b.Key));
         r.Fires.Sort((a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Key.CompareTo(b.Key));
+        r.Windows.Sort((a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : a.Key.CompareTo(b.Key));
         r.RootMotion = ReadRootMotion(e, r.Montage, out bool unreadable);
         r.RootUnreadable = unreadable;
         rows.Add(r);
@@ -954,7 +984,8 @@ public static partial class Reader
               .Append(string.Join(";", r.RootMotion.Select(m => F(m.Time) + ":" + F(m.X) + ":" + F(m.Y) + ":" + F(m.Z)))).Append('\t')
               .Append(r.RootUnreadable ? "1" : "0").Append('\t')
               .Append(r.AnimEnd >= 0f ? F(r.AnimEnd) : "").Append('\t')
-              .Append(string.Join(";", r.Fires.Select(f => F(f.Time) + ":" + f.Key.ToString(CultureInfo.InvariantCulture)))).Append('\n');
+              .Append(string.Join(";", r.Fires.Select(f => F(f.Time) + ":" + f.Key.ToString(CultureInfo.InvariantCulture)))).Append('\t')
+              .Append(string.Join(";", r.Windows.Select(w => F(w.Start) + ":" + F(w.End) + ":" + w.Key.ToString(CultureInfo.InvariantCulture) + (w.Interval > 0f ? ":" + F(w.Interval) : "")))).Append('\n');
         }
         return sb.ToString();
     }

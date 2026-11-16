@@ -65,7 +65,11 @@ void CombatWorld::deliver_hit_effects(Npc& n, PlayerPort& port, const abilities:
     if (mask != 0 && (mask & 2) == 0) return;   // (a player is reached by the enemies' hits and by the ones with no side)
     // a creature's own hit lands its damage, and the hits it fires and the zones it opens, as it did; what a hit puts on a player (its debuffs) comes through a child, a zone or an effect's tick
     const bool own = landing.form == kHitOwn;
-    if (hit.mods.empty() && (own || hit.effects.empty()) && hit.recursive.empty() && hit.zones.empty()) return;   // (an empty marker with nothing to pass on)
+    // a hit with nothing to pass on is an empty marker; one that only throws its target (the Mycelions' impact knock) still reaches it, so its push reaches the player's side.  An impulse that
+    // does not apply is a throw only when the hit carries an effect as well (the knock's): a hit with no applying impulse and no effect (the Mycelions' launch hit scan, a marker the game only
+    // uses to feel for a body) lands nothing
+    const bool throws = hit.impulse && (hit.impulse->applies || !hit.effects.empty());
+    if (hit.mods.empty() && (own || hit.effects.empty()) && hit.recursive.empty() && hit.zones.empty() && !throws && !hit.teleport) return;
     HitMeta meta;
     // a hit a projectile carries names the projectile's record as its source, as the game confirms it; a child keeps the record of the hit that fired it
     meta.source_type = landing.source_type != 0 ? landing.source_type : (landing.projectile != 0 ? content::kSourceTypeProjectile : content::kSourceTypeAbility);

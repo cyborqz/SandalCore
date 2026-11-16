@@ -1320,6 +1320,14 @@ static void test_mounted_combat() {
     miss.flags = stats::kHitMiss;
     h.s->take_hit(h.conn, miss, h.t);
     CHECK(std::fabs(h.s->ride()->health() - (mount_before - 150)) < 0.01, "a missed hit takes no Health");
+    // a hit a creature's hit window lands is the same IncomingHit on the same port: it comes off the mount too (the Ram's Charge's hit record); the mount's own
+    // regeneration may have run since the first hits, so the loss is measured from the Health it stands at now
+    const double before_window = h.s->ride()->health();
+    combat::IncomingHit window_hit = hit;
+    window_hit.hit_guid = 6064633944846237696ll;
+    h.s->take_hit(h.conn, window_hit, h.t);
+    CHECK(std::fabs(h.s->ride()->health() - (before_window - 30)) < 0.01 && pawn_health(h) == rider_before, "a creature's window hit lands on the mount's Health too");
+    h.run(milliseconds(200));
     // the mount's Health goes to the client (EveryoneProxy item)
     h.run(milliseconds(100));
     // the death: the rest of its Health

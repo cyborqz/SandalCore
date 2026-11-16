@@ -50,3 +50,6 @@
 #include "combat_three_fixes_review_tests.inc"
 #include "combat_mob_child_hits_tests.inc"
 #include "combat_mob_child_hits_review_tests.inc"
+#include "combat_mob_hit_windows_tests.inc"
+#include "combat_mob_hit_windows_review_tests.inc"
+#include "combat_mob_shared_reads_tests.inc"

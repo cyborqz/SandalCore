@@ -36,11 +36,18 @@ bool waits_on_a_cooldown(const CreatureAbility& t, const std::string& name) {
     return false;
 }
 
-/// Whether a cooldown is the one that links a finished task to its chain step: it is named for one of the two moves, the finished task starts it and the step waits on it.  A cooldown
-/// named for neither (a global or special attack cooldown both of them use) is a shared gate, and a chain step asks it as every other move does.
+/// Whether a cooldown is the one that links a finished task to its chain step: the finished task starts it and the step waits on it as a condition of its own.  The reader's `next`
+/// holds only the pairs whose cooldown few tasks of the tree start and few wait on (a large part of the tree sharing one is a gate, not a readying), so a step is let through a condition
+/// it asks even when the cooldown is named for neither move (the goblins' Rally starts `Pummel` and the Headbutts' condition asks it).  A cooldown named for one of the two moves is the
+/// pair's own timer, as before; every other gate the pair shares is asked as usual.
 bool links_the_pair(const CreatureAbility& from, const CreatureAbility& step, const std::string& name) {
-    if (name.empty() || (name != from.task && name != step.task)) return false;
-    return starts_a_cooldown(from, name) && waits_on_a_cooldown(step, name);
+    if (name.empty() || !starts_a_cooldown(from, name)) return false;
+    for (const CondGroup& group : step.groups) {
+        for (const CondToken& token : group) {
+            if (token.atom.kind == CondAtom::Kind::Cooldown && token.atom.name == name) return true;
+        }
+    }
+    return (name == from.task || name == step.task) && waits_on_a_cooldown(step, name);
 }
 
 }  // namespace

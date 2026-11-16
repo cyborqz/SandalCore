@@ -13,7 +13,7 @@
 
 namespace mob_children {
 
-/// A zone's targeting record as the data step will write it (a shape and a radius) and, for a rule no real zone that plays shows, its overlap roles; undone when the test ends so the
+/// A zone's targeting record as the data holds it (a shape and a radius) and, for a rule no real zone that plays shows, its overlap roles; undone when the test ends so the
 /// next test finds the zone as the tables hold it.
 struct ZoneTweak {
     content::ZoneRow*                           row = nullptr;
@@ -214,7 +214,7 @@ void test_an_overlap_hit_reaches_the_player_who_entered_or_left(Fixture& f) {
 AOC_REGISTER_TEST(test_an_overlap_hit_reaches_the_player_who_entered_or_left);
 
 // R1 (zones: where): a hit that reaches no enemy (the Bog Brute's bash spawns its mud pool with a hit on itself) opens its zone where that hit lands, which is the caster's place and
-// not the place of a player the move reached: it opens no zone at the player's feet.  (The zone has its record's 300 cm, as the data step will write it.)
+// not the place of a player the move reached: it opens no zone at the player's feet.  (The zone has its record's 300 cm, as the data holds it.)
 void test_a_self_hits_zone_does_not_open_at_the_players_feet(Fixture& f) {
     std::printf("the Bog Brute's bash spawns its mud pool with a hit on itself: the pool does not open at the player's feet and does not snare him\n");
     combat::NpcAbilityData tables;

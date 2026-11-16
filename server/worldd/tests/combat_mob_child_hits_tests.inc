@@ -8,7 +8,8 @@
 //  The Flamespeakers' Fire Bomb is fought through on the real rows: the cast its tree allows, the projectile, the impact child (Health, the Burning debuff) and the 6 s fire, the
 //  confirmations the player gets (the parent projectile, the child, the burn's ticks, the fire's ticks) and their shapes; then a second player, a player who walks out of the fire,
 //  a caster that resets mid-throw, two Flamespeakers side by side and the same caster's second throw; the Ashen Haunt War Mage's Fireball is the second readable carrier of the data.
-//  The fire's own targeting record is not in the content.db yet (the reader change is handed over): its tests give the zone the record's 300 cm, as the data holds it.
+//  The fire's own targeting record is a 300 cm sphere in the data: its tests set the same on the zone, so they also run on a content.db from before the zones' targeting records were
+//  extracted (combat_mob_shared_reads_tests.inc reads the data's own record).
 //  (included by the test program through its registered list; every test registers itself, see tests/README.md)
 // ============================================================================
 
@@ -54,7 +55,7 @@ private:
     combat_rig::RigFighter   fighter_;
 };
 
-/// The zone's reach as the game's own targeting record holds it (the extraction the draft reads does not carry the zone targetings yet: see the reader change): a sphere.
+/// The zone's reach as the game's own targeting record holds it: a sphere (the data has it; a content.db from before the zones' targeting records were extracted does not).
 void give_zone_radius(const abilities::Catalog& catalog, int64_t zone, double radius) {
     auto* row = const_cast<content::ZoneRow*>(catalog.zone(zone));
     if (!row) return;
@@ -307,7 +308,7 @@ void test_the_flamespeaker_throws_the_fire_bomb(Fixture& f) {
     BanditOpen made;
     MOB_CHILD(make_bandit_open(f, tables, path, made), "the world makes the open for Boog (an elite Flamespeaker) (verdict: %s)", spawns::verdict_name(made.why));
     if (!made.open) return;
-    // the fire's own targeting record is not in this content.db; the record holds a 300 cm sphere (out/reader hands the extractor change over)
+    // the fire's own targeting record holds a 300 cm sphere (set here too, for a content.db from before the zones' targeting records were extracted)
     mob_children::give_zone_radius(*f.catalog, mob_children::kFireBombZone, 300.0);
     rally_group::LogCapture log;
     mob_children::Field field(f, tables, 0, 100);

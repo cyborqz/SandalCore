@@ -1166,7 +1166,10 @@ bool CombatWorld::plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& 
         }
         if (fire.projectile != 0 && catalog_.projectile(fire.projectile)) out.fires.push_back(std::move(fire));
     }
-    if (out.hits.empty() && out.fires.empty() && !is_alert_move(def, catalog_, data_.ids().health) && !is_state_move(def, catalog_, data_.ids().health)) return false;   // (an alert has no hit to land: the montage is the whole cast; a state carries the ability's own effects)
+    // the montage's hit-window notify states (the game lands their hit on every tick of the state) and the montage the ability enters when a body obstructs the cast's root motion, whose hits land then
+    plan_windows(def, *montage, out);
+    plan_branch_hits(def, *montage, out);
+    if (out.hits.empty() && out.fires.empty() && out.windows.empty() && out.branch_hits.empty() && !is_alert_move(def, catalog_, data_.ids().health) && !is_state_move(def, catalog_, data_.ids().health)) return false;   // (an alert has no hit to land: the montage is the whole cast; a state carries the ability's own effects)
     out.montage = montage;
     out.seconds = montage->seconds(1.0);
     return true;
@@ -1293,7 +1296,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         if (npc_casts_logged_ < kLoggedNpcCasts) {
             ++npc_casts_logged_;
             p.logged = true;
-            spdlog::info("[combat] {} ({}) plays {}: {} hit(s) and {} projectile(s) over {:.2f} s{}", n.actor_id, log_name(n.actor_id, n.archetype, n.leaf), a.ability->row.name, plan.hits.size(), plan.fires.size(), plan.seconds,
+            spdlog::info("[combat] {} ({}) plays {}: {} hit(s) and {} projectile(s) over {:.2f} s{}", n.actor_id, log_name(n.actor_id, n.archetype, n.leaf), a.ability->row.name, plan.hits.size() + plan.windows.size() + plan.branch_hits.size(), plan.fires.size(), plan.seconds,
                          a.task && a.task->stop_movement ? ", standing still" : "");
         }
         // an alert's cast is named on its own, past the run's first cast lines, at most once a second for each creature: the lines of the effects it lands say where they went
@@ -1313,9 +1316,13 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         for (const PlannedFire& fire : plan.fires) p.timed_fires.emplace_back(now + std::max(fire.delay, kMinHitDelay), fire);
         for (size_t i = 1; i < p.timed_fires.size(); ++i) p.timed_fires[i].first = std::max(p.timed_fires[i].first, p.timed_fires[i - 1].first);
         p.end_at = now + plan.seconds;
+        queue_windows(plan, p, now);
+        queue_branch(plan, p);
         p.due = p.end_at;
         if (!p.timed_hits.empty()) p.due = std::min(p.due, p.timed_hits.front().first);
         if (!p.timed_fires.empty()) p.due = std::min(p.due, p.timed_fires.front().first);
+        if (!p.windows.empty()) p.due = std::min(p.due, p.windows.front().start);
+        if (p.branch_watch) p.due = std::min(p.due, now);   // (the creature's root motion is looked at on every tick for the obstruction the branch waits for)
     } else {
         p.due = now + a.windup_ms / 1000.0;
         std::set<int64_t> seen;
@@ -1364,7 +1371,7 @@ void CombatWorld::resolve_pending(double now) {
     std::vector<Pending> keep;   // attacks with their own animation that still have a hit or their end to come
     for (size_t i = 0; i < pending_.size();) {
         // (an attack that is not due yet is passed over without a copy: this runs every tick for every attack under way; one of a creature that died or was reset goes, due or not)
-        if (pending_[i].due > now) {
+        if (pending_[i].due > now && !(pending_[i].animated && looks_every_tick(pending_[i], now))) {
             bool gone = false;
             if (pending_[i].animated) {
                 const auto owner = npcs_.find(pending_[i].npc);
@@ -1382,7 +1389,7 @@ void CombatWorld::resolve_pending(double now) {
                 pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
                 continue;
             }
-            if (p.due > now) {
+            if (p.due > now && !looks_every_tick(p, now)) {
                 ++i;
                 continue;
             }
@@ -1391,6 +1398,7 @@ void CombatWorld::resolve_pending(double now) {
             PlayerPort* port = player(p.target);
             // (a stun drops the attack when it goes on; this keeps one that lands inside the delivery of this attack's own hits from letting the rest of them through)
             const auto stunned = [&n] { return (n.cc.flags & content::kCcNoAbilities) != 0; };
+            if (!stunned()) watch_branch(n, p, now);   // (a creature held by a body enters the montage its branch names: its hits fall due from now)
             while (p.next_hit < p.timed_hits.size() && p.timed_hits[p.next_hit].first <= now && !stunned()) {
                 const size_t at_hit = p.next_hit++;
                 const int64_t guid = p.timed_hits[at_hit].second;
@@ -1412,6 +1420,7 @@ void CombatWorld::resolve_pending(double now) {
                 const PlannedFire fire = p.timed_fires[p.next_fire++].second;
                 launch(n, p.target, *p.ability, fire, now);
             }
+            if (!stunned()) sweep_windows(n, p, now);   // (a hit window lands on the tick, once for each player its record reaches)
             if (stunned()) continue;   // (its cast was stopped and the rest of its hits are dropped)
             if (p.next_hit >= p.timed_hits.size() && p.next_fire >= p.timed_fires.size() && now >= p.end_at) {
                 if (p.logged && port) {   // where the lunge left the creature, as the server has it (what the client draws is for the client's log)
@@ -1433,6 +1442,16 @@ void CombatWorld::resolve_pending(double now) {
             p.due = p.end_at;
             if (p.next_hit < p.timed_hits.size()) p.due = std::min(p.due, p.timed_hits[p.next_hit].first);
             if (p.next_fire < p.timed_fires.size()) p.due = std::min(p.due, p.timed_fires[p.next_fire].first);
+            if (looks_every_tick(p, now)) {
+                p.due = now;   // (an open window is looked at on every tick: a player who comes in is hit then; so is a root motion that an obstruction may still hold)
+            } else {
+                for (const Pending::PendingWindow& w : p.windows) {
+                    if (w.start > now) {
+                        p.due = std::min(p.due, w.start);
+                        break;
+                    }
+                }
+            }
             keep.push_back(std::move(p));
             continue;
         }
@@ -2552,5 +2571,6 @@ void CombatWorld::tick(double now) {
 #include "combat/alert_effects.inc"      // where an alert's hits land and the effects they put on the caster and its allies
 #include "combat/combat_zone_area.inc"   // who stands in a lingering zone (actors_in_area)
 #include "combat/combat_mob_child_hits.inc"   // the hits a creature's hit fires when it lands, their effects on a player and their lingering zones
+#include "combat/combat_mob_hit_windows.inc"   // a montage's hit-window notify states and the montage a movement-event branch enters
 
 }  // namespace aoc::worldd::combat

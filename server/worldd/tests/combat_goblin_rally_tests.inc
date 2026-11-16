@@ -62,7 +62,16 @@ void test_goblin_rally_group_in_the_real_tables(Fixture& f) {
     }
     for (const char* held : {"Goblin_Headbutt", "Goblin_StationaryHeadbutt"}) {
         const combat::CreatureAbility* t = task_of(goblin, held);
-        CHECKF(t && t->unknown && t->why.find("hit notify") != std::string::npos, "%s is held back: its montage has no hit (unknown %d, the table says: %s)", held, t && t->unknown ? 1 : 0, t ? t->why.c_str() : "no task");
+        // the build's tables carry the hit windows once the reader writes them; until then the montages have no hit and the reader holds the Headbutts
+        std::string dir = NPC_MOTION_PATH;
+        dir.erase(dir.find_last_of("/\\") + 1);
+        std::ifstream montages(dir + "npc_montages.tsv", std::ios::binary);
+        std::string header;
+        std::getline(montages, header);
+        const bool windows_written = header.find("\thit_windows") != std::string::npos;
+        CHECKF(t && t->unknown == !windows_written && (windows_written ? t->why.empty() : t->why.find("hit notify") != std::string::npos),
+               "%s is held back only while its montage has no hit window (windows written %d, unknown %d, the table says: %s)", held, windows_written ? 1 : 0, t && t->unknown ? 1 : 0,
+               t ? t->why.c_str() : "no task");
     }
     const combat::CreatureAbility* retreat = task_of(raven, "Raven_Retreat");
     CHECKF(retreat && retreat->unknown && retreat->why.find("flying") != std::string::npos, "the Raven's retreat is held back until flying creatures exist (unknown %d, the table says: %s)", retreat && retreat->unknown ? 1 : 0, retreat ? retreat->why.c_str() : "no task");
@@ -114,7 +123,18 @@ void test_goblin_rallies_after_twenty_seconds(Fixture& f) {
     CHECKF(!rallies.empty() && rally_without_target, "it rallies in an 80 s fight, with no target in the cast (%zu rallies)", rallies.size());
     CHECKF(!rallies.empty() && rallies.front() >= 20.0 && rallies.front() < 36.0, "... once its fight is 20 to 30 s old (the first at %.2f s of a fight that began within the first second)", rallies.empty() ? -1.0 : rallies.front());
     CHECKF(rallies.size() < 2 || rallies[1] - rallies[0] >= 40.0, "... and again only after the 40 s its Rally starts on the group's timer (%.2f s apart)", rallies.size() < 2 ? -1.0 : rallies[1] - rallies[0]);
-    CHECKF(headbutts == 0, "it never headbutts: the Headbutts are held back (%zu)", headbutts);
+    // the build's tables carry the hit windows once the reader writes them: then the 20-30 s clock is the Headbutt's own gate and it plays; until then the reader holds them
+    std::string dir = NPC_MOTION_PATH;
+    dir.erase(dir.find_last_of("/\\") + 1);
+    std::ifstream montages(dir + "npc_montages.tsv", std::ios::binary);
+    std::string header;
+    std::getline(montages, header);
+    const bool windows_written = header.find("\thit_windows") != std::string::npos;
+    if (windows_written) {
+        CHECKF(headbutts >= 1, "it headbutts once its 20-30 s clock is up and its window is in the tables (%zu)", headbutts);
+    } else {
+        CHECKF(headbutts == 0, "it never headbutts: the Headbutts are held back (%zu)", headbutts);
+    }
 }
 
 AOC_REGISTER_TEST(test_goblin_rallies_after_twenty_seconds);
