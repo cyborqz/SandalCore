@@ -131,7 +131,7 @@ func TestRealStatProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh, results, err := statprog.CompileExprs(g, statprog.Options{}, exprs)
+	fresh, results, err := statprog.CompileExprs(g, statprog.Options{IntDivide: true}, exprs)
 	if err != nil {
 		t.Fatal(err)
 	}

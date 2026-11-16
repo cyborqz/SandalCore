@@ -97,7 +97,7 @@ func compileRealExprs(t testing.TB) (*Bundle, []ExprResult, []Expr, []int64) {
 	realEx.once.Do(func() {
 		realEx.exprs, realEx.ids, realEx.err = LoadExprs(path)
 		if realEx.err == nil {
-			realEx.b, realEx.res, realEx.err = CompileExprs(g, Options{}, realEx.exprs)
+			realEx.b, realEx.res, realEx.err = CompileExprs(g, Options{IntDivide: true}, realEx.exprs)
 		}
 	})
 	if realEx.err != nil {

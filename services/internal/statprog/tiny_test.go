@@ -617,3 +617,91 @@ func TestRunInstructionBudget(t *testing.T) {
 		}
 	}
 }
+
+// TestIntDivideOfWholeNumbers: the ability expressions' division of two whole numbers is the game's integer division, truncating toward zero; the
+// Ranger's Thorns reflects the holder's level over 3, and the default (no option) keeps the construct unsupported.
+func TestIntDivideOfWholeNumbers(t *testing.T) {
+	g := TinyGraph(false)
+	b, res, err := CompileExprs(g, Options{IntDivide: true}, []Expr{
+		{What: "thorns", Text: "-(GetCharacterLevel(GetInstigator())/3)"},
+		{What: "half", Text: "7 / 2"},
+		{What: "minus half", Text: "-7 / 2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []float64{-8, 3, -3} {
+		if res[i].Program < 0 {
+			t.Fatalf("%s: %s", []string{"thorns", "half", "minus half"}[i], res[i].Err)
+		}
+		got, err := evalExpr(t, b, res[i].Program, 25)
+		if err != nil || got != want {
+			t.Errorf("%s = %v, %v; want %v", []string{"thorns", "half", "minus half"}[i], got, err, want)
+		}
+	}
+	_, plain, err := CompileExprs(g, Options{}, []Expr{{What: "thorns", Text: "-(GetCharacterLevel(GetInstigator())/3)"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain[0].Program != -1 || !strings.Contains(plain[0].Err, divisionConstruct) {
+		t.Errorf("the default compile = (%d, %q), want the unsupported division", plain[0].Program, plain[0].Err)
+	}
+}
+
+// TestIntDivideLeavesFloatDivisionAlone: a division with an operand proven to be a float is compiled and runs exactly as it did before, so the option
+// changes only the division of two whole numbers.
+func TestIntDivideLeavesFloatDivisionAlone(t *testing.T) {
+	exprs := []Expr{
+		{What: "float half", Text: "7.0 / 2"},
+		{What: "float sum", Text: "(1 + 2.0) * 3 / 4"},
+		{What: "level as a float", Text: "Float(GetCharacterLevel(GetInstigator())) / 3"},
+	}
+	g := TinyGraph(false)
+	before, resBefore, err := CompileExprs(g, Options{}, exprs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, resAfter, err := CompileExprs(g, Options{IntDivide: true}, exprs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range exprs {
+		if resBefore[i].Program < 0 || resAfter[i].Program < 0 {
+			t.Fatalf("%s: %s / %s", exprs[i].What, resBefore[i].Err, resAfter[i].Err)
+		}
+		if !bytes.Equal(before.Progs[resBefore[i].Program].Code, after.Progs[resAfter[i].Program].Code) {
+			t.Errorf("%s: the program changed under IntDivide", exprs[i].What)
+		}
+		v, err := evalExpr(t, before, resBefore[i].Program, 25)
+		if err != nil {
+			t.Fatalf("%s: %v", exprs[i].What, err)
+		}
+		w := mustEval(t, after, resAfter[i].Program, 25)
+		if v != w {
+			t.Errorf("%s: %v on the old compile, %v on the new", exprs[i].What, v, w)
+		}
+	}
+}
+
+func evalExpr(t *testing.T, b *Bundle, prog, level int) (float64, error) {
+	t.Helper()
+	in := Inputs{Class: 1, Level: level}
+	run, err := b.Run(in, nil)
+	if err != nil {
+		return 0, err
+	}
+	ev, err := b.NewEvaluator(run, in, nil)
+	if err != nil {
+		return 0, err
+	}
+	return ev.Eval(prog, nil)
+}
+
+func mustEval(t *testing.T, b *Bundle, prog, level int) float64 {
+	t.Helper()
+	v, err := evalExpr(t, b, prog, level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}

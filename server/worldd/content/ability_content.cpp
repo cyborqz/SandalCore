@@ -144,7 +144,7 @@ constexpr const char* kZoneSql = "SELECT guid, name, life_time, tick_rate, use_g
 constexpr const char* kZoneSpawnSql = "SELECT guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, "
                                       "expire_after_hits_expr, expire_if_expr, targeting_guid, spawn FROM ab_zone WHERE guid = ?1";
 constexpr const char* kZoneHitsSql = "SELECT role, hit_guid FROM ab_zone_hit WHERE zone_guid = ?1 ORDER BY role, ord";
-constexpr const char* kTargetingDefSql = "SELECT guid, name, shape, radius, angle, volumes FROM ab_targeting_def WHERE guid = ?1";
+constexpr const char* kTargetingDefSql = "SELECT guid, name, shape, radius, angle, volumes, sorting FROM ab_targeting_def WHERE guid = ?1";
 constexpr const char* kAllExprsSql = "SELECT id, text, terms, program, uses_target, error FROM ab_expr ORDER BY id";
 constexpr const char* kGuidListSql[] = {"SELECT guid FROM ab_ability ORDER BY guid", "SELECT guid FROM ab_hit ORDER BY guid",
                                         "SELECT guid FROM ab_effect ORDER BY guid", "SELECT guid FROM ab_projectile ORDER BY guid",
@@ -875,6 +875,27 @@ std::optional<TargetingDefRow> AbilityContent::targeting_def(int64_t guid, std::
             t.radius = col_f64(s, 3);
             t.angle = col_f64(s, 4);
             t.volumes = col_text(s, 5);
+            // the first volume's line-of-sight flag: the sphere a recursive hit aims with asks it (the melodies' sphere leaves out the allies behind the ground)
+            const nlohmann::json volumes = nlohmann::json::parse(t.volumes, nullptr, false);
+            if (volumes.is_array() && !volumes.empty() && volumes[0].is_object()) {
+                const auto los = volumes[0].find("bEnableLOSCheck");
+                t.los = los != volumes[0].end() && los->is_boolean() && los->get<bool>();
+            }
+            // the Sorting entries: [{"filter": <ab_expr id>, "method": "Score", "score": <ab_expr id>}, ...]
+            const nlohmann::json sorting = nlohmann::json::parse(col_text(s, 6), nullptr, false);
+            if (sorting.is_array()) {
+                for (const auto& e : sorting) {
+                    if (!e.is_object()) continue;
+                    TargetingSortRow row;
+                    const auto filter = e.find("filter");
+                    const auto score = e.find("score");
+                    const auto method = e.find("method");
+                    if (filter != e.end() && filter->is_number_integer()) row.filter = filter->get<int64_t>();
+                    if (score != e.end() && score->is_number_integer()) row.score = score->get<int64_t>();
+                    if (method != e.end() && method->is_string()) row.method = method->get<std::string>();
+                    t.sorting.push_back(std::move(row));
+                }
+            }
             out = std::move(t);
             return true;
         }, error))

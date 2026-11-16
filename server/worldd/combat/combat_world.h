@@ -377,6 +377,8 @@ public:
     std::vector<ZoneTarget> actors_in_area(const Fighter& from, const Vec3& centre, const ZoneArea& area, size_t max);
     /// The height of the ground under (x, y): the walkable floor nearest to `z_hint`, or the landscape; false where the world knows none (no ground data).
     bool ground_height(double x, double y, double z_hint, double* z) const;
+    /// Whether the ground between two places is clear (the walking map's line: off the map the ground says nothing and it is clear).
+    bool line_clear(const Vec3& from, const Vec3& to) const;
     /// The ObjectId of the NPC target's collision cylinder: what the ability items name as Targets and the confirmations export as the actor's
     /// "CollisionCylinder" (NpcInfo::collision_cylinder, the actor's + 4 as retail mints it); 0 for an actor that has none.
     uint64_t hit_component_of(uint64_t actor_id) const;
@@ -619,8 +621,6 @@ private:
     bool  hit_reaches(const Npc& n, const Fighter& body, const BiteArea& area, bool is_target) const;
     /// The player the target part of `area` finds for a hit of an attack aimed at `cast_target`: the creature's own target and the one the cast was aimed at, in the order the record says (0: none).
     uint64_t aimed_at(const Npc& n, const BiteArea& area, uint64_t cast_target);
-    /// Whether the creature has a line of sight between the two places (the walking map's: off the map the ground says nothing and it sees).
-    bool  line_clear(const Vec3& from, const Vec3& to) const;
     /// Whether every hit of the ability that hurts an enemy has a targeting record the world can decide by; an ability with one it cannot decide by is not animated.
     bool  areas_usable(const abilities::AbilityDef& def) const;
     /// Whether a hit of the ability trips its target (a bear's grab throws a player down while the two play a paired animation): the world has no tripping of a player and no animation for the target

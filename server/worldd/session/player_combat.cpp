@@ -99,7 +99,12 @@ std::vector<uint64_t> PlayerSession::actors_of(const std::vector<protocol::emit:
 void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& h, Clock::time_point now) {
     if (!pipeline_) return;
     // the mounts milestone, stage 3: a hit aimed at a mounted rider lands on the MOUNT's Health; the rider's own is untouched
-    if (mounted()) return hit_on_mount(conn, h, now);
+    if (mounted()) {
+        hit_on_mount(conn, h, now);
+        // ... but the rider's own effects that listen to being hit still see it (the hit's numbers went to the mount)
+        pipeline_->raise_hit_taken(h, ability_seconds(now));
+        return;
+    }
     pipeline_->receive_hit(h, ability_seconds(now));
     if (mounts_ && (h.flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : h.mods) {

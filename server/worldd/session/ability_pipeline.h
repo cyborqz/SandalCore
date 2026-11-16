@@ -540,6 +540,9 @@ public:
     /// What another player's hit takes off this character (the three Blessings of the Pantheon that the fourth one removes): its EffectsToRemoveIds or
     /// its filter, as the hit's own record says.  The change is an event.
     void apply_ally_removal(const abilities::HitDef& hit, double now);
+    /// A hit that landed on the character's mount: the rider's own effects that listen to being hit react to it (the numbers went to the mount; the
+    /// event reads them as the hit's).  The change is an event.
+    void raise_hit_taken(const combat::IncomingHit& hit, double now);
     // ---- a Summoner's pet (session/ability_pipeline_pets.cpp)
     /// What a pet's ability costs its owner: the Essence it takes from each stat (all the ability's cost hits added up) and the cooldown it starts.
     struct PetPayment {
@@ -690,13 +693,14 @@ private:
         /// The hit lands (its mods and effects) but is confirmed by the caller itself (the Saga's launcher, whose confirmation waits for the projectile's landing).
         bool    silent = false;
     };
-    /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
+    /// A hit the character made, as the reactions that listen to hits see it (OwnerHits), or a hit he took (OwnerIsHit).
     struct HitEvent {
         const abilities::HitDef*     hit = nullptr;
         const abilities::AbilityDef* ability = nullptr;   // the ability it belongs to (null for an effect's, a zone's or a reaction's hit)
         HitSource                    src;
-        std::vector<uint64_t>        targets;             // the other actors it reached (NPCs)
+        std::vector<uint64_t>        targets;             // the other actors it reached (NPCs); for a hit he took, nobody (he is the target)
         bool                         on_self = false;     // the caster is among the targets
+        uint64_t                     attacker = 0;        // a hit he took: who struck him (the event's HitSource and HitInstigator)
         std::map<int64_t, double>    mods;                // the stat mods it resolved, by stat guid, summed over its targets (a loss is negative)
         std::map<int64_t, double>    effective;           // ... and the part of them that took effect
         uint8_t                      flags = 0;           // the flags rolled on its targets (Crit, Block, Miss, ORed)
@@ -705,6 +709,7 @@ private:
     struct ReactionContext {
         const HitEvent*              hit = nullptr;        // an event of kind Hit
         const abilities::AbilityDef* consumed = nullptr;   // an event of kind Ability: the ability whose cost was paid
+        bool                         taking = false;       // a hit the character took (OwnerIsHit): the event's attacker is its HitSource and HitInstigator
     };
     /// One of an open cast's hits the client may ask for.
     struct Pending {
@@ -1111,10 +1116,28 @@ void   step_multi_hit(Cast& cast, double t);
         const abilities::AbilityDef* ability = nullptr;
         HitSource                    src;
         std::vector<uint64_t>        targets;
+        /// A hit a reaction's chain fires (the heal a melody's projectile lands): the hit's own RecursiveHit children follow it, at `depth`.
+        bool                         children = false;
+        int                          depth = 0;
     };
     std::vector<DelayedChild> delayed_;
     static constexpr size_t kMaxDelayed = 64;
     void   land_delayed(const DelayedChild& child, double t);
+    /// A hit another player's ability landed on the character (apply_ally_landing), whose being-hit reactions wait for this runtime's own next step: they may
+    /// hit the attacker back, and the attacker's own step is still running when this one comes in (his evaluation must not be dropped under it).
+    struct TakenHit {
+        int64_t                          hit_guid = 0, source_type = 0, source_guid = 0;
+        uint64_t                         attacker = 0;
+        uint8_t                          flags = 0;
+        std::vector<combat::ResolvedMod> mods;
+        std::vector<double>              effective;
+        double                           at = 0;
+    };
+    std::vector<TakenHit> taken_;
+    static constexpr size_t kMaxTaken = 64;
+    /// The party of the caster, for a targeting record's score (IsApplicableTarget(GetTarget(), TARGET_Party)): the actors of the caster's party around the
+    /// sphere being scored, himself included; null outside a score (every friendly actor is then a party member).
+    const std::set<uint64_t>* party_ids_ = nullptr;
     bool   chaining_ = false;   // a chain's own jumps apply their hit without starting another chain (chain_from)
     int    resplendent_hits_ = 0;   // the Resplendent Beam's hits this cast has fired (GetHitTriggerCount: the heal's formula counts them)
     const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
@@ -1191,14 +1214,34 @@ void   step_multi_hit(Cast& cast, double t);
     /// the heal moves); nullopt when neither knows the actor. The mount is not a combat world actor: its place and distance come from the session.
     std::optional<combat::TargetInfo> target_info(uint64_t actor);
     /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target;
-    /// `first_landed` (when given) is the first actor the hit took effect on (0: none), for a hit that goes on from the one it landed on.
+    /// `first_landed` (when given) is the first actor the hit took effect on (0: none), for a hit that goes on from the one it landed on; `first_reached` (when given) is
+    /// the first actor the hit reached, whether or not its numbers could be worked out, for a child that follows the hit on the actor it was aimed at; `ran` (when given)
+    /// says whether the hit took effect on any actor (a hit whose formula does not compile reached one but ran on none).
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                const abilities::AbilityDef* ability, bool* landed = nullptr, uint64_t* first_landed = nullptr);
+                                const abilities::AbilityDef* ability, bool* landed = nullptr, uint64_t* first_landed = nullptr, uint64_t* first_reached = nullptr,
+                                bool* ran = nullptr);
     // reactions (session/ability_reactions.cpp)
     /// An expression of the reaction tables run for the event: the hit's tags and flags, the stat mods it resolved, the ability whose cost was paid.
     bool   eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why);
     /// The hit event (kind Hit, OwnerHits), raised once a hit of the caster has landed and its confirmation is queued.
     void   raise_hit_event(bootstrap::AbilityChange& c, const HitEvent& ev, double t);
+    /// The hit event of a hit the character took (kind Hit, OwnerIsHit): the reactions of the effects he holds that listen to it.  `apply` false: the
+    /// numbers went to his mount, and only the event is raised.
+    void   raise_hit_taken(bootstrap::AbilityChange& c, int64_t hit_guid, int64_t source_type, int64_t source_guid, uint64_t attacker, uint8_t flags,
+                           const std::vector<combat::ResolvedMod>& mods, const std::vector<double>& effective, double t, bool apply);
+    /// A hit's RecursiveHit children, on whom their targeting record says: Default_Self is the caster, a sphere its sorting picks around the actor the
+    /// parent landed on; a child that fires a projectile sends its landing hit there after its flight, and that hit follows its own children.
+    void   follow_hit_children(bootstrap::AbilityChange& c, const abilities::HitDef& hit, uint64_t landed_on, double t, const HitSource& src, int depth);
+    /// Whether a hit fires a child at the caster's party around him (a sphere targeting record, a mask that names the party and no Ally): the Tick hit of a Bard's
+    /// melody keeps its party's Buff up this way.
+    bool   fires_party_aura(const abilities::HitDef& hit) const;
+    /// The actors a recursive child's sphere targeting record picks around `centre`, by the record's filter and score (the first entry whose filter holds).
+    std::vector<uint64_t> targeting_targets(const abilities::HitDef& child, const content::TargetingDefRow& def, const combat::Vec3& centre);
+    /// The score of one actor under the targeting record's sorting (the first entry whose filter holds, whose position in the list is `index`).  False: no entry lets
+    /// the actor through.
+    bool   targeting_score(const content::TargetingDefRow& def, uint64_t actor, const combat::TargetInfo& ti, double& out, int& index);
+    /// An expression of a targeting record run with one actor as GetTarget() (its stats, its effects, its side and its distance).
+    bool   eval_target(int64_t expr, uint64_t actor, const combat::TargetInfo& ti, double& out, std::string& why);
     /// The ability event (kind Ability, Consume), raised once the cost of a cast was paid.
     void   raise_ability_event(bootstrap::AbilityChange& c, const abilities::AbilityDef& ability, double t);
     /// The carriers' reactions bound to the event, in the order the game runs them: each carrier in the order the character got it, its reactions as listed.

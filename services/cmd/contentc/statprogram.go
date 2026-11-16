@@ -27,7 +27,9 @@ func addStatProgram(ctx context.Context, sdb *sql.DB, path string, opt *Options)
 	if err != nil {
 		return fmt.Errorf("stat program: %w", err)
 	}
-	b, results, err := statprog.CompileExprs(g, statprog.Options{}, exprs)
+	// The ability expressions' division of two whole numbers is the game's integer division (truncating toward zero): the Ranger's Thorns reflects
+	// `GetCharacterLevel(GetInstigator()) / 3`, and a data formula that compiles today (a float operand) gives the same value under this option.
+	b, results, err := statprog.CompileExprs(g, statprog.Options{IntDivide: true}, exprs)
 	if err != nil {
 		return fmt.Errorf("stat program: %w", err)
 	}

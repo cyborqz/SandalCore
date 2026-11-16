@@ -54,6 +54,8 @@ public:
     void move_to(const combat::Vec3& p) { pos_ = p; }
     /// The way the player faces (degrees, 0 along +X, turning towards +Y); a knock-back, a push and a pull work from it.
     void face(double degrees) { facing_ = degrees; }
+    /// The alignments the world reads this player's side from (a test of a fight between two players gives one of them a creature's).
+    void set_alignments(std::vector<int64_t> aligns) { aligns_ = std::move(aligns); }
 
 private:
     ability_rig::Rig&    rig_;
@@ -86,11 +88,21 @@ public:
     RigFighter& rig_fighter() { return fighter_; }
     void receive_hit(const combat::IncomingHit& hit, double now) override {
         hits.push_back(hit);
+        // the session's own path (PlayerSession::take_hit): the pipeline takes the numbers through the shields, confirms the hit and raises the being-hit
+        // events of the character's effects (the Thorns' reflection and the like).  A test that replays a retail reply keeps the old bare damage: its
+        // expected reply was recorded without the events this path adds.
+        if (pipeline_hits) {
+            rig_.pipe->receive_hit(hit, rig_.clock = std::max(rig_.clock, now));
+            rig_.take();
+            return;
+        }
         for (const combat::ResolvedMod& m : hit.mods) {
             if (m.stat_guid == content::kGuidHealth && m.value < 0) rig_.pipe->take_damage(-m.value, rig_.clock = std::max(rig_.clock, now));
         }
         rig_.take();
     }
+    /// True: the hit goes through AbilityPipeline::receive_hit (the session's path).  False: the bare Health loss the replay expects.
+    bool pipeline_hits = false;
     /// A hit of another player's ability on this one (the Saga's heal): its rig applies it to its own pawn, as the session's pipeline does.
     void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) override {
         ally_lands.push_back(hit.hit_guid);

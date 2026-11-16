@@ -810,6 +810,8 @@ protected:
                     if (name == "TARGET_Enemy") return ctx_->enemy ? 1.0 : 0.0;
                     if (name == "TARGET_Neutral") return ctx_->neutral ? 1.0 : 0.0;
                     if (name == "TARGET_Self") return 0.0;
+                    // a score of a targeting record knows the caster's party around its sphere ("favors yourself and party members")
+                    if (name == "TARGET_Party" && p_.party_ids_) return p_.party_ids_->count(ctx_->target_actor) != 0 ? 1.0 : 0.0;
                     return (!ctx_->enemy && !ctx_->neutral) ? 1.0 : 0.0;   // Ally, Party, Raid: its own side
                 }
                 return name == "TARGET_Self" ? 1.0 : 0.0;
@@ -1033,6 +1035,50 @@ bool AbilityPipeline::eval_in_event(int64_t expr, const ReactionContext& rc, dou
     evaluation_->set_consumed(consumed_);
     const bool ran = evaluation_->eval(e->program, host, v, err);
     drop_evaluation();   // the character as it is when the next event looks (a reaction's hits change it)
+    if (!ran) {
+        why = err;
+        return false;
+    }
+    if (!std::isfinite(v)) {
+        why = "expression " + std::to_string(expr) + " is not a finite number";
+        return false;
+    }
+    out = v;
+    return true;
+}
+
+bool AbilityPipeline::eval_target(int64_t expr, uint64_t actor, const combat::TargetInfo& ti, double& out, std::string& why) {
+    // a targeting record's filter or score run with one actor as GetTarget(): its stats, its effects, its side of the caster's relations and its distance
+    if (!catalog_ || !combat_) return false;
+    const content::ExprRow* e = catalog_->expr(expr);
+    if (!e || e->program < 0) {
+        why = expr_problem(expr);
+        return false;
+    }
+    if (!ensure_evaluation(why)) return false;
+    combat::Fighter* tf = combat_->fighter(actor);
+    if (!tf) return false;
+    std::string err;
+    auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
+    if (!target_eval) return false;
+    if (!evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) return false;
+    const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
+    const PortEffects held(*combat_, actor, now_);
+    combat::HitContext ctx;
+    ctx.instigator = &self_view;
+    ctx.target = &target_view;
+    ctx.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
+    ctx.enemy = ti.relation == combat::Relation::Hostile;
+    ctx.neutral = ti.relation == combat::Relation::Neutral;
+    ctx.target_effects = &held;
+    ctx.instigator_actor = combat_->self().id();
+    ctx.target_actor = actor;
+    Host host(*this);
+    host.set_context(&ctx);
+    evaluation_->set_consumed(consumed_);
+    double v = 0;
+    const bool ran = evaluation_->eval(e->program, host, v, err);
+    evaluation_->clear_actors();
     if (!ran) {
         why = err;
         return false;
@@ -1596,7 +1642,17 @@ void AbilityPipeline::run_effect_hits(AbilityChange& c, const EffectInst& e, con
         bool wanted = false;
         for (size_t i = 0; i < n; ++i) wanted = wanted || phase == phases[i];
         if (!wanted) continue;
-        if (const HitDef* h = catalog_->hit(hit_guid)) apply_hit(c, *h, t, false, src);
+        const HitDef* h = catalog_->hit(hit_guid);
+        if (!h) continue;
+        apply_hit(c, *h, t, false, src);
+        // a Tick hit that fires a hit at the caster's party around him (a melody's Buff on the Bard and the members within 3,000 cm) goes on to it every tick; the
+        // children are the server's own, as a reaction's are: the client never predicted them
+        if (tick && fires_party_aura(*h)) {
+            HitSource aura = src;
+            aura.autonomous = false;
+            aura.simulated = false;
+            follow_hit_children(c, *h, combat_->self().id(), t, aura, 0);
+        }
     }
 }
 
@@ -1701,9 +1757,11 @@ std::optional<combat::TargetInfo> AbilityPipeline::target_info(uint64_t actor) {
 }
 
 void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                           const AbilityDef* ability, bool* landed, uint64_t* first_landed) {
+                                           const AbilityDef* ability, bool* landed, uint64_t* first_landed, uint64_t* first_reached, bool* ran) {
     if (landed) *landed = false;
     if (first_landed) *first_landed = 0;
+    if (first_reached) *first_reached = 0;
+    if (ran) *ran = false;
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
@@ -1784,6 +1842,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     }
     // the hit reached a live target when one is in reach, whether or not its damage can be worked out (the Throw's cannot): that is what fires a bounce. An enemy an earlier hit killed is no target
     if (landed) *landed = closest != 0;
+    if (first_reached) *first_reached = closest;
     std::vector<bootstrap::HitTargetOut> outs;
     HitEvent event;   // reactions: what this hit did to the targets it reached
     bool zones_opened = false;
@@ -1880,6 +1939,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         // already has BaseValueMax 10.0 with the passive; only the caster's own heal is short of it, see apply_hit_here)
         const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
+        if (ran) *ran = true;
         // a hit that leaves a lasting area on the ground (LingeringZonesIds): one zone opens where it landed, whatever the number of targets it reached
         if (!zones_opened) {
             zones_opened = true;
@@ -2075,7 +2135,23 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
 void AbilityPipeline::land_delayed(const DelayedChild& child, double t) {
     if (!combat_ || !child.hit || dead_) return;
     AbilityChange c;
-    apply_hit_on_targets(c, *child.hit, child.targets, t, child.src, child.ability);
+    if (child.children) {
+        // a hit a reaction's chain fires (a melody's projectile): its own RecursiveHit children follow it, and a landing on the caster takes his own path
+        const uint64_t self = combat_->self().id();
+        for (const uint64_t id : child.targets) {
+            bool landed = false;
+            if (id == self) {
+                if (!hits_caster(child.hit->row)) continue;
+                apply_hit(c, *child.hit, t, true, child.src);
+                landed = true;
+            } else {
+                apply_hit_on_targets(c, *child.hit, {id}, t, child.src, child.ability, &landed);
+            }
+            if (landed) follow_hit_children(c, *child.hit, id, t, child.src, child.depth);
+        }
+    } else {
+        apply_hit_on_targets(c, *child.hit, child.targets, t, child.src, child.ability);
+    }
     emit({std::move(c), std::nullopt, t, "the delayed hit " + child.hit->row.name});
 }
 
@@ -2097,12 +2173,14 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     uint8_t flags = in.flags;
     const double before = stat_now(content::kGuidHealth);
     double damage = 0;
+    std::vector<double> effective(in.mods.size(), 0.0);
     if ((flags & stats::kHitMiss) == 0) {
-        for (const combat::ResolvedMod& m : in.mods) {
+        for (size_t i = 0; i < in.mods.size(); ++i) {
+            const combat::ResolvedMod& m = in.mods[i];
             if (!std::isfinite(m.value)) continue;
-            const double effective = apply_delta(c, m.stat_guid, m.value);
+            effective[i] = apply_delta(c, m.stat_guid, m.value);
             if (m.stat_guid == content::kGuidHealth && m.value < 0) damage += -m.value;
-            h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective)});
+            h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective[i])});
         }
         // what the hit puts on the player: a creature's debuff, with its own numbers and the world running its ticks
         for (const effects::Applied& applied : in.effects) apply_creature_effect(c, applied, in.instigator, now_);
@@ -2110,6 +2188,8 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;   // (the hit took the last Health)
     h.flags = flags;
     confirmations_.push_back(std::move(h));
+    // reactions: the character took a hit (after its confirmation is queued, so a reaction's follow it)
+    raise_hit_taken(c, in.hit_guid, in.source_type, in.source_guid, in.instigator, flags, in.mods, effective, now_, true);
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
@@ -2146,6 +2226,13 @@ std::vector<double> AbilityPipeline::apply_ally_landing(const combat::PlayerInco
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;
     h.flags = flags;
     confirmations_.push_back(std::move(h));
+    // reactions: the character took another player's hit.  They run in this runtime's own next step and not here: a reaction may hit the attacker back (the
+    // Tank's Reflect, the Ranger's Thorns), and the attacker's own step is still running when this call comes in, so what lands on him must not drop his evaluation
+    // under it (the contract of this function)
+    if (reactions_enabled_ && catalog_ && catalog_->reactions() > 0 && in.source_type != content::kSourceTypeReaction && taken_.size() < kMaxTaken &&
+        (!reaction_carriers_.empty() || !effects_.empty())) {
+        taken_.push_back({in.hit_guid, in.source_type, in.source_guid, in.instigator, flags, in.mods, effective, at});
+    }
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, at, "another player's hit on the character"});
@@ -2450,6 +2537,7 @@ void AbilityPipeline::set_dead(bool dead) {
         swing_records_.clear();
         swing_steps_.clear();
         delayed_.clear();   // the hits a hit was to fire later are not fired
+        taken_.clear();     // ... and the reactions to a hit he took are not run
         // every cast ends with the caster, except a ball that has left: it flies on and goes on hurting what it touches. Its own steps and the hits they sent stay; nothing else of its cast does
         for (size_t i = casts_.size(); i-- > 0;) {
             Cast& c = casts_[i];
@@ -2526,6 +2614,7 @@ double AbilityPipeline::next_due() const {
         for (const HitSlot& s : r.slots) due = std::min(due, slot_due(r, s));
     }
     for (const DelayedChild& d : delayed_) due = std::min(due, d.due);
+    for (const TakenHit& h : taken_) due = std::min(due, h.at);
     for (const Held& h : held_) {
         if (h.end_due) due = std::min(due, *h.end_due);
     }
@@ -2558,6 +2647,17 @@ void AbilityPipeline::tick(double now) { advance(now); }
 
 void AbilityPipeline::run_due(double t) {
     clock_ = t;
+    for (size_t i = 0; i < taken_.size(); ++i) {   // a hit another player landed on the character: its being-hit reactions run in this step (see apply_ally_landing)
+        if (taken_[i].at > t) continue;
+        const TakenHit h = std::move(taken_[i]);
+        taken_.erase(taken_.begin() + static_cast<std::ptrdiff_t>(i));
+        AbilityChange c;
+        raise_hit_taken(c, h.hit_guid, h.source_type, h.source_guid, h.attacker, h.flags, h.mods, h.effective, t, true);
+        drop_evaluation();
+        recompute(c);
+        emit({std::move(c), std::nullopt, t, "the reactions to another player's hit on the character"});
+        return;
+    }
     for (size_t i = 0; i < delayed_.size(); ++i) {   // a hit a hit fired some time ago: it lands now
         if (delayed_[i].due > t) continue;
         const DelayedChild child = std::move(delayed_[i]);

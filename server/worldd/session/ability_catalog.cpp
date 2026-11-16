@@ -237,6 +237,14 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         c.hit_names_[d.row.name] = g;
         c.hits_.emplace(g, std::move(d));
     }
+    // the targeting records the hits' RecursiveHit names: their shape, their sphere and their sorting, for the hits a hit fires when it lands
+    for (const auto& [g, hit] : c.hits_) {
+        for (const content::RecursiveHitRow& r : hit.recursive) {
+            if (r.targeting == 0 || c.targeting_defs_.count(r.targeting)) continue;
+            std::string unread;
+            if (auto def = db->targeting_def(r.targeting, unread)) c.targeting_defs_.emplace(r.targeting, std::move(*def));
+        }
+    }
     if (!db->guids(content::AbilityContent::Table::Ability, guids, error)) return std::nullopt;
     for (const int64_t g : guids) {
         AbilityDef d;

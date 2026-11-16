@@ -36,8 +36,9 @@ import (
 // 42 was taken. 44 added item_learn (the recipes a LearnRecipes item teaches) and kept the certification
 // dialogue actions' profession and Promote / Demote. 45 added the lingering zones' spawn (their origin,
 // attachment, actor class and fade time in ab_zone.spawn) and the targeting records the zones' volumes use.
-// 47 added craft_filter_item (the items of each gather-item filter that names a recipe input).
-const Version = "47"
+// 47 added craft_filter_item (the items of each gather-item filter that names a recipe input). 48 compiles a
+// division of two whole numbers in the ability formulas, truncated toward zero as the game does.
+const Version = "48"
 
 // Options say what Build reads and writes.
 type Options struct {

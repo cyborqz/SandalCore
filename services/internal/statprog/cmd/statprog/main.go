@@ -78,7 +78,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		b, _, err := statprog.CompileExprs(g, statprog.Options{Mode: m}, exprs)
+		b, _, err := statprog.CompileExprs(g, statprog.Options{Mode: m, IntDivide: true}, exprs) // as contentc compiles it
 		if err != nil {
 			return err
 		}

@@ -162,10 +162,12 @@ void test_review_deliverance_full_charge_follows_the_play_rate(Fixture& f) {
         const int32_t id = cast(r, "Cleric_Deliverance", t0, true);
         CHECKF(id > 0, "the cast %d is accepted", i + 1);
         if (id <= 0) return;
+        if (kRates[i] > 0 && std::fabs(play_rate_of(r) - kRates[i]) > 1e-4) set_rate(r, kRates[i], true);   // (a reaction that resets the engine's effects: set the test's rate on again)
         rates[i] = play_rate_of(r);
         // the client's bar reaches the section 2.9629629 montage seconds in: that many over the rate in wall seconds (the recorded requests came 12 to 27 ms before it)
         const double at = 2.9629629 / rates[i] - 0.02;
         g.run_to(t0 + at - 0.05);
+        if (kRates[i] > 0 && std::fabs(play_rate_of(r) - kRates[i]) > 1e-4) set_rate(r, kRates[i], true);   // (the cost's reaction resets the engine's effects: set the test's rate on again for the branch)
         double jump_at = 0;
         float jump_to = 0;
         CHECKF(!deliverance::jump_of(r, deliverance::kDeliverance, jump_at, jump_to, t0), "cast %d: the server has not moved the montage before the client's own full charge (%.2f s)", i + 1, at);

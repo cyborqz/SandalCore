@@ -54,6 +54,8 @@ public:
     virtual const Fighter& self() const = 0;
     /// The living enemies the player sees inside a cone ahead of it (see CombatWorld::enemies_in_cone), nearest first.
     virtual std::vector<GatheredTarget> enemies_in_cone(double /*angle_degrees*/, double /*length_cm*/, double /*behind_cm*/, size_t /*max*/) { return {}; }
+    /// Whether the ground between two points is clear (see CombatWorld::line_clear): what a targeting record that asks line of sight leaves out.
+    virtual bool line_clear(const Vec3& /*from*/, const Vec3& /*to*/) const { return true; }
     /// ... and the ones a projectile flying straight ahead of it would pierce (see CombatWorld::enemies_in_line).
     virtual std::vector<GatheredTarget> enemies_in_line(double /*length_cm*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
     /// ... the ones whose bodies touch a sphere around a point (see CombatWorld::enemies_around), nearest to the point first.
@@ -124,6 +126,7 @@ public:
     std::vector<AllyInfo> players_around(const Vec3& centre, double radius_cm) override { return world_.players_around(self_.id(), centre, radius_cm); }
     std::vector<GatheredTarget> enemies_in_line(double length_cm, double radius_cm, size_t max) override { return world_.enemies_in_line(self_, length_cm, radius_cm, max); }
     std::vector<GatheredTarget> enemies_around(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_around(self_, centre, radius_cm, max); }
+    bool line_clear(const Vec3& from, const Vec3& to) const override { return world_.line_clear(from, to); }
     std::vector<GatheredTarget> enemies_touching(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_touching(self_, centre, radius_cm, max); }
     std::vector<ZoneTarget> actors_in_area(const Vec3& centre, const ZoneArea& area, size_t max) override { return world_.actors_in_area(self_, centre, area, max); }
     bool ground_height(double x, double y, double z_hint, double* z) const override { return world_.ground_height(x, y, z_hint, z); }

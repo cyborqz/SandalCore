@@ -41,6 +41,10 @@ import (
 type Options struct {
 	// Mode is the arithmetic (Bundle.Mode); the default is ModeFloat32.
 	Mode Mode
+	// IntDivide evaluates a division where no operand is proven to be a float as the game's integer division does: the operands and the result are whole
+	// numbers and the quotient is truncated toward zero (the ability data's `GetCharacterLevel(GetInstigator()) / 3`). Without it such a division is an
+	// unsupported construct, as aocexpr's default is.
+	IntDivide bool
 }
 
 type vtype uint8
@@ -179,9 +183,10 @@ const (
 )
 
 type compiler struct {
-	g      *Graph
-	single bool
-	b      *Bundle
+	g         *Graph
+	single    bool
+	intDivide bool   // a division of two whole numbers is the game's integer division (truncating toward zero)
+	b         *Bundle
 
 	statIdx  map[int64]int
 	queue    []int // stats whose own formulas are still to compile (from qpos on)
@@ -254,7 +259,7 @@ func CompileExprs(g *Graph, opt Options, exprs []Expr) (*Bundle, []ExprResult, e
 // compileGraph compiles the stats of the lists and what their formulas read, up to the order.
 func compileGraph(g *Graph, opt Options) (*compiler, error) {
 	c := &compiler{
-		g: g, single: opt.Mode == ModeSingle, b: &Bundle{Mode: opt.Mode},
+		g: g, single: opt.Mode == ModeSingle, intDivide: opt.IntDivide, b: &Bundle{Mode: opt.Mode},
 		statIdx: map[int64]int{}, constIdx: map[uint64]int{}, strIdx: map[string]int{},
 		refIdx: map[Ref]int{}, curveIdx: map[int64]int{}, progIdx: map[string]int{},
 		parsed: map[string]*aocexpr.Program{},
@@ -956,7 +961,19 @@ func (f *fnc) binary(e aocexpr.Binary) (val, error) {
 		fl := l.float || r.float
 		if op == OpDiv {
 			if !fl {
-				return val{}, unsupportedAt(e.At, "%s", divisionConstruct)
+				if !f.c.intDivide {
+					return val{}, unsupportedAt(e.At, "%s", divisionConstruct)
+				}
+				// the game's division of two whole numbers: the quotient truncated toward zero (C++'s integer division).  A positive quotient is
+				// Floor(x); a negative one is -Floor(-x), which is Ceil(x) and so truncates toward zero too.
+				if lok && rok && rc != 0 {
+					return val{t: tNum, n: nConst{math.Trunc(lc / rc)}}, nil
+				}
+				div := nBin{OpDiv, l.n, r.n}
+				floor := nFn1{OpFloor, div}
+				negFloor := nUn{OpNeg, nFn1{OpFloor, nUn{OpNeg, div}}}
+				below := nBin{OpLt, div, nConst{0}}
+				return val{t: tNum, n: nSel{below, negFloor, floor}}, nil
 			}
 		}
 		if lok && rok && !(op == OpDiv && rc == 0) {

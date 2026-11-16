@@ -176,6 +176,13 @@ public:
     size_t hits() const { return hits_.size(); }
     size_t reactions() const { return reactions_.size(); }
     size_t exprs() const { return exprs_.size(); }
+    /// Every reaction record by guid (a test reads the data's own set, not a list written by hand).
+    const std::map<int64_t, ReactionDef>& all_reactions() const { return reactions_; }
+    /// The targeting record a hit's RecursiveHit names (ab_targeting_def, its sorting read): null for one the tables do not have.
+    const content::TargetingDefRow* targeting_def(int64_t guid) const {
+        const auto it = targeting_defs_.find(guid);
+        return it == targeting_defs_.end() ? nullptr : &it->second;
+    }
 
 private:
     Catalog() = default;
@@ -188,6 +195,7 @@ private:
     std::map<int64_t, ModifyCooldownDef>  modify_cooldowns_;
     std::map<int64_t, content::ZoneRow>   zones_;
     std::map<int64_t, content::ProjectileRow> projectiles_;
+    std::map<int64_t, content::TargetingDefRow> targeting_defs_;   // every targeting record a RecursiveHit names
     std::map<int64_t, content::ExprRow>   exprs_;
 };
 

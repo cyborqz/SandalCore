@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"aocrop/services/internal/content"
 	"aocrop/services/internal/standin"
 )
 
@@ -95,5 +96,33 @@ func TestParseCorpusRefusesBadFiles(t *testing.T) {
 		if _, err := ParseCorpus(strings.NewReader(src)); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// TestCorpusMainIsTheFilesBundle: the corpus's main bundle is the stat program contentc stored in the content.db, byte for byte. worldd's
+// test_worldd_content_db compares the same two; contentc and BuildCorpus must compile with the same options (the game's integer division among
+// them), or a rebuilt content.db and a regenerated corpus disagree.
+func TestCorpusMainIsTheFilesBundle(t *testing.T) {
+	path := contentDBPath(t)
+	db, err := content.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sp, err := db.StatProgram()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := BuildCorpus(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := ParseCorpus(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := c.Bundles["main"]
+	if !bytes.Equal(main, sp.Data) {
+		t.Fatalf("the corpus's main bundle is %d bytes, the file's stat_program is %d and they differ: BuildCorpus and contentc compile with different options", len(main), len(sp.Data))
 	}
 }

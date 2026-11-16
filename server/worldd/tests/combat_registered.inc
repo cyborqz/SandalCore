@@ -53,3 +53,7 @@
 #include "combat_mob_hit_windows_tests.inc"
 #include "combat_mob_hit_windows_review_tests.inc"
 #include "combat_mob_shared_reads_tests.inc"
+#include "combat_reactions2_tests.inc"
+#include "combat_reactions2_review_tests.inc"
+#include "combat_reactions3_fix_tests.inc"
+#include "combat_reactions4_review_tests.inc"

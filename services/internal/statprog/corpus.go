@@ -691,7 +691,9 @@ func BuildCorpus(dbPath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	main, mainRes, err := CompileExprs(g, Options{}, exprs)
+	// The main bundle is the one contentc stores in stat_program: the same options (a division of two whole numbers is the game's integer division,
+	// contentc's addStatProgram), so that the file's bundle and the corpus's are the same bytes (worldd's test_worldd_content_db holds it).
+	main, mainRes, err := CompileExprs(g, Options{IntDivide: true}, exprs)
 	if err != nil {
 		return nil, err
 	}

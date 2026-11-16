@@ -270,6 +270,12 @@ struct ProjectileRow {
     std::vector<int64_t> hits;
 };
 
+/// One sorting entry of a targeting record: a filter expression (0: every actor of the side) and the expression that scores the ones it lets through.
+struct TargetingSortRow {
+    int64_t     filter = 0, score = 0;   // ab_expr ids
+    std::string method;                  // "Score" for every record the tables have
+};
+
 /// ab_targeting_def: a targeting record (an ability's target or a lingering zone's volume), with the first volume's shape and size and every volume as JSON.
 struct TargetingDefRow {
     int64_t     guid = 0;
@@ -278,6 +284,8 @@ struct TargetingDefRow {
     double      radius = 0; // its SphereRadius
     double      angle = 0;  // its Angle
     std::string volumes;    // the TargetingVolumes as JSON (each with BoxExtent, Location, Rotation, bEnableLOSCheck ...)
+    bool        los = false;   // the first volume's bEnableLOSCheck: the actors behind the ground are left out
+    std::vector<TargetingSortRow> sorting;   // the Sorting entries, in order: the first whose filter holds scores the actor
 };
 
 /// One box of a targeting record's volumes (a Wall's, a Saga's): its half extents, its centre and its rotation in the caster's frame.
