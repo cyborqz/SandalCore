@@ -320,43 +320,114 @@ void test_arsonist_fires_at_a_standing_player(Fixture& f) {
 
 AOC_REGISTER_TEST(test_arsonist_fires_at_a_standing_player);
 
-void test_plain_goblin_shaman_throws_its_bomb(Fixture& f) {
-    std::printf("a plain goblin shaman against a player 2.5 m away: its oozing bomb leaves at its montage's notify, flies, and lands its damage when it arrives (it was an instant hit)\n");
-    constexpr double kSeconds = 30.0;
+// The shaman test's checks print their passing line too, so the proof of the eight angles can quote the [ok ] line of a check as well as its [FAIL] line.
+#define SHAMAN_CHECKF(cond, ...) do { \
+    if (cond) { std::printf("  [ok ] "); std::printf(__VA_ARGS__); std::printf("\n"); std::fflush(stdout); ++g_pass; } \
+    else { std::printf("  [FAIL] "); std::printf(__VA_ARGS__); std::printf("\n"); std::fflush(stdout); ++g_fail; } \
+} while (0)
+
+void test_plain_goblin_shaman_throws_its_bomb_and_leaves_its_ooze(Fixture& f) {
+    std::printf("a plain goblin shaman against a player 2.5 m away: its oozing bomb leaves at its montage's notify, flies, lands its damage when it arrives, and leaves an ooze that ticks once a "
+                "second for its six seconds (it was an instant hit)\n");
+    constexpr double kSeconds = 30.0, kDt = 1.0 / 15.0;
+    constexpr int64_t kOozingZone = 6064629976727486795ll;
     combat::NpcAbilityData tables;
     if (!load_creature_tables(tables)) return;
+    const content::ZoneRow* ooze = f.catalog->zone(kOozingZone);
+    SHAMAN_CHECKF(ooze && ooze->placeable(), "the data has the Oozing Bomb's ooze where the bomb comes down (a %.0f cm sphere, %.1f s at %.1f s)", ooze ? ooze->volume.radius : 0.0,
+                  ooze ? ooze->life_time : 0.0, ooze ? ooze->tick_rate : 0.0);
+    if (!ooze || !ooze->placeable()) return;
+    const auto role = [&](const char* name) {
+        std::vector<int64_t> out;
+        const auto it = ooze->hits.find(name);
+        if (it != ooze->hits.end()) out = it->second;
+        return out;
+    };
+    const std::vector<int64_t> first_hits = role("InitialHitsIds");
+    const std::vector<int64_t> tick_hits = role("LingeringHitsIds");
+    SHAMAN_CHECKF(!first_hits.empty() && !tick_hits.empty(), "the ooze lists its first hit and its lingering hit (%zu, %zu)", first_hits.size(), tick_hits.size());
+    if (first_hits.empty() || tick_hits.empty()) return;
     const std::string path = creature_path(f, "/GoblinShaman/Goblin_Shaman.Default__Goblin_Shaman_C");
     const auto bp = f.motion.find(path);
-    CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the plain goblin shaman and the creature tables list its abilities");
+    SHAMAN_CHECKF(!path.empty() && bp && tables.abilities_of(path) != nullptr, "the Blueprint table has the plain goblin shaman and the creature tables list its abilities");
     if (path.empty() || !bp || !tables.abilities_of(path)) return;
     BanditOpen made;
-    CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the shaman (verdict: %s)", spawns::verdict_name(made.why));
+    SHAMAN_CHECKF(make_bandit_open(f, tables, path, made), "the world makes an open for the shaman (verdict: %s)", spawns::verdict_name(made.why));
     if (!made.open) return;
     std::vector<LungeSample> samples;
     std::vector<combat::IncomingHit> hits;
-    CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 250, nullptr, samples, &hits, false, 0.5, nullptr, 40000.0, made.open), "a fight of %.0f s against a player 2.5 m away runs", kSeconds);
+    SHAMAN_CHECKF(run_lunge_fight(f, tables, path, kSeconds, 0, 250, nullptr, samples, &hits, false, 0.5, nullptr, 40000.0, made.open), "a fight of %.0f s against a player 2.5 m away runs", kSeconds);
     if (samples.empty()) return;
     const std::vector<ShotCast> casts = shot_casts(f, samples);
     size_t bombs = 0;
     for (const ShotCast& c : casts) bombs += c.name == "GoblinShaman_OozingBomb" ? 1 : 0;
     const ShotReport report = shot_report(f, tables, casts, hits, kSeconds, 1.0);
     std::printf("  %zu casts, %zu of them the bomb; %zu bombs due, %zu landed, the quickest %.2f s after it left; %zu hits without a bomb\n", casts.size(), bombs, report.due, report.landed, report.earliest_after_launch, report.stray);
-    CHECKF(bombs >= 3, "it throws its bomb over and over (%zu)", bombs);
-    CHECKF(report.due >= 3 && report.landed == report.due, "every bomb lands (%zu of %zu)", report.landed, report.due);
+    SHAMAN_CHECKF(bombs >= 3, "it throws its bomb over and over (%zu)", bombs);
+    SHAMAN_CHECKF(report.due >= 3 && report.landed == report.due, "every bomb lands (%zu of %zu)", report.landed, report.due);
     size_t other_hits = 0;   // the hits that are not the bomb's must be its Bludgeon's (a melee swing at the player beside it)
+    std::vector<double> impact_at, first_at, tick_at;
     for (const combat::IncomingHit& h : hits) {
-        if (h.source_type == content::kSourceTypeProjectile) continue;
+        if (h.source_type == content::kSourceTypeProjectile) {
+            // the bomb's own hit and the ground trace it fires at the same instant are one impact
+            bool seen = false;
+            for (const double t : impact_at) seen = seen || std::fabs(t - h.at) <= 1.5 * kDt;
+            if (!seen) impact_at.push_back(h.at);
+            continue;
+        }
+        if (h.source_type == content::kSourceTypeZone && h.source_guid == kOozingZone) {
+            if (std::find(first_hits.begin(), first_hits.end(), h.hit_guid) != first_hits.end()) first_at.push_back(h.at);
+            else if (std::find(tick_hits.begin(), tick_hits.end(), h.hit_guid) != tick_hits.end()) tick_at.push_back(h.at);
+            else ++other_hits;
+            continue;
+        }
         const abilities::AbilityDef* def = f.catalog->ability(h.source_guid);
         if (!def || def->row.name.find("Bludgeon") == std::string::npos) ++other_hits;
     }
-    CHECKF(report.stray == 0 && other_hits == 0, "no hit comes without a bomb but the Bludgeon's swings (%zu hits of a projectile that never left, %zu of another ability)", report.stray, other_hits);
+    std::printf("  the ooze: %zu first hits and %zu ticks of a %.1f s zone at %.1f s, where %zu bombs landed\n", first_at.size(), tick_at.size(), ooze->life_time, ooze->tick_rate, impact_at.size());
+    SHAMAN_CHECKF(report.stray == 0 && other_hits == 0, "no hit comes without a bomb but the Bludgeon's swings (%zu hits of a projectile that never left, %zu of another ability)", report.stray, other_hits);
+    // every bomb that lands opens the ooze at the impact: one first hit there, then the zone's lingering hit every tick until its life is over
+    size_t unpaired = 0;
+    for (const double t0 : first_at) {
+        bool found = false;
+        for (const double t : impact_at) found = found || std::fabs(t - t0) <= 1.5 * kDt;
+        unpaired += found ? 0 : 1;
+    }
+    SHAMAN_CHECKF(first_at.size() == impact_at.size() && unpaired == 0, "every bomb that lands opens its ooze where it came down (%zu first hits, %zu impacts, %zu unpaired)", first_at.size(),
+                  impact_at.size(), unpaired);
+    const double tick = ooze->tick_rate > 0 ? ooze->tick_rate : 1.0;
+    const size_t per_life = static_cast<size_t>(std::floor(ooze->life_time / tick + 1e-6));
+    const double last_now = std::floor((kSeconds - 1e-9) / kDt) * kDt;   // (the last tick of the fight)
+    std::vector<double> due;
+    for (const double t0 : first_at) {
+        for (size_t k = 1; k <= per_life; ++k) {
+            const double at = t0 + tick * static_cast<double>(k);
+            if (at <= last_now + 1e-9) due.push_back(at);
+        }
+    }
+    std::sort(tick_at.begin(), tick_at.end());
+    std::vector<bool> used(tick_at.size(), false);
+    size_t missing = 0;
+    for (const double at : due) {
+        bool found = false;
+        for (size_t i = 0; i < tick_at.size() && !found; ++i) {
+            if (used[i] || std::fabs(tick_at[i] - at) > 1.5 * kDt) continue;
+            used[i] = true;
+            found = true;
+        }
+        missing += found ? 0 : 1;
+    }
+    size_t extra = 0;
+    for (const bool u : used) extra += u ? 0 : 1;
+    SHAMAN_CHECKF(tick_at.size() == due.size() && missing == 0 && extra == 0, "the ooze ticks every %.2f s for its %.1f s life and no longer (%zu ticks, %zu due, %zu missing, %zu extra)", tick,
+                  ooze->life_time, tick_at.size(), due.size(), missing, extra);
     // the bomb leaves at 1.8 s of its montage and lands at once at 2.5 m: no hit before the montage has played that far
     double earliest_after_cast = 1e9;
     for (double t : report.after_cast) earliest_after_cast = std::min(earliest_after_cast, t);
-    CHECKF(earliest_after_cast >= 1.8, "no damage comes before the bomb has left the shaman's hand (%.2f s after the cast)", earliest_after_cast);
+    SHAMAN_CHECKF(earliest_after_cast >= 1.8, "no damage comes before the bomb has left the shaman's hand (%.2f s after the cast)", earliest_after_cast);
 }
 
-AOC_REGISTER_TEST(test_plain_goblin_shaman_throws_its_bomb);
+AOC_REGISTER_TEST(test_plain_goblin_shaman_throws_its_bomb_and_leaves_its_ooze);
 
 void test_goblin_flayer_animates_its_attacks(Fixture& f) {
     std::printf("a Goblin Flayer (made from a generic Blueprint) against a player who stands still: with its tree's abilities in its open it plays its overhead slashes and its cleave, lunges at him along "

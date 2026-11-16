@@ -66,7 +66,17 @@ struct IncomingHit {
     int64_t                  source_guid = 0;
     uint8_t                  flags = 0;           // Miss, Block, Crit (Lethal is the player's session's: its Health decides)
     std::vector<ResolvedMod> mods;
+    /// The effects the hit puts on the player (a creature's child hit's debuff), with their numbers worked out by the world as the creature's: the session shows them and
+    /// moves the stats, and the world runs their Apply, Tick and Expire hits from the creature (they are marked on the player's effect state, so its own runtime does not tick them).
+    std::vector<effects::Applied> effects;
     double                   at = 0;
+    /// The shape of the confirmation when the server makes it.  Unset: a creature's own hit (its Source is the creature, predicted on the autonomous side) or a projectile's
+    /// (its record is the source, predicted on both).  Set by a child hit (a Source actor, predicted on neither), an effect's tick (a Source actor, predicted on both) or a zone's
+    /// (no Source actor, predicted on neither).
+    bool                     shape_known = false;
+    bool                     source_is_actor = true;
+    bool                     predicted_autonomous = true, predicted_simulated = false;
+    uint64_t                 source_actor = 0;    // the actor the confirmation names as its Source (a child: the target it was fired on; an effect's tick: its holder)
 };
 // built with C-Y-B and CoA
 
@@ -370,6 +380,8 @@ public:
     /// The ObjectId of the NPC target's collision cylinder: what the ability items name as Targets and the confirmations export as the actor's
     /// "CollisionCylinder" (NpcInfo::collision_cylinder, the actor's + 4 as retail mints it); 0 for an actor that has none.
     uint64_t hit_component_of(uint64_t actor_id) const;
+    /// The NetGUID of an actor: a player's as his session's pawn names it, an NPC's as its open holds it ({} for an id that names neither).
+    protocol::emit::FIntrepidNetworkGUID actor_guid(uint64_t actor_id);
 
     /// Applies a player's resolved hit to an NPC: Health (and Mana) move, and so do the status stats it holds (the burn's pool and its seconds), the threat, the combat flags, the
     /// death. Returns what happened.  `threat_to`: who the creature turns on, when that is not the attacker (a pet's hit: the kill and the loot are its owner's, the creature's anger is the pet's, and
@@ -611,6 +623,55 @@ private:
     bool  plan_cast(Npc& n, const abilities::AbilityDef& def, CastPlan& out);
     /// `projectile`: the record of the projectile that carried the hit (0: the ability itself made it), which the confirmation names as its source.
     void  deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now, int64_t projectile = 0);
+    /// As what a creature's hit lands: the place its children fire from and its zones open at, the confirmation's shape, the record a child, an effect's tick or a zone names, and
+    /// how many hits deep it is (a child of a child stops at 4).
+    enum HitForm : uint8_t { kHitOwn = 0, kHitChild, kHitEffect, kHitZone };
+    struct HitLanding {
+        Vec3     at;
+        int64_t  projectile = 0;
+        int64_t  source_type = 0, source_guid = 0;   // 0: the ability (or the projectile that carried the hit)
+        uint64_t source_actor = 0;
+        int      form = kHitOwn;
+        int      depth = 0;
+    };
+    /// One lingering zone a creature's hit opened: where it stands, its life and tick, and the players and pets inside it.
+    struct CreatureZone {
+        uint64_t npc = 0;
+        int64_t  ability = 0, zone = 0;
+        Vec3     at;
+        double   radius = 0, open_at = 0, end_at = 0, next_tick = 0, tick = 1.0;
+        std::set<uint64_t> inside;
+    };
+    /// One effect a creature's hit put on a player, whose hits and ticks the world runs (the player's own runtime only shows it and moves the stats).
+    struct CreatureEffect {
+        uint64_t npc = 0, player = 0;
+        const abilities::EffectDef* def = nullptr;
+        double   start = 0, end = 0, next_tick = 0, tick = 0;
+    };
+    /// The hit's own delivery (the roll, the confirmation, the effects, what reacts) and then its children and zones.
+    void  deliver_hit_at(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t hit_guid, double now, const HitLanding& landing);
+    void  deliver_hit_effects(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, const abilities::HitDef& hit, double now, const HitLanding& landing);
+    /// Whether the world can deliver the harm of an attack that hurts only through the hits its hits fire: a notify of its montage must reach a hit that carries it.
+    bool  delivers_its_harm(const abilities::AbilityDef& def) const;
+    /// The hits `hit` fires when it lands, on the players its child's own targeting reaches around `at`; then their own children and zones once.
+    void  land_children_of(Npc& n, const abilities::AbilityDef& ability, const abilities::HitDef& hit, const Vec3& at, uint64_t parent_target, double now, int depth, int64_t source_type,
+                           int64_t source_guid);
+    /// Whether a child's or a zone's hit holds its own requirement for `port` (a hit with none always does).  `target_is_active`: the player is the creature's own target.
+    bool  hit_requirement_holds(Npc& n, PlayerPort& port, const abilities::AbilityDef* ability, const abilities::HitDef& hit, int64_t source_type, int64_t source_guid, bool target_is_active);
+    /// Opens the lingering zones `hit` lists at `at`, with the players already inside them.
+    void  open_hit_zones(Npc& n, const abilities::AbilityDef& ability, const abilities::HitDef& hit, const Vec3& at, double now);
+    /// `only`: the one player a begin-overlap or end-overlap hit lands on (0: every player inside, as an initial, lingering or end hit does).
+    void  land_zone_role(Npc& n, size_t zone, const char* role, double now, uint64_t only = 0);
+    void  land_zone_hit(Npc& n, PlayerPort& port, int64_t ability, int64_t hit_guid, int64_t zone_guid, double now);
+    /// Puts an effect the world worked out on the player's effect state and schedules its hits from the creature.
+    void  schedule_creature_effect(Npc& n, const effects::Applied& applied, uint64_t player, double now);
+    /// The effect's hits of one phase (Apply, Tick, Expire, End), landed on its holder from the creature.
+    void  apply_creature_effect_hits(Npc& n, uint64_t player, const abilities::EffectDef& effect, const char* phase, double now);
+    void  land_creature_effect_hit(Npc& n, PlayerPort& port, const abilities::EffectDef& effect, int64_t hit_guid, double now);
+    void  advance_creature_zones(double now);
+    void  advance_creature_effects(double now);
+    std::vector<CreatureZone>   creature_zones_;
+    std::vector<CreatureEffect> creature_effects_;
     /// The effects of one of the creature's own hits that reach the creature itself (the hit's mask names Self): it carries them for its tree's checks, with each effect's own
     /// duration.  Its abilities' effects on itself only: nothing of them moves its stats or reaches another creature.
     void  land_self_effects(Npc& n, const abilities::HitDef& hit, double now);

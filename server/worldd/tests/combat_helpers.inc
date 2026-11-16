@@ -732,6 +732,14 @@ static ShotReport shot_report(Fixture& f, const combat::NpcAbilityData& tables, 
             }
         }
     }
+    // the hit a projectile fires where it lands (and the hits that one fires) names the same projectile record in the same instant: it belongs to that launch, not to none
+    for (size_t i = 0; i < hits.size(); ++i) {
+        if (!used[i]) continue;
+        for (size_t j = 0; j < hits.size(); ++j) {
+            if (used[j] || hits[j].source_type != content::kSourceTypeProjectile) continue;
+            if (hits[j].source_guid == hits[i].source_guid && std::fabs(hits[j].at - hits[i].at) <= 0.2) used[j] = true;
+        }
+    }
     for (size_t i = 0; i < hits.size(); ++i) {
         if (hits[i].source_type != content::kSourceTypeProjectile) ++r.not_projectile;
         else if (!used[i]) ++r.stray;

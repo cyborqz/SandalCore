@@ -137,6 +137,7 @@ void CombatWorld::remove_player(PlayerPort* port) {
     if (port) {
         player_combat_until_.erase(port->actor_id());
         drop_effects_of(port->actor_id());   // what a player put on the creatures ends with him
+        creature_effects_.erase(std::remove_if(creature_effects_.begin(), creature_effects_.end(), [&](const CreatureEffect& e) { return e.player == port->actor_id(); }), creature_effects_.end());
     }
 }
 
@@ -642,6 +643,8 @@ void CombatWorld::forget(uint64_t actor_id) {
     if (is_pet(actor_id)) pet_cleanup(actor_id);   // a pet's port holds its combatant by reference and stands in players_: a game master's despawn must not leave it there
     if (const auto it = npcs_.find(actor_id); it != npcs_.end()) stop_cast(*it->second);
     flights_.erase(std::remove_if(flights_.begin(), flights_.end(), [&](const Flight& f) { return f.npc == actor_id; }), flights_.end());
+    creature_zones_.erase(std::remove_if(creature_zones_.begin(), creature_zones_.end(), [&](const CreatureZone& z) { return z.npc == actor_id; }), creature_zones_.end());
+    creature_effects_.erase(std::remove_if(creature_effects_.begin(), creature_effects_.end(), [&](const CreatureEffect& e) { return e.npc == actor_id; }), creature_effects_.end());
     npcs_.erase(actor_id);
     stats_filled_.erase(actor_id);
     effect_holders_.erase(actor_id);
@@ -1050,7 +1053,32 @@ bool CombatWorld::animates(const Npc& n, const abilities::AbilityDef& def) const
     if (!listed) return false;
     const world::WorldActor* a = registry_.find(n.actor_id);
     if (!a || !npc_knows_ability(*a, def.row.guid)) return false;
-    return montages_readable(def) && areas_usable(def) && !grabs_target(def);   // (an ability whose hit lands by a volume the world cannot place, or that grabs its target, keeps the creature's single swing)
+    return montages_readable(def) && areas_usable(def) && !grabs_target(def) && delivers_its_harm(def);   // (an ability whose hit lands by a volume the world cannot place, that grabs its target, or whose harm no notify delivers, keeps the creature's single swing)
+}
+
+bool CombatWorld::delivers_its_harm(const abilities::AbilityDef& def) const {
+    const int64_t health = data_.ids().health;
+    // an attack of its own hits, an alert, a state and a show play as they always did; only an attack that hurts through the hits its hits fire (a carrier) needs a way to land them
+    if (!hurts_enemies(def, catalog_, health) || hurts_enemies_directly(def, catalog_, health)) return true;
+    for (const content::MontageRow& m : def.montages) {
+        const MontageData* md = anim_ ? anim_->montage(m.soft_path) : nullptr;
+        if (!md) continue;
+        const auto carries = [&](const char* source, int key) {
+            for (const content::AbilityHitRow& r : def.hits) {
+                if (r.source != source || r.key != key) continue;
+                const abilities::HitDef* hit = catalog_.hit(r.hit_guid);
+                if (hit && hit_hurts_enemies(*hit, catalog_, health, 0)) return true;
+            }
+            return false;
+        };
+        for (const MontageData::Hit& h : md->hits) {
+            if (carries("hit", h.key)) return true;
+        }
+        for (const MontageData::Fire& fire : md->fires) {
+            if (carries("projectile", fire.key)) return true;
+        }
+    }
+    return false;
 }
 
 std::string CombatWorld::GateCensus::text() const {
@@ -1332,72 +1360,6 @@ void CombatWorld::land_ability_effects(Npc& n, const abilities::AbilityDef& abil
     }
 }
 
-void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::AbilityDef& ability, int64_t guid, double now, int64_t projectile) {
-    const abilities::HitDef* hit = catalog_.hit(guid);
-    if (!hit || (hit->row.applicable_targets & 2) == 0 || hit->mods.empty()) return;
-    HitMeta meta;
-    // a hit a projectile carries names the projectile's record as its source, as the game confirms it
-    meta.source_type = projectile != 0 ? content::kSourceTypeProjectile : content::kSourceTypeAbility;
-    meta.source_guid = projectile != 0 ? projectile : ability.row.guid;
-    meta.ability_tags = ability.row.tags;
-    meta.instigator_actor = n.actor_id;
-    meta.target_actor = port.actor_id();
-    Resolved r;
-    std::string why;
-    if (!resolver_.resolve(n, port.fighter(), *hit, meta, r, why)) {
-        spdlog::debug("[combat] {} ({}): {}", n.actor_id, n.leaf, why);
-        return;
-    }
-    double raw_health = 0, health = 0;   // the Health this hit takes: as the data gives it, and after the damage setting
-    for (ResolvedMod& m : r.mods) {
-        if (m.stat_guid != data_.ids().health || !(m.value < 0) || !std::isfinite(m.value)) continue;
-        raw_health += m.value;
-        m.value *= cfg_.npc_damage_mult;
-        health += m.value;
-    }
-    if (!r.miss() && npc_hits_logged_ < kLoggedNpcHits) {
-        // what the hit was made of: the two levels and the target's mitigation (its gear and level), so a fight can be read from the log
-        ++npc_hits_logged_;
-        const stats::CharacterStats& target_stats = port.fighter().stats();
-        const stats::StatValue* physical = target_stats.find(data_.profile().physical.mitigation);
-        const stats::StatValue* magical = target_stats.find(data_.profile().magical.mitigation);
-        spdlog::info("[combat] {} (level {}) hit the player (level {}): Health {:.2f}, {:.2f} before the damage setting; the player's PhysicalMitigation {:.4f}, MagicalMitigation {:.4f}{}", log_name(n.actor_id, n.archetype, n.leaf),
-                     n.lvl, port.fighter().level(), health, raw_health, physical ? physical->value : 0.0, magical ? magical->value : 0.0,
-                     (r.flags & stats::kHitCrit) ? ", a critical hit" : "");
-    }
-    IncomingHit in;
-    in.instigator = n.actor_id;
-    in.hit_guid = guid;
-    in.source_type = meta.source_type;
-    in.source_guid = meta.source_guid;
-    in.flags = r.flags;
-    in.mods = r.mods;
-    in.at = now;
-    r.miss() ? ++stats_.npc_misses : ++stats_.npc_hits;
-    port.receive_hit(in, now);
-    player_exchange(port.actor_id(), now);
-    // the creature's own hit raises what its effects react to (the Blood Fury drains health from a bleeding target): the hit's numbers and its target are what the triggers read
-    if (!n.book.empty()) {
-        HitOrigin origin;
-        origin.landed_here = true;
-        origin.hit = hit;
-        origin.source_type = meta.source_type;
-        origin.source_guid = meta.source_guid;
-        origin.ability_tags = meta.ability_tags;
-        HolderEvent ev;
-        ev.attacker = port.actor_id();
-        ev.target = port.actor_id();
-        ev.origin = &origin;
-        ev.flags = r.flags;
-        for (size_t i = 0; i < r.mods.size(); ++i) {
-            ev.mods[r.mods[i].stat_guid] += r.mods[i].value;
-            ev.effective[r.mods[i].stat_guid] += r.mods[i].value;
-        }
-        for (const effects::Instance& e : n.book.instances()) ev.held.emplace_back(e.def, e.instigator);
-        holder_reacts(n.actor_id, ev, now, 4);
-    }
-}
-
 void CombatWorld::resolve_pending(double now) {
     std::vector<Pending> keep;   // attacks with their own animation that still have a hit or their end to come
     for (size_t i = 0; i < pending_.size();) {
@@ -1508,15 +1470,37 @@ void CombatWorld::launch(Npc& n, uint64_t target, const abilities::AbilityDef& a
     f.ability = &ability;
     f.projectile = fire.projectile;
     f.hits = fire.hits;
-    // A projectile whose own hit hurts nobody only starts a ground zone (the oozing bomb of the goblin shamans).  The world has no ground zones of a creature yet, so the damage the target
-    // takes where the bomb lands is the zone's first hit, which the ability lists among its own hits.
+    // A projectile whose own hit hurts nobody passes the harm to the hits it fires when it lands (the oozing bomb's ground trace opens its zone, the fire bomb's its fire).  Until the
+    // tables carry the zone's own targeting record, a carrier whose children cannot be placed at all falls back to the ability's first direct hurting hit (the zone's first hit, which the
+    // ability lists among its own hits): the Oozing Bomb's old way, until the extractor writes the zone targetings.  Once they are there the child and the zone land the hit themselves, once.
     const auto hurts = [&](int64_t guid) {
         const abilities::HitDef* h = catalog_.hit(guid);
         return h && (h->row.applicable_targets & 2) != 0 && !h->mods.empty();
     };
     if (std::none_of(f.hits.begin(), f.hits.end(), hurts)) {
-        for (const content::AbilityHitRow& r : ability.hits) {
-            if (r.source == "hit" && hurts(r.hit_guid) && std::find(f.hits.begin(), f.hits.end(), r.hit_guid) == f.hits.end()) f.hits.push_back(r.hit_guid);
+        bool children_land = false;
+        for (const int64_t guid : f.hits) {
+            const abilities::HitDef* carried = catalog_.hit(guid);
+            if (!carried) continue;
+            for (const content::RecursiveHitRow& row : carried->recursive) {
+                const abilities::HitDef* child = catalog_.hit(row.child_hit);
+                if (!child) continue;
+                bool lands = !child->mods.empty() || !child->effects.empty();
+                for (const int64_t zone_guid : child->zones) {
+                    const content::ZoneRow* zone = catalog_.zone(zone_guid);
+                    lands = lands || (zone && zone->placeable());
+                }
+                if (lands) {
+                    children_land = true;
+                    break;
+                }
+            }
+            if (children_land) break;
+        }
+        if (!children_land) {
+            for (const content::AbilityHitRow& r : ability.hits) {
+                if (r.source == "hit" && hurts(r.hit_guid) && std::find(f.hits.begin(), f.hits.end(), r.hit_guid) == f.hits.end()) f.hits.push_back(r.hit_guid);
+            }
         }
     }
     f.speed = record->speed;
@@ -2485,6 +2469,8 @@ void CombatWorld::tick(double now) {
     resolve_pending(now);
     advance_flights(now);
     advance_effects(now);
+    advance_creature_zones(now);
+    advance_creature_effects(now);
     if (now < next_think_) return;
     next_think_ = now + cfg_.think_seconds;
 
@@ -2565,5 +2551,6 @@ void CombatWorld::tick(double now) {
 #include "combat/combat_resist.inc"      // a crowd control the data's UniversalResistChance throws off (takes_resist_roll, effect_resisted)
 #include "combat/alert_effects.inc"      // where an alert's hits land and the effects they put on the caster and its allies
 #include "combat/combat_zone_area.inc"   // who stands in a lingering zone (actors_in_area)
+#include "combat/combat_mob_child_hits.inc"   // the hits a creature's hit fires when it lands, their effects on a player and their lingering zones
 
 }  // namespace aoc::worldd::combat

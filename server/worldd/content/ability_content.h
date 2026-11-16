@@ -314,6 +314,9 @@ struct ZoneRow {
     std::string delay_type;
     double      speed = 0;
     int64_t     expire_after_hits_expr = 0, expire_if_expr = 0, targeting_guid = 0;
+    /// Whether a creature's hit can place the zone: a sphere of some radius.  A box or another shape keeps a leftover radius its record does not use, so the
+    /// creature-side placement is a sphere only; the class-side zones read the volume's own shape (zone_volume_of).
+    bool placeable() const { return volume.shape == "EHitboxShape::SHAPE_Sphere" && volume.radius > 0; }
     /// contentc version 45: how the actor is made (its spawn transform, attachment, class and fade time).  An older file has none: the runtime
     /// places the zone at the caster, attached, as it did before.
     struct Spawn {

@@ -1450,6 +1450,54 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
     }
 }
 
+void AbilityPipeline::apply_creature_effect(AbilityChange& c, const effects::Applied& applied, uint64_t instigator, double t) {
+    const EffectDef* def = applied.def;
+    if (!def || effects_.size() >= kMaxEffects) return;
+    const content::EffectRow& row = def->row;
+    const double end = std::isinf(applied.duration) ? kInf : t + std::max(0.0, applied.duration);
+    const bool in_place = row.stack_type.find("StackInPlace") != std::string::npos;
+    const bool never_refresh = row.stack_duration_refresh.find("NeverRefresh") != std::string::npos;
+    const auto add = [&]() {
+        EffectInst e;
+        e.key = a7_.allocate_effect_id();
+        e.def = def;
+        e.stacks = std::max(1, applied.stacks);
+        e.start = t;
+        e.end = end;
+        e.next_tick = kInf;   // the world runs the creature's ticks
+        e.mods = applied.mods;
+        e.by_creature = true;
+        e.instigator = instigator;
+        effects_.push_back(e);
+        c.effects_added.push_back(effect_item(effects_.back()));
+    };
+    size_t existing = effects_.size();
+    for (size_t i = 0; i < effects_.size(); ++i) {
+        if (effects_[i].def != def) continue;
+        existing = i;
+        break;
+    }
+    if (existing == effects_.size()) {
+        add();
+        return;
+    }
+    EffectInst& e = effects_[existing];
+    if (in_place) {
+        e.stacks = std::min(std::max(1, applied.in_place_limit), e.stacks + std::max(1, applied.stacks));
+        e.mods = applied.mods;
+        if (!never_refresh) {
+            e.start = t;
+            e.end = end;
+        }
+        e.by_creature = true;
+        e.instigator = instigator;
+        c.effects_changed.push_back(effect_item(e));
+        return;
+    }
+    remove_instance(c, existing);
+    add();
+}
+
 void AbilityPipeline::remove_instance(AbilityChange& c, size_t index) {
     const int64_t key = effects_[index].key;
     // an instance the same change added never reached the client: it is dropped from the change, not removed
@@ -1534,6 +1582,7 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit, double 
 // C:Y:B with C-O-A
 
 void AbilityPipeline::run_effect_hits(AbilityChange& c, const EffectInst& e, const char* const* phases, size_t n, double t) {
+    if (e.by_creature) return;   // (a creature's effect: the world runs its hits from the creature, not this runtime from the player)
     HitSource src;   // an effect's hit: confirmed by the server when it lands, Source is the pawn [R: 1,525 effect hits]
     src.type = content::kSourceTypeEffect;
     src.guid = e.def->row.guid;
@@ -2037,12 +2086,14 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     h.record_guid = in.hit_guid;
     h.source_type = in.source_type;
     h.source_guid = in.source_guid;
-    // a creature's projectile hit as the game confirms it: no source actor (the source is the projectile's record), predicted on both the autonomous and the simulated side
+    // a creature's projectile hit as the game confirms it: no source actor (the source is the projectile's record), predicted on both the autonomous and the simulated side.  A
+    // child, an effect's tick or a zone's tick says its own shape (a child: a Source actor, neither side predicted; an effect's tick: a Source actor, both sides; a zone: no actor)
     const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
-    h.source_is_actor = !from_projectile;
-    h.predicted_autonomous = true;
-    h.predicted_simulated = from_projectile;
+    h.source_is_actor = in.shape_known ? in.source_is_actor : !from_projectile;
+    h.predicted_autonomous = in.shape_known ? in.predicted_autonomous : true;
+    h.predicted_simulated = in.shape_known ? in.predicted_simulated : from_projectile;
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
+    if (in.source_actor != 0 && combat_) h.source = combat_->guid_of(in.source_actor);
     uint8_t flags = in.flags;
     const double before = stat_now(content::kGuidHealth);
     double damage = 0;
@@ -2053,6 +2104,8 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
             if (m.stat_guid == content::kGuidHealth && m.value < 0) damage += -m.value;
             h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective)});
         }
+        // what the hit puts on the player: a creature's debuff, with its own numbers and the world running its ticks
+        for (const effects::Applied& applied : in.effects) apply_creature_effect(c, applied, in.instigator, now_);
     }
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;   // (the hit took the last Health)
     h.flags = flags;
@@ -2127,12 +2180,14 @@ void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, 
     h.record_guid = in.hit_guid;
     h.source_type = in.source_type;
     h.source_guid = in.source_guid;
-    // (as receive_hit confirms it: a creature's projectile hit has no source actor, the projectile's record is its source, and it is predicted on both sides)
+    // (as receive_hit confirms it: a creature's projectile hit has no source actor, the projectile's record is its source, and it is predicted on both sides; a child or a
+    // zone's tick keeps the shape the world gave it)
     const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
-    h.source_is_actor = !from_projectile;
-    h.predicted_autonomous = true;
-    h.predicted_simulated = from_projectile;
+    h.source_is_actor = in.shape_known ? in.source_is_actor : !from_projectile;
+    h.predicted_autonomous = in.shape_known ? in.predicted_autonomous : true;
+    h.predicted_simulated = in.shape_known ? in.predicted_simulated : from_projectile;
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
+    if (in.source_actor != 0 && combat_) h.source = combat_->guid_of(in.source_actor);
     bootstrap::HitTargetOut t;
     t.component = target;
     t.cylinder = cylinder;

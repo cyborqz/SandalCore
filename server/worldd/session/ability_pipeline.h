@@ -885,6 +885,10 @@ private:
         double                      start = 0, end = 0;           // end: infinity for an infinite effect
         double                      next_tick = 0;                // infinity: none
         std::vector<stats::EffectMod> mods;                       // one stack's values
+        /// A creature's hit put it on the player: the world worked its numbers and runs its Apply, Tick and Expire hits from the creature (the player's own runtime only
+        /// shows it and moves the stats, so its ticks are not run again here with the player as the caster).
+        bool                        by_creature = false;
+        uint64_t                    instigator = 0;              // the creature that put it on (0: the player's own)
     };
     /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect, the Vine Field's circle), the place the
     /// data puts it and the hits it lands on whoever stands in it.  The infinite effects its overlap hits put on the caster end with the dance.
@@ -1118,6 +1122,9 @@ void   step_multi_hit(Cast& cast, double t);
     /// `mods_override`: the one stack's mod values are the caller's (a hit of another player, worked out for the two actors), not the record's formulas run here.
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
                         int64_t owner = 0, const std::vector<stats::EffectMod>* mods_override = nullptr);
+    /// An effect a creature's hit put on the player, with the numbers the world worked out as the creature's: the instance is shown and moves the stats, and its own hits and
+    /// ticks are the world's (by_creature), so this runtime does not run them.
+    void   apply_creature_effect(bootstrap::AbilityChange& c, const effects::Applied& applied, uint64_t instigator, double t);
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
     /// The game's damage breaks stealth: Camouflage's Incoming reaction ends it on any damage, and Rogue_Stealth's fragility ends it when the damage taken

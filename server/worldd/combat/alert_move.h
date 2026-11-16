@@ -17,14 +17,55 @@
 
 namespace aoc::worldd::combat {
 
-/// Whether an ability does harm to enemies: some hit of it is aimed at enemies and moves Health.
+/// Whether a hit's own stat mods move an enemy's Health: a Health mod whose expression runs.
+inline bool hit_moves_enemies_health(const abilities::HitDef& hit, const abilities::Catalog& catalog, int64_t health_stat) {
+    for (const content::ModRow& m : hit.mods) {
+        if (m.stat_guid == health_stat && m.value_expr != 0 && catalog.program(m.value_expr) >= 0) return true;
+    }
+    return false;
+}
+
+/// Whether a hit, the hits of the zones it opens, or the hits it fires when it lands (its RecursiveHit children) move an enemy's Health.  A hit whose mask names no side (a ground
+/// trace where a projectile came down) reaches whoever stands there, so it counts: the Fire Bomb's child is one.  `depth` caps the chain at 4, as the hits a creature's own hit
+/// fires do.
+inline bool hit_hurts_enemies(const abilities::HitDef& hit, const abilities::Catalog& catalog, int64_t health_stat, int depth) {
+    if (depth > 4) return false;
+    const bool reaches = hit.row.applicable_targets == 0 || (hit.row.applicable_targets & 2) != 0;
+    if (reaches && hit_moves_enemies_health(hit, catalog, health_stat)) return true;
+    // a zone the hit opens is its harm when the hit itself reached enemies; a self or ally hit's zone (an arsonist's ring under the caster) is not read as an attack here
+    if (reaches) {
+        for (const int64_t zone_guid : hit.zones) {
+            const content::ZoneRow* zone = catalog.zone(zone_guid);
+            if (!zone) continue;
+            for (const auto& role : zone->hits) {
+                for (const int64_t guid : role.second) {
+                    const abilities::HitDef* zh = catalog.hit(guid);
+                    if (zh && hit_hurts_enemies(*zh, catalog, health_stat, depth + 1)) return true;
+                }
+            }
+        }
+    }
+    for (const content::RecursiveHitRow& row : hit.recursive) {
+        const abilities::HitDef* child = catalog.hit(row.child_hit);
+        if (child && hit_hurts_enemies(*child, catalog, health_stat, depth + 1)) return true;
+    }
+    return false;
+}
+
+/// Whether one of an ability's own hits aimed at enemies moves their Health itself: the rule before the hits a hit fires and the zones it opens were read.
+inline bool hurts_enemies_directly(const abilities::AbilityDef& d, const abilities::Catalog& catalog, int64_t health_stat) {
+    for (const content::AbilityHitRow& h : d.hits) {
+        const abilities::HitDef* hit = catalog.hit(h.hit_guid);
+        if (hit && (hit->row.applicable_targets & 2) != 0 && hit_moves_enemies_health(*hit, catalog, health_stat)) return true;
+    }
+    return false;
+}
+
+/// Whether an ability does harm to enemies: some hit of it moves their Health, itself, through the zones it opens or through the hits it fires when it lands.
 inline bool hurts_enemies(const abilities::AbilityDef& d, const abilities::Catalog& catalog, int64_t health_stat) {
     for (const content::AbilityHitRow& h : d.hits) {
         const abilities::HitDef* hit = catalog.hit(h.hit_guid);
-        if (!hit || (hit->row.applicable_targets & 2) == 0) continue;
-        for (const content::ModRow& m : hit->mods) {
-            if (m.stat_guid == health_stat && m.value_expr != 0 && catalog.program(m.value_expr) >= 0) return true;
-        }
+        if (hit && hit_hurts_enemies(*hit, catalog, health_stat, 0)) return true;
     }
     return false;
 }

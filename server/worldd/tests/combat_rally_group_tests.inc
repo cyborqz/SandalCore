@@ -223,18 +223,20 @@ void test_the_flamespeaker_rallies_then_shields(Fixture& f) {
     }
     ALERT_EFFECT(melee_before >= 10, "it fights with its Bludgeon before the first Rally (%zu bludgeons)", melee_before);
     ALERT_EFFECT(melee_between >= 10, "... and between the pair and the next Rally, not only rallies (%zu bludgeons)", melee_between);
-    // the Fire Bomb is one of its tree's moves, but its projectile's own hit is empty: no stat, no effect, no zone.  Its damage, burn and lingering fire are on the child hit the data
-    // chains to that hit, which the world does not follow yet.  The world plays neither an attack nor a show of it, so it waits like any move whose hit nothing shows; the Bludgeon is
-    // the melee that fills the wait between the rallies.
-    bool bomb_reads = false;
+    // the Fire Bomb is one of its tree's moves: the projectile's own hit is empty, and the data chains the hit that carries the damage, the Burning and the lingering fire to it.  The
+    // world reads the child now, so the move is an attack and the Flamespeaker throws it between the melees.
+    bool bomb_child_hurts = false;
     for (const content::AbilityHitRow& r : bomb->hits) {
         const abilities::HitDef* h = f.catalog->hit(r.hit_guid);
-        bomb_reads = bomb_reads || (h && (!h->mods.empty() || !h->effects.empty() || !h->zones.empty()));
+        if (!h) continue;
+        for (const content::RecursiveHitRow& child : h->recursive) {
+            const abilities::HitDef* c = f.catalog->hit(child.child_hit);
+            if (!c) continue;
+            for (const content::ModRow& m : c->mods) bomb_child_hurts = bomb_child_hurts || (m.stat_guid == f.data->ids().health && m.value_expr != 0);
+        }
     }
-    ALERT_EFFECT(!combat::hurts_enemies(*bomb, *f.catalog, f.data->ids().health) && !combat::is_alert_move(*bomb, *f.catalog, f.data->ids().health) &&
-                     !combat::is_state_move(*bomb, *f.catalog, f.data->ids().health) && !bomb_reads,
-                 "the Fire Bomb's projectile hit carries nothing the world can land (0 stat changes, 0 effects, 0 zones): the world plays neither an attack nor a show of it, and it is "
-                 "not cast (%zu casts)", bombs.size());
+    ALERT_EFFECT(bomb_child_hurts && combat::hurts_enemies(*bomb, *f.catalog, f.data->ids().health) && !bombs.empty(),
+                 "the Fire Bomb is an attack through the child hit its projectile fires (its own hit carries nothing), and the Flamespeaker throws it (%zu casts)", bombs.size());
     ALERT_EFFECT(caster_shielded, "the Fire Shield Aura's effect is on the Flamespeaker itself (the hit's Self bit)");
     ALERT_EFFECT(shown, "the caster shows the aura in its CurrentEffects array, what its clients are told");
     ALERT_EFFECT(near_shielded && far_shielded, "the aura reaches the allies in its 14 m sphere (5 m and 13 m away)");

@@ -108,12 +108,7 @@ public:
     /// The world's clock for a time of the runtime's.
     double world_time(double runtime_now) const { return runtime_now + clock_offset_; }
     double clock_offset() const { return clock_offset_; }
-    protocol::emit::FIntrepidNetworkGUID guid_of(uint64_t actor) override {
-        const world::WorldActor* a = registry_.find(actor);
-        if (a) return a->actor.guid;
-        if (PlayerPort* p = world_.find_player(actor)) return p->pawn_guid();   // (another player's pawn: a hit of the ally's heals names it)
-        return protocol::emit::FIntrepidNetworkGUID{};
-    }
+    protocol::emit::FIntrepidNetworkGUID guid_of(uint64_t actor) override { return world_.actor_guid(actor); }
     protocol::emit::FIntrepidNetworkGUID hit_component_of(uint64_t actor) override {
         if (PlayerPort* p = world_.find_player(actor)) return p->cylinder_guid();
         protocol::emit::FIntrepidNetworkGUID g = guid_of(actor);

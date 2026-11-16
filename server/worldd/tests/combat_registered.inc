@@ -48,3 +48,5 @@
 #include "combat_deliverance_review_tests.inc"
 #include "combat_three_fixes_tests.inc"
 #include "combat_three_fixes_review_tests.inc"
+#include "combat_mob_child_hits_tests.inc"
+#include "combat_mob_child_hits_review_tests.inc"
