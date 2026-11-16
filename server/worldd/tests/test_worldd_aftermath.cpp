@@ -26,6 +26,9 @@
 #include "world/corpse.h"
 
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <set>
 
 #ifndef NPC_MOTION_PATH
@@ -286,6 +289,39 @@ void test_kill(Fixture& f) {
     CHECK(c2 && !c2->parts && near(c2->close_at - c2->died_at, 15.0, 1e-6), "a corpse with nothing to loot lasts 15.0 s (retail: 7 of 7)");
     const world::WorldActor* b = s.w.registry.find(without);
     CHECK(b && count_sub(*b, "ULootComponent", true) == 0, "and has no loot components");
+}
+
+void test_kill_reward_names_the_creature(Fixture& f) {
+    std::printf("the kill reward carries what the logs call the creature, and its nameplate stays as it was\n");
+    const std::filesystem::path table = std::filesystem::temp_directory_path() / ("aoc_aftermath_names_" + std::to_string(reinterpret_cast<std::uintptr_t>(&f)) + ".tsv");
+    {
+        std::ofstream out(table, std::ios::binary);
+        out << "blueprint\tdisplay_name\tsource\n" << f.wolf_path << "\tSlate Wolf\tinfo\n";
+    }
+    Scene s(f, 12);
+    CHECKF(s.ok(), "the scene: %s %s", s.rig.problem.c_str(), s.w.problem.c_str());
+    if (!s.ok()) {
+        std::filesystem::remove(table);
+        return;
+    }
+    // no table: the name it had
+    const uint64_t plain = s.wolf(10, 100);
+    s.kill(plain);
+    CHECK(s.player->kills.size() == 1 && s.player->kills[0].shown == "Wolf" && s.player->kills[0].name == "Wolf", "with no table the reward says what it said: Wolf");
+    // a table: the game's name beside the leaf; the nameplate, which is a wire value, is what it was
+    CHECK(s.world->load_display_names(table.string()) == 1, "the table names the Wolf");
+    const uint64_t named = s.wolf(10, 500);
+    s.kill(named);
+    CHECK(s.player->kills.size() == 2 && s.player->kills[1].shown == "Slate Wolf (Wolf)", "the reward shows the name the game shows beside the Blueprint's leaf");
+    CHECK(s.player->kills.size() == 2 && s.player->kills[1].name == "Wolf" && s.player->kills[1].blueprint == "Wolf", "...and its nameplate and its Blueprint are what they were");
+    const combat::Corpse* c = s.after->corpse_of(named);
+    CHECK(c != nullptr && c->name == "Wolf", "...as is the corpse's name");
+    // a creature that names itself keeps its name
+    const uint64_t own = s.wolf(10, 900);
+    s.w.registry.modify(own, world::Change::State, [&](world::WorldActor& a) { a.npc.name = "Marrowrot Flamespeaker"; });
+    s.kill(own);
+    CHECK(s.player->kills.size() == 3 && s.player->kills[2].name == "Marrowrot Flamespeaker" && s.player->kills[2].shown == "Marrowrot Flamespeaker", "a creature that names itself keeps its own name in the reward");
+    std::filesystem::remove(table);
 }
 
 // ---- the respawn -----------------------------------------------------------------------------------------------------------------
@@ -556,6 +592,62 @@ void test_zone(Fixture& f) {
     CHECK(there.tur > 0 && there.rvr == 0, "dying in the Tropics gives the _TUR gear and not the _RVR gear");
 }
 
+// ---- the pile of a full bag: the dropped items' class, not the dead player's ------------------------------------------------------------
+
+// this file's CHECK prints only a failure; this test prints its own passing lines too, so that a Green run shows each check
+#define CHECK_OK(cond, msg) do { if (cond) { std::printf("  [ok ] %s\n", msg); ++g_pass; } else { std::printf("  [FAIL] %s\n", msg); ++g_fail; } } while (0)
+
+void test_dropped_pile_look(Fixture& f) {
+    std::printf("a full bag's overflow: an ALootPile (the dropped items' look), beside a dead player's APlayerLootPile\n");
+    Scene s(f, 20);
+    CHECK_OK(s.ok(), ("the scene: " + s.rig.problem + " " + s.w.problem).c_str());
+    if (!s.ok()) return;
+    repl::GuidValue owner{0x11111111u, 0x22222222u, 0x33333333u, 0x44444444u};
+    combat::LootStack stack;
+    stack.item = 6064629184431849472ll;   // Resource_Raw_Plant_Daffodil
+    stack.variation = 0;
+    stack.quantity = 3;
+    stack.quality = 1;
+    const std::vector<combat::LootStack> stacks{stack};
+    std::string error;
+    // what PlayerWorld::drop_harvest_pile makes of a full bag (item_drop), and a death's pile of the same stacks beside it
+    const uint64_t dropped = s.after->drop_pile(100, 0, 1000, owner, "Cyb", stacks, s.now, error, /*item_drop=*/true);
+    CHECK_OK(dropped != 0 && error.empty(), ("the drop's pile is made: " + error).c_str());
+    const uint64_t death = s.after->drop_pile(300, 0, 1000, owner, "Cyb", stacks, s.now, error);
+    CHECK_OK(death != 0 && error.empty(), ("the death's pile is made: " + error).c_str());
+    if (!dropped || !death) return;
+    const world::WorldActor* a = s.w.registry.find(dropped);
+    const world::WorldActor* d = s.w.registry.find(death);
+    CHECK_OK(a && a->kind == world::ActorKind::Pile && a->actor.obj.schema && std::string(a->actor.obj.schema->name) == "ALootPile",
+             "the full bag's pile is an ALootPile: the class the game spawns dropped items in");
+    CHECK_OK(a && a->actor.open.archetype.size() == 2 && a->actor.open.archetype[0].name == "Default__LootPile" &&
+                 a->actor.open.archetype[1].name == "/Script/GameSystemsPlugin",
+             "and it opens as the retail full-bag capture's Default__LootPile of /Script/GameSystemsPlugin");
+    CHECK_OK(a && a->actor.obj.schema && !a->actor.obj.schema->command("PlayerGuid") && !a->actor.obj.schema->command("PlayerName") && !a->actor.obj.schema->command("LootPileType"),
+             "a drop has no player's guid, name or pile type: its class has none");
+    CHECK_OK(a && count_sub(*a, "ULootComponent", true) == 1 && count_sub(*a, "UItemStorageComponent", true) >= 1, "it carries the loot's LootComponent and ItemStorageComponent");
+    const combat::Corpse* c = s.after->corpse_of(dropped);
+    CHECK_OK(c && c->is_pile && c->loot.size() == 1 && c->loot[0].quantity == 3, "its loot window holds the harvest's stack (Daffodil x3)");
+    CHECK_OK(c && s.after->corpse_by_interactable(c->parts->interactable) == c, "a client's interaction names it by its InteractableComponent");
+    CHECK_OK(d && d->actor.obj.schema && std::string(d->actor.obj.schema->name) == "APlayerLootPile", "the death's pile keeps its own class beside it");
+    int64_t pile_type = -1;
+    if (d && d->actor.obj.schema) {
+        if (const repl::Value* v = d->actor.obj.state.get(*d->actor.obj.schema, "LootPileType")) {
+            if (const uint64_t* u = v->get_if<uint64_t>()) pile_type = static_cast<int64_t>(*u);
+        }
+    }
+    CHECK_OK(pile_type == 2, "and its LootPileType is still 2 (the dead player's pile)");
+    // two of a kind: a second drop beside the first is its own pile, and taking from one leaves the other
+    const uint64_t second = s.after->drop_pile(500, 0, 1000, owner, "Cyb", stacks, s.now, error, true);
+    CHECK_OK(second != 0 && second != dropped && s.after->corpse_of(second) != nullptr, "a second drop makes a second ALootPile of its own");
+    const world::WorldActor* b = s.w.registry.find(second);
+    CHECK_OK(b && b->actor.obj.schema && std::string(b->actor.obj.schema->name) == "ALootPile" && b->actor.open.archetype.size() == 2, "...with the same dropped-items class and open");
+    CHECK_OK(s.after->take(dropped, 0) != nullptr && s.after->corpse_of(dropped)->remaining() == 0, "the first drop's stack is taken");
+    CHECK_OK(s.after->corpse_of(second)->remaining() == 1, "the second drop still holds its stack");
+}
+
+#include "aftermath_dropped_pile_tests.inc"
+
 int main() {
     if (!real_db_present()) {
         std::printf("test_worldd_aftermath: no content.db at %s (set AOC_CONTENT_DB): skipped\n", real_db_path().c_str());
@@ -567,10 +659,13 @@ int main() {
         return 1;
     }
     test_kill(f);
+    test_kill_reward_names_the_creature(f);
     test_respawn(f);
     test_hostile(f);
     test_huntable(f);
     test_zone(f);
+    test_dropped_pile_look(f);
+    test_dropped_pile_blocks(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

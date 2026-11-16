@@ -12,6 +12,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace aoc::worldd::npc::ai {
@@ -39,8 +40,10 @@ public:
     const std::vector<Entry>& entries() const { return entries_; }
 
     /// The target to fight: `current` while no one has kSwitchRatio of its threat (and it is still in the table), else the one with the most (the earliest
-    /// entered wins a tie). 0 for an empty table.
-    uint64_t pick(uint64_t current) const;
+    /// entered wins a tie). 0 for an empty table.  `allowed` (optional) leaves out a target the creature cannot fight now (a stealthed player it has lost):
+    /// the highest threat it allows is the one, and `current` keeps its place only while it is allowed.
+    uint64_t pick(uint64_t current, const std::function<bool(uint64_t)>& allowed) const;
+    uint64_t pick(uint64_t current) const { return pick(current, {}); }
 
 private:
     std::vector<Entry> entries_;

@@ -24,6 +24,9 @@ import (
 //	craft_cost                a money cost record (the currency tier and the amount)
 //	craft_reward              the reward tables the recipes name, and the sub-tables they reach, each as the JSON of its containers (what a finished recipe yields)
 //	craft_tag_item            (version 31) for each tag that names a recipe input, alone or with others: the items that satisfy it, so a pick of stacks can be checked
+//	craft_filter_item         (version 47) for each gather-item filter a recipe input names (CostGatherItemFilter) whose record lists items: the items the filter admits, so a pick of stacks can be
+//	                          checked against the curated list the client shows, not against the wider tag; a filter that lists none (the trade and construction crates' own, the fish, plant and
+//	                          ore filters of the gatherers, the processed goods of each profession) has no row, and the input's tags name its materials
 //	item_equipped_effect      (version 33) the effects an item puts on its wearer while it is worn (ItemRecordBase.EquippedEffects), each for the item rarities MinimumRarity to
 //	                          MaximumRarity: a carried crate's Encumbered effect, for crates of Common rarity
 //
@@ -56,6 +59,11 @@ CREATE TABLE craft_tag_item (
     tag       TEXT NOT NULL,              -- a gameplay tag that alone names a recipe input, in lower case
     item_guid INTEGER NOT NULL,           -- an item that carries it: its GameplayTags, RecipeFilterTags or ProfessionTag hold the tag or a child of it
     PRIMARY KEY (tag, item_guid)
+) WITHOUT ROWID;
+CREATE TABLE craft_filter_item (
+    filter_guid INTEGER NOT NULL,         -- a GatherItemFilterRecordBase a recipe input names (CostGatherItemFilter)
+    item_guid   INTEGER NOT NULL,         -- an item the filter admits (ItemsIds)
+    PRIMARY KEY (filter_guid, item_guid)
 ) WITHOUT ROWID;
 CREATE TABLE item_equipped_effect (
     item_guid   INTEGER NOT NULL,
@@ -159,8 +167,8 @@ CREATE TABLE craft_reward (
 `
 
 // CraftingTables are the tables CraftingDDL creates, in the DDL's order.
-var CraftingTables = []string{"craft_station_def", "craft_station_asset", "craft_tag_item", "item_equipped_effect", "craft_recipe_set", "craft_recipe_set_list", "craft_recipe_list", "craft_recipe_list_member", "craft_pred",
-	"craft_recipe", "craft_recipe_input", "craft_cost", "craft_reward"}
+var CraftingTables = []string{"craft_station_def", "craft_station_asset", "craft_tag_item", "craft_filter_item", "item_equipped_effect", "craft_recipe_set", "craft_recipe_set_list", "craft_recipe_list",
+	"craft_recipe_list_member", "craft_pred", "craft_recipe", "craft_recipe_input", "craft_cost", "craft_reward"}
 
 func createCrafting(db *sql.DB) error {
 	if _, err := db.Exec(CraftingDDL); err != nil {

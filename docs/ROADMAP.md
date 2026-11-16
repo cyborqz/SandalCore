@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 15 November 2026
+**Last updated:** 16 November 2026
 
 ---
 
@@ -74,6 +74,12 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Resisting mobs: a crowd control a mob has kept up is thrown off at its build-up's threshold, and a new one of that kind is resisted for 10 s; a boss is immune to the effects the data gates on the Boss effect, and the caster's client shows the resist or the immunity in its combat log.
 - Mob moves that wait for a clock: a mob's move that waits for the fight's clock (under any of its names) or for the mob's own clock now plays: the Skeletons' long axe swipe, the Tidebreakers' and Otters' rapid bite, the Reapers' guillotine and slice, the Mycellions' spore moves and the Dunzenkell constructs' hammer throw and shield assault among them; a mob's own clock starts again when it respawns.
 - The Quest bag: quest items (the items the game marks as quest items) are kept in the quest bag, not the item bag. Rewards, objects, mob drops and a quest's own start items go there, a stack tops up as in the item bag, a hand-in takes from the quest bag and the item bag, and abandoning a quest takes its items out of the bag. A character who already carries quest items in the item bag keeps them there.
+- Mob alert moves, move chains and mob effects: mobs play their growls, yawps and rear-ups; a move that readies another is followed by it (the Goblin Flayer's sneer and its spin, the Bear's rear-up and its pound), and a chain never skips a cooldown the two moves share; the Flamespeakers' auras land on the goblin and its allies, and the Fire Shield strikes back at the player who hits it; a move that waits for an effect on the mob plays once the effect is there (the Skeleton Soldier's block, the Ashen Flame Disciple's spear strikes after its prayer); a mob keeps its starting effects through a reset.
+- Mob names in the server log: the log names each mob as the game shows it, with its kind beside it (for example "Slate Wolf (Wolf)"), including the names the game gives single spawns such as "Bone Crusha".
+- Hit checks on each target: a hit rolls its miss, block and critical on each of its targets on its own and asks its own requirement of each of them, so the Hemorrhage conversions of the Snipe, the Rupture, the Headshot and the Vine Field turn a bleed into a Hemorrhage on the mobs that bleed. The ticks of a mob's bleeds, Hemorrhages, poisons and burns never miss, and a second player's Blinded, Dazed, Demoralized, Weakened or Rooted goes on a mob beside the first one's.
+- Ground circles: the abilities that leave a lasting area open its actor where the game's record places it and tick its hits on whoever stands in it (the Vine Field roots once per caster, the Chains of Restraint damage every second, the Magma Field ends its cast), the Chilling Lament's zone stands under the Bard and the game shows no circle for it, and a requirement that counts what one caster put on a mob now reads his stacks.
+- Ability casts and costs: the Magma Field's cast ends with its field, the Prismatic Beam's Recurse tick lands the beam's damage, and a Cleric spell with Essence Infusion on falls back to its normal Mana cost when the Divine Power is short.
+- The Bard's Saga: its six variants are chosen from the Bard's three themes, its Return to Verra's bursts heal the party's allies (injured first, up to eight within 40 m) on their own characters, and its Silent Pantheon's four projectiles land 1 m blessing zones; the notes are the Bard_Notes group of three, so three stories of one theme build the variant.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -82,6 +88,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Summoner pets: the Guardian, Hunter and Mystic come with the summon, follow, fight, take commands and stances, play their ten abilities and come back when more than 40 m away.
 - Seeing other players (first three parts): players within 150 m of each other see each other's characters standing, walking, stopping and riding their mounts, with the gear they wear, the weapons in their hands and their level kept current as they change. Still to come: live Health and Mana, death, combat stances, and abilities and hits on other players.
 - The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
+- Stealth: the full-bag pile on the ground, the client's own Camouflage look pinned on the wire, and creatures that detect a stealthed player by the game's rule.
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.

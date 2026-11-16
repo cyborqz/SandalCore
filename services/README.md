@@ -836,9 +836,11 @@ never applied later.
 - `Teleport(character, place | point{x, y, z, has_z})`: the character's name is matched without case. The path is the one E1's respawn uses to move a player: the move checker is
   rebased on the new place (the credits start over, the TimeStamp state stays) and the client is sent a position correction (`ClientAdjustPosition`), so its next moves are
   measured from there and not corrected. **A mounted player is dismounted first** (the ride is over); the mount stays where it was and desummons by distance as it does today
-  (`MountDesummonDistance`, 500 m). Without `z`, the height is the landscape's under the point plus the capsule's half height (98 cm) when the server has ground there (the
-  area's terrain), otherwise the call is refused (`InvalidArgument`: "give z"). A named place stands 98 cm above the ground where the server has ground, otherwise 150 cm above
-  its recorded z. A dead player is not moved (`FailedPrecondition`), a point outside the world box is refused (`InvalidArgument`), an unknown character or place is `NotFound`.
+  (`MountDesummonDistance`, 500 m). Without `z`, the height is the surface the server has under the point (a town's floor, the floor of a building, else the landscape) plus the capsule's half height (98 cm) when it has ground there
+  (the floors of the walking map count only where their chunk is loaded), otherwise the call is refused (`InvalidArgument`: "give z"). A `z` that is given is kept unless it is under the ground there,
+  then the ground is used. A named place stands 98 cm above the ground where the server has ground, otherwise 150 cm above
+  its recorded z. The client is held at the place until its own moves show it stands there (the correction goes again while it falls under the place, 0.5 s apart for at most 20 s); a place in the air is
+  not held. A dead player is not moved (`FailedPrecondition`), a point outside the world box is refused (`InvalidArgument`), an unknown character or place is `NotFound`.
   Every teleport is logged with its from and to (`[gm] cyb: teleported by ... from (...) to (...)`), and the new position is handed to the saver at once.
 - `SetMoveSpeed(character, multiplier)`: 0.5 to 10 (`InvalidArgument` outside), 1 resets. It is a factor of the character's `MoveSpeedMult`: the pawn's replicated stat (the one the
   Sprint's effect raises: the client moves at 600 cm/s times it) and, while the player rides, the mount's own `MoveSpeedMult` (the stat the road's and the dash's effects raise),

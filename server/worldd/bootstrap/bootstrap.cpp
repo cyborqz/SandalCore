@@ -17,6 +17,7 @@
 //      parameters are libaocnet's typed storage RPCs (storage_rpc.h), an empty slot as the original sent it.
 // ============================================================================
 #include "bootstrap/bootstrap.h"
+#include "bootstrap/stealth_effects.h"
 
 #include "content/content_db.h"
 
@@ -2729,15 +2730,23 @@ bool PlayerBootstrap::apply_ability_change(const AbilityChange& c) {
         item.values[2] = Value(std::move(values));
         if (!shield_array->change(*shield_item, std::move(item))) return fail("the TempHealth item does not take its shields");
     }
+    const bool was_stealthed = !stealth_keys_.empty();
     for (const int64_t k : c.effects_removed) {
         effects->remove(effect_ids_.at(k));
         effects->mark_array_dirty();   // the original server's removals move the key by two (test_repl_fast_array)
         effect_ids_.erase(k);
+        stealth_keys_.erase(k);
     }
     for (const EffectItem& e : c.effects_added) {
         const auto id = effects->add(effect_state(setup_, e));
         if (!id) return fail("an effect item does not fit CurrentEffects");
         effect_ids_[e.effect_id] = *id;
+        if (applies_stealth(e.effect_guid)) stealth_keys_.insert(e.effect_id);
+    }
+    // the pawn says it is stealthed while an effect that stealths it is on, in the packet that changes the effects [R: the recordings of Camouflage on and off, Rogue's Stealth and Phase Out]
+    if (was_stealthed != !stealth_keys_.empty() &&
+        !pawn_.obj.state.set(*pawn_.obj.schema, "StealthInfo.bInStealth", Value::boolean(!stealth_keys_.empty()))) {
+        return fail("the pawn does not take StealthInfo.bInStealth");
     }
     for (const EffectItem& e : c.effects_changed) {
         if (!effects->change(effect_ids_.at(e.effect_id), effect_state(setup_, e))) return fail("an effect item does not take its change");
@@ -2900,6 +2909,7 @@ bool PlayerBootstrap::lingering_add(const LingeringSpec& spec) {
     if (!actor) return false;
     EffectActor e;
     e.actor = std::move(*actor);
+    e.attached = spec.attached;
     effect_actors_[spec.actor.ObjectId] = std::move(e);
     mesh_ = spec.pawn_mesh;
     return true;
@@ -2924,11 +2934,14 @@ std::optional<repl::Actor> PlayerBootstrap::lingering_actor_of(const LingeringSp
     // the values of the retail actor, in handle order (the retail capture, packet 302)
     set(a.obj, "AuthServerIDReplicated", Value::u64(kAuthServerIdReplicated));
     set(a.obj, "RemoteRole", Value::u64(1));   // SimulatedProxy
-    set(a.obj, "AttachmentReplication.AttachParent", object(setup_.guids.pawn));
-    set(a.obj, "AttachmentReplication.LocationOffset", Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, 3, 0, 0}));
-    set(a.obj, "AttachmentReplication.RelativeScale3D",
-        Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, kRelativeScale100, kRelativeScale100, kRelativeScale100}));
-    set(a.obj, "AttachmentReplication.AttachComponent", object(spec.pawn_mesh));
+    if (spec.attached) {
+        // a zone on the pawn (a dance, an aura): the values the retail capture holds
+        set(a.obj, "AttachmentReplication.AttachParent", object(setup_.guids.pawn));
+        set(a.obj, "AttachmentReplication.LocationOffset", Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, 3, 0, 0}));
+        set(a.obj, "AttachmentReplication.RelativeScale3D",
+            Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, kRelativeScale100, kRelativeScale100, kRelativeScale100}));
+        set(a.obj, "AttachmentReplication.AttachComponent", object(spec.pawn_mesh));
+    }
     set(a.obj, "Role", Value::u64(4));   // Authority
     set(a.obj, "Instigator", object(setup_.guids.pawn));
     set(a.obj, "LingeringEffectGuid.A", word(spec.effect_guid[0]));
@@ -2983,7 +2996,7 @@ std::optional<Send> PlayerBootstrap::lingering_open(uint64_t actor_id) {
         return std::nullopt;
     }
     // AttachComponent names the pawn's CharacterMesh0, a default component the client finds by name and outer: its export goes with the actor's block
-    blocks[0].exports.push_back(lingering_mesh_export(mesh_));
+    if (e.attached) blocks[0].exports.push_back(lingering_mesh_export(mesh_));
     auto emission = repl::assemble_open(e.actor, blocks, acks_);
     if (!emission) undo.rollback(e.shadow);
     auto send = finish(Role::Pawn, true, "lingering zone open", std::move(emission));

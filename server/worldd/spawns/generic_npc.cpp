@@ -90,6 +90,20 @@ bool is_plain_conversation(const ParsedBlock& b) {
 /// The block classes of a plain creature's open, in the order retail sends them.
 const char* const kPlain[] = {"ANPCCharacter", "UAlignmentComponent", "UNPCSecondaryInfo", "UNPCInfo", "UNPCCombatInfo", "UAoCAbilityComponent", "UAoCStatsComponent"};
 
+/// Copies the effects the Blueprint's own captured open lists in its stats component (what retail carried on the creature from spawn) into the open made here, which is built
+/// from a donor's: the creature's tree asks about them ("carries effect E"), and its clients see the same effects retail sent.
+void adopt_starting_effects(OpenTemplate& t, const OpenTemplate& own) {
+    const int to = t.find("UAoCStatsComponent"), from = own.find("UAoCStatsComponent");
+    if (to <= 0 || from <= 0) return;
+    ParsedBlock& block = t.blocks[static_cast<size_t>(to)];
+    const ParsedBlock& source = own.blocks[static_cast<size_t>(from)];
+    if (!block.schema || !source.schema) return;
+    repl::FastArrayState* dst = block.state.arrays.get(*block.schema, "CurrentEffects");
+    repl::FastArrayState* src = const_cast<repl::FastArrays&>(source.state.arrays).get(*source.schema, "CurrentEffects");
+    if (!dst || !src) return;
+    for (const repl::FastArrayItem& item : src->items()) dst->add(item.values);
+}
+
 bool is_plain(const OpenTemplate& t) {
     if (t.category != "npc" || t.blocks.size() != std::size(kPlain)) return false;
     for (size_t i = 0; i < t.blocks.size(); ++i) {
@@ -459,6 +473,8 @@ const OpenTemplate* GenericNpcs::make_plain(const content::NpcAssetRow& asset, V
         const auto* emote = si > 0 && t.blocks[static_cast<size_t>(si)].schema ? t.blocks[static_cast<size_t>(si)].schema->command("EmoteAnimationInfoGuid") : nullptr;
         if (emote) t.blocks[static_cast<size_t>(si)].state.state.erase(emote->handle);
     }
+    // the effects the Blueprint's own open carried from spawn (its equipment and passives): the donor's stats component says nothing of them
+    if (const OpenTemplate* own = captured_->template_for(path)) adopt_starting_effects(t, *own);
     return &made_.emplace(person && talks ? path + "#talks" : path, std::move(t)).first->second;
 }
 

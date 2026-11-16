@@ -34,6 +34,16 @@ public static class Looks
     public const string TreesFile = "npc_trees.tsv";
     public const string TreesHeader = "archetype\ttree\twander\tpatrol";
 
+    /// <summary>
+    /// The name the game shows for a pawn Blueprint (npc_display_names.tsv): one line per pawn Blueprint the reader knows, in path order:
+    ///   blueprint  display_name  source
+    /// `blueprint` is the same key as npc_abilities.tsv's first column, `display_name` the CharacterName its BaseCharacterInfo component carries (the nearest parent Blueprint's when that
+    /// class sets none; "" when none of them names it), `source` where the name was read ("info": its own component, "parent_info": a parent Blueprint's, "blueprint": the class defaults'
+    /// CharacterName or NPCName, "none": no name).  The pawn base class's "NPC" is a placeholder, not a name.
+    /// </summary>
+    public const string DisplayFile = "npc_display_names.tsv";
+    public const string DisplayHeader = "blueprint\tdisplay_name\tsource";
+
     /// <summary>The class chain of a default object: its parents' default objects, nearest first (each is the archetype of the next).</summary>
     static List<UObject> Chain(UObject cdo, out bool pawn)
     {
@@ -81,10 +91,44 @@ public static class Looks
 
     static string Flat(string s) => s.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
 
-    public static string Collect(Game g, out int packages, out int failed, out int rows, out string trees, out int treeRows)
+    /// <summary>The name a pawn Blueprint's people show: the class defaults' CharacterName (else NPCName) of the nearest Blueprint that sets one, which the game's server copies into the
+    /// BaseCharacterInfo component; then the component's own CharacterName, or the nearest parent Blueprint's (a class that sets an empty one clears its parent's).  The pawn base class's
+    /// "NPC" is a placeholder, not a name.  `source` says where it was read.</summary>
+    static string DisplayNameOf(List<UObject> cdos, out string source)
+    {
+        source = "";
+        for (int i = 0; i < cdos.Count; i++)
+        {
+            UObject c = cdos[i];
+            string text;
+            if (c.TryGetValue(out string nm, "CharacterName") && nm != null) text = Flat(nm);
+            else if (c.TryGetValue(out string np, "NPCName") && np != null) text = Flat(np);
+            else continue;
+            if (text != "0" && text != "NPC" && text.Length != 0) { source = i == 0 ? "blueprint" : "parent_blueprint"; return text; }
+            break;   // (the empty name this class sets clears a parent's; the component's own default stands)
+        }
+        for (int i = 0; i < cdos.Count; i++)
+        {
+            UObject c = cdos[i];
+            if (c.Owner is not IPackage cp) continue;
+            foreach (var e in cp.GetExports())
+            {
+                if (e.Outer != c || e.Name != "BaseCharacterInfo") continue;
+                if (!e.TryGetValue(out string own, "CharacterName") || own == null) continue;
+                string text = Flat(own);
+                if (text == "0" || text == "NPC") text = "";
+                if (text.Length != 0) source = i == 0 ? "info" : "parent_info";
+                return text;
+            }
+        }
+        return "";
+    }
+
+    public static string Collect(Game g, out int packages, out int failed, out int rows, out string trees, out int treeRows, out string displayNames, out int displayRows)
     {
         var lines = new List<(string Archetype, string Line)>();
         var treeLines = new List<(string Archetype, string Line)>();
+        var displayLines = new List<(string Archetype, string Line)>();
         var treeCache = new Dictionary<string, Reader.TreeKind?>();
         packages = 0; failed = 0;
         foreach (var path in NpcBlueprints.AllPaths(g))
@@ -101,6 +145,9 @@ public static class Looks
             if (!pawn) continue;
             string pkgPath = "/Game/" + path.Substring("AOC/Content/".Length, path.Length - "AOC/Content/".Length - ".uasset".Length);
             string archetype = pkgPath + "." + cdo.Name;
+            // the name the game shows (every pawn Blueprint, humanoid or not)
+            string displayName = DisplayNameOf(cdos, out string displaySource);
+            displayLines.Add((archetype, archetype + "\t" + displayName + "\t" + (displayName.Length != 0 ? displaySource : "none")));
             // what its state tree has tasks for (every pawn Blueprint, humanoid or not)
             var kind = Reader.TreeKindOf(g, cdo, treeCache);
             if (kind != null) treeLines.Add((archetype, archetype + "\t" + kind.Tree + "\t" + (kind.Wander ? "1" : "0") + "\t" + (kind.Patrol ? "1" : "0")));
@@ -144,6 +191,12 @@ public static class Looks
         tb.Append(TreesHeader).Append('\n');
         foreach (var (_, line) in treeLines) tb.Append(line).Append('\n');
         trees = tb.ToString();
+        displayLines.Sort((x, y) => string.CompareOrdinal(x.Archetype, y.Archetype));
+        displayRows = displayLines.Count;
+        var db = new StringBuilder();
+        db.Append(DisplayHeader).Append('\n');
+        foreach (var (_, line) in displayLines) db.Append(line).Append('\n');
+        displayNames = db.ToString();
         return sb.ToString();
     }
 }

@@ -920,6 +920,11 @@ bool NpcWorld::root_motion_active(uint64_t id) const {
     return it != npcs_.end() && it->second.rm.has_value();
 }
 
+bool NpcWorld::root_motion_obstructed(uint64_t id) const {
+    const auto it = npcs_.find(id);
+    return it != npcs_.end() && it->second.rm.has_value() && it->second.rm->obstructed;
+}
+
 void NpcWorld::advance_root_motion(Npc& n, double t) {
     RootMotion& r = *n.rm;
     const RootMotionPlay& p = r.play;
@@ -1049,6 +1054,7 @@ void NpcWorld::advance_root_motion(Npc& n, double t) {
     // (the velocity of a lunge has no vertical part: the retail server's is 0.0 in every recorded update of every lunge, on a slope too, where its place moves with the ground)
     const nav::Vec3 vel = last ? nav::Vec3{} : nav::Vec3{(to.x - g.x) / dt, (to.y - g.y) / dt, 0.0};
     write_replicated(*a, to.x, to.y, z, yaw, vel, false, t);
+    r.obstructed = obstructed && !last;
     write_root_motion(*a, !last, p.montage, at, to.x, to.y, z, yaw, vel, obstructed && !last);
     n.reported_moving = false;
     ++stats_.writes;

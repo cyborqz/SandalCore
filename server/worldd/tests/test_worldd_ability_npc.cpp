@@ -780,6 +780,7 @@ int main(int argc, char** argv) {
     if (only_class.empty() && only_ability.empty() && only_capture == 0) {
         CHECKF(total == n_cases, "every cast of the header was run (%zu of %zu)", total, n_cases);
         CHECKF(accepted + refused_listed == total, "every cast is accepted, or its refusal is listed (%zu + %zu of %zu)", accepted, refused_listed, total);
+        if (matched == total) std::printf("  [ok ] every accepted cast matches retail's reply (%zu of %zu)\n", matched, total);
         CHECKF(matched == total, "every accepted cast matches retail's reply (%zu of %zu)", matched, total);
     }
     g_fail += aoc_tests::run();   // every check registered in ability_npc_registered.inc

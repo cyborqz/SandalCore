@@ -17,10 +17,11 @@
 //  Teleport.  The path E1's respawn uses to move a player: the move checker's teleport() (the last good position and the credits start over, the TimeStamp state is kept) and a
 //  position correction to the client (ClientAdjustPosition), so the client is moved and its next moves are measured from the new place, not corrected.  A mounted player is
 //  dismounted first (the ride is over); the mount stays where it was and desummons by distance as it does today (PlayerSession::run_mounts).  Every teleport is logged with its from
-//  and to.  A dead player is not moved.  The place is the ground when no z is given: the landscape's height under the point plus the capsule's half height (98 cm), when the server has
-//  ground there, else the call is refused and asks for z; a named place stands 98 cm above the ground, or 150 cm above its recorded z where the server has no ground.  Inside a city
-//  node's bowl (Winstead, Joeva, New Aela, Halcyon, Miraleth: the baked terrain is a pit about 50 m under the town) the ground is the town's floor plus 2 m of slack (PlayerWorld::ground_at,
-//  world/town_floor.h); a z that is given is believed.
+//  and to.  A dead player is not moved.  The place is the ground when no z is given: the surface the data has there (PlayerWorld::player_height: a town's floor, the floor of a
+//  building over it, the walking map's floor, or the landscape) plus the capsule's half height (98 cm); where the server has no ground the call is refused and asks for z.  A named
+//  place stands on the surface the same way (98 cm above it; 150 cm above its recorded z where the server has no ground).  A z that is given is kept as given unless it is under
+//  the ground there, then the ground is used.  After a game master's teleport the client is held at the place until its own moves show it stands there (the floor it was sent to
+//  may still be streaming in): the correction goes again while it falls under the place (PlayerSession::run_floor_net, MoveChecker's teleport hold).
 //
 //  Run speed.  A multiplier of MoveSpeedMult, 0.5 to 10, lasts until the session ends (relog) or it is set to 1.  On foot it is the pawn's replicated MoveSpeedMult stat (the one
 //  the Sprint's effect raises: the client moves at 600 cm/s times it), on a mount the mount's own MoveSpeedMult (the stat the road's and the dash's effects raise), so the client

@@ -622,16 +622,25 @@ static bool run_chase(Fixture& f, const combat::NpcAbilityData& tables, const st
 // ---- hostile humanoids: a bandit raider against a player who stands still ---------------------------------------------------------------------------------------------
 
 
+/// Which abilities are alerts (a growl, a yawp, a rally: a move that hurts nobody, played with no target in its cast): what a creature's fight may play without naming its target.
+static std::function<bool(int64_t)> alert_abilities(Fixture& f) {
+    return [&f](int64_t ability) {
+        const abilities::AbilityDef* d = f.catalog->ability(ability);
+        return d && combat::is_alert_move(*d, *f.catalog, f.data->ids().health);
+    };
+}
+
 /// The client finds a creature's target by NetGUID, in full: the Targets of the creature's cast element name the player's collision cylinder and its CombatInfo.ActiveTargets his pawn, each with the ServerId and
 /// Randomizer of his session (a bare ObjectId names nothing the client knows, and its targeting then finds no one to fly a bolt at), and the element's Instigator is the creature's own NetGUID in full.
-static void check_targets_named_in_full(const std::vector<LungeSample>& samples, const char* name) {
+/// An alert (a growl, a yawp, a rally: `alert` says which abilities are) names no target at all, as the recorded casts of such moves do; its Instigator is still the creature's own.
+static void check_targets_named_in_full(const std::vector<LungeSample>& samples, const char* name, const std::function<bool(int64_t)>& alert = nullptr) {
     constexpr uint64_t kPlayer = 77;   // (the rig's player)
     const aoc::protocol::emit::FIntrepidNetworkGUID pawn = combat_rig::rig_pawn_guid(kPlayer), cylinder = combat_rig::rig_cylinder_guid(kPlayer);
     size_t element_ticks = 0, wrong_target = 0, wrong_instigator = 0, combat_ticks = 0, wrong_active = 0;
     for (const LungeSample& s : samples) {
         if (s.ability != 0) {
             ++element_ticks;
-            wrong_target += s.item_target == cylinder ? 0 : 1;
+            wrong_target += (alert && alert(s.ability)) || s.item_target == cylinder ? 0 : 1;
             wrong_instigator += s.item_instigator == s.creature_guid && s.creature_guid.ServerId != 0 && s.creature_guid.Randomizer != 0 ? 0 : 1;
         }
         if (s.active_target.ObjectId != 0) {
@@ -723,6 +732,14 @@ static ShotReport shot_report(Fixture& f, const combat::NpcAbilityData& tables, 
             }
         }
     }
+    // the hit a projectile fires where it lands (and the hits that one fires) names the same projectile record in the same instant: it belongs to that launch, not to none
+    for (size_t i = 0; i < hits.size(); ++i) {
+        if (!used[i]) continue;
+        for (size_t j = 0; j < hits.size(); ++j) {
+            if (used[j] || hits[j].source_type != content::kSourceTypeProjectile) continue;
+            if (hits[j].source_guid == hits[i].source_guid && std::fabs(hits[j].at - hits[i].at) <= 0.2) used[j] = true;
+        }
+    }
     for (size_t i = 0; i < hits.size(); ++i) {
         if (hits[i].source_type != content::kSourceTypeProjectile) ++r.not_projectile;
         else if (!used[i]) ++r.stray;
@@ -807,7 +824,7 @@ static void check_generic_creature_animates(Fixture& f, const GenericFightPlan& 
     const double provoke = plan.timid ? 1.0 : -1.0;
     CHECKF(run_lunge_fight(f, tables, path, seconds, 0, 800, nullptr, samples, &hits, plan.timid, provoke, &stats, 40000.0, made.open), "a fight of %.0f s against a player who stands 8 m away runs", seconds);
     if (samples.empty()) return;
-    check_targets_named_in_full(samples, plan.name);
+    check_targets_named_in_full(samples, plan.name, alert_abilities(f));
     struct Cast {
         double      t;
         int64_t     ability;

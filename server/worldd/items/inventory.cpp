@@ -1323,6 +1323,39 @@ Outcome Inventory::grant_cargo(svc::InventoryItem item, const ItemCatalog& catal
     return out;
 }
 
+Outcome Inventory::grant_equipment(svc::InventoryItem item, int slot, const ItemCatalog& catalog) {
+    Outcome out;
+    const auto refuse = [&](std::string why) {
+        out.refusal = std::move(why);
+        return out;
+    };
+    const auto info = catalog.info(item.item_record_id);
+    if (!info) return refuse("the item's record is not one this server knows");
+    if (info->equip_slots.empty()) return refuse("the item is not worn: its record lists no slot");
+    if (slot < 0 || slot >= kEquipmentSlots) return refuse("Equipment slot " + std::to_string(slot) + " does not exist");
+    if (std::find(info->equip_slots.begin(), info->equip_slots.end(), static_cast<uint8_t>(slot)) == info->equip_slots.end()) {
+        return refuse("Equipment slot " + std::to_string(slot) + " is not a slot the item's record lists");
+    }
+    if (info->two_handed) return refuse("a two-handed item is worn in its first slot, not put there by a craft");
+    if (item.quantity != 1) return refuse("a worn item is one item, not " + std::to_string(item.quantity));
+    if (find(svc::ItemContainer::Equipment, slot)) return refuse("Equipment slot " + std::to_string(slot) + " holds an item already");
+    if (find_guid(item.instance_guid)) return refuse("the inventory holds an item with that instance guid already");
+    item.container = svc::ItemContainer::Equipment;
+    item.slot = slot;
+    if (const std::string problem = item_problem(item); !problem.empty()) return refuse(problem);
+    slots_[{static_cast<uint8_t>(item.container), item.slot}] = item;
+    Event add;
+    add.type = repl::StorageEventType::Add;
+    add.container = item.container;
+    add.slot = item.slot;
+    add.item = item;
+    add.instigated = true;
+    out.events.push_back(std::move(add));
+    out.equipment_changed = true;
+    out.ok = true;
+    return out;
+}
+
 Outcome Inventory::swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,
                         const std::string& to_guid, int32_t to_count, const ItemCatalog* catalog) {
     Outcome out;

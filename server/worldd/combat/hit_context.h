@@ -32,12 +32,16 @@ uint8_t hit_flag_bit(const std::string& name);
 bool tag_matches(const std::string& tag, const std::string& want);
 
 /// What the actor in the Target role holds in effects, for the reads only the host can answer (GetEffectRemainingDuration(GetTarget(), effect): a burning
-/// aura is applied again only when it has run down far enough).  Whoever resolves a hit on an actor that keeps an effect list gives it.
+/// aura is applied again only when it has run down far enough; GetEffectCountByRecordAndInstigator(GetTarget(), effect, instigator): the stacks one
+/// caster put on it).  Whoever resolves a hit on an actor that keeps an effect list gives it.
 class TargetEffects {
 public:
     virtual ~TargetEffects() = default;
     /// Seconds left of the effect record on the target (0: it is not on).
     virtual double remaining(int64_t effect_guid) const = 0;
+    /// The stacks of the effect record the instigator put on the target (0: that caster put none on it).  The instances of two casters do not mix.  A view
+    /// that cannot say reads none.
+    virtual double stacks_from(int64_t /*effect_guid*/, uint64_t /*instigator*/) const { return 0.0; }
 };
 
 struct HitContext {
@@ -55,6 +59,9 @@ struct HitContext {
     bool                        active_in_hit = false;      // ... is among the targets of the hit
     bool                        target_is_closest = false;  // the target is the one of the hit nearest the caster (GetClosestTargetToActorInHit)
     const TargetEffects*        target_effects = nullptr;   // the effects the target holds (null: the target's effect list is not known here and reads as empty)
+    /// The actors of the two other roles, for the reads that name who applied an effect: the hit's caster (the one it is from) and the target (0: unknown, and such a read answers 0).
+    uint64_t                    instigator_actor = 0;
+    uint64_t                    target_actor = 0;
     /// The effect whose numbers are being worked out (its duration, requirement, stack limit, the values of its stat mods): what EffectHasTag(GetEffect(), tag) and
     /// GetEffect() == <effect> ask.  0: none in progress, and those two are left to whoever runs the cast.
     int64_t                     effect_guid = 0;

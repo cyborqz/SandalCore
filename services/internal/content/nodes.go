@@ -27,9 +27,9 @@ import (
 //	node_tax_details, node_tax_table, node_tax_table_tag
 //	                      the tax bounds, and the global tax tables with the tag each tax is and the predicate that makes it available
 //	node_reputation_tier  the 5 reputation ranks with the tax modifier of each
-//	node_reward, node_reward_mod (contentc version 46)
+//	node_reward, node_reward_mod (contentc version 49)
 //	                      the 103 NodeRewardRecordBase rows (a mayoral commission's RewardId) with each NodeModification they give and for how long
-//	node_effect, node_effect_zoi, node_effect_zoi_alignment, node_effect_commodity (contentc version 46)
+//	node_effect, node_effect_zoi, node_effect_zoi_alignment, node_effect_commodity (contentc version 49)
 //	                      the 322 NodeEffectRecordBase rows (what a node modification's EffectsIds name): the effects each puts on the characters (or caravans, mounts)
 //	                      in the node's zone of influence, with the rank, the alignment and the org affiliation they ask, whether they reach a citizen anywhere, and
 //	                      the commodities the node's stores gain
@@ -221,7 +221,7 @@ CREATE TABLE node_effect (
 CREATE TABLE node_effect_zoi (
     node_effect_guid     INTEGER NOT NULL,
     ord                  INTEGER NOT NULL,
-    effect_guid          INTEGER NOT NULL,              -- EffectRecordId: an EffectRecordBase (ab_effect has it from contentc version 46)
+    effect_guid          INTEGER NOT NULL,              -- EffectRecordId: an EffectRecordBase (ab_effect has it from contentc version 49)
     on_character         INTEGER NOT NULL,              -- EffectClassifications: ECharacterClassification::Character
     on_caravan           INTEGER NOT NULL,              -- ... Caravan
     on_mount             INTEGER NOT NULL,              -- ... Mount

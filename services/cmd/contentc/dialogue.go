@@ -51,7 +51,7 @@ type actionJSON struct {
 	Window string `json:"w,omitempty"`
 	Vendor int64  `json:"vd,omitempty"`
 	// Response is the kind of an ActionResponse line that worldd answers (storage milestone, step 0, version 25): "OpenPlayerWarehouse"; Config is its StorageAccessConfig.
-	// Node citizenship (version 45): "AddNodeCitizenship" (its VendorId, the shop that sells the tax receipts, in Vendor) and "RemoveNodeCitizenship", and
+	// Node citizenship (version 48): "AddNodeCitizenship" (its VendorId, the shop that sells the tax receipts, in Vendor) and "RemoveNodeCitizenship", and
 	// "AddNodeMayorCandidate" (the Sheriff's "stand for mayor").
 	// Every other action response keeps only "a": "ActionResponse".
 	Response string `json:"r,omitempty"`

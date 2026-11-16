@@ -7,6 +7,7 @@
 #include "session/ability_pipeline.h"
 
 #include "bootstrap/constants.h"
+#include "bootstrap/stealth_effects.h"
 #include "content/content_db.h"
 #include "content/emote_commands.h"
 #include "session/ability_timings.h"
@@ -109,7 +110,7 @@ const SwingGap* swing_gap_of(const std::string& ability) {
 //  - a character WITH the talent ("Scatter Shot becomes a held ability"): the request above was not answered. The jump came 99 and 121 ms after the key's release (a tap at 125 ms, a partial hold at
 //    739 ms) or, when the key was held until the charge was full, 73 to 99 ms (82 ms) after the client's second request, for the branch "Ranger_Passive_ScatterShot_Concentrated" (1.11 to 1.15 s after the
 //    trigger), into the montage of the full charge (also at 1.1363 s) with the cost in the same packet. The data's own timings for this ability (ability_timings.h: the cost at 1,224 ms) are those of the
-//    casts held until the charge was full. A held cast whose release or full charge is not heard goes on as a tap 3 s after the trigger [modelled].
+//    casts held until the charge was full. A held cast whose release or full charge is not heard goes on as a tap 3 s after the trigger [modelled]; one the client ends (Escape), or another accepted press interrupts, before the key's release is dropped at once [modelled].
 //  - The cast bars [R: the recorded casts of each ability below: how many is in the comment of its row; the copies of identical captures count once and a quick variant with no bar is left out]. The client's
 //    cast bar ran out and it asked for the branch the row names; the server moved the montage to the section that starts at `position` `answer` after that request, took the cost (the mana, the cooldown)
 //    `cost` after the jump and cleared the item's montage `end` after the cost. `item` is the ability item's delay and `request` the DEADLINE, two and a half times the median recorded request, rounded up
@@ -124,8 +125,13 @@ const SwingGap* swing_gap_of(const std::string& ability) {
 //    before the bar is full (ServerNotifyHeldAbilityCancelled, the call's CancelledTime = how long the key was held) ends the bar at the fill reached, and the cast goes on from there as from a request: the
 //    montage jumps, the cost is paid, and the damage follows the fill (the Lightning Strike's formula: Lerp(100%, 300%, GetAbilityProgressRatio())). The client sends no request for such a release [R: the owner's
 //    run: nine Lightning Strikes, seven released early, five requests in all, all from full bars; eight releases, seven ends] and the recorded releases of the Deliverance, the third held ability, jumped the
-//    montage 61 ms after the release. Not here: the Air Strike and the Barrage (kTimedCasts), the Disengage (its recordings show no jump) and the Deliverance (a held cast: its release fires it).
+//    montage 61 ms after the release. The Deliverance's own row is its full charge: the client's branch request at the recorded 3.534 s (its jump to 2.9629629 s at the montage's rate) or its held
+//    key's release, whose CancelledTime is montage seconds, so its fill is that time over 2.9629629 s [R: the fourteen recorded casts: the item 71 ms, the jump 48 to 111 ms after the release, the heal 203 to
+//    311 ms after it and the montage cleared 1.291 to 1.356 s after it]. The Disengage's bar ends on the client's CancelIfFalling branch request, which moves no montage: it clears the montage 0.37 s after the
+//    request (the recorded 85 to 551 ms) and, with no request, at the timing table's 1,345 ms [R: the ten recorded casts]. Also not here: the Air Strike and the Barrage (kTimedCasts).
 constexpr double kHoldStart = 0.2;   // a HELD ability's key is held from this long after the trigger [R: the Deliverance's recorded releases: CancelledTime was 0.2 to 0.3 s less than the release came after the trigger]
+// A held release's CancelledTime runs a few ms past the montage time the bar has played (0.4 % in the recorded releases): the cut allows this much.
+constexpr double kFillSlack = 0.05;
 constexpr BranchedCast kBranchedCasts[] = {
     {"Mage_ArcaneVolley", 6064628901575655424ll, 2.0003722f, 0.099, 3.25, 0.082, 0.069, 1.170},
     {"Ranger_ScatterShot", 6064630600000733338ll, 1.1363468f, 0.087, 0.100, 0.120, 0.036, 1.275, -1, false, false, 0.0, 6064630644737576924ll, 3.0, 0.100, 6064629886734172383ll, 0.082, 0.0},
@@ -133,10 +139,11 @@ constexpr BranchedCast kBranchedCasts[] = {
     {"Cleric_ChainsOfRestraint", 109341746222712ll, 1.6668f, 0.067, 5.20, 0.069, 0.100, 1.285},   // n=3, request 2066 ms (1569..2067)
     {"Cleric_CommunalRestoration", 109382755440251ll, 1.8588f, 0.258, 4.45, 0.232, 0.036, 1.062},   // n=3, request 1766 ms (1757..2281)
     {"Cleric_Condemn", 6064629326169899648ll, 1.4024f, 0.087, 4.30, 0.107, 0.101, 0.903},   // n=3, request 1710 ms (907..1716)
+    {"Cleric_Deliverance", 6064629301877604633ll, 2.9629629f, 0.071, 5.30, 0.066, 0.070, 1.170, -1, false, true, 3.534, 0, 0, 0, 0, 0, 0, 0, 2.9629629, false},   // n=14, full charge 3534 ms (3526..3541) at the recorded play rate; the release's montage time is 2.9629629 s; the deadline is 1.5 times the recorded full charge (a client that plays slower than the recorded one is not cut short); no cost step in the recordings: modelled
     {"Cleric_Judgment", 109313609651832ll, 2.9978f, 0.065, 9.15, 0.094, 0.068, 1.237, 0, false},   // n=10, request 3648 ms (3644..3657); no end in the recordings: the other montage's
     {"Cleric_Judgment", 109315044890234ll, 2.9981f, 0.070, 8.85, 0.089, 0.034, 1.237, 1, false},   // n=3, request 3540 ms (2054..3648)
     {"Cleric_Purify", 6064630996510049918ll, 0.9975f, 0.302, 2.40, 0.315, 0.070, 0.965},   // n=4, request 951 ms (945..1174); no cost step in the recordings: modelled
-    {"Cleric_ResplendentBeam", 6064629659855553923ll, 1.3333f, 0.071, 3.15, 0.066, 0.168, 1.171, -1, false, true, 1.241},   // n=1, request 1241 ms (1241..1241)
+    {"Cleric_ResplendentBeam", 6064629659855553923ll, 1.3333f, 0.071, 3.15, 0.066, 0.168, 1.171, -1, false, true, 1.241, 0, 0, 0, 0, 0, 0, 3.0, 0.0, false},   // n=1, request 1241 ms (1241..1241); the 3 s hold its data gives
     {"Cleric_Smite", 6064630407207993048ll, 0.8672f, 0.072, 2.75, 0.096, 0.000, 1.236, 0, true},   // n=36, request 1097 ms (808..1128)
     {"Mage_ArcaneCircle", 6064629093978406920ll, 1.7333f, 0.075, 2.10, 0.099, 0.000, 0.768, -1, true},   // n=2, request 826 ms (825..827)
     {"Mage_BallLightning", 6064629048751489028ll, 2.0000f, 0.090, 3.20, 0.061, 0.035, 1.709},   // n=1, request 1262 ms (1262..1262)
@@ -146,6 +153,7 @@ constexpr BranchedCast kBranchedCasts[] = {
     {"Mage_LightningStrike", 6064628894971461633ll, 3.0000f, 0.089, 6.05, 0.080, 0.102, 2.147, -1, false, true, 2.416},   // n=1, request 2416 ms (2416..2416)
     {"Mage_MagmaField", 6064629060044980230ll, 2.9327f, 0.076, 3.20, 0.065, 0.036, 1.404},   // n=1, request 1277 ms (1277..1277)
     {"Mage_Slumber", 6064629064360525827ll, 2.7670f, 0.096, 5.40, 0.074, 0.333, 2.175},   // n=1, request 2159 ms (2159..2159)
+    {"Ranger_Disengage", 6064630690278670336ll, 0.0000f, 0.093, 2.55, 0.000, 0.000, 0.370, -1, false, true, 0.0, 0, 0, 0, 0, 0, 0, 0.0, 0.0, true},   // n=10, request 920..1053 ms, clear 85..551 ms after it; no montage jump
     {"Summoner_ExtractVessel", 6064633645892571971ll, 2.0000f, 0.051, 4.00, 0.059, 0.070, 1.302},   // n=1, request 1592 ms (1592..1592); no cost step in the recordings: modelled
     {"Summoner_MassAffliction", 6064633572821731033ll, 2.9998f, 0.074, 5.35, 0.068, 0.101, 2.319},   // n=4, request 2136 ms (2125..2137)
     {"Summoner_MortalBlast", 6064633391727706791ll, 2.0000f, 0.064, 4.00, 0.058, 0.199, 1.268},   // n=6, request 1589 ms (1478..1594)
@@ -159,10 +167,13 @@ constexpr BranchedCast kBranchedCasts[] = {
 // sends the ability's homing projectile (6,000 cm/s) at every enemy a cone ahead of the character holds when the montage jumps to "Fire": the cone is 50 degrees wide, reaches 2,500 cm from a start 250 cm
 // behind the character, and wants a clear line of sight. The one recorded hit (a Raven 180 cm in front of the character) was confirmed 35 ms after the jump, which is its flight (180 cm at 6,000 cm/s is 30 ms);
 // the damage is the projectile's hit (Ranger_ScatterShot), one confirmation for each enemy, predicted on both sides. The charged shot (the talent's) is one projectile of 150 cm radius that flies straight on
-// for 3,500 cm at 7,000 cm/s through every enemy in its way (the one recorded hit came 229 ms after the jump).
+// for 3,500 cm at 7,000 cm/s through every enemy in its way (the one recorded hit came 229 ms after the jump). The normal cast's three arcing ground arrows also show where they land: ten FX-only hits of
+// each of their records (Ranger_Scattershot_GroundFX_ImpactHit, no stat mod), together at one point on the ground under the first enemy found, the moment the first homing arrow lands; the charged
+// shot has none of them.
 constexpr GatheredCast kGatheredCasts[] = {
     {"Ranger_ScatterShot", 10, 50.0, 2500.0, 250.0, 6000.0, 9, 3500.0, 150.0, 7000.0,
-     "/Game/Characters/Animations/00_ABLT/Ranger/ABLT_Scattershot_FullCharge_Montage.ABLT_Scattershot_FullCharge_Montage", 10550296575633473351ull},
+     "/Game/Characters/Animations/00_ABLT/Ranger/ABLT_Scattershot_FullCharge_Montage.ABLT_Scattershot_FullCharge_Montage", 10550296575633473351ull,
+     "Ranger_Scattershot_GroundFX_ImpactHit"},
 };
 // Casts whose montage launches projectiles at moments of its own (see TimedCast). The times are the montage's FireProjectile notifies over the montage's rate scale, at the PlayRate of 1.0 that the
 // ability item carries; the retail client's PlayRate ran 0.92 to 1.01 in the recorded casts, which moves a launch by up to 0.1 s.
@@ -170,7 +181,8 @@ constexpr GatheredCast kGatheredCasts[] = {
 //    target. Its three arrows leave at the notifies 0.2574, 0.2795 and 0.3015 s (1.030, 1.118 and 1.206 s after the trigger), from where the caster is in the air, at 4,000 cm/s, each at an angle of its
 //    own from the way the caster faces: -130, -90 and -50 degrees (the pitch of each projectile record's fire rotation: behind and down, straight down, ahead and down). An arrow ends on the ground and
 //    its hit (Ranger_AirStrike, on the caster, the one that shows the blast) fires the area hit Ranger_AirStrike_AoE (a RecursiveHit) at that spot: everything within 400 cm (the targeting record's
-//    sphere). The area hit puts an effect of 0.5 s (Ranger_AirStrike_ICD) on whoever it hurts and does not hurt one that has it: an enemy near two spots is hurt once. In the recorded leaps the arrows
+//    sphere). The area hit puts an effect of 0.5 s (Ranger_AirStrike_ICD) on whoever it hurts and does not hurt a target that holds one: the requirement is asked of each target, so a target an
+//    earlier area hurt is skipped only while its own cooldown lasts (no set of the whole cast). In the recorded leaps the arrows
 //    ended 6 to 8 m apart along the path (the caster was 6.1 to 6.5 m up), and the one enemy near the path was in the area of the second arrow only (168 and 57 cm from its spot; the first and third
 //    arrows ended 771 and 491, 679 and 605 cm from it): the same ground spots as this table gives from the client's own moves. The server confirmed the three landings 1.260/1.325/1.426, 1.373/1.402/1.573 and
 //    1.283/1.349/1.450 s after the trigger (PlayRate 1.01, 0.92 and 0.99); the arrow's flight and the notify give 1.216/1.262/1.404 and 1.324/1.375/1.527 for the first two.
@@ -272,6 +284,8 @@ constexpr double kMuzzleCm = 40.0;
 // The stats the client takes its montages' play rates from (stat_def: MagicalSpeed, PhysicalSpeed).
 constexpr int64_t kStatMagicalSpeed = 109343399106257ll;
 constexpr int64_t kStatPhysicalSpeed = 109343399171808ll;
+// The heal formula's one read of its target (stat_def: HealingReceivedAddMult): 0 when the target has none, as a mount's data has none.
+constexpr int64_t kStatHealingReceivedAddMult = 109343236642458ll;
 
 // Ordinary casts (no cast bar) whose montage launches ONE projectile (see ShotCast, plan_shot): the hit lands when the projectile gets to the target, which is its launch plus the target's distance over the
 // record's speed, not the recordings' median for the distance of the stage they were recorded on (the Thundering Shot's first damage came 33 to 932 ms after its cost step in 7 casts: targets 1 to 28 m away).
@@ -614,6 +628,7 @@ constexpr bool timings_sorted() {
 static_assert(timings_sorted(), "ability_timings.h is sorted by ability, then aimed");
 
 const char* const kExpirePhases[] = {"Expire", "End"};
+const char* const kEndPhases[] = {"End"};   // an effect taken off by a hit does not expire, but it ends
 const char* const kTickPhases[] = {"Tick"};
 const char* const kApplyPhases[] = {"Apply"};
 
@@ -762,6 +777,7 @@ class PortEffects final : public combat::TargetEffects {
 public:
     PortEffects(combat::HitPort& port, uint64_t actor, double t) : port_(port), actor_(actor), t_(t) {}
     double remaining(int64_t effect_guid) const override { return port_.effect_remaining(actor_, effect_guid, t_); }
+    double stacks_from(int64_t effect_guid, uint64_t instigator) const override { return port_.effect_stacks_from(actor_, effect_guid, instigator, t_); }
 
 private:
     combat::HitPort& port_;
@@ -801,6 +817,7 @@ protected:
             case stats::kHostMovementKey: return p_.moving_ ? 1.0 : 0.0;
             case stats::kHostStatDelta: return p_.stat_delta_over_time(std::strtoll(name.c_str(), nullptr, 10), args[0]);
             case stats::kHostNow: return p_.clock_;
+            case stats::kHostHitTriggerCount: return p_.hit_trigger_count(std::strtoll(name.c_str(), nullptr, 10));
             case stats::kHostProgressDuration: return name == "DefaultGroup" ? kCastSeconds : 0.0;
             case stats::kHostRandIntRange: {
                 const double lo = std::floor(args[0]), hi = std::floor(args[1]);
@@ -1146,6 +1163,39 @@ bool AbilityPipeline::remove_effect(int64_t effect_guid, double now) {
     return true;
 }
 
+bool AbilityPipeline::end_effect(int64_t effect_guid, double now) {
+    advance(now);
+    AbilityChange c;
+    std::vector<EffectInst> ended;   // the instances that are gone altogether: their End hits fire (Camouflage's 60 s cooldown after the damage that ended it)
+    for (size_t i = 0; i < effects_.size();) {
+        if (effects_[i].def->row.guid == effect_guid) {
+            ended.push_back(effects_[i]);
+            remove_instance(c, i);
+        } else {
+            ++i;
+        }
+    }
+    if (ended.empty()) return false;
+    sync_engine_effects();
+    for (const EffectInst& gone : ended) run_effect_hits(c, gone, kEndPhases, 1, now_);
+    recompute(c);
+    emit({std::move(c), std::nullopt, now_, "damage took the stealth off"});
+    return true;
+}
+
+void AbilityPipeline::break_stealth_on_damage(double damage, double now) {
+    // the game's Incoming reaction of Camouflage ends it on any damage at all; Rogue_Stealth's fragile definition ends it once the damage taken since it was
+    // put on passes 5 % of MaxHealth (the text's "damage taken exceeds 5 % of your max health while the effect is active").  The effect ends as it does when
+    // an action ends it: its End hit runs (Camouflage's 60 s cooldown).
+    if (stacks_of(bootstrap::kEffectRangerCamouflage) > 0) end_effect(bootstrap::kEffectRangerCamouflage, now);
+    if (stacks_of(bootstrap::kEffectRogueStealth) > 0) {
+        stealth_damage_ += damage;
+        const double max = stat_now(content::kGuidMaxHealth);
+        if (max > 0 && stealth_damage_ > max * 0.05) end_effect(bootstrap::kEffectRogueStealth, now);
+    }
+    if (stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;
+}
+
 void AbilityPipeline::set_moving(bool moving) {
     moving_ = moving;
     stats_.set_moving(moving);
@@ -1251,9 +1301,11 @@ bootstrap::EffectItem AbilityPipeline::effect_item(const EffectInst& e) const {
     return item;
 }
 
-void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner) {
+void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner,
+                                   const std::vector<stats::EffectMod>* mods_override) {
     const content::EffectRow& row = def.row;
     if (stacks_in < 1) stacks_in = 1;
+    if (row.guid == bootstrap::kEffectRogueStealth && stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;   // its damage count starts with it
     // the duration: the hit row's, the record's (a number of seconds), or none: infinite
     double dur = kInf;
     if (duration) {
@@ -1270,19 +1322,23 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
         if (!(dur >= 0)) dur = 0;
     }
-    // the values of its stat mods, for one stack, as the character is now
+    // the values of its stat mods, for one stack, as the character is now (a hit of another player's has them already worked out for the two)
     std::vector<stats::EffectMod> mods;
     std::optional<float> shield;   // a mod on TempHealth is a shield: its amount is held by the instance, not run through the engine
-    for (const content::ModRow& m : def.mods) {
-        if (m.shield_absorb || m.value_expr == 0) continue;
-        double v = 0;
-        std::string why;
-        if (!eval(m.value_expr, v, why)) continue;   // a mod that does not run is left out (the engine's none)
-        if (m.stat_guid == content::kGuidTempHealth) {
-            if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
-            continue;
+    if (mods_override) {
+        mods = *mods_override;
+    } else {
+        for (const content::ModRow& m : def.mods) {
+            if (m.shield_absorb || m.value_expr == 0) continue;
+            double v = 0;
+            std::string why;
+            if (!eval(m.value_expr, v, why)) continue;   // a mod that does not run is left out (the engine's none)
+            if (m.stat_guid == content::kGuidTempHealth) {
+                if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
+                continue;
+            }
+            mods.push_back({m.stat_guid, v});
         }
-        mods.push_back({m.stat_guid, v});
     }
     auto give_shield = [&](EffectInst& e) {
         if (!shield) return;
@@ -1304,21 +1360,6 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
     const bool override_duration = row.stack_type.find("OverrideDuration") != std::string::npos;
 // Cyb + C O A
 
-    // An effect of a consumables' group (Consumable_Scroll, _Elixir, _Food ...) stacks as its GROUP says (contentc version 38): the group holds one effect at a time and a new one
-    // takes the place of the oldest [R: the retail captures: the old meal's buff is deleted in the very update that adds the new one].  The other groups (the Bard's notes)
-    // keep what their effects' own records say
-    if (row.group_guid != 0 && row.group_limit >= 1 && row.group_name.rfind("Consumable_", 0) == 0 && row.group_stack_type.find("OverrideOldest") != std::string::npos) {
-        for (;;) {
-            size_t count = 0, oldest = effects_.size();
-            for (size_t i = 0; i < effects_.size(); ++i) {
-                if (effects_[i].def->row.group_guid != row.group_guid) continue;
-                ++count;
-                if (oldest == effects_.size() || effects_[i].key < effects_[oldest].key) oldest = i;
-            }
-            if (count < static_cast<size_t>(row.group_limit) || oldest == effects_.size()) break;
-            remove_instance(c, oldest);
-        }
-    }
     EffectInst* existing = nullptr;
     int same = 0;
     for (EffectInst& e : effects_) {
@@ -1359,6 +1400,27 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
     };
 
+    // Effects of one group stack as the GROUP says (contentc version 38; the game's own effect code reads the group's stack type in place of the record's): a group of
+    // STACK_OverrideOldest holds at most its limit, and a new application takes the oldest's place.  The Bard's notes are such a group (three): three applications are three
+    // instances of one note, which the six Saga formulas count (GetEffectCountByRecordAndInstigator(...) == 3); the note records' own types differ (Comedy OverrideAlways,
+    // Tragedy and Mystery StackSeperate), so without the group Comedy could never reach three.  A consumable's group (one) keeps its one buff.  A direct grant (a GM's, an
+    // item's) of several stacks stays one instance, as its caller asked.
+    if (row.group_guid != 0 && row.group_limit >= 1 && row.group_stack_type.find("OverrideOldest") != std::string::npos) {
+        for (;;) {
+            size_t count = 0, oldest = effects_.size();
+            for (size_t i = 0; i < effects_.size(); ++i) {
+                if (effects_[i].def->row.group_guid != row.group_guid) continue;
+                ++count;
+                if (oldest == effects_.size() || effects_[i].key < effects_[oldest].key) oldest = i;
+            }
+            if (count < static_cast<size_t>(row.group_limit) || oldest == effects_.size()) break;
+            remove_instance(c, oldest);
+        }
+        if (effects_.size() >= kMaxEffects) return;
+        fresh(raw ? std::min(stacks_in, std::max(1, row.group_limit)) : 1);
+        return;
+    }
+
     if (!existing) {
         if (effects_.size() >= kMaxEffects) return;
         fresh(raw ? std::min(stacks_in, std::max(1, row.global_stack_limit)) : in_place ? std::min(stacks_in, in_place_limit) : 1);
@@ -1386,6 +1448,54 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
         fresh(1);
     }
+}
+
+void AbilityPipeline::apply_creature_effect(AbilityChange& c, const effects::Applied& applied, uint64_t instigator, double t) {
+    const EffectDef* def = applied.def;
+    if (!def || effects_.size() >= kMaxEffects) return;
+    const content::EffectRow& row = def->row;
+    const double end = std::isinf(applied.duration) ? kInf : t + std::max(0.0, applied.duration);
+    const bool in_place = row.stack_type.find("StackInPlace") != std::string::npos;
+    const bool never_refresh = row.stack_duration_refresh.find("NeverRefresh") != std::string::npos;
+    const auto add = [&]() {
+        EffectInst e;
+        e.key = a7_.allocate_effect_id();
+        e.def = def;
+        e.stacks = std::max(1, applied.stacks);
+        e.start = t;
+        e.end = end;
+        e.next_tick = kInf;   // the world runs the creature's ticks
+        e.mods = applied.mods;
+        e.by_creature = true;
+        e.instigator = instigator;
+        effects_.push_back(e);
+        c.effects_added.push_back(effect_item(effects_.back()));
+    };
+    size_t existing = effects_.size();
+    for (size_t i = 0; i < effects_.size(); ++i) {
+        if (effects_[i].def != def) continue;
+        existing = i;
+        break;
+    }
+    if (existing == effects_.size()) {
+        add();
+        return;
+    }
+    EffectInst& e = effects_[existing];
+    if (in_place) {
+        e.stacks = std::min(std::max(1, applied.in_place_limit), e.stacks + std::max(1, applied.stacks));
+        e.mods = applied.mods;
+        if (!never_refresh) {
+            e.start = t;
+            e.end = end;
+        }
+        e.by_creature = true;
+        e.instigator = instigator;
+        c.effects_changed.push_back(effect_item(e));
+        return;
+    }
+    remove_instance(c, existing);
+    add();
 }
 
 void AbilityPipeline::remove_instance(AbilityChange& c, size_t index) {
@@ -1441,8 +1551,9 @@ void AbilityPipeline::sync_engine_effects() {
     if (stats_.started()) stats_.set_effects(engine_effects());
 }
 
-void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
+void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit, double t) {
     int left = hit.max_remove > 0 ? hit.max_remove : 1 << 20;
+    std::vector<EffectInst> ended;   // the instances that are gone altogether: their End hits fire (Camouflage's 60 s cooldown after the action that ended it)
     const auto remove_where = [&](auto&& wanted) {
         for (size_t i = 0; i < effects_.size() && left > 0;) {
             if (!wanted(*effects_[i].def)) {
@@ -1453,6 +1564,7 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
             const int take = std::min(left, effects_[i].stacks);
             left -= take;
             if (take >= effects_[i].stacks) {
+                ended.push_back(effects_[i]);
                 remove_instance(c, i);   // (the next instance, if any, is at i now)
             } else {
                 effects_[i].stacks -= take;
@@ -1465,10 +1577,12 @@ void AbilityPipeline::remove_by_hit(AbilityChange& c, const HitDef& hit) {
     // a cleanse names no effect: its filter chooses them, and an effect item goes with the hit's confirmation [R: Purify, 141]
     if (hit.remove_effects.empty()) remove_where([&](const EffectDef& e) { return hit.removes(e); });
     sync_engine_effects();
+    for (const EffectInst& gone : ended) run_effect_hits(c, gone, kEndPhases, 1, t);
 }
 // C:Y:B with C-O-A
 
 void AbilityPipeline::run_effect_hits(AbilityChange& c, const EffectInst& e, const char* const* phases, size_t n, double t) {
+    if (e.by_creature) return;   // (a creature's effect: the world runs its hits from the creature, not this runtime from the player)
     HitSource src;   // an effect's hit: confirmed by the server when it lands, Source is the pawn [R: 1,525 effect hits]
     src.type = content::kSourceTypeEffect;
     src.guid = e.def->row.guid;
@@ -1567,18 +1681,37 @@ double AbilityPipeline::take_damage(double amount, double now) {
     return through;
 }
 
+std::optional<combat::TargetInfo> AbilityPipeline::target_info(uint64_t actor) {
+    if (combat_) {
+        combat::TargetInfo ti = combat_->inspect(actor);
+        if (ti.exists) return ti;
+    }
+    if (!mount_target_) return std::nullopt;
+    const std::optional<MountTarget> m = mount_target_(actor);
+    if (!m) return std::nullopt;
+    combat::TargetInfo ti;
+    ti.exists = true;
+    ti.position = combat::Vec3{m->x, m->y, m->z};
+    ti.radius_cm = m->radius_cm;
+    ti.alive = m->alive;
+    ti.relation = combat::Relation::Friendly;   // the session names only the caster's own mount: an ally
+    ti.surface_distance_cm = m->surface_distance_cm;
+    ti.in_line_of_sight = true;
+    return ti;
+}
+
 void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                           const AbilityDef* ability, bool* landed) {
+                                           const AbilityDef* ability, bool* landed, uint64_t* first_landed) {
     if (landed) *landed = false;
+    if (first_landed) *first_landed = 0;
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
-    // a hit that asks about its target is asked of each target below when it is a reaction's (as before); the last hit of the Lullaby's cast asks its own
-    // requirement (an Incapacitated target) of each target it reaches, and no other hit is asked so (src.ask_each_target: the tooltip's final hit)
+    // a hit whose requirement reads its target (GetTarget(): "does it bleed?", "is it Incapacitated?") is asked of each target it reaches, with that target as GetTarget(): a target
+    // it does not hold for is no target of the hit, and the others still are. A requirement that reads no target is asked once, of the caster
     const content::ExprRow* requirement = hit.row.requirement_expr != 0 && catalog_ ? catalog_->expr(hit.row.requirement_expr) : nullptr;
-    const bool ask_each = src.type == content::kSourceTypeReaction && requirement && requirement->uses_target && requirement->program >= 0;
-    const bool ask_each_this = ask_each || (src.ask_each_target && requirement && requirement->uses_target && requirement->program >= 0);
-    if (!ask_each_this && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
+    const bool ask_each = requirement && requirement->uses_target && requirement->program >= 0;
+    if (!ask_each && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
     if (!ensure_evaluation(why)) return;
     const int mask = hit.row.applicable_targets;
     double max_targets = 40;
@@ -1593,70 +1726,148 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         if (!ti.exists || !ti.alive) return false;
         const bool hostile = ti.relation == combat::Relation::Hostile;
         if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
-        return src.reach_free || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
+        return src.reach_free || !combat_ || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
     };
+    const uint64_t active = active_target_ ? active_target_() : 0;
+    // whether the hit's requirement holds of a target it reaches: the requirement runs with that target as GetTarget() (its stats, the effects it holds, its side of the caster's relations
+    // and its distance), so that each target is asked on its own: a Hemorrhage conversion asks of the Wolf, not of the Ranger, whether it bleeds
+    const bool active_named = active != 0 && std::find(targets.begin(), targets.end(), active) != targets.end();
+    const auto holds = [&](uint64_t id, const combat::TargetInfo& ti) {
+        combat::Fighter* tf = combat_->fighter(id);
+        if (!tf) return false;
+        std::string err;
+        auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
+        if (!target_eval || !evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) return false;
+        const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
+        const PortEffects held(*combat_, id, t);   // what the target holds (GetEffectRemainingDuration(GetTarget(), ...))
+        combat::HitContext ask;
+        ask.instigator = &self_view;
+        ask.target = &target_view;
+        ask.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
+        ask.enemy = ti.relation == combat::Relation::Hostile;
+        ask.neutral = ti.relation == combat::Relation::Neutral;
+        ask.active_is_target = id == active;
+        ask.active_in_hit = active_named;
+        ask.target_effects = &held;
+        ask.instigator_actor = combat_->self().id();
+        ask.target_actor = id;
+        Host ask_host(*this);
+        ask_host.set_context(&ask);
+        double v = 0;
+        evaluation_->set_consumed(consumed_);
+        const bool wanted = evaluation_->eval(requirement->program, ask_host, v, err) && std::isfinite(v) && v != 0.0;
+        evaluation_->clear_actors();
+        return wanted;
+    };
+    // the targets the hit is on: the ones named, or for a hit that reads its target the ones it reaches and holds for, each asked once and in the order they were named
+    std::vector<uint64_t> held_for;
+    if (ask_each) {
+        for (const uint64_t id : targets) {
+            const combat::TargetInfo ti = combat_->inspect(id);
+            if (reached(ti) && holds(id, ti)) held_for.push_back(id);
+        }
+    }
+    const std::vector<uint64_t>& on = ask_each ? held_for : targets;
     // the hit's primary target, for the formulas that tell it from the others (the melee combos give every other target a smaller share): the caster's
     // selected enemy when the hit reaches it, else the target nearest the caster
-    const uint64_t active = active_target_ ? active_target_() : 0;
     bool active_in_hit = false;
     uint64_t closest = 0;
     double closest_cm = 0;
-    for (const uint64_t id : targets) {
-        const combat::TargetInfo ti = combat_->inspect(id);
-        if (!reached(ti)) continue;
+    for (const uint64_t id : on) {
+        const std::optional<combat::TargetInfo> ti = target_info(id);
+        if (!ti || !reached(*ti)) continue;
         if (id == active) active_in_hit = true;
-        if (closest == 0 || ti.surface_distance_cm < closest_cm) {
+        if (closest == 0 || ti->surface_distance_cm < closest_cm) {
             closest = id;
-            closest_cm = ti.surface_distance_cm;
+            closest_cm = ti->surface_distance_cm;
         }
     }
     // the hit reached a live target when one is in reach, whether or not its damage can be worked out (the Throw's cannot): that is what fires a bounce. An enemy an earlier hit killed is no target
     if (landed) *landed = closest != 0;
     std::vector<bootstrap::HitTargetOut> outs;
     HitEvent event;   // reactions: what this hit did to the targets it reached
-    for (const uint64_t id : targets) {
+    bool zones_opened = false;
+    for (const uint64_t id : on) {
         if (static_cast<double>(outs.size()) >= max_targets) break;
-        const combat::TargetInfo ti = combat_->inspect(id);
-        if (!reached(ti)) continue;
-        const bool hostile = ti.relation == combat::Relation::Hostile;
-        combat::Fighter* tf = combat_->fighter(id);
-        if (!tf) continue;
+        const std::optional<combat::TargetInfo> ti = target_info(id);
+        if (!ti || !reached(*ti)) continue;
+        const bool hostile = ti->relation == combat::Relation::Hostile;
+        combat::Fighter* tf = combat_ ? combat_->fighter(id) : nullptr;
+        if (!tf) {
+            // The caster's own mount: not a fighter of the combat world, its Health is its own stat (the session's heal puts it there). Only a hit
+            // that helps allies and heals does anything; a damage hit on a friendly mount reaches nobody.
+            const std::optional<MountTarget> mount = mount_target_ ? mount_target_(id) : std::nullopt;
+            if (!combat_ || !mount || !mount_heal_ || (hit.row.applicable_targets & 4) == 0) continue;
+            Host host(*this);
+            combat::HitMeta meta;
+            meta.source_type = src.type;
+            meta.source_guid = src.guid;
+            if (ability) meta.ability_tags = ability->row.tags;
+            if (hit.use_item_tags && weapon_tags_) meta.item_tags = weapon_tags_();
+            meta.targets = static_cast<double>(targets.size());
+            meta.target_is_active = id == active;
+            meta.active_in_hit = active_in_hit;
+            meta.target_is_closest = id == closest;
+            combat::Resolved r;
+            if (!combat_->resolver().resolve_with(*evaluation_, host, nullptr, ti->surface_distance_cm, false, false, hit, meta, r, why)) {
+                if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on a mount: {}", hit.row.name, why);
+                continue;
+            }
+            // the heal formula's one read of its target is HealingReceivedAddMult; GetTarget() read the caster, so take the caster's (1 + received)
+            // back out (the mount's own is 0: its data carries no such stat).
+            const double caster_received = 1.0 + stat_now(kStatHealingReceivedAddMult);
+            double healed = 0;
+            for (const combat::ResolvedMod& m : r.mods) {
+                if (m.stat_guid == content::kGuidHealth && m.value > 0) healed += caster_received != 0.0 ? m.value / caster_received : m.value;
+            }
+            if (healed <= 0) continue;
+            const double applied = mount_heal_(id, healed);
+            event.targets.push_back(id);
+            event.mods[content::kGuidHealth] += healed;
+            event.effective[content::kGuidHealth] += applied;
+            bootstrap::HitTargetOut out;
+            out.component = mount->component;   // the HitComp is the mount actor
+            out.cylinder = mount->cylinder;
+            out.has_impact = true;
+            out.impact_location = {mount->x, mount->y, mount->z};
+            {
+                double nx = 0, ny = 0, nz = 1;   // (the normal points from the mount towards the caster)
+                const combat::Vec3 from = combat_->self().position();
+                nx = from.x - mount->x;
+                ny = from.y - mount->y;
+                nz = from.z - mount->z;
+                const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+                if (len > 1e-6) { nx /= len; ny /= len; nz /= len; } else { nx = 0; ny = 0; nz = 1; }
+                out.impact_normal = {nx, ny, nz};
+            }
+            out.flags = r.flags;
+            for (const combat::ResolvedMod& m : r.mods) {
+                if (m.stat_guid != content::kGuidHealth) continue;
+                if (m.value == 0.0 && applied == 0.0) continue;
+                out.mods.push_back({m.stat_mod_guid, static_cast<float>(healed), static_cast<float>(applied)});
+            }
+            outs.push_back(std::move(out));
+            continue;
+        }
         std::string err;
         auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
         if (!target_eval) continue;
-        if (ask_each_this) {   // the requirement, with this target as GetTarget()
-            bool wanted = false;
-            if (evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) {
-                const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
-                combat::HitContext ask;
-                ask.instigator = &self_view;
-                ask.target = &target_view;
-                ask.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
-                ask.enemy = hostile;
-                ask.neutral = ti.relation == combat::Relation::Neutral;
-                Host ask_host(*this);
-                ask_host.set_context(&ask);
-                double v = 0;
-                evaluation_->set_consumed(consumed_);
-                wanted = evaluation_->eval(requirement->program, ask_host, v, err) && std::isfinite(v) && v != 0.0;
-                evaluation_->clear_actors();
-            }
-            if (!wanted) continue;
-        }
         Host host(*this);
         combat::HitMeta meta;
         meta.source_type = src.type;
         meta.source_guid = src.guid;
         if (ability) meta.ability_tags = ability->row.tags;
         if (hit.use_item_tags && weapon_tags_) meta.item_tags = weapon_tags_();
-        meta.targets = static_cast<double>(targets.size());
+        meta.targets = static_cast<double>(on.size());
         meta.target_is_active = id == active;
         meta.active_in_hit = active_in_hit;
         meta.target_is_closest = id == closest;
         const PortEffects target_effects(*combat_, id, t);   // what the target holds (GetEffectRemainingDuration(GetTarget(), ...))
         meta.target_effects = &target_effects;
+        meta.instigator_actor = combat_->self().id();
+        meta.target_actor = id;
         combat::Resolved r;
-        if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, r, why)) {
+        if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti->surface_distance_cm, hostile, ti->relation == combat::Relation::Neutral, hit, meta, r, why)) {
             if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on another actor: {}", hit.row.name, why);
             continue;
         }
@@ -1665,10 +1876,18 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         origin.source_type = src.type;
         origin.source_guid = src.guid;
         origin.ability_tags = meta.ability_tags;
+        // (the Redemptive passive needs nothing here: this resolver runs the data's own formula, SelectFloat and Lerp over the target's Health, so another actor's heal
+        // already has BaseValueMax 10.0 with the passive; only the caster's own heal is short of it, see apply_hit_here)
         const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
+        // a hit that leaves a lasting area on the ground (LingeringZonesIds): one zone opens where it landed, whatever the number of targets it reached
+        if (!zones_opened) {
+            zones_opened = true;
+            spawn_hit_zones(hit, ability, id, t);
+        }
         if (hit.row.name == "Summoner_Transpose") transpose_with_ = id;   // (TeleportId: bSwapLocationWithTarget; the session moves the two)
         event.targets.push_back(id);
+        if (first_landed && *first_landed == 0) *first_landed = id;
         event.flags = static_cast<uint8_t>(event.flags | d.flags);
         for (size_t i = 0; i < r.mods.size(); ++i) {
             event.mods[r.mods[i].stat_guid] += r.mods[i].value;
@@ -1680,10 +1899,10 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         // the impact is at the target [R: median 0 cm from its replicated position]; the normal a unit vector, here from the target towards the caster
         // [modelled: retail's normals vary; a unit vector is all the captures fix]
         out.has_impact = true;
-        out.impact_location = {ti.position.x, ti.position.y, ti.position.z};
+        out.impact_location = {ti->position.x, ti->position.y, ti->position.z};
         {
             const combat::Vec3 from = combat_->self().position();
-            double nx = from.x - ti.position.x, ny = from.y - ti.position.y, nz = from.z - ti.position.z;
+            double nx = from.x - ti->position.x, ny = from.y - ti->position.y, nz = from.z - ti->position.z;
             const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
             if (len > 1e-6) { nx /= len; ny /= len; nz /= len; } else { nx = 0; ny = 0; nz = 1; }
             out.impact_normal = {nx, ny, nz};
@@ -1728,7 +1947,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             if (applies_effects && !d.lethal) {
                 if (auto after = tf->stats().evaluation(tf->worn(), after_err, true)) {
                     std::string gate_why;
-                    gated = combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, gate, gate_why);
+                    gated = combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti->surface_distance_cm, hostile, ti->relation == combat::Relation::Neutral, hit, meta, gate, gate_why);
                     if (gated && !gate_why.empty()) spdlog::debug("[abilities] the effects of {} on actor {}: {}", hit.row.name, id, gate_why);
                 }
             }
@@ -1802,11 +2021,14 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         h.response = src.response;
         confirmations_.push_back(std::move(h));
     };
-    // A hit the client asked for or predicted is always confirmed; one the server makes by itself (a reaction's) only when there is something to show: a number, or an effect to
-    // play [R: the retail confirmations of a reaction's effect-only hit: none when it applied].  Its reactions still see it land.
+    // A hit the client asked for or predicted is always confirmed; one the server makes by itself (a reaction's, a zone's own tick) only when there is something to show: a
+    // number, or an effect to play [R: the retail confirmations of a reaction's effect-only hit: none when it applied; a zone's snare, apply and burning hits: none].
+    // Its reactions still see it land.
     bool shows = hit.row.has_fx;
     for (const bootstrap::HitTargetOut& o : outs) shows = shows || !o.mods.empty();
-    if (src.type == content::kSourceTypeReaction && !shows) {
+    if (src.silent) {
+        // (the caller confirms this hit itself: the Saga's launcher, whose answer waits for its projectile's landing)
+    } else if ((src.type == content::kSourceTypeReaction || src.type == content::kSourceTypeZone) && !shows) {
         // nothing to confirm
     } else if (!src.source_is_target) {
         // a bounce's child hit names the enemy the projectile flew from as its Source, and the next enemy is its target [R: the recorded bounce hit of the Throw]
@@ -1824,6 +2046,25 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     }
     // a hit that names itself in its RecursiveHit (Chain Lightning) jumps to the enemies near the one it hit, each with its own confirmation (chain_from)
     chain_from(c, hit, event.targets, t, src, ability);
+    // a client-asked hit that asks for more hits on the actors it reached (RecursiveHit: the Prismatic Beam's Recurse tick carries the beam's damage, its
+    // statuses and its mana; the tick itself has no mod, effect or projectile of its own): the children land on the same targets, with the parent's source,
+    // and are confirmed after it. The children are the server's own: the client never predicted them, and every recorded child confirmation of the beam's
+    // tick (its damage hit, its Fire and Lightning status hits) is predicted on neither side, as a zone's hits are. Only a hit the client asked for runs its
+    // children here: the hits a reaction, an effect, a zone or a projectile's landing run keep the paths they had. A child that fires a projectile, waits a
+    // delay or is a pet's is another path's (chain_from, the delayed hits, the pet hits) and is left to it.
+    if (src.response && carried_depth_ < 2 && hit.mods.empty() && hit.effects.empty() && hit.fires.empty() && hit.row.net_type.find("ServerVerify") != std::string::npos) {
+        HitSource carried = src;
+        carried.autonomous = false;
+        carried.simulated = false;
+        for (const content::RecursiveHitRow& r : hit.recursive) {
+            const HitDef* child = catalog_->hit(r.child_hit);
+            if (!child || r.radius_cm > 0 || child->row.delay_expr != 0 || !child->fires.empty() || child->row.applicable_targets == 4) continue;
+            ++carried_depth_;
+            if ((child->row.applicable_targets & 1) != 0) apply_hit(c, *child, t, true, carried);   // (the tick's own mana heal: the caster)
+            if ((child->row.applicable_targets & 2) != 0 && !event.targets.empty()) apply_hit_on_targets(c, *child, event.targets, t, carried, ability);
+            --carried_depth_;
+        }
+    }
     // reactions: the hit landed (after its confirmations are queued, so a reaction's follow them)
     event.hit = &hit;
     event.ability = ability;
@@ -1845,20 +2086,26 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     h.record_guid = in.hit_guid;
     h.source_type = in.source_type;
     h.source_guid = in.source_guid;
-    // a creature's projectile hit as the game confirms it: no source actor (the source is the projectile's record), predicted on both the autonomous and the simulated side
+    // a creature's projectile hit as the game confirms it: no source actor (the source is the projectile's record), predicted on both the autonomous and the simulated side.  A
+    // child, an effect's tick or a zone's tick says its own shape (a child: a Source actor, neither side predicted; an effect's tick: a Source actor, both sides; a zone: no actor)
     const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
-    h.source_is_actor = !from_projectile;
-    h.predicted_autonomous = true;
-    h.predicted_simulated = from_projectile;
+    h.source_is_actor = in.shape_known ? in.source_is_actor : !from_projectile;
+    h.predicted_autonomous = in.shape_known ? in.predicted_autonomous : true;
+    h.predicted_simulated = in.shape_known ? in.predicted_simulated : from_projectile;
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
+    if (in.source_actor != 0 && combat_) h.source = combat_->guid_of(in.source_actor);
     uint8_t flags = in.flags;
     const double before = stat_now(content::kGuidHealth);
+    double damage = 0;
     if ((flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : in.mods) {
             if (!std::isfinite(m.value)) continue;
             const double effective = apply_delta(c, m.stat_guid, m.value);
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) damage += -m.value;
             h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective)});
         }
+        // what the hit puts on the player: a creature's debuff, with its own numbers and the world running its ticks
+        for (const effects::Applied& applied : in.effects) apply_creature_effect(c, applied, in.instigator, now_);
     }
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;   // (the hit took the last Health)
     h.flags = flags;
@@ -1866,6 +2113,64 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
+    if (damage > 0) break_stealth_on_damage(damage, now_);
+}
+
+std::vector<double> AbilityPipeline::apply_ally_landing(const combat::PlayerIncomingHit& in, double now) {
+    // Another player's hit comes in while that player's own runtime is in the middle of a step, and it does not run this runtime's steps inside it (two players who
+    // heal each other would step into each other's formulas, and this one's cached evaluation would be gone under the step that holds it): it lands at the time the
+    // runtime has reached or the hit's own, whichever is later, and the session's next tick brings the runtime's own steps up to date.
+    const double at = std::max(now, now_);
+    AbilityChange c;
+    std::vector<double> effective(in.mods.size(), 0.0);
+    bootstrap::HitConfirm h;
+    h.record_guid = in.hit_guid;
+    h.source_type = in.source_type;
+    h.source_guid = in.source_guid;
+    // (as a hit on the character from a creature: a projectile's hit has no source actor and is predicted on the simulated side)
+    const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
+    h.source_is_actor = !from_projectile;
+    h.predicted_autonomous = in.predicted_autonomous;
+    h.predicted_simulated = in.predicted_simulated;
+    if (combat_) h.instigator = combat_->guid_of(in.instigator);
+    uint8_t flags = in.flags;
+    const double before = stat_now(content::kGuidHealth);
+    if ((flags & stats::kHitMiss) == 0) {
+        for (size_t i = 0; i < in.mods.size(); ++i) {
+            const combat::ResolvedMod& m = in.mods[i];
+            if (!std::isfinite(m.value)) continue;
+            effective[i] = apply_delta(c, m.stat_guid, m.value);
+            h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective[i])});
+        }
+    }
+    if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;
+    h.flags = flags;
+    confirmations_.push_back(std::move(h));
+    drop_evaluation();
+    recompute(c);
+    emit({std::move(c), std::nullopt, at, "another player's hit on the character"});
+    return effective;
+}
+
+void AbilityPipeline::apply_ally_effects(const std::vector<effects::Applied>& list, uint64_t instigator, double now) {
+    const double at = std::max(now, now_);   // (see apply_ally_landing: no steps of this runtime run inside another player's step)
+    AbilityChange c;
+    for (const effects::Applied& a : list) {
+        if (!a.def || a.stacks < 1) continue;
+        const std::optional<double> duration = std::isfinite(a.duration) ? std::optional<double>(a.duration) : std::nullopt;
+        apply_effect(c, *a.def, a.stacks, duration, at, false, 0, &a.mods);
+    }
+    sync_engine_effects();
+    recompute(c);
+    emit({std::move(c), std::nullopt, at, "another player's effects on the character (from actor " + std::to_string(instigator) + ")"});
+}
+
+void AbilityPipeline::apply_ally_removal(const abilities::HitDef& hit, double now) {
+    const double at = std::max(now, now_);   // (see apply_ally_landing)
+    AbilityChange c;
+    remove_by_hit(c, hit, at);
+    recompute(c);
+    emit({std::move(c), std::nullopt, at, "another player's hit takes effects off the character"});
 }
 
 void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, const protocol::emit::FIntrepidNetworkGUID& target,
@@ -1875,12 +2180,14 @@ void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, 
     h.record_guid = in.hit_guid;
     h.source_type = in.source_type;
     h.source_guid = in.source_guid;
-    // (as receive_hit confirms it: a creature's projectile hit has no source actor, the projectile's record is its source, and it is predicted on both sides)
+    // (as receive_hit confirms it: a creature's projectile hit has no source actor, the projectile's record is its source, and it is predicted on both sides; a child or a
+    // zone's tick keeps the shape the world gave it)
     const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
-    h.source_is_actor = !from_projectile;
-    h.predicted_autonomous = true;
-    h.predicted_simulated = from_projectile;
+    h.source_is_actor = in.shape_known ? in.source_is_actor : !from_projectile;
+    h.predicted_autonomous = in.shape_known ? in.predicted_autonomous : true;
+    h.predicted_simulated = in.shape_known ? in.predicted_simulated : from_projectile;
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
+    if (in.source_actor != 0 && combat_) h.source = combat_->guid_of(in.source_actor);
     bootstrap::HitTargetOut t;
     t.component = target;
     t.cylinder = cylinder;
@@ -1948,7 +2255,7 @@ void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double
     std::string why;
     if (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok) return;
     // (what the hit takes off goes before what it applies)
-    if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) remove_by_hit(c, hit);
+    if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) remove_by_hit(c, hit, t);
     modify_cooldowns(c, hit, t);
     for (const content::HitEffectRow& row : hit.effects) {
         bool applies = true;
@@ -1970,10 +2277,12 @@ void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double
     // confirmation carries the value and the part that took effect, which is where the client draws its floating number
     std::vector<bootstrap::HitStatModOut> outs;
     HitEvent event;   // reactions: what this hit resolved
+    const double passive = deliverance_passive_scale(hit, stat_now(content::kGuidHealth), stat_now(content::kGuidMaxHealth));
     for (const content::ModRow& m : hit.mods) {
         if (m.shield_absorb || m.value_expr == 0) continue;
         double amount = 0;
         if (!eval(m.value_expr, amount, why) || !std::isfinite(amount)) continue;
+        if (passive != 1.0 && m.stat_guid == content::kGuidHealth && amount > 0) amount *= passive;
         const double effective = apply_delta(c, m.stat_guid, amount);
         outs.push_back({m.stat_mod_guid, static_cast<float>(amount), static_cast<float>(effective)});
         event.mods[m.stat_guid] += amount;
@@ -1990,6 +2299,7 @@ void AbilityPipeline::apply_hit_here(AbilityChange& c, const HitDef& hit, double
         h.source_guid = src.guid;
         h.source_is_actor = src.actor;
         h.mods = std::move(outs);
+        if (src.source_actor != 0 && combat_) h.source = combat_->guid_of(src.source_actor);   // (the Beam's first hit names the caster, as the recording does)
         h.predicted_autonomous = src.autonomous;
         h.predicted_simulated = src.simulated;
         h.response = src.response;
@@ -2155,6 +2465,15 @@ void AbilityPipeline::set_dead(bool dead) {
         // a consumable's cast that had not paid its cost is over with the death and takes nothing from the bag (the session lets its item go): the hit the client asked for
         // before the death must not give the buff of an item that stays where it was
         records_.erase(std::remove_if(records_.begin(), records_.end(), [](const CastRecord& r) { return r.item_cast && r.cost_at < 0; }), records_.end());
+        // the zones go with their caster, as everything a player put on the creatures does when he dies (the world drops it at once) and a dead caster fires nothing: a zone that has not
+        // opened never does, and one that is open ends now with no End hits (its actor fades out and closes as at the end of its life, the effects it put on others and on him go)
+        for (size_t i = zones_.size(); i-- > 0;) {
+            if (zones_[i].state == Zone::State::Pending) {
+                zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(i));
+            } else if (zones_[i].state == Zone::State::Open) {
+                end_zone(zones_[i].id, now_, false, "a zone ends with its caster");
+            }
+        }
     }
 }
 
@@ -2201,6 +2520,7 @@ double AbilityPipeline::next_due() const {
             if (*d) due = std::min(due, **d);
         }
         for (const Cast::Missile& m : c.missiles) due = std::min(due, m.due);
+        if (c.ground) due = std::min(due, c.ground->due);
     }
     for (const CastRecord& r : records_) {
         for (const HitSlot& s : r.slots) due = std::min(due, slot_due(r, s));
@@ -2325,6 +2645,16 @@ void AbilityPipeline::run_due(double t) {
                 return;
             }
         }
+        if (cast.ground && cast.ground->due <= t) {
+            // the ground marks of a gathering cast: they come after the homing arrow's own hit when both are due now
+            mark_launched(cast.client_id);
+            send_ground_marks(cast);
+            const std::string name = cast.def->row.name;
+            cast.ground.reset();
+            emit({AbilityChange{}, std::nullopt, t, "the ground marks of " + name + " show where its arrows landed"});
+            finish_cast_if_done(i);
+            return;
+        }
         if (cast.end_due && *cast.end_due <= t) {
             cast.end_due.reset();
             step_end(cast, t);
@@ -2356,7 +2686,7 @@ void AbilityPipeline::run_due(double t) {
                 if (s.due[i].at > t) continue;
                 const Pending p = s.due[i];
                 s.due.erase(s.due.begin() + static_cast<std::ptrdiff_t>(i));
-                return run_slot(rec, s, t, !s.server_self_use, p.found, p.targets);
+                return run_slot(rec, s, t, !s.server_self_use, p.found, p.targets, p.asked, p.targeting);
             }
         }
     }
@@ -2380,7 +2710,7 @@ void AbilityPipeline::run_due(double t) {
 
 void AbilityPipeline::finish_cast_if_done(size_t index) {
     const Cast& c = casts_[index];
-    if (!c.item_due && !c.cost_due && !c.hit_due && !c.projectile_due && !c.loop_due && !c.own_due && !c.branch_due && !c.end_due && c.missiles.empty()) {
+    if (!c.item_due && !c.cost_due && !c.hit_due && !c.projectile_due && !c.loop_due && !c.own_due && !c.branch_due && !c.end_due && !c.ground && c.missiles.empty()) {
         casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(index));
     }
 }
@@ -2411,6 +2741,207 @@ int64_t AbilityPipeline::targeting_of(const AbilityDef& def, int key) const {
     return content::kTargetingDefaultSelf;   // a hit whose key names no targeting record is aimed at the caster
 }
 // ~ C | Y | B & C O A ~
+
+// ---- the Bard's Saga's ally targetings ----------------------------------------------------------------------------------------------
+// The two targeting records the Saga's ally hits use (ab_targeting by name): their sphere, and the sorting they do (a plain number of the data: the tables do not
+// export a targeting record's volumes and Sorting, so the rule is written here from the records).  The Joyousness record sorts an injured party member first
+// (Health < MaxHealth, the Favor_Party_LowHealth score 1000 - health * 100) and then the nearer one; the Pantheon's puts the party and the caster first (10000)
+// and the others by distance.  The hit's own MaxTargets caps both (the bursts 8, the Pantheon's own hit 1).
+namespace {
+struct AllyTargeting {
+    const char* record;
+    double      radius_cm;
+    bool        injured_first;
+};
+constexpr AllyTargeting kAllyTargetings[] = {
+    {"Bard_Saga_Joyousness", 4000.0, true},
+    {"Bard_Saga_Pantheon", 3000.0, false},
+};
+const AllyTargeting* ally_targeting_named(const std::string& record) {
+    for (const AllyTargeting& t : kAllyTargetings) {
+        if (record == t.record) return &t;
+    }
+    return nullptr;
+}
+
+// The hits that jump from the ally they landed on to the next when they land (the Cleric's Resplendent Beam).  The hit names itself in its
+// RecursiveHit, and the recursive targeting is a sphere of 1,250 cm with two sorting entries: the first wants an injured target (Health < MaxHealth)
+// and scores minus the distance to the hit's Source (the one just hit), the second has no filter and scores the same.  So the injured come first,
+// the nearest of them, and then the nearest of the others: the tooltip says "up to 4 additional friendly targets closest to the original target",
+// and the recorded cast healed three targets that were all at full Health.  The data's MaxHitsGlobally is the progress ratio's `p * 4 + 1`, a
+// MAXIMUM: a charge of 0.414 (the recorded 1.241 s of the ability's 3 s hold) gives 2.65, so three hits, the caster and the two allies the recording
+// shows.  The rounding is modelled (the maximum is compared with the number of hits, so a fractional one allows the next hit); no recording settles it.
+struct AllyChain {
+    const char* hit;
+    double      radius_cm;
+    double      per_progress;    // the hits in all: 1 + per_progress x the progress ratio
+    int         max_hits;
+    bool        injured_first;   // the recursive targeting's filtered entry: an injured target (Health < MaxHealth) before the others
+};
+constexpr AllyChain kAllyChains[] = {
+    {"Cleric_ResplendentBeam_Hit", 1250.0, 4.0, 5, true},
+};
+const AllyChain* ally_chain_of(const abilities::HitDef& hit) {
+    for (const AllyChain& c : kAllyChains) {
+        if (hit.row.name == c.hit) return &c;
+    }
+    return nullptr;
+}
+
+// The Resplendent Beam's hit: whose GetHitTriggerCount its heal formula reads.
+constexpr int64_t kResplendentBeamHitGuid = 109201325905529ll;
+// The Deliverance's Redemptive passive (a skill): its heal's BaseValueMax is 10.0 with it, 5.0 without (the data's SelectFloat).
+constexpr int64_t kDeliveranceRedemptiveSkill = 6064630599209517058ll;
+// The hits a cast takes one client request for (one heal a cast, however often a client asks).
+constexpr const char* kOneRequestHits[] = {"Cleric_Deliverance_Hit", "Cleric_ResplendentBeam_Hit"};
+bool one_request_hit(const std::string& hit) {
+    for (const char* h : kOneRequestHits) {
+        if (hit == h) return true;
+    }
+    return false;
+}
+}  // namespace
+
+bool AbilityPipeline::ally_targets(const AbilityDef& def, const HitDef& hit, size_t max, int64_t named, const std::string& fallback, std::vector<uint64_t>& out) {
+    out.clear();
+    // only a hit that reaches allies is an ally hit: one whose mask names no Ally, Party or Raid (the notes' consuming and the Resonance on the caster, the Apocalypse's and
+    // the Horrors' hits on enemies) is an ordinary hit of the cast, on the caster or on the creatures the client's request names
+    if ((hit.row.applicable_targets & (4 | 8 | 16)) == 0) return false;
+    // the targeting record the client named (what the game's client asks with), else the cast's own variant's record, else the hit's key map
+    const AllyTargeting* rule = nullptr;
+    for (const content::TargetingRow& t : def.targetings) {
+        if (named != 0 && t.guid == named) rule = ally_targeting_named(t.name);
+        if (rule) break;
+    }
+    if (!rule && !fallback.empty()) rule = ally_targeting_named(fallback);
+    if (!rule) {
+        int key = -1;
+        for (const content::AbilityHitRow& h : def.hits) {
+            if (h.hit_guid == hit.row.guid) {
+                key = static_cast<int>(h.key);
+                break;
+            }
+        }
+        for (const content::TargetingRow& t : def.targetings) {
+            if (t.key != key) continue;
+            rule = ally_targeting_named(t.name);
+            if (rule) break;
+        }
+    }
+    if (!rule) return false;
+    double cap = static_cast<double>(max);
+    if (hit.row.max_targets_expr != 0) {
+        double v = 0;
+        std::string why;
+        if (eval(hit.row.max_targets_expr, v, why) && v >= 1) cap = std::min(cap, v);
+    }
+    out = ally_targets_of(rule->record, static_cast<size_t>(cap));
+    return true;
+}
+
+std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_t max) {
+    if (!combat_ || record == nullptr) return {};
+    const AllyTargeting* rule = ally_targeting_named(record);
+    if (!rule) return {};
+    const combat::Vec3 me = combat_->self().position();
+    struct Candidate {
+        uint64_t actor = 0;
+        double   score = 0, distance = 0;
+    };
+    std::vector<Candidate> candidates;
+    for (const combat::AllyInfo& a : combat_->allies()) {
+        if (!a.party && !a.self) continue;   // (the Saga's allies are the caster's party and the caster: another player of the world is no one of them)
+        const combat::TargetInfo ti = combat_->inspect(a.actor);
+        if (!ti.exists || !ti.alive) continue;
+        const double distance = std::hypot(ti.position.x - me.x, ti.position.y - me.y);
+        if (distance > rule->radius_cm) continue;
+        const double hpp = a.max_health > 0 ? std::clamp(a.health / a.max_health, 0.0, 1.0) : 1.0;
+        const double score = rule->injured_first ? (((a.party || a.self) && hpp < 0.95 ? 1000.0 : 0.0) - hpp * 100.0)
+                                                 : ((a.party || a.self) ? 10000.0 : -distance);
+        candidates.push_back({a.actor, score, distance});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& x, const Candidate& y) {
+        if (x.score != y.score) return x.score > y.score;
+        return x.distance < y.distance;
+    });
+    std::vector<uint64_t> out;
+    for (const Candidate& c : candidates) {
+        if (out.size() >= max) break;
+        out.push_back(c.actor);
+    }
+    return out;
+}
+
+double AbilityPipeline::hit_trigger_count(int64_t record) const {
+    return record == kResplendentBeamHitGuid ? static_cast<double>(resplendent_hits_) : 0.0;
+}
+
+double AbilityPipeline::deliverance_passive_scale(const abilities::HitDef& hit, double health, double max_health) const {
+    // The Deliverance's stat mod runs in the stat engine with its BaseValue at 5.0 (the formula's other end) and the progress ratio; the Redemptive
+    // passive's BaseValueMax of 10.0, `Lerp(10, 5, the target's Health / MaxHealth)`, is not read there, so its factor over the 5.0 is applied here.
+    if (hit.row.name != "Cleric_Deliverance_Hit" || !holds_skill(kDeliveranceRedemptiveSkill)) return 1.0;
+    const double hpp = max_health > 0 ? std::clamp(health / max_health, 0.0, 1.0) : 1.0;
+    return 2.0 - hpp;   // Lerp(10, 5, h) / 5
+}
+
+void AbilityPipeline::beam_bounces(AbilityChange& c, const CastRecord& rec, const HitDef& hit, uint64_t first, double t, const HitSource& src,
+                                   const AbilityDef* ability) {
+    const AllyChain* rule = ally_chain_of(hit);
+    if (!rule || !combat_ || dead_ || first == 0) return;
+    // the data's maximum: 1 + 4 x the cast's progress ratio, a limit (a fractional one allows the next hit)
+    const double wanted = std::min(static_cast<double>(rule->max_hits), 1.0 + rule->per_progress * std::clamp(rec.fill, 0.0, 1.0));
+    const int hits = std::clamp(static_cast<int>(std::ceil(wanted - 1e-6)), 1, rule->max_hits);
+    std::set<uint64_t> tried{first};   // (each target once: the record's MaxHitsPerTarget is 1)
+    int landed_hits = 1;               // (the first hit has landed: the caller's)
+    uint64_t from = first;
+    for (size_t guard = 0; landed_hits < hits && guard < 16; ++guard) {
+        const combat::TargetInfo at = combat_->inspect(from);
+        if (!at.exists) break;
+        // the allies within the record's sphere of the one just hit: the injured first (its filtered sorting entry), the nearest of them, and when none is
+        // hurt the nearest of the others (its second entry has no filter)
+        uint64_t next = 0;
+        double best = 0;
+        bool next_hurt = false;
+        for (const combat::AllyInfo& a : combat_->players_around(at.position, rule->radius_cm)) {
+            if (tried.count(a.actor)) continue;
+            const combat::TargetInfo ti = combat_->inspect(a.actor);
+            if (!ti.exists || !ti.alive || ti.relation == combat::Relation::Hostile) continue;
+            const bool hurt = a.health < a.max_health;
+            const double d = std::hypot(ti.position.x - at.position.x, ti.position.y - at.position.y);
+            bool wins = next == 0 || d < best || (d == best && a.actor < next);
+            if (next != 0 && rule->injured_first && hurt != next_hurt) wins = hurt;
+            if (wins) {
+                next = a.actor;
+                best = d;
+                next_hurt = hurt;
+            }
+        }
+        if (next == 0) {
+            spdlog::info("[abilities] {}: no ally within {:.1f} m of the one just hit: the beam stops after {} hit(s)", ability ? ability->row.name : std::string("?"),
+                         rule->radius_cm / 100.0, landed_hits);
+            break;
+        }
+        tried.insert(next);
+        HitSource fired = src;
+        fired.source_actor = from;   // (the confirmation's Source is the target just hit)
+        fired.autonomous = false;    // [R: the bounce's confirmation is predicted on neither side]
+        fired.simulated = false;
+        fired.response = false;
+        fired.reach_free = true;     // (the next ally is reached wherever the caster stands by now)
+        bool landed = true;
+        if (combat_->self().id() == next) {
+            apply_hit(c, hit, t, true, fired);   // (the caster's own runtime: never through another session's ally path)
+        } else {
+            uint64_t on = 0;
+            apply_hit_on_targets(c, hit, {next}, t, fired, ability, nullptr, &on);
+            landed = on == next;
+        }
+        if (!landed) continue;   // (a hit that did not land is no hit of the cast: the chain looks on from the same ally)
+        ++resplendent_hits_;
+        ++landed_hits;
+        from = next;
+    }
+}
 
 std::set<int64_t> AbilityPipeline::reach_of(const AbilityDef& def) const {
     std::set<int64_t> out;
@@ -2532,25 +3063,82 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
     }
     // the answer comes kConfirmDelay after the request, and never before the cast's own cost step (+ the hits' delay)
     const double at = std::max(now + kConfirmDelay, record_reference(*rec) + rec->hit_delay);
-    slot->due.push_back({at, found, others});
+    slot->due.push_back({at, found, others, now, targeting_guid});
     return (found || !others.empty()) ? HitVerdict::Scheduled : HitVerdict::Empty;
 }
 
-void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets) {
+void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting) {
+    // (a request the client made before the caster died runs after it: nothing of him lands any more)
+    if (dead_) return;
     rec.launched = true;   // (a hit of the cast is out: a Dodge no longer cancels it)
     const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
     const ConsumedScope consumed(*this, rec.item_cast);   // (a consumable's hit reads the item's numbers)
     AbilityChange c;
     const AbilityDef* def = catalog_->ability(rec.ability);
+    const AllyChain* chain = slot.hit ? ally_chain_of(*slot.hit) : nullptr;   // (the Resplendent Beam's hit jumps to the allies near the one it hit)
     HitSource src;
     src.type = content::kSourceTypeAbility;
     src.guid = rec.ability;
     src.actor = true;
     src.confirm = true;
     src.response = response;
+    bool bounced = false;
+    if (chain) {
+        resplendent_hits_ = 0;   // (the heal formula counts this cast's hits before each one)
+        if (combat_) src.source_actor = combat_->self().id();   // (the first hit's Source is the caster, as the recording shows)
+    }
+    // The Bard's Saga's ally hits: the server picks their targets from the targeting record's own rule (the client names the caster, or the party it found; the
+    // projectiles fly at the allies the record picks), and a launcher that fires a projectile has its confirmation held to the landing (fire_ally_from_hit).  The Saga's
+    // other hits (the notes' consuming and the Resonance on the caster, the Apocalypse's and the Horrors' on the creatures the client names) take the ordinary path below.
+    std::vector<uint64_t> chosen;
+    // (a request the client made before the caster died runs after it: a dead Bard's hit lands on no one else)
+    if (def && def->row.name == "Bard_Saga" && combat_ && !dead_ && ally_targets(*def, *slot.hit, 8, targeting, rec.ally_targeting, chosen)) {
+        const uint64_t self = combat_->self().id();
+        if (chosen.empty() && hits_caster(slot.hit->row)) chosen.push_back(self);   // (nobody of the record's sphere: the caster alone)
+        std::vector<uint64_t> others;
+        for (const uint64_t id : chosen) {
+            if (id != combat_->self().id()) others.push_back(id);
+        }
+        HitSource held = src;
+        held.confirm = false;
+        held.silent = true;
+        if (!others.empty()) apply_hit_on_targets(c, *slot.hit, others, t, held, def);
+        if (std::find(chosen.begin(), chosen.end(), combat_->self().id()) != chosen.end()) apply_hit(c, *slot.hit, t, true, held);
+        if (!slot.hit->fires.empty()) {
+            if (rec.ally_bursts < kSagaBursts) {   // (each request of the client is one burst: the Return's second launcher hit is asked for twice)
+                ++rec.ally_bursts;
+                const double first_at = std::max(asked + kProjectileDelay, record_reference(rec) + rec.hit_delay);
+                fire_ally_from_hit(*def, rec.client_id, rec.trigger_at, *slot.hit, chosen, first_at, src);
+            }
+        } else {
+            // (a launcher that fires nothing: its confirmation is the usual one, with the allies the record picked)
+            Cast launcher;
+            launcher.def = def;
+            launcher.launcher = Cast::Launcher{slot.hit->row.guid, def->row.guid, response, {}};
+            for (const uint64_t id : chosen) {
+                Cast::LauncherTarget lt;
+                lt.component = combat_->guid_of(id);
+                const combat::TargetInfo ti = combat_->inspect(id);
+                lt.x = ti.position.x;
+                lt.y = ti.position.y;
+                lt.z = ti.position.z;
+                launcher.launcher->targets.push_back(lt);
+            }
+            push_launcher_confirm(launcher, t);
+        }
+        recompute(c);
+        emit({std::move(c), std::nullopt, t, "the ally hit " + slot.hit->row.name + " of " + def->row.name + " on " + std::to_string(chosen.size()) + " all" + (chosen.size() == 1 ? "y" : "ies")});
+        return;
+    }
     if (!targets.empty()) {
-        apply_hit_on_targets(c, *slot.hit, targets, t, src, def);
-        if (!found) {
+        uint64_t first_hit = 0;   // (the one the hit took effect on: a chain goes on from him, and from nobody when the hit reached none)
+        apply_hit_on_targets(c, *slot.hit, targets, t, src, def, nullptr, chain ? &first_hit : nullptr);
+        if (chain && combat_ && !bounced && first_hit != 0) {
+            bounced = true;
+            ++resplendent_hits_;   // (the hit that just landed on the target the client named)
+            beam_bounces(c, rec, *slot.hit, first_hit, t, src, def);
+        }
+        if (!found || (chain && first_hit != 0)) {   // (a chain's hit has one first target: the caster is not healed besides)
             recompute(c);
             emit({std::move(c), std::nullopt, t,
                   "the hit " + slot.hit->row.name + " of " + (def ? def->row.name : std::string("?")) + " on " + std::to_string(targets.size()) + " other actor(s) (the client asked)"});
@@ -2569,6 +3157,11 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
         if (!slot.hit->mods.empty() || slot.hit->row.has_fx || (slot.hit->row.applicable_targets & 8) != 0) confirmations_.push_back(std::move(h));
     } else {
         apply_hit(c, *slot.hit, t, true, src);
+        if (chain && combat_ && !bounced) {
+            bounced = true;
+            ++resplendent_hits_;   // (the hit that just landed on the caster)
+            beam_bounces(c, rec, *slot.hit, combat_->self().id(), t, src, def);
+        }
         if (!slot.hit->fires.empty() && !slot.fired) {   // (they leave once a cast, however often the client asks for the hit)
             slot.fired = true;
             fire_from_hit(rec, *slot.hit, t);
@@ -2614,6 +3207,15 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held
 double AbilityPipeline::held_fill(const Cast& cast, double held_seconds) const {
     // the key cannot have been held longer than the cast has run: a CancelledTime beyond that is cut there (a forged one would fill the bar at once)
     const double ran = std::max(0.0, now_ - cast.trigger_at);
+    // A held ability whose full charge the data gives (the Resplendent Beam's 3 s hold) or whose montage the release's CancelledTime counts (the
+    // Deliverance: montage seconds): the fill is the time held over the full charge's own seconds.  Every other held cast keeps the rule below.
+    if (cast.branched && (cast.branched->release_fill_seconds > 0 || cast.branched->charge_seconds > 0)) {
+        // (a CancelledTime beyond the montage the bar has played is cut there; the recorded ones run a few ms over it, so kFillSlack is allowed)
+        const double montage = ran * client_rate(true) + kFillSlack;
+        const double held = held_seconds > 0 ? std::min(held_seconds, montage) : montage - kFillSlack;
+        const double full = cast.branched->release_fill_seconds > 0 ? cast.branched->release_fill_seconds : cast.branched->charge_seconds * client_rate(true);
+        return std::clamp(held / std::max(0.1, full), 0.0, 1.0);
+    }
     const double held = held_seconds > 0 ? std::min(held_seconds, ran) : std::max(0.0, ran - kHoldStart);
     const auto shown = full_bars_.find(cast.def->row.guid);
     const double bar = shown != full_bars_.end() ? shown->second : cast.branched->full;
@@ -2665,6 +3267,7 @@ void AbilityPipeline::abort_cast(size_t index, double t, const char* why, bool g
 // A cast with no bar (a weapon swing, a song, a looping or channelled cast, a held stance) has none to end.
 bool AbilityPipeline::in_cast_bar(const Cast& cast) const {
     if (pets::for_ability(cast.def->row.guid)) return cast.cost_due.has_value();
+    if (cast.branched && cast.branched->no_jump) return false;   // (the ability moved at the press: its bar is the client's, and a Dodge leaves it alone)
     return cast.branched != nullptr && cast.branch_due && !cast.request_heard && !cast.charged && !cast.released;
 }
 
@@ -2912,6 +3515,17 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
             // a cast bar's request names its cast by the instance: the end of the bar is the end of the bar whichever branch the client names (a variant the table has no row for must not lose its cast)
             spdlog::info("[abilities] the client asked for the branch {} of {}, which the table does not list (it has {}): taken as the end of the cast bar", branch_guid, cast.def->row.name, b.branch);
         }
+        if (b.no_jump) {
+            // the branch ends the bar where it stands (the Disengage's CancelIfFalling: the record's section is none): no montage jump, the cost and the
+            // hits keep the times the recordings give them, and the montage is cleared `end` after the request
+            if (cast.request_heard) return true;
+            cast.request_heard = true;
+            cast.heard_at = now_;
+            if (cast.end_due) cast.end_due = now_ + b.end;   // (a montage that is cleared already stays cleared: a late request clears nothing twice)
+            spdlog::info("[abilities] the client's branch of {} ends its bar {:.3f} s after the trigger: the montage is cleared {:.3f} s later", cast.def->row.name,
+                         now_ - cast.trigger_at, b.end);
+            return true;
+        }
         if (cast.held) return true;   // (the talent makes this branch invalid: the request is not answered; the release or the full charge goes on)
         const bool first = !cast.request_heard;   // (the cast goes on from the first request or release: how full the bar was is that one's to say)
         cast.request_heard = true;
@@ -2922,9 +3536,18 @@ bool AbilityPipeline::branch_request(int32_t client_instance_id, int64_t branch_
         spdlog::info("[abilities] the client asked for the branch of {} {:.3f} s after the trigger{}", cast.def->row.name, now_ - cast.trigger_at,
                      earlier < 0 ? ": the cast goes on " + std::to_string(-earlier).substr(0, 5) + " s sooner" : std::string(": the cast goes on as planned"));
         if (b.full > 0 && now_ - cast.trigger_at >= 0.5 * b.full) full_bars_[cast.def->row.guid] = std::max(full_bars_[cast.def->row.guid], now_ - cast.trigger_at);   // (a HELD ability's full bar, as this client shows it)
-        // a HELD ability's request: a bar that ran out asks at its end (a full charge), but a tap asks at once (retail's own quick Lightning Strike asked 171 ms after its trigger) and has the charge the key
-        // had given it by then
-        if (first && b.full > 0 && now_ - cast.trigger_at < 0.5 * b.full) {
+        // A held ability's fill from the request that ends its bar: the charge the client's bar had run.  The data's own full charge where it gives one
+        // (the Resplendent Beam's 3 s hold), the montage's own section where the charge is one (the Deliverance's), else the recorded bar.  A tap has the charge the key had given it by then.
+        if (first && b.release_fill_seconds > 0) {
+            // the request is the montage reaching its full-charge section (the Deliverance's): the fill is the montage the bar has played, at this caster's
+            // rate, over the section's own seconds (a faster caster reaches it sooner than the recorded 3.534 s, a slower one later: the recorded requests
+            // came a few ms short of it, which kFillSlack allows)
+            if (CastRecord* rec = record_of(cast.client_id)) {
+                rec->fill = std::clamp(((now_ - cast.trigger_at) * client_rate(true) + kFillSlack) / b.release_fill_seconds, 0.0, 1.0);
+            }
+        } else if (first && b.charge_seconds > 0) {
+            if (CastRecord* rec = record_of(cast.client_id)) rec->fill = std::clamp((now_ - cast.trigger_at) / b.charge_seconds, 0.0, 1.0);
+        } else if (first && b.full > 0 && now_ - cast.trigger_at < 0.5 * b.full) {
             if (CastRecord* rec = record_of(cast.client_id)) rec->fill = held_fill(cast, 0);
         }
         if (earlier >= 0) return true;
@@ -2947,6 +3570,12 @@ bool AbilityPipeline::end_request(int32_t server_instance_id, double now) {
         }
         if (cast.multi) {   // (the Lullaby's cast: its hits after the end never run, so its last hit and its stun do not; a cost it has already paid stays paid)
             abort_cast(i, now_, "the client ended the cast", false);
+            break;
+        }
+        // a held cast the key has not released yet ends with the client's end (Escape) at once: its cost is paid after its jump, so nothing is given back and
+        // nothing fires (a released or a charged held cast has gone out and is left alone below)
+        if (cast.held && !cast.released && !cast.charged && cast.branch_due) {
+            abort_cast(i, now_, "the client ended the held cast", true);
             break;
         }
         if (!cast.branched || !cast.branched->cancels || cast.held || cast.request_heard || !cast.branch_due) continue;
@@ -3038,36 +3667,68 @@ const char* AbilityPipeline::resolve_formulas(Cast& cast, const AbilityDef& def,
         if (!eval(row.charges_expr, v, why)) return "its charges";
         cast.max_charges = static_cast<int>(std::clamp(std::round(v), 1.0, 99.0));
     }
+    // A cost is a group (cost_ord): an ability's groups can be alternatives (the Cleric's Essence Infusion switches the Divine Power cost on, and its
+    // description says "uses normal resource cost if insufficient Divine Power to cast"), so the cast takes the first enabled group it can pay for,
+    // else the first enabled one (the refusal names that group's cost).
+    struct CostGroup {
+        bool enabled = false;
+        bool triggers_cooldown = false;
+        int  charge = 1;
+        std::vector<std::pair<int64_t, double>> stats;
+        std::vector<std::pair<int64_t, int>>    effects;
+    };
+    std::vector<CostGroup> groups;
     for (size_t i = 0; i < def.costs.size();) {
         const int ord = def.costs[i].cost_ord;
-        const content::CostRow& first = def.costs[i];
-        bool enabled = true;
-        if (!eval_bool(first.enabled_expr, true, enabled, why)) return "a cost's enabled flag";
-        int charge = 1;
-        if (first.charge_cost_expr != 0) {
+        CostGroup g;
+        g.enabled = true;
+        if (!eval_bool(def.costs[i].enabled_expr, true, g.enabled, why)) return "a cost's enabled flag";
+        if (def.costs[i].charge_cost_expr != 0) {
             double v = 1;
-            if (!eval(first.charge_cost_expr, v, why)) return "a cost's charge count";
-            charge = static_cast<int>(std::clamp(std::round(v), 0.0, 99.0));
+            if (!eval(def.costs[i].charge_cost_expr, v, why)) return "a cost's charge count";
+            g.charge = static_cast<int>(std::clamp(std::round(v), 0.0, 99.0));
         }
         size_t j = i;
         for (; j < def.costs.size() && def.costs[j].cost_ord == ord; ++j) {
             const content::CostRow& cr = def.costs[j];
-            if (!enabled || cr.stat_ord < 0 || cr.stat_guid == 0) continue;
+            if (!g.enabled || cr.stat_ord < 0 || cr.stat_guid == 0) continue;
             double amount = 0;
             if (cr.amount_expr != 0 && !eval(cr.amount_expr, amount, why)) return "a cost's amount";
-            if (amount > 0) cast.stat_costs.emplace_back(cr.stat_guid, amount);
-        }
-        if (enabled) {
-            cast.triggers_cooldown = cast.triggers_cooldown || first.triggers_cooldown;
-            if (first.triggers_cooldown) cast.charge_cost = std::max(cast.charge_cost, charge);
+            if (amount > 0) g.stats.emplace_back(cr.stat_guid, amount);
         }
         for (const content::EffectCostRow& ec : def.effect_costs) {
-            if (ec.cost_ord != ord || !enabled || ec.effect_guid == 0) continue;
+            if (ec.cost_ord != ord || !g.enabled || ec.effect_guid == 0) continue;
             double n = 0;
             if (ec.num_expr != 0 && !eval(ec.num_expr, n, why)) return "an effect cost's count";
-            if (n >= 1) cast.effect_costs.emplace_back(ec.effect_guid, static_cast<int>(std::min(n, 4096.0)));
+            if (n >= 1) g.effects.emplace_back(ec.effect_guid, static_cast<int>(std::min(n, 4096.0)));
         }
+        g.triggers_cooldown = g.enabled && def.costs[i].triggers_cooldown;
+        groups.push_back(std::move(g));
         i = j;
+    }
+    const auto affordable = [&](const CostGroup& g) {
+        for (const auto& [stat, amount] : g.stats) {
+            if (stat_now(stat) < amount) return false;
+        }
+        for (const auto& [effect, n] : g.effects) {
+            if (stacks_of(effect) < n) return false;
+        }
+        return true;
+    };
+    const CostGroup* chosen = nullptr;
+    for (const CostGroup& g : groups) {
+        if (!g.enabled) continue;
+        if (!chosen) chosen = &g;
+        if (affordable(g)) {
+            chosen = &g;
+            break;
+        }
+    }
+    if (chosen) {
+        cast.stat_costs = chosen->stats;
+        cast.effect_costs = chosen->effects;
+        cast.triggers_cooldown = cast.triggers_cooldown || chosen->triggers_cooldown;
+        if (chosen->triggers_cooldown) cast.charge_cost = std::max(cast.charge_cost, chosen->charge);
     }
     return nullptr;
 }
@@ -3140,6 +3801,16 @@ int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& st
     if (log) spdlog::info("[abilities] {}: the client named montage {}, but the combo is at step {}: the swing plays montage {}", def.row.name, requested, next, take->anim_index);
     step = next;
     return take->anim_index;
+}
+
+// The abilities whose montage the SERVER chooses from the rows' AnimExpressions, because the client's call carries no step of its own: the Bard's Saga (its six
+// variants, each selected by one of the equations; the item plays what the notes made) — the emotes are chosen the same way (is_emote_ability).
+constexpr const char* kMontagesChosenByServer[] = {"Bard_Saga"};
+bool montage_chosen_by_server(const std::string& name) {
+    for (const char* n : kMontagesChosenByServer) {
+        if (name == n) return true;
+    }
+    return false;
 }
 
 int32_t AbilityPipeline::emote_montage_index(const AbilityDef& def, int32_t fallback) {
@@ -3216,19 +3887,21 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     }
     const bool is_toggle = row.held_behavior.find("Toggle") != std::string::npos;
 
-    // the other actors the call names: each must be there, alive, of the side the ability reaches, in range and in sight [plan E1, stage 3]
+    // the other actors the call names: each must be there, alive, of the side the ability reaches, in range and in sight [plan E1, stage 3].  The
+    // caster's own mount is no combat world actor: the session's view of it stands in (a friendly ally whose Health a heal reaches).
     std::vector<uint64_t> target_actors;
-    if (combat_) {
+    {
         const bool melee = row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                            std::find(row.tags.begin(), row.tags.end(), "ability.Melee") != row.tags.end();
         for (const uint64_t id : info.target_actors) {
             if (target_actors.size() >= 16) break;
-            const combat::TargetInfo ti = combat_->inspect(id);
-            if (!ti.exists || !ti.alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
-            const bool hostile = ti.relation == combat::Relation::Hostile;
+            const std::optional<combat::TargetInfo> ti = target_info(id);
+            if (!ti || !ti->exists || !ti->alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
+            const bool hostile = ti->relation == combat::Relation::Hostile;
             // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493])
             if (hostile ? (row.applicable_targets & 2) == 0 : row.applicable_targets != 0 && (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
-            if (ti.surface_distance_cm > combat_->reach_cm(melee) + combat_->data().activation_leeway_cm()) return refused(Refusal::OutOfRange);
+            const double reach = combat_ ? combat_->reach_cm(melee) + combat_->data().activation_leeway_cm() : 1e9;   // (a mount's own range is the client's)
+            if (ti->surface_distance_cm > reach) return refused(Refusal::OutOfRange);
             // Line of sight is NOT a refusal for a player's cast (E1 review I4): `TargetInfo::in_line_of_sight` is the navmesh's 2D raycast, which a
             // bank, a ledge or a gap in the walkable ground stops as a wall would; the client enforces its own sight rules, and retail's server refused
             // none of the 361 recorded casts. The AI's aggro keeps the raycast (combat_world.cpp).
@@ -3267,6 +3940,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // does not have (another player) is cast at the air, like one with no target, and Mock's Quick Wit heal never lands on the caster [E1 stage 3 fix]
     cast.self_reachable = (row.applicable_targets & kFriendly) != 0;
     cast.target_actors = target_actors;
+    cast.place = info.place;
     cast.loop = loop;
     cast.toggle_off = (loop && stacks_of(loop_effect) > 0) || (is_toggle && !own_effects.empty() && stacks_of(own_effects[0]->row.guid) > 0);   // on: this press ends it
     if (!cast.toggle_off) cast.own_effects = own_effects;
@@ -3340,7 +4014,20 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
     }
     cast.animation_index = swing_montage(*def, info.animation_index, swing_step);
-    if (content::is_emote_ability(row.guid)) cast.animation_index = emote_montage_index(*def, cast.animation_index);
+    if (content::is_emote_ability(row.guid)) {
+        cast.animation_index = emote_montage_index(*def, cast.animation_index);
+    } else if (montage_chosen_by_server(row.name)) {
+        cast.animation_index = emote_montage_index(*def, cast.animation_index);
+        cast.montage_selected = true;
+        // the Saga's ally variants: their hits' targeting record follows the montage the notes chose (the Return's Joyousness, the Silent Pantheon's
+        // Pantheon record); its own client names the same record in its requests, and this is the fallback for one that names none
+        for (const content::MontageRow& m : def->montages) {
+            if (m.anim_index != cast.animation_index) continue;
+            if (m.soft_path.find("Joyousness") != std::string::npos) cast.ally_targeting = "Bard_Saga_Joyousness";
+            else if (m.soft_path.find("Pantheon2") != std::string::npos) cast.ally_targeting = "Bard_Saga_Pantheon";
+            break;
+        }
+    }
     // accepted: the steps and their times
     double item_delay = kItemDelay, cost_delay = kCostDelay, hit_delay = -1;
     double zone_delay = -1;   // when the actor of the zone the cast spawns opens, after the trigger (-1: a moment after the item)
@@ -3397,6 +4084,13 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         // a character whose talent makes the cast a held one waits for the key's release or the full charge: the plan is the fallback for neither being heard
         cast.held = b.held_skill != 0 && holds_skill(b.held_skill);
         if (cast.held) spdlog::info("[abilities] {}: the character's talent makes it a held cast: it waits for the key's release or the full charge", row.name);
+        if (b.no_jump) {
+            // the bar only ends on the client's branch request (the Disengage's CancelIfFalling): the cost and the montage's clear are the recordings',
+            // and a request that comes clears the montage `end` after it
+            cast.branch_due = t + b.request + b.answer;
+            cast.end_due = t + (table_end >= 0 ? table_end : 1.345);
+            break;
+        }
         cast.branch_due = cast.held ? t + b.hold_limit + b.release : t + b.request + b.answer;
         if (b.cost_first) {   // the cost step was paid before the bar's end (the timing table's moment, set above): the request moves the jump and the end
             cast.end_due = *cast.branch_due + b.end;
@@ -3540,6 +4234,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     rec.window_end = rec.cost_due + (info.item_cast ? kItemRequestWindow : kRequestWindow);
     rec.item_cast = info.item_cast;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
+    rec.ally_targeting = cast.ally_targeting;
     rec.reach = reach_of(*def);
     // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes its requests closer together.
     // A ranged weapon swing's other hits are the server's own: its projectile hits land when the projectile gets there, and the retail client asks for none of them (the Wand's beam steps are the only
@@ -3579,6 +4274,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         slot.hit = hit;
         slot.targeting = tg;
         slot.max_requests = beam_requests;
+        if (one_request_hit(hit->row.name)) slot.max_requests = 1;   // (one heal a cast: the Deliverance's and the Beam's hits are asked for once)
         slot.reaches = hits_caster(hit->row);
         slot.aims_others = combat_ != nullptr && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0;
         if (pets::for_ability(ability) && hit->row.applicable_targets == 1 && hit->row.fallback_target.find("SelfOnly") != std::string::npos) {
@@ -3600,6 +4296,13 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // [R: the retail capture: Maddening +362 (item +328), Nimble +300 (+300), Mesmerizing +389 (+324), Shielding +462 (+331)]; what their overlap hits put on the
     // caster at the cost step belongs to them, and the cast's record takes the client's requests for their ticks while they live
     spawn_zones(cast, t + (zone_delay >= 0 ? zone_delay : (has_montage ? item_delay : cost_delay) + kZoneOpenDelay), zone_end >= 0 ? t + zone_end : -1.0);
+    // an accepted press ends a held cast the key has not released (the client chose another ability): nothing of it happens, since its cost comes after its jump.
+    // A press the server refuses changes nothing, and a released or a charged held cast has gone out and is left alone.
+    for (size_t i = casts_.size(); i-- > 0;) {
+        Cast& held = casts_[i];
+        if (!held.held || held.released || held.charged || !held.branch_due) continue;
+        abort_cast(i, now_, "another ability ended the held cast", true);
+    }
     // an ability's trigger ends the weapon swings under way: retail's server sent no hit of a swing that an ability followed within 0.45 s, and ended one that showed no item
     if (!is_weapon_combo(row)) cancel_swings(t, name);
     if (swing_gap) {   // (the least gap counts from an accepted swing; the rate it was played at goes with it)
@@ -3649,7 +4352,7 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
         item.montage_guid = m.net_guid ? *m.net_guid : 0;
         if (!m.net_guid) {
             if (const auto known = bootstrap::montage_for(m.soft_path)) item.montage_guid = known->guid.ObjectId;
-            else if (content::is_emote_ability(def.row.guid)) item.montage_guid = bootstrap::montage_id_for(m.soft_path);
+            else if (content::is_emote_ability(def.row.guid) || cast.montage_selected) item.montage_guid = bootstrap::montage_id_for(m.soft_path);
         }
         break;
     }
@@ -3708,6 +4411,7 @@ void AbilityPipeline::step_branch(Cast& cast, double t) {
     land_by_flight(cast, t);
     // a ball (the Mage's Ball Lightning) leaves when the montage's notify gets there, whoever is or is not the cast's target
     launch_ball(cast, t);
+    if (cast.branched && cast.branched->no_jump) return;   // (the branch ends the bar where it stands: the record's section is none and no montage jump is sent)
     // the montage moves to the section the branch names; when another ability's item is the pawn's by now there is nothing to move
     if (!cast.montage_branch || !item_instance_ || *item_instance_ != cast.instance) return;
     if (cast.charged && cast.gathered && cast.gathered->charged_montage[0] != '\0') {   // the charged shot has a montage of its own
@@ -4165,6 +4869,54 @@ void AbilityPipeline::launch_gathered(Cast& cast, double t) {
     for (const combat::GatheredTarget& e : found) cast.missiles.push_back({t + e.distance_cm / speed, projectile, e.actor});
     spdlog::info("[abilities] {} ({}): {} enem{} ahead of the caster{}", cast.def->row.name, charged ? "the charged shot" : "the scatter", found.size(), found.size() == 1 ? "y" : "ies",
                  found.empty() ? ", nothing is hit" : found.size() == 1 ? ", a projectile flies at it" : ", a projectile flies at each");
+    // The arcing ground arrows show where they land: ten FX-only hits of each of their records, at one point on the ground under the first enemy found (under
+    // the caster when the cone holds nobody), at the moment the first homing arrow lands. The charged shot has no ground arrows and sends none.
+    if (!charged && g.ground_hit[0] != '\0') {
+        Cast::GroundMarks marks;
+        const uint64_t target = found.empty() ? combat_->self().id() : found.front().actor;
+        const combat::TargetInfo ti = combat_->inspect(target);
+        marks.x = ti.position.x;
+        marks.y = ti.position.y;
+        marks.z = ti.position.z;
+        double ground = 0;
+        if (combat_->ground_height(marks.x, marks.y, marks.z, &ground)) marks.z = ground;
+        marks.due = found.empty() ? t : t + found.front().distance_cm / speed;
+        marks.component = combat_->guid_of(target);
+        marks.cylinder = combat_->hit_component_of(target);
+        cast.ground = marks;
+    }
+}
+
+// The FX-only impact hits of the arcing ground arrows: ten for each projectile record of the ability that fires the hit, from that record as their source (not
+// the actor), with no stat mod, at the one point on the ground the cast holds. A decal of the hit's record shows there (its 3 s lifetime and its size).
+void AbilityPipeline::send_ground_marks(Cast& cast) {
+    if (!combat_ || !cast.gathered || !cast.ground) return;
+    const abilities::HitDef* ground = catalog_ ? catalog_->hit_named(cast.gathered->ground_hit) : nullptr;
+    if (!ground) return;
+    const Cast::GroundMarks& marks = *cast.ground;
+    size_t sent = 0;
+    for (const content::AbilityHitRow& h : cast.def->hits) {
+        if (h.source != "projectile" || h.hit_guid != ground->row.guid) continue;
+        for (int i = 0; i < 10; ++i) {
+            bootstrap::HitConfirm confirm;
+            confirm.record_guid = ground->row.guid;
+            confirm.source_type = content::kSourceTypeProjectile;
+            confirm.source_guid = h.owner_guid;
+            confirm.source_is_actor = false;
+            confirm.predicted_autonomous = true;
+            confirm.predicted_simulated = true;
+            bootstrap::HitTargetOut out;
+            out.component = marks.component;
+            out.cylinder = marks.cylinder;
+            out.has_impact = true;
+            out.impact_location = {marks.x, marks.y, marks.z};
+            out.impact_normal = {0, 0, 1};
+            confirm.targets.push_back(std::move(out));
+            confirmations_.push_back(std::move(confirm));
+            ++sent;
+        }
+    }
+    spdlog::info("[abilities] {}: {} ground impact hits show where its arrows landed", cast.def->row.name, sent);
 }
 
 void AbilityPipeline::step_end(Cast& cast, double t) {
@@ -4181,8 +4933,12 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
         cast.item.animation_counter = ++animation_counter_;
         c.abilities_changed.push_back(cast.item);
     }
-    if (c.empty()) return;
-    emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " ends"});
+    // a ground cast whose client never asked for its branch (the aim point is in the call, so its client's cast bar is not the game's own) has no client
+    // end of its own: the server ends it here, so the animation does not play on after the spell is done. A cast aimed at an actor keeps its client's end.
+    std::optional<int32_t> end;
+    if (cast.montage_branch && !cast.request_heard && cast.place) end = cast.client_id;
+    if (c.empty() && !end) return;
+    emit({std::move(c), end, t, "the montage of " + cast.def->row.name + " ends"});
 }
 
 void AbilityPipeline::step_cost(Cast& cast, double t) {
@@ -4256,8 +5012,21 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         apply_effect(c, *resource_, 1, std::nullopt, t);
         cast.resource_added = std::max(0, stacks_of(resource_->row.guid) - held);
     }
+    paying_group_ = cast.group;
+    paying_extra_ = 0;
     if (!cast.toggle_off) raise_ability_event(c, def, t);   // reactions: the ability was consumed (the Bard's Resonance gain)
+    paying_group_.clear();
     use_charge(c, cast, t);
+    if (paying_extra_ > 0) {   // a reaction's hit asked for more cooldown on this ability than it has (Camouflage: its action ends the effect, whose End hit adds 60 s): the item says the sum [R: 61 s]
+        if (const auto g = groups_.find(cast.group); g != groups_.end() && g->second.timer_end >= 0) {
+            g->second.cooldown += paying_extra_;
+            g->second.timer_end += paying_extra_;
+            c.cooldowns_set.erase(std::remove_if(c.cooldowns_set.begin(), c.cooldowns_set.end(), [&](const bootstrap::CooldownItem& cd) { return g->second.items.count(cd.ability_guid) != 0; }),
+                                  c.cooldowns_set.end());
+            for (const int64_t a : g->second.items) c.cooldowns_set.push_back(cooldown_item(a, g->second));
+        }
+    }
+    paying_extra_ = 0;
     // An ability with no hit, zone or effect of its own has nothing that goes out for the server: its payment is its launch, and a Dodge after the cost step changes nothing.
     if (def.hits.empty() && def.zones.empty() && cast.own_effects.empty() && !cast.toggle_off) mark_launched(cast.client_id);
     if (cast.toggle_off) {
@@ -4308,6 +5077,15 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         for (const auto& [stat, amount] : cast.stat_costs) more = more && stat_now(stat) >= amount;
         if (more) cast.cost_due = t + cast.looped->period * cast.loop_scale;
         else end_shots(t);
+    }
+    // the Bard's Saga, its Silent Pantheon: the four server-only spawn hits leave with the cost step (their montage notifies are in no table)
+    if (def.row.name == "Bard_Saga" && combat_) {
+        for (const content::MontageRow& m : def.montages) {
+            if (m.anim_index == cast.animation_index && m.soft_path.find("Pantheon2") != std::string::npos) {
+                start_saga_pantheon(cast, t);
+                break;
+            }
+        }
     }
     recompute(c);
     emit({std::move(c), std::nullopt, t, "the cost, cooldown and class resource of " + def.row.name});
@@ -4397,9 +5175,60 @@ void AbilityPipeline::step_loop(Cast& cast, double t) {
 
 // ---- lingering zones ------------------------------------------------------------------------------------------------------------------
 
+bool AbilityPipeline::cast_opens_zone(const AbilityDef& def, int64_t zone) const {
+    if (std::find(def.zones.begin(), def.zones.end(), zone) != def.zones.end()) return true;
+    if (!catalog_) return false;
+    for (const content::AbilityHitRow& r : def.hits) {
+        if (r.source != "hit" && r.source != "projectile") continue;
+        const HitDef* hit = catalog_->hit(r.hit_guid);
+        if (hit && std::find(hit->zones.begin(), hit->zones.end(), zone) != hit->zones.end()) return true;
+    }
+    return false;
+}
+
+std::vector<int64_t> AbilityPipeline::zones_of_cast(const AbilityDef& def) {
+    std::vector<int64_t> out;
+    if (!catalog_) return out;
+    // the zones the ability's own hits name, and whether one of the hits that name a zone holds for the caster now: the game tells the Magma Field's base, Pyromania and Wildfire
+    // fields apart by the talent each spawn hit asks for (the recording of the Pyromania field shows no other field's damage), and the Chains, the Vine Field, the Wall and the other
+    // hit-named zones open with the cast (the recordings open the Vine Field's and the Chains' actors with it)
+    std::vector<int64_t> named;
+    std::map<int64_t, bool> holds;
+    for (const content::AbilityHitRow& r : def.hits) {
+        if (r.source != "hit" && r.source != "projectile") continue;
+        const HitDef* hit = catalog_->hit(r.hit_guid);
+        if (!hit || hit->zones.empty()) continue;
+        bool ok = true;
+        const content::ExprRow* requirement = hit->row.requirement_expr != 0 ? catalog_->expr(hit->row.requirement_expr) : nullptr;
+        if (requirement && !requirement->uses_target) {   // (a requirement that reads a target is asked of the targets a hit reaches, and a zone's opening has none: it opens)
+            std::string why;
+            if (!eval_bool(hit->row.requirement_expr, true, ok, why)) ok = false;
+        }
+        for (const int64_t zone : hit->zones) {
+            if (zone == 0) continue;
+            if (std::find(named.begin(), named.end(), zone) == named.end()) {
+                named.push_back(zone);
+                holds[zone] = false;
+            }
+            holds[zone] = holds[zone] || ok;
+        }
+    }
+    const auto add = [&](int64_t zone) {
+        if (zone != 0 && std::find(out.begin(), out.end(), zone) == out.end()) out.push_back(zone);
+    };
+    for (const int64_t zone : def.zones) {   // (one no hit of the ability names is the cast's own: the dances)
+        const auto it = holds.find(zone);
+        if (it == holds.end() || it->second) add(zone);
+    }
+    for (const int64_t zone : named) {
+        if (holds[zone]) add(zone);
+    }
+    return out;
+}
+
 void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_at) {
     if (cast.loop) return;
-    for (const int64_t guid : cast.def->zones) {
+    for (const int64_t guid : zones_of_cast(*cast.def)) {
         const content::ZoneRow* row = catalog_->zone(guid);
         if (!row) continue;
         Zone z;
@@ -4411,8 +5240,24 @@ void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_a
         const double life = row->life_time > 0 ? row->life_time : 30.0;
         // the dance ends where the captures show (ability_timings.h), else when the zone's life in the data is over
         z.end_at = end_at >= 0 ? std::max(end_at, open_at) : open_at + life;
+        // where the data puts it: the cast's first target (a cast aimed at an enemy) or the place the call aimed at (a ground-targeted cast).  A zone
+        // attached to the caster (a dance, an aura) keeps its place on him.
+        // The Chilling Lament's zone is the Bard's own cone: it stands under him (the location of its hit is the caster), and the game draws no circle
+        // for it (the client's own cast effect is the visual), so no zone actor is sent.
+        const bool lament = row->name == "Bard_Song_Lament_Linger";
+        if (lament) z.visible = false;
+        if (lament) {
+            // (neither the target a cast named nor the place it was aimed at moves it: it opens at the caster, where place_zone puts a zone with no anchor)
+        } else if (!cast.target_actors.empty()) {
+            z.anchor = cast.target_actors.front();
+        } else if (cast.place) {
+            z.x = cast.place->x;
+            z.y = cast.place->y;
+            z.z = cast.place->z;
+            z.placed = true;
+        }
         zones_.push_back(z);
-        if (zones_.size() > kMaxZones) zones_.erase(zones_.begin());
+        while (zones_.size() > kMaxZones) drop_zone(0, now_);
         // the client asks for the zone's tick hits as long as its actor lives
         if (CastRecord* rec = record_of(cast.client_id)) {
             rec->window_end = std::max(rec->window_end, z.end_at + kZoneRequestSlack);
@@ -4421,13 +5266,108 @@ void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_a
     }
 }
 
+namespace {
+
+/// A zone's next tick is due when its moment is reached within this many seconds (the moments are sums of the record's period: one that lands a rounding after the zone's end still counts).
+constexpr double kTickEpsilon = 1e-6;
+
+/// The zone's volume as the world's area query takes it (a sphere, or the boxes its data lists).
+combat::ZoneArea zone_area_of(const content::ZoneVolume& v) {
+    combat::ZoneArea a;
+    for (const content::ZoneBox& b : v.boxes) a.boxes.push_back({b.ex, b.ey, b.ez, b.cx, b.cy, b.cz, b.yaw});
+    if (v.boxes.empty()) a.radius = v.radius;
+    return a;
+}
+
+/// Whether a point (a body's centre) stands in the volume around `centre`; the caster's own body is always in a zone attached to him.
+bool zone_holds_point(const combat::ZoneArea& a, const combat::Vec3& centre, const combat::Vec3& body, double body_radius_cm) {
+    return combat::zone_holds(a, centre, body, body_radius_cm);
+}
+
+}  // namespace
+
 double AbilityPipeline::zone_due(const Zone& z) const {
     switch (z.state) {
         case Zone::State::Pending: return z.open_at;
-        case Zone::State::Open: return z.end_at;
+        case Zone::State::Open: {
+            double due = z.end_at;
+            if (z.next_tick >= 0) due = std::min(due, z.next_tick);
+            return due;
+        }
         case Zone::State::Ended: return std::min(z.fade_at >= 0 ? z.fade_at : kInf, z.close_at);
     }
     return kInf;
+}
+
+void AbilityPipeline::place_zone(Zone& z, double t) {
+    const content::ZoneRow* row = catalog_ ? catalog_->zone(z.zone) : nullptr;
+    if (!row) return;
+    // a file from before the extraction's spawn column does not say where or how far a zone reaches: its actor opens at the caster and no tick runs (the old behaviour)
+    z.volume = row->has_spawn ? row->volume : content::ZoneVolume{};
+    z.tick = row->tick_rate;
+    z.no_first_tick = row->spawn.no_first_tick;
+    // its record's own limits: the hits begin DelayTime after the open (a trap arms itself), and the zone ends once ExpireAfterAppliedHits of its hits have landed (a trap goes off once)
+    z.base = t;
+    z.tick_no = 1;
+    z.armed = true;
+    z.next_tick = -1;
+    if (row->has_spawn && row->delay_time > 0 && (row->delay_type.empty() || row->delay_type.find("DELAY_Time") != std::string::npos)) {
+        z.armed = false;
+        z.next_tick = t + row->delay_time;   // (its next step is the end of the delay: tick_zone arms it)
+    }
+    z.expire_after = 0;
+    if (row->has_spawn && row->expire_after_hits_expr != 0) {
+        double n = 0;
+        std::string why;
+        if (eval(row->expire_after_hits_expr, n, why) && n >= 1) z.expire_after = static_cast<int>(std::min(n, 1.0e9));
+    }
+    const bool attached = !row->has_spawn || row->spawn.attach.find("AttachedInstigator") != std::string::npos;
+    z.attached = attached;
+    if (combat_) z.yaw = combat_->self().facing_degrees();
+    if (attached) {
+        // the actor is on the caster and moves with him (a dance, an aura, an Arcane Eye the Mage carries): the data's origin is his place
+        z.placed = false;
+        return;
+    }
+    const std::string& origin = row->spawn.origin;
+    // a zone whose origin the data names as the instigator or his owner stands at the caster (the Saga's zone, the Arcane Circle, a trap): the target a cast named and the place it was aimed
+    // at are where the HitLocation zones stand, not these
+    if ((origin.find("Instigator") != std::string::npos || origin.find("Owner") != std::string::npos) && combat_) {
+        const combat::Vec3 me = combat_->self().position();
+        const double yaw = z.yaw * 3.14159265358979323846 / 180.0;   // (the record's offset is in the caster's frame: a trap goes 1 m ahead of him)
+        z.x = me.x + std::cos(yaw) * row->spawn.rel_x - std::sin(yaw) * row->spawn.rel_y;
+        z.y = me.y + std::sin(yaw) * row->spawn.rel_x + std::cos(yaw) * row->spawn.rel_y;
+        z.z = me.z + row->spawn.rel_z;
+        z.placed = true;
+        double ground = z.z;
+        if (combat_->ground_height(z.x, z.y, z.z, &ground)) z.z = ground;
+        return;
+    }
+    if (z.placed) return;   // the place the call aimed at
+    bool at = false;
+    if (z.anchor != 0 && combat_ && z.anchor != combat_->self().id()) {
+        const combat::TargetInfo ti = combat_->inspect(z.anchor);
+        if (ti.exists) {
+            z.x = ti.position.x;
+            z.y = ti.position.y;
+            z.z = ti.position.z;
+            at = true;
+        }
+    }
+    if (!at && (origin.find("HitLocation") != std::string::npos || origin.find("Source") != std::string::npos || origin.find("Target") != std::string::npos) && combat_) {
+        const combat::Vec3 me = combat_->self().position();
+        z.x = me.x;
+        z.y = me.y;
+        z.z = me.z;
+        at = true;
+    }
+    if (!at) return;   // the caster (Owner, an origin the data does not name, a file without the spawn)
+    z.placed = true;
+    // a lasting circle is drawn on the ground under the place (the target's feet, not its body's centre)
+    if (combat_) {
+        double ground = z.z;
+        if (combat_->ground_height(z.x, z.y, z.z, &ground)) z.z = ground;
+    }
 }
 
 
@@ -4444,57 +5384,333 @@ void AbilityPipeline::end_zone_effects(AbilityChange& c, int64_t zone_id, double
     sync_engine_effects();
 }
 
-void AbilityPipeline::run_zone(size_t index, double t) {
-    Zone& z = zones_[index];
+std::vector<uint64_t> AbilityPipeline::zone_standers(const Zone& z) const {
+    std::vector<uint64_t> out;
+    if (!combat_ || !z.volume.has_volume()) return out;
+    combat::ZoneArea area = zone_area_of(z.volume);
+    area.yaw = z.yaw;
+    const combat::Vec3 me = combat_->self().position();
+    const combat::Vec3 centre = z.attached ? me : combat::Vec3{z.x, z.y, z.z};
+    // the caster stands in it while he lives: a dead caster takes none of its hits (a corpse is no one's ally)
+    if (!dead_ && zone_holds_point(area, centre, me, combat_->self().radius_cm())) out.push_back(combat_->self().id());
+    // (each hit's own filter picks who it lands on: a creature that is neither the caster's enemy nor his friend is refused by the hit path for the enemy lists and the ally lists alike)
+    for (const combat::ZoneTarget& t : combat_->actors_in_area(centre, area, kMaxZoneTargets)) out.push_back(t.actor);
+    return out;
+}
+
+void AbilityPipeline::zone_land(int64_t zone_id, int64_t zone_guid, int64_t ability, const char* role, const std::vector<uint64_t>& actors, double t) {
+    if (!combat_ || !catalog_ || actors.empty()) return;
+    const content::ZoneRow* row = catalog_->zone(zone_guid);
+    if (!row) return;
+    const auto list = row->hits.find(role);
+    if (list == row->hits.end() || list->second.empty()) return;
+    HitSource src;   // a zone's hit: Source is the zone record, predicted on neither side [R: 84 zone hits]
+    src.type = content::kSourceTypeZone;
+    src.guid = zone_guid;
+    src.actor = false;
+    src.confirm = true;
+    src.autonomous = false;
+    src.simulated = false;
+    src.reach_free = true;   // it reaches whoever stands in the zone, wherever the caster is
+    AbilityChange c;
+    bool did = false;
+    int applied = 0;
+    std::set<std::pair<uint64_t, int64_t>> held;   // the infinite effects its hits put on others
+    const uint64_t self = combat_->self().id();
+    const AbilityDef* owner = ability != 0 ? catalog_->ability(ability) : nullptr;
+    for (const int64_t hit_guid : list->second) {
+        const HitDef* hit = catalog_->hit(hit_guid);
+        if (!hit) continue;
+        if ((hit->row.applicable_targets & 1) != 0 && std::find(actors.begin(), actors.end(), self) != actors.end()) {
+            zone_owner_ = zone_id;   // (an infinite effect a zone puts on its caster ends with the zone)
+            apply_hit(c, *hit, t, false, src);
+            zone_owner_ = 0;
+            did = true;
+        }
+        std::vector<uint64_t> others;
+        for (const uint64_t a : actors) {
+            if (a != self) others.push_back(a);
+        }
+        if (!others.empty()) {
+            bool landed = false;
+            apply_hit_on_targets(c, *hit, others, t, src, owner, &landed);
+            did = true;
+            if (landed) {
+                ++applied;
+                // an infinite effect that a hit of the zone put on an actor stays while that actor stands in the zone (the Void's silence, the Maddening Dance's mark)
+                for (const content::HitEffectRow& effect : hit->effects) {
+                    if (effect.kind == "self") continue;
+                    const EffectDef* def = catalog_->effect(effect.effect_guid);
+                    if (!def || !def->row.infinite_duration) continue;
+                    for (const uint64_t a : others) {
+                        if (combat_->effect_stacks_from(a, effect.effect_guid, self, t) > 0) held.insert({a, effect.effect_guid});
+                    }
+                }
+            }
+        }
+    }
+    if (const int zi = zone_index(zone_id); zi >= 0) {   // (a hit of the list may have opened a zone and dropped the oldest)
+        zones_[static_cast<size_t>(zi)].applied += applied;
+        zones_[static_cast<size_t>(zi)].held.insert(held.begin(), held.end());
+    }
+    if (!did) return;
+    recompute(c);
+    emit({std::move(c), std::nullopt, t, "the zone of " + (owner ? owner->row.name : std::string("?")) + " lands its " + role});
+}
+
+void AbilityPipeline::zone_first_look(int64_t zone_id, double t) {
+    int zi = zone_index(zone_id);
+    if (zi < 0) return;
+    const int64_t guid = zones_[static_cast<size_t>(zi)].zone, ability = zones_[static_cast<size_t>(zi)].ability;
+    // the actors already inside: the Initial hits run once, and they are the first overlap
+    const std::vector<uint64_t> standers = zone_standers(zones_[static_cast<size_t>(zi)]);
+    std::vector<uint64_t> entered;
+    {
+        Zone& z = zones_[static_cast<size_t>(zi)];
+        for (const uint64_t stand : standers) {
+            if (!z.inside.count(stand)) entered.push_back(stand);
+            z.inside.insert(stand);
+        }
+    }
+    if (!entered.empty()) {
+        zone_land(zone_id, guid, ability, "InitialHitsIds", entered, t);
+        zone_land(zone_id, guid, ability, "OnBeginOverlapHitsIds", entered, t);
+    }
+    zone_check_expiry(zone_id, t);
+}
+
+void AbilityPipeline::tick_zone(size_t index, double t) {
+    if (index >= zones_.size()) return;
+    const int64_t id = zones_[index].id, guid = zones_[index].zone, ability = zones_[index].ability;
+    if (!zones_[index].armed) {
+        // its DelayTime is over (a trap arms itself): its hits begin, with the first look, and its ticks count from here
+        Zone& z = zones_[index];
+        z.armed = true;
+        z.base = t;
+        z.tick_no = 1;
+        z.next_tick = z.tick > 0 ? z.base + z.tick : -1.0;
+        zone_first_look(id, t);
+    } else {
+        Zone& z = zones_[index];
+        const bool first = z.no_first_tick;
+        z.next_tick = z.tick > 0 ? z.base + static_cast<double>(++z.tick_no) * z.tick : -1.0;   // (the moments count from the base: a sum of rounded steps would drift)
+        z.no_first_tick = false;
+        const std::vector<uint64_t> standers = zone_standers(z);   // (before any hit: one of them may open another zone)
+        std::vector<uint64_t> entered, left;
+        for (const uint64_t a : standers) {
+            if (!z.inside.count(a)) entered.push_back(a);
+        }
+        for (const uint64_t a : z.inside) {
+            if (std::find(standers.begin(), standers.end(), a) == standers.end()) left.push_back(a);
+        }
+        z.inside = std::set<uint64_t>(standers.begin(), standers.end());   // (one that left takes the overlap again when it comes back)
+        if (!left.empty()) release_zone_effects(id, &left, t);
+        if (!entered.empty()) zone_land(id, guid, ability, "OnBeginOverlapHitsIds", entered, t);
+        if (!first) zone_land(id, guid, ability, "LingeringHitsIds", standers, t);
+    }
+    zone_check_expiry(id, t);
+}
+
+void AbilityPipeline::release_zone_effects(int64_t zone_id, const std::vector<uint64_t>* leavers, double t) {
+    const int zi = zone_index(zone_id);
+    if (zi < 0 || !combat_) return;
+    Zone& z = zones_[static_cast<size_t>(zi)];
+    const uint64_t self = combat_->self().id();
+    for (auto it = z.held.begin(); it != z.held.end();) {
+        const bool gone = !leavers || std::find(leavers->begin(), leavers->end(), it->first) != leavers->end();
+        if (!gone) {
+            ++it;
+            continue;
+        }
+        combat_->remove_effect_from(it->first, it->second, self, t);
+        it = z.held.erase(it);
+    }
+}
+
+void AbilityPipeline::end_zone(int64_t zone_id, double t, bool end_hits, const std::string& note) {
+    int zi = zone_index(zone_id);
+    if (zi < 0 || zones_[static_cast<size_t>(zi)].state != Zone::State::Open) return;
+    if (end_hits) {
+        // the end: its End hits land on whoever still stands in it, then its effects go and its actor fades
+        const std::vector<uint64_t> standers = zone_standers(zones_[static_cast<size_t>(zi)]);
+        const int64_t guid = zones_[static_cast<size_t>(zi)].zone, ability = zones_[static_cast<size_t>(zi)].ability;
+        if (!standers.empty()) zone_land(zone_id, guid, ability, "EndHitsIds", standers, t);
+        zi = zone_index(zone_id);   // (one of the End hits may have opened a zone and dropped the oldest)
+        if (zi < 0) return;
+    }
+    release_zone_effects(zone_id, nullptr, t);
+    AbilityChange c;
+    end_zone_effects(c, zone_id, t);
+    recompute(c);
+    zi = zone_index(zone_id);
+    if (zi < 0) return;
+    Zone& z = zones_[static_cast<size_t>(zi)];
+    z.state = Zone::State::Ended;
+    z.next_tick = -1;
+    z.fade_at = t + kZoneFadeDelay;
+    z.close_at = t + kZoneCloseDelay;
+    if (CastRecord* rec = record_of(z.client_id)) rec->window_end = std::max(rec->cost_due + kRequestWindow, t + kZoneRequestSlack);
     AbilityEvent e;
     e.at = t;
+    e.change = std::move(c);
+    e.note = note;
+    emit(std::move(e));
+}
+
+void AbilityPipeline::drop_zone(size_t index, double t) {
+    if (index >= zones_.size()) return;
+    const Zone gone = zones_[index];
+    if (gone.state == Zone::State::Open) release_zone_effects(gone.id, nullptr, t);
+    zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (gone.state == Zone::State::Pending) return;   // (its actor never opened)
+    AbilityChange c;
+    if (gone.state == Zone::State::Open) {
+        end_zone_effects(c, gone.id, t);
+        recompute(c);
+    }
+    AbilityEvent e;
+    e.at = t;
+    e.change = std::move(c);
+    e.note = "a zone is dropped: too many are alive";
     bootstrap::ZoneOp op;
-    op.id = z.id;
-    op.ability = z.ability;
-    op.zone = z.zone;
-    const AbilityDef* a = catalog_->ability(z.ability);
+    op.id = gone.id;
+    op.ability = gone.ability;
+    op.zone = gone.zone;
+    op.kind = bootstrap::ZoneOp::Kind::Close;
+    e.zones.push_back(op);
+    emit(std::move(e));
+}
+
+int AbilityPipeline::zone_index(int64_t id) const {
+    for (size_t i = 0; i < zones_.size(); ++i) {
+        if (zones_[i].id == id) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+void AbilityPipeline::run_zone(size_t index, double t) {
+    if (index >= zones_.size()) return;
+    AbilityEvent e;
+    e.at = t;
+    const int64_t zone_id = zones_[index].id, zone_guid = zones_[index].zone, ability = zones_[index].ability;
+    const AbilityDef* a = catalog_->ability(ability);
     const std::string who = a ? a->row.name : std::string("?");
-    switch (z.state) {
-        case Zone::State::Pending:
-            z.state = Zone::State::Open;
+    switch (zones_[index].state) {
+        case Zone::State::Pending: {
+            bootstrap::ZoneOp op;
+            op.id = zone_id;
+            op.ability = ability;
+            op.zone = zone_guid;
+            bool armed = true;
+            {
+                Zone& z = zones_[index];
+                z.state = Zone::State::Open;
+                place_zone(z, t);
+                armed = z.armed;
+                if (armed) z.next_tick = z.tick > 0 ? z.base + z.tick : -1.0;   // (an unarmed zone's next step is the end of its DelayTime, set by place_zone)
+                op.placed = z.placed;
+                op.x = z.x;
+                op.y = z.y;
+                op.z = z.z;
+                op.yaw_degrees = z.yaw;
+                op.attached = z.attached;
+                // the caster's own overlap hits went with the cast's cost step: he is already "inside", so the open does not apply them again
+                if (combat_ && z.volume.has_volume() && !dead_) {
+                    combat::ZoneArea area = zone_area_of(z.volume);
+                    area.yaw = z.yaw;
+                    const combat::Vec3 me = combat_->self().position();
+                    const combat::Vec3 centre = z.attached ? me : combat::Vec3{z.x, z.y, z.z};
+                    if (zone_holds_point(area, centre, me, combat_->self().radius_cm())) z.inside.insert(combat_->self().id());
+                }
+            }
             op.kind = bootstrap::ZoneOp::Kind::Open;
-            e.zones.push_back(op);
+            if (zones_[index].visible) e.zones.push_back(op);   // (an invisible zone runs and ticks; the client draws nothing for it)
             e.note = "the zone of " + who + " opens";
             emit(std::move(e));
-            return;
-        case Zone::State::Open: {
-            AbilityChange c;
-            end_zone_effects(c, z.id, t);
-            recompute(c);
-            z.state = Zone::State::Ended;
-            z.fade_at = t + kZoneFadeDelay;
-            z.close_at = t + kZoneCloseDelay;
-            if (CastRecord* rec = record_of(z.client_id)) rec->window_end = std::max(rec->cost_due + kRequestWindow, t + kZoneRequestSlack);
-            e.change = std::move(c);
-            e.note = "the dance of " + who + " ends";
-            emit(std::move(e));
+            if (armed) zone_first_look(zone_id, t);
             return;
         }
-        case Zone::State::Ended:
-            if (z.fade_at >= 0 && z.fade_at <= t) {
-                z.fade_at = -1;
+        case Zone::State::Open: {
+            const bool tick_due = zones_[index].next_tick >= 0 && zones_[index].next_tick <= t + kTickEpsilon;
+            // A tick that falls on the moment the zone's life is over is that moment's End, not a hit of its own: the End hits land in its place (the Chains' hits are the Initial hit and eight
+            // more in their 8 s, one at each second and none doubled at the end), and a zone that skips its first tick lands nothing when that first tick is its end (the Hoarfrost, whose
+            // only hit is an End hit, blasts once, with the cast) [R: the recorded Chains of Restraint: nine hits in the zone's 8 s; the recorded Hoarfrost: no second hit at the end of its second]
+            if (tick_due && zones_[index].armed && zones_[index].end_at <= t + kTickEpsilon) {
+                bool has_end_hits = false;
+                if (const content::ZoneRow* row = catalog_->zone(zone_guid)) {
+                    const auto end_hits = row->hits.find("EndHitsIds");
+                    has_end_hits = end_hits != row->hits.end() && !end_hits->second.empty();
+                }
+                if (zones_[index].no_first_tick) {
+                    end_zone(zone_id, t, false, "the zone of " + who + " ends on its skipped first tick");
+                    return;
+                }
+                if (has_end_hits) {
+                    end_zone(zone_id, t, true, "the zone of " + who + " ends");
+                    return;
+                }
+            }
+            if (tick_due) {
+                tick_zone(index, t);
+                return;
+            }
+            end_zone(zone_id, t, true, "the zone of " + who + " ends");
+            return;
+        }
+        case Zone::State::Ended: {
+            bootstrap::ZoneOp op;
+            op.id = zone_id;
+            op.ability = ability;
+            op.zone = zone_guid;
+            if (zones_[index].fade_at >= 0 && zones_[index].fade_at <= t) {
+                zones_[index].fade_at = -1;
                 op.kind = bootstrap::ZoneOp::Kind::Fade;
-                e.zones.push_back(op);
+                if (zones_[index].visible) e.zones.push_back(op);
                 e.note = "the zone of " + who + " fades out";
                 emit(std::move(e));
                 return;
             }
             op.kind = bootstrap::ZoneOp::Kind::Close;
-            e.zones.push_back(op);
+            if (zones_[index].visible) e.zones.push_back(op);
             e.note = "the zone of " + who + " closes";
             zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(index));
             emit(std::move(e));
             return;
+        }
     }
+}
+
+void AbilityPipeline::spawn_hit_zones(const HitDef& hit, const AbilityDef* ability, uint64_t target, double t) {
+    if (!catalog_ || hit.zones.empty()) return;
+    for (const int64_t guid : hit.zones) {
+        // the ability's own zone is the one its cast opened (the game opens the Vine Field's and the Chains of Restraint's with the cast): the hit does not open it again
+        if (ability && cast_opens_zone(*ability, guid)) continue;
+        const content::ZoneRow* row = catalog_->zone(guid);
+        if (!row) continue;
+        Zone z;
+        z.id = next_zone_id_++;
+        z.ability = ability ? ability->row.guid : 0;
+        z.zone = guid;
+        z.client_id = -1;   // (no cast of the client's owns it: no request window to extend)
+        z.open_at = t;
+        z.anchor = target;
+        z.end_at = t + (row->life_time > 0 ? row->life_time : 30.0);
+        zones_.push_back(z);
+        while (zones_.size() > kMaxZones) drop_zone(0, t);
+    }
+}
+
+void AbilityPipeline::zone_check_expiry(int64_t zone_id, double t) {
+    const int zi = zone_index(zone_id);
+    if (zi < 0) return;
+    Zone& z = zones_[static_cast<size_t>(zi)];
+    // a zone that has landed the hits its record allows (a trap's one) is over now: its End hits run at its next step
+    if (z.state == Zone::State::Open && z.expire_after > 0 && z.applied >= z.expire_after) z.end_at = std::min(z.end_at, t);
 }
 // [Cyb - C | O | A]
 
 void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int depth) {
+    if (std::string_view(which) == "projectile") push_launcher_confirm(cast, t);
     const CastRecord* fill_record = record_of(cast.client_id);
     const FillScope fill(*this, fill_record ? fill_record->fill : 1.0);
     const ConsumedScope consumed(*this, cast.item_cast);
@@ -4563,7 +5779,19 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
             src.reach_free = cast.ball != nullptr && h.owner_guid == cast.ball_flight.projectile;   // (the ball's own hits: it hurts what it touches, wherever the caster stands)
         }
         bool landed = false;
-        if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+        // A projectile that landed on the Caster himself (the Saga's first burst, its once-solo target) lands through the ordinary self path, with the
+        // projectile as its source: the allies are the other players of the world, which the CombatWorld's hit path serves.
+        const uint64_t self_actor = combat_ ? combat_->self().id() : 0;
+        if (std::string_view(which) == "projectile" && hit->row.applicable_targets == 0 && !hit->zones.empty() && !cast.target_actors.empty()) {
+            // a projectile's landing that only opens a zone where it lands (the Silent Pantheon's blessing zones): the hit reaches no actor by its mask, and the
+            // zone's own overlap hits are what a stander takes
+            spawn_hit_zones(*hit, &def, cast.target_actors.front(), t);
+            landed = true;
+        } else if (std::string_view(which) == "projectile" && !cast.target_actors.empty() && cast.target_actors.size() == 1 && cast.target_actors.front() == self_actor) {
+            apply_hit(c, *hit, t, true, src);
+        } else if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) {
+            apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+        }
         // a hit that fires a bounce when it lands (the Discordance's notes, the Throw): the projectile flies on from this enemy to another near it. A hit that landed on nobody (the enemy
         // an earlier note killed) fires none; a hit that killed its enemy did land and does
         if (landed && std::string_view(which) == "projectile" && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, h.owner_guid, cast.target_actors.front(), depth, t);
@@ -4573,6 +5801,39 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
         // 2026-10-06: Mock healed the caster]. A direct hit (NET_ServerOnly, "hit") is around the caster and keeps reaching it.
         const bool at_others = std::string_view(which) == "projectile" && !cast.target_actors.empty();
         if (hits_caster(hit->row) && !at_others) apply_hit(c, *hit, t, true, src);
+    }
+    // A projectile's own landing hits (ab_projectile_hit): the ones the ability's list does not carry, which the projectile still lands.  The Return to
+    // Verra's second and third bursts fire Bard_Saga_RTV_Projectile, whose landing hit (Bard_Saga_RTV_Hit) is in no ab_ability_hit row, and the Silent
+    // Pantheon's projectiles land their zone-spawning hits the same way.  A landing hit is applied as the projectile's (its SourceRecordGuid is the projectile).
+    if (std::string_view(which) == "projectile" && cast.chain_owner != 0) {
+        std::set<int64_t> listed;
+        for (const content::AbilityHitRow& h : def.hits) {
+            if (h.source == "projectile" && h.owner_guid == cast.chain_owner) listed.insert(h.hit_guid);
+        }
+        if (const content::ProjectileRow* shot = catalog_->projectile(cast.chain_owner)) {
+            const uint64_t self_actor = combat_ ? combat_->self().id() : 0;
+            for (const int64_t guid : shot->hits) {
+                if (!listed.insert(guid).second) continue;
+                const HitDef* hit = catalog_->hit(guid);
+                if (!hit) continue;
+                HitSource src;
+                src.type = content::kSourceTypeProjectile;
+                src.guid = cast.chain_owner;
+                src.actor = false;
+                src.confirm = true;
+                src.simulated = true;
+                bool landed = false;
+                if (!cast.target_actors.empty() && hit->row.applicable_targets == 0 && !hit->zones.empty()) {
+                    spawn_hit_zones(*hit, &def, cast.target_actors.front(), t);
+                    landed = true;
+                } else if (!cast.target_actors.empty() && cast.target_actors.size() == 1 && cast.target_actors.front() == self_actor) {
+                    apply_hit(c, *hit, t, true, src);
+                } else if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) {
+                    apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+                }
+                if (landed && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, cast.chain_owner, cast.target_actors.front(), depth, t);
+            }
+        }
     }
     // the step's direct hits that land with the projectile: carried by no projectile of the combo, firing one of their own (the book's Split hits),
     // of the same step as a projectile hit that flew; confirmed in the same confirmation, predicted on neither side [R: pa 0 ps 0, 408 of 408]
@@ -4627,14 +5888,10 @@ void AbilityPipeline::step_multi_hit(Cast& cast, double t) {
     if (damage && !cast.target_actors.empty()) apply_hit_on_targets(c, *damage, cast.target_actors, t, src, &def, &landed);
     const bool last = ++cast.multi_index >= mh.count;
     if (last) {
-        // The final hit also runs the shape's Stun hit. Its own record asks for an Incapacitated target (the tooltip's final hit); that requirement is asked of each
-        // target this hit reaches, and of this hit alone (HitSource::ask_each_target), never of the other hits or the other abilities' target-reading hits.
+        // The final hit also runs the shape's Stun hit. Its own record asks for an Incapacitated target (the tooltip's final hit); like every hit that reads its target,
+        // it is asked of each target it reaches (apply_hit_on_targets).
         if (landed) {
-            if (const HitDef* stun = catalog_->hit_named(mh.stun)) {
-                HitSource next = src;
-                next.ask_each_target = true;
-                apply_hit_on_targets(c, *stun, cast.target_actors, t, next, &def);
-            }
+            if (const HitDef* stun = catalog_->hit_named(mh.stun)) apply_hit_on_targets(c, *stun, cast.target_actors, t, src, &def);
         }
         cast.end_due = cast.trigger_at + mh.length * cast.multi_scale;   // (the montage's end clears the item)
         cast.clears_montage = true;
@@ -4783,7 +6040,8 @@ void AbilityPipeline::land_strike(Cast& cast, const Cast::Missile& m, double t) 
         src.confirm = true;
         src.simulated = true;
         apply_hit(c, *hit, t, true, src);
-        // ... and the hits it fires where it landed (RecursiveHit): the area hit, on everyone the area holds who was not hurt by this cast already [R: pa 0, ps 0]
+        // ... and the hits it fires where it landed (RecursiveHit): the area hit, on every enemy the area holds; the hit itself asks each of them its own
+        // requirement, Ranger_AirStrike_ICD (0.5 s), so a target an earlier area hurt is skipped only while its own cooldown holds (no set of the whole cast)
         for (const content::RecursiveHitRow& r : hit->recursive) {
             const HitDef* area = catalog_->hit(r.child_hit);
             if (!area) continue;
@@ -4791,11 +6049,18 @@ void AbilityPipeline::land_strike(Cast& cast, const Cast::Missile& m, double t) 
             around.simulated = false;
             around.autonomous = false;
             std::vector<uint64_t> ids;
-            for (const combat::GatheredTarget& e : combat_->enemies_around(combat::Vec3{m.x, m.y, m.z}, tc.radius, kMaxGathered)) {
-                if (cast.struck.insert(e.actor).second) ids.push_back(e.actor);
+            for (const combat::GatheredTarget& e : combat_->enemies_around(combat::Vec3{m.x, m.y, m.z}, tc.radius, kMaxGathered)) ids.push_back(e.actor);
+            bool landed = false;
+            if (!ids.empty()) {
+                const size_t before = confirmations_.size();
+                apply_hit_on_targets(c, *area, ids, t, around, &def, &landed);
+                for (size_t k = before; k < confirmations_.size(); ++k) {   // (the enemies the area reached: one that holds its own cooldown is not among them)
+                    if (confirmations_[k].record_guid == area->row.guid) hurt += confirmations_[k].targets.size();
+                }
             }
-            if (ids.empty()) {
-                // an area that holds nobody is confirmed all the same, with no target [R: 6 of the 9 recorded confirmations]
+            if (!landed) {
+                // an area that hurts nobody (nobody there, or every one of them in its own cooldown) is confirmed all the same, with no target
+                // [R: 6 of the 9 recorded confirmations]
                 if (!area->mods.empty() || area->row.has_fx) {
                     bootstrap::HitConfirm none;
                     none.record_guid = area->row.guid;
@@ -4807,10 +6072,7 @@ void AbilityPipeline::land_strike(Cast& cast, const Cast::Missile& m, double t) 
                     none.predicted_simulated = false;
                     confirmations_.push_back(std::move(none));
                 }
-                continue;
             }
-            hurt += ids.size();
-            apply_hit_on_targets(c, *area, ids, t, around, &def);
         }
     }
     spdlog::info("[abilities] {} (arrow {} of {}) lands at {:.1f} m from the caster: {} enem{} hurt", def.row.name, m.index + 1, tc.count,
@@ -4948,6 +6210,116 @@ void AbilityPipeline::fire_from_hit(const CastRecord& rec, const HitDef& hit, do
         spdlog::info("[abilities] {} ({}): a straight projectile of {:.0f} cm/s flies {:.0f} m ahead: {} enem{} in its way", def->row.name, hit.row.name, p->speed, p->range / 100.0, found.size(), found.size() == 1 ? "y" : "ies");
     }
     if (!wave.missiles.empty()) casts_.push_back(std::move(wave));
+}
+
+// ---- the Bard's Saga's ally hits ---------------------------------------------------------------------------------------------------
+
+void AbilityPipeline::fire_ally_from_hit(const AbilityDef& def, int32_t client_id, double trigger_at, const HitDef& hit, const std::vector<uint64_t>& allies,
+                                         double first_at, const HitSource& launcher_src) {
+    if (!combat_ || hit.fires.empty() || dead_) return;
+    Cast wave;   // a cast with nothing to do but fly to the allies and land what the shot carries: it ends with its last missile
+    wave.client_id = client_id;
+    wave.def = &def;
+    wave.trigger_at = trigger_at;
+    const combat::Vec3 me = combat_->self().position();
+    for (const int64_t guid : hit.fires) {
+        const content::ProjectileRow* p = catalog_->projectile(guid);
+        if (!p || p->speed <= 0) continue;
+        if (p->projectile_type.find("Homing") == std::string::npos) {
+            if (no_formula_.insert(guid).second) spdlog::info("[abilities] the ally hit {} fires {}, a {} projectile: only homing ones are flown at allies", hit.row.name, p->name, p->projectile_type);
+            continue;
+        }
+        for (const uint64_t ally : allies) {
+            const combat::TargetInfo ti = combat_->inspect(ally);
+            if (!ti.exists || !ti.alive) continue;
+            const double distance = std::hypot(ti.position.x - me.x, ti.position.y - me.y);
+            Cast::Missile land;
+            land.kind = Cast::Missile::Kind::Land;
+            land.due = first_at + distance / p->speed;   // (the flight at 0 m is the recorded third of a second: the record's speed gives no time at 0 m)
+            land.projectile = guid;
+            land.target = ally;
+            wave.missiles.push_back(land);
+        }
+    }
+    // The launcher's confirmation is the answer to the client's request.  It names the allies the record picked and waits for the first landing, so that both
+    // hits go out in one call (the recorded solo Saga: the launcher's and the landed hit's in one call, a third of a second after the request).
+    if (launcher_src.response) {
+        Cast::Launcher l;
+        l.hit = hit.row.guid;
+        l.ability = def.row.guid;
+        l.response = true;
+        for (const uint64_t ally : allies) {
+            const combat::TargetInfo ti = combat_->inspect(ally);
+            if (!ti.exists) continue;
+            Cast::LauncherTarget lt;
+            lt.component = combat_->guid_of(ally);
+            lt.x = ti.position.x;
+            lt.y = ti.position.y;
+            lt.z = ti.position.z;
+            l.targets.push_back(lt);
+        }
+        wave.launcher = std::move(l);
+    }
+    if (!wave.missiles.empty()) {
+        casts_.push_back(std::move(wave));
+    } else if (wave.launcher) {
+        Cast now;
+        now.def = &def;
+        now.launcher = std::move(wave.launcher);
+        push_launcher_confirm(now, first_at);
+    }
+}
+
+void AbilityPipeline::push_launcher_confirm(Cast& cast, double t) {
+    if (!cast.launcher || cast.launcher_sent) return;
+    cast.launcher_sent = true;
+    bootstrap::HitConfirm h;
+    h.record_guid = cast.launcher->hit;
+    h.source_type = content::kSourceTypeAbility;
+    h.source_guid = cast.launcher->ability;
+    h.source_is_actor = true;
+    h.predicted_autonomous = true;
+    h.predicted_simulated = false;
+    h.response = cast.launcher->response;
+    for (const Cast::LauncherTarget& lt : cast.launcher->targets) {
+        bootstrap::HitTargetOut o;
+        o.component = lt.component;
+        o.has_impact = true;
+        o.impact_location = {lt.x, lt.y, lt.z};
+        o.impact_normal = {0.0, 0.0, -1.0};   // (retail: the launcher's target normal points down)
+        h.targets.push_back(std::move(o));
+    }
+    confirmations_.push_back(std::move(h));
+    (void)t;
+}
+
+void AbilityPipeline::start_saga_pantheon(const Cast& cast, double t) {
+    if (!combat_ || !cast.def) return;
+    const AbilityDef& def = *cast.def;
+    // the four spawn hits are NET_ServerOnly: the server runs them by itself.  Their montage notifies are in no table (the one recorded Saga is the Return's),
+    // so they are fired together with the cost step; each has its own requirement (the data's RandDouble() < 0.5) and each projectile lands a 1 m blessing zone.
+    const std::vector<uint64_t> allies = ally_targets_of("Bard_Saga_Pantheon", 8);
+    size_t spawned = 0;
+    for (const content::AbilityHitRow& row : def.hits) {
+        if (row.source != "hit") continue;
+        const HitDef* hit = catalog_->hit(row.hit_guid);
+        if (!hit || hit->fires.empty() || hit->row.name.rfind("Bard_Saga_Panth_SpawnProj", 0) != 0) continue;
+        bool ok = true;
+        std::string why;
+        if (!eval_bool(hit->row.requirement_expr, true, ok, why) || !ok) continue;
+        if (allies.empty()) continue;
+        const uint64_t aim = allies[spawned % allies.size()];
+        ++spawned;
+        HitSource src;
+        src.type = content::kSourceTypeAbility;
+        src.guid = def.row.guid;
+        src.actor = true;
+        src.confirm = false;   // (a server-only hit is no client's request: its landed hit is the one that may be confirmed)
+        src.response = false;
+        src.autonomous = false;
+        fire_ally_from_hit(def, cast.client_id, cast.trigger_at, *hit, {aim}, t + kProjectileDelay, src);
+    }
+    if (spawned > 0) spdlog::info("[abilities] {}: {} of the four spawn projectiles of the Silent Pantheon left with the cost step", def.row.name, spawned);
 }
 
 #include "session/ability_pipeline_chain.inc"

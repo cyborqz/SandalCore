@@ -54,17 +54,20 @@ inline constexpr int kLootEmptied = 7;
 std::optional<CorpseLoot> add_loot(ActorRegistry& registry, uint64_t npc, const Minter& mint, const protocol::repl::GuidValue& owner,
                                    const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, std::string& error);
 
-/// A dead player's loot pile (APlayerLootPile, retail: the retail capture; research/combat 5): an actor of its own where the player fell, with the same three
-/// components a corpse gets (the LootComponent is public: bPublicLoot), holding what the death took from the player's bag.
+/// A loot pile: a dead player's (APlayerLootPile, retail: the retail capture; research/combat 5) or the one a full bag's overflow makes (ALootPile): an actor of its own
+/// where the player fell or stood, with the same three components a corpse gets, holding what the death took from the player's bag or what did not fit in it.  A death's
+/// LootComponent is public (bPublicLoot); a drop's is not, and its interaction is offered to the player whose bag it fell from.
 struct Pile {
     uint64_t  actor = 0;
     CorpseLoot parts;
 };
 
 /// Makes the pile at (x, y, z): a new actor of kind Pile in the registry, owned by `player` (its CharacterGuid and name), that `may_loot` may take from
-/// (the owner first).  `top_rarity` as add_loot.  nullopt, with `error`, when the retail blocks do not load or the registry refuses the actor.
+/// (the owner first).  `top_rarity` as add_loot.  `item_drop` makes the pile of items that fell out of a full bag: an ALootPile, the class the game
+/// spawns dropped items in (and the look it draws for them), without a player's name, guid or pile type.  nullopt, with `error`, when the retail blocks
+/// do not load or the registry refuses the actor.
 std::optional<Pile> add_pile(ActorRegistry& registry, const Minter& mint, double x, double y, double z, const protocol::repl::GuidValue& player, const std::string& name,
-                             const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, std::string& error);
+                             const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, std::string& error, bool item_drop = false);
 
 /// The loot is gone: TopRarity 7 and the interaction closed (state 0, nobody in StateGuids).  False for an actor that holds no such components.
 bool empty_loot(ActorRegistry& registry, uint64_t npc);

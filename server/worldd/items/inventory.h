@@ -268,6 +268,10 @@ public:
     /// one Add event, `equipment_changed`.  Refused, changing nothing, for an item that is no crate, a quantity other than 1, an instance the inventory holds already, an unknown
     /// record or a cargo slot that holds a crate already.
     Outcome grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog);
+    /// Weaponsmithing: puts a made tool in the Equipment slot its record lists (the field ItemDestination is Equipment), where the game puts a tool that is made: one Add event,
+    /// `equipment_changed`.  Refused, changing nothing, for an item that is not worn, a two-handed one, a quantity other than 1, a slot its record does not list or that holds an
+    /// item already, an instance the inventory holds already or an unknown record.
+    Outcome grant_equipment(svc::InventoryItem item, int slot, const ItemCatalog& catalog);
     /// The crate of the instance `guid` leaves the cargo slot for good (given to a construction): one Remove event, `equipment_changed`.  Refused, changing nothing, when the
     /// slot holds another.
     Outcome remove_cargo(const std::string& guid);

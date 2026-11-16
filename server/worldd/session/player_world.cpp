@@ -1261,7 +1261,7 @@ size_t PlayerWorld::apply_road_levels() {
 uint64_t PlayerWorld::drop_harvest_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<combat::LootStack> stacks,
                                         std::string& error) {
     error.clear();
-    if (aftermath_) return aftermath_->drop_pile(x, y, z, owner, name, std::move(stacks), world_clock_, error);
+    if (aftermath_) return aftermath_->drop_pile(x, y, z, owner, name, std::move(stacks), world_clock_, error, /*item_drop=*/true);
     if (pile_hook_) return pile_hook_(x, y, z, owner, name, stacks);
     error = "the world has no loot piles (no area, or --no-loot)";
     return 0;
@@ -1500,13 +1500,80 @@ PlayerWorld::RespawnSpot PlayerWorld::respawn_spot(double from_x, double from_y,
 }
 
 double PlayerWorld::spawn_height(double x, double y, double data_z, bool* grounded) const {
-    // a shrine inside the footprint of a bowl whose platform is read comes back on the platform's floor (the baked ground there is the pit, 50 m under the town) with the slack of every
-    // put-down in a town
-    if (const auto bowl = bowl_floor_at(x, y)) {
-        if (grounded) *grounded = true;
-        return bowl->z + kCapsuleHalfHeightCm + kBowlSlackCm;
+    // the surface the data has at the spot: a town's floor, the walking map's floor or the landscape, with the capsule's half height (a respawn stands on it, not over it)
+    double z = data_z;
+    if (!player_height(x, y, data_z, /*has_hint=*/true, /*keep_above=*/false, &z, grounded)) return data_z;
+    // A shrine on a deck, a hull or a roof stands over the landscape, and only the walking map shows what it stands on: where its chunk is not here (the player died far away) the
+    // landscape alone would put it under the structure, so the data's height stands, as it always did, when it is over the landscape (up to kStructureReachCm).
+    if (nav_ != nullptr && !nav_->ready_at(x, y) && !bowl_floor_at(x, y) && data_z > z + kTerrainTolCm && data_z - z <= kStructureReachCm) z = data_z;
+    return z;
+}
+
+bool PlayerWorld::surface_at(double x, double y, double z_hint, bool has_hint, double* z) const {
+    if (!std::isfinite(x) || !std::isfinite(y) || (has_hint && !std::isfinite(z_hint))) return false;
+    // a town's bowl: its floor is the ground (the baked landscape under it is the pit).  A floor of the walking map at the spot within a step and a half of the street is
+    // the floor there (a building's ground floor, a terrace): a body whose feet are at the street would stand on it.
+    if (const auto town = town_ground_at(x, y)) {
+        const std::vector<double> over = floors_at(x, y, town->z, town->z + kFloorReachCm);
+        if (!over.empty() && over.front() > town->z + 25.0) {
+            *z = over.front();
+            return true;
+        }
+        *z = town->z;
+        return true;
     }
-    return spot_height(nav_.get(), x, y, data_z, grounded);
+    double terrain = 0;
+    const bool has_terrain = nav_ != nullptr && nav_->terrain_height(x, y, &terrain) && std::isfinite(terrain);
+    if (nav_ != nullptr && nav_->ready_at(x, y) && (has_hint || has_terrain)) {
+        // with a height: the walking map's floor nearest it (a shrine's, a place's, a game master's); without: the highest floor over the landscape within a step and a half of it (the
+        // ground floor of a building, a stair).  The landscape's samples are exact: a floor within kTerrainTolCm of it is the landscape.  A floor farther UNDER the landscape is a cave,
+        // a cellar or a tunnel, and a spot named at or over the landscape is never on it (the walking map has such a floor where the landscape's own polygon is missing, a slope too
+        // steep to walk: a player put there would stand inside the hill); a height named under the landscape may be a cave's own.
+        double lo = has_hint ? z_hint - kSpotBelowCm : terrain + kTerrainTolCm;
+        const double hi = has_hint ? z_hint + kSpotAboveCm : terrain + kSpotAboveCm;
+        if (has_hint && has_terrain && z_hint >= terrain - kTerrainTolCm) lo = std::max(lo, terrain - kTerrainTolCm);
+        const double target = has_hint ? z_hint : hi;
+        double best = 0;
+        bool have = false;
+        for (const double floor : nav_->floors_at(x, y, lo, hi)) {
+            if (!have || std::fabs(floor - target) < std::fabs(best - target)) {
+                best = floor;
+                have = true;
+            }
+        }
+        if (have && has_terrain) {
+            // the landscape itself answers where the map's floor is its own polygon, or where the landscape lies nearer the height asked than the floor does
+            if (std::fabs(best - terrain) <= kTerrainTolCm || (has_hint && terrain >= lo && terrain <= hi && std::fabs(terrain - target) <= std::fabs(best - target))) best = terrain;
+        }
+        if (have) {
+            *z = best;
+            return true;
+        }
+    }
+    if (has_terrain) {
+        *z = terrain;   // (the landscape answers even when the height asked is far from it, and while the chunk of the walking map is not loaded)
+        return true;
+    }
+    return false;
+}
+
+bool PlayerWorld::on_the_ground(double x, double y, double z) const {
+    double surface = 0;
+    if (!std::isfinite(z) || !surface_at(x, y, z, /*has_hint=*/true, &surface)) return true;
+    return z <= surface + kCapsuleHalfHeightCm + kFloorReachCm;
+}
+
+bool PlayerWorld::player_height(double x, double y, double z_hint, bool has_hint, bool keep_above, double* z, bool* grounded) const {
+    if (grounded) *grounded = false;
+    double surface = 0;
+    if (!surface_at(x, y, z_hint, has_hint, &surface)) {
+        if (grounded) *grounded = false;
+        return false;   // (the caller's height stays; a caller with none has no answer)
+    }
+    const double stands = surface + kCapsuleHalfHeightCm;
+    *z = keep_above ? std::max(z_hint, stands) : stands;
+    if (grounded) *grounded = true;
+    return true;
 }
 
 double PlayerWorld::spot_height(const nav::AreaNav* nav, double x, double y, double data_z, bool* grounded) {
@@ -1711,7 +1778,9 @@ std::optional<PlayerWorld::FloorRescue> PlayerWorld::floor_rescue(double x, doub
 }
 
 double PlayerWorld::place_height(const world::Place& place) const {
-    if (const auto ground = ground_at(place.x, place.y)) return *ground + kCapsuleHalfHeightCm;
+    double z = 0;
+    bool grounded = false;
+    if (player_height(place.x, place.y, place.z, /*has_hint=*/true, /*keep_above=*/false, &z, &grounded) && grounded) return z;
     return place.z + kPlaceLiftCm;
 }
 

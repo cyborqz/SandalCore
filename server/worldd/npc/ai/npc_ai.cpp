@@ -39,20 +39,27 @@ double heading_difference_degrees(double a, double b) {
 bool NpcAi::notices(const Sense& s, const Candidate& c, double& distance) const {
     if (!params_.senses.enabled) {
         distance = combat::distance_xy_cm(s.self, c.pos);
-        return distance <= params_.aggro_radius_cm + c.radius_cm && within_leash(s.self, s.home);
+        if (!(distance <= params_.aggro_radius_cm + c.radius_cm && within_leash(s.self, s.home))) return false;
+        return can_target(s, c);
     }
     // within the aggro radius (centre to centre), and then heard (all round) or seen (inside the cone in front of it), each within its own radius and vertical limit
     const double dx = c.pos.x - s.self.x, dy = c.pos.y - s.self.y, dz = c.pos.z - s.self.z;
     distance = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (!(distance < params_.aggro_radius_cm)) return false;
+    // (a stealthed character must be one the creature hears or sees all the same: the game's stealth rule decides, of those it notices, which it may fight)
     const Senses& e = params_.senses;
     const double vertical = std::fabs(dz);
-    if (e.hearing_radius_cm > 0 && distance < e.hearing_radius_cm && (e.hearing_vertical_cm <= 0 || vertical < e.hearing_vertical_cm)) return true;
+    if (e.hearing_radius_cm > 0 && distance < e.hearing_radius_cm && (e.hearing_vertical_cm <= 0 || vertical < e.hearing_vertical_cm)) return can_target(s, c);
     if (e.sight_radius_cm > 0 && distance < e.sight_radius_cm && (e.sight_vertical_cm <= 0 || vertical < e.sight_vertical_cm)) {
         const double bearing = std::atan2(dy, dx) * 180.0 / 3.14159265358979323846;
-        return heading_difference_degrees(bearing, s.self_yaw_degrees) < e.sight_cone_deg;
+        return heading_difference_degrees(bearing, s.self_yaw_degrees) < e.sight_cone_deg && can_target(s, c);
     }
     return false;
+}
+
+bool NpcAi::can_target(const Sense& s, const Candidate& c) const {
+    if (!c.stealth.active) return true;
+    return combat::stealth_targetable(c.stealth, c.pos, s.self, s.self_yaw_degrees, params_.stealth_perception_level);
 }
 
 void NpcAi::notice(uint64_t id, double threat, double now) {
@@ -65,6 +72,7 @@ void NpcAi::kill() {
     state_ = State::Dead;
     threat_.clear();
     target_ = 0;
+    forget_no_path();
 }
 
 void NpcAi::revive() {
@@ -72,6 +80,7 @@ void NpcAi::revive() {
     threat_.clear();
     target_ = 0;
     pending_fight_ = false;
+    forget_no_path();
 }
 
 void NpcAi::reset_now() {
@@ -80,7 +89,18 @@ void NpcAi::reset_now() {
     threat_.clear();
     target_ = 0;
     pending_fight_ = false;
+    forget_no_path();
 }
+
+void NpcAi::forget_no_path() {
+    no_path_at_ = -1;
+    no_path_seconds_ = 0;
+    nav_clock_ = -1;
+}
+
+void NpcAi::no_path_to_target(double now) { no_path_at_ = now; }
+
+void NpcAi::path_to_target_found() { no_path_at_ = -1; }
 
 Orders NpcAi::think(const Sense& s) {
     Orders o;
@@ -139,12 +159,14 @@ Orders NpcAi::think(const Sense& s) {
         target_ = 0;
         pending_fight_ = false;
         anchor_ = s.self;   // where the fight began
+        forget_no_path();   // (a new fight counts from nothing)
     }
 
     // chase and attack: the leash first
     const auto leash = [&](const char* reason) {
         threat_.clear();
         target_ = 0;
+        forget_no_path();
         state_ = State::Reset;
         o.began_reset = true;
         o.reset_reason = reason;
@@ -156,7 +178,12 @@ Orders NpcAi::think(const Sense& s) {
     const double anchor_dist = combat::distance_xy_cm(s.self, params_.anchor_at_fight_start ? anchor_ : s.home);
     if (anchor_dist > params_.leash_radius_cm) return leash(params_.anchor_at_fight_start ? "it is farther from where its fight began than its leash distance" : "it is farther from home than its leash distance");
     if (threat_.empty()) return leash("nobody is left to fight");
-    target_ = threat_.pick(target_);
+    const auto perceived = [&](uint64_t id) {
+        const Candidate* who = find(id);
+        return who != nullptr && can_target(s, *who);
+    };
+    target_ = threat_.pick(target_, perceived);
+    if (target_ == 0) return leash("it can no longer see anyone it was fighting");   // (a stealthed player out of its reveal range: it loses him)
     const Candidate* t = find(target_);
     if (!t) {   // (cannot happen: the table only holds what is known)
         threat_.remove(target_);
@@ -164,6 +191,16 @@ Orders NpcAi::think(const Sense& s) {
     }
     // a creature with senses also gives up on a target that has got farther from it than the leash radius
     if (params_.senses.enabled && combat::distance_xy_cm(s.self, t->pos) > params_.leash_radius_cm) return leash("its target is farther from it than its leash distance");
+    // the game's nav-abuse count: the seconds it has tried to find a way to its target grow while the last walk it was ordered found none (and for a moment after,
+    // until it is ordered again) and fall by a quarter of a second per second while there is one; at the check's 5 s it leashes at once, as one that was led out of its leash would
+    {
+        const double dt = nav_clock_ >= 0 ? std::clamp(s.now - nav_clock_, 0.0, 1.0) : 0.0;
+        nav_clock_ = s.now;
+        const bool missing = no_path_at_ >= 0 && s.now - no_path_at_ <= params_.unreachable_memory_seconds;
+        if (missing) no_path_seconds_ += dt;
+        else no_path_seconds_ = std::max(0.0, no_path_seconds_ - params_.unreachable_decay * dt);
+        if (no_path_seconds_ >= params_.unreachable_give_up_seconds) return leash("its target cannot be reached");
+    }
     o.target = target_;
     o.in_combat = true;
     const double surface = combat::distance_xy_cm(s.self, t->pos) - s.self_radius_cm - t->radius_cm;

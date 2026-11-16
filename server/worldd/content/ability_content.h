@@ -270,6 +270,39 @@ struct ProjectileRow {
     std::vector<int64_t> hits;
 };
 
+/// ab_targeting_def: a targeting record (an ability's target or a lingering zone's volume), with the first volume's shape and size and every volume as JSON.
+struct TargetingDefRow {
+    int64_t     guid = 0;
+    std::string name;
+    std::string shape;      // the first volume's EHitboxShape ("EHitboxShape::SHAPE_Sphere" ...), '' for none
+    double      radius = 0; // its SphereRadius
+    double      angle = 0;  // its Angle
+    std::string volumes;    // the TargetingVolumes as JSON (each with BoxExtent, Location, Rotation, bEnableLOSCheck ...)
+};
+
+/// One box of a targeting record's volumes (a Wall's, a Saga's): its half extents, its centre and its rotation in the caster's frame.
+struct ZoneBox {
+    double ex = 0, ey = 0, ez = 0;
+    double cx = 0, cy = 0, cz = 0;
+    double yaw = 0, roll = 0;
+};
+
+/// Where and how a lingering zone reaches: the shape the data gives it (ab_targeting_def through its `targeting_guid`).  A zone whose targeting
+/// record the file does not hold has none (`shape` empty), and the runtime opens its actor but runs no tick for it.
+struct ZoneVolume {
+    std::string          shape;    // "EHitboxShape::SHAPE_Sphere", "...SHAPE_Box", "...SHAPE_Point" ...
+    double               radius = 0;
+    double               angle = 90;
+    std::vector<ZoneBox> boxes;
+    bool                 los = false;   // bEnableLOSCheck of the first volume
+    bool has_volume() const { return !shape.empty() && (radius > 0 || !boxes.empty()); }
+};
+
+/// The volume a lingering zone reaches, from the targeting record its LingeringHitTargetingInfoId names.  The record's first volume gives the shape and the sphere's
+/// radius (its SphereRadiusExpr when that is a plain number: the Pantheon spheres are 100 by expression); a volume of the box shape gives a box (its half extents, by
+/// BoxExtentExpr when that is a plain vector, its place in the caster's frame and its own turn).  A volume of another shape is no box, whatever BoxExtent it carries.
+ZoneVolume zone_volume_of(const TargetingDefRow& t);
+
 /// ab_zone (a lingering zone) with its hits by role (InitialHitsIds, LingeringHitsIds, OnBeginOverlapHitsIds, OnEndOverlapHitsIds, EndHitsIds).
 struct ZoneRow {
     int64_t     guid = 0;
@@ -281,6 +314,27 @@ struct ZoneRow {
     std::string delay_type;
     double      speed = 0;
     int64_t     expire_after_hits_expr = 0, expire_if_expr = 0, targeting_guid = 0;
+    /// Whether a creature's hit can place the zone: a sphere of some radius.  A box or another shape keeps a leftover radius its record does not use, so the
+    /// creature-side placement is a sphere only; the class-side zones read the volume's own shape (zone_volume_of).
+    bool placeable() const { return volume.shape == "EHitboxShape::SHAPE_Sphere" && volume.radius > 0; }
+    /// contentc version 45: how the actor is made (its spawn transform, attachment, class and fade time).  An older file has none: the runtime
+    /// places the zone at the caster, attached, as it did before.
+    struct Spawn {
+        std::string origin;          // EAbilitySystemOrigin::Instigator | HitLocation | Source | Owner
+        double      rel_x = 0, rel_y = 0, rel_z = 0;   // RelativeLocation: where it stands from its origin, in the caster's frame, cm (a trap is placed 1 m ahead)
+        std::string origin_socket;
+        std::string orientation;     // EAbilitySystemOrientation::...
+        std::string attach;          // EAbilitySystemAttachType::None | AttachedInstigator ...
+        std::string attach_socket;
+        std::string effect_class;    // LingeringEffectClass's soft path
+        double      deactivate_fx = 0;   // DeactivateFXTimeBeforeDestroy, seconds
+        double      net_cull = 0;
+        int64_t     fx = 0;              // LingeringFXId
+        bool        no_first_tick = false;   // bNoHitOnFirstTick
+        double      scale_x = 1, scale_y = 1, scale_z = 1;
+    } spawn;
+    bool            has_spawn = false;    // the file holds the zone's spawn (contentc version 45)
+    ZoneVolume      volume;               // filled by the catalog from the zone's targeting record
     std::map<std::string, std::vector<int64_t>> hits;
 };
 
@@ -365,6 +419,10 @@ public:
     bool mods(const std::string& kind, int64_t owner, std::vector<ModRow>& out, std::string& error) const;
     std::optional<ProjectileRow> projectile(int64_t guid, std::string& error) const;
     std::optional<ZoneRow> zone(int64_t guid, std::string& error) const;
+    /// ab_targeting_def: a targeting record (a zone's volume is the one its `targeting_guid` names).  nullopt, with `error`, for one the file does not hold.
+    std::optional<TargetingDefRow> targeting_def(int64_t guid, std::string& error) const;
+    /// Whether the file holds the zones' spawn (contentc version 45 or later).  A file from before it places every zone at its caster, attached.
+    bool has_zone_spawn() const { return contentc_version_ >= 44; }
 
     /// Whether the file has the reaction tables (contentc version 35 or later). A file without them has no reactions.
     bool has_reactions() const { return reactions_; }

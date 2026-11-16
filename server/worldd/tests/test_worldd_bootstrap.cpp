@@ -1101,6 +1101,27 @@ static void test_lingering_actor() {
         }
     }
     CHECK(pb.lingering_count() == 2, "two actors held");
+    // a zone the data does not attach (AttachType None: a ground circle): its actor names no AttachParent, and its open carries no mesh export
+    {
+        bs::LingeringSpec ground;
+        ground.actor = guid(900001, first.actor.server_id, first.actor.randomizer);
+        ground.movement = guid(900002, first.actor.server_id, first.actor.randomizer);
+        ground.ability = guid(900003, first.actor.server_id, first.actor.randomizer);
+        ground.stats = guid(900004, first.actor.server_id, first.actor.randomizer);
+        ground.pawn_mesh = guid(900005, first.actor.server_id, first.actor.randomizer);
+        ground.zone = 4242;
+        ground.source = 4243;
+        ground.attached = false;
+        ground.x = 600.0;
+        ground.y = 0.0;
+        ground.z = 1000.0;
+        const auto free = pb.lingering_actor_of(ground);
+        const bool no_parent = free && free->obj.schema && free->obj.state.get(*free->obj.schema, "AttachmentReplication.AttachParent") == nullptr;
+        CHECK(no_parent, "a zone whose AttachType is None names no AttachParent (it stands where it opens)");
+        CHECK(pb.lingering_add(ground), "...and its actor is added");
+        CHECK(pb.lingering_count() == 3, "(three actors held)");
+        pb.lingering_remove(ground.actor.ObjectId);   // (it was this check's own: the rest of the test is of the two retail actors)
+    }
     pb.lingering_remove(capture_lingering::kOpens[0].actor.object_id);
     pb.lingering_remove(capture_lingering::kOpens[1].actor.object_id);
     CHECK(pb.lingering_count() == 0 && !pb.lingering_open(capture_lingering::kOpens[0].actor.object_id).has_value(), "a closed actor is forgotten");

@@ -11,3 +11,4 @@
 #include "mounts_ride_others_ends_tests.inc"
 #include "others_gear_level_tests.inc"
 #include "others_gear_level_edges_tests.inc"
+#include "mounts_ride_health_tests.inc"

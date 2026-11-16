@@ -16,6 +16,7 @@
 //    reset     it walks home at a run; when it is there it is idle again and says so once
 //    dead      it thinks no more; a revive starts it afresh
 //    hostile   NaN threat, a table full of attackers, thinking without a clock that moves, a target that is not in `known`
+//    no way    a target the world finds no way to: the creature leashes when the seconds it has tried reach 5 (npc_ai_unreachable_tests.inc)
 // ============================================================================
 #include "npc/ai/npc_ai.h"
 #include "npc/ai/threat.h"
@@ -253,11 +254,14 @@ void test_dead_and_hostile() {
 
 }  // namespace
 
+#include "npc_ai_unreachable_tests.inc"
+
 int main() {
     test_threat();
     test_aggro();
     test_fight_and_leash();
     test_dead_and_hostile();
+    test_nav_abuse();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -290,6 +290,10 @@ void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnS
     queue("pawn state (respawn)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("respawn"); }, conn, /*must_build=*/true);
     queue("respawn teleport", [ts, spot, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{spot.x, spot.y, spot.z}, repl::Vec3d{}, mode); }, conn,
           /*must_build=*/true);
+    // the floor it comes back on may still be streaming in: hold the client there until its own moves show it stands (the same as a GM teleport's hold)
+    if (!world_ || world_->on_the_ground(spot.x, spot.y, spot.z)) checker_.hold_after_teleport(mode, now);
+    // the place is handed to the saver at once: a crash, a second login or a reconnect right after the respawn must not take the player back to where it died
+    if (position_changed(/*with_yaw=*/false)) hand_over("a respawn", /*periodic=*/false);
     spdlog::log(level_for(death_logged_), "[session] {}: comes back at {} ({:.0f}, {:.0f}, {:.0f}) with full Health and Mana", name(), spot.name, spot.x, spot.y, spot.z);
 }
 

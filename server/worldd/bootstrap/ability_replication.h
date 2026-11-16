@@ -168,6 +168,11 @@ struct ZoneOp {
     int64_t id = 0;        // the runtime's number of the zone instance: one actor through its life
     int64_t ability = 0;   // SourceRecordGuid: the ability that spawned the zone
     int64_t zone = 0;      // LingeringEffectId: the zone record
+    /// Where the zone's actor stands and whether it is attached to the caster (its data's SpawnTransform and AttachType).  A producer that does not place
+    /// its zones leaves `placed` false, and the session opens the actor at the caster, attached, as it did before.
+    bool    placed = false;
+    double  x = 0, y = 0, z = 0, yaw_degrees = 0;
+    bool    attached = true;        // AttachedInstigator: the actor is attached to the caster's mesh (none: it stands on its own at x, y, z)
     bool operator==(const ZoneOp&) const = default;
 };
 

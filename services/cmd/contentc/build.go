@@ -34,12 +34,14 @@ import (
 // 42 added the knock-back tables. 43 added item_reward_selection (the random coffers and choose-one
 // selectors contributed in #16); the comments of that code that say "version 42" were written before
 // 42 was taken. 44 added item_learn (the recipes a LearnRecipes item teaches) and kept the certification
-// dialogue actions' profession and Promote / Demote.
-// 45 keeps the node citizenship and mayor lines of a conversation (AddNodeCitizenship with its VendorId,
+// dialogue actions' profession and Promote / Demote. 45 added the lingering zones' spawn (their origin,
+// attachment, actor class and fade time in ab_zone.spawn) and the targeting records the zones' volumes use.
+// 47 added craft_filter_item (the items of each gather-item filter that names a recipe input).
+// 48 keeps the node citizenship and mayor lines of a conversation (AddNodeCitizenship with its VendorId,
 // RemoveNodeCitizenship, AddNodeMayorCandidate).
-// 46 writes the node rewards (node_reward, node_reward_mod) and the node effects (node_effect, node_effect_zoi,
+// 49 writes the node rewards (node_reward, node_reward_mod) and the node effects (node_effect, node_effect_zoi,
 // node_effect_zoi_alignment, node_effect_commodity), and seeds the boons they put on characters into the ability tables.
-const Version = "46"
+const Version = "49"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -222,7 +224,7 @@ var keep = map[string]bool{
 	"TaxDetailsRecordBase":                 true,
 	"NodeGlobalTaxTableRecordBase":         true,
 	"NodeToPlayerReputationTierRecordBase": true,
-	"NodeRewardRecordBase":                 true, // version 46: the mayoral commissions' node rewards
+	"NodeRewardRecordBase":                 true, // version 49: the mayoral commissions' node rewards
 	"NodeEffectRecordBase":                 true,
 	"CitizenshipNodeRecordBase":            true,
 	"CitizenshipGenericRecordBase":         true,
@@ -270,6 +272,8 @@ var keep = map[string]bool{
 	"CraftingRecipeListRecordBase":   true,
 	"CraftingRecipeDefRecordBase":    true,
 	"CraftingCurrencyCostRecordBase": true,
+	// filter inputs (version 47): a recipe input named by a gather-item filter (GatherItemFilterRecordBase.ItemsIds, crafting.go)
+	"GatherItemFilterRecordBase": true,
 	// Glint tiers (version 24): the currencies and their tiers (currency.go)
 	"CurrencyTierDefRecordBase": true,
 	"CurrencyDefRecordBase":     true,

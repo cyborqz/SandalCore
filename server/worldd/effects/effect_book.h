@@ -19,7 +19,7 @@
 //  A record that never refreshes keeps its times (a new stack still counts).  An effect that extends its duration (ExtendDuration) grows its time left by the amount the
 //  application worked out (`Applied::extension`) and never past the record's longest (`extended_max`); one whose amount is not known is refreshed to its full duration.
 //  A record that compares sources keeps one instance per instigator: an application refreshes, stacks or replaces the instance of the SAME instigator, and another instigator's
-//  makes an instance of its own (up to the record's global limit, 0 for no limit).
+//  makes an instance of its own (up to the record's global limit, 0 for no limit; a record whose limit is 1 holds one stack for each instigator, kMaxSources of them at most).
 //  A hit's effect that works out to no stacks is never applied: that is the data's way to make an effect conditional.
 //  The instances also answer the stat engine: `engine_effects()` is the list a character's stats read (the stat mods of its stacks, GetEffectCount, GetEffectCountByTag).
 // ============================================================================
@@ -53,6 +53,8 @@ struct Applied {
     double                        extension = -1;        // seconds one more application adds under ExtendDuration; negative: the record gives none, the duration is refreshed in full
     double                        extended_max = 0;      // the most seconds an extended instance has left; 0: no limit
     DisableAspect                 disable_aspect = DisableAspect::Unset;   // which of the two disable stats the resist roll reads
+    /// A creature's own ability put it on (a rally, a yawp, a prayer), not a player's: it has no player to run its Apply, Tick and Expire hits from, and a reset takes it off.
+    bool                          by_creature = false;
 };
 
 /// An effect on its holder.
@@ -66,12 +68,16 @@ struct Instance {
     uint64_t                      instigator = 0;        // the actor that applied it (the one it is shown to be from); 0: none
     uint64_t                      pet = 0;               // the pet whose hit put it on (its owner is the instigator); 0: the instigator's own.  It ends with the pet
     double                        damage_taken = 0;      // what the fragility that ends at a share of the instigator's Health has counted so far
+    bool                          by_creature = false;   // a creature's own ability put it on (Applied::by_creature)
 };
 
 class Book {
 public:
     /// The most instances one holder keeps (a hostile list cannot grow the book without bound).
     static constexpr size_t kMaxInstances = 256;
+    /// The most instigators one record that compares sources and has a limit of 1 is on a holder from at once.  A bound of the book, not a number of the data (a limit of 1 does not name one), set
+    /// at the most targets one hit reaches: the 41st instigator's application is refused (nothing is put on and nothing is said), while an instigator that is on the holder already still refreshes his own.
+    static constexpr int kMaxSources = 40;
 
     /// What a call changed, in the order the replicated array must see it: the keys that went, then the instances added and the ones changed in place.
     struct Changes {
@@ -116,6 +122,7 @@ public:
         const auto refresh = [&](Instance& e) {
             e.mods = a.mods;
             e.instigator = instigator;   // (a record that compares sources only reaches an instance of this same instigator)
+            e.by_creature = a.by_creature;
             // the pet's hit refreshes an instance that was the pet's own (it stays with the pet it is now from); one the owner put on himself stays the owner's: the pet's going does not take it off.
             // The owner's own application makes an instance his, whoever it was from before
             if (via_pet == 0 || e.pet != 0) e.pet = via_pet;
@@ -143,14 +150,18 @@ public:
             e.next_tick = row.tick_timer > 0 ? (row.ignore_initial_tick ? t + row.tick_timer : t) : kForever;
             e.instigator = instigator;
             e.pet = via_pet;
+            e.by_creature = a.by_creature;
             items_.push_back(e);
             out.added.push_back(e);
             if (created) *created = e;
             return true;
         };
         if (!existing) {
-            // a record that compares sources and is on the holder already from other instigators: one more instance only up to the record's global limit (0: no limit)
-            if (row.compare_source && same > 0 && row.global_stack_limit > 0 && same >= row.global_stack_limit) return false;
+            // a record that compares sources and is on the holder already from other instigators: one more instance only up to the record's global limit (0: no limit). A limit of 1 on
+            // such a record is one stack for each instigator, not one on the holder (comparing sources would mean nothing else): a second player's Blinded, Dazed, Demoralized or
+            // Weakened goes on beside the first one's, up to kMaxSources instigators
+            const int cap = row.global_stack_limit == 1 ? kMaxSources : row.global_stack_limit;
+            if (row.compare_source && same > 0 && cap > 0 && same >= cap) return false;
             return fresh(in_place ? std::min(a.stacks, std::max(1, a.in_place_limit)) : 1);
         }
         if (in_place) {
@@ -222,6 +233,20 @@ public:
         return n;
     }
 
+    /// Takes off what a creature's own ability put on the holder (Applied::by_creature): a fight that resets ends the buffs an ally gave it (a player's effects stay).
+    size_t remove_by_creature(Changes& out) {
+        size_t n = 0;
+        for (size_t i = 0; i < items_.size();) {
+            if (items_[i].by_creature) {
+                remove_key(items_[i].key, out);
+                ++n;
+            } else {
+                ++i;
+            }
+        }
+        return n;
+    }
+
     /// Takes off everything the pet `pet` put on (it is gone); the number of instances that went.
     size_t remove_from_pet(uint64_t pet, Changes& out) {
         size_t n = 0;
@@ -258,6 +283,17 @@ public:
         int n = 0;
         for (const Instance& e : items_) {
             if (e.def->row.guid == effect_guid) n += e.stacks;
+        }
+        return n;
+    }
+
+    /// The stacks of an effect record that one instigator put on the holder (0: he put none): the instances of two casters do not mix, and a pet's
+    /// instance counts for its owner (the instigator is the owner; `pet` names the pet that put it).
+    int stacks_from(int64_t effect_guid, uint64_t instigator) const {
+        int n = 0;
+        if (instigator == 0) return 0;
+        for (const Instance& e : items_) {
+            if (e.def->row.guid == effect_guid && e.instigator == instigator) n += e.stacks;
         }
         return n;
     }

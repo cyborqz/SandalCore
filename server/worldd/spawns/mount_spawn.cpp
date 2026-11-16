@@ -310,6 +310,18 @@ double MountBook::max_health(const content::MountRow& row, int owner_level) cons
     return data_.stat_at(level, content::kGuidMaxHealth, 0.0) * row.health_factor();
 }
 
+double MountBook::health_regeneration_rating(const content::MountRow& row, int owner_level) const {
+    (void)row;   // the rating is the Mount_Base's, the same for every item
+    const int level = std::clamp(owner_level, 1, 50);
+    return data_.stat_at(level, kStatHealthRegenerationRating, 0.0);
+}
+
+double MountBook::health_regeneration(const content::MountRow& row, int owner_level, bool in_combat) const {
+    // The game's HealthRegeneration stat: HealthRegenerationRating / 250, five times up while its owner is out of combat (stat_def: the rating
+    // divided by the data's equation, CharacterType 1.0 to 1.15 includes a mount at 1.1; the captured level-25 Bard's 373 gives 7.46 out of it).
+    return health_regeneration_rating(row, owner_level) / 250.0 * (in_combat ? 1.0 : 5.0);
+}
+
 std::optional<MountMade> MountBook::make(const content::MountRow& row, const MountParams& p, const Minter& mint, std::string& error) const {
     const OpenTemplate* donor = donor_of(row);
     if (!donor) {

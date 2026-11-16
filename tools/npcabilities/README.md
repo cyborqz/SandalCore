@@ -24,8 +24,14 @@ It writes three tables (five with `--senses-dir`):
   `arrival` is how near its target the creature's approach brings it: the arrival distance of the move-to-target task in a state directly below the Combat state (-1: none). A creature whose attacks
   launch projectiles casts from as far as its tree allows (the largest `max_distance` of those tasks) and closes in to that distance between two casts. A timer of the tree that holds a charge once its seconds have passed since it was emptied (the accumulator tasks: a global cooldown, a special
   attack's) is said as a cooldown named `acc.<identifier>`: the task's `gates` hold it, and `starts` has it as `acc.<identifier>=seconds` (or `=low~high` when the tree rolls the seconds anew each
-  time) for the task whose completion empties it; a task that compares the fight's clock with a number the tree generates at the start of the fight is said with `fcr`. A few abilities the world
-  cannot play yet are left out whatever their conditions say: their rows are `unknown`, and `why` says what they wait for.
+  time) for the task whose completion empties it; a task that compares the fight's clock with a number the tree generates at the start of the fight (a stored or generated number, or the
+  random number a "Generate Random Float In Range" task draws between its Min and Max: the goblins' wait before they rally) is said with `fcr`. A few abilities the world
+  cannot play yet are left out whatever their conditions say: their rows are `unknown`, and `why` says what they wait for (a bird's flight, a blink, a change of form, a spawn, a montage with no hit).
+  `targeting.py` finishes the table: its last column `branches` lists the montages an ability enters when its root motion is obstructed, `obstructed:montage` separated by ';' (the conditional branch of
+  the ability record is bound to the movement event RootMotionObstructed, a body in the ability's freeze box; a branch bound to another movement event or entering a named section of a montage is not
+  listed), and a row held for "a hit notify in its montage" is played (`unknown` 0, `why` empty) once the ability's montage has a hit window of a key the ability has a hit for, or such a branch montage has
+  a hit notify of one.
+  A move that hurts nobody (a growl, a yawp, a rally) is read like any other; whether the world plays it as a show is decided by its ability record, not by this table.
   A tree takes some settings from its parameters (the distance of a bite, whether the creature may pounce); the tool reads them from the Blueprint's reference to the tree and the tree's
   own defaults and folds them in: a condition that compares parameters is decided when the table is made, and a task a parameter switches off for the creature has `why` = `off`.
   A cooldown a task takes from a parameter (the Goblin Flayer's Overhead Slash waits as long as its Blueprint's parameter says) is that parameter's value for the creature. The time into the fight is
@@ -45,6 +51,9 @@ It writes three tables (five with `--senses-dir`):
   done at that time, and the cooldowns the task starts run from there. It is filled for the folders the extractor lists as `$NpcAnimEndFolders` (the bandits) and empty for the others,
   whose cooldowns run from the start of the cast. `fires` is `time:key` for every notify of the montage that launches a projectile (the time in seconds at a play rate of 1; the key picks the
   ability's projectile record, 0 when the notify names none): the projectile leaves the creature there, flies by its record's speed and path, and lands the hits of its record when it arrives.
+  `hit_windows` is `start:end:key` for every hit-window notify state of the montage (`AoCAnimNotifyState_AbilityHit`, kept in the event's `NotifyStateClass`, with the key in its `AbilityHitKey`): while
+  the state is open its tick lands the hit of the ability that the key names, once on each target the hit's targeting record reaches; a state that allows several hits (`bEnableMultipleHits`) has a
+  fourth field, `interval` (`HitIntervalInSeconds`, 0.001 when it names none), and lands the hit on a target again every `interval` seconds the target stays in reach.
 - `npc_targeting.tsv` (`targeting.py`, from content.db): where each listed ability's hit lands, one line per targeting record of the ability (`key`):
   - `discovery` is how the record finds its target: `none`, `prefers_active` (what the creature fights now, else the one the cast was aimed at), `only_locked` (the one the cast was aimed at),
     `only_active` or `prefers_locked`.
@@ -89,6 +98,9 @@ The same step (`-Only tools,npcabilities`) also writes four tables that dress an
 - `npc_appearances.tsv` (`looks.py`, from content.db): the NPCAppearance records (shared appearance info, the outfit options, the curve that weighs them and the customization preset a record pins), the customization presets that the records which do not randomize their face pin (their saved face, hair, eyes and colours, and the race and gender of the body they were made for; for a record that pins one, the shared appearance info that has a body for it), the outfits (the item
   appearance records of each slot and the curve that weighs them) and the races and genders each shared appearance info may make. `looks.py` documents the lines.
 - `npc_names.tsv` (`looks.py`): the display names of the population instances, asset sets and assets; the game's server takes the NPC's name from the first non-empty list of them.
+- `npc_display_names.tsv` (`looks`, from the game's containers): one line per pawn Blueprint the reader knows: the Blueprint (as `npc_motion.tsv` names it), the name the game shows for
+  its people (the CharacterName its BaseCharacterInfo component carries, or the nearest parent Blueprint's; empty when neither names it) and where the name was read (`info`, `parent_info`,
+  `blueprint` or `none`). The pawn base class's `NPC` is a placeholder, not a name. worldd reads it beside `npc_motion.tsv` for its mob log lines.
 - `npc_trees.tsv` (`looks`, from the game's containers): one line per pawn Blueprint that plays a state tree (its own reference, else the nearest parent's): the Blueprint, the `tree`, and whether
   the tree, or a tree one of its states plays, has a task that wanders (`wander`) and one that patrols (`patrol`), 1 or 0. A creature can only do what its tree has states for: the quest
   givers' tree only idles, so they stand at their post whatever their population instance says (worldd reads the Blueprints whose tree has neither task as `standing` NPCs).

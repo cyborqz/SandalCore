@@ -7,17 +7,25 @@
 //  What a start at a processing station (a job) or at a crafting station (the quick make, `quick`) asks of the player, the station and the recipe, in the order the checks run.  A start
 //  that fails a check is refused whole: nothing is taken and the client is told nothing (the window stays as it was); the reason goes to the log.
 //
-//  The order.  The recipe exists and may be made at a station (not blacklisted, its products go to the bags); it is in the station's recipe set; the player knows it (a recipe the game makes
+//  The order.  The recipe exists and may be made at a station (not blacklisted); it is in the station's recipe set; the player knows it (a recipe the game makes
 //  the player learn is known only once a game master taught it); the player's certification in the recipe's profession reaches its tier and the station's tier reaches it; the node the
 //  station is in allows it (the recipe's and its list's availability predicates: the node's level and biome, the nodes it is for, and the service building it needs, which no node has yet);
 //  the quantity is 1 to 250 (a quick make is one unit); the player's queue at the station has room (a quick make has none); the stacks the player named add up to the recipe's inputs for that
 //  quantity (the same records, rarities at or above the recipe's minimum, no warehouse), the bags hold them, and hold the reagent too; the purse holds the price.
+//
+//  Where the product goes.  A recipe's ItemDestination is Inventory (the bag) or Equipment (a gathering tool's own slot: the pickaxe, axe, sickle, fishing rod or bow).  A quick make
+//  delivers an Equipment product into the slot its item record lists when that slot is free; when the slot is worn the tool goes to the bag instead, as any other product does (no
+//  modelling of a replacement or a refusal exists in the data or the client, and a craft never takes off what the player wears).  A job's product is collected into the bag.
 //
 //  A crate station's recipes (the Crate Packing stations make construction crates, the commodity tables make trade crates) name their inputs by TAGS instead of by an item: 30 units of
 //  anything that carries Item.Resource.Raw.Wood, 12 of anything that carries both harvesting.type.ore and Riverlands.  The request gives the stacks the player picked for each such input, by
 //  record and rarity, with the names of its tags; every record has to carry every one of the input's tags (the data's craft_tag_item) and the picks add up to the quantity the input takes.
 //  A recipe may take a plain item beside them (a commodity certificate): it is named in the general resources and taken from the item bag, where it lies.  A station whose definition names
 //  no tier (the Crate Packing stations) limits no recipe by tier.  Every other station refuses a recipe that names an input by tags.
+//
+//  A craft's recipe (a job or a quick make) may also name an input by a GATHER-ITEM FILTER: a curated list of items (the data's craft_filter_item, GatherItemFilterRecordBase.ItemsIds) that
+//  the client shows as the input's materials.  It travels the same way, in a tag selection of the input's tags, but every picked record has to be one of the filter's items (not merely carry
+//  the tag: the tag is wider, e.g. 45 plants against a filter's 22).  A filter that lists no item leaves the pick to the input's tags, as an input named by tags alone does.
 //
 //  The rarity of a stack is the one the client shows for it (items/rarity.h): the band its quality falls in, held inside the item's own RarityMin..RarityMax.  The client groups the stacks it
 //  offers by that rarity and names it in the request, so a general input is taken from the stacks whose rarity is the one named, and a reagent (which the request does not name) from the
@@ -105,14 +113,14 @@ inline bool is_commodity_table(const content::CraftStationDef& d) { return d.nam
 /// Whether the recipes of a station name their inputs by tags, so that the player picks the stacks from the window's own lists: the crate stations.
 inline bool takes_tag_inputs(const content::CraftStationDef& d) { return packs_crates(d) || is_commodity_table(d); }
 
-/// Whether a station definition is one the quick make serves: a profession's crafting station, a Crate Packing station or a commodity table.  The stations that make gathering tools and the
+/// Whether a station definition is one the quick make serves: a profession's crafting station, the stations of the gathering tools, a Crate Packing station or a commodity table.  The
 /// event and dungeon stations answer nothing.
 inline bool serves_quick_make(const content::CraftStationDef& d) {
     const std::string& n = d.name;
     if (d.processing) return false;
     if (packs_crates(d)) return true;
     if (n.rfind("CraftingStation_", 0) != 0) return false;
-    for (const char* other : {"GatheringTools", "HarbingerEvent", "BefallenForge"}) {
+    for (const char* other : {"HarbingerEvent", "BefallenForge"}) {
         if (n.find(other) != std::string::npos) return false;
     }
     return true;
@@ -214,6 +222,8 @@ inline std::vector<std::string> split_tags(const std::string& csv) {
 
 /// Whether an availability predicate holds at the node; `why` says which does not.
 inline bool predicate_holds(const content::CraftPred& p, const NodeFacts& n, std::string& why) {
+    // (the data's placeholder for a list with no condition: the reason enum's own count, which names no reason; one recipe list carries it)
+    if (p.type == "cCount") return true;
     if (p.type == "NodeLevel") {
         if (n.level >= p.node_level && p.node_level >= 0) return true;
         why = "it needs a node of level " + std::to_string(p.node_level) + " and the node is " + (n.level < 0 ? std::string("not known") : "level " + std::to_string(n.level));
@@ -253,9 +263,11 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
         return plan;
     };
     if (!f.recipes || !f.station || !f.inventory) return refuse("worldd has no recipes or no station definition");
+    // (the window the player sees: a definition's display name, or its record name when the data names none)
+    const auto station_label = [&]() -> const std::string& { return f.station->display_name.empty() ? f.station->name : f.station->display_name; };
     if (f.quick) {
-        if (f.station->processing) return refuse(f.station->name + " is a processing station: a start there is a job");
-        if (!serves_quick_make(*f.station)) return refuse(f.station->name + " makes nothing yet (the stations of gathering tools and the event stations are not served)");
+        if (f.station->processing) return refuse(station_label() + " is a processing station: a start there is a job");
+        if (!serves_quick_make(*f.station)) return refuse(station_label() + " makes nothing yet (the event and dungeon stations are not served)");
     } else if (!f.station->processing) {
         return refuse("the station is not a processing station");
     }
@@ -264,15 +276,14 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     plan.recipe = r;
     if (req.sub_recipe != 0) return refuse("a sub recipe (" + std::to_string(req.sub_recipe) + ") is named: none is made");
     if (r->blacklisted) return refuse(r->name + " is switched off in the data");
-    if (!r->inventory_destination) return refuse(r->name + " makes gear that is worn at once: not made yet");
     std::vector<int64_t> lists;
-    if (!f.recipes->set_holds(f.station->recipe_set, r->guid, &lists)) return refuse(r->name + " is not one of the recipes of " + f.station->name);
+    if (!f.recipes->set_holds(f.station->recipe_set, r->guid, &lists)) return refuse(r->name + " is not one of the recipes of " + station_label());
     if (r->learnable && !(f.taught && f.taught(r->guid))) return refuse(r->name + " has to be learned, and the character was not taught it");
     if (r->fuel > 0) return refuse(r->name + " burns fuel: not made yet");
     if (r->tier < 0) return refuse(r->name + " needs no certification tier the data names");
     const int have = f.tier_of ? f.tier_of(r->profession) : 0;
     if (have < r->tier) return refuse(r->name + " needs certification tier " + std::to_string(r->tier) + " and the character has " + std::to_string(have));
-    if (f.station->max_tier >= 0 && r->tier > f.station->max_tier) return refuse(r->name + " needs tier " + std::to_string(r->tier) + " and " + f.station->name + " reaches " + std::to_string(f.station->max_tier));
+    if (f.station->max_tier >= 0 && r->tier > f.station->max_tier) return refuse(r->name + " needs tier " + std::to_string(r->tier) + " and " + station_label() + " reaches " + std::to_string(f.station->max_tier));
     std::string why;
     if (!predicates_hold(r->preds, f.node, why)) return refuse(r->name + ": " + why);
     {   // the lists that hold it: one of them has to allow it (a list with no predicate does)
@@ -292,9 +303,9 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     } else {
         if (req.quantity < 1 || req.quantity > kMaxQuantity) return refuse("a quantity of " + std::to_string(req.quantity) + " (the station makes 1 to " + std::to_string(kMaxQuantity) + ")");
         if (f.unfinished_here >= static_cast<size_t>(std::max(1, f.station->queue_size))) {
-            return refuse("the queue at " + f.station->name + " is full (" + std::to_string(f.unfinished_here) + " of " + std::to_string(f.station->queue_size) + ")");
+            return refuse("the queue at " + station_label() + " is full (" + std::to_string(f.unfinished_here) + " of " + std::to_string(f.station->queue_size) + ")");
         }
-        if (f.held_here >= kMaxJobsAtStation) return refuse(std::to_string(f.held_here) + " jobs are held at " + f.station->name + " already (the finished ones stay until they are collected)");
+        if (f.held_here >= kMaxJobsAtStation) return refuse(std::to_string(f.held_here) + " jobs are held at " + station_label() + " already (the finished ones stay until they are collected)");
     }
     if (req.has_fuel || !req.flexible.empty()) return refuse("the request names flexible or fuel resources: only the general ones (and a crate's tag picks) are served");
 
@@ -346,13 +357,23 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             continue;
         }
         if (in.item == 0) {
-            if (!tag_inputs) return refuse(r->name + " takes a resource named by a filter or by tags: not made yet");
-            // TAGS name the input: the player picks the stacks (any item that carries every one of them) and the request gives the pick with the names of the tags
+            // an input is named by TAGS (a crate station's recipe) or by a GATHER-ITEM FILTER (a curated list of items the client shows as the allowed materials), and
+            // the request gives the picks in a tag selection either way.  A filter that lists items decides the picks: they have to be its items, not anything that carries the
+            // input's tag.  A filter that lists none (30 of the 51 the recipes name: the trade and construction crates' own, the gatherers' fish, plants and ore, the processed
+            // goods of each profession) carries no tag query either, so the input's tags name its materials, as they do for an input named by tags alone.
+            const bool by_filter = in.filter != 0;
+            const bool by_list = by_filter && data.filter_items.count(in.filter) != 0;
+            if (!tag_inputs) {   // (the crate stations are served by tags whatever the data lists; any other station serves a filter input only)
+                if (!by_filter) return refuse(r->name + " takes a resource named by tags: not made yet");
+                if (!data.filters_read) {
+                    return refuse(r->name + " takes a resource named by a gather-item filter, and the data lists no items for filters (rebuild it with this checkout's contentc)");
+                }
+            }
             const std::vector<std::string> want = tag_key(split_tags(in.tags));
             if (want.empty()) return refuse(r->name + " takes a resource named by a filter and no tag: not made yet");
             std::string tag_text;
             for (const std::string& t : want) tag_text += (tag_text.empty() ? "" : ", ") + t;
-            if (!data.tags_read) return refuse(r->name + " takes a resource named by the tags " + tag_text + ", and the data lists no items for tags (rebuild it with this checkout's contentc)");
+            if (!by_list && !data.tags_read) return refuse(r->name + " takes a resource named by the tags " + tag_text + ", and the data lists no items for tags (rebuild it with this checkout's contentc)");
             size_t at = req.tags.size();
             for (size_t i = 0; i < req.tags.size(); ++i) {
                 if (!tag_used[i] && tag_key(req.tags[i].tags) == want) {
@@ -370,8 +391,14 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             std::vector<Pick> picks;   // by record and rarity in the order named (a record or a rarity named twice is added up)
             int64_t picked = 0;
             for (const protocol::repl::CraftResource& res : req.tags[at].resources) {
-                for (const std::string& tag : want) {
-                    if (!data.tag_admits(tag, res.record)) return refuse("item " + std::to_string(res.record) + " does not carry the tag " + tag + ", which " + r->name + " takes");
+                if (by_list) {
+                    if (!data.filter_admits(in.filter, res.record)) {
+                        return refuse("item " + std::to_string(res.record) + " is not one of the items of the gather-item filter " + std::to_string(in.filter) + ", which " + r->name + " takes");
+                    }
+                } else {
+                    for (const std::string& tag : want) {
+                        if (!data.tag_admits(tag, res.record)) return refuse("item " + std::to_string(res.record) + " does not carry the tag " + tag + ", which " + r->name + " takes");
+                    }
                 }
                 for (const protocol::repl::CraftRarityCount& c : res.rarities) {
                     if (c.from_warehouse) return refuse("the request takes from the warehouse: none can be used yet");
@@ -434,8 +461,9 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     // (two takes of one record and rarity would each pass the count check alone; the bags are checked again when the stacks are taken)
     plan.takes = reagent_takes;
     plan.takes.insert(plan.takes.end(), general_takes.begin(), general_takes.end());
-    // what the job is shown with: the records and the rarities in the order the player named them, a record or a rarity named twice added up
-    for (const protocol::repl::CraftResource& res : req.general) {
+    // what the job is shown with: the records and the rarities in the order the player named them, a record or a rarity named twice added up.  The picks of a filter or a
+    // tag input are part of what was paid (the job's window lists them, and the products and the experience read their rarity), so they follow the general resources.
+    const auto add_paid = [&](const protocol::repl::CraftResource& res) {
         auto dst = std::find_if(plan.paid.begin(), plan.paid.end(), [&](const protocol::repl::CraftResource& p) { return p.record == res.record; });
         if (dst == plan.paid.end()) {
             plan.paid.push_back({res.record, {}});
@@ -446,6 +474,10 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             if (at == dst->rarities.end()) dst->rarities.push_back({c.rarity, c.count, false});
             else at->count += c.count;
         }
+    };
+    for (const protocol::repl::CraftResource& res : req.general) add_paid(res);
+    for (const protocol::repl::CraftTagSelection& selection : req.tags) {
+        for (const protocol::repl::CraftResource& res : selection.resources) add_paid(res);
     }
 
     const UnitCost unit = recipe_unit_cost(data, *r);

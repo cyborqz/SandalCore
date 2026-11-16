@@ -131,7 +131,7 @@ static fishing::Facts facts_of(int certification, int tier) {
 static void test_predicates(World& w) {
     std::printf("the reward predicates the stat programs cannot compile, on the data's own text\n");
     // the predicates are found by their text, in the order of their ab_expr ids: the ids are contentc's own numbering, which moves when a contentc version seeds more of the
-    // ability tables (2095 to 2373 in a version 44 file; version 46's node boons put them about 140 later), and the order stays the data's: nine predicates of a certification
+    // ability tables (2095 to 2373 in a version 44 file; version 49's node boons put them about 140 later), and the order stays the data's: nine predicates of a certification
     // and a rod's tier, and the world events' one, which also asks for an objective
     std::vector<int64_t> rod_exprs, event_exprs;
     for (int64_t id = 1; id <= static_cast<int64_t>(w.catalog().exprs()); ++id) {   // (contentc numbers ab_expr from 1 with no gap)

@@ -7,3 +7,5 @@
 
 #include "ability_pipeline_summon_tests.inc"
 #include "ability_pipeline_guard_tests.inc"
+#include "ability_pipeline_camouflage_tests.inc"
+#include "ability_pipeline_stealth_tests.inc"

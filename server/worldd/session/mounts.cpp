@@ -82,7 +82,31 @@ void MountController::forget_mount(Effects* out) {
     }
     actor_ = 0;
     item_record_ = 0;
+    regen_at_ = -1.0;
     phase_ = Phase::Idle;
+}
+
+void MountController::regenerate(double now, bool in_combat) {
+    if (actor_ == 0 || (phase_ != Phase::Summoning && phase_ != Phase::Out)) return;
+    const content::MountRow* row = book_.find(item_record_);
+    if (!row) return;
+    const world::WorldActor* m = registry_.find(actor_);
+    if (!m) return;
+    const std::optional<double> health = spawns::stat_value(*m, content::kGuidHealth);
+    const std::optional<double> maximum = spawns::stat_value(*m, content::kGuidMaxHealth);
+    if (!health || !maximum) return;
+    if (regen_at_ < 0) regen_at_ = now + 1.0;
+    if (now < regen_at_) return;
+    // a long stall owes at most five seconds (the player's own regeneration has the same bound)
+    if (regen_at_ < now - 4.0) regen_at_ = now - 4.0;
+    const double rate = book_.health_regeneration(*row, req_.owner_level, in_combat);
+    double after = *health;
+    while (regen_at_ <= now) {
+        if (rate > 0) after = std::min(*maximum, after + rate);
+        regen_at_ += 1.0;
+    }
+    if (!(after > *health)) return;
+    registry_.modify(actor_, world::Change::State, [after](world::WorldActor& a) { spawns::set_stat_value(a, content::kGuidHealth, static_cast<float>(after)); });
 }
 
 double MountController::run_speed(const content::MountRow& row) const {
@@ -299,6 +323,7 @@ void MountController::run_open(double now, Effects& out) {
     }
     actor_ = id;
     open_done_ = true;
+    regen_at_ = now + 1.0;   // the first second of the mount's own regeneration, a second after it opens
     ++stats_.opened;
     // the pawn names the mount it can mount: the client's action bar resolves the bank-18 Mount slot (the dash) through it [R: 871 packet 210, 898 packet 158]
     out.pet_changed = true;

@@ -387,7 +387,7 @@ void PlayerSession::apply_kill(Connection& conn, const combat::KillReward& k, Cl
             weapon_text += ", " + (line ? line->name : std::to_string(type)) + " " + std::to_string(weapon_.xp(type)) + " XP (level " + std::to_string(weapon_.level(type)) + (up ? ", level-up" : "") + ")";
         }
     }
-    spdlog::log(level_for(use_logged_), "[session] {}: killed {} (level {}): Adventuring +{} XP{}{} (now {} XP, debt {}){}", name(), k.name.empty() ? k.blueprint : k.name, k.level,
+    spdlog::log(level_for(use_logged_), "[session] {}: killed {} (level {}): Adventuring +{} XP{}{} (now {} XP, debt {}){}", name(), !k.shown.empty() ? k.shown : (k.name.empty() ? k.blueprint : k.name), k.level,
                 k.adventuring_xp, weapon_text, leveled ? ", level " + std::to_string(xp.after.level) : "", progress_.xp, progress_.debt, k.loot ? "; there is loot" : "");
     if (xp.changed() || !weapon_changes.empty()) hand_over_progress(leveled || weapons_leveled ? "a level-up" : "XP earned");
     quest_kill(conn, k, now);   // quests: the Kill objectives

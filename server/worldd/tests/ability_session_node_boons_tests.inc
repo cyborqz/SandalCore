@@ -2,12 +2,12 @@
 // Copyright (C) 2026 Cyb and contributors. Developed by Cyb; thanks to Hatemost and CoA (Creation of Ashes).
 // GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 // ============================================================================
-//  tests/ability_session_node_boons_tests.inc: the boons of a node's running modifications (session/player_node_boons.cpp, contentc version 46)
+//  tests/ability_session_node_boons_tests.inc: the boons of a node's running modifications (session/player_node_boons.cpp, contentc version 49)
 //  (registered with AOC_REGISTER_TEST: test_worldd_ability_session.cpp runs it through aoc_tests::run; it is included from ability_session_registered.inc)
 //
 //  A citizen's boon that can be applied globally reaches the node's citizen wherever it stands: a running modification of the node's buildings puts it on as an
 //  effect of the ability runtime, a second running modification that gives it makes two stacks, and the boon goes when the modifications stop.  The node's
-//  running modifications are set by hand (the effect is a service building's own boon, which the real content.db's ability tables have had since contentc version 46).
+//  running modifications are set by hand (the effect is a service building's own boon, which the real content.db's ability tables have had since contentc version 49).
 // ============================================================================
 #include "world/elections.h"
 #include "world/node_rewards.h"
@@ -17,7 +17,7 @@ static constexpr int64_t kBoonMod = 7790001, kBoonMod2 = 7790002;
 static constexpr int64_t kBoonEffect = 6064634123617239068ll;   // Effect_ServiceBuilding_AdventuringXP_Small, "Lesser Boon of Adventuring XP": infinite, stacks in place up to 10
 
 static void test_node_boons() {
-    std::printf("the nodes' boons (contentc version 46): a citizen's global boon from the node's running modifications, stacked per modification, gone when they stop\n");
+    std::printf("the nodes' boons (contentc version 49): a citizen's global boon from the node's running modifications, stacked per modification, gone when they stop\n");
     const auto prepare = [](PlayerWorld& w) {
         world::NodeRewards book;
         world::NodeBoon b;

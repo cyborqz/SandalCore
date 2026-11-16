@@ -179,6 +179,10 @@ void AbilityPipeline::modify_cooldowns(AbilityChange& c, const HitDef& hit, doub
             }
             if (g == groups_.end()) {
                 if (delta <= 0) continue;
+                if (key == paying_group_) {   // the cast's own cooldown starts a moment later: what is asked now comes on top of it
+                    paying_extra_ += delta;
+                    continue;
+                }
                 Cast cast;
                 cast.def = def;
                 cast.group = key;
