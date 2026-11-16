@@ -4,7 +4,7 @@
 // ============================================================================
 //  content/craft_filter.h
 //
-//  A gather-item filter's items (craft_filter_item, contentc version 45): a recipe input may name no item but a filter (CostGatherItemFilter), a curated list of items
+//  A gather-item filter's items (craft_filter_item, contentc version 47): a recipe input may name no item but a filter (CostGatherItemFilter), a curated list of items
 //  (GatherItemFilterRecordBase.ItemsIds) the client shows as the input's allowed materials.  A pick for such an input is one of these items, not anything that carries
 //  the input's tag.  The reader keeps each filter's items ascending and once, the shape ContentDb::craft_recipe_data holds them in.
 // ============================================================================
@@ -26,7 +26,7 @@ inline bool read_craft_filter_items(sqlite3* db, std::map<int64_t, std::vector<i
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, "SELECT filter_guid, item_guid FROM craft_filter_item ORDER BY filter_guid, item_guid", -1, &stmt, nullptr) != SQLITE_OK) {
         const std::string why = sqlite3_errmsg(db);
-        if (why.find("no such table") != std::string::npos) return true;   // (contentc before 45: the filters then admit no item)
+        if (why.find("no such table") != std::string::npos) return true;   // (contentc before 47: the filters then admit no item)
         error = "content.db craft_filter_item query failed: " + why;
         return false;
     }

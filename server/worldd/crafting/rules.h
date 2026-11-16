@@ -257,9 +257,11 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
         return plan;
     };
     if (!f.recipes || !f.station || !f.inventory) return refuse("worldd has no recipes or no station definition");
+    // (the window the player sees: a definition's display name, or its record name when the data names none)
+    const auto station_label = [&]() -> const std::string& { return f.station->display_name.empty() ? f.station->name : f.station->display_name; };
     if (f.quick) {
-        if (f.station->processing) return refuse(f.station->name + " is a processing station: a start there is a job");
-        if (!serves_quick_make(*f.station)) return refuse(f.station->name + " makes nothing yet (the stations of gathering tools and the event stations are not served)");
+        if (f.station->processing) return refuse(station_label() + " is a processing station: a start there is a job");
+        if (!serves_quick_make(*f.station)) return refuse(station_label() + " makes nothing yet (the stations of gathering tools and the event stations are not served)");
     } else if (!f.station->processing) {
         return refuse("the station is not a processing station");
     }
@@ -270,13 +272,13 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     if (r->blacklisted) return refuse(r->name + " is switched off in the data");
     if (!r->inventory_destination) return refuse(r->name + " makes gear that is worn at once: not made yet");
     std::vector<int64_t> lists;
-    if (!f.recipes->set_holds(f.station->recipe_set, r->guid, &lists)) return refuse(r->name + " is not one of the recipes of " + f.station->name);
+    if (!f.recipes->set_holds(f.station->recipe_set, r->guid, &lists)) return refuse(r->name + " is not one of the recipes of " + station_label());
     if (r->learnable && !(f.taught && f.taught(r->guid))) return refuse(r->name + " has to be learned, and the character was not taught it");
     if (r->fuel > 0) return refuse(r->name + " burns fuel: not made yet");
     if (r->tier < 0) return refuse(r->name + " needs no certification tier the data names");
     const int have = f.tier_of ? f.tier_of(r->profession) : 0;
     if (have < r->tier) return refuse(r->name + " needs certification tier " + std::to_string(r->tier) + " and the character has " + std::to_string(have));
-    if (f.station->max_tier >= 0 && r->tier > f.station->max_tier) return refuse(r->name + " needs tier " + std::to_string(r->tier) + " and " + f.station->name + " reaches " + std::to_string(f.station->max_tier));
+    if (f.station->max_tier >= 0 && r->tier > f.station->max_tier) return refuse(r->name + " needs tier " + std::to_string(r->tier) + " and " + station_label() + " reaches " + std::to_string(f.station->max_tier));
     std::string why;
     if (!predicates_hold(r->preds, f.node, why)) return refuse(r->name + ": " + why);
     {   // the lists that hold it: one of them has to allow it (a list with no predicate does)
@@ -296,9 +298,9 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     } else {
         if (req.quantity < 1 || req.quantity > kMaxQuantity) return refuse("a quantity of " + std::to_string(req.quantity) + " (the station makes 1 to " + std::to_string(kMaxQuantity) + ")");
         if (f.unfinished_here >= static_cast<size_t>(std::max(1, f.station->queue_size))) {
-            return refuse("the queue at " + f.station->name + " is full (" + std::to_string(f.unfinished_here) + " of " + std::to_string(f.station->queue_size) + ")");
+            return refuse("the queue at " + station_label() + " is full (" + std::to_string(f.unfinished_here) + " of " + std::to_string(f.station->queue_size) + ")");
         }
-        if (f.held_here >= kMaxJobsAtStation) return refuse(std::to_string(f.held_here) + " jobs are held at " + f.station->name + " already (the finished ones stay until they are collected)");
+        if (f.held_here >= kMaxJobsAtStation) return refuse(std::to_string(f.held_here) + " jobs are held at " + station_label() + " already (the finished ones stay until they are collected)");
     }
     if (req.has_fuel || !req.flexible.empty()) return refuse("the request names flexible or fuel resources: only the general ones (and a crate's tag picks) are served");
 

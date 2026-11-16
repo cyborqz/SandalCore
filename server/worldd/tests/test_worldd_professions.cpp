@@ -913,7 +913,7 @@ static void test_artisan(const content::ContentDb& db, const PlayerWorld& world)
 //  The game's own data: a recipe input whose item is 0 and whose filter is a GatherItemFilterRecordBase (a curated list: ALL_Raw_Plants_Any's 22 plants, Raw_Wood_Any's 9
 //  woods, Processed_Paper_Any's 17 papers).  The client shows the list as the input's materials and sends the pick in a tag selection, so a job takes a pick only when it is
 //  one of the filter's items, not when it merely carries the input's tag (45 plants carry Item.Resource.Raw.Plant, 22 are in the filter).  The filter lists come from
-//  contentc version 45's craft_filter_item; the data here may be an older file, so the test names the three lists it uses and the reader has a test of its own.
+//  contentc version 47's craft_filter_item; the data here may be an older file, so the test names the three lists it uses and the reader has a test of its own.
 
 namespace farm {
 constexpr int64_t kFarming = 108752756954757ll;
@@ -1010,7 +1010,7 @@ static crafting::StartFacts filter_facts(const content::CraftRecipeData& data, c
     return f;
 }
 
-/// The table the reader writes (contentc version 45): a small SQLite file with craft_filter_item only.
+/// The table the reader writes (contentc version 47): a small SQLite file with craft_filter_item only.
 static void test_filter_table() {
     std::printf("the gather-item filter table (craft_filter_item)\n");
     const fs::path path = fs::temp_directory_path() / "worldd_professions_filter_table.db";
@@ -1232,7 +1232,7 @@ static void test_filter_rules(const content::ContentDb& db, const PlayerWorld& w
 }
 
 /// A filter that lists no item (30 of the 51 the recipes name: the crates' own, the gatherers' fish, plants and ore, the processed goods of each profession) carries no tag query either, so the
-/// input's own tags name its materials, as the tag check did before the filter table existed.  A file without the table (contentc before 45) keeps the crate stations on their tags, and refuses
+/// input's own tags name its materials, as the tag check did before the filter table existed.  A file without the table (contentc before 47) keeps the crate stations on their tags, and refuses
 /// a filter input at a profession's station (its list is not known).
 static void test_filter_without_items(const content::ContentDb& db, const PlayerWorld& world) {
     namespace cr = aoc::worldd::crafting;
@@ -1316,20 +1316,20 @@ static void test_filter_without_items(const content::ContentDb& db, const Player
     old_file.filter_items.clear();
     old_file.filters_read = false;
     const cr::Plan old_crate = crate_start(farm::kDaffodil, old_file);
-    CHECK_SHOWN(old_crate.ok, "a file of contentc before 45: the Herbalism crate is still made by its tags");
+    CHECK_SHOWN(old_crate.ok, "a file of contentc before 47: the Herbalism crate is still made by its tags");
     auto mulch_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kDaffodil)});
     repl::StartCraft mulch_req = start_of(*mulch, 1);
     mulch_req.general = {resource(farm::kWoodchips, 1)};
     mulch_req.tags = {pick_of({resource(farm::kDaffodil, 1)}, {"Item.Resource.Raw.Plant"})};
     const cr::Plan old_mulch = mulch_bag ? cr::plan_start(mulch_req, filter_facts(old_file, *farming, *mulch_bag, world)) : cr::Plan{};
-    CHECK_SHOWN(!old_mulch.ok && old_mulch.refusal.find("lists no items for filters") != std::string::npos, "a file of contentc before 45: Mulch is refused with the reason (rebuild the data), not started by the wider tag");
+    CHECK_SHOWN(!old_mulch.ok && old_mulch.refusal.find("lists no items for filters") != std::string::npos, "a file of contentc before 47: Mulch is refused with the reason (rebuild the data), not started by the wider tag");
     const cr::Plan old_bait = [&] {
         auto bag = bag_of({farm_item(0, kBluegill, 50)});
         repl::StartCraft req = start_of(*bait, 1);
         req.tags = {pick_of({resource(kBluegill, 50)}, {"Item.Resource.Raw.Fish"})};
         return bag ? cr::plan_start(req, filter_facts(old_file, *cooking, *bag, world)) : cr::Plan{};
     }();
-    CHECK_SHOWN(!old_bait.ok && old_bait.refusal.find("lists no items for filters") != std::string::npos, "a file of contentc before 45: the bait chum is refused with the same reason");
+    CHECK_SHOWN(!old_bait.ok && old_bait.refusal.find("lists no items for filters") != std::string::npos, "a file of contentc before 47: the bait chum is refused with the same reason");
     SAYOK("a filter that lists no item");
 }
 
@@ -1433,7 +1433,7 @@ static void test_farming_loop(const content::ContentDb& db, const PlayerWorld& w
     SAYOK("the Farming Novice loop");
 }
 
-/// The real file's table, when the data has one (contentc version 45): the filters' items, on the values the design records hold.
+/// The real file's table, when the data has one (contentc version 47): the filters' items, on the values the design records hold.
 static void test_filter_real_data(const content::ContentDb& db) {
     std::printf("the real content.db's gather-item filters\n");
     std::string error;
@@ -1444,7 +1444,7 @@ static void test_filter_real_data(const content::ContentDb& db) {
         return;
     }
     if (!data->filters_read) {
-        std::printf("  [skip] %s has no craft_filter_item (contentc before 45): the filters' items are not checked here\n", db.path().c_str());
+        std::printf("  [skip] %s has no craft_filter_item (contentc before 47): the filters' items are not checked here\n", db.path().c_str());
         return;
     }
     const auto plants = data->filter_items.find(farm::kPlantFilter);
@@ -1494,6 +1494,8 @@ static void test_filter_real_data(const content::ContentDb& db) {
     SAYOK("the real file's filters");
 }
 
+#include "cooking_tests.inc"
+
 int main() {
     const char* env = std::getenv("AOC_CONTENT_DB");
     const std::string path = env && *env ? env : PROFESSIONS_CONTENT_DB_PATH;
@@ -1523,6 +1525,10 @@ int main() {
     test_filter_without_items(*db, world);
     test_farming_loop(*db, world);
     test_filter_real_data(*db);
+    test_cooking_recipes(*db, world);
+    test_cooking_conditions(*db, world);
+    test_cooking_novice_station(*db, world);
+    test_cooking_shop_and_saved_jobs(*db, world);
     test_scrolls(path, world);
     test_tools_and_vendor(path, world);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

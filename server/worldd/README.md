@@ -1561,15 +1561,25 @@ the back **into the item bag**: the crate lying on the ground for others to pick
 no experience; a trade crate pays the Adventuring experience its recipe says. The Animal Husbandry construction crate cannot be made yet (it takes a trained animal, which is not a material).
 
 **Filter inputs (Farming and the other professions' gathered materials).** A recipe input may name no item but a gather-item filter (`CostGatherItemFilter`): a curated list
-(`GatherItemFilterRecordBase.ItemsIds`, the table `craft_filter_item`, contentc version 45) that the window shows as the input's allowed materials. The pick travels as a crate's does, in `TagResources`
+(`GatherItemFilterRecordBase.ItemsIds`, the table `craft_filter_item`, contentc version 47) that the window shows as the input's allowed materials. The pick travels as a crate's does, in `TagResources`
 (the input's tags name the selection), but every picked record has to be one of the filter's items: the tag is wider (45 items carry `Item.Resource.Raw.Plant`; the 22 plants of
 `ALL_Raw_Plants_Any` are the filter), and one paper filter admits a raw wood that its tag does not carry. **A filter that lists no item** (30 of the 51 the recipes name: the trade and construction
 crates' own, the fish, plant and ore filters of the gatherers, the processed goods of each profession; none carries a tag query) has no row in the table, and the input's tags name its materials, as for an
-input named by tags alone: so a trade crate or a construction crate is picked by tags as before, and the Cooking baits take fish by the fish tag. A file made before version 45 has no table: the crate stations
+input named by tags alone: so a trade crate or a construction crate is picked by tags as before, and the Cooking baits take fish by the fish tag. A file made before version 47 has no table: the crate stations
 keep their tags, and a filter input at a profession's station is refused with the reason (rebuild the data). The picks are part of what the job was paid with, so its window and its rewards read their
 rarity. A Village Marketplace's `ProcessingStation_Farming_T2` (Farming - Apprentice) serves the Novice loop: `Farming_T1_Mulch` takes a Rotroot Pulp, a Woodchips and a gathered plant of the
 filter and makes the Mulch the five crops (Water, a seed and a Mulch) need; a tier-0 unit pays 50 profession experience, held at the Novice cap until a certification opens the tier-1 plants.
 The Agricultural Supply building's Farming vendor and T3 station are not built (they come with nodes' buildings), and freeholds and animals are not built.
+
+**Cooking at the towns' stations.** The live Cooking - Apprentice station (`ProcessingStation_Cooking_T2`, tier 1 at most) holds the 81 Novice and Apprentice recipes (22 + 59); the
+Cooking - Novice of the artisan buildings (Aven's End, Briarmoor Workshops) and of an Encampment's marketplace holds the 22. Each starts from the items its recipe names, runs its own base time,
+and pays 50 experience a tier-0 unit and 60 a tier-1 unit at Common and its product; the rule checks the station's tier, the player's certification, the recipe that has to be learned and the
+filter input, as at every processing station, and a refusal names the window the player sees. Of the 81, 27 start from items the live Riverlands itself gives: the Marketplace's reagents, the
+Daffodil and Snowdrop plants, the fish of its water (the six of its own tables, and the four that two waters at its edge give from the neighbouring regions' tables: Speckled Dace, Sandsquall
+Pupfish, Starfish and Striped Barrelfish), the Farming crops, the hunted Grem and Raven carcasses and the other professions' products. The other 54 need a fish of a region the Riverlands does
+not hold (Frostflash, Grouper, Kings Coin, Spotted Trout), a hunt kind it does not spawn (Crab, Daystrider, Hippo, Scorpion, Giant Bullywog), Agave, an Animal Husbandry product, a recipe item
+the PTR recipe vendors sell, or a quest item. The 20 recipes that have to be learned are taught by their `Consumable_Recipe_Cooking_*` items. **Held back:** eating a cooked meal (the consumables pull requests), the Cookhouse's
+T3 station and the 74 Journeyman recipes (the node buildings), and the 44 Harbinger event recipes.
 
 **People who talk offer a conversation (`GenericNpcs`).** A humanoid Blueprint that no capture opened is made from a recorded citizen, which in the game is a Construction Crate Vendor: its interactable carries that
 vendor's one input, "sell a crate", which the client shows at all times. So the interactable of a person who talks is replaced by that of a plain conversation (a component whose only input opens the dialogue), taken

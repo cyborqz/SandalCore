@@ -1027,7 +1027,7 @@ struct CraftRecipeData {
         const auto it = tag_items.find(lower);
         return it != tag_items.end() && std::binary_search(it->second.begin(), it->second.end(), item);
     }
-    /// Filter inputs (contentc version 45): the items each gather-item filter a recipe input names admits (craft_filter_item), by the filter's guid, the item records
+    /// Filter inputs (contentc version 47): the items each gather-item filter a recipe input names admits (craft_filter_item), by the filter's guid, the item records
     /// ascending.  `filters_read` is false for a file that has no such table.
     std::map<int64_t, std::vector<int64_t>>            filter_items;
     bool                                               filters_read = false;
