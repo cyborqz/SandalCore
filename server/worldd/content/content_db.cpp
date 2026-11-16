@@ -6,6 +6,8 @@
 // ============================================================================
 #include "content/content_db.h"
 
+#include "content/craft_filter.h"
+
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 #include <spdlog/spdlog.h>
@@ -4124,6 +4126,9 @@ std::optional<CraftRecipeData> ContentDb::craft_recipe_data(std::string& error) 
             if (step != SQLITE_DONE) return failed("craft_tag_item");
             out.tags_read = true;
         }
+    }
+    {   // filter inputs (contentc version 45): the items each gather-item filter a recipe input names admits; a file of an older version has no such table (the filters then admit no item)
+        if (!read_craft_filter_items(db_, out.filter_items, out.filters_read, error)) return std::nullopt;
     }
     {   // crafting, step 2: what each recipe yields when it is done (the reward table, its sub-tables and the names of the experience formulas)
         std::map<int64_t, std::string> bodies;

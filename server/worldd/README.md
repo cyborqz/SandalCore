@@ -1560,6 +1560,17 @@ quality of the rarity that the mean rarity of the paid stacks gives (the rule of
 the back **into the item bag**: the crate lying on the ground for others to pick up is not built yet. A crate a quest gives is carried on the back (`carry_quest_crate`). **Only one crate is carried**: a craft that would make a second is refused when it starts ("You are already carrying a crate.") and again when it ends, with nothing taken. A construction crate pays
 no experience; a trade crate pays the Adventuring experience its recipe says. The Animal Husbandry construction crate cannot be made yet (it takes a trained animal, which is not a material).
 
+**Filter inputs (Farming and the other professions' gathered materials).** A recipe input may name no item but a gather-item filter (`CostGatherItemFilter`): a curated list
+(`GatherItemFilterRecordBase.ItemsIds`, the table `craft_filter_item`, contentc version 45) that the window shows as the input's allowed materials. The pick travels as a crate's does, in `TagResources`
+(the input's tags name the selection), but every picked record has to be one of the filter's items: the tag is wider (45 items carry `Item.Resource.Raw.Plant`; the 22 plants of
+`ALL_Raw_Plants_Any` are the filter), and one paper filter admits a raw wood that its tag does not carry. **A filter that lists no item** (30 of the 51 the recipes name: the trade and construction
+crates' own, the fish, plant and ore filters of the gatherers, the processed goods of each profession; none carries a tag query) has no row in the table, and the input's tags name its materials, as for an
+input named by tags alone: so a trade crate or a construction crate is picked by tags as before, and the Cooking baits take fish by the fish tag. A file made before version 45 has no table: the crate stations
+keep their tags, and a filter input at a profession's station is refused with the reason (rebuild the data). The picks are part of what the job was paid with, so its window and its rewards read their
+rarity. A Village Marketplace's `ProcessingStation_Farming_T2` (Farming - Apprentice) serves the Novice loop: `Farming_T1_Mulch` takes a Rotroot Pulp, a Woodchips and a gathered plant of the
+filter and makes the Mulch the five crops (Water, a seed and a Mulch) need; a tier-0 unit pays 50 profession experience, held at the Novice cap until a certification opens the tier-1 plants.
+The Agricultural Supply building's Farming vendor and T3 station are not built (they come with nodes' buildings), and freeholds and animals are not built.
+
 **People who talk offer a conversation (`GenericNpcs`).** A humanoid Blueprint that no capture opened is made from a recorded citizen, which in the game is a Construction Crate Vendor: its interactable carries that
 vendor's one input, "sell a crate", which the client shows at all times. So the interactable of a person who talks is replaced by that of a plain conversation (a component whose only input opens the dialogue), taken
 from another recorded open; the log says which at the start (`the people who talk are given the interactable of a plain conversation`). The same holds for the recorded opens themselves: the citizen's and the

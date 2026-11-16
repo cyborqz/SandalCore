@@ -17,6 +17,7 @@
 //    the tools        the five T3 tools of the Level 25 scrolls are worn in their slots (gather_tool agrees); the GM vendors list all 67 scrolls and the Starter and T1 tools
 // ============================================================================
 #include "content/content_db.h"
+#include "content/craft_filter.h"
 #include "crafting/artisan.h"
 #include "crafting/rewards.h"
 #include "session/ability_catalog.h"
@@ -26,11 +27,13 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <set>
 #include <string>
@@ -39,6 +42,7 @@
 using namespace aoc::worldd;
 namespace fs = std::filesystem;
 namespace pr = aoc::worldd::professions;
+namespace repl = aoc::protocol::repl;
 
 static int g_pass = 0, g_fail = 0;
 #define CHECK(cond, msg) do { \
@@ -46,6 +50,11 @@ static int g_pass = 0, g_fail = 0;
     else { std::printf("  [FAIL] %s\n", msg); g_fail++; } \
 } while (0)
 #define SAYOK(msg) std::printf("  [ok ] %s\n", msg)
+// The farming tests print the passing line too.
+#define CHECK_SHOWN(cond, msg) do { \
+    if (cond) { g_pass++; std::printf("  [ok ] %s\n", msg); } \
+    else { std::printf("  [FAIL] %s\n", msg); g_fail++; } \
+} while (0)
 
 static bool contains(const std::string& s, const char* part) { return s.find(part) != std::string::npos; }
 
@@ -899,6 +908,592 @@ static void test_artisan(const content::ContentDb& db, const PlayerWorld& world)
     CHECK(from_snapshot, "a job rolls from its saved ratings exactly as from the ratings it was started with");
 }
 
+// ---- farming: a recipe input named by a gather-item filter, and the Novice loop the filter unblocks ----------------------------------------------------------
+//
+//  The game's own data: a recipe input whose item is 0 and whose filter is a GatherItemFilterRecordBase (a curated list: ALL_Raw_Plants_Any's 22 plants, Raw_Wood_Any's 9
+//  woods, Processed_Paper_Any's 17 papers).  The client shows the list as the input's materials and sends the pick in a tag selection, so a job takes a pick only when it is
+//  one of the filter's items, not when it merely carries the input's tag (45 plants carry Item.Resource.Raw.Plant, 22 are in the filter).  The filter lists come from
+//  contentc version 45's craft_filter_item; the data here may be an older file, so the test names the three lists it uses and the reader has a test of its own.
+
+namespace farm {
+constexpr int64_t kFarming = 108752756954757ll;
+constexpr int64_t kMulch = 6064630961167400960ll, kRotrootPulp = 6064634007467655178ll, kWoodchips = 6064632988998041610ll;
+constexpr int64_t kWater = 6064630417665753417ll, kDaffodil = 6064629184431849472ll, kBarley = 6064629132834439185ll;
+constexpr int64_t kSpringdrawnWater = 6064634088144896370ll, kAppleSeed = 6064629252117233675ll, kPitchResin = 6064633979457306628ll;
+constexpr int64_t kOak = 109162169652924ll, kEasternHemlock = 6064629252096851973ll, kWoodTagOnly = 6064629252172021765ll;
+constexpr int64_t kFadedTreasureMap = 6064632204577210671ll, kOraclesEye = 6064632204597920050ll, kBlueInk = 6064632203704795151ll;
+constexpr int64_t kPlantFilter = 6064633963143168007ll, kWoodFilter = 6064633967776563206ll, kPaperFilter = 6064634767191769088ll;
+constexpr int64_t kSeed[5] = {6064630417666212191ll, 6064630683142782977ll, 6064630971851145222ll, 6064630417666277730ll, 6064630417666212192ll};   // Blackberry, Cotton, Flax, Celery, Lettuce
+const char* const kCrop[5] = {"Farming_T1_Fruit_Blackberry", "Farming_T1_Textile_Cotton", "Farming_T1_Textile_Flax", "Farming_T1_Vegetable_Celery", "Farming_T1_Vegetable_Lettuce"};
+}  // namespace farm
+
+/// The items of the gather-item filters this test uses, as the design records hold them: ALL_Raw_Plants_Any (22), Raw_Wood_Any (9), Processed_Paper_Any (17).
+static std::vector<int64_t> plants_filter() {
+    return {6064633259572002818ll, 6064633221579931712ll, 6064633221496700975ll, 6064633221397217305ll, 6064633288204353544ll, 6064632983206232082ll, 6064633855580307516ll,
+            6064629184431849472ll, 6064630417666212190ll, 6064629207110844431ll, 109234000713341ll,     6064631505975640102ll, 6064630520851136512ll, 6064632954949599236ll,
+            6064632954941538306ll, 6064632954942390275ll, 6064633855522111540ll, 6064633368529010691ll, 6064629207102521358ll, 6064629252161929216ll, 6064629252167237635ll,
+            6064633391237496838ll};
+}
+static std::vector<int64_t> wood_filter() {
+    return {6064632954938851328ll, 109162169652924ll, 6064628912716447747ll, 6064628912704782337ll, 6064629252096851973ll, 6064632954939899905ll, 6064633254017630211ll,
+            6064633221016387589ll, 6064633391232581636ll};
+}
+static std::vector<int64_t> paper_filter() {
+    return {6064632989076815886ll, 6064631793389076481ll, 6064633328413179961ll, 6064631793401987077ll, 6064629252096851973ll, 6064634086374965256ll, 6064633328412000311ll,
+            6064632989077536783ll, 6064633328413835322ll, 6064631793394647043ll, 6064634086384861194ll, 6064633328414425147ll, 6064634086373523463ll, 6064631793385668608ll,
+            6064633328412655672ll, 6064631793400479748ll, 6064631793390780418ll};
+}
+
+static svc::InventoryItem farm_item(int slot, int64_t record, int quantity = 1) {
+    static uint32_t n = 0;
+    svc::InventoryItem it;
+    it.container = svc::ItemContainer::Backpack;
+    it.slot = slot;
+    it.item_record_id = record;
+    it.instance_guid = [&] {
+        char buf[33];
+        std::snprintf(buf, sizeof buf, "%032x", ++n + 0x5000);
+        return std::string(buf);
+    }();
+    it.quantity = quantity;
+    it.quality = 1;
+    it.durability = 100;
+    it.created_at_ms = 1'771'299'474'000ll;
+    return it;
+}
+
+static std::optional<items::Inventory> bag_of(std::vector<svc::InventoryItem> items) {
+    std::string error;
+    auto inv = items::Inventory::from_items(items, error);
+    if (!inv) std::printf("    the bag does not read: %s\n", error.c_str());
+    return inv;
+}
+
+static const content::CraftStationDef* station_named(const content::CraftStationData& stations, const char* name) {
+    const auto it = stations.by_name.find(name);
+    return it == stations.by_name.end() ? nullptr : &stations.defs.at(it->second);
+}
+
+static repl::CraftResource resource(int64_t record, int count, int rarity = 0) {
+    repl::CraftResource r;
+    r.record = record;
+    r.rarities.push_back({static_cast<uint8_t>(rarity), count, false});
+    return r;
+}
+
+static repl::CraftTagSelection pick_of(std::vector<repl::CraftResource> resources, std::vector<std::string> tags) {
+    repl::CraftTagSelection s;
+    s.resources = std::move(resources);
+    s.tags = std::move(tags);
+    return s;
+}
+
+static repl::StartCraft start_of(const content::CraftRecipe& recipe, int quantity) {
+    repl::StartCraft s;
+    s.recipe = recipe.guid;
+    s.quantity = quantity;
+    return s;
+}
+
+static crafting::StartFacts filter_facts(const content::CraftRecipeData& data, const content::CraftStationDef& station, const items::Inventory& inventory, const PlayerWorld& world,
+                                         int tier = 0, bool quick = false) {
+    crafting::StartFacts f;
+    f.recipes = &data;
+    f.station = &station;
+    f.quick = quick;
+    f.tier_of = [tier](int64_t) { return tier; };
+    f.taught = [](int64_t) { return true; };
+    f.inventory = &inventory;
+    f.rarity_facts = [&world](int64_t item) { return world.item_rarity_facts(item); };   // (the rarity the client shows: an item that is never Common reads its own)
+    f.copper = 1'000'000;
+    f.node.level = 3;
+    return f;
+}
+
+/// The table the reader writes (contentc version 45): a small SQLite file with craft_filter_item only.
+static void test_filter_table() {
+    std::printf("the gather-item filter table (craft_filter_item)\n");
+    const fs::path path = fs::temp_directory_path() / "worldd_professions_filter_table.db";
+    std::error_code ignored;
+    fs::remove(path, ignored);
+    sqlite3* db = nullptr;
+    CHECK_SHOWN(sqlite3_open(path.string().c_str(), &db) == SQLITE_OK, "a scratch SQLite file opens");
+    if (!db) return;
+    const auto exec = [&](const char* sql) {
+        char* why = nullptr;
+        const bool ok = sqlite3_exec(db, sql, nullptr, nullptr, &why) == SQLITE_OK;
+        if (!ok) std::printf("    %s\n", why ? why : "sqlite refused");
+        sqlite3_free(why);
+        return ok;
+    };
+    CHECK_SHOWN(exec("CREATE TABLE craft_filter_item (filter_guid INTEGER NOT NULL, item_guid INTEGER NOT NULL, PRIMARY KEY (filter_guid, item_guid)) WITHOUT ROWID"),
+          "the table has the reader's key names: filter_guid and item_guid");
+    CHECK_SHOWN(exec("INSERT INTO craft_filter_item VALUES (7, 30), (7, 10), (7, 20), (9, 5)"), "rows are written");
+    std::map<int64_t, std::vector<int64_t>> items;
+    bool present = false;
+    std::string error;
+    CHECK_SHOWN(content::read_craft_filter_items(db, items, present, error), "the table reads");
+    CHECK_SHOWN(present && items.size() == 2 && items[7] == std::vector<int64_t>({10, 20, 30}) && items[9] == std::vector<int64_t>({5}),
+          "each filter's items are kept once and ascending, grouped by the filter's guid");
+    // a file without the table is an older one: no error, no item, present false
+    CHECK_SHOWN(exec("DROP TABLE craft_filter_item"), "the table is dropped");
+    items.clear();
+    present = true;
+    CHECK_SHOWN(content::read_craft_filter_items(db, items, present, error) && !present && items.empty(), "a file without the table is an older contentc's: no item and no error");
+    // a column that is not an integer is refused, not read as zero
+    CHECK_SHOWN(exec("CREATE TABLE craft_filter_item (filter_guid, item_guid)"), "a table of untyped columns");
+    CHECK_SHOWN(exec("INSERT INTO craft_filter_item VALUES ('a filter', 1)"), "a text filter guid is written");
+    items.clear();
+    present = false;
+    error.clear();
+    CHECK_SHOWN(!content::read_craft_filter_items(db, items, present, error) && error.find("wrong storage class") != std::string::npos,
+          "a column of another storage class is an error, not a filter of guid 0");
+    sqlite3_close(db);
+    fs::remove(path, ignored);
+    SAYOK("the filter table");
+}
+
+/// What the change reaches, and the rule at its source: a filter's own list decides a pick, not the input's tag.
+static void test_filter_rules(const content::ContentDb& db, const PlayerWorld& world) {
+    namespace cr = aoc::worldd::crafting;
+    std::printf("a filter input's picks, and the recipes the filter rule reaches\n");
+    std::string error;
+    auto loaded = db.craft_recipe_data(error);
+    if (!loaded) {
+        std::printf("  [FAIL] the recipes do not read: %s\n", error.c_str());
+        ++g_fail;
+        return;
+    }
+    content::CraftRecipeData data = std::move(*loaded);
+    data.filter_items[farm::kPlantFilter] = plants_filter();
+    data.filter_items[farm::kWoodFilter] = wood_filter();
+    data.filter_items[farm::kPaperFilter] = paper_filter();
+    for (int64_t filter : {farm::kPlantFilter, farm::kWoodFilter, farm::kPaperFilter}) {   // (the table holds each filter's items ascending: filter_admits looks them up so)
+        std::vector<int64_t>& items = data.filter_items[filter];
+        std::sort(items.begin(), items.end());
+    }
+    data.filters_read = true;
+    std::string station_error;
+    const auto station_data = db.craft_station_data(station_error);
+    const content::CraftStationData* stations = station_data ? &*station_data : nullptr;
+    CHECK_SHOWN(stations != nullptr, "the station definitions are read");
+    if (!stations) return;
+
+    // the reach, from the data: every recipe input that names a filter, and those at a station worldd serves with an Inventory destination (the refusal this change removes)
+    size_t filter_rows = 0, filter_recipes = 0;
+    std::set<int64_t> professions, filters;
+    for (const auto& [guid, r] : data.recipes) {
+        bool has = false;
+        for (const content::CraftInput& in : r.inputs) {
+            if (in.item == 0 && in.filter != 0) {
+                ++filter_rows;
+                has = true;
+                filters.insert(in.filter);
+            }
+        }
+        if (!has) continue;
+        ++filter_recipes;
+        professions.insert(r.profession);
+    }
+    CHECK_SHOWN(filter_rows == 496 && filter_recipes == 236 && professions.size() == 14 && filters.size() == 51,
+          "the data's filter inputs: 496 rows, 236 recipes, 14 professions, 51 filters");
+    std::set<int64_t> reached, crate_only;
+    std::set<int64_t> reached_professions;
+    for (const auto& [guid, r] : data.recipes) {
+        if (!r.inventory_destination) continue;
+        bool has = false;
+        for (const content::CraftInput& in : r.inputs) has = has || (in.item == 0 && in.filter != 0);
+        if (!has) continue;
+        bool served = false, crate = false;
+        for (const auto& entry : stations->defs) {
+            const content::CraftStationDef& station = entry.second;
+            if (!data.set_holds(station.recipe_set, guid)) continue;
+            if (station.processing || cr::serves_quick_make(station)) served = true;
+            crate = crate || cr::packs_crates(station) || cr::is_commodity_table(station);
+        }
+        if (served && !crate) {
+            reached.insert(guid);
+            reached_professions.insert(r.profession);
+        }
+        if (served && crate) crate_only.insert(guid);
+    }
+    CHECK_SHOWN(reached.size() == 52 && reached_professions.size() == 13, "52 Inventory recipes at a served profession station reach the filter rule, in 13 professions");
+    CHECK_SHOWN(crate_only.size() == 133, "133 more at a crate or commodity station take a filter input where the tag check served them");
+
+    const content::CraftStationDef* farming = station_named(*stations, "ProcessingStation_Farming_T2");
+    const content::CraftStationDef* metal = station_named(*stations, "ProcessingStation_Metalworking_T2");
+    const content::CraftStationDef* scribe = station_named(*stations, "CraftingStation_Scribe_T3");
+    const content::CraftStationDef* crates = station_named(*stations, "ProcessingStation_CratePacking_Construction_Gathering");
+    const content::CraftRecipe* mulch = recipe_named(data, "Farming_T1_Mulch");
+    const content::CraftRecipe* charcoal = recipe_named(data, "Metalworking_T2_Reagent_Charcoal");
+    const content::CraftRecipe* treasure = recipe_named(data, "Scribe_T3_TreasureMap");
+    const content::CraftRecipe* crate = recipe_named(data, "Recipe_Crate_Construction_Gathering_Lumberjacking");
+    CHECK_SHOWN(farming && metal && scribe && crates && mulch && charcoal && treasure && crate, "the stations and the recipes of the cases are in the data");
+    if (!farming || !metal || !scribe || !crates || !mulch || !charcoal || !treasure || !crate) return;
+    CHECK_SHOWN(farming->max_tier == 1 && farming->display_name == "Farming - Apprentice", "the live village Marketplace station is Farming - Apprentice (tier 1 at most)");
+
+    // the Farming filter: a Novice's Mulch job takes a plant of the filter's 22, not a plant that only carries the tag
+    auto mulch_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kDaffodil)});
+    CHECK_SHOWN(mulch_bag.has_value(), "a bag of a Rotroot Pulp, a Woodchips and a Daffodil");
+    if (!mulch_bag) return;
+    repl::StartCraft mulch_req = start_of(*mulch, 1);
+    mulch_req.general = {resource(farm::kWoodchips, 1)};
+    mulch_req.tags = {pick_of({resource(farm::kDaffodil, 1)}, {"Item.Resource.Raw.Plant"})};
+    cr::Plan mulch_plan = cr::plan_start(mulch_req, filter_facts(data, *farming, *mulch_bag, world));
+    CHECK_SHOWN(mulch_plan.ok, "a Novice starts Farming_T1_Mulch with a Daffodil pick at the Farming - Apprentice station");
+    if (mulch_plan.ok) {
+        bool plant_paid = false;
+        for (const repl::CraftResource& paid : mulch_plan.paid) plant_paid = plant_paid || (paid.record == farm::kDaffodil && !paid.rarities.empty() && paid.rarities.front().count == 1);
+        CHECK_SHOWN(mulch_plan.takes.size() == 3 && plant_paid, "the job takes the reagent, the plant and the Woodchips, and the picked plant is among what it was paid with");
+    }
+    auto barley_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kBarley)});
+    repl::StartCraft barley_req = mulch_req;
+    barley_req.tags = {pick_of({resource(farm::kBarley, 1)}, {"Item.Resource.Raw.Plant"})};
+    cr::Plan barley_plan = barley_bag ? cr::plan_start(barley_req, filter_facts(data, *farming, *barley_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(!barley_plan.ok && barley_plan.refusal.find("not one of the items of the gather-item filter") != std::string::npos,
+          "Barley carries the plant tag and is not one of the filter's 22: refused for the filter, though the bags hold it");
+    auto short_bag = bag_of({farm_item(0, farm::kRotrootPulp, 2), farm_item(1, farm::kWoodchips, 2), farm_item(2, farm::kDaffodil)});
+    repl::StartCraft short_req = start_of(*mulch, 2);
+    short_req.general = {resource(farm::kWoodchips, 2)};
+    short_req.tags = {pick_of({resource(farm::kDaffodil, 1)}, {"Item.Resource.Raw.Plant"})};
+    cr::Plan short_plan = short_bag ? cr::plan_start(short_req, filter_facts(data, *farming, *short_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(!short_plan.ok && short_plan.refusal.find("names 1 items for the tags") != std::string::npos, "a job of two units with one plant picked is refused: the picks add up to the quantity");
+
+    // two players at one station: the plan takes nothing, so one player's bag pays only his own job
+    CHECK_SHOWN(mulch_bag->count_materials(farm::kDaffodil, items::default_rarity_facts(), 0, items::kRarityCount - 1) == 1, "planning takes nothing from the bags");
+    auto empty_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips)});
+    cr::Plan poor = empty_bag ? cr::plan_start(mulch_req, filter_facts(data, *farming, *empty_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(!poor.ok && poor.refusal.find("the bags hold 0 of item") != std::string::npos, "a second player without the plant is refused: the first player's pick is not his");
+    auto own_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kDaffodil)});
+    cr::Plan second = own_bag ? cr::plan_start(mulch_req, filter_facts(data, *farming, *own_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(second.ok, "a second player with his own plant starts the same job at the same station");
+
+    // the same start twice: the first job's takes empty the bag, so the second cannot pay; the job's saved resources (a reconnect) hold the pick
+    auto twice_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kDaffodil)});
+    cr::Plan first = twice_bag ? cr::plan_start(mulch_req, filter_facts(data, *farming, *twice_bag, world)) : cr::Plan{};
+    bool applied = first.ok && twice_bag.has_value();
+    for (const cr::Take& t : first.takes) {
+        if (twice_bag) applied = twice_bag->take_materials(t.record, t.facts, t.rarity_lo, t.rarity_hi, t.count, t.lowest_first).ok && applied;
+    }
+    cr::Plan again = twice_bag ? cr::plan_start(mulch_req, filter_facts(data, *farming, *twice_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(applied && first.ok && !again.ok, "the same job started twice: the second finds the materials the first took gone");
+    const std::vector<svc::JobResource> saved = cr::job_resources_of(first.paid);
+    bool plant_saved = false;
+    for (const svc::JobResource& r : saved) plant_saved = plant_saved || r.record_id == farm::kDaffodil;
+    CHECK_SHOWN(plant_saved, "the job's saved resources name the picked plant, so a reconnect mid-job shows what was paid");
+    const svc::ProcessingJob job = cr::make_job({}, "0123456789abcdef", mulch->guid, 1, 60000, {1, 2, 3, 4}, saved, 1000);
+    const auto state = cr::to_state(job, 5000, 10.0);
+    CHECK_SHOWN(state && state->general.size() == 2 && state->general.back().record == farm::kDaffodil, "the reconnected job's window lists the plant");
+
+    // another profession's filter (Metalworking's Raw_Wood_Any): the wood pick is a wood of its 9, not a plant of the other filter
+    auto metal_bag = bag_of({farm_item(0, farm::kOak, 2), farm_item(1, farm::kPitchResin, 2)});
+    repl::StartCraft metal_req = start_of(*charcoal, 1);
+    metal_req.general = {resource(farm::kPitchResin, 2)};
+    metal_req.tags = {pick_of({resource(farm::kOak, 2)}, {"Item.Resource.Raw.Wood"})};
+    cr::Plan metal_plan = metal_bag ? cr::plan_start(metal_req, filter_facts(data, *metal, *metal_bag, world, 1)) : cr::Plan{};
+    CHECK_SHOWN(metal_plan.ok, "Metalworking's charcoal takes an Oak the wood filter admits (a second filter, at a job)");
+    auto plant_in_wood = bag_of({farm_item(0, farm::kDaffodil, 2), farm_item(1, farm::kPitchResin, 2)});
+    repl::StartCraft wrong_kind = metal_req;
+    wrong_kind.tags = {pick_of({resource(farm::kDaffodil, 2)}, {"Item.Resource.Raw.Wood"})};
+    cr::Plan wrong_plan = plant_in_wood ? cr::plan_start(wrong_kind, filter_facts(data, *metal, *plant_in_wood, world, 1)) : cr::Plan{};
+    CHECK_SHOWN(!wrong_plan.ok && wrong_plan.refusal.find("not one of the items of the gather-item filter") != std::string::npos,
+          "a plant is not one of the wood filter's 9, though another filter admits it");
+    CHECK_SHOWN(data.filter_admits(farm::kPlantFilter, farm::kDaffodil) && !data.filter_admits(farm::kPlantFilter, farm::kOak) && data.filter_admits(farm::kWoodFilter, farm::kOak) &&
+              !data.filter_admits(farm::kWoodFilter, farm::kDaffodil),
+          "the filter's own list answers, not the tag: the plant filter takes Daffodil and not Oak, the wood filter the other way round");
+
+    // the paper filter (a quick make): the filter admits a raw hemlock the paper tag does not carry, and does not admit one paper the tag does
+    auto map_bag = bag_of({farm_item(0, farm::kFadedTreasureMap), farm_item(1, farm::kOraclesEye), farm_item(2, farm::kBlueInk, 10), farm_item(3, farm::kEasternHemlock)});
+    repl::StartCraft map_req = start_of(*treasure, 1);
+    map_req.general = {resource(farm::kFadedTreasureMap, 1), resource(farm::kOraclesEye, 1), resource(farm::kBlueInk, 10)};
+    map_req.tags = {pick_of({resource(farm::kEasternHemlock, 1)}, {"Item.Resource.Processed.Paper"})};
+    cr::Plan map_plan = map_bag ? cr::plan_start(map_req, filter_facts(data, *scribe, *map_bag, world, 2, true)) : cr::Plan{};
+    CHECK_SHOWN(map_plan.ok, "a quick make takes a raw EasternHemlock the paper filter admits though its tag is the wood one: the filter is the list");
+    auto paper_bag = bag_of({farm_item(0, farm::kFadedTreasureMap), farm_item(1, farm::kOraclesEye), farm_item(2, farm::kBlueInk, 10), farm_item(3, 6064634086376734729ll)});
+    repl::StartCraft paper_req = map_req;
+    paper_req.tags = {pick_of({resource(6064634086376734729ll, 1)}, {"Item.Resource.Processed.Paper"})};
+    cr::Plan paper_plan = paper_bag ? cr::plan_start(paper_req, filter_facts(data, *scribe, *paper_bag, world, 2, true)) : cr::Plan{};
+    CHECK_SHOWN(!paper_plan.ok && paper_plan.refusal.find("not one of the items of the gather-item filter") != std::string::npos,
+          "a paper the tag admits and the filter does not is refused");
+
+    // a crate station's recipe that the tags already served: its picks are the filter's 9 woods now, not the tag's 29
+    auto crate_bag = bag_of({farm_item(0, farm::kOak, 30)});
+    repl::StartCraft crate_req = start_of(*crate, 1);
+    crate_req.tags = {pick_of({resource(farm::kOak, 30)}, {"Item.Resource.Raw.Wood"})};
+    cr::Plan crate_plan = crate_bag ? cr::plan_start(crate_req, filter_facts(data, *crates, *crate_bag, world, 0, true)) : cr::Plan{};
+    CHECK_SHOWN(crate_plan.ok, "a construction crate takes 30 Oak of the wood filter");
+    auto outsider_bag = bag_of({farm_item(0, farm::kWoodTagOnly, 30)});
+    repl::StartCraft outsider_req = crate_req;
+    outsider_req.tags = {pick_of({resource(farm::kWoodTagOnly, 30)}, {"Item.Resource.Raw.Wood"})};
+    cr::Plan outsider_plan = outsider_bag ? cr::plan_start(outsider_req, filter_facts(data, *crates, *outsider_bag, world, 0, true)) : cr::Plan{};
+    CHECK_SHOWN(!outsider_plan.ok && outsider_plan.refusal.find("not one of the items of the gather-item filter") != std::string::npos,
+          "a wood the tag admits and the filter does not is refused at the crate station too (its picks narrow to the 9)");
+    SAYOK("a filter input's picks and the recipes it reaches");
+}
+
+/// A filter that lists no item (30 of the 51 the recipes name: the crates' own, the gatherers' fish, plants and ore, the processed goods of each profession) carries no tag query either, so the
+/// input's own tags name its materials, as the tag check did before the filter table existed.  A file without the table (contentc before 45) keeps the crate stations on their tags, and refuses
+/// a filter input at a profession's station (its list is not known).
+static void test_filter_without_items(const content::ContentDb& db, const PlayerWorld& world) {
+    namespace cr = aoc::worldd::crafting;
+    constexpr int64_t kPlantsAnyFilter = 6064633967759720452ll, kFishAnyFilter = 6064633967742943235ll;
+    constexpr int64_t kBluegill = 6064629326176452611ll, kCopperOre = 109162169652920ll;
+    std::printf("a filter that lists no item: the input's tags decide\n");
+    std::string error;
+    auto loaded = db.craft_recipe_data(error);
+    if (!loaded) {
+        std::printf("  [FAIL] the recipes do not read: %s\n", error.c_str());
+        ++g_fail;
+        return;
+    }
+    content::CraftRecipeData data = std::move(*loaded);
+    data.filter_items.clear();   // (what a version-45 file holds: the 21 filters that list items; here the plant filter of Mulch)
+    data.filter_items[farm::kPlantFilter] = plants_filter();
+    std::sort(data.filter_items[farm::kPlantFilter].begin(), data.filter_items[farm::kPlantFilter].end());
+    data.filters_read = true;
+    std::string station_error;
+    const auto station_data = db.craft_station_data(station_error);
+    const content::CraftStationData* stations = station_data ? &*station_data : nullptr;
+    CHECK_SHOWN(stations != nullptr && data.tags_read, "the station definitions and the tag table are read");
+    if (!stations) return;
+    const content::CraftStationDef* crates = station_named(*stations, "ProcessingStation_CratePacking_Construction_Gathering");
+    const content::CraftStationDef* cooking = station_named(*stations, "ProcessingStation_Cooking_T2");
+    const content::CraftStationDef* farming = station_named(*stations, "ProcessingStation_Farming_T2");
+    const content::CraftRecipe* herb_crate = recipe_named(data, "Recipe_Crate_Construction_Gathering_Herbalism");
+    const content::CraftRecipe* bait = recipe_named(data, "Cooking_T1_Bait_Chum_Freshwater");
+    const content::CraftRecipe* mulch = recipe_named(data, "Farming_T1_Mulch");
+    CHECK_SHOWN(crates && cooking && farming && herb_crate && bait && mulch, "the crate station, the Cooking and Farming stations and the three recipes of the cases are in the data");
+    if (!crates || !cooking || !farming || !herb_crate || !bait || !mulch) return;
+    bool herb_unlisted = false, bait_unlisted = false;
+    for (const content::CraftInput& in : herb_crate->inputs) herb_unlisted = herb_unlisted || (in.item == 0 && in.filter == kPlantsAnyFilter);
+    for (const content::CraftInput& in : bait->inputs) bait_unlisted = bait_unlisted || (in.item == 0 && in.filter == kFishAnyFilter);
+    CHECK_SHOWN(herb_unlisted && bait_unlisted && data.filter_items.count(kPlantsAnyFilter) == 0 && data.filter_items.count(kFishAnyFilter) == 0,
+                "the Herbalism crate names the filter Raw_Plants_Any and the fish bait Raw_Fish_Any, and the file lists no item for either");
+
+    // a construction crate: the tag decides, as before (Barley carries the plant tag; an Oak does not)
+    const auto crate_start = [&](int64_t record, const content::CraftRecipeData& d) {
+        auto bag = bag_of({farm_item(0, record, 30)});
+        repl::StartCraft req = start_of(*herb_crate, 1);
+        req.tags = {pick_of({resource(record, 30)}, {"Item.Resource.Raw.Plant"})};
+        return bag ? cr::plan_start(req, filter_facts(d, *crates, *bag, world, 0, true)) : cr::Plan{};
+    };
+    const cr::Plan crate_daffodil = crate_start(farm::kDaffodil, data);
+    CHECK_SHOWN(crate_daffodil.ok, "the Herbalism crate takes 30 Daffodil by the plant tag (its filter lists no item)");
+    if (!crate_daffodil.ok) std::printf("    %s\n", crate_daffodil.refusal.c_str());
+    const cr::Plan crate_barley = crate_start(farm::kBarley, data);
+    CHECK_SHOWN(crate_barley.ok, "the Herbalism crate takes 30 Barley too: the plant tag admits it where Mulch's filter does not");
+    const cr::Plan crate_oak = crate_start(farm::kOak, data);
+    CHECK_SHOWN(!crate_oak.ok && crate_oak.refusal.find("does not carry the tag item.resource.raw.plant") != std::string::npos, "the Herbalism crate refuses an Oak: it does not carry the plant tag");
+
+    // the fish bait at a profession's station: 50 fish by the fish tag
+    const auto bait_start = [&](int64_t record, const content::CraftRecipeData& d) {
+        auto bag = bag_of({farm_item(0, record, 50)});
+        repl::StartCraft req = start_of(*bait, 1);
+        req.tags = {pick_of({resource(record, 50)}, {"Item.Resource.Raw.Fish"})};
+        return bag ? cr::plan_start(req, filter_facts(d, *cooking, *bag, world, 0)) : cr::Plan{};
+    };
+    const cr::Plan bait_fish = bait_start(kBluegill, data);
+    CHECK_SHOWN(bait_fish.ok, "a Novice starts the freshwater bait chum at Cooking - Apprentice with 50 Bluegill: the fish tag names the pick");
+    if (!bait_fish.ok) std::printf("    %s\n", bait_fish.refusal.c_str());
+    const cr::Plan bait_plant = bait_start(farm::kDaffodil, data);
+    CHECK_SHOWN(!bait_plant.ok && bait_plant.refusal.find("does not carry the tag item.resource.raw.fish") != std::string::npos, "the bait chum refuses 50 Daffodil: no fish tag");
+    auto copper = bag_of({farm_item(0, kCopperOre, 30)});
+    repl::StartCraft ore_req = start_of(*herb_crate, 1);
+    ore_req.tags = {pick_of({resource(kCopperOre, 30)}, {"Item.Resource.Raw.Plant"})};
+    const cr::Plan ore_plan = copper ? cr::plan_start(ore_req, filter_facts(data, *crates, *copper, world, 0, true)) : cr::Plan{};
+    CHECK_SHOWN(!ore_plan.ok && ore_plan.refusal.find("does not carry the tag") != std::string::npos, "a copper ore is no plant for the Herbalism crate");
+
+    // a list still decides where there is one: Barley is no pick for Mulch (the plant filter lists 22), however many tags it carries
+    auto barley_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kBarley)});
+    repl::StartCraft barley_req = start_of(*mulch, 1);
+    barley_req.general = {resource(farm::kWoodchips, 1)};
+    barley_req.tags = {pick_of({resource(farm::kBarley, 1)}, {"Item.Resource.Raw.Plant"})};
+    const cr::Plan barley_plan = barley_bag ? cr::plan_start(barley_req, filter_facts(data, *farming, *barley_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(!barley_plan.ok && barley_plan.refusal.find("not one of the items of the gather-item filter") != std::string::npos, "Mulch still refuses Barley: its filter lists items, and Barley is not one");
+
+    // a file without the table: the crate keeps its tags, a profession's station refuses the filter input (its list is not known) and says why
+    content::CraftRecipeData old_file = data;
+    old_file.filter_items.clear();
+    old_file.filters_read = false;
+    const cr::Plan old_crate = crate_start(farm::kDaffodil, old_file);
+    CHECK_SHOWN(old_crate.ok, "a file of contentc before 45: the Herbalism crate is still made by its tags");
+    auto mulch_bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kDaffodil)});
+    repl::StartCraft mulch_req = start_of(*mulch, 1);
+    mulch_req.general = {resource(farm::kWoodchips, 1)};
+    mulch_req.tags = {pick_of({resource(farm::kDaffodil, 1)}, {"Item.Resource.Raw.Plant"})};
+    const cr::Plan old_mulch = mulch_bag ? cr::plan_start(mulch_req, filter_facts(old_file, *farming, *mulch_bag, world)) : cr::Plan{};
+    CHECK_SHOWN(!old_mulch.ok && old_mulch.refusal.find("lists no items for filters") != std::string::npos, "a file of contentc before 45: Mulch is refused with the reason (rebuild the data), not started by the wider tag");
+    const cr::Plan old_bait = [&] {
+        auto bag = bag_of({farm_item(0, kBluegill, 50)});
+        repl::StartCraft req = start_of(*bait, 1);
+        req.tags = {pick_of({resource(kBluegill, 50)}, {"Item.Resource.Raw.Fish"})};
+        return bag ? cr::plan_start(req, filter_facts(old_file, *cooking, *bag, world)) : cr::Plan{};
+    }();
+    CHECK_SHOWN(!old_bait.ok && old_bait.refusal.find("lists no items for filters") != std::string::npos, "a file of contentc before 45: the bait chum is refused with the same reason");
+    SAYOK("a filter that lists no item");
+}
+
+/// The Novice loop from a fresh character: Mulch, then the five crops, 50 experience a tier-0 unit up to the Novice cap, and the tier-1 recipes after a certification.
+static void test_farming_loop(const content::ContentDb& db, const PlayerWorld& world) {
+    namespace cr = aoc::worldd::crafting;
+    std::printf("the Farming Novice loop from a fresh character\n");
+    std::string error;
+    auto loaded = db.craft_recipe_data(error);
+    if (!loaded) {
+        std::printf("  [FAIL] the recipes do not read: %s\n", error.c_str());
+        ++g_fail;
+        return;
+    }
+    content::CraftRecipeData data = std::move(*loaded);
+    data.filter_items[farm::kPlantFilter] = plants_filter();
+    std::sort(data.filter_items[farm::kPlantFilter].begin(), data.filter_items[farm::kPlantFilter].end());
+    data.filters_read = true;
+    std::string station_error;
+    const auto station_data = db.craft_station_data(station_error);
+    const content::CraftStationData* stations = station_data ? &*station_data : nullptr;
+    const pr::Book* book = world.professions();
+    const content::CraftStationDef* farming = stations ? station_named(*stations, "ProcessingStation_Farming_T2") : nullptr;
+    const content::CraftRecipe* mulch = recipe_named(data, "Farming_T1_Mulch");
+    CHECK_SHOWN(farming && mulch && book, "the Farming - Apprentice station, the Mulch recipe and the 22 professions are read");
+    if (!farming || !mulch || !book) return;
+    pr::Professions fresh(*book);
+    CHECK_SHOWN(fresh.valid() && fresh.tier(farm::kFarming) == 0 && fresh.level(farm::kFarming) == 1 && fresh.xp(farm::kFarming) == 0,
+          "a fresh character holds Farming at Novice, level 1, no XP");
+    const content::CraftReward* reward = data.reward_of(*mulch);
+    bool makes_mulch = false;
+    if (reward) {
+        for (const content::CraftRewardContainer& box : reward->containers)
+            for (const std::vector<content::CraftRewardItem>& units : box.rewards)
+                for (const content::CraftRewardItem& item : units) makes_mulch = makes_mulch || (item.item == farm::kMulch && item.quantity == 1);
+    }
+    CHECK_SHOWN(makes_mulch, "Farming_T1_Mulch yields one Mulch a unit: the only producer of the five crops' Mulch");
+    auto bag = bag_of({farm_item(0, farm::kRotrootPulp), farm_item(1, farm::kWoodchips), farm_item(2, farm::kDaffodil)});
+    repl::StartCraft mulch_req = start_of(*mulch, 1);
+    mulch_req.general = {resource(farm::kWoodchips, 1)};
+    mulch_req.tags = {pick_of({resource(farm::kDaffodil, 1)}, {"Item.Resource.Raw.Plant"})};
+    cr::Plan mulch_plan = bag ? cr::plan_start(mulch_req, filter_facts(data, *farming, *bag, world, 0)) : cr::Plan{};
+    CHECK_SHOWN(mulch_plan.ok, "the first recipe a fresh character can start is the Mulch job, with the plant picked from the filter");
+    bool crops_start = true;
+    for (int i = 0; i < 5; ++i) {
+        const content::CraftRecipe* crop = recipe_named(data, farm::kCrop[i]);
+        auto crop_bag = bag_of({farm_item(0, farm::kWater), farm_item(1, farm::kSeed[i]), farm_item(2, farm::kMulch)});
+        repl::StartCraft req = crop ? start_of(*crop, 1) : repl::StartCraft{};
+        req.general = {resource(farm::kMulch, 1)};
+        cr::Plan plan = crop && crop_bag ? cr::plan_start(req, filter_facts(data, *farming, *crop_bag, world, 0)) : cr::Plan{};
+        if (!plan.ok) {
+            std::printf("    %s: %s\n", farm::kCrop[i], plan.refusal.c_str());
+            crops_start = false;
+        }
+    }
+    CHECK_SHOWN(crops_start, "the five crops (Blackberry, Cotton, Flax, Celery, Lettuce) start with a Water, a seed and a Mulch at the same station");
+    {   // the real recipes pay what the loop says: a unit of a tier-0 Farming recipe is 50 Farming experience at Common, and the Mulch job makes the Mulch
+        const auto facts = [&](int64_t item) { return world.item_rarity_facts(item); };
+        const auto roll = [&](const content::CraftRecipe& recipe, int quantity, std::vector<svc::JobResource> paid) {
+            svc::ProcessingJob job;
+            job.recipe_guid = recipe.guid;
+            job.quantity = quantity;
+            job.resources = std::move(paid);
+            job.job_guid = "00000000000000000000000000000007";
+            return cr::roll_job(data, job, 1, cr::Ratings{}, facts);
+        };
+        const auto one_mulch = roll(*mulch, 1, {{farm::kWoodchips, {{0, 1, false}}}, {farm::kDaffodil, {{0, 1, false}}}});
+        CHECK_SHOWN(one_mulch && one_mulch->profession == farm::kFarming && one_mulch->profession_xp == 50 && one_mulch->products.size() == 1 && one_mulch->products[0].item == farm::kMulch &&
+                        one_mulch->products[0].quantity == 1,
+                    "a Mulch job of one unit, paid with a Common Woodchips and a Common Daffodil, makes 1 Mulch and pays 50 Farming experience");
+        const auto many_mulch = roll(*mulch, 32, {{farm::kWoodchips, {{0, 32, false}}}, {farm::kDaffodil, {{0, 32, false}}}});
+        CHECK_SHOWN(many_mulch && many_mulch->profession_xp == 1600 && many_mulch->products.size() == 1 && many_mulch->products[0].quantity == 32, "32 units of Mulch make 32 Mulch and pay 1,600 Farming experience (level 2)");
+        bool crops_pay = true;
+        for (int i = 0; i < 5; ++i) {
+            const content::CraftRecipe* crop = recipe_named(data, farm::kCrop[i]);
+            const auto made = crop ? roll(*crop, 1, {{farm::kMulch, {{0, 1, false}}}}) : std::nullopt;
+            const bool pays = made && made->profession == farm::kFarming && made->profession_xp == 50 && !made->products.empty() && made->products[0].quantity >= 1;
+            if (!pays) std::printf("    %s does not pay 50 Farming experience for a unit\n", farm::kCrop[i]);
+            crops_pay = crops_pay && pays;
+        }
+        CHECK_SHOWN(crops_pay, "each of the five crops pays 50 Farming experience for a unit paid with a Common Mulch, and yields its produce");
+    }
+    CHECK_SHOWN(cr::profession_xp(content::XpRule::Processing, 0, 0, 1) == 50, "a tier-0 unit pays 50 profession experience at Common");
+    CHECK_SHOWN(cr::profession_xp(content::XpRule::Processing, 0, 0, 32) == 1600, "32 units pay 1,600 experience: level 2");
+    fresh.add_xp(farm::kFarming, 1600);
+    CHECK_SHOWN(fresh.level(farm::kFarming) == 2 && fresh.xp(farm::kFarming) == 1600, "32 units of a tier-0 job make the Novice level 2");
+    fresh.add_xp(farm::kFarming, 38400);
+    CHECK_SHOWN(fresh.level(farm::kFarming) == 10 && fresh.xp(farm::kFarming) == 40000, "800 units reach level 10 (40,000 experience)");
+    fresh.add_xp(farm::kFarming, 10000);
+    CHECK_SHOWN(fresh.level(farm::kFarming) == 10 && fresh.xp(farm::kFarming) == 48399, "a Novice's experience is held at 48,399 until a certification");
+    const pr::Change promoted = fresh.promote(farm::kFarming);
+    CHECK_SHOWN(promoted.promoted() && fresh.tier(farm::kFarming) == 1 && fresh.level(farm::kFarming) == 10, "at the Novice cap a certification makes Farming Apprentice");
+    const content::CraftRecipe* apple = recipe_named(data, "Farming_T2_Fruit_Apple");
+    auto apple_bag = bag_of({farm_item(0, farm::kSpringdrawnWater), farm_item(1, farm::kAppleSeed), farm_item(2, farm::kMulch)});
+    repl::StartCraft apple_req = apple ? start_of(*apple, 1) : repl::StartCraft{};
+    apple_req.general = {resource(farm::kMulch, 1)};
+    cr::Plan novice_apple = apple && apple_bag ? cr::plan_start(apple_req, filter_facts(data, *farming, *apple_bag, world, 0)) : cr::Plan{};
+    cr::Plan apprentice_apple = apple && apple_bag ? cr::plan_start(apple_req, filter_facts(data, *farming, *apple_bag, world, 1)) : cr::Plan{};
+    CHECK_SHOWN(!novice_apple.ok && novice_apple.refusal.find("needs certification tier 1") != std::string::npos, "an Apple stays out of a Novice's reach (tier 1)");
+    CHECK_SHOWN(apprentice_apple.ok, "the certification opens the tier-1 Apple at the same Farming - Apprentice station");
+    SAYOK("the Farming Novice loop");
+}
+
+/// The real file's table, when the data has one (contentc version 45): the filters' items, on the values the design records hold.
+static void test_filter_real_data(const content::ContentDb& db) {
+    std::printf("the real content.db's gather-item filters\n");
+    std::string error;
+    const auto data = db.craft_recipe_data(error);
+    if (!data) {
+        std::printf("  [FAIL] the recipes do not read: %s\n", error.c_str());
+        ++g_fail;
+        return;
+    }
+    if (!data->filters_read) {
+        std::printf("  [skip] %s has no craft_filter_item (contentc before 45): the filters' items are not checked here\n", db.path().c_str());
+        return;
+    }
+    const auto plants = data->filter_items.find(farm::kPlantFilter);
+    const auto woods = data->filter_items.find(farm::kWoodFilter);
+    size_t rows = 0;
+    for (const auto& [filter, items] : data->filter_items) rows += items.size();
+    CHECK_SHOWN(plants != data->filter_items.end() && plants->second.size() == 22 && std::binary_search(plants->second.begin(), plants->second.end(), farm::kDaffodil) &&
+              !std::binary_search(plants->second.begin(), plants->second.end(), farm::kBarley),
+          "ALL_Raw_Plants_Any holds its 22 plants (Daffodil, not Barley)");
+    CHECK_SHOWN(woods != data->filter_items.end() && woods->second.size() == 9, "Raw_Wood_Any holds its 9 woods");
+    // the filters the recipe inputs name: 21 list items (236 rows); the other 30 list none (the trade and construction crates' own filters, the gatherers' fish, plants and ore, the processed goods
+    // of each profession) and name their materials by the input's tags, so the rule has to fall back on the tags for them
+    std::set<int64_t> named;
+    for (const auto& [guid, r] : data->recipes) {
+        for (const content::CraftInput& in : r.inputs) {
+            if (in.item == 0 && in.filter != 0) named.insert(in.filter);
+        }
+    }
+    size_t listed = 0;
+    for (const int64_t filter : named) listed += data->filter_items.count(filter);
+    CHECK_SHOWN(named.size() == 51 && data->filter_items.size() == 21 && listed == 21 && rows == 236, "of the 51 filters the recipe inputs name, 21 list items (236 rows) and 30 list none");
+    // every filter input can be picked from: its filter lists items, or at least one item carries all of the input's tags
+    size_t unpickable = 0;
+    for (const auto& [guid, r] : data->recipes) {
+        for (const content::CraftInput& in : r.inputs) {
+            if (in.item != 0 || in.filter == 0 || data->filter_items.count(in.filter) != 0) continue;
+            const std::vector<std::string> want = crafting::tag_key(crafting::split_tags(in.tags));
+            std::vector<int64_t> common;
+            bool first = true;
+            for (const std::string& tag : want) {
+                const auto it = data->tag_items.find(tag);
+                const std::vector<int64_t> none;
+                const std::vector<int64_t>& have = it == data->tag_items.end() ? none : it->second;
+                if (first) {
+                    common = have;
+                    first = false;
+                } else {
+                    std::vector<int64_t> both;
+                    std::set_intersection(common.begin(), common.end(), have.begin(), have.end(), std::back_inserter(both));
+                    common = std::move(both);
+                }
+            }
+            if (want.empty() || common.empty()) ++unpickable;
+        }
+    }
+    CHECK_SHOWN(unpickable == 0, "every filter input that lists no item has an item that carries all of its tags (the rule can serve it)");
+    SAYOK("the real file's filters");
+}
+
 int main() {
     const char* env = std::getenv("AOC_CONTENT_DB");
     const std::string path = env && *env ? env : PROFESSIONS_CONTENT_DB_PATH;
@@ -923,6 +1518,11 @@ int main() {
         return 2;
     }
     test_artisan(*db, world);
+    test_filter_table();
+    test_filter_rules(*db, world);
+    test_filter_without_items(*db, world);
+    test_farming_loop(*db, world);
+    test_filter_real_data(*db);
     test_scrolls(path, world);
     test_tools_and_vendor(path, world);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

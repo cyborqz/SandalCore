@@ -36,7 +36,8 @@ import (
 // 42 was taken. 44 added item_learn (the recipes a LearnRecipes item teaches) and kept the certification
 // dialogue actions' profession and Promote / Demote. 45 added the lingering zones' spawn (their origin,
 // attachment, actor class and fade time in ab_zone.spawn) and the targeting records the zones' volumes use.
-const Version = "45"
+// 47 added craft_filter_item (the items of each gather-item filter that names a recipe input).
+const Version = "47"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -265,6 +266,8 @@ var keep = map[string]bool{
 	"CraftingRecipeListRecordBase":   true,
 	"CraftingRecipeDefRecordBase":    true,
 	"CraftingCurrencyCostRecordBase": true,
+	// filter inputs (version 47): a recipe input named by a gather-item filter (GatherItemFilterRecordBase.ItemsIds, crafting.go)
+	"GatherItemFilterRecordBase": true,
 	// Glint tiers (version 24): the currencies and their tiers (currency.go)
 	"CurrencyTierDefRecordBase": true,
 	"CurrencyDefRecordBase":     true,

@@ -19,6 +19,10 @@
 //  A recipe may take a plain item beside them (a commodity certificate): it is named in the general resources and taken from the item bag, where it lies.  A station whose definition names
 //  no tier (the Crate Packing stations) limits no recipe by tier.  Every other station refuses a recipe that names an input by tags.
 //
+//  A craft's recipe (a job or a quick make) may also name an input by a GATHER-ITEM FILTER: a curated list of items (the data's craft_filter_item, GatherItemFilterRecordBase.ItemsIds) that
+//  the client shows as the input's materials.  It travels the same way, in a tag selection of the input's tags, but every picked record has to be one of the filter's items (not merely carry
+//  the tag: the tag is wider, e.g. 45 plants against a filter's 22).  A filter that lists no item leaves the pick to the input's tags, as an input named by tags alone does.
+//
 //  The rarity of a stack is the one the client shows for it (items/rarity.h): the band its quality falls in, held inside the item's own RarityMin..RarityMax.  The client groups the stacks it
 //  offers by that rarity and names it in the request, so a general input is taken from the stacks whose rarity is the one named, and a reagent (which the request does not name) from the
 //  stacks whose rarity is the recipe's minimum or better: a Bee's Wax or a Flux bought at quality 1 is Rare or Uncommon and meets the recipes that ask for it.
@@ -346,13 +350,23 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             continue;
         }
         if (in.item == 0) {
-            if (!tag_inputs) return refuse(r->name + " takes a resource named by a filter or by tags: not made yet");
-            // TAGS name the input: the player picks the stacks (any item that carries every one of them) and the request gives the pick with the names of the tags
+            // an input is named by TAGS (a crate station's recipe) or by a GATHER-ITEM FILTER (a curated list of items the client shows as the allowed materials), and
+            // the request gives the picks in a tag selection either way.  A filter that lists items decides the picks: they have to be its items, not anything that carries the
+            // input's tag.  A filter that lists none (30 of the 51 the recipes name: the trade and construction crates' own, the gatherers' fish, plants and ore, the processed
+            // goods of each profession) carries no tag query either, so the input's tags name its materials, as they do for an input named by tags alone.
+            const bool by_filter = in.filter != 0;
+            const bool by_list = by_filter && data.filter_items.count(in.filter) != 0;
+            if (!tag_inputs) {   // (the crate stations are served by tags whatever the data lists; any other station serves a filter input only)
+                if (!by_filter) return refuse(r->name + " takes a resource named by tags: not made yet");
+                if (!data.filters_read) {
+                    return refuse(r->name + " takes a resource named by a gather-item filter, and the data lists no items for filters (rebuild it with this checkout's contentc)");
+                }
+            }
             const std::vector<std::string> want = tag_key(split_tags(in.tags));
             if (want.empty()) return refuse(r->name + " takes a resource named by a filter and no tag: not made yet");
             std::string tag_text;
             for (const std::string& t : want) tag_text += (tag_text.empty() ? "" : ", ") + t;
-            if (!data.tags_read) return refuse(r->name + " takes a resource named by the tags " + tag_text + ", and the data lists no items for tags (rebuild it with this checkout's contentc)");
+            if (!by_list && !data.tags_read) return refuse(r->name + " takes a resource named by the tags " + tag_text + ", and the data lists no items for tags (rebuild it with this checkout's contentc)");
             size_t at = req.tags.size();
             for (size_t i = 0; i < req.tags.size(); ++i) {
                 if (!tag_used[i] && tag_key(req.tags[i].tags) == want) {
@@ -370,8 +384,14 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             std::vector<Pick> picks;   // by record and rarity in the order named (a record or a rarity named twice is added up)
             int64_t picked = 0;
             for (const protocol::repl::CraftResource& res : req.tags[at].resources) {
-                for (const std::string& tag : want) {
-                    if (!data.tag_admits(tag, res.record)) return refuse("item " + std::to_string(res.record) + " does not carry the tag " + tag + ", which " + r->name + " takes");
+                if (by_list) {
+                    if (!data.filter_admits(in.filter, res.record)) {
+                        return refuse("item " + std::to_string(res.record) + " is not one of the items of the gather-item filter " + std::to_string(in.filter) + ", which " + r->name + " takes");
+                    }
+                } else {
+                    for (const std::string& tag : want) {
+                        if (!data.tag_admits(tag, res.record)) return refuse("item " + std::to_string(res.record) + " does not carry the tag " + tag + ", which " + r->name + " takes");
+                    }
                 }
                 for (const protocol::repl::CraftRarityCount& c : res.rarities) {
                     if (c.from_warehouse) return refuse("the request takes from the warehouse: none can be used yet");
@@ -434,8 +454,9 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     // (two takes of one record and rarity would each pass the count check alone; the bags are checked again when the stacks are taken)
     plan.takes = reagent_takes;
     plan.takes.insert(plan.takes.end(), general_takes.begin(), general_takes.end());
-    // what the job is shown with: the records and the rarities in the order the player named them, a record or a rarity named twice added up
-    for (const protocol::repl::CraftResource& res : req.general) {
+    // what the job is shown with: the records and the rarities in the order the player named them, a record or a rarity named twice added up.  The picks of a filter or a
+    // tag input are part of what was paid (the job's window lists them, and the products and the experience read their rarity), so they follow the general resources.
+    const auto add_paid = [&](const protocol::repl::CraftResource& res) {
         auto dst = std::find_if(plan.paid.begin(), plan.paid.end(), [&](const protocol::repl::CraftResource& p) { return p.record == res.record; });
         if (dst == plan.paid.end()) {
             plan.paid.push_back({res.record, {}});
@@ -446,6 +467,10 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
             if (at == dst->rarities.end()) dst->rarities.push_back({c.rarity, c.count, false});
             else at->count += c.count;
         }
+    };
+    for (const protocol::repl::CraftResource& res : req.general) add_paid(res);
+    for (const protocol::repl::CraftTagSelection& selection : req.tags) {
+        for (const protocol::repl::CraftResource& res : selection.resources) add_paid(res);
     }
 
     const UnitCost unit = recipe_unit_cost(data, *r);
