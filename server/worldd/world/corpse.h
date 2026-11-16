@@ -7,8 +7,10 @@
 //  What a dead NPC's actor gains when its killer may loot it, as the retail server does (research/combat 2): in the update that follows the death, three
 //  dynamic subobjects on the corpse's own channel,
 //
-//    LootComponent          OwnerGuid (the player that may loot), CosmeticData.TopRarity (the best rarity of the loot: a number the client draws the
-//                           sparkle from; 7 once it is emptied), ServerLootContainer (the next one)
+//    LootComponent          OwnerGuid (the player that may loot), CosmeticData.TopRarity (the rarity the client shows: while the loot holds equipment, the best
+//                           rarity among the equipment stacks, else the best of every stack; 7 once it is emptied), CosmeticData.bHasEquipment (whether the loot
+//                           holds equipment: the client draws the equipment's light for it; sent only when set, as the retail blocks leave it out when it is
+//                           clear), ServerLootContainer (the next one)
 //    ItemStorageComponent   the loot container the window's events name; it has no replicated state
 //    InteractableComponent  ICD_DefaultLoot with the loot interaction (LootPileInteraction) on its first input, whose CurrentInputStates say the
 //                           interaction is available (state 2) to the players in StateGuids; when the loot is emptied the state is 0
@@ -49,10 +51,10 @@ using Minter = std::function<protocol::emit::FIntrepidNetworkGUID()>;
 inline constexpr int kLootEmptied = 7;
 
 /// Gives the NPC `npc` its loot components (above): `owner` is the guid of the player the loot is for, `may_loot` the guids of everyone who may take
-/// from it (the interaction's StateGuids; the owner first), `top_rarity` the best rarity of what is in it.  nullopt, with `error`, for an NPC that is not
-/// held or one that has the components already, or when the retail blocks do not load.
+/// from it (the interaction's StateGuids; the owner first), `top_rarity` the rarity the client shows for what is in it and `has_equipment` whether any of it is
+/// equipment.  nullopt, with `error`, for an NPC that is not held or one that has the components already, or when the retail blocks do not load.
 std::optional<CorpseLoot> add_loot(ActorRegistry& registry, uint64_t npc, const Minter& mint, const protocol::repl::GuidValue& owner,
-                                   const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, std::string& error);
+                                   const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, bool has_equipment, std::string& error);
 
 /// A loot pile: a dead player's (APlayerLootPile, retail: the retail capture; research/combat 5) or the one a full bag's overflow makes (ALootPile): an actor of its own
 /// where the player fell or stood, with the same three components a corpse gets, holding what the death took from the player's bag or what did not fit in it.  A death's
@@ -63,13 +65,18 @@ struct Pile {
 };
 
 /// Makes the pile at (x, y, z): a new actor of kind Pile in the registry, owned by `player` (its CharacterGuid and name), that `may_loot` may take from
-/// (the owner first).  `top_rarity` as add_loot.  `item_drop` makes the pile of items that fell out of a full bag: an ALootPile, the class the game
-/// spawns dropped items in (and the look it draws for them), without a player's name, guid or pile type.  nullopt, with `error`, when the retail blocks
-/// do not load or the registry refuses the actor.
+/// (the owner first).  `top_rarity` and `has_equipment` as add_loot.  `item_drop` makes the pile of items that fell out of a full bag: an ALootPile, the class
+/// the game spawns dropped items in (and the look it draws for them), without a player's name, guid or pile type.  nullopt, with `error`, when the retail
+/// blocks do not load or the registry refuses the actor.
 std::optional<Pile> add_pile(ActorRegistry& registry, const Minter& mint, double x, double y, double z, const protocol::repl::GuidValue& player, const std::string& name,
-                             const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, std::string& error, bool item_drop = false);
+                             const std::vector<protocol::repl::GuidValue>& may_loot, int top_rarity, bool has_equipment, std::string& error, bool item_drop = false);
 
 /// The loot is gone: TopRarity 7 and the interaction closed (state 0, nobody in StateGuids).  False for an actor that holds no such components.
 bool empty_loot(ActorRegistry& registry, uint64_t npc);
+
+/// What is left of a loot pile after a take decides its light again: `top_rarity` and `has_equipment` replace the LootComponent's CosmeticData values and the
+/// connections that hold the actor are sent the change.  A client that already holds the component keeps a field that is no longer sent, so bHasEquipment is
+/// written false when it was set (it stays out when the loot never had equipment).  False for an actor that holds no loot component.
+bool set_loot_light(ActorRegistry& registry, uint64_t npc, int top_rarity, bool has_equipment);
 
 }  // namespace aoc::worldd::world

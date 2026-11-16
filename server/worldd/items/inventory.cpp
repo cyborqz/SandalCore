@@ -163,6 +163,11 @@ std::optional<svc::InventoryItem> item_of(const repl::ItemInstance& instance, sv
 // ---- the catalog ---------------------------------------------------------------------------------------------------------
 // ~ C Y B :: C O A ~
 
+bool is_equipment(const ItemCatalog& catalog, int64_t record) {
+    const std::optional<ItemInfo> info = catalog.info(record);
+    return info && info->wearable();
+}
+
 std::optional<ItemInfo> ContentItemCatalog::info(int64_t record) const {
     {
         std::lock_guard<std::mutex> lock(mutex_);

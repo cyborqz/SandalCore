@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 16 November 2026
+**Last updated:** 17 November 2026
 
 ---
 
@@ -78,6 +78,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Ground circles: the abilities that leave a lasting area open its actor where the game's record places it and tick its hits on whoever stands in it (the Vine Field roots once per caster, the Chains of Restraint damage every second, the Magma Field ends its cast), the Chilling Lament's zone stands under the Bard and the game shows no circle for it, and a requirement that counts what one caster put on a mob now reads his stacks.
 - Ability casts and costs: the Magma Field's cast ends with its field, the Prismatic Beam's Recurse tick lands the beam's damage, and a Cleric spell with Essence Infusion on falls back to its normal Mana cost when the Divine Power is short.
 - The Bard's Saga: its six variants are chosen from the Bard's three themes, its Return to Verra's bursts heal the party's allies (injured first, up to eight within 40 m) on their own characters, and its Silent Pantheon's four projectiles land 1 m blessing zones; the notes are the Bard_Notes group of three, so three stories of one theme build the variant.
+- The light of a loot pile that holds equipment: the rarity's colour with the embers, spike and ribbon, on a mob's corpse, a group's kill and a full bag's pile; the best equipment's rarity while it holds equipment, and the best of what is left once the equipment is taken.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

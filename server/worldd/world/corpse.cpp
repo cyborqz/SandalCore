@@ -149,7 +149,8 @@ bool set_first_input_definition(repl::Subobject& inter, int64_t def) {
 }
 
 /// `item_drop` (with `pile`): the pile of the items that fell out of a full bag.  Its loot is not public (the retail open sends no bPublicLoot) and its interaction is the foliage pile's.
-bool build_components(bool pile, bool item_drop, const Minter& mint, const repl::GuidValue& owner, const std::vector<repl::GuidValue>& may_loot, int top_rarity, Components& c, std::string& error) {
+bool build_components(bool pile, bool item_drop, const Minter& mint, const repl::GuidValue& owner, const std::vector<repl::GuidValue>& may_loot, int top_rarity, bool has_equipment,
+                      Components& c, std::string& error) {
     c.loot_guid = mint();
     c.container_guid = mint();
     c.inter_guid = mint();
@@ -165,6 +166,8 @@ bool build_components(bool pile, bool item_drop, const Minter& mint, const repl:
               lo.state.set(*lo.schema, "OwnerGuid.C", guid_word(owner.c)) && lo.state.set(*lo.schema, "OwnerGuid.D", guid_word(owner.d)) &&
               lo.state.set(*lo.schema, "CosmeticData.TopRarity", repl::Value::u64(static_cast<uint64_t>(top_rarity))) &&
               lo.state.set(*lo.schema, "ServerLootContainer", repl::Value(c.container_guid));
+    // the equipment's light: sent only for loot that holds equipment, as the retail blocks leave the field out when it is clear (the client reads an absent bool as clear)
+    if (has_equipment) ok = ok && lo.state.set(*lo.schema, "CosmeticData.bHasEquipment", repl::Value::boolean(true));
     if (pile && !item_drop) ok = ok && lo.state.set(*lo.schema, "bPublicLoot", repl::Value::boolean(true));
     if (item_drop) {   // the pile block's own LootComponent is a death's (public): the drop's is the owner's, and sends no bPublicLoot
         if (const schema::RepCommand* pub = lo.schema->command("bPublicLoot")) lo.state.erase(pub->handle);
@@ -185,7 +188,7 @@ bool build_components(bool pile, bool item_drop, const Minter& mint, const repl:
 }  // namespace
 
 std::optional<CorpseLoot> add_loot(ActorRegistry& registry, uint64_t npc, const Minter& mint, const repl::GuidValue& owner,
-                                   const std::vector<repl::GuidValue>& may_loot, int top_rarity, std::string& error) {
+                                   const std::vector<repl::GuidValue>& may_loot, int top_rarity, bool has_equipment, std::string& error) {
     WorldActor* w = registry.find(npc);
     if (!w || w->kind != ActorKind::Npc) {
         error = "the NPC is not held";
@@ -202,7 +205,7 @@ std::optional<CorpseLoot> add_loot(ActorRegistry& registry, uint64_t npc, const 
     }
     CorpseLoot out;
     Components c;
-    if (!build_components(false, false, mint, owner, may_loot, top_rarity, c, error)) return std::nullopt;
+    if (!build_components(false, false, mint, owner, may_loot, top_rarity, has_equipment, c, error)) return std::nullopt;
     const FIntrepidNetworkGUID loot_guid = c.loot_guid, container_guid = c.container_guid, inter_guid = c.inter_guid;
     repl::Subobject loot = std::move(c.loot), container = std::move(c.container), inter = std::move(c.inter);
     bool ok = false;
@@ -237,7 +240,7 @@ std::optional<CorpseLoot> add_loot(ActorRegistry& registry, uint64_t npc, const 
 // [C.O.A + C_Y_B]
 
 std::optional<Pile> add_pile(ActorRegistry& registry, const Minter& mint, double x, double y, double z, const repl::GuidValue& player, const std::string& name,
-                             const std::vector<repl::GuidValue>& may_loot, int top_rarity, std::string& error, bool item_drop) {
+                             const std::vector<repl::GuidValue>& may_loot, int top_rarity, bool has_equipment, std::string& error, bool item_drop) {
     const schema::ClassSchema* schema = gen::find_class_schema(item_drop ? "ALootPile" : "APlayerLootPile");
     if (!schema) {
         error = item_drop ? "no schema ALootPile" : "no schema APlayerLootPile";
@@ -256,7 +259,7 @@ std::optional<Pile> add_pile(ActorRegistry& registry, const Minter& mint, double
         loaded = std::move(*state);
     }
     Components c;
-    if (!build_components(true, item_drop, mint, player, may_loot, top_rarity, c, error)) return std::nullopt;
+    if (!build_components(true, item_drop, mint, player, may_loot, top_rarity, has_equipment, c, error)) return std::nullopt;
     WorldActor w;
     w.kind = ActorKind::Pile;
     repl::Actor& a = w.actor;
@@ -339,6 +342,24 @@ bool empty_loot(ActorRegistry& registry, uint64_t npc) {
         const bool a1 = loot->obj.state.set(*loot->obj.schema, "CosmeticData.TopRarity", repl::Value::u64(static_cast<uint64_t>(kLootEmptied)));
         const bool a2 = set_first_input(*inter, 0, {});
         done = a1 && a2;
+    });
+    return done;
+}
+
+bool set_loot_light(ActorRegistry& registry, uint64_t npc, int top_rarity, bool has_equipment) {
+    bool done = false;
+    registry.modify(npc, Change::State, [&](WorldActor& a) {
+        repl::Subobject* loot = find_sub(a.actor, "ULootComponent");
+        if (!loot) return;
+        bool ok = loot->obj.state.set(*loot->obj.schema, "CosmeticData.TopRarity", repl::Value::u64(static_cast<uint64_t>(top_rarity)));
+        // the equipment's light: set while the loot holds equipment; when the last of it is taken the field the client holds must be told false (an absent field
+        // would keep the light it already has), and loot that never had any keeps the retail block's absent field
+        if (has_equipment) {
+            ok = ok && loot->obj.state.set(*loot->obj.schema, "CosmeticData.bHasEquipment", repl::Value::boolean(true));
+        } else if (loot->obj.state.get(*loot->obj.schema, "CosmeticData.bHasEquipment")) {
+            ok = ok && loot->obj.state.set(*loot->obj.schema, "CosmeticData.bHasEquipment", repl::Value::boolean(false));
+        }
+        done = ok;
     });
     return done;
 }

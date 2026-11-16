@@ -82,6 +82,7 @@ struct Corpse {
     std::set<uint64_t>           rights;        // the pawns of the players that may take from it
     std::optional<world::CorpseLoot> parts;     // its components, when it has loot
     int                          top_rarity = 0;
+    bool                         has_equipment = false;   // whether the stacks left hold equipment (the client draws the equipment's light for it)
     bool                         is_pile = false;   // a pile: a dead player's (public loot) or a full bag's overflow (the session lets anyone take from either; the drop is offered to its owner alone)
     bool                         huntable = false;  // a huntable creature's corpse: no loot, hunted with a Bow
     bool                         hunted = false;    // ... and the hunt is done
@@ -115,6 +116,9 @@ public:
     /// The rarity the client shows for a quality of an item record (items/rarity.h: the band of the record's curve held inside its RarityMin..RarityMax); it colours a corpse's loot marker
     /// by the best of its stacks.  Without one the common curve, held by nothing, is read.
     void set_rarity_of(std::function<int(int64_t item, int quality)> fn) { rarity_of_ = std::move(fn); }
+    /// Whether an item record is equipment (the loot's CosmeticData.bHasEquipment: the client draws the equipment's embers, spike and ribbon for a pile whose loot has some).  Without one
+    /// every item is not equipment, the retail loot blocks' own value.
+    void set_equipment_of(std::function<bool(int64_t item)> fn) { equipment_of_ = std::move(fn); }
     /// The name of an item record, for the log's death line (without one the record's number is logged).
     void set_name_of(std::function<std::string(int64_t item)> fn) { name_of_ = std::move(fn); }
     /// Glint tiers: the currency kinds that are items.  A kill's Glint is rolled in the smallest kind and paid in kinds, the biggest first, each under its rate (27 rolled is 2 of the second
@@ -164,9 +168,9 @@ public:
     const Corpse* corpse_of(uint64_t npc) const;
     /// The corpse a client's interaction names (the InteractableComponent's object id), null when it names none.
     const Corpse* corpse_by_interactable(uint64_t object_id) const;
-    /// Takes the stack in `slot` out of the corpse (null when there is none or it was taken); the corpse is not closed by it.
+    /// Takes the stack in `slot` out of the corpse (null when there is none or it was taken); the corpse is not closed by it.  What is left decides the light (TopRarity and bHasEquipment) again.
     const LootStack* take(uint64_t npc, size_t slot);
-    /// Puts a taken stack back (the player's bag could not hold it).
+    /// Puts a taken stack back (the player's bag could not hold it), and the light with it.
     void put_back(uint64_t npc, size_t slot);
     /// The corpse holds nothing more: its loot components say so and it closes emptied_seconds later.
     void emptied(uint64_t npc, double now);
@@ -183,6 +187,15 @@ public:
 
 private:
     int rarity_of(int64_t item, int quality) const;
+    /// The rarity the client shows for the stacks (CosmeticData.TopRarity) and whether they hold equipment (bHasEquipment): while they hold equipment, the best rarity of the equipment stacks
+    /// only, else the best of every stack.  A taken stack is not there.
+    struct LootLight {
+        int  top_rarity = 0;
+        bool has_equipment = false;
+    };
+    LootLight light_of(const std::vector<LootStack>& stacks) const;
+    /// Works the light out again from what is left after a take or a put-back and writes it to the pile's loot component when it changed; an empty corpse is emptied's (TopRarity 7 and the input closed).
+    void refresh_light(Corpse& c);
     struct Respawn {
         double   at = 0;
         uint32_t spawn_ref = 0;
@@ -200,6 +213,7 @@ private:
     std::function<uint64_t(uint32_t, double)> respawner_;
     std::function<int(int64_t)> quality_of_;
     std::function<int(int64_t, int)> rarity_of_;
+    std::function<bool(int64_t)> equipment_of_;
     std::function<std::string(int64_t)> name_of_;
     const items::CurrencyTable* currencies_ = nullptr;
     HuntablePredicate          huntable_;

@@ -1450,6 +1450,7 @@ void PlayerWorld::start_aftermath() {
     aftermath_ = std::make_unique<combat::Aftermath>(registry_, *combat_, rewards_ ? &*rewards_ : nullptr, [this] { return guids_.next(); }, aftermath_config_);
     aftermath_->set_quality_of([this](int64_t item) { return item_quality(item); });
     aftermath_->set_rarity_of([this](int64_t item, int quality) { return item_rarity(item, quality); });
+    aftermath_->set_equipment_of([this](int64_t item) { const items::ItemCatalog* catalog = item_catalog(); return catalog && items::is_equipment(*catalog, item); });
     aftermath_->set_name_of([this](int64_t item) { return item_name(item); });
     aftermath_->set_currencies(currencies());   // a kill's Glint is paid in kinds, the biggest first
     aftermath_->set_respawner([this](uint32_t ref, double now) { return respawn_npc(ref, now); });

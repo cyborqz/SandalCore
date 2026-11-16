@@ -16,3 +16,4 @@
 #include "ability_session_emotes_tests.inc"
 #include "ability_session_emotes_seen_tests.inc"
 #include "ability_session_interrupt_budget_tests.inc"
+#include "ability_session_loot_light_tests.inc"

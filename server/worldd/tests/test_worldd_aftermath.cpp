@@ -406,11 +406,11 @@ void test_hostile(Fixture& f) {
         const uint64_t id = s.wolf(10, 100);
         std::string why;
         const repl::GuidValue me{1, 2, 3, 4};
-        auto first = world::add_loot(s.w.registry, id, [&] { return s.guids.next(); }, me, {me}, 1, why);
+        auto first = world::add_loot(s.w.registry, id, [&] { return s.guids.next(); }, me, {me}, 1, false, why);
         CHECK(first.has_value(), "loot components can be added to an NPC");
-        auto second = world::add_loot(s.w.registry, id, [&] { return s.guids.next(); }, me, {me}, 1, why);
+        auto second = world::add_loot(s.w.registry, id, [&] { return s.guids.next(); }, me, {me}, 1, false, why);
         CHECK(!second.has_value() && !why.empty(), "but not twice");
-        CHECK(!world::add_loot(s.w.registry, 4242424242ull, [&] { return s.guids.next(); }, me, {me}, 1, why).has_value(), "nor to an actor that is none");
+        CHECK(!world::add_loot(s.w.registry, 4242424242ull, [&] { return s.guids.next(); }, me, {me}, 1, false, why).has_value(), "nor to an actor that is none");
         CHECK(world::empty_loot(s.w.registry, id) && top_rarity_of(*s.w.registry.find(id)) == world::kLootEmptied, "emptying says 7");
         CHECK(!world::empty_loot(s.w.registry, 4242424242ull), "emptying nothing fails");
     }
@@ -647,6 +647,7 @@ void test_dropped_pile_look(Fixture& f) {
 }
 
 #include "aftermath_dropped_pile_tests.inc"
+#include "aftermath_loot_light_tests.inc"
 
 int main() {
     if (!real_db_present()) {
@@ -666,6 +667,13 @@ int main() {
     test_zone(f);
     test_dropped_pile_look(f);
     test_dropped_pile_blocks(f);
+    test_loot_light_piles(f);
+    test_loot_light_corpse(f);
+    test_loot_light_owner_case(f);
+    test_loot_light_block(f);
+    test_loot_light_takes(f);
+    test_loot_light_put_back(f);
+    test_loot_light_of_a_kill(f);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

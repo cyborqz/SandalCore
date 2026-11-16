@@ -37,6 +37,31 @@ int Aftermath::rarity_of(int64_t item, int quality) const {
     return rarity_of_ ? rarity_of_(item, quality) : items::default_rarity_facts().rarity_of(static_cast<double>(quality));
 }
 
+Aftermath::LootLight Aftermath::light_of(const std::vector<LootStack>& stacks) const {
+    LootLight light;
+    for (const LootStack& s : stacks) {
+        if (!s.taken && equipment_of_ && equipment_of_(s.item)) {
+            light.has_equipment = true;
+            break;
+        }
+    }
+    for (const LootStack& s : stacks) {
+        if (s.taken) continue;
+        if (light.has_equipment && !(equipment_of_ && equipment_of_(s.item))) continue;
+        light.top_rarity = std::max(light.top_rarity, rarity_of(s.item, s.quality));
+    }
+    return light;
+}
+
+void Aftermath::refresh_light(Corpse& c) {
+    if (c.remaining() == 0) return;   // an empty corpse is emptied's: TopRarity 7 and the input closed
+    const LootLight light = light_of(c.loot);
+    if (light.top_rarity == c.top_rarity && light.has_equipment == c.has_equipment) return;
+    c.top_rarity = light.top_rarity;
+    c.has_equipment = light.has_equipment;
+    world::set_loot_light(registry_, c.npc, light.top_rarity, light.has_equipment);
+}
+
 Aftermath::Aftermath(world::ActorRegistry& registry, CombatWorld& combat, const RewardBook* book, world::Minter mint, AftermathConfig config)
     : registry_(registry), combat_(combat), book_(book), mint_(std::move(mint)), cfg_(std::move(config)) {
     rng_.state = cfg_.seed * 0x9E3779B97F4A7C15ull + 11;
@@ -184,19 +209,19 @@ void Aftermath::on_death(const DeathEvent& d) {
                 }
             }
             if (!stacks.empty() && !fighters.empty()) {
-                int top = 0;
-                for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));
+                const LootLight light = light_of(stacks);
                 std::vector<protocol::repl::GuidValue> guids;
                 for (PlayerPort* p : fighters) {
                     const auto w = p->character_guid();
                     guids.push_back({w[0], w[1], w[2], w[3]});
                 }
                 std::string why;
-                const auto parts = world::add_loot(registry_, d.npc, mint_, guids.front(), guids, top, why);
+                const auto parts = world::add_loot(registry_, d.npc, mint_, guids.front(), guids, light.top_rarity, light.has_equipment, why);
                 if (parts) {
                     c.parts = *parts;
                     c.loot = std::move(stacks);
-                    c.top_rarity = top;
+                    c.top_rarity = light.top_rarity;
+                    c.has_equipment = light.has_equipment;
                     c.close_at = d.at + cfg_.loot_corpse_seconds;
                     ++stats_.corpses_with_loot;
                     stats_.loot_stacks += c.loot.size();
@@ -339,6 +364,7 @@ const LootStack* Aftermath::take(uint64_t npc, size_t slot) {
     if (it == corpses_.end() || slot >= it->second.loot.size() || it->second.loot[slot].taken) return nullptr;
     it->second.loot[slot].taken = true;
     ++stats_.loot_taken;
+    refresh_light(it->second);
     return &it->second.loot[slot];
 }
 
@@ -347,15 +373,15 @@ void Aftermath::put_back(uint64_t npc, size_t slot) {
     if (it == corpses_.end() || slot >= it->second.loot.size() || !it->second.loot[slot].taken) return;
     it->second.loot[slot].taken = false;
     if (stats_.loot_taken > 0) --stats_.loot_taken;
+    refresh_light(it->second);
 }
 // Cyb captures, C O A code
 
 uint64_t Aftermath::drop_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<LootStack> stacks, double now,
                               std::string& error, bool item_drop) {
     if (stacks.empty()) return 0;
-    int top = 0;
-    for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));
-    const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, top, error, item_drop);
+    const LootLight light = light_of(stacks);
+    const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, light.top_rarity, light.has_equipment, error, item_drop);
     if (!pile) return 0;
     Corpse c;
     c.npc = pile->actor;
@@ -364,7 +390,8 @@ uint64_t Aftermath::drop_pile(double x, double y, double z, const protocol::repl
     c.close_at = now + cfg_.pile_seconds;
     c.loot = std::move(stacks);
     c.parts = pile->parts;
-    c.top_rarity = top;
+    c.top_rarity = light.top_rarity;
+    c.has_equipment = light.has_equipment;
     c.is_pile = true;
     corpses_[c.npc] = std::move(c);
     ++stats_.piles;

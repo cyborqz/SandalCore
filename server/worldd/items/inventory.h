@@ -161,6 +161,10 @@ public:
     virtual std::optional<ItemInfo> info(int64_t record) const = 0;
 };
 
+/// True when an item record is equipment: the catalog lists at least one EEquipSlot it may be worn in.  A loot pile says whether its loot holds equipment in the
+/// LootComponent's CosmeticData.bHasEquipment: the client draws the equipment's light (the embers, the spike and the ribbon) for a pile whose loot has some.
+bool is_equipment(const ItemCatalog& catalog, int64_t record);
+
 /// The catalog worldd runs: content.db's item, item_equip_slot and resource_bag.  A query that fails reads as "unknown" and is logged once.  What it found is kept (a grant asks about
 /// every item of a container): a record is read from the file once per catalog.
 class ContentItemCatalog : public ItemCatalog {
