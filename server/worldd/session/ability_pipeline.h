@@ -233,6 +233,9 @@ struct GatheredCast {
     double      charged_speed = 0;
     const char* charged_montage = "";      // the soft path of the montage the cast jumps into
     uint64_t    charged_montage_guid = 0;
+    // The FX-only hit of the arcing arrows that fire it ("" : none): ten confirmations for each projectile record of the ability that fires it, at one point on
+    // the ground where the first homing arrow lands (the Ranger's Scatter Shot's ground marks).
+    const char* ground_hit = "";
 };
 
 /// An ability whose montage launches its projectiles at moments of its own: the SERVER plays those launches (the montage's FireProjectile notifies, counted from the trigger) and lands what they
@@ -792,7 +795,14 @@ private:
         };
         std::vector<Missile>                  missiles;
         const TimedCast*                      timed = nullptr;            // a cast whose montage launches its projectiles at moments of its own (kTimedCasts)
-        std::set<uint64_t>                    struck;                     // a Strike: the enemies its areas hurt already (the area hit lets none of them be hurt again by the same cast)
+        // A gathered cast whose arcing arrows show where they land (GatheredCast::ground_hit): their FX-only hits, confirmed together when the first homing
+        // arrow lands, at one point on the ground under the first enemy found (the caster when none).
+        struct GroundMarks {
+            double                                due = 0;
+            protocol::emit::FIntrepidNetworkGUID  component, cylinder;
+            double                                x = 0, y = 0, z = 0;
+        };
+        std::optional<GroundMarks>            ground;
         std::set<uint64_t>                    bounced;                    // a bouncing cast (kBounces): the enemies its projectiles have landed on
         bootstrap::ActiveAbilityItem          item;
         std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
@@ -971,6 +981,9 @@ void   step_multi_hit(Cast& cast, double t);
     void   step_branch(Cast& cast, double t);
     /// A gathering cast's montage has jumped: the enemies the cone holds (the line of the charged shot) each get a projectile that lands after its flight.
     void   launch_gathered(Cast& cast, double t);
+    /// The arcing arrows of a gathering cast (GatheredCast::ground_hit): ten FX-only confirmations for each of their projectile records, from that record as
+    /// their source (not the actor), at the one point on the ground `cast.ground` holds (they show where the arrows land, and no stat mod is taken or confirmed).
+    void   send_ground_marks(Cast& cast);
     /// A timed cast (TimedCast) starts: its launches are steps of the cast, and a Barrage's montage jumps to its end section and ends at moments of its own.
     void   start_timed(Cast& cast, const TimedCast& timed, double t);
     /// One step of a timed cast's list: a launch leaves (a Volley gathers its cone, a Strike's arrow flies down to the ground, a Barrage's arrow flies at the target) or a Strike's arrow lands.
