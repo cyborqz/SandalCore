@@ -2811,6 +2811,7 @@ bool PlayerBootstrap::lingering_add(const LingeringSpec& spec) {
     if (!actor) return false;
     EffectActor e;
     e.actor = std::move(*actor);
+    e.attached = spec.attached;
     effect_actors_[spec.actor.ObjectId] = std::move(e);
     mesh_ = spec.pawn_mesh;
     return true;
@@ -2835,11 +2836,14 @@ std::optional<repl::Actor> PlayerBootstrap::lingering_actor_of(const LingeringSp
     // the values of the retail actor, in handle order (the retail capture, packet 302)
     set(a.obj, "AuthServerIDReplicated", Value::u64(kAuthServerIdReplicated));
     set(a.obj, "RemoteRole", Value::u64(1));   // SimulatedProxy
-    set(a.obj, "AttachmentReplication.AttachParent", object(setup_.guids.pawn));
-    set(a.obj, "AttachmentReplication.LocationOffset", Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, 3, 0, 0}));
-    set(a.obj, "AttachmentReplication.RelativeScale3D",
-        Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, kRelativeScale100, kRelativeScale100, kRelativeScale100}));
-    set(a.obj, "AttachmentReplication.AttachComponent", object(spec.pawn_mesh));
+    if (spec.attached) {
+        // a zone on the pawn (a dance, an aura): the values the retail capture holds
+        set(a.obj, "AttachmentReplication.AttachParent", object(setup_.guids.pawn));
+        set(a.obj, "AttachmentReplication.LocationOffset", Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, 3, 0, 0}));
+        set(a.obj, "AttachmentReplication.RelativeScale3D",
+            Value(repl::QuantVec{repl::QuantVec::Mode::Scaled, kRelativeScale100, kRelativeScale100, kRelativeScale100}));
+        set(a.obj, "AttachmentReplication.AttachComponent", object(spec.pawn_mesh));
+    }
     set(a.obj, "Role", Value::u64(4));   // Authority
     set(a.obj, "Instigator", object(setup_.guids.pawn));
     set(a.obj, "LingeringEffectGuid.A", word(spec.effect_guid[0]));
@@ -2894,7 +2898,7 @@ std::optional<Send> PlayerBootstrap::lingering_open(uint64_t actor_id) {
         return std::nullopt;
     }
     // AttachComponent names the pawn's CharacterMesh0, a default component the client finds by name and outer: its export goes with the actor's block
-    blocks[0].exports.push_back(lingering_mesh_export(mesh_));
+    if (e.attached) blocks[0].exports.push_back(lingering_mesh_export(mesh_));
     auto emission = repl::assemble_open(e.actor, blocks, acks_);
     if (!emission) undo.rollback(e.shadow);
     auto send = finish(Role::Pawn, true, "lingering zone open", std::move(emission));

@@ -37,10 +37,14 @@ public:
     /// What a hit takes off the target (its EffectsToRemoveIds, or its filter), and every instance of one effect (Dimensional Bolt's mark).
     virtual void remove_effects(uint64_t /*target_actor*/, const abilities::HitDef& /*hit*/, double /*now*/) {}
     virtual void remove_effect(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) {}
+    /// ... and every instance of one effect that one instigator put on the target (what a lingering zone's infinite effect is when its target leaves the zone).
+    virtual void remove_effect_from(uint64_t /*target_actor*/, int64_t /*effect_guid*/, uint64_t /*instigator*/, double /*now*/) {}
     /// The player's pet in the world (0: none).
     virtual uint64_t own_pet() const { return 0; }
     /// Seconds left of an effect record on the target (0: it is not on): what GetEffectRemainingDuration(GetTarget(), effect) reads.
     virtual double effect_remaining(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) const { return 0; }
+    /// The stacks of an effect record one instigator put on the target: what GetEffectCountByRecordAndInstigator(GetTarget(), effect, GetInstigator()) reads.
+    virtual double effect_stacks_from(uint64_t /*target_actor*/, int64_t /*effect_guid*/, uint64_t /*instigator*/, double /*now*/) const { return 0; }
     /// The target's NetGUID and its HitComp (the collision cylinder) for a confirmation.
     virtual protocol::emit::FIntrepidNetworkGUID guid_of(uint64_t actor) = 0;
     virtual protocol::emit::FIntrepidNetworkGUID hit_component_of(uint64_t actor) = 0;
@@ -56,6 +60,8 @@ public:
     virtual std::vector<GatheredTarget> enemies_around(const Vec3& /*centre*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
     /// ... the same, with nothing on the ground in the way (see CombatWorld::enemies_touching): a ball that flies through walls.
     virtual std::vector<GatheredTarget> enemies_touching(const Vec3& /*centre*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
+    /// The creatures and the other players whose bodies touch a lingering zone, and their side of the caster (see CombatWorld::actors_in_area).
+    virtual std::vector<ZoneTarget> actors_in_area(const Vec3& /*centre*/, const ZoneArea& /*area*/, size_t /*max*/) { return {}; }
     /// The height of the ground under (x, y), nearest to `z_hint` (see CombatWorld::ground_height); false where the world has none.
     virtual bool ground_height(double /*x*/, double /*y*/, double /*z_hint*/, double* /*z*/) const { return false; }
 };
@@ -85,9 +91,15 @@ public:
     void shield(uint64_t target_actor, double amount, double seconds, double now) override { world_.add_shield(target_actor, amount, seconds, world_time(now)); }
     void remove_effects(uint64_t target_actor, const abilities::HitDef& hit, double now) override { world_.remove_effects_from_npc(target_actor, hit, world_time(now)); }
     void remove_effect(uint64_t target_actor, int64_t effect_guid, double now) override { world_.remove_npc_effect(target_actor, effect_guid, world_time(now)); }
+    void remove_effect_from(uint64_t target_actor, int64_t effect_guid, uint64_t instigator, double now) override {
+        world_.remove_npc_effect_from(target_actor, effect_guid, instigator, world_time(now));
+    }
     uint64_t own_pet() const override { return world_.pet_of(self_.id()); }
     void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now) override { world_.apply_effects(target_actor, self_.id(), effects, world_time(now)); }
     double effect_remaining(uint64_t target_actor, int64_t effect_guid, double now) const override { return world_.effect_remaining(target_actor, effect_guid, world_time(now)); }
+    double effect_stacks_from(uint64_t target_actor, int64_t effect_guid, uint64_t instigator, double now) const override {
+        return world_.effect_stacks_from(target_actor, effect_guid, instigator);
+    }
     /// The world's clock for a time of the runtime's.
     double world_time(double runtime_now) const { return runtime_now + clock_offset_; }
     double clock_offset() const { return clock_offset_; }
@@ -108,6 +120,7 @@ public:
     std::vector<GatheredTarget> enemies_in_line(double length_cm, double radius_cm, size_t max) override { return world_.enemies_in_line(self_, length_cm, radius_cm, max); }
     std::vector<GatheredTarget> enemies_around(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_around(self_, centre, radius_cm, max); }
     std::vector<GatheredTarget> enemies_touching(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_touching(self_, centre, radius_cm, max); }
+    std::vector<ZoneTarget> actors_in_area(const Vec3& centre, const ZoneArea& area, size_t max) override { return world_.actors_in_area(self_, centre, area, max); }
     bool ground_height(double x, double y, double z_hint, double* z) const override { return world_.ground_height(x, y, z_hint, z); }
 
 private:

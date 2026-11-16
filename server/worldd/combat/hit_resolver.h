@@ -75,6 +75,9 @@ struct HitMeta {
     bool                     active_in_hit = false;       // the caster's selected enemy is among the targets the hit reaches
     bool                     target_is_closest = false;   // this target is the one the hit reaches nearest the caster
     const TargetEffects*     target_effects = nullptr;    // the effects the target holds, for the reads of them (null: it holds none that the expressions can see)
+    /// The caster's actor id and the target's, for GetEffectCountByRecordAndInstigator(GetTarget(), effect, GetInstigator()) (0: unknown, the read answers 0).
+    uint64_t                 instigator_actor = 0;
+    uint64_t                 target_actor = 0;
     bool                     cannot_miss = false;         // the hit rolls no miss, as if its record forced it: the tick of a damage over time (retail's recorded ticks never missed)
 };
 // (C-O-A ~ C.Y.B)

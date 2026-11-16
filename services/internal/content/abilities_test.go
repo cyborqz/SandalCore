@@ -6,6 +6,7 @@ package content
 
 import (
 	"database/sql"
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -122,12 +123,24 @@ func TestAbilityReaders(t *testing.T) {
 	if err != nil || p.Speed != 8000 || p.LifeTime != 10 || p.SphereRadius != 16 || !reflect.DeepEqual(p.Hits, []int64{501, 503}) {
 		t.Errorf("Projectile = %+v, %v", p, err)
 	}
-	exec(t, w, `INSERT INTO ab_zone VALUES (700, 'Dance', 30, 1.5, 1, 1, 0, 'ELingeringZoneTriggerDelay::DELAY_Time', 0, 0, 0, 900)`)
+	exec(t, w, `INSERT INTO ab_zone VALUES (700, 'Dance', 30, 1.5, 1, 1, 0, 'ELingeringZoneTriggerDelay::DELAY_Time', 0, 0, 0, 900, '{"origin":"EAbilitySystemOrigin::HitLocation","attach":"EAbilitySystemAttachType::None","relative_location":[100,0,0],"deactivate_fx":3,"no_first_tick":true,"scale":[1,1,1]}')`)
 	exec(t, w, `INSERT INTO ab_zone_hit VALUES (700, 'LingeringHitsIds', 0, 502), (700, 'OnBeginOverlapHitsIds', 0, 504), (700, 'LingeringHitsIds', 1, 505)`)
 	z, err := db.Zone(700)
 	if err != nil || z.LifeTime != 30 || z.TickRate != 1.5 || !z.UseGlobalTickRate || z.TargetingGuid != 900 ||
 		!reflect.DeepEqual(z.Hits, map[string][]int64{"LingeringHitsIds": {502, 505}, "OnBeginOverlapHitsIds": {504}}) {
 		t.Errorf("Zone = %+v, %v", z, err)
+	}
+	// the spawn column is the JSON the extractor writes, read whole: its values are the row's
+	var spawn struct {
+		Origin      string     `json:"origin"`
+		Attach      string     `json:"attach"`
+		Relative    [3]float64 `json:"relative_location"`
+		Deactivate  float64    `json:"deactivate_fx"`
+		NoFirstTick bool       `json:"no_first_tick"`
+	}
+	if err := json.Unmarshal([]byte(z.Spawn), &spawn); err != nil || spawn.Origin != "EAbilitySystemOrigin::HitLocation" || spawn.Attach != "EAbilitySystemAttachType::None" ||
+		spawn.Relative != [3]float64{100, 0, 0} || spawn.Deactivate != 3 || !spawn.NoFirstTick {
+		t.Errorf("Zone.Spawn = %s (%+v, %v): want the HitLocation origin, no attachment, an offset of 100, a 3 s fade and no first tick", z.Spawn, spawn, err)
 	}
 	exec(t, w, `INSERT INTO ab_effect VALUES (800, 'Bard_Pep', 'Pep', 'EEffectCategory::Buff', '["Buff"]', '[]', 0, 4, 0, 0, 'EEffectStackingType::STACK_Override', 1, 0, 'x', 1, 0, 1, 1, 0, 0, '{}', 0)`)
 	ef, err := db.EffectRowByName("Bard_Pep")

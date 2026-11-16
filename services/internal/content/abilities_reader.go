@@ -485,6 +485,7 @@ type ZoneRow struct {
 	ExpireAfterHitsExpr int64
 	ExpireIfExpr        int64
 	TargetingGuid       int64
+	Spawn               string             // contentc version 44: the zone's spawn transform, attachment, actor class and fade time, as JSON
 	Hits                map[string][]int64 // by role: InitialHitsIds, LingeringHitsIds, OnBeginOverlapHitsIds, OnEndOverlapHitsIds, EndHitsIds
 }
 
@@ -492,9 +493,9 @@ type ZoneRow struct {
 func (d *DB) Zone(guid int64) (ZoneRow, error) {
 	var z ZoneRow
 	var global int
-	err := d.sql.QueryRow(`SELECT guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, expire_after_hits_expr, expire_if_expr, targeting_guid
+	err := d.sql.QueryRow(`SELECT guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, expire_after_hits_expr, expire_if_expr, targeting_guid, spawn
 		FROM ab_zone WHERE guid = ?`, guid).
-		Scan(&z.Guid, &z.Name, &z.LifeTime, &z.TickRate, &global, &z.Charges, &z.DelayTime, &z.DelayType, &z.Speed, &z.ExpireAfterHitsExpr, &z.ExpireIfExpr, &z.TargetingGuid)
+		Scan(&z.Guid, &z.Name, &z.LifeTime, &z.TickRate, &global, &z.Charges, &z.DelayTime, &z.DelayType, &z.Speed, &z.ExpireAfterHitsExpr, &z.ExpireIfExpr, &z.TargetingGuid, &z.Spawn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ZoneRow{}, fmt.Errorf("content: no ab_zone %d", guid)
 	}

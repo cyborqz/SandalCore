@@ -447,6 +447,9 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 		return hs, pf.err
 	}
 	zoneLists := []string{"InitialHitsIds", "LingeringHitsIds", "OnBeginOverlapHitsIds", "OnEndOverlapHitsIds", "EndHitsIds"}
+	// contentc version 44: the targeting records the zones' volumes use are written too (a zone's LingeringHitTargetingInfoId names one): the
+	// runtime needs its shape and size to know who stands in the zone.
+	targetingSet := map[int64]bool{}
 	addZone := func(g int64) (map[string][]int64, error) {
 		if g == 0 {
 			return nil, nil
@@ -461,11 +464,17 @@ func buildAbilities(w *writer, src *source, opt *Options, meta map[string]string
 		for _, role := range zoneLists {
 			out[role] = refGuids(zf, role)
 		}
+		if tg, _ := zf.id("LingeringHitTargetingInfoId"); tg != 0 {
+			if b.targetingRows[tg] == nil {
+				return nil, fmt.Errorf("%s names LingeringHitTargetingInfoId %d, which is not a row", zf.where, tg)
+			}
+			targetingSet[tg] = true
+		}
 		return out, zf.err
 	}
 	// reactions (version 35): an effect, a hit or an ability that carries one brings it, the hits it applies and what those reach; a hit's cooldown
 	// modifiers and the targeting records of its recursive hits come with it
-	reactionSet, cooldownSet, targetingSet := map[int64]bool{}, map[int64]bool{}, map[int64]bool{}
+	reactionSet, cooldownSet := map[int64]bool{}, map[int64]bool{}
 	addReaction := func(g int64) error {
 		if g == 0 || reactionSet[g] {
 			return nil
@@ -1219,6 +1228,54 @@ func (b *abBuilder) writeProjectile(r *designdb.Row) error {
 	return nil
 }
 
+// zoneSpawn says how a lingering zone's actor is made: where it stands (its origin and the offset from it), what it is attached to, its class, its FX and how long its
+// fade-out lasts.  One JSON column on ab_zone (contentc version 44); a reader of an older file has none and keeps its defaults (the caster, the base class).  A record
+// without a SpawnTransform or an FX (the unit tests' synthetic zones) has the defaults; a field that is there and of another kind is an error.
+func zoneSpawn(f *fields) (string, error) {
+	var origin, socket, orientation string
+	scale, relative := [3]float64{1, 1, 1}, [3]float64{}
+	if v, ok := f.get("SpawnTransform"); ok {
+		s, isStruct := v.(designdb.Struct)
+		if !isStruct {
+			return "", fmt.Errorf("%s: field SpawnTransform is %T, want struct", f.where, v)
+		}
+		sf := newFields(f.where+": SpawnTransform", s)
+		origin, socket, orientation = sf.optStr("OriginLocation"), sf.optStr("OriginLocationSocket"), sf.optStr("OriginOrientation")
+		if _, has := sf.get("RelativeScale"); has {
+			scale = readVec3(sf, "RelativeScale", [3]string{"X", "Y", "Z"})
+		}
+		if _, has := sf.get("RelativeLocation"); has {
+			relative = readVec3(sf, "RelativeLocation", [3]string{"X", "Y", "Z"})
+		}
+		if sf.err != nil {
+			return "", sf.err
+		}
+	}
+	var fx int64
+	if _, has := f.get("LingeringFXId"); has {
+		fx, _ = f.id("LingeringFXId")
+	}
+	spawn := map[string]any{
+		"origin":            origin,
+		"origin_socket":     socket,
+		"orientation":       orientation,
+		"relative_location": relative,
+		"attach":            f.optStr("AttachType"),
+		"attach_socket":     f.optStr("AttachSocketName"),
+		"class":             f.optStr("LingeringEffectClass"),
+		"deactivate_fx":     f.optNumber("DeactivateFXTimeBeforeDestroy"),
+		"net_cull":          f.optNumber("NetCullDistanceOverride"),
+		"fx":                fx,
+		"no_first_tick":     f.optBool("bNoHitOnFirstTick"),
+		"scale":             scale,
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	b, err := json.Marshal(spawn)
+	return string(b), err
+}
+
 func (b *abBuilder) writeZone(r *designdb.Row, roles []string) error {
 	f := newFields(fmt.Sprintf("LingeringEffect %s (%d)", r.Name, r.Guid), r.Fields)
 	life, tick, delay, speed := f.float("LifeTime"), f.float("TickRate"), f.float("DelayTime"), f.float("Speed")
@@ -1229,6 +1286,10 @@ func (b *abBuilder) writeZone(r *designdb.Row, roles []string) error {
 	if f.err != nil {
 		return f.err
 	}
+	spawn, err := zoneSpawn(f)
+	if err != nil {
+		return err
+	}
 	h, err := b.exprs.id(expireHits, nil)
 	if err != nil {
 		return err
@@ -1237,8 +1298,8 @@ func (b *abBuilder) writeZone(r *designdb.Row, roles []string) error {
 	if err != nil {
 		return err
 	}
-	if err := b.w.exec(`INSERT INTO ab_zone (guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, expire_after_hits_expr, expire_if_expr, targeting_guid)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.Guid, r.Name, life, tick, b2i(global), charges, delay, delayType, speed, h, x, targeting); err != nil {
+	if err := b.w.exec(`INSERT INTO ab_zone (guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, expire_after_hits_expr, expire_if_expr, targeting_guid, spawn)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.Guid, r.Name, life, tick, b2i(global), charges, delay, delayType, speed, h, x, targeting, spawn); err != nil {
 		return err
 	}
 	for _, role := range roles {

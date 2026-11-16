@@ -118,6 +118,11 @@ struct AbilityEvent {
     std::vector<bootstrap::ZoneOp> zones;
 };
 
+/// Where a ServerTriggerAbility aimed the ability when the call names a place (its TargetTransforms: a click on the ground), in the world's cm.
+struct AimPlace {
+    double x = 0, y = 0, z = 0;
+};
+
 /// What a ServerTriggerAbility says besides the ability and the instance: the Dodge's montage and MeshYaw come from them.
 struct TriggerInfo {
     int32_t  animation_index = 0;
@@ -128,6 +133,8 @@ struct TriggerInfo {
     std::shared_ptr<const ItemCast> item_cast;
     /// plan E1, stage 3: the actors the call's Targets name other than the caster's own components, as the session resolved them (an NPC's ObjectId).
     std::vector<uint64_t> target_actors;
+    /// The place the call aimed at when it names one (TargetTransforms): a ground-targeted zone stands there.  Empty: the call gives no place.
+    std::optional<AimPlace> place;
     /// The server starts the ability itself (an emote word): the client began no instance of it, so a refusal sends it no ClientEndAbility.
     bool by_server = false;
 };

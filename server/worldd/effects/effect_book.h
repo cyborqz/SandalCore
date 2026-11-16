@@ -287,6 +287,17 @@ public:
         return n;
     }
 
+    /// The stacks of an effect record that one instigator put on the holder (0: he put none): the instances of two casters do not mix, and a pet's
+    /// instance counts for its owner (the instigator is the owner; `pet` names the pet that put it).
+    int stacks_from(int64_t effect_guid, uint64_t instigator) const {
+        int n = 0;
+        if (instigator == 0) return 0;
+        for (const Instance& e : items_) {
+            if (e.def->row.guid == effect_guid && e.instigator == instigator) n += e.stacks;
+        }
+        return n;
+    }
+
     /// Adds the damage a hit took from the holder to the instance's accumulation (the fragility that ends it at a share of the instigator's Health); the total after it (0: no such instance).
     double add_damage_taken(int64_t key, double amount) {
         for (Instance& e : items_) {

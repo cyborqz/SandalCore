@@ -372,6 +372,8 @@ public:
     static constexpr int    kZoneExtraRequests = 8;
     /// The most zone actors alive at once.
     static constexpr size_t kMaxZones = 16;
+    /// The most actors one zone's tick looks at (a bound of the query, not a number of the data).
+    static constexpr size_t kMaxZoneTargets = 40;
     /// How many ClientInstanceIds are remembered to drop a replayed one.
     static constexpr size_t kRecentIds = 256;
     /// The most effect instances at once (a hostile ability list cannot grow it without bound), and the most steps one advance runs.
@@ -768,6 +770,7 @@ private:
         bool                                  target = false;     // the call named a target (the caster)
         bool                                  self_reachable = true;   // E1 stage 3 fix: the ability's mask names Self, Ally, Party or Raid (a projectile may land on the caster)
         std::vector<uint64_t>                 target_actors;      // plan E1, stage 3: the other actors the call named (validated)
+        std::optional<AimPlace>               place;              // the place the call aimed at (a ground-targeted cast), when it names one
         bool                                  loop = false;       // a song or a toggle: the item, the cost and the cooldown only
         double                                cooldown = 0;
         int                                   max_charges = 1;
@@ -800,8 +803,8 @@ private:
         double                      next_tick = 0;                // infinity: none
         std::vector<stats::EffectMod> mods;                       // one stack's values
     };
-    /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect) and the infinite effects its overlap hits
-    /// put on the caster, which end with the dance.
+    /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect, the Vine Field's circle), the place the
+    /// data puts it and the hits it lands on whoever stands in it.  The infinite effects its overlap hits put on the caster end with the dance.
     struct Zone {
         enum class State : uint8_t { Pending, Open, Ended };
         int64_t id = 0;
@@ -811,6 +814,28 @@ private:
         double  end_at = 0;            // the dance ends: the effects go (open + the zone's life, or an interrupt)
         double  fade_at = -1, close_at = -1;
         State   state = State::Pending;
+        /// Where the data puts the actor: the caster (Instigator), the place the call aimed at (HitLocation), the actor a hit landed on (HitLocation), or
+        /// the source.  `placed` is false for a zone whose data the file does not say: its actor opens at the caster, as before.
+        bool    placed = false;
+        double  x = 0, y = 0, z = 0, yaw = 0;
+        uint64_t anchor = 0;           // the actor the place is taken from at the open (0: the caster, or the hit's target)
+        bool    attached = true;       // the actor is attached to the caster's mesh
+        bool    visible = true;        // false: the zone runs on the server only (its circle is the client's own effect, not a zone actor)
+        /// The volume and the ticks: the zone record's life, its tick rate and its role hits (what they reach is the hit's own mask).
+        content::ZoneVolume volume;
+        double  tick = 0;              // seconds between ticks (0: the zone lands no tick, only its overlap and end hits)
+        double  next_tick = -1;        // the next tick's moment (-1: none due)
+        bool    no_first_tick = false; // bNoHitOnFirstTick: the first tick lands no Lingering hit
+        std::set<uint64_t> inside;     // the actors that stood in it at the last look: a new one takes the OnBeginOverlap hits
+        /// The ticks count from the moment its hits begin (`base`: its open, or the end of its DelayTime), and the tick `tick_no` is due at base + tick_no x tick, so that the
+        /// moments do not drift by the rounding of repeated sums (a zone of 10 s at 0.2 s lands 50 ticks, whatever second it opened at).
+        double  base = 0;
+        int64_t tick_no = 1;
+        bool    armed = true;          // false until its DelayTime is over (a trap: the Bear Trap's base zone waits 2 s): it lands no hit before
+        int     expire_after = 0;      // ExpireAfterAppliedHits: the zone ends once this many of its hits have landed (a trap: 1); 0: none
+        int     applied = 0;           // the hits of its lists that have landed so far
+        /// The infinite effects its hits put on others (an aura's silence, a dance's mark), as (actor, effect): they end when the actor leaves the zone and when the zone ends.
+        std::set<std::pair<uint64_t, int64_t>> held;
     };
     struct Group {
         int                  max_charges = 1;
@@ -991,8 +1016,39 @@ void   step_multi_hit(Cast& cast, double t);
     void   step_loop(Cast& cast, double t);
     /// The zones of a cast's ability, spawned at its cost step; the caster's overlap hits are applied by the caller with `zone_owner_` set.
     void   spawn_zones(const Cast& cast, double open_at, double end_at);
+    /// The zones a cast opens: the ones its ability lists that no hit of it names (the dances), and the ones its own hits name when one of those hits holds for the caster
+    /// (the Magma Field's three zones are told apart by the talent each spawn hit asks for).
+    std::vector<int64_t> zones_of_cast(const abilities::AbilityDef& def);
     void   run_zone(size_t index, double t);
+    /// The index of the zone with the runtime's id (-1: it is gone), for the steps a hit may spawn or drop another zone in.
+    int    zone_index(int64_t id) const;
     double zone_due(const Zone& z) const;
+    /// Where the zone's actor stands when its data says (its SpawnTransform's origin): the caster (an actor at the caster's own place), the cast's
+    /// target or the place the call aimed at (HitLocation), or the source.  A zone whose data the file does not hold is not placed: its actor opens at the caster.
+    void   place_zone(Zone& z, double t);
+    /// Who stands in the zone now: the creatures and the other players whose bodies touch its volume, and the caster himself when he does (alive).
+    std::vector<uint64_t> zone_standers(const Zone& z) const;
+    /// One of the zone's role lists (InitialHitsIds, LingeringHitsIds, OnBeginOverlapHitsIds, EndHitsIds) on the actors it reaches, through the ordinary hit path.
+    /// The hits that landed are counted on the zone (ExpireAfterAppliedHits) and the infinite effects they put on others are kept with it.
+    void   zone_land(int64_t zone_id, int64_t zone_guid, int64_t ability, const char* role, const std::vector<uint64_t>& actors, double t);
+    /// The first look of a zone whose hits begin now: the actors already inside take its Initial hits and, as the first overlap, its OnBeginOverlap hits.
+    void   zone_first_look(int64_t zone_id, double t);
+    /// A zone that has landed as many hits as its record's ExpireAfterAppliedHits allows ends at `t`.
+    void   zone_check_expiry(int64_t zone_id, double t);
+    /// Whether a cast of the ability opens the zone itself (it lists it, or one of its own hits names it): a hit of it that lands does not open it again.
+    bool   cast_opens_zone(const abilities::AbilityDef& def, int64_t zone) const;
+    /// One tick of an open zone: the standers that entered take its overlap hits, then its Lingering hits.
+    void   tick_zone(size_t index, double t);
+    /// The end of an open zone (its life, its applied-hit limit, the caster's death): its End hits land when `end_hits`, the effects it put on others and on the caster go, and its
+    /// actor fades and closes.
+    void   end_zone(int64_t zone_id, double t, bool end_hits, const std::string& note);
+    /// The effects a zone's hits put on others (infinite ones) end: `leavers` only (the actors that left it), or every one when `leavers` is null.
+    void   release_zone_effects(int64_t zone_id, const std::vector<uint64_t>* leavers, double t);
+    /// The oldest zone goes at once when too many are alive: its effects end and its actor closes.
+    void   drop_zone(size_t index, double t);
+    /// The zones a hit spawns when it lands (its LingeringZonesIds), at the actor it landed on; a zone the ability itself already opens with its cast (listed, or named by its own
+    /// hits) is not opened twice.
+    void   spawn_hit_zones(const abilities::HitDef& hit, const abilities::AbilityDef* ability, uint64_t target, double t);
     /// The infinite effects the zone's hits put on the caster go: their Expire and End hits run.
     void   end_zone_effects(bootstrap::AbilityChange& c, int64_t zone_id, double t);
 

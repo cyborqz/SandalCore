@@ -37,3 +37,8 @@
 #include "combat_unreachable_tests.inc"
 #include "combat_stealth_tests.inc"
 #include "combat_hit_checks_tests.inc"
+#include "combat_ground_circles_tests.inc"
+#include "combat_ground_circles_review_tests.inc"
+#include "combat_ground_circles_end_tests.inc"
+#include "combat_fixes_tests.inc"
+#include "combat_fixes_review_tests.inc"

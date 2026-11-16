@@ -129,6 +129,7 @@ struct LingeringSpec {
     int64_t                    source = 0;                         // SourceRecordGuid: the ability
     double                     x = 0, y = 0, z = 0;                // where it opens, cm
     double                     yaw_degrees = 0;
+    bool                       attached = true;                    // the data's AttachedInstigator: on the pawn (a dance, an aura); false: it stands where it opens (a ground circle)
     std::optional<repl::QuantVec> velocity;                        // SerializeNewActor's velocity as the wire holds it (the retail actor had one; the session sends none)
     uint32_t                   effect_guid[4] = {0, 0, 0, 0};      // LingeringEffectGuid (an FGuid of its own)
     uint32_t                   instance_guid[4] = {0, 0, 0, 0};    // LingeringZoneInstGuid
@@ -874,6 +875,7 @@ private:
     struct EffectActor {
         repl::Actor       actor;
         repl::ActorShadow shadow;
+        bool              attached = true;   // its data attaches it to the pawn: its open carries the mesh export (a detached one names no component)
     };
     std::map<uint64_t, EffectActor> effect_actors_;
     emit::FIntrepidNetworkGUID      mesh_;   // the pawn's CharacterMesh0 the lingering actors attach to (the session's one guid)

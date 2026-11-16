@@ -34,8 +34,9 @@ import (
 // 42 added the knock-back tables. 43 added item_reward_selection (the random coffers and choose-one
 // selectors contributed in #16); the comments of that code that say "version 42" were written before
 // 42 was taken. 44 added item_learn (the recipes a LearnRecipes item teaches) and kept the certification
-// dialogue actions' profession and Promote / Demote.
-const Version = "44"
+// dialogue actions' profession and Promote / Demote. 45 added the lingering zones' spawn (their origin,
+// attachment, actor class and fade time in ab_zone.spawn) and the targeting records the zones' volumes use.
+const Version = "45"
 
 // Options say what Build reads and writes.
 type Options struct {

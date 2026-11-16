@@ -223,13 +223,28 @@ void CombatWorld::remove_npc_effect(uint64_t npc_actor, int64_t effect_guid, dou
     }
 }
 
+void CombatWorld::remove_npc_effect_from(uint64_t npc_actor, int64_t effect_guid, uint64_t instigator, double now) {
+    const auto found = npcs_.find(npc_actor);
+    if (found == npcs_.end()) return;
+    Npc& n = *found->second;
+    const std::vector<effects::Instance> held = n.book.instances();
+    for (const effects::Instance& e : held) {
+        if (e.def->row.guid != effect_guid || e.instigator != instigator || n.dead) continue;
+        effects::Book::Changes changes;
+        if (!n.book.remove(e.key, changes)) continue;
+        send_effects(n, changes);
+        run_effect_hits(n, e, kRemovePhases, 2, now);
+    }
+}
+
 namespace {
 
-/// What a creature holds, for the reads of a hit that lands on it (GetEffectRemainingDuration(GetTarget(), effect)).
+/// What a creature holds, for the reads of a hit that lands on it (GetEffectRemainingDuration(GetTarget(), effect), GetEffectCountByRecordAndInstigator).
 class HeldView final : public TargetEffects {
 public:
     HeldView(const CombatWorld& world, uint64_t holder, double at) : world_(world), holder_(holder), at_(at) {}
     double remaining(int64_t effect_guid) const override { return world_.effect_remaining(holder_, effect_guid, at_); }
+    double stacks_from(int64_t effect_guid, uint64_t instigator) const override { return world_.effect_stacks_from(holder_, effect_guid, instigator); }
 
 private:
     const CombatWorld& world_;
@@ -313,6 +328,8 @@ void CombatWorld::land_for_player(uint64_t by, uint64_t target, const abilities:
     if (src.ability) meta.ability_tags = src.ability->row.tags;
     const HeldView held_view(*this, target, now);
     meta.target_effects = &held_view;
+    meta.instigator_actor = by;
+    meta.target_actor = target;
     if (!src.skip_requirement && !resolver_.requirement_holds(port->fighter(), n, hit, meta)) return;
     Resolved r;
     std::string why;

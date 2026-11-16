@@ -135,7 +135,12 @@ func abilitySource() *source {
 	src.rows["SkillRankRecordBase"] = []designdb.Row{mkRow(abRank, "Bard_Nimble_Skill", st{
 		"AbilityIdId": idv(abNimble, content.TypeAbility, "None"), "EffectIdId": idv(abEffPassive, content.TypeEffect, "None"),
 	})}
-	src.rows["AbilityTargetingRecordBase"] = []designdb.Row{mkRow(abTarget, "Bard_Dance_Nimble_Targeting", st{})}
+	// the dance's zone names this record as its volume (LingeringHitTargetingInfoId): the shape of a real record, a sphere of 500 cm (every volume holds a BoxExtent, 24 by default)
+	src.rows["AbilityTargetingRecordBase"] = []designdb.Row{mkRow(abTarget, "Bard_Dance_Nimble_Targeting", st{
+		"HurtBoxInfo": st{"TargetingVolumes": list{st{"id": "EHitboxShape::SHAPE_Sphere", "SphereRadius": float32(500), "Angle": float32(90),
+			"BoxExtent": st{"X": float32(24), "Y": float32(24), "Z": float32(24)}, "Location": st{"X": float32(0), "Y": float32(0), "Z": float32(0)}}}},
+		"LockOnInfo": st{}, "Sorting": list{},
+	})}
 	// the cooldown change the Nimble ability lists (abBase+99)
 	src.rows["ModifyCooldownRecordBase"] = []designdb.Row{mkRow(abBase+99, "Bard_Nimble_Cooldown", st{"DeltaSeconds": "", "ShouldTriggerCooldown": "", "TargetCooldownAbility": list{}})}
 
@@ -166,7 +171,12 @@ func abilitySource() *source {
 		"LifeTime": float32(30), "TickRate": float32(1.5), "bUseGlobalTickRate": true, "NumberOfCharges": int64(1), "DelayTime": float32(0),
 		"DelayType": "ELingeringZoneTriggerDelay::DELAY_Time", "Speed": float32(0), "ExpireAfterAppliedHits": "", "ExpireIfExpressionTrue": "",
 		"LingeringHitTargetingInfoId": targetID(abTarget),
-		"InitialHitsIds":              list{}, "LingeringHitsIds": list{hitID(abHitTick)}, "OnBeginOverlapHitsIds": list{hitID(abHitZone)},
+		// contentc version 44: how the actor is made (the real records hold all of these)
+		"SpawnTransform": st{"OriginLocation": "EAbilitySystemOrigin::HitLocation", "OriginLocationSocket": "None", "OriginOrientation": "EAbilitySystemOrientation::SourceToOrigin",
+			"RelativeLocation": st{"X": float32(100), "Y": float32(0), "Z": float32(0)}, "RelativeScale": st{"X": float32(1), "Y": float32(1), "Z": float32(1)}},
+		"AttachType": "EAbilitySystemAttachType::None", "AttachSocketName": "None", "LingeringEffectClass": "/Script/GameSystemsPlugin.AoCAbilityLingeringEffect",
+		"LingeringFXId": idv(abBase+60, 42595794548453256, "Nimble_Zone_FX"), "DeactivateFXTimeBeforeDestroy": float32(3), "NetCullDistanceOverride": float32(3000), "bNoHitOnFirstTick": true,
+		"InitialHitsIds": list{}, "LingeringHitsIds": list{hitID(abHitTick)}, "OnBeginOverlapHitsIds": list{hitID(abHitZone)},
 		"OnEndOverlapHitsIds": list{}, "EndHitsIds": list{},
 	})}
 	animMontage := func(path, expr string) st {
@@ -425,6 +435,33 @@ func TestAbilityTablesOfASyntheticBard(t *testing.T) {
 	if err != nil || z.TickRate != 1.5 || !z.UseGlobalTickRate || z.TargetingGuid != abTarget ||
 		!reflect.DeepEqual(z.Hits, map[string][]int64{"LingeringHitsIds": {abHitTick}, "OnBeginOverlapHitsIds": {abHitZone}}) {
 		t.Errorf("zone = %+v, %v", z, err)
+	}
+	// the zone's spawn column holds the record's origin, attachment, class, FX, fade time and first-tick rule, and the zone's targeting record is written (its volume)
+	var spawn struct {
+		Origin      string     `json:"origin"`
+		Orientation string     `json:"orientation"`
+		Relative    [3]float64 `json:"relative_location"`
+		Attach      string     `json:"attach"`
+		Class       string     `json:"class"`
+		FX          int64      `json:"fx"`
+		Deactivate  float64    `json:"deactivate_fx"`
+		NetCull     float64    `json:"net_cull"`
+		NoFirstTick bool       `json:"no_first_tick"`
+		Scale       [3]float64 `json:"scale"`
+	}
+	if err := json.Unmarshal([]byte(z.Spawn), &spawn); err != nil || spawn.Origin != "EAbilitySystemOrigin::HitLocation" || spawn.Orientation != "EAbilitySystemOrientation::SourceToOrigin" ||
+		spawn.Relative != [3]float64{100, 0, 0} || spawn.Attach != "EAbilitySystemAttachType::None" || spawn.Class != "/Script/GameSystemsPlugin.AoCAbilityLingeringEffect" ||
+		spawn.FX != abBase+60 || spawn.Deactivate != 3 || spawn.NetCull != 3000 || !spawn.NoFirstTick || spawn.Scale != [3]float64{1, 1, 1} {
+		t.Errorf("the zone's spawn = %s (%+v, %v)", z.Spawn, spawn, err)
+	}
+	if n := scalarInt(t, db, `SELECT count(*) FROM ab_targeting_def WHERE guid = ?`, abTarget); n != 1 {
+		t.Errorf("the zone's targeting record is written %d times, want once", n)
+	}
+	var shape, volumes string
+	var radius float64
+	if err := db.SQL().QueryRow(`SELECT shape, radius, volumes FROM ab_targeting_def WHERE guid = ?`, abTarget).Scan(&shape, &radius, &volumes); err != nil ||
+		shape != "EHitboxShape::SHAPE_Sphere" || radius != 500 || !strings.Contains(volumes, `"BoxExtent"`) {
+		t.Errorf("the zone's volume = %s, %v cm, %s (%v): want the sphere of 500 cm with its volumes as the record holds them", shape, radius, volumes, err)
 	}
 
 	// effects and stat mods; the terms of a StatMod are in the value's expression

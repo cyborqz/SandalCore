@@ -1264,6 +1264,8 @@ void CombatWorld::deliver_hit(Npc& n, PlayerPort& port, const abilities::Ability
     meta.source_type = projectile != 0 ? content::kSourceTypeProjectile : content::kSourceTypeAbility;
     meta.source_guid = projectile != 0 ? projectile : ability.row.guid;
     meta.ability_tags = ability.row.tags;
+    meta.instigator_actor = n.actor_id;
+    meta.target_actor = port.actor_id();
     Resolved r;
     std::string why;
     if (!resolver_.resolve(n, port.fighter(), *hit, meta, r, why)) {
@@ -1689,6 +1691,7 @@ class BookView final : public TargetEffects {
 public:
     BookView(const effects::Book& book, double now) : book_(book), now_(now) {}
     double remaining(int64_t effect_guid) const override { return book_.remaining(effect_guid, now_); }
+    double stacks_from(int64_t effect_guid, uint64_t instigator) const override { return book_.stacks_from(effect_guid, instigator); }
 
 private:
     const effects::Book& book_;
@@ -1968,6 +1971,11 @@ double CombatWorld::effect_remaining(uint64_t npc_actor, int64_t effect_guid, do
     return it == npcs_.end() ? 0.0 : it->second->book.remaining(effect_guid, now);
 }
 
+int CombatWorld::effect_stacks_from(uint64_t npc_actor, int64_t effect_guid, uint64_t instigator) const {
+    const auto it = npcs_.find(npc_actor);
+    return it == npcs_.end() ? 0 : it->second->book.stacks_from(effect_guid, instigator);
+}
+
 int CombatWorld::effect_stacks(uint64_t npc_actor, int64_t effect_guid) const {
     const auto it = npcs_.find(npc_actor);
     return it == npcs_.end() ? 0 : it->second->book.stacks_of(effect_guid);
@@ -2022,6 +2030,8 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
         meta.source_guid = e.def->row.guid;
         const BookView view(n.book, at);
         meta.target_effects = &view;
+        meta.instigator_actor = e.instigator;
+        meta.target_actor = n.actor_id;
         meta.cannot_miss = tick_phase;   // the tick of a damage over time never misses (none of retail's recorded ticks did); it can still be a critical hit
         if (!resolver_.requirement_holds(from, n, *hit, meta)) continue;
         Resolved r;
@@ -2445,5 +2455,6 @@ void CombatWorld::tick(double now) {
 #include "combat/combat_knockback.inc"   // what throws, pushes and pulls a creature (move_by_hit, track_push, push_wire, origin_actors)
 #include "combat/combat_resist.inc"      // a crowd control the data's UniversalResistChance throws off (takes_resist_roll, effect_resisted)
 #include "combat/alert_effects.inc"      // where an alert's hits land and the effects they put on the caster and its allies
+#include "combat/combat_zone_area.inc"   // who stands in a lingering zone (actors_in_area)
 
 }  // namespace aoc::worldd::combat

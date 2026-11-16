@@ -213,11 +213,20 @@ void PlayerSession::flush_zones(Connection& conn) {
             spec.pawn_mesh = *pawn_mesh_;
             spec.zone = op.zone;
             spec.source = op.ability;
-            const GoodPosition at = checker_.good();
-            spec.x = at.x;
-            spec.y = at.y;
-            spec.z = at.z;
-            spec.yaw_degrees = at.yaw_degrees;
+            // where the zone's data puts it (the target's point, the place the call aimed at); a zone at the caster keeps the checker's ground position
+            if (op.placed) {
+                spec.x = op.x;
+                spec.y = op.y;
+                spec.z = op.z;
+                spec.yaw_degrees = op.yaw_degrees;
+            } else {
+                const GoodPosition at = checker_.good();
+                spec.x = at.x;
+                spec.y = at.y;
+                spec.z = at.z;
+                spec.yaw_degrees = at.yaw_degrees;
+            }
+            spec.attached = op.attached;
             if (zone_random_ == 0) zone_random_ = 0x9E3779B97F4A7C15ull ^ (static_cast<uint64_t>(pb_.setup().player_id) * 0xBF58476D1CE4E5B9ull) ^ 1;
             const auto next_word = [&] {   // SplitMix64: the FGuids of an actor are random words
                 zone_random_ += 0x9E3779B97F4A7C15ull;
@@ -239,14 +248,14 @@ void PlayerSession::flush_zones(Connection& conn) {
             w.id = spec.actor.ObjectId;
             w.kind = world::ActorKind::Effect;
             w.actor = std::move(*actor);
-            w.x = at.x;
-            w.y = at.y;
-            w.z = at.z;
-            w.yaw_degrees = at.yaw_degrees;
+            w.x = spec.x;
+            w.y = spec.y;
+            w.z = spec.z;
+            w.yaw_degrees = spec.yaw_degrees;
             w.never_dormant = true;
             w.owner = static_cast<uint64_t>(pb_.setup().player_id);
             w.npc.source = world::Source::Runtime;
-            w.open_exports.push_back(pb_.lingering_mesh_export(*pawn_mesh_));
+            if (spec.attached) w.open_exports.push_back(pb_.lingering_mesh_export(*pawn_mesh_));
             if (!registry_->add(std::move(w))) {
                 spdlog::warn("[session] {}: the registry does not take the zone actor of ability {}: dropped", name(), op.ability);
                 continue;
@@ -430,6 +439,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
         info.input_y = t->input_y;
         info.target_count = t->target_count;
         info.target_actors = actors_of(t->targets, t->inline_targets);
+        if (trigger_place) info.place = AimPlace{trigger_place->x, trigger_place->y, trigger_place->z};
         info.item = t->item_slot != -1;
     } else if (const auto prefix = repl::read_trigger_prefix(bunch.data.data(), bunch.data.size(), rpc.call.param_pos,
                                                              rpc.call.param_pos + rpc.call.param_bits)) {

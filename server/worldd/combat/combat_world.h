@@ -28,6 +28,7 @@
 #include "combat/npc_stats.h"
 #include "combat/origin_frame.h"
 #include "combat/stealth.h"
+#include "combat/zone_area.h"
 #include "effects/effect_book.h"
 #include "nav/area_nav.h"
 #include "npc/ai/npc_ai.h"
@@ -325,6 +326,8 @@ public:
     /// The same as enemies_around, with nothing on the ground in the way: a body counts when any part of it is inside the sphere, whatever stands between (a ball that flies through walls: the Mage's
     /// Ball Lightning).  Nearest to the centre first, at most `max`; the distance is from the centre.
     std::vector<GatheredTarget> enemies_touching(const Fighter& from, const Vec3& centre, double radius_cm, size_t max);
+    /// The creatures and the other players whose bodies touch a lingering zone around `centre`, nearest first, each with its side of `from` (combat/combat_zone_area.inc).
+    std::vector<ZoneTarget> actors_in_area(const Fighter& from, const Vec3& centre, const ZoneArea& area, size_t max);
     /// The height of the ground under (x, y): the walkable floor nearest to `z_hint`, or the landscape; false where the world knows none (no ground data).
     bool ground_height(double x, double y, double z_hint, double* z) const;
     /// The ObjectId of the NPC target's collision cylinder: what the ability items name as Targets and the confirmations export as the actor's
@@ -345,6 +348,8 @@ public:
     void apply_effects(uint64_t npc_actor, uint64_t instigator, const std::vector<effects::Applied>& effects, double now);
     /// Seconds left of an effect record on an NPC (0: it is not on).
     double effect_remaining(uint64_t npc_actor, int64_t effect_guid, double now) const;
+    /// The stacks of an effect record that one instigator put on an NPC (0: he put none on it): GetEffectCountByRecordAndInstigator(GetTarget(), effect, GetInstigator()).
+    int    effect_stacks_from(uint64_t npc_actor, int64_t effect_guid, uint64_t instigator) const;
     /// How many stacks of an effect record an NPC holds, and how many instances of effects it holds in all (for the tests and the log).
     int    effect_stacks(uint64_t npc_actor, int64_t effect_guid) const;
     size_t effect_count(uint64_t npc_actor) const;
@@ -357,6 +362,8 @@ public:
     void seed_own_effect(uint64_t npc_actor, int64_t effect_guid);
     /// Takes every instance of the effect off the creature (Dimensional Bolt's mark, spent by its second press), and what a hit takes off it (its EffectsToRemoveIds, or its filter).
     void remove_npc_effect(uint64_t npc_actor, int64_t effect_guid, double now);
+    /// ... the same for the instances that one instigator put on it (a lingering zone's infinite effect, when the creature leaves the zone).
+    void remove_npc_effect_from(uint64_t npc_actor, int64_t effect_guid, uint64_t instigator, double now);
     void remove_effects_from_npc(uint64_t npc_actor, const abilities::HitDef& hit, double now);
     /// Whether an NPC or a player carries an effect record now: a creature's own effects (the ones its abilities put on it and its Blueprint's from spawn) and the effects the world
     /// keeps on it, or a player's own effect state.  What a tree's "carries effect E" condition asks about the creature and its target.

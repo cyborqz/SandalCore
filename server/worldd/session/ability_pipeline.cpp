@@ -764,6 +764,7 @@ class PortEffects final : public combat::TargetEffects {
 public:
     PortEffects(combat::HitPort& port, uint64_t actor, double t) : port_(port), actor_(actor), t_(t) {}
     double remaining(int64_t effect_guid) const override { return port_.effect_remaining(actor_, effect_guid, t_); }
+    double stacks_from(int64_t effect_guid, uint64_t instigator) const override { return port_.effect_stacks_from(actor_, effect_guid, instigator, t_); }
 
 private:
     combat::HitPort& port_;
@@ -1654,6 +1655,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         ask.active_is_target = id == active;
         ask.active_in_hit = active_named;
         ask.target_effects = &held;
+        ask.instigator_actor = combat_->self().id();
+        ask.target_actor = id;
         Host ask_host(*this);
         ask_host.set_context(&ask);
         double v = 0;
@@ -1689,6 +1692,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     if (landed) *landed = closest != 0;
     std::vector<bootstrap::HitTargetOut> outs;
     HitEvent event;   // reactions: what this hit did to the targets it reached
+    bool zones_opened = false;
     for (const uint64_t id : on) {
         if (static_cast<double>(outs.size()) >= max_targets) break;
         const combat::TargetInfo ti = combat_->inspect(id);
@@ -1711,6 +1715,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         meta.target_is_closest = id == closest;
         const PortEffects target_effects(*combat_, id, t);   // what the target holds (GetEffectRemainingDuration(GetTarget(), ...))
         meta.target_effects = &target_effects;
+        meta.instigator_actor = combat_->self().id();
+        meta.target_actor = id;
         combat::Resolved r;
         if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, r, why)) {
             if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on another actor: {}", hit.row.name, why);
@@ -1723,6 +1729,11 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         origin.ability_tags = meta.ability_tags;
         const combat::Delivery d = combat_->deliver_from(id, r, t, origin);
         if (!d.applied) continue;
+        // a hit that leaves a lasting area on the ground (LingeringZonesIds): one zone opens where it landed, whatever the number of targets it reached
+        if (!zones_opened) {
+            zones_opened = true;
+            spawn_hit_zones(hit, ability, id, t);
+        }
         if (hit.row.name == "Summoner_Transpose") transpose_with_ = id;   // (TeleportId: bSwapLocationWithTarget; the session moves the two)
         event.targets.push_back(id);
         event.flags = static_cast<uint8_t>(event.flags | d.flags);
@@ -1858,11 +1869,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         h.response = src.response;
         confirmations_.push_back(std::move(h));
     };
-    // A hit the client asked for or predicted is always confirmed; one the server makes by itself (a reaction's) only when there is something to show: a number, or an effect to
-    // play [R: the retail confirmations of a reaction's effect-only hit: none when it applied].  Its reactions still see it land.
+    // A hit the client asked for or predicted is always confirmed; one the server makes by itself (a reaction's, a zone's own tick) only when there is something to show: a
+    // number, or an effect to play [R: the retail confirmations of a reaction's effect-only hit: none when it applied; a zone's snare, apply and burning hits: none].
+    // Its reactions still see it land.
     bool shows = hit.row.has_fx;
     for (const bootstrap::HitTargetOut& o : outs) shows = shows || !o.mods.empty();
-    if (src.type == content::kSourceTypeReaction && !shows) {
+    if ((src.type == content::kSourceTypeReaction || src.type == content::kSourceTypeZone) && !shows) {
         // nothing to confirm
     } else if (!src.source_is_target) {
         // a bounce's child hit names the enemy the projectile flew from as its Source, and the next enemy is its target [R: the recorded bounce hit of the Throw]
@@ -1880,6 +1892,25 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     }
     // a hit that names itself in its RecursiveHit (Chain Lightning) jumps to the enemies near the one it hit, each with its own confirmation (chain_from)
     chain_from(c, hit, event.targets, t, src, ability);
+    // a client-asked hit that asks for more hits on the actors it reached (RecursiveHit: the Prismatic Beam's Recurse tick carries the beam's damage, its
+    // statuses and its mana; the tick itself has no mod, effect or projectile of its own): the children land on the same targets, with the parent's source,
+    // and are confirmed after it. The children are the server's own: the client never predicted them, and every recorded child confirmation of the beam's
+    // tick (its damage hit, its Fire and Lightning status hits) is predicted on neither side, as a zone's hits are. Only a hit the client asked for runs its
+    // children here: the hits a reaction, an effect, a zone or a projectile's landing run keep the paths they had. A child that fires a projectile, waits a
+    // delay or is a pet's is another path's (chain_from, the delayed hits, the pet hits) and is left to it.
+    if (src.response && carried_depth_ < 2 && hit.mods.empty() && hit.effects.empty() && hit.fires.empty() && hit.row.net_type.find("ServerVerify") != std::string::npos) {
+        HitSource carried = src;
+        carried.autonomous = false;
+        carried.simulated = false;
+        for (const content::RecursiveHitRow& r : hit.recursive) {
+            const HitDef* child = catalog_->hit(r.child_hit);
+            if (!child || r.radius_cm > 0 || child->row.delay_expr != 0 || !child->fires.empty() || child->row.applicable_targets == 4) continue;
+            ++carried_depth_;
+            if ((child->row.applicable_targets & 1) != 0) apply_hit(c, *child, t, true, carried);   // (the tick's own mana heal: the caster)
+            if ((child->row.applicable_targets & 2) != 0 && !event.targets.empty()) apply_hit_on_targets(c, *child, event.targets, t, carried, ability);
+            --carried_depth_;
+        }
+    }
     // reactions: the hit landed (after its confirmations are queued, so a reaction's follow them)
     event.hit = &hit;
     event.ability = ability;
@@ -2214,6 +2245,15 @@ void AbilityPipeline::set_dead(bool dead) {
         // a consumable's cast that had not paid its cost is over with the death and takes nothing from the bag (the session lets its item go): the hit the client asked for
         // before the death must not give the buff of an item that stays where it was
         records_.erase(std::remove_if(records_.begin(), records_.end(), [](const CastRecord& r) { return r.item_cast && r.cost_at < 0; }), records_.end());
+        // the zones go with their caster, as everything a player put on the creatures does when he dies (the world drops it at once) and a dead caster fires nothing: a zone that has not
+        // opened never does, and one that is open ends now with no End hits (its actor fades out and closes as at the end of its life, the effects it put on others and on him go)
+        for (size_t i = zones_.size(); i-- > 0;) {
+            if (zones_[i].state == Zone::State::Pending) {
+                zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(i));
+            } else if (zones_[i].state == Zone::State::Open) {
+                end_zone(zones_[i].id, now_, false, "a zone ends with its caster");
+            }
+        }
     }
 }
 
@@ -3097,36 +3137,68 @@ const char* AbilityPipeline::resolve_formulas(Cast& cast, const AbilityDef& def,
         if (!eval(row.charges_expr, v, why)) return "its charges";
         cast.max_charges = static_cast<int>(std::clamp(std::round(v), 1.0, 99.0));
     }
+    // A cost is a group (cost_ord): an ability's groups can be alternatives (the Cleric's Essence Infusion switches the Divine Power cost on, and its
+    // description says "uses normal resource cost if insufficient Divine Power to cast"), so the cast takes the first enabled group it can pay for,
+    // else the first enabled one (the refusal names that group's cost).
+    struct CostGroup {
+        bool enabled = false;
+        bool triggers_cooldown = false;
+        int  charge = 1;
+        std::vector<std::pair<int64_t, double>> stats;
+        std::vector<std::pair<int64_t, int>>    effects;
+    };
+    std::vector<CostGroup> groups;
     for (size_t i = 0; i < def.costs.size();) {
         const int ord = def.costs[i].cost_ord;
-        const content::CostRow& first = def.costs[i];
-        bool enabled = true;
-        if (!eval_bool(first.enabled_expr, true, enabled, why)) return "a cost's enabled flag";
-        int charge = 1;
-        if (first.charge_cost_expr != 0) {
+        CostGroup g;
+        g.enabled = true;
+        if (!eval_bool(def.costs[i].enabled_expr, true, g.enabled, why)) return "a cost's enabled flag";
+        if (def.costs[i].charge_cost_expr != 0) {
             double v = 1;
-            if (!eval(first.charge_cost_expr, v, why)) return "a cost's charge count";
-            charge = static_cast<int>(std::clamp(std::round(v), 0.0, 99.0));
+            if (!eval(def.costs[i].charge_cost_expr, v, why)) return "a cost's charge count";
+            g.charge = static_cast<int>(std::clamp(std::round(v), 0.0, 99.0));
         }
         size_t j = i;
         for (; j < def.costs.size() && def.costs[j].cost_ord == ord; ++j) {
             const content::CostRow& cr = def.costs[j];
-            if (!enabled || cr.stat_ord < 0 || cr.stat_guid == 0) continue;
+            if (!g.enabled || cr.stat_ord < 0 || cr.stat_guid == 0) continue;
             double amount = 0;
             if (cr.amount_expr != 0 && !eval(cr.amount_expr, amount, why)) return "a cost's amount";
-            if (amount > 0) cast.stat_costs.emplace_back(cr.stat_guid, amount);
-        }
-        if (enabled) {
-            cast.triggers_cooldown = cast.triggers_cooldown || first.triggers_cooldown;
-            if (first.triggers_cooldown) cast.charge_cost = std::max(cast.charge_cost, charge);
+            if (amount > 0) g.stats.emplace_back(cr.stat_guid, amount);
         }
         for (const content::EffectCostRow& ec : def.effect_costs) {
-            if (ec.cost_ord != ord || !enabled || ec.effect_guid == 0) continue;
+            if (ec.cost_ord != ord || !g.enabled || ec.effect_guid == 0) continue;
             double n = 0;
             if (ec.num_expr != 0 && !eval(ec.num_expr, n, why)) return "an effect cost's count";
-            if (n >= 1) cast.effect_costs.emplace_back(ec.effect_guid, static_cast<int>(std::min(n, 4096.0)));
+            if (n >= 1) g.effects.emplace_back(ec.effect_guid, static_cast<int>(std::min(n, 4096.0)));
         }
+        g.triggers_cooldown = g.enabled && def.costs[i].triggers_cooldown;
+        groups.push_back(std::move(g));
         i = j;
+    }
+    const auto affordable = [&](const CostGroup& g) {
+        for (const auto& [stat, amount] : g.stats) {
+            if (stat_now(stat) < amount) return false;
+        }
+        for (const auto& [effect, n] : g.effects) {
+            if (stacks_of(effect) < n) return false;
+        }
+        return true;
+    };
+    const CostGroup* chosen = nullptr;
+    for (const CostGroup& g : groups) {
+        if (!g.enabled) continue;
+        if (!chosen) chosen = &g;
+        if (affordable(g)) {
+            chosen = &g;
+            break;
+        }
+    }
+    if (chosen) {
+        cast.stat_costs = chosen->stats;
+        cast.effect_costs = chosen->effects;
+        cast.triggers_cooldown = cast.triggers_cooldown || chosen->triggers_cooldown;
+        if (chosen->triggers_cooldown) cast.charge_cost = std::max(cast.charge_cost, chosen->charge);
     }
     return nullptr;
 }
@@ -3326,6 +3398,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // does not have (another player) is cast at the air, like one with no target, and Mock's Quick Wit heal never lands on the caster [E1 stage 3 fix]
     cast.self_reachable = (row.applicable_targets & kFriendly) != 0;
     cast.target_actors = target_actors;
+    cast.place = info.place;
     cast.loop = loop;
     cast.toggle_off = (loop && stacks_of(loop_effect) > 0) || (is_toggle && !own_effects.empty() && stacks_of(own_effects[0]->row.guid) > 0);   // on: this press ends it
     if (!cast.toggle_off) cast.own_effects = own_effects;
@@ -4240,8 +4313,12 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
         cast.item.animation_counter = ++animation_counter_;
         c.abilities_changed.push_back(cast.item);
     }
-    if (c.empty()) return;
-    emit({std::move(c), std::nullopt, t, "the montage of " + cast.def->row.name + " ends"});
+    // a ground cast whose client never asked for its branch (the aim point is in the call, so its client's cast bar is not the game's own) has no client
+    // end of its own: the server ends it here, so the animation does not play on after the spell is done. A cast aimed at an actor keeps its client's end.
+    std::optional<int32_t> end;
+    if (cast.montage_branch && !cast.request_heard && cast.place) end = cast.client_id;
+    if (c.empty() && !end) return;
+    emit({std::move(c), end, t, "the montage of " + cast.def->row.name + " ends"});
 }
 
 void AbilityPipeline::step_cost(Cast& cast, double t) {
@@ -4469,9 +4546,60 @@ void AbilityPipeline::step_loop(Cast& cast, double t) {
 
 // ---- lingering zones ------------------------------------------------------------------------------------------------------------------
 
+bool AbilityPipeline::cast_opens_zone(const AbilityDef& def, int64_t zone) const {
+    if (std::find(def.zones.begin(), def.zones.end(), zone) != def.zones.end()) return true;
+    if (!catalog_) return false;
+    for (const content::AbilityHitRow& r : def.hits) {
+        if (r.source != "hit" && r.source != "projectile") continue;
+        const HitDef* hit = catalog_->hit(r.hit_guid);
+        if (hit && std::find(hit->zones.begin(), hit->zones.end(), zone) != hit->zones.end()) return true;
+    }
+    return false;
+}
+
+std::vector<int64_t> AbilityPipeline::zones_of_cast(const AbilityDef& def) {
+    std::vector<int64_t> out;
+    if (!catalog_) return out;
+    // the zones the ability's own hits name, and whether one of the hits that name a zone holds for the caster now: the game tells the Magma Field's base, Pyromania and Wildfire
+    // fields apart by the talent each spawn hit asks for (the recording of the Pyromania field shows no other field's damage), and the Chains, the Vine Field, the Wall and the other
+    // hit-named zones open with the cast (the recordings open the Vine Field's and the Chains' actors with it)
+    std::vector<int64_t> named;
+    std::map<int64_t, bool> holds;
+    for (const content::AbilityHitRow& r : def.hits) {
+        if (r.source != "hit" && r.source != "projectile") continue;
+        const HitDef* hit = catalog_->hit(r.hit_guid);
+        if (!hit || hit->zones.empty()) continue;
+        bool ok = true;
+        const content::ExprRow* requirement = hit->row.requirement_expr != 0 ? catalog_->expr(hit->row.requirement_expr) : nullptr;
+        if (requirement && !requirement->uses_target) {   // (a requirement that reads a target is asked of the targets a hit reaches, and a zone's opening has none: it opens)
+            std::string why;
+            if (!eval_bool(hit->row.requirement_expr, true, ok, why)) ok = false;
+        }
+        for (const int64_t zone : hit->zones) {
+            if (zone == 0) continue;
+            if (std::find(named.begin(), named.end(), zone) == named.end()) {
+                named.push_back(zone);
+                holds[zone] = false;
+            }
+            holds[zone] = holds[zone] || ok;
+        }
+    }
+    const auto add = [&](int64_t zone) {
+        if (zone != 0 && std::find(out.begin(), out.end(), zone) == out.end()) out.push_back(zone);
+    };
+    for (const int64_t zone : def.zones) {   // (one no hit of the ability names is the cast's own: the dances)
+        const auto it = holds.find(zone);
+        if (it == holds.end() || it->second) add(zone);
+    }
+    for (const int64_t zone : named) {
+        if (holds[zone]) add(zone);
+    }
+    return out;
+}
+
 void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_at) {
     if (cast.loop) return;
-    for (const int64_t guid : cast.def->zones) {
+    for (const int64_t guid : zones_of_cast(*cast.def)) {
         const content::ZoneRow* row = catalog_->zone(guid);
         if (!row) continue;
         Zone z;
@@ -4483,8 +4611,24 @@ void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_a
         const double life = row->life_time > 0 ? row->life_time : 30.0;
         // the dance ends where the captures show (ability_timings.h), else when the zone's life in the data is over
         z.end_at = end_at >= 0 ? std::max(end_at, open_at) : open_at + life;
+        // where the data puts it: the cast's first target (a cast aimed at an enemy) or the place the call aimed at (a ground-targeted cast).  A zone
+        // attached to the caster (a dance, an aura) keeps its place on him.
+        // The Chilling Lament's zone is the Bard's own cone: it stands under him (the location of its hit is the caster), and the game draws no circle
+        // for it (the client's own cast effect is the visual), so no zone actor is sent.
+        const bool lament = row->name == "Bard_Song_Lament_Linger";
+        if (lament) z.visible = false;
+        if (lament) {
+            // (neither the target a cast named nor the place it was aimed at moves it: it opens at the caster, where place_zone puts a zone with no anchor)
+        } else if (!cast.target_actors.empty()) {
+            z.anchor = cast.target_actors.front();
+        } else if (cast.place) {
+            z.x = cast.place->x;
+            z.y = cast.place->y;
+            z.z = cast.place->z;
+            z.placed = true;
+        }
         zones_.push_back(z);
-        if (zones_.size() > kMaxZones) zones_.erase(zones_.begin());
+        while (zones_.size() > kMaxZones) drop_zone(0, now_);
         // the client asks for the zone's tick hits as long as its actor lives
         if (CastRecord* rec = record_of(cast.client_id)) {
             rec->window_end = std::max(rec->window_end, z.end_at + kZoneRequestSlack);
@@ -4493,13 +4637,108 @@ void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_a
     }
 }
 
+namespace {
+
+/// A zone's next tick is due when its moment is reached within this many seconds (the moments are sums of the record's period: one that lands a rounding after the zone's end still counts).
+constexpr double kTickEpsilon = 1e-6;
+
+/// The zone's volume as the world's area query takes it (a sphere, or the boxes its data lists).
+combat::ZoneArea zone_area_of(const content::ZoneVolume& v) {
+    combat::ZoneArea a;
+    for (const content::ZoneBox& b : v.boxes) a.boxes.push_back({b.ex, b.ey, b.ez, b.cx, b.cy, b.cz, b.yaw});
+    if (v.boxes.empty()) a.radius = v.radius;
+    return a;
+}
+
+/// Whether a point (a body's centre) stands in the volume around `centre`; the caster's own body is always in a zone attached to him.
+bool zone_holds_point(const combat::ZoneArea& a, const combat::Vec3& centre, const combat::Vec3& body, double body_radius_cm) {
+    return combat::zone_holds(a, centre, body, body_radius_cm);
+}
+
+}  // namespace
+
 double AbilityPipeline::zone_due(const Zone& z) const {
     switch (z.state) {
         case Zone::State::Pending: return z.open_at;
-        case Zone::State::Open: return z.end_at;
+        case Zone::State::Open: {
+            double due = z.end_at;
+            if (z.next_tick >= 0) due = std::min(due, z.next_tick);
+            return due;
+        }
         case Zone::State::Ended: return std::min(z.fade_at >= 0 ? z.fade_at : kInf, z.close_at);
     }
     return kInf;
+}
+
+void AbilityPipeline::place_zone(Zone& z, double t) {
+    const content::ZoneRow* row = catalog_ ? catalog_->zone(z.zone) : nullptr;
+    if (!row) return;
+    // a file from before the extraction's spawn column does not say where or how far a zone reaches: its actor opens at the caster and no tick runs (the old behaviour)
+    z.volume = row->has_spawn ? row->volume : content::ZoneVolume{};
+    z.tick = row->tick_rate;
+    z.no_first_tick = row->spawn.no_first_tick;
+    // its record's own limits: the hits begin DelayTime after the open (a trap arms itself), and the zone ends once ExpireAfterAppliedHits of its hits have landed (a trap goes off once)
+    z.base = t;
+    z.tick_no = 1;
+    z.armed = true;
+    z.next_tick = -1;
+    if (row->has_spawn && row->delay_time > 0 && (row->delay_type.empty() || row->delay_type.find("DELAY_Time") != std::string::npos)) {
+        z.armed = false;
+        z.next_tick = t + row->delay_time;   // (its next step is the end of the delay: tick_zone arms it)
+    }
+    z.expire_after = 0;
+    if (row->has_spawn && row->expire_after_hits_expr != 0) {
+        double n = 0;
+        std::string why;
+        if (eval(row->expire_after_hits_expr, n, why) && n >= 1) z.expire_after = static_cast<int>(std::min(n, 1.0e9));
+    }
+    const bool attached = !row->has_spawn || row->spawn.attach.find("AttachedInstigator") != std::string::npos;
+    z.attached = attached;
+    if (combat_) z.yaw = combat_->self().facing_degrees();
+    if (attached) {
+        // the actor is on the caster and moves with him (a dance, an aura, an Arcane Eye the Mage carries): the data's origin is his place
+        z.placed = false;
+        return;
+    }
+    const std::string& origin = row->spawn.origin;
+    // a zone whose origin the data names as the instigator or his owner stands at the caster (the Saga's zone, the Arcane Circle, a trap): the target a cast named and the place it was aimed
+    // at are where the HitLocation zones stand, not these
+    if ((origin.find("Instigator") != std::string::npos || origin.find("Owner") != std::string::npos) && combat_) {
+        const combat::Vec3 me = combat_->self().position();
+        const double yaw = z.yaw * 3.14159265358979323846 / 180.0;   // (the record's offset is in the caster's frame: a trap goes 1 m ahead of him)
+        z.x = me.x + std::cos(yaw) * row->spawn.rel_x - std::sin(yaw) * row->spawn.rel_y;
+        z.y = me.y + std::sin(yaw) * row->spawn.rel_x + std::cos(yaw) * row->spawn.rel_y;
+        z.z = me.z + row->spawn.rel_z;
+        z.placed = true;
+        double ground = z.z;
+        if (combat_->ground_height(z.x, z.y, z.z, &ground)) z.z = ground;
+        return;
+    }
+    if (z.placed) return;   // the place the call aimed at
+    bool at = false;
+    if (z.anchor != 0 && combat_ && z.anchor != combat_->self().id()) {
+        const combat::TargetInfo ti = combat_->inspect(z.anchor);
+        if (ti.exists) {
+            z.x = ti.position.x;
+            z.y = ti.position.y;
+            z.z = ti.position.z;
+            at = true;
+        }
+    }
+    if (!at && (origin.find("HitLocation") != std::string::npos || origin.find("Source") != std::string::npos || origin.find("Target") != std::string::npos) && combat_) {
+        const combat::Vec3 me = combat_->self().position();
+        z.x = me.x;
+        z.y = me.y;
+        z.z = me.z;
+        at = true;
+    }
+    if (!at) return;   // the caster (Owner, an origin the data does not name, a file without the spawn)
+    z.placed = true;
+    // a lasting circle is drawn on the ground under the place (the target's feet, not its body's centre)
+    if (combat_) {
+        double ground = z.z;
+        if (combat_->ground_height(z.x, z.y, z.z, &ground)) z.z = ground;
+    }
 }
 
 
@@ -4516,53 +4755,328 @@ void AbilityPipeline::end_zone_effects(AbilityChange& c, int64_t zone_id, double
     sync_engine_effects();
 }
 
-void AbilityPipeline::run_zone(size_t index, double t) {
-    Zone& z = zones_[index];
+std::vector<uint64_t> AbilityPipeline::zone_standers(const Zone& z) const {
+    std::vector<uint64_t> out;
+    if (!combat_ || !z.volume.has_volume()) return out;
+    combat::ZoneArea area = zone_area_of(z.volume);
+    area.yaw = z.yaw;
+    const combat::Vec3 me = combat_->self().position();
+    const combat::Vec3 centre = z.attached ? me : combat::Vec3{z.x, z.y, z.z};
+    // the caster stands in it while he lives: a dead caster takes none of its hits (a corpse is no one's ally)
+    if (!dead_ && zone_holds_point(area, centre, me, combat_->self().radius_cm())) out.push_back(combat_->self().id());
+    // (each hit's own filter picks who it lands on: a creature that is neither the caster's enemy nor his friend is refused by the hit path for the enemy lists and the ally lists alike)
+    for (const combat::ZoneTarget& t : combat_->actors_in_area(centre, area, kMaxZoneTargets)) out.push_back(t.actor);
+    return out;
+}
+
+void AbilityPipeline::zone_land(int64_t zone_id, int64_t zone_guid, int64_t ability, const char* role, const std::vector<uint64_t>& actors, double t) {
+    if (!combat_ || !catalog_ || actors.empty()) return;
+    const content::ZoneRow* row = catalog_->zone(zone_guid);
+    if (!row) return;
+    const auto list = row->hits.find(role);
+    if (list == row->hits.end() || list->second.empty()) return;
+    HitSource src;   // a zone's hit: Source is the zone record, predicted on neither side [R: 84 zone hits]
+    src.type = content::kSourceTypeZone;
+    src.guid = zone_guid;
+    src.actor = false;
+    src.confirm = true;
+    src.autonomous = false;
+    src.simulated = false;
+    src.reach_free = true;   // it reaches whoever stands in the zone, wherever the caster is
+    AbilityChange c;
+    bool did = false;
+    int applied = 0;
+    std::set<std::pair<uint64_t, int64_t>> held;   // the infinite effects its hits put on others
+    const uint64_t self = combat_->self().id();
+    const AbilityDef* owner = ability != 0 ? catalog_->ability(ability) : nullptr;
+    for (const int64_t hit_guid : list->second) {
+        const HitDef* hit = catalog_->hit(hit_guid);
+        if (!hit) continue;
+        if ((hit->row.applicable_targets & 1) != 0 && std::find(actors.begin(), actors.end(), self) != actors.end()) {
+            zone_owner_ = zone_id;   // (an infinite effect a zone puts on its caster ends with the zone)
+            apply_hit(c, *hit, t, false, src);
+            zone_owner_ = 0;
+            did = true;
+        }
+        std::vector<uint64_t> others;
+        for (const uint64_t a : actors) {
+            if (a != self) others.push_back(a);
+        }
+        if (!others.empty()) {
+            bool landed = false;
+            apply_hit_on_targets(c, *hit, others, t, src, owner, &landed);
+            did = true;
+            if (landed) {
+                ++applied;
+                // an infinite effect that a hit of the zone put on an actor stays while that actor stands in the zone (the Void's silence, the Maddening Dance's mark)
+                for (const content::HitEffectRow& effect : hit->effects) {
+                    if (effect.kind == "self") continue;
+                    const EffectDef* def = catalog_->effect(effect.effect_guid);
+                    if (!def || !def->row.infinite_duration) continue;
+                    for (const uint64_t a : others) {
+                        if (combat_->effect_stacks_from(a, effect.effect_guid, self, t) > 0) held.insert({a, effect.effect_guid});
+                    }
+                }
+            }
+        }
+    }
+    if (const int zi = zone_index(zone_id); zi >= 0) {   // (a hit of the list may have opened a zone and dropped the oldest)
+        zones_[static_cast<size_t>(zi)].applied += applied;
+        zones_[static_cast<size_t>(zi)].held.insert(held.begin(), held.end());
+    }
+    if (!did) return;
+    recompute(c);
+    emit({std::move(c), std::nullopt, t, "the zone of " + (owner ? owner->row.name : std::string("?")) + " lands its " + role});
+}
+
+void AbilityPipeline::zone_first_look(int64_t zone_id, double t) {
+    int zi = zone_index(zone_id);
+    if (zi < 0) return;
+    const int64_t guid = zones_[static_cast<size_t>(zi)].zone, ability = zones_[static_cast<size_t>(zi)].ability;
+    // the actors already inside: the Initial hits run once, and they are the first overlap
+    const std::vector<uint64_t> standers = zone_standers(zones_[static_cast<size_t>(zi)]);
+    std::vector<uint64_t> entered;
+    {
+        Zone& z = zones_[static_cast<size_t>(zi)];
+        for (const uint64_t stand : standers) {
+            if (!z.inside.count(stand)) entered.push_back(stand);
+            z.inside.insert(stand);
+        }
+    }
+    if (!entered.empty()) {
+        zone_land(zone_id, guid, ability, "InitialHitsIds", entered, t);
+        zone_land(zone_id, guid, ability, "OnBeginOverlapHitsIds", entered, t);
+    }
+    zone_check_expiry(zone_id, t);
+}
+
+void AbilityPipeline::tick_zone(size_t index, double t) {
+    if (index >= zones_.size()) return;
+    const int64_t id = zones_[index].id, guid = zones_[index].zone, ability = zones_[index].ability;
+    if (!zones_[index].armed) {
+        // its DelayTime is over (a trap arms itself): its hits begin, with the first look, and its ticks count from here
+        Zone& z = zones_[index];
+        z.armed = true;
+        z.base = t;
+        z.tick_no = 1;
+        z.next_tick = z.tick > 0 ? z.base + z.tick : -1.0;
+        zone_first_look(id, t);
+    } else {
+        Zone& z = zones_[index];
+        const bool first = z.no_first_tick;
+        z.next_tick = z.tick > 0 ? z.base + static_cast<double>(++z.tick_no) * z.tick : -1.0;   // (the moments count from the base: a sum of rounded steps would drift)
+        z.no_first_tick = false;
+        const std::vector<uint64_t> standers = zone_standers(z);   // (before any hit: one of them may open another zone)
+        std::vector<uint64_t> entered, left;
+        for (const uint64_t a : standers) {
+            if (!z.inside.count(a)) entered.push_back(a);
+        }
+        for (const uint64_t a : z.inside) {
+            if (std::find(standers.begin(), standers.end(), a) == standers.end()) left.push_back(a);
+        }
+        z.inside = std::set<uint64_t>(standers.begin(), standers.end());   // (one that left takes the overlap again when it comes back)
+        if (!left.empty()) release_zone_effects(id, &left, t);
+        if (!entered.empty()) zone_land(id, guid, ability, "OnBeginOverlapHitsIds", entered, t);
+        if (!first) zone_land(id, guid, ability, "LingeringHitsIds", standers, t);
+    }
+    zone_check_expiry(id, t);
+}
+
+void AbilityPipeline::release_zone_effects(int64_t zone_id, const std::vector<uint64_t>* leavers, double t) {
+    const int zi = zone_index(zone_id);
+    if (zi < 0 || !combat_) return;
+    Zone& z = zones_[static_cast<size_t>(zi)];
+    const uint64_t self = combat_->self().id();
+    for (auto it = z.held.begin(); it != z.held.end();) {
+        const bool gone = !leavers || std::find(leavers->begin(), leavers->end(), it->first) != leavers->end();
+        if (!gone) {
+            ++it;
+            continue;
+        }
+        combat_->remove_effect_from(it->first, it->second, self, t);
+        it = z.held.erase(it);
+    }
+}
+
+void AbilityPipeline::end_zone(int64_t zone_id, double t, bool end_hits, const std::string& note) {
+    int zi = zone_index(zone_id);
+    if (zi < 0 || zones_[static_cast<size_t>(zi)].state != Zone::State::Open) return;
+    if (end_hits) {
+        // the end: its End hits land on whoever still stands in it, then its effects go and its actor fades
+        const std::vector<uint64_t> standers = zone_standers(zones_[static_cast<size_t>(zi)]);
+        const int64_t guid = zones_[static_cast<size_t>(zi)].zone, ability = zones_[static_cast<size_t>(zi)].ability;
+        if (!standers.empty()) zone_land(zone_id, guid, ability, "EndHitsIds", standers, t);
+        zi = zone_index(zone_id);   // (one of the End hits may have opened a zone and dropped the oldest)
+        if (zi < 0) return;
+    }
+    release_zone_effects(zone_id, nullptr, t);
+    AbilityChange c;
+    end_zone_effects(c, zone_id, t);
+    recompute(c);
+    zi = zone_index(zone_id);
+    if (zi < 0) return;
+    Zone& z = zones_[static_cast<size_t>(zi)];
+    z.state = Zone::State::Ended;
+    z.next_tick = -1;
+    z.fade_at = t + kZoneFadeDelay;
+    z.close_at = t + kZoneCloseDelay;
+    if (CastRecord* rec = record_of(z.client_id)) rec->window_end = std::max(rec->cost_due + kRequestWindow, t + kZoneRequestSlack);
     AbilityEvent e;
     e.at = t;
+    e.change = std::move(c);
+    e.note = note;
+    emit(std::move(e));
+}
+
+void AbilityPipeline::drop_zone(size_t index, double t) {
+    if (index >= zones_.size()) return;
+    const Zone gone = zones_[index];
+    if (gone.state == Zone::State::Open) release_zone_effects(gone.id, nullptr, t);
+    zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (gone.state == Zone::State::Pending) return;   // (its actor never opened)
+    AbilityChange c;
+    if (gone.state == Zone::State::Open) {
+        end_zone_effects(c, gone.id, t);
+        recompute(c);
+    }
+    AbilityEvent e;
+    e.at = t;
+    e.change = std::move(c);
+    e.note = "a zone is dropped: too many are alive";
     bootstrap::ZoneOp op;
-    op.id = z.id;
-    op.ability = z.ability;
-    op.zone = z.zone;
-    const AbilityDef* a = catalog_->ability(z.ability);
+    op.id = gone.id;
+    op.ability = gone.ability;
+    op.zone = gone.zone;
+    op.kind = bootstrap::ZoneOp::Kind::Close;
+    e.zones.push_back(op);
+    emit(std::move(e));
+}
+
+int AbilityPipeline::zone_index(int64_t id) const {
+    for (size_t i = 0; i < zones_.size(); ++i) {
+        if (zones_[i].id == id) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+void AbilityPipeline::run_zone(size_t index, double t) {
+    if (index >= zones_.size()) return;
+    AbilityEvent e;
+    e.at = t;
+    const int64_t zone_id = zones_[index].id, zone_guid = zones_[index].zone, ability = zones_[index].ability;
+    const AbilityDef* a = catalog_->ability(ability);
     const std::string who = a ? a->row.name : std::string("?");
-    switch (z.state) {
-        case Zone::State::Pending:
-            z.state = Zone::State::Open;
+    switch (zones_[index].state) {
+        case Zone::State::Pending: {
+            bootstrap::ZoneOp op;
+            op.id = zone_id;
+            op.ability = ability;
+            op.zone = zone_guid;
+            bool armed = true;
+            {
+                Zone& z = zones_[index];
+                z.state = Zone::State::Open;
+                place_zone(z, t);
+                armed = z.armed;
+                if (armed) z.next_tick = z.tick > 0 ? z.base + z.tick : -1.0;   // (an unarmed zone's next step is the end of its DelayTime, set by place_zone)
+                op.placed = z.placed;
+                op.x = z.x;
+                op.y = z.y;
+                op.z = z.z;
+                op.yaw_degrees = z.yaw;
+                op.attached = z.attached;
+                // the caster's own overlap hits went with the cast's cost step: he is already "inside", so the open does not apply them again
+                if (combat_ && z.volume.has_volume() && !dead_) {
+                    combat::ZoneArea area = zone_area_of(z.volume);
+                    area.yaw = z.yaw;
+                    const combat::Vec3 me = combat_->self().position();
+                    const combat::Vec3 centre = z.attached ? me : combat::Vec3{z.x, z.y, z.z};
+                    if (zone_holds_point(area, centre, me, combat_->self().radius_cm())) z.inside.insert(combat_->self().id());
+                }
+            }
             op.kind = bootstrap::ZoneOp::Kind::Open;
-            e.zones.push_back(op);
+            if (zones_[index].visible) e.zones.push_back(op);   // (an invisible zone runs and ticks; the client draws nothing for it)
             e.note = "the zone of " + who + " opens";
             emit(std::move(e));
-            return;
-        case Zone::State::Open: {
-            AbilityChange c;
-            end_zone_effects(c, z.id, t);
-            recompute(c);
-            z.state = Zone::State::Ended;
-            z.fade_at = t + kZoneFadeDelay;
-            z.close_at = t + kZoneCloseDelay;
-            if (CastRecord* rec = record_of(z.client_id)) rec->window_end = std::max(rec->cost_due + kRequestWindow, t + kZoneRequestSlack);
-            e.change = std::move(c);
-            e.note = "the dance of " + who + " ends";
-            emit(std::move(e));
+            if (armed) zone_first_look(zone_id, t);
             return;
         }
-        case Zone::State::Ended:
-            if (z.fade_at >= 0 && z.fade_at <= t) {
-                z.fade_at = -1;
+        case Zone::State::Open: {
+            const bool tick_due = zones_[index].next_tick >= 0 && zones_[index].next_tick <= t + kTickEpsilon;
+            // A tick that falls on the moment the zone's life is over is that moment's End, not a hit of its own: the End hits land in its place (the Chains' hits are the Initial hit and eight
+            // more in their 8 s, one at each second and none doubled at the end), and a zone that skips its first tick lands nothing when that first tick is its end (the Hoarfrost, whose
+            // only hit is an End hit, blasts once, with the cast) [R: the recorded Chains of Restraint: nine hits in the zone's 8 s; the recorded Hoarfrost: no second hit at the end of its second]
+            if (tick_due && zones_[index].armed && zones_[index].end_at <= t + kTickEpsilon) {
+                bool has_end_hits = false;
+                if (const content::ZoneRow* row = catalog_->zone(zone_guid)) {
+                    const auto end_hits = row->hits.find("EndHitsIds");
+                    has_end_hits = end_hits != row->hits.end() && !end_hits->second.empty();
+                }
+                if (zones_[index].no_first_tick) {
+                    end_zone(zone_id, t, false, "the zone of " + who + " ends on its skipped first tick");
+                    return;
+                }
+                if (has_end_hits) {
+                    end_zone(zone_id, t, true, "the zone of " + who + " ends");
+                    return;
+                }
+            }
+            if (tick_due) {
+                tick_zone(index, t);
+                return;
+            }
+            end_zone(zone_id, t, true, "the zone of " + who + " ends");
+            return;
+        }
+        case Zone::State::Ended: {
+            bootstrap::ZoneOp op;
+            op.id = zone_id;
+            op.ability = ability;
+            op.zone = zone_guid;
+            if (zones_[index].fade_at >= 0 && zones_[index].fade_at <= t) {
+                zones_[index].fade_at = -1;
                 op.kind = bootstrap::ZoneOp::Kind::Fade;
-                e.zones.push_back(op);
+                if (zones_[index].visible) e.zones.push_back(op);
                 e.note = "the zone of " + who + " fades out";
                 emit(std::move(e));
                 return;
             }
             op.kind = bootstrap::ZoneOp::Kind::Close;
-            e.zones.push_back(op);
+            if (zones_[index].visible) e.zones.push_back(op);
             e.note = "the zone of " + who + " closes";
             zones_.erase(zones_.begin() + static_cast<std::ptrdiff_t>(index));
             emit(std::move(e));
             return;
+        }
     }
+}
+
+void AbilityPipeline::spawn_hit_zones(const HitDef& hit, const AbilityDef* ability, uint64_t target, double t) {
+    if (!catalog_ || hit.zones.empty()) return;
+    for (const int64_t guid : hit.zones) {
+        // the ability's own zone is the one its cast opened (the game opens the Vine Field's and the Chains of Restraint's with the cast): the hit does not open it again
+        if (ability && cast_opens_zone(*ability, guid)) continue;
+        const content::ZoneRow* row = catalog_->zone(guid);
+        if (!row) continue;
+        Zone z;
+        z.id = next_zone_id_++;
+        z.ability = ability ? ability->row.guid : 0;
+        z.zone = guid;
+        z.client_id = -1;   // (no cast of the client's owns it: no request window to extend)
+        z.open_at = t;
+        z.anchor = target;
+        z.end_at = t + (row->life_time > 0 ? row->life_time : 30.0);
+        zones_.push_back(z);
+        while (zones_.size() > kMaxZones) drop_zone(0, t);
+    }
+}
+
+void AbilityPipeline::zone_check_expiry(int64_t zone_id, double t) {
+    const int zi = zone_index(zone_id);
+    if (zi < 0) return;
+    Zone& z = zones_[static_cast<size_t>(zi)];
+    // a zone that has landed the hits its record allows (a trap's one) is over now: its End hits run at its next step
+    if (z.state == Zone::State::Open && z.expire_after > 0 && z.applied >= z.expire_after) z.end_at = std::min(z.end_at, t);
 }
 // [Cyb - C | O | A]
 

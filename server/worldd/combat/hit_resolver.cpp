@@ -136,6 +136,8 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
     ctx.active_in_hit = meta.active_in_hit;
     ctx.target_is_closest = meta.target_is_closest;
     ctx.target_effects = meta.target_effects;
+    ctx.instigator_actor = meta.instigator_actor;
+    ctx.target_actor = meta.target_actor;
     const HitAspect aspect = aspect_of(ctx.tags);
     ctx.hit.tag = aspect.element;
     ctx.hit.physical = aspect.physical;
@@ -247,6 +249,8 @@ void fill_context(HitContext& ctx, const CombatData& data, const abilities::HitD
     ctx.active_in_hit = meta.active_in_hit;
     ctx.target_is_closest = meta.target_is_closest;
     ctx.target_effects = meta.target_effects;
+    ctx.instigator_actor = meta.instigator_actor;
+    ctx.target_actor = meta.target_actor;
     const HitAspect aspect = aspect_of(ctx.tags);
     ctx.hit.tag = aspect.element;
     ctx.hit.physical = aspect.physical;
