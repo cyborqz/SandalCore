@@ -50,6 +50,8 @@ namespace aoc::worldd::spawns {
 /// The stats of a mount's StatsComponent the maker sets (content.db's stat_def guids).
 inline constexpr int64_t kStatMoveSpeedMult = 109228544644729ll;
 inline constexpr int64_t kStatStealthLevel = 6064633186496741774ll;
+/// The Mount_Base HealthRegenerationRating of the data (a server-side stat: no donor open carries it, the client is not sent it).
+inline constexpr int64_t kStatHealthRegenerationRating = 109315114489464ll;
 
 /// An aquatic mount's dash is MountAbility_Sprint_AllowSwimming, on slot 1 of bank 18 [R: the retail capture; the others have MountAbility_Sprint on slot 0].
 inline constexpr int64_t kDashAllowSwimming = 6064633300902020596ll;
@@ -147,6 +149,12 @@ public:
 
     /// MaxHealth of the mount at its owner's level: Mount_Base_HP times the item's factor.
     double max_health(const content::MountRow& row, int owner_level) const;
+
+    /// The Mount_Base HealthRegenerationRating at the owner's level (0: the data has none).
+    double health_regeneration_rating(const content::MountRow& row, int owner_level) const;
+    /// The mount's Health a second: the rating / 250, five times out of combat (the game's HealthRegeneration stat: the rating divided by the
+    /// data's equation, and a mount's CharacterType 1.1 earns the out-of-combat bonus like a player's 1.0). The session ticks it.
+    double health_regeneration(const content::MountRow& row, int owner_level, bool in_combat) const;
 
     /// Makes the mount actor of `row` (the layout and the values above). `mint` gives the NetGUIDs (the actor's, then every second one, as the allocator does).
     /// nullopt, with `error`, when the captures have no donor of its kind, or a value is refused.

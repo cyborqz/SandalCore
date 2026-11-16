@@ -284,6 +284,8 @@ constexpr double kMuzzleCm = 40.0;
 // The stats the client takes its montages' play rates from (stat_def: MagicalSpeed, PhysicalSpeed).
 constexpr int64_t kStatMagicalSpeed = 109343399106257ll;
 constexpr int64_t kStatPhysicalSpeed = 109343399171808ll;
+// The heal formula's one read of its target (stat_def: HealingReceivedAddMult): 0 when the target has none, as a mount's data has none.
+constexpr int64_t kStatHealingReceivedAddMult = 109343236642458ll;
 
 // Ordinary casts (no cast bar) whose montage launches ONE projectile (see ShotCast, plan_shot): the hit lands when the projectile gets to the target, which is its launch plus the target's distance over the
 // record's speed, not the recordings' median for the distance of the stage they were recorded on (the Thundering Shot's first damage came 33 to 932 ms after its cost step in 7 casts: targets 1 to 28 m away).
@@ -1630,6 +1632,25 @@ double AbilityPipeline::take_damage(double amount, double now) {
     return through;
 }
 
+std::optional<combat::TargetInfo> AbilityPipeline::target_info(uint64_t actor) {
+    if (combat_) {
+        combat::TargetInfo ti = combat_->inspect(actor);
+        if (ti.exists) return ti;
+    }
+    if (!mount_target_) return std::nullopt;
+    const std::optional<MountTarget> m = mount_target_(actor);
+    if (!m) return std::nullopt;
+    combat::TargetInfo ti;
+    ti.exists = true;
+    ti.position = combat::Vec3{m->x, m->y, m->z};
+    ti.radius_cm = m->radius_cm;
+    ti.alive = m->alive;
+    ti.relation = combat::Relation::Friendly;   // the session names only the caster's own mount: an ally
+    ti.surface_distance_cm = m->surface_distance_cm;
+    ti.in_line_of_sight = true;
+    return ti;
+}
+
 void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
                                            const AbilityDef* ability, bool* landed, uint64_t* first_landed) {
     if (landed) *landed = false;
@@ -1656,7 +1677,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         if (!ti.exists || !ti.alive) return false;
         const bool hostile = ti.relation == combat::Relation::Hostile;
         if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
-        return src.reach_free || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
+        return src.reach_free || !combat_ || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
     };
     const uint64_t active = active_target_ ? active_target_() : 0;
     // whether the hit's requirement holds of a target it reaches: the requirement runs with that target as GetTarget() (its stats, the effects it holds, its side of the caster's relations
@@ -1704,12 +1725,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     uint64_t closest = 0;
     double closest_cm = 0;
     for (const uint64_t id : on) {
-        const combat::TargetInfo ti = combat_->inspect(id);
-        if (!reached(ti)) continue;
+        const std::optional<combat::TargetInfo> ti = target_info(id);
+        if (!ti || !reached(*ti)) continue;
         if (id == active) active_in_hit = true;
-        if (closest == 0 || ti.surface_distance_cm < closest_cm) {
+        if (closest == 0 || ti->surface_distance_cm < closest_cm) {
             closest = id;
-            closest_cm = ti.surface_distance_cm;
+            closest_cm = ti->surface_distance_cm;
         }
     }
     // the hit reached a live target when one is in reach, whether or not its damage can be worked out (the Throw's cannot): that is what fires a bounce. An enemy an earlier hit killed is no target
@@ -1719,11 +1740,66 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     bool zones_opened = false;
     for (const uint64_t id : on) {
         if (static_cast<double>(outs.size()) >= max_targets) break;
-        const combat::TargetInfo ti = combat_->inspect(id);
-        if (!reached(ti)) continue;
-        const bool hostile = ti.relation == combat::Relation::Hostile;
-        combat::Fighter* tf = combat_->fighter(id);
-        if (!tf) continue;
+        const std::optional<combat::TargetInfo> ti = target_info(id);
+        if (!ti || !reached(*ti)) continue;
+        const bool hostile = ti->relation == combat::Relation::Hostile;
+        combat::Fighter* tf = combat_ ? combat_->fighter(id) : nullptr;
+        if (!tf) {
+            // The caster's own mount: not a fighter of the combat world, its Health is its own stat (the session's heal puts it there). Only a hit
+            // that helps allies and heals does anything; a damage hit on a friendly mount reaches nobody.
+            const std::optional<MountTarget> mount = mount_target_ ? mount_target_(id) : std::nullopt;
+            if (!combat_ || !mount || !mount_heal_ || (hit.row.applicable_targets & 4) == 0) continue;
+            Host host(*this);
+            combat::HitMeta meta;
+            meta.source_type = src.type;
+            meta.source_guid = src.guid;
+            if (ability) meta.ability_tags = ability->row.tags;
+            if (hit.use_item_tags && weapon_tags_) meta.item_tags = weapon_tags_();
+            meta.targets = static_cast<double>(targets.size());
+            meta.target_is_active = id == active;
+            meta.active_in_hit = active_in_hit;
+            meta.target_is_closest = id == closest;
+            combat::Resolved r;
+            if (!combat_->resolver().resolve_with(*evaluation_, host, nullptr, ti->surface_distance_cm, false, false, hit, meta, r, why)) {
+                if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on a mount: {}", hit.row.name, why);
+                continue;
+            }
+            // the heal formula's one read of its target is HealingReceivedAddMult; GetTarget() read the caster, so take the caster's (1 + received)
+            // back out (the mount's own is 0: its data carries no such stat).
+            const double caster_received = 1.0 + stat_now(kStatHealingReceivedAddMult);
+            double healed = 0;
+            for (const combat::ResolvedMod& m : r.mods) {
+                if (m.stat_guid == content::kGuidHealth && m.value > 0) healed += caster_received != 0.0 ? m.value / caster_received : m.value;
+            }
+            if (healed <= 0) continue;
+            const double applied = mount_heal_(id, healed);
+            event.targets.push_back(id);
+            event.mods[content::kGuidHealth] += healed;
+            event.effective[content::kGuidHealth] += applied;
+            bootstrap::HitTargetOut out;
+            out.component = mount->component;   // the HitComp is the mount actor
+            out.cylinder = mount->cylinder;
+            out.has_impact = true;
+            out.impact_location = {mount->x, mount->y, mount->z};
+            {
+                double nx = 0, ny = 0, nz = 1;   // (the normal points from the mount towards the caster)
+                const combat::Vec3 from = combat_->self().position();
+                nx = from.x - mount->x;
+                ny = from.y - mount->y;
+                nz = from.z - mount->z;
+                const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+                if (len > 1e-6) { nx /= len; ny /= len; nz /= len; } else { nx = 0; ny = 0; nz = 1; }
+                out.impact_normal = {nx, ny, nz};
+            }
+            out.flags = r.flags;
+            for (const combat::ResolvedMod& m : r.mods) {
+                if (m.stat_guid != content::kGuidHealth) continue;
+                if (m.value == 0.0 && applied == 0.0) continue;
+                out.mods.push_back({m.stat_mod_guid, static_cast<float>(healed), static_cast<float>(applied)});
+            }
+            outs.push_back(std::move(out));
+            continue;
+        }
         std::string err;
         auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
         if (!target_eval) continue;
@@ -1742,7 +1818,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         meta.instigator_actor = combat_->self().id();
         meta.target_actor = id;
         combat::Resolved r;
-        if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, r, why)) {
+        if (!combat_->resolver().resolve_with(*evaluation_, host, target_eval.get(), ti->surface_distance_cm, hostile, ti->relation == combat::Relation::Neutral, hit, meta, r, why)) {
             if (no_formula_.insert(hit.row.guid).second) spdlog::warn("[abilities] the hit {} does not run on another actor: {}", hit.row.name, why);
             continue;
         }
@@ -1774,10 +1850,10 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         // the impact is at the target [R: median 0 cm from its replicated position]; the normal a unit vector, here from the target towards the caster
         // [modelled: retail's normals vary; a unit vector is all the captures fix]
         out.has_impact = true;
-        out.impact_location = {ti.position.x, ti.position.y, ti.position.z};
+        out.impact_location = {ti->position.x, ti->position.y, ti->position.z};
         {
             const combat::Vec3 from = combat_->self().position();
-            double nx = from.x - ti.position.x, ny = from.y - ti.position.y, nz = from.z - ti.position.z;
+            double nx = from.x - ti->position.x, ny = from.y - ti->position.y, nz = from.z - ti->position.z;
             const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
             if (len > 1e-6) { nx /= len; ny /= len; nz /= len; } else { nx = 0; ny = 0; nz = 1; }
             out.impact_normal = {nx, ny, nz};
@@ -1822,7 +1898,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             if (applies_effects && !d.lethal) {
                 if (auto after = tf->stats().evaluation(tf->worn(), after_err, true)) {
                     std::string gate_why;
-                    gated = combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti.surface_distance_cm, hostile, ti.relation == combat::Relation::Neutral, hit, meta, gate, gate_why);
+                    gated = combat_->resolver().resolve_effects_with(*evaluation_, host, after.get(), ti->surface_distance_cm, hostile, ti->relation == combat::Relation::Neutral, hit, meta, gate, gate_why);
                     if (gated && !gate_why.empty()) spdlog::debug("[abilities] the effects of {} on actor {}: {}", hit.row.name, id, gate_why);
                 }
             }
@@ -3756,19 +3832,21 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     }
     const bool is_toggle = row.held_behavior.find("Toggle") != std::string::npos;
 
-    // the other actors the call names: each must be there, alive, of the side the ability reaches, in range and in sight [plan E1, stage 3]
+    // the other actors the call names: each must be there, alive, of the side the ability reaches, in range and in sight [plan E1, stage 3].  The
+    // caster's own mount is no combat world actor: the session's view of it stands in (a friendly ally whose Health a heal reaches).
     std::vector<uint64_t> target_actors;
-    if (combat_) {
+    {
         const bool melee = row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                            std::find(row.tags.begin(), row.tags.end(), "ability.Melee") != row.tags.end();
         for (const uint64_t id : info.target_actors) {
             if (target_actors.size() >= 16) break;
-            const combat::TargetInfo ti = combat_->inspect(id);
-            if (!ti.exists || !ti.alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
-            const bool hostile = ti.relation == combat::Relation::Hostile;
+            const std::optional<combat::TargetInfo> ti = target_info(id);
+            if (!ti || !ti->exists || !ti->alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
+            const bool hostile = ti->relation == combat::Relation::Hostile;
             // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493])
             if (hostile ? (row.applicable_targets & 2) == 0 : row.applicable_targets != 0 && (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
-            if (ti.surface_distance_cm > combat_->reach_cm(melee) + combat_->data().activation_leeway_cm()) return refused(Refusal::OutOfRange);
+            const double reach = combat_ ? combat_->reach_cm(melee) + combat_->data().activation_leeway_cm() : 1e9;   // (a mount's own range is the client's)
+            if (ti->surface_distance_cm > reach) return refused(Refusal::OutOfRange);
             // Line of sight is NOT a refusal for a player's cast (E1 review I4): `TargetInfo::in_line_of_sight` is the navmesh's 2D raycast, which a
             // bank, a ledge or a gap in the walkable ground stops as a wall would; the client enforces its own sight rules, and retail's server refused
             // none of the 361 recorded casts. The AI's aggro keeps the raycast (combat_world.cpp).

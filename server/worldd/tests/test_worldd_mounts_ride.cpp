@@ -32,6 +32,7 @@
 #include "protocol/repl/ability_rpc.h"
 #include "protocol/repl/block_reader.h"
 #include "protocol/repl/fast_array.h"
+#include "protocol/repl/hit_rpc.h"
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/move_packed.h"
 #include "protocol/repl/rep_block.h"
@@ -186,7 +187,7 @@ struct Fixture {
     std::unique_ptr<PlayerWorld> world;
 // [Cyb x C O A]
 
-    Fixture() {
+    Fixture(bool real_content = false) {
         dir = cf::make_temp_dir("worldd_mounts_ride_");
         const fs::path db = dir / "content.db";
         if (!cf::make_db(db)) std::exit(2);
@@ -201,7 +202,9 @@ struct Fixture {
             std::printf("  [FAIL] the real content.db does not open (%s): %s\n", real_db_path().c_str(), error.c_str());
             std::exit(2);
         }
-        world = std::make_unique<PlayerWorld>(&*content, "", bs::GameStateMode::Tier2, kServerId, guids);
+        // a test of the game's own abilities and fights (the heal on a mount) runs the real tables; the other tests the small fixture's
+        const content::ContentDb* world_content = real_content ? &*real : &*content;
+        world = std::make_unique<PlayerWorld>(world_content, "", bs::GameStateMode::Tier2, kServerId, guids);
         auto book = spawns::MountBook::load(*real, error);
         if (!book) {
             std::printf("  [FAIL] the mounts do not load: %s\n", error.c_str());
@@ -243,8 +246,10 @@ struct Harness {
     svc::Character record;
 
     /// `shared`: the world another harness made, which this player joins at the time `start` (a step of one is a step of all: `group`, tests/mounts_ride_others_rig.h).  Without it a world of its own.
-    explicit Harness(svc::Character r, const std::function<void(PlayerWorld&)>& setup = nullptr, Fixture* shared = nullptr, Clock::time_point start = t0)
-        : own_fx(shared ? nullptr : std::make_unique<Fixture>()),
+    /// `real_content`: the world runs the real content.db (the game's abilities and fights) instead of the small fixture.
+    explicit Harness(svc::Character r, const std::function<void(PlayerWorld&)>& setup = nullptr, Fixture* shared = nullptr, Clock::time_point start = t0,
+                     bool real_content = false)
+        : own_fx(shared ? nullptr : std::make_unique<Fixture>(real_content)),
           fx(shared ? *shared : *own_fx),
           conn(ConnectionConfig{conn::OuterHeader{0x500c7696u, 0, 5}, conn::CustomField{0x38, 0x21, 0xc7, 0x0d, 0x43, 0x5d}, 14265, 15870}, start),
           t(start),
@@ -1369,27 +1374,30 @@ static void test_health_comes_back_and_is_kept() {
     Harness h(rec);
     h.play();
     summon_with(h, kMountSlot);
-    h.run(milliseconds(1900));
+    h.run(milliseconds(300));
     CHECK(h.mount() && spawns::stat_value(*h.mount(), content::kGuidHealth).value_or(-1) == 200.0, "the mount starts at the item's Health (200 of 500)");
+    h.run(milliseconds(1600));   // (the mount is out; the game's regeneration has ticked once by now)
     walk_up_to_mount(h);
     get_on(h);
     h.run(milliseconds(150));
+    const double before_damage = h.mount() ? spawns::stat_value(*h.mount(), content::kGuidHealth).value_or(-1) : -1;
     h.s->take_damage(h.conn, 50.0, h.t);
     get_off(h);
     h.run(milliseconds(150));
+    const double saved = before_damage - 50.0;
     desummon_with(h, kMountSlot);
     h.run(milliseconds(300));
     const svc::InventoryItem* item = h.s->inventory().at(Bag, kMountSlot);
-    CHECK(item && item->persisted_health && std::fabs(*item->persisted_health - 150.0f) < 0.01f, "desummoned, the item keeps the Health the mount had (150)");
+    CHECK(item && item->persisted_health && std::fabs(*item->persisted_health - saved) < 0.01f, "desummoned, the item keeps the Health the mount had");
     CHECK(item && item->lock_expiration == 0, "no lock: it did not die");
     h.run(milliseconds(3400));
     summon_with(h, kMountSlot, 41);
-    h.run(milliseconds(1900));
-    CHECK(h.mount() && spawns::stat_value(*h.mount(), content::kGuidHealth).value_or(-1) == 150.0, "summoned again it starts from 150");
+    h.run(milliseconds(600));   // (before the first second of its regeneration)
+    CHECK(h.mount() && std::fabs(spawns::stat_value(*h.mount(), content::kGuidHealth).value_or(-1) - saved) < 0.01, "summoned again it starts from the saved Health");
     // the session's end keeps it as well
     h.s->finish("the test");
     const svc::InventoryItem* after = h.s->inventory().at(Bag, kMountSlot);
-    CHECK(after && after->persisted_health && *after->persisted_health == 150.0f, "(the session's end keeps the Health too)");
+    CHECK(after && after->persisted_health && std::fabs(*after->persisted_health - saved) < 0.01f, "(the session's end keeps the Health too)");
     CHECK(!h.sink.inventories.empty(), "and the inventory was handed to the saver");
 }
 

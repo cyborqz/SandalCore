@@ -269,6 +269,58 @@ public:
         has_teleport_ = true;
     }
 
+    // ---- the teleport hold -------------------------------------------------------------------------------------------------------------
+    // A teleport puts the client where the server says, but the collision of the place (a town's floor, the scenery's) may still be streaming in: the pawn falls
+    // through the world until it arrives.  The session holds it there: while the client's own moves say it is under the place it was put at, the position
+    // correction goes again (a few times a second), until it stands on it, walks away, or the hold's time is over (then the floor net is the last resort).  A walking move
+    // within kHoldStandCm of the place's height is standing on something, whichever side of it: that ends the hold before a drop is judged.  A place in the air (a height
+    // named over the ground) is never held: PlayerWorld::on_the_ground says, and the callers ask it.
+    static constexpr double kHoldSeconds = 20.0;        // s: the most a teleport is held (the scenery loads in a few seconds; the net takes the stragglers)
+    static constexpr double kHoldRepeatSeconds = 0.5;   // s: the shortest gap between two corrections of one hold
+    static constexpr double kHoldDropCm = 60.0;         // cm under the place: a move that is not a walking one on it has fallen through the floor it was sent to
+    static constexpr double kHoldStandCm = 150.0;       // cm from the place a walking move may be (over or under it) and still count as standing on it
+    static constexpr double kHoldNearCm = 300.0;        // cm from the place: farther, the player walked on and the hold is over
+
+    struct TeleportHold {
+        bool   active = false;
+        double x = 0, y = 0, z = 0;   // the place
+        uint8_t mode = protocol::repl::kMoveFalling;   // the correction's movement mode (the client lands and walks again by itself)
+        bool   dropped = false;       // the client's own move put it under the place since the last correction
+        int    sent = 0;              // the corrections the hold has sent
+        std::chrono::steady_clock::time_point until{}, next{};
+    };
+    const TeleportHold& teleport_hold() const { return hold_; }
+    /// The hold starts now, at the last good position (call it after teleport() and its correction).
+    void hold_after_teleport(uint8_t mode, std::chrono::steady_clock::time_point now) {
+        hold_ = TeleportHold{};
+        hold_.active = true;
+        hold_.x = good_.x;
+        hold_.y = good_.y;
+        hold_.z = good_.z;
+        hold_.mode = mode;
+        hold_.until = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(kHoldSeconds));
+        hold_.next = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(kHoldRepeatSeconds));
+    }
+    void release_hold() { hold_ = TeleportHold{}; }
+    /// True when the session sends the correction again now: the client fell under the place, and the last correction is old enough.
+    bool hold_due(std::chrono::steady_clock::time_point now) const { return hold_.active && hold_.dropped && now >= hold_.next && now <= hold_.until; }
+    /// The correction is sent: the last good position is the place again, and the next one waits.
+    void hold_sent(std::chrono::steady_clock::time_point now) {
+        if (!hold_.active) return;
+        good_.x = hold_.x;
+        good_.y = hold_.y;
+        good_.z = hold_.z;
+        credit_along_ = limits_.slack;
+        credit_up_ = limits_.max_rise_burst;
+        credit_down_ = limits_.slack;
+        air_speed_ = 0;
+        hold_speed_ = 0;
+        over_law_ = 0;
+        hold_.dropped = false;
+        ++hold_.sent;
+        hold_.next = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(kHoldRepeatSeconds));
+    }
+
     /// Review A I1: the controlled actor changes (a mount-up, a dismount): new limits and a new last good position (the TimeStamp restarts near 0, the flight's speed does not carry
     /// from one body to the other), but the pacing state is the SESSION's and stays: the pace bank (and whether it has been filled), the server's clock of its last refill, and the credits
     /// (cut to the new limits).  A fresh checker per possession refilled the bank (5 s of claimed time) and the first-move second every time, so mounting and dismounting in a loop was a
@@ -317,6 +369,8 @@ public:
 
 private:
     MoveVerdict judge(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double speed, bool ability_window, bool based);
+    /// A move that was accepted: the hold learns whether the client is still under the place it was put at, stands on it, or walked away.
+    void hold_saw(const protocol::repl::Vec3d& loc, uint8_t mode, std::chrono::steady_clock::time_point now);
     MoveLimits   limits_;
     GoodPosition good_;
     double       credit_along_, credit_up_, credit_down_;   // cm in hand per direction, 0 .. slack (up: 0 .. max_rise_burst)
@@ -330,6 +384,7 @@ private:
     const nav::AreaNav* surface_ = nullptr;                  // the world's ground and walkable surface (the ground check); null: none
     std::chrono::steady_clock::time_point last_teleport_{};  // the server's clock of the last teleport (a respawn, a GM teleport)
     bool         has_teleport_ = false;                      // false until a teleport: `last_teleport_` means nothing before one
+    TeleportHold hold_;                                      // the teleport hold (see above)
 };
 
 }}  // namespace aoc::worldd

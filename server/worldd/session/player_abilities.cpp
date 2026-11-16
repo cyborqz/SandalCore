@@ -89,6 +89,47 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             pipeline_->set_weapon_tags([this] { return weapon_tags(); });
             pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
             pipeline_->set_item_taker([this](int32_t client_instance_id) { return consumable_paid(client_instance_id); });   // consumables: the cost step takes the item
+            // a player's heal reaches his own summoned mount: the mount is no combat world actor, its Health is the replicated stat the session holds
+            // (the caster's own mount, never another player's, and only while it stands: a mount that dissolves or dies has saved the Health it had, so a heal on it would be lost)
+            const auto healable = [this](uint64_t id) {
+                if (!mounts_ || mounts_->actor_id() != id) return false;
+                const MountController::Phase phase = mounts_->phase();
+                return phase == MountController::Phase::Summoning || phase == MountController::Phase::Out;
+            };
+            pipeline_->set_mount_targets(
+                [this, healable](uint64_t id) -> std::optional<AbilityPipeline::MountTarget> {
+                    if (!registry_ || !healable(id)) return std::nullopt;
+                    const world::WorldActor* m = registry_->find(id);
+                    if (!m || m->kind != world::ActorKind::Mount) return std::nullopt;
+                    const std::optional<double> health = spawns::stat_value(*m, content::kGuidHealth);
+                    const std::optional<double> maximum = spawns::stat_value(*m, content::kGuidMaxHealth);
+                    if (!health || !maximum) return std::nullopt;
+                    AbilityPipeline::MountTarget t;
+                    t.actor = id;
+                    t.health = *health;
+                    t.max_health = *maximum;
+                    t.x = m->x;
+                    t.y = m->y;
+                    t.z = m->z;
+                    t.alive = *health > 0;
+                    const GoodPosition at = checker_.good();
+                    t.surface_distance_cm = std::max(0.0, std::hypot(m->x - at.x, m->y - at.y) - t.radius_cm - 50.0);
+                    t.component = m->actor.guid;
+                    t.cylinder = m->actor.guid;
+                    t.cylinder.ObjectId = m->npc.collision_cylinder;
+                    return t;
+                },
+                [this, healable](uint64_t id, double amount) -> double {
+                    if (!registry_ || !healable(id) || !std::isfinite(amount) || amount <= 0) return 0;
+                    const world::WorldActor* m = registry_->find(id);
+                    if (!m) return 0;
+                    const std::optional<double> health = spawns::stat_value(*m, content::kGuidHealth);
+                    const std::optional<double> maximum = spawns::stat_value(*m, content::kGuidMaxHealth);
+                    if (!health || !maximum || !(*health < *maximum)) return 0;
+                    const double after = std::min(*maximum, *health + amount);
+                    registry_->modify(id, world::Change::State, [after](world::WorldActor& a) { spawns::set_stat_value(a, content::kGuidHealth, static_cast<float>(after)); });
+                    return after - *health;
+                });
             sync_ability_values();
             if (npc_world_ && npc_world_->combat()) {
                 combat_side_ = std::make_shared<CombatSide>(*this);

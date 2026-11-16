@@ -85,8 +85,10 @@ GmTeleportResult GmTravel::teleport(const GmTeleportRequest& request, const std:
         out.message = "the character \"" + request.character + "\" is not in the world (worldctl players lists them)";
         return out;
     }
-    // where to: a place by name, or a point (with the ground's height when no z is given)
+    // where to: a place by name, or a point.  The player stands on the surface the data has there (a town's floor, a building's, the landscape) with the capsule's half
+    // height; a z the game master names is kept as given unless it is under the ground.
     double x = 0, y = 0, z = 0;
+    bool lifted = false;
     if (!request.place.empty()) {
         const world::Places places = world_.places();
         const world::Place* place = places.find(request.place);
@@ -109,13 +111,18 @@ GmTeleportResult GmTravel::teleport(const GmTeleportRequest& request, const std:
         }
         if (request.has_z) {
             z = request.z;
-        } else if (const auto ground = world_.ground_at(x, y)) {
-            z = *ground + PlayerWorld::kCapsuleHalfHeightCm;
-            out.ground_height = true;
+            bool grounded = false;
+            world_.player_height(x, y, request.z, /*has_hint=*/true, /*keep_above=*/true, &z, &grounded);
+            lifted = grounded && z > request.z + 0.5;   // (the height named is under the ground there: the ground is used)
         } else {
-            out.status = GmStatus::InvalidArgument;
-            out.message = "the server has no ground at " + coords(x, y) + ": give z";
-            return out;
+            bool grounded = false;
+            if (world_.player_height(x, y, 0.0, /*has_hint=*/false, /*keep_above=*/false, &z, &grounded) && grounded) {
+                out.ground_height = true;
+            } else {
+                out.status = GmStatus::InvalidArgument;
+                out.message = "the server has no ground at " + coords(x, y) + ": give z";
+                return out;
+            }
         }
     }
     const PlayerSession::GmMoveResult moved = handle.player->gm_teleport(*handle.connection, x, y, z, now_(), by);
@@ -125,6 +132,8 @@ GmTeleportResult GmTravel::teleport(const GmTeleportRequest& request, const std:
         case PlayerSession::GmMoveResult::Status::Moved:
             out.to = {moved.to.x, moved.to.y, moved.to.z};
             out.dismounted = moved.dismounted;
+            if (lifted) spdlog::info("[gm] {}: the z {:.0f} cm named at ({:.0f}, {:.0f}) is under the ground: put on it, at ({:.0f}, {:.0f}, {:.0f}) cm", out.character, request.z, x, y, out.to.x, out.to.y,
+                                     out.to.z);
             break;
         case PlayerSession::GmMoveResult::Status::Dead:
             out.status = GmStatus::FailedPrecondition;
@@ -1035,8 +1044,11 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
     return out;
 }
 
-size_t GmTravel::teleport_characters(const std::string& names, double x, double y, double z, const std::string& by, Clock::time_point now) {
+size_t GmTravel::teleport_characters(const std::string& names, double x, double y, double z_named, const std::string& by, Clock::time_point now) {
     size_t moved = 0;
+    // the height the client names is kept unless it is under the ground there (the same as the admin API's point with a height)
+    double z = z_named;
+    if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z_named)) world_.player_height(x, y, z_named, /*has_hint=*/true, /*keep_above=*/true, &z);
     std::string token;
     const auto flush = [&] {
         if (token.empty()) return;

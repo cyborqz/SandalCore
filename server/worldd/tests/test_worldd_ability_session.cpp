@@ -58,6 +58,7 @@
 #include "protocol/schema/generated/index.h"
 #include "session/summoner_pets.h"
 #include "session/player_session.h"
+#include "session/gm_travel.h"
 #include "spawns/area.h"
 #include "world/relevancy.h"
 // C.O.A.C_Y_B
@@ -4071,6 +4072,63 @@ static void test_e1_player_death() {
 }
 // built by C Y B with CoA
 
+/// The community bug fixes, lane 4: a game master's teleport in the middle of a fight.  The player is put where the teleport names and held there
+/// (the floor may still be streaming in), and the fight goes on: the same session, the Wolf still fighting, the player in combat.
+static void test_gm_teleport_in_a_fight() {
+    std::printf("a game master's teleport in a fight: the player is put at the place named and held there, and the fight goes on\n");
+    const svc::Character rec = bard25();
+    std::vector<uint64_t> wolves;
+    uint64_t far_wolf = 0, next_actor_id = 5000000;
+    bool ground = false;
+    auto prepare = [&](PlayerWorld& w) { spawn_wolves(w, wolves, far_wolf, 1, 24, 800, ground, next_actor_id); };
+    Run r(0, true, &rec, prepare);
+    CHECK(ground && wolves.size() == 1 && r.h.fx.world->combat(), "a world with a Wolf at the player's side");
+    if (!ground || wolves.empty() || !r.h.fx.world->combat()) return;
+    combat::CombatWorld& cw = *r.h.fx.world->combat();
+    r.play(0.5, false);
+    phase_in(r);
+    double bitten = -1;
+    const float full = r.m.stats[content::kGuidMaxHealth];
+    for (int i = 0; i < 60 && bitten < 0; ++i) {
+        r.play(0.1, false);
+        r.h.fx.world->tick_world(r.now());
+        if (r.m.stats[content::kGuidHealth] < full) bitten = r.now();
+    }
+    CHECK(bitten >= 0 && r.h.s->character_stats() && r.h.s->character_stats()->in_combat(), "(the Wolf has bitten: the player is in a fight)");
+    const auto fighting = cw.ai_state(wolves[0]);
+    CHECK(fighting.has_value() && *fighting != npc::ai::State::Idle, "(the Wolf's AI is fighting (Chase or Attack))");
+    const GoodPosition before = r.h.s->movement().good();
+    GmTravel travel(*r.h.fx.world, [&r] { return std::vector<PlayerHandle>{PlayerHandle{r.h.s.get(), &r.h.conn}}; }, [&r] { return r.h.t; });
+    GmTeleportRequest rq;
+    rq.character = "cyb";
+    rq.x = before.x + 300.0;
+    rq.y = before.y;
+    rq.z = before.z;
+    rq.has_z = true;   // (the login spot is outside the test's ground: a height is given, as the admin app's form allows)
+    const GmTeleportResult moved = travel.teleport(rq, "the test");
+    CHECK(moved.status == GmStatus::Ok && std::fabs(moved.to.x - (before.x + 300.0)) < 1.0 && std::fabs(moved.to.z - before.z) < 1.0,
+          "the teleport in the fight is done: 3 m to the side, at the height given");
+    // its floor at the new place is not there yet: the client falls 2 m, and its own move says so (the ticks below send no move of the client's: only the server's)
+    r.ts += 0.2f;
+    repl::NetworkMove fall;
+    fall.time_stamp = r.ts;
+    fall.acceleration = repl::quantize_vector(10, 0, 0, 0);
+    fall.location = repl::quantize_vector(100, moved.to.x, moved.to.y, moved.to.z - 200.0);
+    fall.movement_mode = repl::kMoveFalling;
+    r.h.client_sends({r.h.client.actor(r.h.pawn_ch, client_move(fall), false)});
+    for (int i = 0; i < 10; ++i) {
+        r.h.step(milliseconds(100));
+        r.h.fx.world->tick_world(r.now());
+        r.absorb();
+    }
+    CHECK(std::fabs(r.h.s->movement().good().z - moved.to.z) < 1.0, "the falling client is put back at the place it was teleported to (the hold)");
+    const auto still = cw.ai_state(wolves[0]);
+    CHECK(still.has_value() && *still != npc::ai::State::Idle, "the Wolf still fights: the teleport did not end the fight");
+    CHECK(r.h.s->character_stats() && r.h.s->character_stats()->in_combat(), "the player is still in combat through the teleport");
+    CHECK(!r.h.s->dead() && r.h.s->moves_refused() < 3 && !r.h.s->abilities_failed() && r.m.unreadable == 0, "(the session is fine, the teleport is not a refused move)");
+}
+
+
 static void test_e1_death_without_loss() {
     std::printf("E1 stage 3, part 2: with --no-death-loss a death costs experience only %s\n", kAftermathNote);
     svc::Character rec = bard25();
@@ -4774,6 +4832,7 @@ int main() {
         test_e1_whole_fight();
         test_e1_loot_with_full_bag();
         test_e1_player_death();
+        test_gm_teleport_in_a_fight();
         test_e1_death_without_loss();
         test_level_up_of_a_dead_player();
         test_level_up_in_the_tick_of_the_death();

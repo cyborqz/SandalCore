@@ -396,13 +396,33 @@ public:
         std::string name;
     };
     RespawnSpot respawn_spot(double from_x, double from_y, bool nearest_point = true) const;
-    /// Review A I4: the height a player is put at over (x, y) when the data says `data_z`: the ground's under the spot plus the capsule's half height (98 cm) when the ground's
-    /// chunk is here, the data's own height when it is not (a chunk that is not here has none of its navmesh floors: grounding on the terrain alone would put a shrine on a bridge, or
-    /// a platform, under it).  `grounded` (optional) says which.  A world without ground gives the data's.
+    /// Review A I4: the height a player is put at over (x, y) when the data says `data_z`: the ground's under the spot plus the capsule's half height (98 cm) when the world has
+    /// ground there, the data's own height when it has none (an older content.db's shrine outside the extracted landscape).  `grounded` (optional) says which.  A world without
+    /// ground gives the data's.
     static double spot_height(const nav::AreaNav* nav, double x, double y, double data_z, bool* grounded = nullptr);
-    /// The height a player is put at over a spawn point (a respawn shrine) whose data height is `data_z`: inside the footprint of a bowl whose platform is read, the platform's floor plus the
-    /// capsule and kBowlSlackCm; anywhere else spot_height().  `grounded` says whether a ground or a floor was found.
+    /// The height a player is put at over a spawn point (a respawn shrine) whose data height is `data_z`: the surface the data has at the spot (below) plus the capsule's half
+    /// height.  Where the chunk of the walking map is not here and the data's height is over the landscape (up to kStructureReachCm: a shrine on a deck, a hull or a roof), the data's
+    /// height stands.  `grounded` says whether a ground or a floor was found; a world with none gives the data's height.
     double spawn_height(double x, double y, double data_z, bool* grounded = nullptr) const;
+    /// The surface (where a body's feet stand) the data has at (x, y), the walking map and the landscape: inside a town's bowl its floor (the street, or the floor of a
+    /// building at the spot within kFloorReachCm of it); elsewhere the walking map's floor nearest `z_hint` within kSpotBelowCm under it and kSpotAboveCm over it (a building's
+    /// floor, a bridge, a stair), else the landscape -- which answers even when the walking map's chunk is not loaded (the terrain is resident).  `has_hint` false: the landscape
+    /// itself is the height the floor is looked for around (a point without a height).  A floor more than kTerrainTolCm under the landscape (a cave, a cellar, a tunnel) is never
+    /// the surface of a spot named at or over the landscape, and a point without a height is the landscape's top or a floor over it.  False when the world has no ground there.
+    bool surface_at(double x, double y, double z_hint, bool has_hint, double* z) const;
+    /// True when a body whose origin is at z over (x, y) stands on the surface the data has there, or within kFloorReachCm over it; false for a place in the air (a height a game
+    /// master named over the ground, a tower).  True where the world has no ground there: nothing says it is in the air.
+    bool on_the_ground(double x, double y, double z) const;
+    /// A floor of the walking map this close to the landscape's own height is the landscape (cm): the terrain's samples are exact, the map's polygon of them is within its cells.
+    static constexpr double kTerrainTolCm = 40.0;
+    /// A shrine whose chunk of the walking map is not here keeps its data's height over the landscape up to this far (cm): it stands on a deck, a hull or a roof that only the map shows.
+    static constexpr double kStructureReachCm = 1000.0;
+    /// Where a player's origin is put at (x, y): the surface (surface_at) plus the capsule's half height.  `has_hint` and `keep_above`: a height the caller names (a game
+    /// master's z, a place's data height) is kept as given unless it is under the ground there.  False, with the height unchanged, when the world has no ground there.
+    bool player_height(double x, double y, double z_hint, bool has_hint, bool keep_above, double* z, bool* grounded = nullptr) const;
+    /// How far around the height asked the walking map's floor is looked for (cm): a step and a half under, a step and a half over, as the respawn always did.
+    static constexpr double kSpotBelowCm = 400.0;
+    static constexpr double kSpotAboveCm = 150.0;
     /// The default quality of an item record, cached (the loot's stacks).
     int item_quality(int64_t item) const;
     /// The rarity the client shows for a quality of an item record (items/rarity.h: the band of the record's curve held inside its RarityMin..RarityMax), its facts cached.
@@ -503,7 +523,8 @@ public:
     static constexpr double kCapsuleHalfHeightCm = 98.0;
     /// A named place stands this far above its recorded z where the server has no ground (a short fall, never a place under the ground).
     static constexpr double kPlaceLiftCm = 150.0;
-    /// The height a player sent to `place` is put at: the ground under it plus the capsule's half height where the server has ground, else the place's z plus kPlaceLiftCm.
+    /// The height a player sent to `place` is put at: the surface under it (a town's floor, a building's, the landscape) plus the capsule's half height where the server has
+    /// ground, else the place's z plus kPlaceLiftCm.
     double place_height(const world::Place& place) const;
 
     /// How each session's ActorView runs (the rings, the tick, the opens cap): the defaults are retail's; a test changes them before a session joins.

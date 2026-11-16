@@ -33,11 +33,35 @@ const char* fault_name(MoveFault f) {
 }
 
 MoveVerdict MoveChecker::check(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, bool dash) {
-    return judge(move, now, dash ? std::max(limits_.max_speed, limits_.dash_speed) : limits_.max_speed, dash, false);
+    const MoveVerdict v = judge(move, now, dash ? std::max(limits_.max_speed, limits_.dash_speed) : limits_.max_speed, dash, false);
+    if (v.accepted) hold_saw(move.location_cm(), move.movement_mode, now);
+    return v;
 }
 
 MoveVerdict MoveChecker::check_allowing(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double allow_speed, bool based) {
-    return judge(move, now, std::max(limits_.max_speed, std::isfinite(allow_speed) ? allow_speed : 0.0), std::isfinite(allow_speed) && allow_speed > 0.0, based);
+    const MoveVerdict v = judge(move, now, std::max(limits_.max_speed, std::isfinite(allow_speed) ? allow_speed : 0.0), std::isfinite(allow_speed) && allow_speed > 0.0, based);
+    if (v.accepted) hold_saw(move.location_cm(), move.movement_mode, now);
+    return v;
+}
+
+/// The hold after an accepted move: a walking move on the place means the client has the floor it was sent to (the hold is over: a client that walks stands on something,
+/// even when that is up to kHoldStandCm under the place, so a floor a little lower than the server believed is not fought for twenty seconds); a falling move under the place
+/// means it fell through the floor (the correction goes again); a move away from it means the player walked on (over too).
+void MoveChecker::hold_saw(const protocol::repl::Vec3d& loc, uint8_t mode, std::chrono::steady_clock::time_point now) {
+    if (!hold_.active) return;
+    if (now > hold_.until) {
+        release_hold();
+        return;
+    }
+    if (std::hypot(loc.x - hold_.x, loc.y - hold_.y) > kHoldNearCm) {
+        release_hold();   // the player walked on: the fall, if one comes, is the game's
+        return;
+    }
+    if (mode == protocol::repl::kMoveWalking && loc.z >= hold_.z - kHoldStandCm && loc.z <= hold_.z + kHoldStandCm) {
+        release_hold();
+        return;
+    }
+    if (loc.z < hold_.z - kHoldDropCm) hold_.dropped = true;
 }
 
 MoveVerdict MoveChecker::judge(const protocol::repl::NetworkMove& move, std::chrono::steady_clock::time_point now, double speed, bool ability_window, bool based) {

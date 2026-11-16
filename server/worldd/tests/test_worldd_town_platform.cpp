@@ -356,7 +356,7 @@ static void test_real_platforms() {
         // a respawn point inside a bowl's footprint
         bool grounded = false;
         const double shrine_z = world.spawn_height(mx, my, 7000.0, &grounded);
-        CHECK(grounded && std::fabs(shrine_z - (floor_z + 98.0 + PlayerWorld::kBowlSlackCm)) < 1e-6, "respawn: a shrine in a bowl comes back on the floor + the capsule + the slack, not the pit's height");
+        CHECK(grounded && std::fabs(shrine_z - (floor_z + 98.0)) < 1e-6, "respawn: a shrine in a bowl comes back on the floor + the capsule (no slack: the respawn holds the client on it), not the pit's height");
         CHECK(std::fabs(world.spawn_height(mx + 100000.0, my, 7000.0, &grounded) - 7000.0) < 1e-9 && !grounded, "respawn: a shrine outside every bowl keeps its data height when the world has no ground");
     }
 

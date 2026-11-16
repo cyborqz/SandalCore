@@ -137,6 +137,7 @@
 
 #include "combat/hit_port.h"
 #include "combat/hit_resolver.h"
+#include "protocol/emit/intrepid_netguid.h"
 #include "session/abilities.h"
 #include "session/ability_catalog.h"
 #include "session/projectile_flight.h"
@@ -404,6 +405,22 @@ public:
     using ActiveTargetFn = std::function<uint64_t()>;
     /// A consumable's cast reaches its cost step: the session takes one off the item's stack and answers whether it could (false: the stack is gone since the trigger).
     using ItemTakeFn = std::function<bool(int32_t client_instance_id)>;
+    /// The caster's own mount as a heal's target: a friendly character whose Health is its own (the game heals an ally's Health; the mount is no NPC
+    /// the combat world knows, so the session gives this view of it). `surface_distance_cm` is from the caster's place to its body.
+    struct MountTarget {
+        uint64_t                                      actor = 0;
+        double                                        health = 0, max_health = 0;
+        double                                        x = 0, y = 0, z = 0;
+        double                                        surface_distance_cm = 0;
+        double                                        radius_cm = 50.0;
+        bool                                          alive = false;
+        protocol::emit::FIntrepidNetworkGUID          component;   // the mount's actor: the confirmation's HitComp
+        protocol::emit::FIntrepidNetworkGUID          cylinder;    // its CollisionCylinder, exported with the confirmation
+    };
+    /// A mount the caster may heal (the session's own summon, nullopt for any other actor).
+    using MountTargetFn = std::function<std::optional<MountTarget>(uint64_t actor)>;
+    /// Puts a heal on the mount's Health (clamped at its maximum) and answers what took effect; 0 when nothing did.
+    using MountHealFn = std::function<double(uint64_t actor, double amount)>;
 
     /// `catalog` may be null (a content.db without the ability tables, a test with none): only regeneration runs then. `stats` and `a7` belong to
     /// the session and outlive the pipeline; `worn` gives the equipment the stat engine runs with. `seed` seeds RandDouble.
@@ -505,6 +522,11 @@ public:
     void set_active_target(ActiveTargetFn fn) { active_target_ = std::move(fn); }
     /// Where a consumable's cast takes its item when its cost step runs (after the other costs); none set: such a cast takes nothing (the pipeline alone, a test with no bag).
     void set_item_taker(ItemTakeFn fn) { item_taker_ = std::move(fn); }
+    /// The caster's own mount for a heal's target (none set: a mount is no target the pipeline knows) and where the heal's Health goes.
+    void set_mount_targets(MountTargetFn target, MountHealFn heal) {
+        mount_target_ = std::move(target);
+        mount_heal_ = std::move(heal);
+    }
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
@@ -1158,6 +1180,9 @@ void   step_multi_hit(Cast& cast, double t);
     // hit requests and slots
     CastRecord*  record_of(int32_t client_id);
     void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting);
+    /// The target as the world knows it (an NPC, a player's pawn), else the caster's own mount from the session's view (a friendly ally whose Health
+    /// the heal moves); nullopt when neither knows the actor. The mount is not a combat world actor: its place and distance come from the session.
+    std::optional<combat::TargetInfo> target_info(uint64_t actor);
     /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target;
     /// `first_landed` (when given) is the first actor the hit took effect on (0: none), for a hit that goes on from the one it landed on.
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
@@ -1207,6 +1232,8 @@ void   step_multi_hit(Cast& cast, double t);
     WeaponTagsFn              weapon_tags_;
     ActiveTargetFn            active_target_;
     ItemTakeFn                item_taker_;
+    MountTargetFn             mount_target_;
+    MountHealFn               mount_heal_;
     double                    world_time_at_zero_;
     stats::SplitMix           rng_;
     std::unique_ptr<stats::CharacterStats::Evaluation> evaluation_;
