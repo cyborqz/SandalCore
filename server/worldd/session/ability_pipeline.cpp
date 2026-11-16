@@ -1612,12 +1612,11 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     if (!combat_ || targets.empty()) return;
     std::string why;
     bool ok = true;
-    // a hit that asks about its target is asked of each target below when it is a reaction's (as before); the last hit of the Lullaby's cast asks its own
-    // requirement (an Incapacitated target) of each target it reaches, and no other hit is asked so (src.ask_each_target: the tooltip's final hit)
+    // a hit whose requirement reads its target (GetTarget(): "does it bleed?", "is it Incapacitated?") is asked of each target it reaches, with that target as GetTarget(): a target
+    // it does not hold for is no target of the hit, and the others still are. A requirement that reads no target is asked once, of the caster
     const content::ExprRow* requirement = hit.row.requirement_expr != 0 && catalog_ ? catalog_->expr(hit.row.requirement_expr) : nullptr;
-    const bool ask_each = src.type == content::kSourceTypeReaction && requirement && requirement->uses_target && requirement->program >= 0;
-    const bool ask_each_this = ask_each || (src.ask_each_target && requirement && requirement->uses_target && requirement->program >= 0);
-    if (!ask_each_this && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
+    const bool ask_each = requirement && requirement->uses_target && requirement->program >= 0;
+    if (!ask_each && (!eval_bool(hit.row.requirement_expr, true, ok, why) || !ok)) return;
     if (!ensure_evaluation(why)) return;
     const int mask = hit.row.applicable_targets;
     double max_targets = 40;
@@ -1634,13 +1633,50 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
         return src.reach_free || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
     };
+    const uint64_t active = active_target_ ? active_target_() : 0;
+    // whether the hit's requirement holds of a target it reaches: the requirement runs with that target as GetTarget() (its stats, the effects it holds, its side of the caster's relations
+    // and its distance), so that each target is asked on its own: a Hemorrhage conversion asks of the Wolf, not of the Ranger, whether it bleeds
+    const bool active_named = active != 0 && std::find(targets.begin(), targets.end(), active) != targets.end();
+    const auto holds = [&](uint64_t id, const combat::TargetInfo& ti) {
+        combat::Fighter* tf = combat_->fighter(id);
+        if (!tf) return false;
+        std::string err;
+        auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
+        if (!target_eval || !evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) return false;
+        const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
+        const PortEffects held(*combat_, id, t);   // what the target holds (GetEffectRemainingDuration(GetTarget(), ...))
+        combat::HitContext ask;
+        ask.instigator = &self_view;
+        ask.target = &target_view;
+        ask.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
+        ask.enemy = ti.relation == combat::Relation::Hostile;
+        ask.neutral = ti.relation == combat::Relation::Neutral;
+        ask.active_is_target = id == active;
+        ask.active_in_hit = active_named;
+        ask.target_effects = &held;
+        Host ask_host(*this);
+        ask_host.set_context(&ask);
+        double v = 0;
+        evaluation_->set_consumed(consumed_);
+        const bool wanted = evaluation_->eval(requirement->program, ask_host, v, err) && std::isfinite(v) && v != 0.0;
+        evaluation_->clear_actors();
+        return wanted;
+    };
+    // the targets the hit is on: the ones named, or for a hit that reads its target the ones it reaches and holds for, each asked once and in the order they were named
+    std::vector<uint64_t> held_for;
+    if (ask_each) {
+        for (const uint64_t id : targets) {
+            const combat::TargetInfo ti = combat_->inspect(id);
+            if (reached(ti) && holds(id, ti)) held_for.push_back(id);
+        }
+    }
+    const std::vector<uint64_t>& on = ask_each ? held_for : targets;
     // the hit's primary target, for the formulas that tell it from the others (the melee combos give every other target a smaller share): the caster's
     // selected enemy when the hit reaches it, else the target nearest the caster
-    const uint64_t active = active_target_ ? active_target_() : 0;
     bool active_in_hit = false;
     uint64_t closest = 0;
     double closest_cm = 0;
-    for (const uint64_t id : targets) {
+    for (const uint64_t id : on) {
         const combat::TargetInfo ti = combat_->inspect(id);
         if (!reached(ti)) continue;
         if (id == active) active_in_hit = true;
@@ -1653,7 +1689,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     if (landed) *landed = closest != 0;
     std::vector<bootstrap::HitTargetOut> outs;
     HitEvent event;   // reactions: what this hit did to the targets it reached
-    for (const uint64_t id : targets) {
+    for (const uint64_t id : on) {
         if (static_cast<double>(outs.size()) >= max_targets) break;
         const combat::TargetInfo ti = combat_->inspect(id);
         if (!reached(ti)) continue;
@@ -1663,32 +1699,13 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         std::string err;
         auto target_eval = tf->stats().evaluation(tf->worn(), err, true);
         if (!target_eval) continue;
-        if (ask_each_this) {   // the requirement, with this target as GetTarget()
-            bool wanted = false;
-            if (evaluation_->set_actor(stats::kRoleTarget, *target_eval, err)) {
-                const combat::EvalView self_view(*evaluation_), target_view(*target_eval);
-                combat::HitContext ask;
-                ask.instigator = &self_view;
-                ask.target = &target_view;
-                ask.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
-                ask.enemy = hostile;
-                ask.neutral = ti.relation == combat::Relation::Neutral;
-                Host ask_host(*this);
-                ask_host.set_context(&ask);
-                double v = 0;
-                evaluation_->set_consumed(consumed_);
-                wanted = evaluation_->eval(requirement->program, ask_host, v, err) && std::isfinite(v) && v != 0.0;
-                evaluation_->clear_actors();
-            }
-            if (!wanted) continue;
-        }
         Host host(*this);
         combat::HitMeta meta;
         meta.source_type = src.type;
         meta.source_guid = src.guid;
         if (ability) meta.ability_tags = ability->row.tags;
         if (hit.use_item_tags && weapon_tags_) meta.item_tags = weapon_tags_();
-        meta.targets = static_cast<double>(targets.size());
+        meta.targets = static_cast<double>(on.size());
         meta.target_is_active = id == active;
         meta.active_in_hit = active_in_hit;
         meta.target_is_closest = id == closest;
@@ -4682,14 +4699,10 @@ void AbilityPipeline::step_multi_hit(Cast& cast, double t) {
     if (damage && !cast.target_actors.empty()) apply_hit_on_targets(c, *damage, cast.target_actors, t, src, &def, &landed);
     const bool last = ++cast.multi_index >= mh.count;
     if (last) {
-        // The final hit also runs the shape's Stun hit. Its own record asks for an Incapacitated target (the tooltip's final hit); that requirement is asked of each
-        // target this hit reaches, and of this hit alone (HitSource::ask_each_target), never of the other hits or the other abilities' target-reading hits.
+        // The final hit also runs the shape's Stun hit. Its own record asks for an Incapacitated target (the tooltip's final hit); like every hit that reads its target,
+        // it is asked of each target it reaches (apply_hit_on_targets).
         if (landed) {
-            if (const HitDef* stun = catalog_->hit_named(mh.stun)) {
-                HitSource next = src;
-                next.ask_each_target = true;
-                apply_hit_on_targets(c, *stun, cast.target_actors, t, next, &def);
-            }
+            if (const HitDef* stun = catalog_->hit_named(mh.stun)) apply_hit_on_targets(c, *stun, cast.target_actors, t, src, &def);
         }
         cast.end_due = cast.trigger_at + mh.length * cast.multi_scale;   // (the montage's end clears the item)
         cast.clears_montage = true;

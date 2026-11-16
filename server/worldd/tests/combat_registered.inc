@@ -36,3 +36,4 @@
 #include "combat_display_names_tests.inc"
 #include "combat_unreachable_tests.inc"
 #include "combat_stealth_tests.inc"
+#include "combat_hit_checks_tests.inc"

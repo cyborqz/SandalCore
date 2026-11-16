@@ -156,7 +156,7 @@ bool HitResolver::resolve_with(stats::CharacterStats::Evaluation& attacker, Cont
         if (hit.miss_rate_expr) override_rate(hit.miss_rate_expr, rates.miss);
         if (hit.block_rate_expr) override_rate(hit.block_rate_expr, rates.block);
         if (hit.crit_rate_expr) override_rate(hit.crit_rate_expr, rates.crit);
-        if (hit.force_cant_miss) rates.miss = 0;
+        if (hit.force_cant_miss || meta.cannot_miss) rates.miss = 0;
         if (hit.force_cant_block) rates.block = 0;
         if (hit.force_cant_crit) rates.crit = 0;
         if (hit.force_roll_miss) rates.miss = 1;

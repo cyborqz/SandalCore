@@ -19,7 +19,7 @@
 //  A record that never refreshes keeps its times (a new stack still counts).  An effect that extends its duration (ExtendDuration) grows its time left by the amount the
 //  application worked out (`Applied::extension`) and never past the record's longest (`extended_max`); one whose amount is not known is refreshed to its full duration.
 //  A record that compares sources keeps one instance per instigator: an application refreshes, stacks or replaces the instance of the SAME instigator, and another instigator's
-//  makes an instance of its own (up to the record's global limit, 0 for no limit).
+//  makes an instance of its own (up to the record's global limit, 0 for no limit; a record whose limit is 1 holds one stack for each instigator, kMaxSources of them at most).
 //  A hit's effect that works out to no stacks is never applied: that is the data's way to make an effect conditional.
 //  The instances also answer the stat engine: `engine_effects()` is the list a character's stats read (the stat mods of its stacks, GetEffectCount, GetEffectCountByTag).
 // ============================================================================
@@ -75,6 +75,9 @@ class Book {
 public:
     /// The most instances one holder keeps (a hostile list cannot grow the book without bound).
     static constexpr size_t kMaxInstances = 256;
+    /// The most instigators one record that compares sources and has a limit of 1 is on a holder from at once.  A bound of the book, not a number of the data (a limit of 1 does not name one), set
+    /// at the most targets one hit reaches: the 41st instigator's application is refused (nothing is put on and nothing is said), while an instigator that is on the holder already still refreshes his own.
+    static constexpr int kMaxSources = 40;
 
     /// What a call changed, in the order the replicated array must see it: the keys that went, then the instances added and the ones changed in place.
     struct Changes {
@@ -154,8 +157,11 @@ public:
             return true;
         };
         if (!existing) {
-            // a record that compares sources and is on the holder already from other instigators: one more instance only up to the record's global limit (0: no limit)
-            if (row.compare_source && same > 0 && row.global_stack_limit > 0 && same >= row.global_stack_limit) return false;
+            // a record that compares sources and is on the holder already from other instigators: one more instance only up to the record's global limit (0: no limit). A limit of 1 on
+            // such a record is one stack for each instigator, not one on the holder (comparing sources would mean nothing else): a second player's Blinded, Dazed, Demoralized or
+            // Weakened goes on beside the first one's, up to kMaxSources instigators
+            const int cap = row.global_stack_limit == 1 ? kMaxSources : row.global_stack_limit;
+            if (row.compare_source && same > 0 && cap > 0 && same >= cap) return false;
             return fresh(in_place ? std::min(a.stacks, std::max(1, a.in_place_limit)) : 1);
         }
         if (in_place) {

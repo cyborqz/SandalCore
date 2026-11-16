@@ -10,7 +10,7 @@
 //  is what the world applies to an NPC target and what a session applies to its player (shields first), and what the confirmation carries.
 //
 //  The rolls [modelled: no capture shows a rate; the captured player's hits crit 8.9 % of the time, block 0.2 %]:
-//    miss   the target's Evasion over the instigator's Accuracy, of the hit's aspect (a hit that cannot miss: bForceCantMiss)
+//    miss   the target's Evasion over the instigator's Accuracy, of the hit's aspect (a hit that cannot miss: bForceCantMiss, and the tick of a damage over time: HitMeta::cannot_miss)
 //    block  the target's BlockChance of the aspect (physical hits and magical ones alike)
 //    crit   the instigator's CriticalChance less the target's CriticalAvoidance, of the aspect
 //  a hit's own CritRate / BlockRate / MissRate expression replaces the chance of the stats, and the hit's force flags decide what can happen at all.
@@ -75,6 +75,7 @@ struct HitMeta {
     bool                     active_in_hit = false;       // the caster's selected enemy is among the targets the hit reaches
     bool                     target_is_closest = false;   // this target is the one the hit reaches nearest the caster
     const TargetEffects*     target_effects = nullptr;    // the effects the target holds, for the reads of them (null: it holds none that the expressions can see)
+    bool                     cannot_miss = false;         // the hit rolls no miss, as if its record forced it: the tick of a damage over time (retail's recorded ticks never missed)
 };
 // (C-O-A ~ C.Y.B)
 

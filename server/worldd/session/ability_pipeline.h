@@ -631,8 +631,6 @@ private:
         uint64_t source_actor = 0;
         /// The hit reaches its targets wherever they stand: a ball that flew on from the caster hurts what it touches, however far from the caster that is by now. Every other check of the hit holds.
         bool    reach_free = false;
-        /// The last hit of the Lullaby's cast: its Stun hit asks its own requirement (an Incapacitated target) of each target it reaches, and no other hit is asked so.
-        bool    ask_each_target = false;
     };
     /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
     struct HitEvent {

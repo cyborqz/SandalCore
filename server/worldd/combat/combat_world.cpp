@@ -2022,6 +2022,7 @@ void CombatWorld::run_effect_hits(Npc& n, const effects::Instance& e, const char
         meta.source_guid = e.def->row.guid;
         const BookView view(n.book, at);
         meta.target_effects = &view;
+        meta.cannot_miss = tick_phase;   // the tick of a damage over time never misses (none of retail's recorded ticks did); it can still be a critical hit
         if (!resolver_.requirement_holds(from, n, *hit, meta)) continue;
         Resolved r;
         std::string why;
