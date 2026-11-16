@@ -62,6 +62,8 @@ public:
     virtual std::vector<GatheredTarget> enemies_touching(const Vec3& /*centre*/, double /*radius_cm*/, size_t /*max*/) { return {}; }
     /// The creatures and the other players whose bodies touch a lingering zone, and their side of the caster (see CombatWorld::actors_in_area).
     virtual std::vector<ZoneTarget> actors_in_area(const Vec3& /*centre*/, const ZoneArea& /*area*/, size_t /*max*/) { return {}; }
+    /// The joined players that stand with the caster (his party and himself; see CombatWorld::player_allies), for the targeting of an ally hit.
+    virtual std::vector<AllyInfo> allies() { return {}; }
     /// The height of the ground under (x, y), nearest to `z_hint` (see CombatWorld::ground_height); false where the world has none.
     virtual bool ground_height(double /*x*/, double /*y*/, double /*z_hint*/, double* /*z*/) const { return false; }
 };
@@ -105,9 +107,12 @@ public:
     double clock_offset() const { return clock_offset_; }
     protocol::emit::FIntrepidNetworkGUID guid_of(uint64_t actor) override {
         const world::WorldActor* a = registry_.find(actor);
-        return a ? a->actor.guid : protocol::emit::FIntrepidNetworkGUID{};
+        if (a) return a->actor.guid;
+        if (PlayerPort* p = world_.find_player(actor)) return p->pawn_guid();   // (another player's pawn: a hit of the ally's heals names it)
+        return protocol::emit::FIntrepidNetworkGUID{};
     }
     protocol::emit::FIntrepidNetworkGUID hit_component_of(uint64_t actor) override {
+        if (PlayerPort* p = world_.find_player(actor)) return p->cylinder_guid();
         protocol::emit::FIntrepidNetworkGUID g = guid_of(actor);
         g.ObjectId = world_.hit_component_of(actor);
         return g;
@@ -117,6 +122,7 @@ public:
     std::vector<GatheredTarget> enemies_in_cone(double angle_degrees, double length_cm, double behind_cm, size_t max) override {
         return world_.enemies_in_cone(self_, angle_degrees, length_cm, behind_cm, max);
     }
+    std::vector<AllyInfo> allies() override { return world_.player_allies(self_.id()); }
     std::vector<GatheredTarget> enemies_in_line(double length_cm, double radius_cm, size_t max) override { return world_.enemies_in_line(self_, length_cm, radius_cm, max); }
     std::vector<GatheredTarget> enemies_around(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_around(self_, centre, radius_cm, max); }
     std::vector<GatheredTarget> enemies_touching(const Vec3& centre, double radius_cm, size_t max) override { return world_.enemies_touching(self_, centre, radius_cm, max); }

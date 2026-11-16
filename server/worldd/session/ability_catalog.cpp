@@ -270,13 +270,21 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
         }
         c.zones_.emplace(g, std::move(*row));
     }
-    // the projectile records the abilities fire (a creature's bolt flies by its speed, its path and its life); one the file lacks is left out
+    // the projectile records the abilities fire (a creature's bolt flies by its speed, its path and its life); one the file lacks is left out.  The ones a
+    // hit fires with ab_hit_projectile "fire" are loaded too: they are no ability's projectile row (the Silent Pantheon's spawn projectiles, the Return to
+    // Verra's RTV_Projectile, the Myth of Creation's), and the runtime needs their speed and their landing hits.
+    const auto load_projectile = [&](int64_t guid) {
+        if (guid == 0 || c.projectiles_.count(guid)) return;
+        std::string skipped;
+        if (auto row = db->projectile(guid, skipped)) c.projectiles_.emplace(guid, std::move(*row));
+    };
     for (const auto& [g, a] : c.abilities_) {
         for (const content::AbilityHitRow& h : a.hits) {
-            if (h.source != "projectile" || c.projectiles_.count(h.owner_guid)) continue;
-            std::string skipped;
-            if (auto row = db->projectile(h.owner_guid, skipped)) c.projectiles_.emplace(h.owner_guid, std::move(*row));
+            if (h.source == "projectile") load_projectile(h.owner_guid);
         }
+    }
+    for (const auto& [g, hit] : c.hits_) {
+        for (const int64_t fired : hit.fires) load_projectile(fired);
     }
     // the reactions (contentc version 35); a file without their tables has none, and the effects and hits then list none
     if (!db->guids(content::AbilityContent::Table::Reaction, guids, error)) return std::nullopt;

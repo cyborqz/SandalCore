@@ -693,6 +693,44 @@ bool PlayerSession::consumable_paid(int32_t client_instance_id) {
     return true;
 }
 
+// ============================================================================================================================
+//  the Bard's Saga's ally hits: what another player's hit does to this player (session/members/saga.inc)
+// ============================================================================================================================
+
+bool PlayerSession::in_party_with(uint64_t actor) const {
+    if (actor == 0) return false;
+    if (actor == pb_.setup().guids.pawn.ObjectId) return true;
+    if (!party_group_) return false;
+    for (const PlayerSession* member : party_group_->members) {
+        if (member && member->pb_.setup().guids.pawn.ObjectId == actor) return true;
+    }
+    return false;
+}
+
+void PlayerSession::receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) {
+    effective.assign(hit.mods.size(), 0.0);
+    if (!pipeline_ || dead_) return;
+    // the world's clock is the combat world's; the pipeline's starts at the join (abilities_origin_)
+    effective = pipeline_->apply_ally_landing(hit, hit.at - pb_.setup().world_time);
+    take_ability_events();
+}
+
+void PlayerSession::receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double at) {
+    if (!pipeline_ || dead_) return;
+    pipeline_->apply_ally_effects(effects, instigator, at - pb_.setup().world_time);
+    take_ability_events();
+}
+
+void PlayerSession::receive_player_shield(double, double, double) {
+    // (the Sagas put no shield on another player: a TempHealth effect of a hostile hit stays the NPC world's; the session's own shields are its effects')
+}
+
+void PlayerSession::remove_player_effects(const abilities::HitDef& hit, double at) {
+    if (!pipeline_ || dead_) return;
+    pipeline_->apply_ally_removal(hit, at - pb_.setup().world_time);
+    take_ability_events();
+}
+
 /// The client calls of the ability component: triggers, held-ability cancels, branch and hit verification, ends (session/rpc_table.h).
 void PlayerSession::register_abilities_rpcs(RpcTable& t) {
     t.add(RpcScope::AbilityComponent, "ServerTriggerAbility", [](PlayerSession& s, const RpcContext& c) { s.on_ability_trigger(c.conn, c.rpc, c.bunch, c.now); });

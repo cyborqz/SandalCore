@@ -189,6 +189,10 @@ void CombatWorld::pet_effects_changed(Npc& pet) {
 // ---- what a hit takes off, and leaves on, what it lands on -----------------------------------------------------------------------------------
 
 void CombatWorld::remove_effects_from_npc(uint64_t npc_actor, const abilities::HitDef& hit, double now) {
+    if (PlayerPort* p = player(npc_actor); p && !is_pet(npc_actor)) {   // (a player's session takes it off its own effects)
+        p->remove_player_effects(hit, now);
+        return;
+    }
     const auto found = npcs_.find(npc_actor);
     if (found == npcs_.end() || found->second->book.empty()) return;
     Npc& n = *found->second;

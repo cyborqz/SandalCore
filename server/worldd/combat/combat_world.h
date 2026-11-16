@@ -70,6 +70,26 @@ struct IncomingHit {
 };
 // built with C-Y-B and CoA
 
+/// One player of the world, as another player's ally hits find him: his actor id, his Health, and whether he is of the caster's party (or the caster).
+struct AllyInfo {
+    uint64_t actor = 0;
+    double   health = 0, max_health = 0;
+    bool     party = false;   // of the caster's party, or the caster himself
+    bool     self = false;
+};
+
+/// A hit another player's ability landed on this player (the heals and blessings of a Bard's Saga): the numbers its caster's hit resolved and the
+/// effects it applies, for this player's session to put on its own pawn and show to its own client.  `at` is the combat world's clock.
+struct PlayerIncomingHit {
+    uint64_t                       instigator = 0;   // the caster's actor id
+    int64_t                        hit_guid = 0;
+    int64_t                        source_type = 0, source_guid = 0;
+    uint8_t                        flags = 0;
+    std::vector<ResolvedMod>       mods;
+    bool                           predicted_autonomous = true, predicted_simulated = false;
+    double                         at = 0;
+};
+
 /// One hit of an effect a player put on a creature (a burn's damage each second), worked out by the world: the player's session confirms it to the player's client, which draws the
 /// number over the creature.
 struct EffectHitNote {
@@ -132,6 +152,17 @@ public:
     virtual Fighter& fighter() = 0;
     /// An NPC's hit on the player: the session applies it (shields first, the confirmation, the replicated arrays).
     virtual void receive_hit(const IncomingHit& hit, double now) = 0;
+    /// A hit of another player's ability on this player (a heal, a blessing): the session puts its mods on its own pawn and gives the part of each
+    /// that took effect.  `at` is the combat world's clock.
+    virtual void receive_player_hit(const PlayerIncomingHit& /*hit*/, std::vector<double>& effective) { effective.assign(0, 0.0); }
+    /// The effects another player's hit puts on this player, their numbers worked out for the two (HitResolver::resolve_effects).
+    virtual void receive_player_effects(const std::vector<effects::Applied>& /*effects*/, uint64_t /*instigator*/, double /*now*/) {}
+    /// A shield another player's hit gives this player (a TempHealth effect).
+    virtual void receive_player_shield(double /*amount*/, double /*seconds*/, double /*now*/) {}
+    /// What another player's hit takes off this player (its EffectsToRemoveIds or filter).
+    virtual void remove_player_effects(const abilities::HitDef& /*hit*/, double /*now*/) {}
+    /// Whether this player is of `actor`'s party (the caster's own actor: true).
+    virtual bool in_party_with(uint64_t actor) const { return actor == actor_id(); }
     /// The player enters or leaves combat (the first exchange, 6 s after the last): the session sets its stats' flag (the out-of-combat regeneration
     /// ends and returns) and its CombatInfo.
     virtual void set_in_combat(bool in_combat, double now) = 0;
@@ -305,6 +336,9 @@ public:
     /// The port of the player whose pawn is `actor_id` (null: none joined).
     PlayerPort* find_player(uint64_t actor_id) { return player(actor_id); }
     const std::vector<PlayerPort*>& players() const { return players_; }
+    /// The joined players' pawns that are no pet, with their Health and whether they are of `self`'s party (the caster included: self), for the
+    /// targeting of an ally hit (a Bard's Saga).
+    std::vector<AllyInfo> player_allies(uint64_t self) const;
 
     // ---- NPCs
     /// The NPC's fighter (its combatant made when it is not yet); null for an actor that is no NPC of a kind that has stats.

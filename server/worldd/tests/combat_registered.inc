@@ -42,3 +42,5 @@
 #include "combat_ground_circles_end_tests.inc"
 #include "combat_fixes_tests.inc"
 #include "combat_fixes_review_tests.inc"
+#include "combat_bard_saga_tests.inc"
+#include "combat_bard_saga_review_tests.inc"

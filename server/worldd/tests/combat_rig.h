@@ -91,6 +91,27 @@ public:
         }
         rig_.take();
     }
+    /// A hit of another player's ability on this one (the Saga's heal): its rig applies it to its own pawn, as the session's pipeline does.
+    void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) override {
+        ally_lands.push_back(hit.hit_guid);
+        effective = rig_.pipe->apply_ally_landing(hit, hit.at);
+        rig_.take();
+    }
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now) override {
+        const size_t before = rig_.log.size();
+        rig_.pipe->apply_ally_effects(effects, instigator, now);
+        rig_.take();
+        ally_effects += rig_.log.size() - before;
+    }
+    /// What another player's hit takes off this one (a hit's EffectsToRemoveIds, the Pantheon's other three blessings): its rig removes them, as the session's pipeline does.
+    void remove_player_effects(const abilities::HitDef& hit, double now) override {
+        ++ally_removals;
+        rig_.pipe->apply_ally_removal(hit, now);
+        rig_.take();
+    }
+    std::vector<int64_t> ally_lands;   // the hit records another player's ability landed on this pawn
+    size_t               ally_effects = 0;
+    size_t               ally_removals = 0;   // the times another player's hit took effects off this pawn
     void set_in_combat(bool in_combat, double now) override {
         combat_flips.emplace_back(now, in_combat);
         this->in_combat = in_combat;
@@ -98,6 +119,9 @@ public:
     std::array<uint32_t, 4> character_guid() const override { return guid; }
     emit::FIntrepidNetworkGUID pawn_guid() const override { return rig_pawn_guid(fighter_.id()); }
     emit::FIntrepidNetworkGUID cylinder_guid() const override { return rig_cylinder_guid(fighter_.id()); }
+    /// The caster's actor id when this player stands in his party (a test of an ally hit sets it), else only his own.
+    bool in_party_with(uint64_t actor) const override { return actor == party_with || actor == fighter_.id(); }
+    uint64_t party_with = 0;   // the party's leader (or any member's) actor id
     void receive_kill(const combat::KillReward& kill, double now) override {
         kills.push_back(kill);
         (void)now;

@@ -1287,7 +1287,8 @@ bootstrap::EffectItem AbilityPipeline::effect_item(const EffectInst& e) const {
     return item;
 }
 
-void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner) {
+void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner,
+                                   const std::vector<stats::EffectMod>* mods_override) {
     const content::EffectRow& row = def.row;
     if (stacks_in < 1) stacks_in = 1;
     if (row.guid == bootstrap::kEffectRogueStealth && stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;   // its damage count starts with it
@@ -1307,19 +1308,23 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
         if (!(dur >= 0)) dur = 0;
     }
-    // the values of its stat mods, for one stack, as the character is now
+    // the values of its stat mods, for one stack, as the character is now (a hit of another player's has them already worked out for the two)
     std::vector<stats::EffectMod> mods;
     std::optional<float> shield;   // a mod on TempHealth is a shield: its amount is held by the instance, not run through the engine
-    for (const content::ModRow& m : def.mods) {
-        if (m.shield_absorb || m.value_expr == 0) continue;
-        double v = 0;
-        std::string why;
-        if (!eval(m.value_expr, v, why)) continue;   // a mod that does not run is left out (the engine's none)
-        if (m.stat_guid == content::kGuidTempHealth) {
-            if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
-            continue;
+    if (mods_override) {
+        mods = *mods_override;
+    } else {
+        for (const content::ModRow& m : def.mods) {
+            if (m.shield_absorb || m.value_expr == 0) continue;
+            double v = 0;
+            std::string why;
+            if (!eval(m.value_expr, v, why)) continue;   // a mod that does not run is left out (the engine's none)
+            if (m.stat_guid == content::kGuidTempHealth) {
+                if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
+                continue;
+            }
+            mods.push_back({m.stat_guid, v});
         }
-        mods.push_back({m.stat_guid, v});
     }
     auto give_shield = [&](EffectInst& e) {
         if (!shield) return;
@@ -1341,21 +1346,6 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
     const bool override_duration = row.stack_type.find("OverrideDuration") != std::string::npos;
 // Cyb + C O A
 
-    // An effect of a consumables' group (Consumable_Scroll, _Elixir, _Food ...) stacks as its GROUP says (contentc version 38): the group holds one effect at a time and a new one
-    // takes the place of the oldest [R: the retail captures: the old meal's buff is deleted in the very update that adds the new one].  The other groups (the Bard's notes)
-    // keep what their effects' own records say
-    if (row.group_guid != 0 && row.group_limit >= 1 && row.group_name.rfind("Consumable_", 0) == 0 && row.group_stack_type.find("OverrideOldest") != std::string::npos) {
-        for (;;) {
-            size_t count = 0, oldest = effects_.size();
-            for (size_t i = 0; i < effects_.size(); ++i) {
-                if (effects_[i].def->row.group_guid != row.group_guid) continue;
-                ++count;
-                if (oldest == effects_.size() || effects_[i].key < effects_[oldest].key) oldest = i;
-            }
-            if (count < static_cast<size_t>(row.group_limit) || oldest == effects_.size()) break;
-            remove_instance(c, oldest);
-        }
-    }
     EffectInst* existing = nullptr;
     int same = 0;
     for (EffectInst& e : effects_) {
@@ -1395,6 +1385,27 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
             --apply_depth_;
         }
     };
+
+    // Effects of one group stack as the GROUP says (contentc version 38; the game's own effect code reads the group's stack type in place of the record's): a group of
+    // STACK_OverrideOldest holds at most its limit, and a new application takes the oldest's place.  The Bard's notes are such a group (three): three applications are three
+    // instances of one note, which the six Saga formulas count (GetEffectCountByRecordAndInstigator(...) == 3); the note records' own types differ (Comedy OverrideAlways,
+    // Tragedy and Mystery StackSeperate), so without the group Comedy could never reach three.  A consumable's group (one) keeps its one buff.  A direct grant (a GM's, an
+    // item's) of several stacks stays one instance, as its caller asked.
+    if (row.group_guid != 0 && row.group_limit >= 1 && row.group_stack_type.find("OverrideOldest") != std::string::npos) {
+        for (;;) {
+            size_t count = 0, oldest = effects_.size();
+            for (size_t i = 0; i < effects_.size(); ++i) {
+                if (effects_[i].def->row.group_guid != row.group_guid) continue;
+                ++count;
+                if (oldest == effects_.size() || effects_[i].key < effects_[oldest].key) oldest = i;
+            }
+            if (count < static_cast<size_t>(row.group_limit) || oldest == effects_.size()) break;
+            remove_instance(c, oldest);
+        }
+        if (effects_.size() >= kMaxEffects) return;
+        fresh(raw ? std::min(stacks_in, std::max(1, row.group_limit)) : 1);
+        return;
+    }
 
     if (!existing) {
         if (effects_.size() >= kMaxEffects) return;
@@ -1874,7 +1885,9 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     // Its reactions still see it land.
     bool shows = hit.row.has_fx;
     for (const bootstrap::HitTargetOut& o : outs) shows = shows || !o.mods.empty();
-    if ((src.type == content::kSourceTypeReaction || src.type == content::kSourceTypeZone) && !shows) {
+    if (src.silent) {
+        // (the caller confirms this hit itself: the Saga's launcher, whose answer waits for its projectile's landing)
+    } else if ((src.type == content::kSourceTypeReaction || src.type == content::kSourceTypeZone) && !shows) {
         // nothing to confirm
     } else if (!src.source_is_target) {
         // a bounce's child hit names the enemy the projectile flew from as its Source, and the next enemy is its target [R: the recorded bounce hit of the Throw]
@@ -1956,6 +1969,63 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
     if (damage > 0) break_stealth_on_damage(damage, now_);
+}
+
+std::vector<double> AbilityPipeline::apply_ally_landing(const combat::PlayerIncomingHit& in, double now) {
+    // Another player's hit comes in while that player's own runtime is in the middle of a step, and it does not run this runtime's steps inside it (two players who
+    // heal each other would step into each other's formulas, and this one's cached evaluation would be gone under the step that holds it): it lands at the time the
+    // runtime has reached or the hit's own, whichever is later, and the session's next tick brings the runtime's own steps up to date.
+    const double at = std::max(now, now_);
+    AbilityChange c;
+    std::vector<double> effective(in.mods.size(), 0.0);
+    bootstrap::HitConfirm h;
+    h.record_guid = in.hit_guid;
+    h.source_type = in.source_type;
+    h.source_guid = in.source_guid;
+    // (as a hit on the character from a creature: a projectile's hit has no source actor and is predicted on the simulated side)
+    const bool from_projectile = in.source_type == content::kSourceTypeProjectile;
+    h.source_is_actor = !from_projectile;
+    h.predicted_autonomous = in.predicted_autonomous;
+    h.predicted_simulated = in.predicted_simulated;
+    if (combat_) h.instigator = combat_->guid_of(in.instigator);
+    uint8_t flags = in.flags;
+    const double before = stat_now(content::kGuidHealth);
+    if ((flags & stats::kHitMiss) == 0) {
+        for (size_t i = 0; i < in.mods.size(); ++i) {
+            const combat::ResolvedMod& m = in.mods[i];
+            if (!std::isfinite(m.value)) continue;
+            effective[i] = apply_delta(c, m.stat_guid, m.value);
+            h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective[i])});
+        }
+    }
+    if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;
+    h.flags = flags;
+    confirmations_.push_back(std::move(h));
+    drop_evaluation();
+    recompute(c);
+    emit({std::move(c), std::nullopt, at, "another player's hit on the character"});
+    return effective;
+}
+
+void AbilityPipeline::apply_ally_effects(const std::vector<effects::Applied>& list, uint64_t instigator, double now) {
+    const double at = std::max(now, now_);   // (see apply_ally_landing: no steps of this runtime run inside another player's step)
+    AbilityChange c;
+    for (const effects::Applied& a : list) {
+        if (!a.def || a.stacks < 1) continue;
+        const std::optional<double> duration = std::isfinite(a.duration) ? std::optional<double>(a.duration) : std::nullopt;
+        apply_effect(c, *a.def, a.stacks, duration, at, false, 0, &a.mods);
+    }
+    sync_engine_effects();
+    recompute(c);
+    emit({std::move(c), std::nullopt, at, "another player's effects on the character (from actor " + std::to_string(instigator) + ")"});
+}
+
+void AbilityPipeline::apply_ally_removal(const abilities::HitDef& hit, double now) {
+    const double at = std::max(now, now_);   // (see apply_ally_landing)
+    AbilityChange c;
+    remove_by_hit(c, hit, at);
+    recompute(c);
+    emit({std::move(c), std::nullopt, at, "another player's hit takes effects off the character"});
 }
 
 void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, const protocol::emit::FIntrepidNetworkGUID& target,
@@ -2455,7 +2525,7 @@ void AbilityPipeline::run_due(double t) {
                 if (s.due[i].at > t) continue;
                 const Pending p = s.due[i];
                 s.due.erase(s.due.begin() + static_cast<std::ptrdiff_t>(i));
-                return run_slot(rec, s, t, !s.server_self_use, p.found, p.targets);
+                return run_slot(rec, s, t, !s.server_self_use, p.found, p.targets, p.asked, p.targeting);
             }
         }
     }
@@ -2510,6 +2580,99 @@ int64_t AbilityPipeline::targeting_of(const AbilityDef& def, int key) const {
     return content::kTargetingDefaultSelf;   // a hit whose key names no targeting record is aimed at the caster
 }
 // ~ C | Y | B & C O A ~
+
+// ---- the Bard's Saga's ally targetings ----------------------------------------------------------------------------------------------
+// The two targeting records the Saga's ally hits use (ab_targeting by name): their sphere, and the sorting they do (a plain number of the data: the tables do not
+// export a targeting record's volumes and Sorting, so the rule is written here from the records).  The Joyousness record sorts an injured party member first
+// (Health < MaxHealth, the Favor_Party_LowHealth score 1000 - health * 100) and then the nearer one; the Pantheon's puts the party and the caster first (10000)
+// and the others by distance.  The hit's own MaxTargets caps both (the bursts 8, the Pantheon's own hit 1).
+namespace {
+struct AllyTargeting {
+    const char* record;
+    double      radius_cm;
+    bool        injured_first;
+};
+constexpr AllyTargeting kAllyTargetings[] = {
+    {"Bard_Saga_Joyousness", 4000.0, true},
+    {"Bard_Saga_Pantheon", 3000.0, false},
+};
+const AllyTargeting* ally_targeting_named(const std::string& record) {
+    for (const AllyTargeting& t : kAllyTargetings) {
+        if (record == t.record) return &t;
+    }
+    return nullptr;
+}
+}  // namespace
+
+bool AbilityPipeline::ally_targets(const AbilityDef& def, const HitDef& hit, size_t max, int64_t named, const std::string& fallback, std::vector<uint64_t>& out) {
+    out.clear();
+    // only a hit that reaches allies is an ally hit: one whose mask names no Ally, Party or Raid (the notes' consuming and the Resonance on the caster, the Apocalypse's and
+    // the Horrors' hits on enemies) is an ordinary hit of the cast, on the caster or on the creatures the client's request names
+    if ((hit.row.applicable_targets & (4 | 8 | 16)) == 0) return false;
+    // the targeting record the client named (what the game's client asks with), else the cast's own variant's record, else the hit's key map
+    const AllyTargeting* rule = nullptr;
+    for (const content::TargetingRow& t : def.targetings) {
+        if (named != 0 && t.guid == named) rule = ally_targeting_named(t.name);
+        if (rule) break;
+    }
+    if (!rule && !fallback.empty()) rule = ally_targeting_named(fallback);
+    if (!rule) {
+        int key = -1;
+        for (const content::AbilityHitRow& h : def.hits) {
+            if (h.hit_guid == hit.row.guid) {
+                key = static_cast<int>(h.key);
+                break;
+            }
+        }
+        for (const content::TargetingRow& t : def.targetings) {
+            if (t.key != key) continue;
+            rule = ally_targeting_named(t.name);
+            if (rule) break;
+        }
+    }
+    if (!rule) return false;
+    double cap = static_cast<double>(max);
+    if (hit.row.max_targets_expr != 0) {
+        double v = 0;
+        std::string why;
+        if (eval(hit.row.max_targets_expr, v, why) && v >= 1) cap = std::min(cap, v);
+    }
+    out = ally_targets_of(rule->record, static_cast<size_t>(cap));
+    return true;
+}
+
+std::vector<uint64_t> AbilityPipeline::ally_targets_of(const char* record, size_t max) {
+    if (!combat_ || record == nullptr) return {};
+    const AllyTargeting* rule = ally_targeting_named(record);
+    if (!rule) return {};
+    const combat::Vec3 me = combat_->self().position();
+    struct Candidate {
+        uint64_t actor = 0;
+        double   score = 0, distance = 0;
+    };
+    std::vector<Candidate> candidates;
+    for (const combat::AllyInfo& a : combat_->allies()) {
+        if (!a.party && !a.self) continue;   // (the Saga's allies are the caster's party and the caster: another player of the world is no one of them)
+        const combat::TargetInfo ti = combat_->inspect(a.actor);
+        if (!ti.exists || !ti.alive) continue;
+        const double distance = std::hypot(ti.position.x - me.x, ti.position.y - me.y);
+        if (distance > rule->radius_cm) continue;
+        const double hpp = a.max_health > 0 ? std::clamp(a.health / a.max_health, 0.0, 1.0) : 1.0;
+        const double score = rule->injured_first ? (((a.party || a.self) && hpp < 0.95 ? 1000.0 : 0.0) - hpp * 100.0)
+                                                 : ((a.party || a.self) ? 10000.0 : -distance);
+        candidates.push_back({a.actor, score, distance});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& x, const Candidate& y) {
+        if (x.score != y.score) return x.score > y.score;
+        return x.distance < y.distance;
+    });
+    std::vector<uint64_t> out;
+    for (const Candidate& c : candidates) {
+        if (out.size() >= max) break;
+        out.push_back(c.actor);
+    }
+    return out;
+}
 
 std::set<int64_t> AbilityPipeline::reach_of(const AbilityDef& def) const {
     std::set<int64_t> out;
@@ -2631,11 +2794,11 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
     }
     // the answer comes kConfirmDelay after the request, and never before the cast's own cost step (+ the hits' delay)
     const double at = std::max(now + kConfirmDelay, record_reference(*rec) + rec->hit_delay);
-    slot->due.push_back({at, found, others});
+    slot->due.push_back({at, found, others, now, targeting_guid});
     return (found || !others.empty()) ? HitVerdict::Scheduled : HitVerdict::Empty;
 }
 
-void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets) {
+void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting) {
     rec.launched = true;   // (a hit of the cast is out: a Dodge no longer cancels it)
     const FillScope fill(*this, rec.fill);   // (a HELD ability released early: its hit reads the fill its bar reached)
     const ConsumedScope consumed(*this, rec.item_cast);   // (a consumable's hit reads the item's numbers)
@@ -2647,6 +2810,49 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
     src.actor = true;
     src.confirm = true;
     src.response = response;
+    // The Bard's Saga's ally hits: the server picks their targets from the targeting record's own rule (the client names the caster, or the party it found; the
+    // projectiles fly at the allies the record picks), and a launcher that fires a projectile has its confirmation held to the landing (fire_ally_from_hit).  The Saga's
+    // other hits (the notes' consuming and the Resonance on the caster, the Apocalypse's and the Horrors' on the creatures the client names) take the ordinary path below.
+    std::vector<uint64_t> chosen;
+    // (a request the client made before the caster died runs after it: a dead Bard's hit lands on no one else)
+    if (def && def->row.name == "Bard_Saga" && combat_ && !dead_ && ally_targets(*def, *slot.hit, 8, targeting, rec.ally_targeting, chosen)) {
+        const uint64_t self = combat_->self().id();
+        if (chosen.empty() && hits_caster(slot.hit->row)) chosen.push_back(self);   // (nobody of the record's sphere: the caster alone)
+        std::vector<uint64_t> others;
+        for (const uint64_t id : chosen) {
+            if (id != combat_->self().id()) others.push_back(id);
+        }
+        HitSource held = src;
+        held.confirm = false;
+        held.silent = true;
+        if (!others.empty()) apply_hit_on_targets(c, *slot.hit, others, t, held, def);
+        if (std::find(chosen.begin(), chosen.end(), combat_->self().id()) != chosen.end()) apply_hit(c, *slot.hit, t, true, held);
+        if (!slot.hit->fires.empty()) {
+            if (rec.ally_bursts < kSagaBursts) {   // (each request of the client is one burst: the Return's second launcher hit is asked for twice)
+                ++rec.ally_bursts;
+                const double first_at = std::max(asked + kProjectileDelay, record_reference(rec) + rec.hit_delay);
+                fire_ally_from_hit(*def, rec.client_id, rec.trigger_at, *slot.hit, chosen, first_at, src);
+            }
+        } else {
+            // (a launcher that fires nothing: its confirmation is the usual one, with the allies the record picked)
+            Cast launcher;
+            launcher.def = def;
+            launcher.launcher = Cast::Launcher{slot.hit->row.guid, def->row.guid, response, {}};
+            for (const uint64_t id : chosen) {
+                Cast::LauncherTarget lt;
+                lt.component = combat_->guid_of(id);
+                const combat::TargetInfo ti = combat_->inspect(id);
+                lt.x = ti.position.x;
+                lt.y = ti.position.y;
+                lt.z = ti.position.z;
+                launcher.launcher->targets.push_back(lt);
+            }
+            push_launcher_confirm(launcher, t);
+        }
+        recompute(c);
+        emit({std::move(c), std::nullopt, t, "the ally hit " + slot.hit->row.name + " of " + def->row.name + " on " + std::to_string(chosen.size()) + " all" + (chosen.size() == 1 ? "y" : "ies")});
+        return;
+    }
     if (!targets.empty()) {
         apply_hit_on_targets(c, *slot.hit, targets, t, src, def);
         if (!found) {
@@ -3273,6 +3479,16 @@ int AbilityPipeline::swing_montage(const AbilityDef& def, int requested, int& st
     return take->anim_index;
 }
 
+// The abilities whose montage the SERVER chooses from the rows' AnimExpressions, because the client's call carries no step of its own: the Bard's Saga (its six
+// variants, each selected by one of the equations; the item plays what the notes made) — the emotes are chosen the same way (is_emote_ability).
+constexpr const char* kMontagesChosenByServer[] = {"Bard_Saga"};
+bool montage_chosen_by_server(const std::string& name) {
+    for (const char* n : kMontagesChosenByServer) {
+        if (name == n) return true;
+    }
+    return false;
+}
+
 int32_t AbilityPipeline::emote_montage_index(const AbilityDef& def, int32_t fallback) {
     bool have_first = false;
     int32_t first = fallback;
@@ -3472,7 +3688,20 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         }
     }
     cast.animation_index = swing_montage(*def, info.animation_index, swing_step);
-    if (content::is_emote_ability(row.guid)) cast.animation_index = emote_montage_index(*def, cast.animation_index);
+    if (content::is_emote_ability(row.guid)) {
+        cast.animation_index = emote_montage_index(*def, cast.animation_index);
+    } else if (montage_chosen_by_server(row.name)) {
+        cast.animation_index = emote_montage_index(*def, cast.animation_index);
+        cast.montage_selected = true;
+        // the Saga's ally variants: their hits' targeting record follows the montage the notes chose (the Return's Joyousness, the Silent Pantheon's
+        // Pantheon record); its own client names the same record in its requests, and this is the fallback for one that names none
+        for (const content::MontageRow& m : def->montages) {
+            if (m.anim_index != cast.animation_index) continue;
+            if (m.soft_path.find("Joyousness") != std::string::npos) cast.ally_targeting = "Bard_Saga_Joyousness";
+            else if (m.soft_path.find("Pantheon2") != std::string::npos) cast.ally_targeting = "Bard_Saga_Pantheon";
+            break;
+        }
+    }
     // accepted: the steps and their times
     double item_delay = kItemDelay, cost_delay = kCostDelay, hit_delay = -1;
     double zone_delay = -1;   // when the actor of the zone the cast spawns opens, after the trigger (-1: a moment after the item)
@@ -3672,6 +3901,7 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     rec.window_end = rec.cost_due + (info.item_cast ? kItemRequestWindow : kRequestWindow);
     rec.item_cast = info.item_cast;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
+    rec.ally_targeting = cast.ally_targeting;
     rec.reach = reach_of(*def);
     // a beam step (the wand's finisher): the client asks for its tick hit again and again while it burns, so this cast takes its requests closer together.
     // A ranged weapon swing's other hits are the server's own: its projectile hits land when the projectile gets there, and the retail client asks for none of them (the Wand's beam steps are the only
@@ -3781,7 +4011,7 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
         item.montage_guid = m.net_guid ? *m.net_guid : 0;
         if (!m.net_guid) {
             if (const auto known = bootstrap::montage_for(m.soft_path)) item.montage_guid = known->guid.ObjectId;
-            else if (content::is_emote_ability(def.row.guid)) item.montage_guid = bootstrap::montage_id_for(m.soft_path);
+            else if (content::is_emote_ability(def.row.guid) || cast.montage_selected) item.montage_guid = bootstrap::montage_id_for(m.soft_path);
         }
         break;
     }
@@ -4458,6 +4688,15 @@ void AbilityPipeline::step_cost(Cast& cast, double t) {
         if (more) cast.cost_due = t + cast.looped->period * cast.loop_scale;
         else end_shots(t);
     }
+    // the Bard's Saga, its Silent Pantheon: the four server-only spawn hits leave with the cost step (their montage notifies are in no table)
+    if (def.row.name == "Bard_Saga" && combat_) {
+        for (const content::MontageRow& m : def.montages) {
+            if (m.anim_index == cast.animation_index && m.soft_path.find("Pantheon2") != std::string::npos) {
+                start_saga_pantheon(cast, t);
+                break;
+            }
+        }
+    }
     recompute(c);
     emit({std::move(c), std::nullopt, t, "the cost, cooldown and class resource of " + def.row.name});
 }
@@ -5081,6 +5320,7 @@ void AbilityPipeline::zone_check_expiry(int64_t zone_id, double t) {
 // [Cyb - C | O | A]
 
 void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int depth) {
+    if (std::string_view(which) == "projectile") push_launcher_confirm(cast, t);
     const CastRecord* fill_record = record_of(cast.client_id);
     const FillScope fill(*this, fill_record ? fill_record->fill : 1.0);
     const ConsumedScope consumed(*this, cast.item_cast);
@@ -5149,7 +5389,19 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
             src.reach_free = cast.ball != nullptr && h.owner_guid == cast.ball_flight.projectile;   // (the ball's own hits: it hurts what it touches, wherever the caster stands)
         }
         bool landed = false;
-        if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+        // A projectile that landed on the Caster himself (the Saga's first burst, its once-solo target) lands through the ordinary self path, with the
+        // projectile as its source: the allies are the other players of the world, which the CombatWorld's hit path serves.
+        const uint64_t self_actor = combat_ ? combat_->self().id() : 0;
+        if (std::string_view(which) == "projectile" && hit->row.applicable_targets == 0 && !hit->zones.empty() && !cast.target_actors.empty()) {
+            // a projectile's landing that only opens a zone where it lands (the Silent Pantheon's blessing zones): the hit reaches no actor by its mask, and the
+            // zone's own overlap hits are what a stander takes
+            spawn_hit_zones(*hit, &def, cast.target_actors.front(), t);
+            landed = true;
+        } else if (std::string_view(which) == "projectile" && !cast.target_actors.empty() && cast.target_actors.size() == 1 && cast.target_actors.front() == self_actor) {
+            apply_hit(c, *hit, t, true, src);
+        } else if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) {
+            apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+        }
         // a hit that fires a bounce when it lands (the Discordance's notes, the Throw): the projectile flies on from this enemy to another near it. A hit that landed on nobody (the enemy
         // an earlier note killed) fires none; a hit that killed its enemy did land and does
         if (landed && std::string_view(which) == "projectile" && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, h.owner_guid, cast.target_actors.front(), depth, t);
@@ -5159,6 +5411,39 @@ void AbilityPipeline::step_hits(Cast& cast, double t, const char* which, int dep
         // 2026-10-06: Mock healed the caster]. A direct hit (NET_ServerOnly, "hit") is around the caster and keeps reaching it.
         const bool at_others = std::string_view(which) == "projectile" && !cast.target_actors.empty();
         if (hits_caster(hit->row) && !at_others) apply_hit(c, *hit, t, true, src);
+    }
+    // A projectile's own landing hits (ab_projectile_hit): the ones the ability's list does not carry, which the projectile still lands.  The Return to
+    // Verra's second and third bursts fire Bard_Saga_RTV_Projectile, whose landing hit (Bard_Saga_RTV_Hit) is in no ab_ability_hit row, and the Silent
+    // Pantheon's projectiles land their zone-spawning hits the same way.  A landing hit is applied as the projectile's (its SourceRecordGuid is the projectile).
+    if (std::string_view(which) == "projectile" && cast.chain_owner != 0) {
+        std::set<int64_t> listed;
+        for (const content::AbilityHitRow& h : def.hits) {
+            if (h.source == "projectile" && h.owner_guid == cast.chain_owner) listed.insert(h.hit_guid);
+        }
+        if (const content::ProjectileRow* shot = catalog_->projectile(cast.chain_owner)) {
+            const uint64_t self_actor = combat_ ? combat_->self().id() : 0;
+            for (const int64_t guid : shot->hits) {
+                if (!listed.insert(guid).second) continue;
+                const HitDef* hit = catalog_->hit(guid);
+                if (!hit) continue;
+                HitSource src;
+                src.type = content::kSourceTypeProjectile;
+                src.guid = cast.chain_owner;
+                src.actor = false;
+                src.confirm = true;
+                src.simulated = true;
+                bool landed = false;
+                if (!cast.target_actors.empty() && hit->row.applicable_targets == 0 && !hit->zones.empty()) {
+                    spawn_hit_zones(*hit, &def, cast.target_actors.front(), t);
+                    landed = true;
+                } else if (!cast.target_actors.empty() && cast.target_actors.size() == 1 && cast.target_actors.front() == self_actor) {
+                    apply_hit(c, *hit, t, true, src);
+                } else if (!cast.target_actors.empty() && (hit->row.applicable_targets & (2 | 4 | 8 | 16)) != 0) {
+                    apply_hit_on_targets(c, *hit, cast.target_actors, t, src, &def, &landed);
+                }
+                if (landed && !hit->recursive.empty() && cast.target_actors.size() == 1) bounce_from(c, cast, *hit, cast.chain_owner, cast.target_actors.front(), depth, t);
+            }
+        }
     }
     // the step's direct hits that land with the projectile: carried by no projectile of the combo, firing one of their own (the book's Split hits),
     // of the same step as a projectile hit that flew; confirmed in the same confirmation, predicted on neither side [R: pa 0 ps 0, 408 of 408]
@@ -5530,6 +5815,116 @@ void AbilityPipeline::fire_from_hit(const CastRecord& rec, const HitDef& hit, do
         spdlog::info("[abilities] {} ({}): a straight projectile of {:.0f} cm/s flies {:.0f} m ahead: {} enem{} in its way", def->row.name, hit.row.name, p->speed, p->range / 100.0, found.size(), found.size() == 1 ? "y" : "ies");
     }
     if (!wave.missiles.empty()) casts_.push_back(std::move(wave));
+}
+
+// ---- the Bard's Saga's ally hits ---------------------------------------------------------------------------------------------------
+
+void AbilityPipeline::fire_ally_from_hit(const AbilityDef& def, int32_t client_id, double trigger_at, const HitDef& hit, const std::vector<uint64_t>& allies,
+                                         double first_at, const HitSource& launcher_src) {
+    if (!combat_ || hit.fires.empty() || dead_) return;
+    Cast wave;   // a cast with nothing to do but fly to the allies and land what the shot carries: it ends with its last missile
+    wave.client_id = client_id;
+    wave.def = &def;
+    wave.trigger_at = trigger_at;
+    const combat::Vec3 me = combat_->self().position();
+    for (const int64_t guid : hit.fires) {
+        const content::ProjectileRow* p = catalog_->projectile(guid);
+        if (!p || p->speed <= 0) continue;
+        if (p->projectile_type.find("Homing") == std::string::npos) {
+            if (no_formula_.insert(guid).second) spdlog::info("[abilities] the ally hit {} fires {}, a {} projectile: only homing ones are flown at allies", hit.row.name, p->name, p->projectile_type);
+            continue;
+        }
+        for (const uint64_t ally : allies) {
+            const combat::TargetInfo ti = combat_->inspect(ally);
+            if (!ti.exists || !ti.alive) continue;
+            const double distance = std::hypot(ti.position.x - me.x, ti.position.y - me.y);
+            Cast::Missile land;
+            land.kind = Cast::Missile::Kind::Land;
+            land.due = first_at + distance / p->speed;   // (the flight at 0 m is the recorded third of a second: the record's speed gives no time at 0 m)
+            land.projectile = guid;
+            land.target = ally;
+            wave.missiles.push_back(land);
+        }
+    }
+    // The launcher's confirmation is the answer to the client's request.  It names the allies the record picked and waits for the first landing, so that both
+    // hits go out in one call (the recorded solo Saga: the launcher's and the landed hit's in one call, a third of a second after the request).
+    if (launcher_src.response) {
+        Cast::Launcher l;
+        l.hit = hit.row.guid;
+        l.ability = def.row.guid;
+        l.response = true;
+        for (const uint64_t ally : allies) {
+            const combat::TargetInfo ti = combat_->inspect(ally);
+            if (!ti.exists) continue;
+            Cast::LauncherTarget lt;
+            lt.component = combat_->guid_of(ally);
+            lt.x = ti.position.x;
+            lt.y = ti.position.y;
+            lt.z = ti.position.z;
+            l.targets.push_back(lt);
+        }
+        wave.launcher = std::move(l);
+    }
+    if (!wave.missiles.empty()) {
+        casts_.push_back(std::move(wave));
+    } else if (wave.launcher) {
+        Cast now;
+        now.def = &def;
+        now.launcher = std::move(wave.launcher);
+        push_launcher_confirm(now, first_at);
+    }
+}
+
+void AbilityPipeline::push_launcher_confirm(Cast& cast, double t) {
+    if (!cast.launcher || cast.launcher_sent) return;
+    cast.launcher_sent = true;
+    bootstrap::HitConfirm h;
+    h.record_guid = cast.launcher->hit;
+    h.source_type = content::kSourceTypeAbility;
+    h.source_guid = cast.launcher->ability;
+    h.source_is_actor = true;
+    h.predicted_autonomous = true;
+    h.predicted_simulated = false;
+    h.response = cast.launcher->response;
+    for (const Cast::LauncherTarget& lt : cast.launcher->targets) {
+        bootstrap::HitTargetOut o;
+        o.component = lt.component;
+        o.has_impact = true;
+        o.impact_location = {lt.x, lt.y, lt.z};
+        o.impact_normal = {0.0, 0.0, -1.0};   // (retail: the launcher's target normal points down)
+        h.targets.push_back(std::move(o));
+    }
+    confirmations_.push_back(std::move(h));
+    (void)t;
+}
+
+void AbilityPipeline::start_saga_pantheon(const Cast& cast, double t) {
+    if (!combat_ || !cast.def) return;
+    const AbilityDef& def = *cast.def;
+    // the four spawn hits are NET_ServerOnly: the server runs them by itself.  Their montage notifies are in no table (the one recorded Saga is the Return's),
+    // so they are fired together with the cost step; each has its own requirement (the data's RandDouble() < 0.5) and each projectile lands a 1 m blessing zone.
+    const std::vector<uint64_t> allies = ally_targets_of("Bard_Saga_Pantheon", 8);
+    size_t spawned = 0;
+    for (const content::AbilityHitRow& row : def.hits) {
+        if (row.source != "hit") continue;
+        const HitDef* hit = catalog_->hit(row.hit_guid);
+        if (!hit || hit->fires.empty() || hit->row.name.rfind("Bard_Saga_Panth_SpawnProj", 0) != 0) continue;
+        bool ok = true;
+        std::string why;
+        if (!eval_bool(hit->row.requirement_expr, true, ok, why) || !ok) continue;
+        if (allies.empty()) continue;
+        const uint64_t aim = allies[spawned % allies.size()];
+        ++spawned;
+        HitSource src;
+        src.type = content::kSourceTypeAbility;
+        src.guid = def.row.guid;
+        src.actor = true;
+        src.confirm = false;   // (a server-only hit is no client's request: its landed hit is the one that may be confirmed)
+        src.response = false;
+        src.autonomous = false;
+        fire_ally_from_hit(def, cast.client_id, cast.trigger_at, *hit, {aim}, t + kProjectileDelay, src);
+    }
+    if (spawned > 0) spdlog::info("[abilities] {}: {} of the four spawn projectiles of the Silent Pantheon left with the cost step", def.row.name, spawned);
 }
 
 #include "session/ability_pipeline_chain.inc"

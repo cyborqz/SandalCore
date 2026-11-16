@@ -67,6 +67,11 @@ public:
     void receive_hit(const combat::IncomingHit& hit, double) override {
         if (inbox.size() < 256) inbox.push_back(hit);
     }
+    void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) override { s_.receive_player_hit(hit, effective); }
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now) override { s_.receive_player_effects(effects, instigator, now); }
+    void receive_player_shield(double amount, double seconds, double now) override { s_.receive_player_shield(amount, seconds, now); }
+    void remove_player_effects(const abilities::HitDef& hit, double now) override { s_.remove_player_effects(hit, now); }
+    bool in_party_with(uint64_t actor) const override { return s_.in_party_with(actor); }
     void set_in_combat(bool in_combat, double) override { wants_in_combat = in_combat; }
     std::array<uint32_t, 4> character_guid() const override { return s_.pb_.setup().character_guid; }
     FIntrepidNetworkGUID pawn_guid() const override { return s_.pb_.setup().guids.pawn; }

@@ -152,6 +152,27 @@ PlayerPort* CombatWorld::player(uint64_t actor_id) {
     return nullptr;
 }
 
+std::vector<AllyInfo> CombatWorld::player_allies(uint64_t self) const {
+    std::vector<AllyInfo> out;
+    for (PlayerPort* p : players_) {
+        if (!p) continue;
+        const uint64_t id = p->actor_id();
+        if (id == 0 || is_pet(id)) continue;   // (a pet stands in players_ for the creatures' code: its owner is the ally)
+        Fighter& f = p->fighter();
+        if (!f.alive()) continue;
+        AllyInfo a;
+        a.actor = id;
+        const stats::StatValue* h = f.stats().find(content::kGuidHealth);
+        const stats::StatValue* m = f.stats().find(content::kGuidMaxHealth);
+        a.health = h ? h->value : 0;
+        a.max_health = m ? m->value : 0;
+        a.self = id == self;
+        a.party = a.self || p->in_party_with(self);
+        out.push_back(a);
+    }
+    return out;
+}
+
 void CombatWorld::player_exchange(uint64_t player_id, double now) {
     const double until = now + data_.in_combat_timer();
     const auto it = player_combat_until_.find(player_id);
@@ -362,7 +383,11 @@ bool CombatWorld::holds_effect(uint64_t actor_id, int64_t effect_guid, double no
     return false;
 }
 
-Fighter* CombatWorld::fighter_of(uint64_t actor_id) { return combatant(actor_id); }
+Fighter* CombatWorld::fighter_of(uint64_t actor_id) {
+    // (another player's pawn is a fighter too: an ally hit's formulas run against his own stats; a pet stands in players_ for the creatures' code and stays an NPC here)
+    if (PlayerPort* p = player(actor_id); p && !is_pet(actor_id)) return &p->fighter();
+    return combatant(actor_id);
+}
 
 uint64_t CombatWorld::actor_of_object(uint64_t object_id) const {
     if (registry_.find(object_id)) return object_id;
@@ -379,6 +404,22 @@ uint64_t CombatWorld::hit_component_of(uint64_t actor_id) const {
 
 TargetInfo CombatWorld::inspect(uint64_t target_actor, const Fighter& from) {
     TargetInfo t;
+    // Another player's pawn: his fighter says where he stands, whether he lives and what he is to the caster (a party's ally, an ungrouped player: Neutral).
+    // (A pet stands in players_ for the creatures' code: it stays an NPC here.)
+    if (PlayerPort* p = player(target_actor); p && !is_pet(target_actor)) {
+        const Fighter& f = p->fighter();
+        t.exists = true;
+        t.alive = f.alive();
+        t.position = f.position();
+        t.velocity = {0, 0, 0};
+        t.radius_cm = f.radius_cm();
+        t.half_height_cm = 88.0;
+        t.relation = data_.relation(from.alignments(), f.alignments());
+        t.surface_distance_cm = std::max(0.0, distance_xy_cm(from.position(), t.position) - from.radius_cm() - t.radius_cm);
+        t.in_line_of_sight = true;
+        t.is_player = true;
+        return t;
+    }
     const world::WorldActor* a = registry_.find(target_actor);
     if (!a || a->kind != world::ActorKind::Npc) return t;
     t.exists = true;
@@ -590,6 +631,10 @@ bool CombatWorld::fill_stats(const world::WorldActor& a) {
 }
 
 void CombatWorld::add_shield(uint64_t npc_actor, double amount, double seconds, double now, int64_t effect_guid, bool by_creature) {
+    if (PlayerPort* p = player(npc_actor); p && !is_pet(npc_actor)) {
+        p->receive_player_shield(amount, seconds, now);
+        return;
+    }
     Npc* n = combatant(npc_actor);
     if (!n || n->dead || !std::isfinite(amount) || amount <= 0) return;
     if (n->shields.size() >= 16) n->shields.erase(n->shields.begin());
@@ -1538,6 +1583,35 @@ void CombatWorld::advance_flights(double now) {
 // -- C.Y.B & CoA --
 
 Delivery CombatWorld::apply_hit_to_npc(uint64_t npc_actor, uint64_t attacker, const Resolved& r, double now, uint64_t threat_to, const HitOrigin* origin) {
+    // Another player's pawn: his own session puts the resolved hit's mods on his character (its stat engine, its client), and the part that took effect comes
+    // back for the confirmation.  (A pet stands in players_ for the creatures' code: it stays an NPC here.)
+    if (PlayerPort* p = player(npc_actor); p && !is_pet(npc_actor)) {
+        Delivery d;
+        d.target_object = hit_component_of(npc_actor);
+        if (!p->fighter().alive()) return d;
+        d.applied = true;
+        d.flags = r.flags;
+        d.effective.assign(r.mods.size(), 0.0);
+        if (!r.miss()) {
+            PlayerIncomingHit ph;
+            ph.instigator = attacker;
+            ph.hit_guid = origin && origin->hit ? origin->hit->row.guid : 0;
+            ph.source_type = origin ? origin->source_type : 0;
+            ph.source_guid = origin ? origin->source_guid : 0;
+            ph.flags = r.flags;
+            ph.mods = r.mods;
+            ph.predicted_autonomous = true;
+            ph.predicted_simulated = ph.source_type == content::kSourceTypeProjectile;   // (a projectile's hit is simulated on the client, as a hit on a player is)
+            ph.at = now;
+            p->receive_player_hit(ph, d.effective);
+        }
+        const stats::StatValue* hp = p->fighter().stats().find(content::kGuidHealth);
+        if (hp && hp->value <= 0) {
+            d.lethal = true;
+            d.flags |= stats::kHitLethal;
+        }
+        return d;
+    }
     Npc* n = combatant(npc_actor);
     if (!n || n->dead) {
         Delivery d;
@@ -1958,6 +2032,10 @@ void CombatWorld::land_effect(Npc& n, const effects::Applied& a, uint64_t instig
 }
 
 void CombatWorld::apply_effects(uint64_t npc_actor, uint64_t instigator, const std::vector<effects::Applied>& list, double now) {
+    if (PlayerPort* p = player(npc_actor); p && !is_pet(npc_actor)) {
+        p->receive_player_effects(list, instigator, now);
+        return;
+    }
     Npc* n = combatant(npc_actor);
     if (!n || n->dead) return;
     for (const effects::Applied& a : list) {

@@ -320,6 +320,9 @@ public:
     /// 54-113 ms, median about 65].
     static constexpr double kItemCastDelay = 0.065;
     static constexpr int    kMaxRequestsPerHit = 8;
+    /// The bursts of projectiles the Bard's Saga sends at its allies in one cast: the Return to Verra's three (its first launcher hit once, its second twice)
+    /// [R: the recorded cast's three requests]; a further request for a launcher hit sends none.
+    static constexpr int    kSagaBursts = 3;
     static constexpr double kMinRequestGap = 0.100;
     /// A beam (the wand's finisher) keeps the client asking for its tick hit for as long as it burns: up to a dozen requests about 100 ms apart, the closest 68 ms.
     /// A cast of a beam step takes its requests that close together; how many of each hit it takes is in `kBeamHits` (ability_pipeline.cpp).
@@ -492,6 +495,16 @@ public:
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
+    /// A hit of ANOTHER player's ability that landed on this character (a Bard's Saga's heal): its stat mods move this character's Health, the confirmation
+    /// names that player as the instigator (its source is the projectile where the hit came from one), and the part of each mod that took effect is returned.
+    /// The change and the confirmation are an event.
+    std::vector<double> apply_ally_landing(const combat::PlayerIncomingHit& hit, double now);
+    /// The effects that hit put on this character, with their numbers worked out by its caster's hit (HitResolver::resolve_effects): they go on the
+    /// character's own effect list, run their Apply hits, and the change is an event.
+    void apply_ally_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now);
+    /// What another player's hit takes off this character (the three Blessings of the Pantheon that the fourth one removes): its EffectsToRemoveIds or
+    /// its filter, as the hit's own record says.  The change is an event.
+    void apply_ally_removal(const abilities::HitDef& hit, double now);
     // ---- a Summoner's pet (session/ability_pipeline_pets.cpp)
     /// What a pet's ability costs its owner: the Essence it takes from each stat (all the ability's cost hits added up) and the cooldown it starts.
     struct PetPayment {
@@ -573,6 +586,12 @@ public:
     /// montage's first notify of 300 ms (what the runtime's own tests of its mechanics use).
     void set_data_timings(bool on) { data_timings_ = on; }
 
+    /// The numbers RandDouble returns before its own draws (a test forces a data roll, such as the Pantheon's coin flips); the list must outlive the pipeline. Null: none.
+    void set_rand_script(const std::vector<double>* script) {
+        rng_.script = script;
+        rng_.scripted = 0;
+    }
+
     /// Takes every instance of an effect record off the caster (a dispel, an item's end); true when there was one.
     bool remove_effect(int64_t effect_guid, double now);
 
@@ -633,6 +652,8 @@ private:
         uint64_t source_actor = 0;
         /// The hit reaches its targets wherever they stand: a ball that flew on from the caster hurts what it touches, however far from the caster that is by now. Every other check of the hit holds.
         bool    reach_free = false;
+        /// The hit lands (its mods and effects) but is confirmed by the caller itself (the Saga's launcher, whose confirmation waits for the projectile's landing).
+        bool    silent = false;
     };
     /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
     struct HitEvent {
@@ -655,6 +676,8 @@ private:
         double at = 0;
         bool   found = true;   // the hit reached the caster (false: an empty confirmation)
         std::vector<uint64_t> targets;   // plan E1, stage 3: the other actors it names
+        double asked = 0;      // when the client asked (the Saga's projectile lands kProjectileDelay after this, never before its hit's earliest step)
+        int64_t targeting = 0; // the targeting record the client named (the Saga's ally hits take their rule from it)
     };
     struct HitSlot {
         const abilities::HitDef* hit = nullptr;
@@ -684,6 +707,8 @@ private:
         int                          max_requests = kMaxRequestsPerHit;   // a zone's tick hit is asked for as often as the zone's life holds ticks
         double                       min_gap = kMinRequestGap;            // the least time between two requests for one hit
         bool                         launched = false; // something of the cast has gone out (a hit, a projectile or a volley, an effect): a Dodge no longer cancels it
+        int                          ally_bursts = 0;  // the Saga's bursts of projectiles that left at the allies of this cast (the Return to Verra's are three, however the client asks)
+        std::string                  ally_targeting;   // the Saga's variant's targeting record (see Cast): the cast's record outlives the cast's own steps, and a late request still finds its rule
         std::vector<HitSlot>         slots;
         std::set<int64_t>            reach;            // every hit that belongs to the ability
         std::map<int64_t, std::pair<int, double>> asked;   // hit guid -> (requests, time of the last) for the hits that are no slot
@@ -789,6 +814,22 @@ private:
         double                                flight = 0;                 // ... how long it flies, seconds (the target's distance over the projectile's speed)
         const BallCast*                       ball = nullptr;             // a cast whose projectile is a ball that flies on (kBalls): planned at the montage's jump, in flight from its first step
         BallFlight                            ball_flight;                // ... and its flight
+        // The Bard's Saga: the server chose the montage from its rows' AnimExpressions (the item's NetGUID is made from the path where the table has none), and the
+        // launcher confirmation of an ally hit waits for the first projectile's landing so that both go out together (the recorded solo Saga: one call, two hits).
+        bool                                  montage_selected = false;
+        struct LauncherTarget {
+            protocol::emit::FIntrepidNetworkGUID component;   // the ally's pawn (what the confirmation's HitComp names)
+            double x = 0, y = 0, z = 0;                       // where it stood when the projectile left
+        };
+        struct Launcher {
+            int64_t hit = 0;          // the launcher hit's record
+            int64_t ability = 0;      // the ability that cast it (the confirmation's source)
+            bool    response = true;  // it answers the client's request
+            std::vector<LauncherTarget> targets;
+        };
+        std::optional<Launcher>               launcher;      // the confirmation to send with the first landing
+        bool                                  launcher_sent = false;
+        std::string                           ally_targeting;   // the Saga's variant's targeting record (ab_targeting's name; "" for the other abilities)
     };
     struct EffectInst {
         int64_t                     owner = 0;                    // plan D2, stage 2: the looping ability whose effect this is (0: none)
@@ -920,6 +961,23 @@ void   step_multi_hit(Cast& cast, double t);
     void   cancel_timed(int32_t client_instance_id, double now);
     /// A hit the client asked for lands and fires projectiles (ab_hit_projectile "fire": Maim's Slicing hit): a straight one flies the line ahead of the caster and lands on every enemy in its way.
     void   fire_from_hit(const CastRecord& rec, const abilities::HitDef& hit, double t);
+    // ---- the Bard's Saga's ally hits (ability_pipeline.cpp) ----------------------------------------------------------------------------------
+    /// The allies the hit's targeting record picks among the players of the caster's party (the caster included): its sphere, its own sorting
+    /// (an injured party member first, or the party first) and the hit's max targets, in `out`.  The record is the one the client named, else `fallback` (the cast's own
+    /// variant), else the hit's key map.  False for a hit that is no ally hit (its mask names no Ally, Party or Raid, or no ally targeting record is its own): the hits
+    /// of the Saga on the caster alone (the notes' consuming) and on enemies (the Apocalypse's, the Horrors') are the cast's ordinary hits.
+    bool   ally_targets(const abilities::AbilityDef& def, const abilities::HitDef& hit, size_t max, int64_t named, const std::string& fallback, std::vector<uint64_t>& out);
+    /// The same for a targeting record by name (the Silent Pantheon's spawn hits name no targeting of their own).
+    std::vector<uint64_t> ally_targets_of(const char* record, size_t max);
+    /// The Saga's launcher hit fires a Homing projectile: one flies at each ally, and the launcher's confirmation goes out with the first landing.
+    /// `first_at` is when the first projectile lands at 0 m (its request's answer + its flight).  A hit that fires no Homing projectile is not this.
+    void   fire_ally_from_hit(const abilities::AbilityDef& def, int32_t client_id, double trigger_at, const abilities::HitDef& hit, const std::vector<uint64_t>& allies,
+                              double first_at, const HitSource& src);
+    /// The launcher's confirmation, built where the first projectile lands (or at once for a launcher that fires none).
+    void   push_launcher_confirm(Cast& cast, double t);
+    /// The Silent Pantheon's four server-only spawn hits (their montage notifies are not in the data: they are fired at the cost step, each with its own
+    /// requirement, and the projectile each fires lands a 1 m blessing zone at the ally it was aimed at).
+    void   start_saga_pantheon(const Cast& cast, double t);
     /// Whether the character holds the skill (purchased, or granted by its level).
     bool   holds_skill(int64_t skill) const;
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
@@ -1001,8 +1059,9 @@ void   step_multi_hit(Cast& cast, double t);
     bool   chaining_ = false;   // a chain's own jumps apply their hit without starting another chain (chain_from)
     const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
+    /// `mods_override`: the one stack's mod values are the caller's (a hit of another player, worked out for the two actors), not the record's formulas run here.
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
-                        int64_t owner = 0);
+                        int64_t owner = 0, const std::vector<stats::EffectMod>* mods_override = nullptr);
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
     /// The game's damage breaks stealth: Camouflage's Incoming reaction ends it on any damage, and Rogue_Stealth's fragility ends it when the damage taken
@@ -1064,7 +1123,7 @@ void   step_multi_hit(Cast& cast, double t);
     void   sync_engine_effects();
     // hit requests and slots
     CastRecord*  record_of(int32_t client_id);
-    void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets);
+    void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting);
     /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target.
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
                                 const abilities::AbilityDef* ability, bool* landed = nullptr);

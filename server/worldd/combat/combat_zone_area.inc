@@ -18,6 +18,7 @@ std::vector<ZoneTarget> CombatWorld::actors_in_area(const Fighter& from, const V
     std::vector<uint64_t> ids;
     registry_.query(centre.x, centre.y, reach + 600.0, ids);
     for (const uint64_t id : ids) {
+        if (const world::WorldActor* a = registry_.find(id); a && a->kind == world::ActorKind::Player) continue;   // (a player's pawn is in the registry too: the players below are the ones who stand here)
         const TargetInfo ti = inspect(id, from);
         if (!ti.exists || !ti.alive) continue;
         if (!zone_holds(area, centre, ti.position, ti.radius_cm)) continue;
