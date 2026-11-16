@@ -4895,6 +4895,8 @@ static void test_consumables_item_gone_and_death() {
 }
 
 
+#include "weaponsmithing_session_tests.inc"
+#include "weaponsmithing_review_session_tests.inc"
 #include "items_session_registered.inc"
 
 int main() {
@@ -4972,6 +4974,13 @@ int main() {
     test_resource_repair();
     test_resource_no_room_at_login();
     test_real_content_db();
+    test_ws_session_novice();
+    test_ws_session_tool_slot();
+    test_ws_session_orders();
+    test_ws_session_second_player();
+    test_ws_session_tool_events();
+    test_ws_session_tool_room();
+    test_ws_session_reconnect();
 
     g_fail += aoc_tests::run();   // every check registered in items_session_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

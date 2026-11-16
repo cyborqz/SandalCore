@@ -503,8 +503,15 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         return fail("the cargo slot holds a crate already, so " + recipe.name + " cannot be made (the player was told)");
     }
     const int64_t created = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() * 1000;
-    std::vector<svc::InventoryItem> fresh;                    // every stack, product after product
-    std::vector<std::vector<svc::InventoryItem>> by_product;  // ... and each product's own
+    // a recipe of the Equipment destination makes a tool: it goes to the slot its record lists when that slot is free, and to the bag when it is worn already (the
+    // game's only home for a made tool is its slot; nothing in the data or the client says a craft replaces a worn tool, so a craft never takes one off)
+    const bool equipment_destination = !recipe.inventory_destination;
+    struct MadeProduct {
+        std::vector<svc::InventoryItem> stacks;
+        int                             worn_slot = -1;
+    };
+    std::vector<MadeProduct> made_products;     // every stack, product after product
+    std::vector<svc::InventoryItem> fresh;      // what goes to the bag: the room is checked for these alone
     std::map<int64_t, std::string> shown_name;
     for (const crafting::Product& p : rewards.products) {
         const auto info = item_catalog().info(p.item);
@@ -516,16 +523,29 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         std::string error;
         const auto rec = db ? db->item(p.item, error) : std::nullopt;
         if (rec) shown_name[p.item] = rec->display_name.empty() ? rec->name : rec->display_name;
+        int worn_slot = -1;
+        if (equipment_destination && p.quantity == 1 && info->equip_slots.size() == 1 && !info->two_handed &&
+            !inventory_.at(svc::ItemContainer::Equipment, info->equip_slots.front())) {
+            worn_slot = info->equip_slots.front();
+        }
+        made_products.push_back(MadeProduct{});
+        MadeProduct& made = made_products.back();
+        made.worn_slot = worn_slot;
         const int64_t max_stack = std::max(1, info->max_stack);
-        by_product.emplace_back();
         for (int64_t left = p.quantity; left > 0;) {
             const int64_t take = std::min(left, max_stack);
             svc::InventoryItem it;
-            it.container = svc::ItemContainer::Backpack;
+            it.container = worn_slot >= 0 ? svc::ItemContainer::Equipment : svc::ItemContainer::Backpack;
+            it.slot = worn_slot >= 0 ? worn_slot : 0;
             it.item_record_id = p.item;
             it.instance_guid = fresh_guid();
             for (const svc::InventoryItem& other : fresh) {
                 if (other.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();   // (fresh_guid looks at the inventory only)
+            }
+            for (const MadeProduct& other : made_products) {
+                for (const svc::InventoryItem& stack : other.stacks) {
+                    if (stack.instance_guid == it.instance_guid) it.instance_guid = fresh_guid();
+                }
             }
             it.quantity = static_cast<int32_t>(take);
             it.quality = p.quality > 0 ? p.quality : rewards.quality;
@@ -542,21 +562,23 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
             }
             it.durability = rec ? rec->max_durability_at(it.quality) : 0.0f;
             it.created_at_ms = created;
-            by_product.back().push_back(it);
-            fresh.push_back(std::move(it));
+            if (worn_slot < 0) fresh.push_back(it);
+            made.stacks.push_back(std::move(it));
             left -= take;
         }
     }
-    // the room, all or nothing, with the materials already gone from the bags (their cells are free): with none nothing is taken and the player is told so
-    if (!cargo && !inventory_.can_grant(fresh, item_catalog())) {
+    // the room, all or nothing, with the materials already gone from the bags (their cells are free): with none nothing is taken and the player is told so.  A tool made into a
+    // free tool slot needs no bag room (and an empty list of bag stacks is no room question at all).
+    if (!cargo && !fresh.empty() && !inventory_.can_grant(fresh, item_catalog())) {
         inventory_ = kept_bags;
         wallet_ = kept_purse;
         say(conn, kNoRoomText, now);
         return fail("the bags have no room for the " + std::to_string(fresh.size()) + " stack(s) of " + recipe.name + " (the player was told)");
     }
     std::vector<items::Outcome> granted;
+    bool equipment_changed = false;
     if (cargo) {
-        items::Outcome o = inventory_.grant_cargo(fresh.front(), item_catalog());
+        items::Outcome o = inventory_.grant_cargo(made_products.front().stacks.front(), item_catalog());
         if (!o.ok) {
             const std::string why = o.refusal;
             inventory_ = kept_bags;
@@ -565,8 +587,14 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         }
         granted.push_back(std::move(o));
     } else {
-        for (std::vector<svc::InventoryItem>& stacks : by_product) {
-            items::Outcome o = inventory_.grant(stacks, item_catalog());
+        for (MadeProduct& made : made_products) {
+            items::Outcome o;
+            if (made.worn_slot >= 0) {
+                o = inventory_.grant_equipment(made.stacks.front(), made.worn_slot, item_catalog());
+                equipment_changed = equipment_changed || o.ok;
+            } else {
+                o = inventory_.grant(made.stacks, item_catalog());
+            }
             if (!o.ok) {
                 const std::string why = o.refusal;
                 inventory_ = kept_bags;
@@ -586,6 +614,7 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     ++items_applied_;
     ++quick_made_;
     if (cargo) apply_gear_stats("a crate was made");   // the worn stats (the crate's stat block is among them): before the replies are queued, which are built later and carry the stats' deltas
+    if (equipment_changed) apply_gear_stats("a tool was made");   // the made tool's stats are worn now: the same rule
     professions::Professions after = professions_;
     if (professions_.valid() && rewards.profession_xp > 0 && rewards.profession != 0) after.add_xp(rewards.profession, rewards.profession_xp);
     const std::vector<professions::Change> changes = professions_.valid() ? set_professions(after) : std::vector<professions::Change>();
@@ -664,6 +693,18 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
         for (const items::Outcome& o : granted) note_cargo_crate(o);   // the quest module is told a construction crate is carried now
         sync_cargo(conn, tick);   // the crate's effects and the Drop Crate slot of the bar follow the Add
     }
+    if (equipment_changed) {   // a made tool shows in the tool slot on the pawn, as a worn item does
+        const std::vector<bootstrap::HeldItem> held = bootstrap::held_items_for(inventory_);
+        const std::vector<repl::AppearanceId> appearance = items::appearance_ids(inventory_);
+        size_t marks = 0;
+        for (const items::Outcome& o : granted) marks += o.equipment_changed ? 1 : 0;
+        queue_later("HeldItems and AppearanceIDs",
+                    [held, appearance, marks](bootstrap::PlayerBootstrap& pb) -> std::optional<bootstrap::Send> {
+                        if (!pb.apply_equipment(held, appearance, marks ? marks : 1)) return std::nullopt;
+                        return pb.equipment_update();
+                    },
+                    conn, tick, /*must_build=*/true);
+    }
     if (xp.changed() || leveled || !changes.empty()) {
         const int64_t total = progress_.xp, debt = progress_.debt;
         const std::vector<ProfessionWire> wire = profession_wire(changes);
@@ -706,8 +747,16 @@ bool PlayerSession::complete_quick_make(Connection& conn, Clock::time_point now)
     const double on_scale = crafting::tier_scale(product_facts, rewards.quality);
     const std::string as_tier = fmt::format("{:.2f}", rewards.quality_exact) + " exactly, nearest whole; " + std::string(items::rarity_name(product_facts.rarity_of(rewards.quality))) + " +" +
                                 fmt::format("{:.1f}", (on_scale - std::floor(on_scale)) * 100.0) + " %, " + fmt::format("{:.4f}", on_scale) + " on the tier scale";
+    int worn_slot = -1;
+    for (const MadeProduct& m : made_products) {
+        if (m.worn_slot >= 0) {
+            worn_slot = m.worn_slot;
+            break;
+        }
+    }
     line += (cargo ? " into the cargo slot at quality " + std::to_string(fresh.front().quality) + " (rarity " + std::string(items::rarity_name(world_->item_rarity_facts(fresh.front().item_record_id).rarity_of(fresh.front().quality))) + ")"
-                   : " at quality " + std::to_string(rewards.quality) + " (" + as_tier + ") in " + std::to_string(fresh.size()) + " stack(s)") +
+                   : worn_slot >= 0 ? " into the tool slot " + std::to_string(worn_slot) + " at quality " + std::to_string(rewards.quality) + " (" + as_tier + ")"
+                                    : " at quality " + std::to_string(rewards.quality) + " (" + as_tier + ") in " + std::to_string(fresh.size()) + " stack(s)") +
             "; " + std::to_string(plan.cost) + " " + price_unit(plan.currency) + " paid" +
             (plan.currency == items::kMoneyTier ? " (" + std::to_string(before) + " -> " + std::to_string(wallet_.copper()) + ")" : std::string()) + ", " + std::to_string(taken.events.size()) +
             " stack(s) of materials taken";

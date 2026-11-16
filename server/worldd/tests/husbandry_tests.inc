@@ -352,8 +352,8 @@ static void test_husbandry_sources(const content::ContentDb& db, const PlayerWor
     }
     CHECK_SHOWN(circles == 2, "the two livestock recipes' adult is made by a Farming recipe that takes the baby they make: no seed exists in the live world");
 
-    // the five Apprentice hunts need an Apprentice Hunting Bow (the data's bows that reach tier 1 or more, worn in the bow slot): no open shop sells one, and every recipe that makes one delivers
-    // it into the equipment slot, which a job or a quick make does not serve yet, so a game master gives it
+    // the five Apprentice hunts need an Apprentice Hunting Bow (the data's bows that reach tier 1 or more, worn in the bow slot): no open shop sells one; Carpentry's recipes make them and deliver
+    // each into the equipment slot (the quick make serves that destination since the Weaponsmithing milestone), and their reagent is sold by the Woodshop vendor of the artisan outposts
     const auto gather = db.gather_data(error);
     std::set<int64_t> bows;
     if (gather) {
@@ -361,16 +361,23 @@ static void test_husbandry_sources(const content::ContentDb& db, const PlayerWor
             if (tool.tool_slot == 38 && tool.cert_tier >= 1) bows.insert(item);
         }
     }
-    size_t bows_sold = 0, bow_recipes = 0, bow_recipes_served = 0;
+    size_t bows_sold = 0, bow_recipes = 0, bow_recipes_served = 0, bow_reagents_sold = 0;
     for (const int64_t bow : bows) bows_sold += open_items.count(bow) != 0 ? 1 : 0;
     for (const auto& [guid, r] : data.recipes) {
         const std::set<int64_t> made = ah_outputs(data, r);
         const bool makes_a_bow = std::any_of(bows.begin(), bows.end(), [&](int64_t bow) { return made.count(bow) != 0; });
         bow_recipes += makes_a_bow ? 1 : 0;
         bow_recipes_served += makes_a_bow && r.inventory_destination ? 1 : 0;
+        if (!makes_a_bow) continue;
+        for (const content::CraftInput& in : r.inputs) {
+            if (in.primary && in.item != 0 && open_items.count(in.item) != 0) {
+                ++bow_reagents_sold;
+                break;
+            }
+        }
     }
-    CHECK_SHOWN(gather.has_value() && !bows.empty() && bows_sold == 0 && bow_recipes > 0 && bow_recipes_served == 0,
-                "no open shop sells a hunting bow of Apprentice or more, and every recipe that makes one delivers it into the equipment slot, which is not served yet: the 5 Apprentice hunts wait on a game master's bow");
+    CHECK_SHOWN(gather.has_value() && !bows.empty() && bows_sold == 0 && bow_recipes > 0 && bow_recipes_served == 0 && bow_reagents_sold == bow_recipes,
+                "no open shop sells a hunting bow of Apprentice or more; every recipe that makes one delivers it into the equipment slot (served by the quick make) and takes a reagent an open shop sells");
     SAYOK("the Animal Husbandry recipes' sources");
 }
 

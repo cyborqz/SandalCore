@@ -7,11 +7,15 @@
 //  What a start at a processing station (a job) or at a crafting station (the quick make, `quick`) asks of the player, the station and the recipe, in the order the checks run.  A start
 //  that fails a check is refused whole: nothing is taken and the client is told nothing (the window stays as it was); the reason goes to the log.
 //
-//  The order.  The recipe exists and may be made at a station (not blacklisted, its products go to the bags); it is in the station's recipe set; the player knows it (a recipe the game makes
+//  The order.  The recipe exists and may be made at a station (not blacklisted); it is in the station's recipe set; the player knows it (a recipe the game makes
 //  the player learn is known only once a game master taught it); the player's certification in the recipe's profession reaches its tier and the station's tier reaches it; the node the
 //  station is in allows it (the recipe's and its list's availability predicates: the node's level and biome, the nodes it is for, and the service building it needs, which no node has yet);
 //  the quantity is 1 to 250 (a quick make is one unit); the player's queue at the station has room (a quick make has none); the stacks the player named add up to the recipe's inputs for that
 //  quantity (the same records, rarities at or above the recipe's minimum, no warehouse), the bags hold them, and hold the reagent too; the purse holds the price.
+//
+//  Where the product goes.  A recipe's ItemDestination is Inventory (the bag) or Equipment (a gathering tool's own slot: the pickaxe, axe, sickle, fishing rod or bow).  A quick make
+//  delivers an Equipment product into the slot its item record lists when that slot is free; when the slot is worn the tool goes to the bag instead, as any other product does (no
+//  modelling of a replacement or a refusal exists in the data or the client, and a craft never takes off what the player wears).  A job's product is collected into the bag.
 //
 //  A crate station's recipes (the Crate Packing stations make construction crates, the commodity tables make trade crates) name their inputs by TAGS instead of by an item: 30 units of
 //  anything that carries Item.Resource.Raw.Wood, 12 of anything that carries both harvesting.type.ore and Riverlands.  The request gives the stacks the player picked for each such input, by
@@ -109,14 +113,14 @@ inline bool is_commodity_table(const content::CraftStationDef& d) { return d.nam
 /// Whether the recipes of a station name their inputs by tags, so that the player picks the stacks from the window's own lists: the crate stations.
 inline bool takes_tag_inputs(const content::CraftStationDef& d) { return packs_crates(d) || is_commodity_table(d); }
 
-/// Whether a station definition is one the quick make serves: a profession's crafting station, a Crate Packing station or a commodity table.  The stations that make gathering tools and the
+/// Whether a station definition is one the quick make serves: a profession's crafting station, the stations of the gathering tools, a Crate Packing station or a commodity table.  The
 /// event and dungeon stations answer nothing.
 inline bool serves_quick_make(const content::CraftStationDef& d) {
     const std::string& n = d.name;
     if (d.processing) return false;
     if (packs_crates(d)) return true;
     if (n.rfind("CraftingStation_", 0) != 0) return false;
-    for (const char* other : {"GatheringTools", "HarbingerEvent", "BefallenForge"}) {
+    for (const char* other : {"HarbingerEvent", "BefallenForge"}) {
         if (n.find(other) != std::string::npos) return false;
     }
     return true;
@@ -263,7 +267,7 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     const auto station_label = [&]() -> const std::string& { return f.station->display_name.empty() ? f.station->name : f.station->display_name; };
     if (f.quick) {
         if (f.station->processing) return refuse(station_label() + " is a processing station: a start there is a job");
-        if (!serves_quick_make(*f.station)) return refuse(station_label() + " makes nothing yet (the stations of gathering tools and the event stations are not served)");
+        if (!serves_quick_make(*f.station)) return refuse(station_label() + " makes nothing yet (the event and dungeon stations are not served)");
     } else if (!f.station->processing) {
         return refuse("the station is not a processing station");
     }
@@ -272,7 +276,6 @@ inline Plan plan_start(const protocol::repl::StartCraft& req, const StartFacts& 
     plan.recipe = r;
     if (req.sub_recipe != 0) return refuse("a sub recipe (" + std::to_string(req.sub_recipe) + ") is named: none is made");
     if (r->blacklisted) return refuse(r->name + " is switched off in the data");
-    if (!r->inventory_destination) return refuse(r->name + " makes gear that is worn at once: not made yet");
     std::vector<int64_t> lists;
     if (!f.recipes->set_holds(f.station->recipe_set, r->guid, &lists)) return refuse(r->name + " is not one of the recipes of " + station_label());
     if (r->learnable && !(f.taught && f.taught(r->guid))) return refuse(r->name + " has to be learned, and the character was not taught it");
