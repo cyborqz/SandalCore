@@ -19,6 +19,10 @@ inline constexpr int64_t kEffectRangerCamouflage = 6064630841868877827ll;
 inline constexpr int64_t kEffectRogueStealth = 6064632711256473912ll;
 inline constexpr int64_t kEffectSummonerPhaseOut = 6064633866989608593ll;
 
+/// The two stats the stealth rule reads: the character's stealth and its perception (both the character's level, from the game's combat stat list).
+inline constexpr int64_t kStatStealthLevel = 6064633186496741774ll;
+inline constexpr int64_t kStatStealthPerceptionLevel = 6064633186506047887ll;
+
 /// Whether the effect record stealths the character that holds it.
 constexpr bool applies_stealth(int64_t effect_guid) {
     return effect_guid == kEffectRangerCamouflage || effect_guid == kEffectRogueStealth || effect_guid == kEffectSummonerPhaseOut;

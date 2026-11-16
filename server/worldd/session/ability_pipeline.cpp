@@ -7,6 +7,7 @@
 #include "session/ability_pipeline.h"
 
 #include "bootstrap/constants.h"
+#include "bootstrap/stealth_effects.h"
 #include "content/content_db.h"
 #include "content/emote_commands.h"
 #include "session/ability_timings.h"
@@ -1147,6 +1148,39 @@ bool AbilityPipeline::remove_effect(int64_t effect_guid, double now) {
     return true;
 }
 
+bool AbilityPipeline::end_effect(int64_t effect_guid, double now) {
+    advance(now);
+    AbilityChange c;
+    std::vector<EffectInst> ended;   // the instances that are gone altogether: their End hits fire (Camouflage's 60 s cooldown after the damage that ended it)
+    for (size_t i = 0; i < effects_.size();) {
+        if (effects_[i].def->row.guid == effect_guid) {
+            ended.push_back(effects_[i]);
+            remove_instance(c, i);
+        } else {
+            ++i;
+        }
+    }
+    if (ended.empty()) return false;
+    sync_engine_effects();
+    for (const EffectInst& gone : ended) run_effect_hits(c, gone, kEndPhases, 1, now_);
+    recompute(c);
+    emit({std::move(c), std::nullopt, now_, "damage took the stealth off"});
+    return true;
+}
+
+void AbilityPipeline::break_stealth_on_damage(double damage, double now) {
+    // the game's Incoming reaction of Camouflage ends it on any damage at all; Rogue_Stealth's fragile definition ends it once the damage taken since it was
+    // put on passes 5 % of MaxHealth (the text's "damage taken exceeds 5 % of your max health while the effect is active").  The effect ends as it does when
+    // an action ends it: its End hit runs (Camouflage's 60 s cooldown).
+    if (stacks_of(bootstrap::kEffectRangerCamouflage) > 0) end_effect(bootstrap::kEffectRangerCamouflage, now);
+    if (stacks_of(bootstrap::kEffectRogueStealth) > 0) {
+        stealth_damage_ += damage;
+        const double max = stat_now(content::kGuidMaxHealth);
+        if (max > 0 && stealth_damage_ > max * 0.05) end_effect(bootstrap::kEffectRogueStealth, now);
+    }
+    if (stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;
+}
+
 void AbilityPipeline::set_moving(bool moving) {
     moving_ = moving;
     stats_.set_moving(moving);
@@ -1255,6 +1289,7 @@ bootstrap::EffectItem AbilityPipeline::effect_item(const EffectInst& e) const {
 void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner) {
     const content::EffectRow& row = def.row;
     if (stacks_in < 1) stacks_in = 1;
+    if (row.guid == bootstrap::kEffectRogueStealth && stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;   // its damage count starts with it
     // the duration: the hit row's, the record's (a number of seconds), or none: infinite
     double dur = kInf;
     if (duration) {
@@ -1857,10 +1892,12 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     if (combat_) h.instigator = combat_->guid_of(in.instigator);
     uint8_t flags = in.flags;
     const double before = stat_now(content::kGuidHealth);
+    double damage = 0;
     if ((flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : in.mods) {
             if (!std::isfinite(m.value)) continue;
             const double effective = apply_delta(c, m.stat_guid, m.value);
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) damage += -m.value;
             h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective)});
         }
     }
@@ -1870,6 +1907,7 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
+    if (damage > 0) break_stealth_on_damage(damage, now_);
 }
 
 void AbilityPipeline::confirm_hit_on(const combat::IncomingHit& in, double now, const protocol::emit::FIntrepidNetworkGUID& target,

@@ -16,6 +16,7 @@
 #include "combat/combat_world.h"
 #include "combat/knockback.h"
 #include "combat/npc_replicator.h"
+#include "session/stealth_state.h"
 #include "nav_fixture.h"
 #include "npc/area_npcs.h"
 #include "spawns/captured_spawns.h"
@@ -120,8 +121,14 @@ public:
     void effect_refused(const combat::EffectRefusal& refusal, double) override { refusals.push_back(refusal); }
     /// The player carries an effect record: what his session's effect state says (the pipeline the rig plays his abilities through).
     bool holds_effect(int64_t effect_guid) const override { return rig_.pipe && rig_.pipe->stacks_of(effect_guid) > 0; }
+    /// The stealth the test hands him (the session's own state): the effects on him and the two stats the creatures' sight reads.
+    combat::StealthState stealth() const override {
+        return real_stealth ? stealth_state_of(rig_.pipe ? &*rig_.pipe : nullptr, rig_.cs ? &*rig_.cs : nullptr) : stealth_state;
+    }
     /// The rig this player belongs to: a test's hand on his effect state and his pipeline (a bleed put on him, a spell cast).
     ability_rig::Rig& rig() { return rig_; }
+    combat::StealthState                     stealth_state;
+    bool                                     real_stealth = false;   // true: the state is what the session reads from the rig's effects and stats (session/stealth_state.h), not `stealth_state`
     std::vector<combat::DealtHit>            dealt;
     std::vector<int64_t>                     from_pet;
     std::vector<combat::EffectRefusal>       refusals;

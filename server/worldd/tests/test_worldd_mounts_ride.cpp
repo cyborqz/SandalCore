@@ -1419,6 +1419,11 @@ static void test_filter() {
     h.client_sends({h.client.actor(h.pawn_ch, trigger_on(h, g.ability, unstuck->ability, 52), true)});
     h.run(milliseconds(100));
     CHECK(h.s->mounted() && h.s->mount_triggers_refused() == 1, "General_Unstuck is not refused by the filter and does not dismount");
+    // Camouflage is no mounted ability either (the data's mount-ability list has no row for it): a stealthed rider is not a state the game has
+    const int64_t camouflage = 6064630837930098688ll;   // Ranger_Camouflage, the data's ability
+    h.client_sends({h.client.actor(h.pawn_ch, trigger_on(h, g.ability, camouflage, 56), true)});
+    h.run(milliseconds(100));
+    CHECK(h.s->mounted() && h.s->mount_triggers_refused() == 2, "Camouflage while mounted is refused (its ability is in no mount-ability row) and the rider stays on");
     // an auto-dismount ability dismounts the rider first
     h.client_sends({h.client.actor(h.pawn_ch, trigger_on(h, g.ability, blink->ability, 53), true)});
     h.run(milliseconds(150));

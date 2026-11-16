@@ -21,6 +21,7 @@
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
+#include "nav_fixture.h"
 #include "test_registry.h"
 #include "bootstrap/character_setup.h"
 #include "gather/gathering.h"
@@ -46,6 +47,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -205,7 +207,7 @@ struct Rig {
     Clock::time_point t = t0;
     std::vector<std::unique_ptr<Player>> players;
 
-    bool open(const char* path, double respawn_mult = 0.001) {
+    bool open(const char* path, double respawn_mult = 0.001, const nav::NavFile* ground = nullptr) {
         std::string error;
         db = content::ContentDb::open(path, error);
         if (!db) {
@@ -232,12 +234,19 @@ struct Rig {
             std::printf("  [FAIL] gathering does not start: %s\n", error.c_str());
             return false;
         }
+        if (ground) {
+            auto nav = nav::AreaNav::from_file(*ground, &error);
+            if (!nav || !world->adopt_ground(std::move(nav), error)) {
+                std::printf("  [FAIL] the ground does not load: %s\n", error.c_str());
+                return false;
+            }
+        }
         return donor != nullptr;
     }
     gather::Gathering& g() { return *world->gathering(); }
     gather::NodeBoard& board() { return g().board(); }
 
-    uint64_t add_node(int64_t def_guid, double dx, double dy, uint32_t seed) {
+    uint64_t add_node(int64_t def_guid, double dx, double dy, uint32_t seed, double z = bs::kDefaultSpawn.z) {
         const content::GatherDefRow* def = g().def(def_guid);
         spawns::InstanceParams p;
         p.keep_captured_position = true;
@@ -261,7 +270,7 @@ struct Rig {
         const double x = kCx + dx, y = kCy + dy;
         node->x = x;
         node->y = y;
-        node->z = bs::kDefaultSpawn.z;
+        node->z = z;
         node->npc.source = world::Source::Runtime;
         const uint64_t id = node->id;
         return world->registry().add(std::move(*node)) ? id : 0;
@@ -1150,7 +1159,8 @@ static void test_full_bag() {
         const repl::GuidValue me{cg[0], cg[1], cg[2], cg[3]};
         CHECK(d.owner == me && d.name == "cyb", "for the harvester");
         const GoodPosition at = p.s->movement().good();
-        CHECK(std::hypot(d.x - at.x, d.y - at.y) < 1.0 && std::fabs(d.z - at.z) < 1.0, "where the player stands");
+        CHECK(std::hypot(d.x - at.x, d.y - at.y) < 1.0 && std::fabs(d.z - (at.z - PlayerWorld::kCapsuleHalfHeightCm)) < 1.0,
+              "where the player stands, on the ground under its feet (the body's origin is 98 cm above it; no ground file in this world)");
         const double after_frame = std::chrono::duration<double>(d.at - frame_at).count();
         CHECK(after_frame >= 0.1 && after_frame < 0.2, "100 ms after the experience frame (the world steps 20 ms)");
     }
@@ -1159,6 +1169,101 @@ static void test_full_bag() {
     // a bag with room for part of it is filled first: 69 items, a Moonbell... the stacks that fit go in, the rest to the pile
 }
 // (C | O | A) (Cyb)
+
+// ---- the pile of a full bag lies on the ground ---------------------------------------------------------------------------------------------
+
+/// A character of the full-bag test at `pos`: the 24 cells of Resource0 full of coal, so the harvest has nowhere to go.
+static svc::Character full_bag_at(const char* id_hex, const char* name, double x, double y, double z) {
+    svc::Character c = record_of(id_hex, name);
+    c.has_position = true;
+    c.position.x = x;
+    c.position.y = y;
+    c.position.z = z;
+    for (int slot = 0; slot < 24; ++slot) c.items.push_back(make_item(R0, slot, id3::kCoal, 300 + static_cast<uint32_t>(slot), 20));
+    return c;
+}
+
+/// The game's pile lies on the ground, not at the capsule's centre: on the plain, a slope, a bridge deck and a roof, for four players whose bags are full.
+static void test_full_bag_pile_on_the_ground() {
+    std::printf("a full bag's pile lies on the ground under the player: the plain, a slope, a bridge and a roof, a pile each\n");
+    // the fixture's plain (z 1,000), its hill (the cone at 6,000, 0: z 1,400) and its platform (the top at 1,540), and a bridge deck 2 m over the plain
+    nav::Geometry geometry = navfix::test_geometry();
+    navfix::place_box(geometry, 0, 3000, 5000, -300, 300, 1000, 1200);
+    nav::BuildOptions options;
+    options.threads = 2;
+    options.nav_margin_cm = 3000;
+    nav::NavFile file;
+    nav::BuildStats stats;
+    std::string error;
+    if (!nav::build_nav(geometry, 7, options, &file, &stats, &error)) {
+        std::printf("  [FAIL] the test ground builds: %s\n", error.c_str());
+        return;
+    }
+    Rig rig;
+    if (!rig.open(g_path, 0.001, &file)) return;
+    struct Spot {
+        const char* id;
+        const char* name;
+        double      x, y, z;   // the body's origin (the saved position): its feet are 98 cm under it
+        double      ground;    // the floor the pile lies on
+        double      tolerance; // the landscape is exact; a mesh floor is the walking map's surface, within about 10 cm
+    };
+    const Spot spots[] = {
+        {"0000000000000000000000000000f101", "plain", 0, 0, 1098, 1000, 1.0},
+        {"0000000000000000000000000000f102", "slope", 6000, 0, 1498, 1400, 1.0},
+        {"0000000000000000000000000000f103", "roof", 9000, -5000, 1638, 1540, 15.0},
+        {"0000000000000000000000000000f104", "bridge", 4000, 0, 1298, 1200, 15.0},
+    };
+    struct Dropped {
+        double x, y, z;
+    };
+    std::vector<Dropped> hooked;   // the piles a world without its fights makes through the hook
+    rig.world->set_pile_hook([&](double x, double y, double z, const repl::GuidValue&, const std::string&, const std::vector<combat::LootStack>&) -> uint64_t {
+        hooked.push_back({x, y, z});
+        return 9000 + hooked.size();
+    });
+    const auto pile_near = [&](double x, double y) -> std::optional<Dropped> {
+        for (const Dropped& d : hooked)
+            if (std::hypot(d.x - x, d.y - y) < 1.0) return d;
+        const world::WorldActor* found = nullptr;
+        rig.world->registry().for_each([&](const world::WorldActor& a) {
+            if (a.kind == world::ActorKind::Pile && std::hypot(a.x - x, a.y - y) < 1.0) found = &a;
+        });
+        if (found) return Dropped{found->x, found->y, found->z};
+        return std::nullopt;
+    };
+    for (size_t i = 0; i < std::size(spots); ++i) {
+        const Spot& s = spots[i];
+        const uint64_t node = rig.add_node(id::kDaffodil, s.x - kCx + 200.0, s.y - kCy, 60 + static_cast<uint32_t>(i), s.z);
+        Player& p = rig.add_player(full_bag_at(s.id, s.name, s.x, s.y, s.z));
+        play(p);
+        CHECK(p.s->inventory().count(R0) == 24, "the player's resource bag is full (24 stacks of coal)");
+        CHECK(std::fabs(p.s->movement().good().z - s.z) < 1.0 && std::hypot(p.s->movement().good().x - s.x, p.s->movement().good().y - s.y) < 1.0,
+              "the player stands where the character was saved");
+        p.send_now(interact(rig.component_of(node)), p.pawn_ch);
+        if (!run_until(rig, [&] { return p.s->harvests_completed() == 1; }, seconds(20))) {
+            CHECK(false, "the harvest completes");
+            continue;
+        }
+        rig.run(milliseconds(200));
+        const std::optional<Dropped> pile = pile_near(s.x, s.y);
+        if (!pile) {
+            CHECK(false, "the pile is made");
+            continue;
+        }
+        char msg[200];
+        std::snprintf(msg, sizeof msg, "%s: the pile lies on the ground at %.0f cm (the body's origin is at %.0f, the floor %.0f)", s.name, pile->z, s.z, s.ground);
+        CHECK(std::fabs(pile->z - s.ground) <= s.tolerance, msg);
+        CHECK(std::hypot(pile->x - s.x, pile->y - s.y) < 1.0, "the pile is where the player stands");
+    }
+    size_t made = hooked.size();
+    rig.world->registry().for_each([&](const world::WorldActor& a) {
+        if (a.kind == world::ActorKind::Pile) ++made;
+    });
+    CHECK(made == std::size(spots), "four full bags: four piles, none on another player's spot");
+}
+
+#include "gather_pile_ground_tests.inc"
 
 // a Backpack full of other items blocks nothing of a harvest: the daffodils go to the resource bag
 static void test_backpack_full_blocks_nothing() {
@@ -1301,6 +1406,9 @@ int main() {
     test_stand_still();
     test_foliage_line();
     test_full_bag();
+    test_full_bag_pile_on_the_ground();
+    test_pile_not_in_a_cave_under_the_slope();
+    test_pile_on_the_real_ground();
     test_backpack_full_blocks_nothing();
     test_relog_keeps_the_resource_bag();
     test_levels();

@@ -27,6 +27,7 @@
 #include "combat/npc_replicator.h"
 #include "combat/npc_stats.h"
 #include "combat/origin_frame.h"
+#include "combat/stealth.h"
 #include "effects/effect_book.h"
 #include "nav/area_nav.h"
 #include "npc/ai/npc_ai.h"
@@ -152,6 +153,9 @@ public:
     virtual void effect_refused(const EffectRefusal& /*refusal*/, double /*now*/) {}
     /// Whether the player carries an effect record (his session's effect state): what a creature's "its target carries effect E" condition asks.  The default: none.
     virtual bool holds_effect(int64_t /*effect_guid*/) const { return false; }
+    /// The player's stealth (the effects that stealth him and the two stats the rule reads): what a creature's sight asks before it notices or targets him.
+    /// The default: not stealthed.
+    virtual StealthState stealth() const { return {}; }
 };
 
 /// What a player asks about a target before it acts on it.

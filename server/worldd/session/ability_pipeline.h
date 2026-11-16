@@ -982,6 +982,11 @@ void   step_multi_hit(Cast& cast, double t);
                         int64_t owner = 0);
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
+    /// The game's damage breaks stealth: Camouflage's Incoming reaction ends it on any damage, and Rogue_Stealth's fragility ends it when the damage taken
+    /// since it was put on passes 5 % of MaxHealth.
+    void   break_stealth_on_damage(double damage, double now);
+    /// Takes every instance of an effect off as a hit that removes it does: its End hits run (remove_effect is the plain take-off, which runs none).  False when it was not on.
+    bool   end_effect(int64_t effect_guid, double now);
     void   restore_stacks(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, double t);   // stacks a cost took go back on (the instance keeps its time; one that has gone comes back whole)
     bootstrap::EffectItem effect_item(const EffectInst& e) const;
     void   run_effect_hits(bootstrap::AbilityChange& c, const EffectInst& e, const char* const* phases, size_t n, double t);
@@ -1133,6 +1138,7 @@ void   step_multi_hit(Cast& cast, double t);
     int                       reaction_depth_ = 0;                  // > 0 while a reaction's hits are applied: they raise no events (a reaction does not chain)
     size_t                    reactions_fired_ = 0;
     std::map<int64_t, int>    reaction_procs_;                      // reaction guid -> how often it fired (its proc limits)
+    double                    stealth_damage_ = 0;                  // the damage taken since Rogue_Stealth went on (its 5 % fragility)
     std::set<int64_t>         reaction_noted_;                      // reactions whose inert state or unserved shape was logged
     std::set<int64_t>         reaction_recursive_noted_;            // reactions whose hits fire further hits (not followed) that were logged
     std::set<int>             unserved_host_;                       // host functions an expression asked for and the runtime does not answer yet

@@ -2,7 +2,7 @@
 
 This document lists the known issues of the current SandalCore main in one place: what happens, a workaround when there is one, and the status. What is still to be built is in [ROADMAP.md](ROADMAP.md), under "Achieved and left".
 
-**Last updated:** 15 November 2026
+**Last updated:** 16 November 2026
 
 ---
 
@@ -73,6 +73,7 @@ This document lists the known issues of the current SandalCore main in one place
 | **Combat / Crowd-control resistance** | A crowd control that a mob has kept up is thrown off at its build-up's threshold and the tier stat gets +100 for 10 s, so a new crowd control of that kind is resisted; a boss is immune to the 24 exported effects the data gates on the Boss effect, and Rafflesia's Steadfast Root and Shardmaw's Void Rage make their holder immune to tagged crowd control while they last. Not built: the data's CharacterType > 1.5 rule (caravans, destructibles and caravels resist every debuff), which waits for the caravan work. | None. | Open: the caravan, destructible and caravel rule. |
 | **Artisan certification and recipe items** | The artisan certifiers in Aven's End, Briarmoor Workshops and the farms west of Aven's End (the Smithy Foreman, the Agricultural Supplier and the others) move a profession one tier up or down. A Promote needs the profession at its tier's level cap and room under the next tier's limit, counted over the professions at that tier or above. A recipe item teaches its recipe when the character holds the certification it asks for, and is used up. | None. | Open: a refused Promote gives the player no message (how the game refused one is not known), and a Demote is taken at once where the game asks the player to confirm it first. |
 | **Fishing** | Fishing in the Riverlands' lakes and rivers works: the cast, the bite, the catch in the resource bag with its quality, the rod's wear, the Fishing experience and level, and a cast that fails on dry land. The lure comes down about 8 m ahead of you in the direction you face. How the game decides where it lands is not known, so stand within a few metres of the water, facing it, and stand still: moving or fighting ends the cast. | Step closer to the water when a cast fails. | Open: where the lure lands is modelled. Sport fishing is not built. |
+| **Creatures / Stealth** | A creature that hears or sees a stealthed player sees him the way the game's rule says: its own perception (its level) against the player's stealth level, the distance and the angle decide whether he is hidden, detected or revealed, and only a revealed player is noticed or kept as a target; Camouflage ends on any incoming damage (and its 60 s cooldown starts) and Rogue_Stealth when the damage taken passes 5 % of MaxHealth. | None. | Open: the tooltip's "other negative effects" are not in the game's data (Camouflage's reaction asks for a negative Health change only); the rule is the data's and no retail recording shows a creature with a stealthed player to compare it with. |
 
 ---
 

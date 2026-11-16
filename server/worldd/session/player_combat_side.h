@@ -12,6 +12,7 @@
 #include "session/player_session.h"
 
 #include "bootstrap/character_setup.h"
+#include "session/stealth_state.h"
 #include "combat/combat_world.h"
 #include "crafting/job.h"
 #include "crafting/rewards.h"
@@ -86,6 +87,7 @@ public:
         if (effect_refusals.size() < 64) effect_refusals.push_back(refusal);
     }
     bool holds_effect(int64_t effect_guid) const override { return s_.pipeline_ && s_.pipeline_->stacks_of(effect_guid) > 0; }
+    combat::StealthState stealth() const override { return stealth_state_of(s_.pipeline_ ? &*s_.pipeline_ : nullptr, s_.stats_ ? &*s_.stats_ : nullptr); }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }

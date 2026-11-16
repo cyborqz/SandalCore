@@ -1613,6 +1613,7 @@ int main() {
     test_end_ability();
     test_apply_refusals();
     test_stealth_flag();
+    test_camouflage_stealth_on_the_wire();
     test_retail_replies(r);
     test_out_of_stamina_reply(r);
     test_client_never_sees_negative_stamina(r);

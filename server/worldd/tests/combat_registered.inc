@@ -35,3 +35,4 @@
 #include "combat_rally_group_tests.inc"
 #include "combat_display_names_tests.inc"
 #include "combat_unreachable_tests.inc"
+#include "combat_stealth_tests.inc"

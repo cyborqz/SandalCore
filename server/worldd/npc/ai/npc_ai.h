@@ -25,6 +25,7 @@
 #pragma once
 
 #include "combat/fighter.h"
+#include "combat/stealth.h"
 #include "npc/ai/threat.h"
 
 #include <cstdint>
@@ -71,6 +72,8 @@ struct Params {
     double proximity_threat = 1.0;        // what coming into the aggro radius adds
     double chase_speed_cm_s = 600.0;
     double run_home_speed_cm_s = 900.0;
+    /// The creature's StealthPerceptionLevel (the game's CombatStats: its level): the perception the stealth rule reads.
+    double stealth_perception_level = 1.0;
 };
 
 /// Someone the NPC may fight (a player): where, whether it lives, and whether the NPC may attack it.
@@ -80,6 +83,8 @@ struct Candidate {
     double         radius_cm = 50.0;
     bool           alive = true;
     bool           hostile = true;
+    /// The stealth a player carries (nobody else is stealthed): the rule reads it against the creature's own perception.
+    combat::StealthState stealth;
 };
 // C.Y.B : C O A
 
@@ -146,6 +151,8 @@ private:
     bool within_leash(const combat::Vec3& self, const combat::Vec3& home) const;
     /// Whether the creature notices the candidate: its distance from the creature in `distance` (the plane, or all three directions with Senses).
     bool notices(const Sense& s, const Candidate& c, double& distance) const;
+    /// Whether the creature may fight the candidate: a stealthed character only when the game's stealth rule has revealed it to this creature.
+    bool can_target(const Sense& s, const Candidate& c) const;
 
     Params      params_;
     State       state_ = State::Idle;

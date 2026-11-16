@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 15 November 2026
+**Last updated:** 16 November 2026
 
 ---
 
@@ -82,6 +82,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - Summoner pets: the Guardian, Hunter and Mystic come with the summon, follow, fight, take commands and stances, play their ten abilities and come back when more than 40 m away.
 - Seeing other players (first three parts): players within 150 m of each other see each other's characters standing, walking, stopping and riding their mounts, with the gear they wear, the weapons in their hands and their level kept current as they change. Still to come: live Health and Mana, death, combat stances, and abilities and hits on other players.
 - The world clock: the day runs 6 game seconds per real second and the night 9, so a game day takes 200 minutes. One clock drives the sky and the hour the mobs spawn for, and every server start begins at 7 in the morning. Still to come: a command to skip ahead, and mobs that change at dawn and dusk.
+- Stealth: the full-bag pile on the ground, the client's own Camouflage look pinned on the wire, and creatures that detect a stealthed player by the game's rule.
 
 ### Left
 - Quests: the speech bubbles over NPCs who have an objective for you; objects that stand in the map itself (the Harbinger quests); the Destiny window, group quests, events and boards.

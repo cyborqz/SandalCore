@@ -194,6 +194,7 @@ CombatWorld::Npc* CombatWorld::make_combatant(const world::WorldActor& a) {
     // huntable, whose alignment is Friendly, never attack first)
     p.proximity_aggro = notices_players(n->hostile, a.npc);
     p.leash_radius_cm = a.npc.leash_radius_cm > 0 ? a.npc.leash_radius_cm : std::max(cfg_.default_leash_cm, p.aggro_radius_cm * 3.0);
+    p.stealth_perception_level = static_cast<double>(std::max(1, a.npc.level));   // the game's StealthPerceptionLevel: the character's level
     if (const npc::SensesRow* row = senses_ ? senses_->find(a.npc.archetype) : nullptr) {
         // what its Blueprint says: the aggro radius (the population's own when it gives one) scaled by the creature's level, the senses, how often it looks, where its fights anchor and how far they
         // may go.  A setting no Blueprint on its chain makes stands at the game's default.
@@ -2239,6 +2240,7 @@ void CombatWorld::think(Npc& n, double now) {
         c.radius_cm = f.radius_cm();
         c.alive = f.alive();
         c.hostile = !is_pet(c.id);   // (a creature does not notice a pet by itself: the pet gets on its table by hurting it)
+        c.stealth = p->stealth();
         s.known.push_back(c);
     }
     if (nav_) {

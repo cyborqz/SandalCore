@@ -16,6 +16,7 @@ namespace {
 constexpr int64_t kCamouflageEffect = 6064630841868877827ll;    // EffectRecord Ranger_Camouflage (bAppliesStealth)
 constexpr int64_t kRogueStealthEffect = 6064632711256473912ll;  // EffectRecord Rogue_Stealth (bAppliesStealth)
 constexpr int64_t kPhaseOutEffect = 6064633866989608593ll;      // EffectRecord Summoner_PhaseOut (bAppliesStealth)
+constexpr int64_t kStealthLevel = 6064633186496741774ll;        // StatTypeDef StealthLevel (the character's level, less Camouflage's 5)
 
 bs::EffectItem infinite_effect(int64_t id, int64_t guid, double start) {
     bs::EffectItem e = rest_effect(id, start);
@@ -92,6 +93,47 @@ void test_stealth_flag() {
     c = {};
     c.effects_added.push_back(rest_effect(0, 100.0));
     CHECK(!stealth_in(fresh.update(c)), "a pawn that was never stealthed says nothing of it");
+}
+
+/// The stealth level of the character in the update's EveryoneProxy array (the number every client is sent): the last changed item for the stat, if the
+/// stats component block names it.
+std::optional<float> stealth_level_in(const std::optional<bs::Send>& s, const FIntrepidNetworkGUID& stats_object) {
+    if (!s) return std::nullopt;
+    const auto views = read_content_blocks(s->emission.payload.data(), s->emission.payload.bit_pos(), 0);
+    if (!views) return std::nullopt;
+    for (const BlockView& v : *views) {
+        if (v.header.is_actor || !(v.header.object == stats_object)) continue;
+        size_t p = v.payload_pos;
+        const auto fields = read_fast_array_fields(class_named("UAoCStatsComponent"), s->emission.payload.data(), v.payload_pos + v.payload_bits, p, stat_options());
+        if (!fields) continue;
+        const FastArrayField* arr = field_named(*fields, "UAoCStatsComponent", "StatRepInt32EveryoneProxy");
+        if (!arr) continue;
+        for (const FastArrayDelta::Changed& ch : arr->delta.changed) {
+            const Value* val = item_value(ch.values, 1);
+            const StatInt32Inst* it = val ? val->get_if<StatInt32Inst>() : nullptr;
+            if (it && it->record == kStealthLevel) return std::bit_cast<float>(it->value);
+        }
+    }
+    return std::nullopt;
+}
+
+/// Camouflage's update is retail's: the effect, the pawn's StealthInfo.bInStealth 1 and the StealthLevel item (level - 5) in the EveryoneProxy array, in the
+/// same chain.  The client's own character is drawn from these (its stealth material and the state it computes); the still-or-moving difference is the client's.
+void test_camouflage_stealth_on_the_wire() {
+    std::printf("Camouflage: the effect, the stealth flag and the stealth level in the update the client is sent\n");
+    Pawn p;
+    bs::AbilityChange c;
+    c.effects_added.push_back(infinite_effect(0, kCamouflageEffect, 100.0));
+    c.stats.push_back({kStealthLevel, 20.0f});
+    const auto s = p.update(c);
+    CHECK(s && stealth_in(s) == std::optional<bool>(true), "bInStealth 1 in the packet that adds the effect");
+    CHECK(s && stealth_level_in(s, p.pb.setup().guids.stats) == std::optional<float>(20.0f), "StealthLevel 20 (the character's 25 less the effect's 5) in StatRepInt32EveryoneProxy, in the same chain");
+    c = {};
+    c.effects_removed.push_back(0);
+    c.stats.push_back({kStealthLevel, 25.0f});
+    const auto off = p.update(c);
+    CHECK(off && stealth_in(off) == std::optional<bool>(false), "the effect taken off: bInStealth 0");
+    CHECK(off && stealth_level_in(off, p.pb.setup().guids.stats) == std::optional<float>(25.0f), "and the stealth level back to 25");
 }
 
 }  // namespace
