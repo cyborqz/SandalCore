@@ -28,10 +28,14 @@ const (
 type ChangeCause int32
 
 const (
-	ChangeCause_CHANGE_CAUSE_UNSPECIFIED    ChangeCause = 0
-	ChangeCause_CHANGE_CAUSE_SET_LEVEL      ChangeCause = 1
-	ChangeCause_CHANGE_CAUSE_ADD_EXPERIENCE ChangeCause = 2
-	ChangeCause_CHANGE_CAUSE_SEED           ChangeCause = 3
+	ChangeCause_CHANGE_CAUSE_UNSPECIFIED      ChangeCause = 0
+	ChangeCause_CHANGE_CAUSE_SET_LEVEL        ChangeCause = 1
+	ChangeCause_CHANGE_CAUSE_ADD_EXPERIENCE   ChangeCause = 2
+	ChangeCause_CHANGE_CAUSE_SEED             ChangeCause = 3
+	ChangeCause_CHANGE_CAUSE_LEVEL_UP         ChangeCause = 4 // Nodes 2: the countdown ended, the node is a level up
+	ChangeCause_CHANGE_CAUSE_LEVEL_UP_PENDING ChangeCause = 5 // ... the node reached its next threshold: the countdown runs to Node.level_up_at_ms
+	ChangeCause_CHANGE_CAUSE_ATROPHY          ChangeCause = 6 // ... the node lost XP to the atrophy
+	ChangeCause_CHANGE_CAUSE_LEVEL_DOWN       ChangeCause = 7 // ... and a level with it
 )
 
 // built by Cyb with C-O-A
@@ -43,12 +47,20 @@ var (
 		1: "CHANGE_CAUSE_SET_LEVEL",
 		2: "CHANGE_CAUSE_ADD_EXPERIENCE",
 		3: "CHANGE_CAUSE_SEED",
+		4: "CHANGE_CAUSE_LEVEL_UP",
+		5: "CHANGE_CAUSE_LEVEL_UP_PENDING",
+		6: "CHANGE_CAUSE_ATROPHY",
+		7: "CHANGE_CAUSE_LEVEL_DOWN",
 	}
 	ChangeCause_value = map[string]int32{
-		"CHANGE_CAUSE_UNSPECIFIED":    0,
-		"CHANGE_CAUSE_SET_LEVEL":      1,
-		"CHANGE_CAUSE_ADD_EXPERIENCE": 2,
-		"CHANGE_CAUSE_SEED":           3,
+		"CHANGE_CAUSE_UNSPECIFIED":      0,
+		"CHANGE_CAUSE_SET_LEVEL":        1,
+		"CHANGE_CAUSE_ADD_EXPERIENCE":   2,
+		"CHANGE_CAUSE_SEED":             3,
+		"CHANGE_CAUSE_LEVEL_UP":         4,
+		"CHANGE_CAUSE_LEVEL_UP_PENDING": 5,
+		"CHANGE_CAUSE_ATROPHY":          6,
+		"CHANGE_CAUSE_LEVEL_DOWN":       7,
 	}
 )
 
@@ -145,6 +157,7 @@ type Node struct {
 	ExperienceToNextLevel int64                  `protobuf:"varint,8,opt,name=experience_to_next_level,json=experienceToNextLevel,proto3" json:"experience_to_next_level,omitempty"` // the XP still missing for the next level (0 at the highest level)
 	ParentGuid            int64                  `protobuf:"varint,9,opt,name=parent_guid,json=parentGuid,proto3" json:"parent_guid,omitempty"`                                      // the lord this node is a vassal of; 0 for none
 	UpdatedAtMs           int64                  `protobuf:"varint,10,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`                                // unix milliseconds
+	LevelUpAtMs           int64                  `protobuf:"varint,11,opt,name=level_up_at_ms,json=levelUpAtMs,proto3" json:"level_up_at_ms,omitempty"`                              // Nodes 2: the end of its level-up countdown (unix milliseconds); 0 for none
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -247,6 +260,13 @@ func (x *Node) GetParentGuid() int64 {
 func (x *Node) GetUpdatedAtMs() int64 {
 	if x != nil {
 		return x.UpdatedAtMs
+	}
+	return 0
+}
+
+func (x *Node) GetLevelUpAtMs() int64 {
+	if x != nil {
+		return x.LevelUpAtMs
 	}
 	return 0
 }
@@ -1405,7 +1425,7 @@ const file_aoc_citynode_v1_citynode_proto_rawDesc = "" +
 	"\x1eaoc/citynode/v1/citynode.proto\x12\x0faoc.citynode.v1\"1\n" +
 	"\aNodeRef\x12\x12\n" +
 	"\x04guid\x18\x01 \x01(\x03R\x04guid\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xbe\x02\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xe3\x02\n" +
 	"\x04Node\x12\x12\n" +
 	"\x04guid\x18\x01 \x01(\x03R\x04guid\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
@@ -1421,7 +1441,8 @@ const file_aoc_citynode_v1_citynode_proto_rawDesc = "" +
 	"\vparent_guid\x18\t \x01(\x03R\n" +
 	"parentGuid\x12\"\n" +
 	"\rupdated_at_ms\x18\n" +
-	" \x01(\x03R\vupdatedAtMs\"\x88\x01\n" +
+	" \x01(\x03R\vupdatedAtMs\x12#\n" +
+	"\x0elevel_up_at_ms\x18\v \x01(\x03R\vlevelUpAtMs\"\x88\x01\n" +
 	"\x05Clock\x12\x14\n" +
 	"\x05speed\x18\x01 \x01(\x01R\x05speed\x12%\n" +
 	"\x0eoffset_seconds\x18\x02 \x01(\x03R\roffsetSeconds\x12 \n" +
@@ -1487,12 +1508,16 @@ const file_aoc_citynode_v1_citynode_proto_rawDesc = "" +
 	"\aapplied\x18\x01 \x01(\bR\aapplied\x12\x16\n" +
 	"\x06forced\x18\x02 \x01(\bR\x06forced\x12#\n" +
 	"\rnodes_changed\x18\x03 \x01(\rR\fnodesChanged\x12\"\n" +
-	"\rapplied_at_ms\x18\x04 \x01(\x03R\vappliedAtMs*\x7f\n" +
+	"\rapplied_at_ms\x18\x04 \x01(\x03R\vappliedAtMs*\xf4\x01\n" +
 	"\vChangeCause\x12\x1c\n" +
 	"\x18CHANGE_CAUSE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16CHANGE_CAUSE_SET_LEVEL\x10\x01\x12\x1f\n" +
 	"\x1bCHANGE_CAUSE_ADD_EXPERIENCE\x10\x02\x12\x15\n" +
-	"\x11CHANGE_CAUSE_SEED\x10\x032\xb7\x06\n" +
+	"\x11CHANGE_CAUSE_SEED\x10\x03\x12\x19\n" +
+	"\x15CHANGE_CAUSE_LEVEL_UP\x10\x04\x12!\n" +
+	"\x1dCHANGE_CAUSE_LEVEL_UP_PENDING\x10\x05\x12\x18\n" +
+	"\x14CHANGE_CAUSE_ATROPHY\x10\x06\x12\x1b\n" +
+	"\x17CHANGE_CAUSE_LEVEL_DOWN\x10\a2\xb7\x06\n" +
 	"\x0fCityNodeService\x12R\n" +
 	"\tListNodes\x12!.aoc.citynode.v1.ListNodesRequest\x1a\".aoc.citynode.v1.ListNodesResponse\x12L\n" +
 	"\aGetNode\x12\x1f.aoc.citynode.v1.GetNodeRequest\x1a .aoc.citynode.v1.GetNodeResponse\x12O\n" +

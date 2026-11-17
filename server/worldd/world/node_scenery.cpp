@@ -226,6 +226,7 @@ size_t NodeScenery::start() {
         Entry e;
         e.node = info->guid;
         e.rank = rank;
+        e.plots_revision = nodes_.plots_revision(info->guid);
         Entry& slot = entries_.emplace(info->guid, e).first->second;
         if (refresh(slot, *info, nodes_.level_of_rank(rank)) && slot.actor != 0) ++n;
     }
@@ -246,7 +247,9 @@ size_t NodeScenery::tick() {
     size_t n = 0;
     for (auto& [node, e] : entries_) {
         const int level = nodes_.level_of_rank(e.rank);
-        if (level == e.level) continue;
+        const uint64_t plots = nodes_.plots_revision(node);   // the node's buildings changed a plot (world/node_buildings.h)
+        if (level == e.level && plots == e.plots_revision) continue;
+        e.plots_revision = plots;
         const CityNodeInfo* info = nodes_.by_rank(e.rank);
         if (info && refresh(e, *info, level)) ++n;
     }

@@ -51,6 +51,13 @@ type Progress struct {
 	// Social, step 6: with ReplaceIgnoredNames the players and the guilds the character ignores become exactly IgnoredNames, each list in its order (ignored_names.go); without it they are left alone.
 	ReplaceIgnoredNames bool
 	IgnoredNames        IgnoredNames
+	// Node citizenship: with ReplaceCitizenship the citizenship of the character's account becomes exactly Citizenship (citizenship.go; an empty one removes it); without it it
+	// is left alone.
+	ReplaceCitizenship bool
+	Citizenship        Citizenship
+	// Node reputation: with ReplaceNodeReputation the character's reputations with the nodes become exactly NodeReputation (node_reputation.go); without it they are left alone.
+	ReplaceNodeReputation bool
+	NodeReputation        []NodeReputation
 	// Social, step 7: with ReplaceFriends the character's friends become exactly Friends, in this order, and with ReplaceFriendRequests its pending requests become exactly FriendRequests
 	// (friends.go); without one of them that list is left alone.
 	ReplaceFriends        bool
@@ -118,6 +125,20 @@ func (p Progress) Validate() error {
 		}
 	} else if len(p.CompletedFTUEs) > 0 {
 		return fmt.Errorf("%w: completed tutorials are given without replace_completed_ftues", ErrInvalid)
+	}
+	if p.ReplaceCitizenship {
+		if err := ValidateCitizenship(p.Citizenship); err != nil {
+			return err
+		}
+	} else if p.Citizenship != (Citizenship{}) {
+		return fmt.Errorf("%w: a citizenship is given without replace_citizenship", ErrInvalid)
+	}
+	if p.ReplaceNodeReputation {
+		if err := ValidateNodeReputations(p.NodeReputation); err != nil {
+			return err
+		}
+	} else if len(p.NodeReputation) > 0 {
+		return fmt.Errorf("%w: node reputations are given without replace_node_reputation", ErrInvalid)
 	}
 	if p.ReplaceAttunements {
 		if err := ValidateAttunements(p.Attunements); err != nil {
@@ -269,6 +290,16 @@ func (s *Store) SaveProgress(ctx context.Context, characterID string, p Progress
 	if p.ReplaceIgnoredNames {
 		if err := replaceIgnoredNames(ctx, tx, characterID, p.IgnoredNames); err != nil {
 			return Character{}, itemsError(err)
+		}
+	}
+	if p.ReplaceCitizenship {
+		if err := replaceCitizenship(ctx, tx, characterID, p.Citizenship); err != nil {
+			return Character{}, err
+		}
+	}
+	if p.ReplaceNodeReputation {
+		if err := replaceNodeReputations(ctx, tx, characterID, p.NodeReputation); err != nil {
+			return Character{}, err
 		}
 	}
 	if p.ReplaceFriends {

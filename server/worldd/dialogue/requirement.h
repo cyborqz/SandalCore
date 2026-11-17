@@ -118,6 +118,8 @@ public:
             const auto take = [&](const std::vector<content::DialogueActionRow>& actions) {
                 for (const content::DialogueActionRow& a : actions) {
                     if (a.action == "OpenWindow" && a.window == "Vendor" && a.vendor != 0) shops.insert(a.vendor);
+                    // node citizenship: the join dialog's "purchase tax receipts" button opens the shop the line's action response names
+                    if (a.action == "ActionResponse" && a.response == "AddNodeCitizenship" && a.vendor != 0) shops.insert(a.vendor);
                 }
             };
             take(n->on_enter);

@@ -36,6 +36,7 @@
 #include "svc/world_admin.h"
 #include "svc/world_stream.h"
 #include "svc/city_node_control.h"
+#include "world/citizenship.h"
 #include "world/city_nodes.h"
 #include "world/node_layout_data.h"
 #include "world/node_scenery.h"
@@ -340,6 +341,12 @@ int main(int argc, char** argv) {
     // plan E1, stage 3, part 2: what follows a death (combat/aftermath.h)
     bool no_loot = false, no_respawn = false, no_death_loss = false;
     double corpse_seconds = 15.0, loot_corpse_seconds = 120.0, loot_chance_mult = 1.0, loot_rarity_boost = 1.0;
+    std::string elections_file = "dist/services/elections.json";
+    app.add_option("--elections-file", elections_file,
+                   "where the nodes' mayoral elections are kept between runs (empty: a restart loses them)")
+        ->envname("AOC_ELECTIONS_FILE");
+    double node_exp_rate = 100.0;
+    app.add_option("--node-exp-rate", node_exp_rate, "Nodes 2: a node gets the base XP its players earn in it times this (config/rates.json node_exp_rate)");
     app.add_flag("--no-loot", no_loot, "the kill switch for what follows a death: no experience, no loot, no respawn (the corpse still goes)")->envname("AOC_NO_LOOT");
     app.add_flag("--no-death-loss", no_death_loss, "a player's death takes no materials (retail: about half of each stack, into a pile where it fell)")->envname("AOC_NO_DEATH_LOSS");
     app.add_flag("--no-respawn", no_respawn, "the kill switch for respawns: a dead NPC stays dead")->envname("AOC_NO_RESPAWN");
@@ -424,6 +431,7 @@ int main(int argc, char** argv) {
         ->envname("AOC_LOOP_STATS_SECONDS")
         ->capture_default_str();
     CLI11_PARSE(app, argc, argv);
+    if (!(node_exp_rate >= 0.0 && node_exp_rate <= 1000.0)) { spdlog::error("--node-exp-rate must be finite and between 0 and 1000"); return 1; }
     if (view_threads > 0 && tick_hz == 0) {
         if (view_threads_option->count() > 0) {   // asked for, on the command line or in AOC_VIEW_THREADS: the old loop has no phases to run the passes in
             std::fprintf(stderr, "--view-threads needs the fixed-rate tick (--tick-hz 10 or more): the old loop (--tick-hz 0) has no phases to run the passes in\n");
@@ -541,6 +549,8 @@ int main(int argc, char** argv) {
     quest::GrpcQuestApi quest_api(quests_addr, *token);
     quest::QuestWorker quest_worker(quest_api);
     PlayerWorld players(content ? &*content : nullptr, content_problem, mode, reg.server_id, guids);
+    players.set_node_experience_rate(node_exp_rate);
+    spdlog::info("[nodes] node XP x{}", node_exp_rate);
     if (content && !players.ready()) {
         // content.db opened, but its ability rows are not what this worldd runs (plan A7): the same refusal as a missing file
         spdlog::error("worldd refuses every login: {}", players.content_problem());
@@ -615,6 +625,35 @@ int main(int argc, char** argv) {
                              city_nodes->zones(), seed_error);
             }
             players.set_city_nodes(city_nodes.get());
+            std::string citizenship_error;
+            if (auto rules = world::CitizenshipRules::load(content_db_path, citizenship_error)) {
+                std::string levels;
+                for (const auto& [level, secs] : rules->cooldown_secs) levels += (levels.empty() ? "" : ", ") + std::to_string(level);
+                spdlog::info("[nodes] citizenship: nodes at level {} take citizens; joining costs {} Tax Receipts, dues {} every {} weeks", levels, rules->join_cost, rules->dues_cost,
+                             rules->dues_weeks);
+                players.set_citizenship_rules(std::move(*rules));
+                std::string reputation_error;
+                if (auto reputation = world::ReputationRules::load(content_db_path, reputation_error)) {
+                    spdlog::info("[nodes] node reputation: ranks at {:.0f} / {:.0f} / {:.0f} / {:.0f}, a decay of {} an hour, {} node range(s)", reputation->threshold[1],
+                                 reputation->threshold[2], reputation->threshold[3], reputation->threshold[4], reputation->decay_per_hour, reputation->range.size());
+                    players.set_reputation_rules(std::move(*reputation));
+                } else {
+                    spdlog::warn("[nodes] node reputation keeps the data's numbers: {}", reputation_error);
+                }
+                std::string rewards_error;
+                if (auto rewards = world::NodeRewards::load(content_db_path, rewards_error)) {
+                    spdlog::info("[nodes] node rewards: {} reward(s), {} node modification(s) with boons", rewards->rewards(), rewards->mods());
+                    players.set_node_rewards(std::move(*rewards));
+                } else {
+                    spdlog::warn("[nodes] the mayoral commissions' node rewards put nothing on anyone: {}", rewards_error);
+                }
+                std::string election_error;
+                auto election_rules = world::ElectionRules::load(content_db_path, election_error);
+                if (!election_rules) spdlog::warn("[nodes] the election rules are the defaults ({})", election_error);
+                players.set_elections(election_rules.value_or(world::ElectionRules{}), elections_file);
+            } else {
+                spdlog::warn("[nodes] no citizenship ({}): the Node Administrators' citizenship lines open nothing", citizenship_error);
+            }
             std::string wire_error;
             node_wire = world::NodeWire::load(content_db_path, *city_nodes, wire_error);
             if (!node_wire) {

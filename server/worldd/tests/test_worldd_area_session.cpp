@@ -1369,6 +1369,8 @@ int main() {
     test_crowd();
     test_crowd_moving();
     test_dialogue_book();
+    test_dialogue_citizenship();
+    test_dialogue_buy_orders();
     test_dialogue_town_crier();
     test_dialogue_session();
     test_dialogue_1531();

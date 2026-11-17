@@ -31,6 +31,8 @@ public:
     virtual void node_data(const std::string& node, const std::string& by) = 0;
     virtual void clock(const std::string& by) = 0;
     virtual void advance_clock(int64_t seconds, const std::string& by) = 0;
+    /// Nodes 2: XP the players earned in the node (session/player_node_xp.cpp), sent without a report: a failure is logged, once until one succeeds.
+    virtual void gain_experience(int64_t guid, int64_t amount) { (void)guid, (void)amount; }
 };
 
 }  // namespace aoc::worldd::world

@@ -20,6 +20,7 @@
 #pragma once
 
 #include "protocol/repl/value.h"
+#include "world/elections.h"
 
 #include <cstdint>
 
@@ -31,5 +32,9 @@ protocol::repl::NodeTaxDetails untaxed_table(int64_t node);
 /// The table of a node nobody has changed (the vendors milestone, step 0): the 78 rows with the rates of the default tax details, 50 percent of the price with the owning node
 /// keeping all of it.  A shop that has a tax tag charges the rate of the first row, from its tag up the tag tree, with both flags set (vendor/town_shops.h).
 protocol::repl::NodeTaxDetails default_table(int64_t node);
+
+/// The table of a node whose mayor set rates (`overrides`, by tag; null: none): the default table with each tag the mayor set at the mayor's rate, both flags set
+/// (the flags the client reads as an entry a node's mayor changed).
+protocol::repl::NodeTaxDetails node_table(int64_t node, const std::map<std::string, world::TaxOverride>* overrides);
 
 }  // namespace aoc::worldd::vendor

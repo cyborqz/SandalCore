@@ -69,12 +69,12 @@ func jobSnapshot(t *testing.T, pool *pgxpool.Pool) []string {
 	return out
 }
 
-// schemaWithoutRatings lists every column, constraint and table but the three columns and the three checks 0019 adds and the tables of the later migrations 0021 and 0024: what 0019
-// must not change.
+// schemaWithoutRatings lists every column, constraint and table but the three columns and the three checks 0019 adds and the tables of the later migrations 0020, 0021,
+// 0022 and 0024: what 0019 must not change.
 func schemaWithoutRatings(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
 	var out []string
-	const later = `'character_ignored_names', 'character_friends', 'character_friend_requests'`
+	const later = `'account_citizenship', 'character_ignored_names', 'character_node_reputation', 'character_friends', 'character_friend_requests'`
 	for _, q := range []string{
 		`SELECT table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-') FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name NOT IN (` + later + `) AND NOT (table_name = 'character_processing_jobs' AND column_name IN ('rating_xp', 'rating_quantity', 'rating_rarity')) ORDER BY 1`,

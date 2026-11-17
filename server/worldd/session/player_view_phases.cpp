@@ -40,9 +40,11 @@ PlayerSession::TickPlan PlayerSession::tick_logic(Connection& conn, Clock::time_
     run_quick_make(conn, now);
     run_cargo(conn, now);
     run_chat(conn, now);
+    run_node_boons(conn, now);      // the boons of the nodes' running modifications (contentc version 49)
     run_friends(conn, now);
     run_party(conn, now);
     run_nodes(conn);
+    run_node_levels(conn, now);     // Nodes 2: a level-up's countdown toast, and the node XP gathered goes to citynode
     sync_item_abilities(conn);
     // Players seeing each other (stage A, unspike's #14): this player's pawn in the registry, for the other players' views.  #14 review: once a tick, here and nowhere else.  This is the first part of the
     // server's tick (before every view pass of the tick), after everything that can move the player (the moves, a teleport, a respawn, the floor net), so the registry is never written while the views

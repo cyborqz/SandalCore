@@ -86,12 +86,28 @@ NodeStateMaps node_maps_of_fields(const std::vector<FastArrayField>& fields);
 
 // ---- the PlayerController's RPCs -------------------------------------------------------------------------------------------------------------------
 
+/// An FAoCRecordId: a record's guid and its table's TypeId (its Name is sent as None).
+struct RecordId {
+    int64_t guid = 0;
+    int64_t type_id = 0;
+    bool operator==(const RecordId&) const = default;
+};
+
 /// One plot of the summary (FAoCNodePlotOverview): what stands on a service building plot.  EBuildingState: Empty 0, UnderConstruction 1, Operational 2 ...
+/// The times are unix seconds.
 struct PlotEntry {
     int64_t plot = 0;
     int64_t building = 0;
     uint8_t state = 0;
     int64_t building_time_end = 0;
+    std::vector<std::pair<int64_t, uint32_t>> building_contribution;    // FAoCResourceAmount: Resource (an item record) and Quantity, what players gave the construction
+    std::vector<std::pair<int64_t, uint32_t>> expansion_contribution;   // ... and the expansion project
+    uint8_t  expansion_state = 0;                // EAoCExpansionState
+    int64_t  in_progress_expansion = 0;          // an ExpansionRecordBase (the client looks it up under that type)
+    int64_t  expansion_project_time_end = 0;
+    std::vector<RecordId> purchased_expansions;  // PurchasedExpansions.IDs
+    uint32_t project_yes_votes = 0, project_total_votes = 0;
+    bool     has_requester_voted = false;
     bool operator==(const PlotEntry&) const = default;
 };
 
@@ -108,6 +124,7 @@ struct NodeSummary {
     uint8_t                current_node_essence = 0;
     uint8_t                max_node_essence = 0;
     uint8_t                active_relic_slots = 0;
+    std::vector<std::pair<RecordId, int32_t>> node_skill_points;   // NodeSkillPoints: a SkillPointTypeRecordBase and the points of it the node has left
     bool operator==(const NodeSummary&) const = default;
 };
 

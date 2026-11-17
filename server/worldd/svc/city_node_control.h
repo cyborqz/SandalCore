@@ -47,6 +47,7 @@ public:
 
     void set_level(const std::string& node, int level, bool disable_vassalship, const std::string& by) override;
     void add_experience(const std::string& node, int64_t amount, const std::string& by) override;
+    void gain_experience(int64_t guid, int64_t amount) override;
     void node_data(const std::string& node, const std::string& by) override;
     void clock(const std::string& by) override;
     void advance_clock(int64_t seconds, const std::string& by) override;
@@ -69,6 +70,7 @@ private:
     std::condition_variable  cv_, idle_cv_;
     std::deque<std::function<void()>> queue_;
     bool                     stop_ = false, busy_ = false, overflow_said_ = false;
+    bool                     gain_failed_said_ = false;   // (the worker's: a lost gain_experience is said once until one gets through)
     uint64_t                 calls_ = 0;
 };
 

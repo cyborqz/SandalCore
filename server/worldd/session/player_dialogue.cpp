@@ -69,7 +69,11 @@ public:
     double                          player_x = 0, player_y = 0, npc_x = 0, npc_y = 0;
     bool                            has_npc = false;
     int64_t                         citizen_node = 0;
+    bool                            citizenship_cooldown = false;   // the account renounced lately and may not join yet
+    const world::Elections*         elections = nullptr;            // node citizenship, stage 2 (null: no elections)
+    int64_t                         account = 0;
     const world::CityNodes*         nodes = nullptr;
+    int64_t                         now_ms = 0;         // the wall clock (buy orders run out by it)
     const quest::QuestLog*          quests = nullptr;   // quests: the character's log (null: it has none)
 
     std::optional<int64_t> quest_count(int64_t quest, const std::string& query) const override { return quests ? quests->quest_count(quest, query) : std::nullopt; }
@@ -104,10 +108,42 @@ public:
             if (args.size() != 2) return std::nullopt;
             return ExprValue::of(citizen_node != 0 && citizen_node == args[1].i ? 1 : 0);
         }
-        // the world around: worldd runs no elections, constructions, expansions or buy orders yet, and has no mayors
-        static const char* const kNodeActivity[] = {"Node_NumOfServiceBuildingsInState", "Node_NumOfServiceBuilding", "Node_IsNodeMayorElectionActive", "Node_IsNodeMayorPrevoteActive",
-                                                    "Node_IsExpansionInGivenState", "Node_IsBuyOrderActive", "Node_IsPlayerMayorCandidate", "Node_IsPlayerMayorCurrentNode",
-                                                    "Node_HasPlayerCitizenshipCooldown", "Node_CanPlayerBecomeCitizen"};
+        // the world around: worldd runs no constructions or expansions yet (the elections and the buy orders are below)
+        if (name == "Node_HasPlayerCitizenshipCooldown") return ExprValue::of(citizenship_cooldown ? 1 : 0);
+        // the elections: the registration is the client's "prevote"
+        const auto election_state = [&](int64_t node) -> int {
+            const world::NodeElection* e = elections ? elections->node(node) : nullptr;
+            return e ? static_cast<int>(e->state) : -1;
+        };
+        if (name == "Node_IsNodeMayorPrevoteActive" || name == "Node_IsNodeMayorElectionActive") {
+            if (args.size() != 1) return std::nullopt;
+            const int want = name == "Node_IsNodeMayorPrevoteActive" ? static_cast<int>(world::ElectionState::Registration) : static_cast<int>(world::ElectionState::Active);
+            return ExprValue::of(election_state(args[0].i) == want ? 1 : 0);
+        }
+        if (name == "Node_IsPlayerMayorCandidate") {
+            if (args.size() != 2) return std::nullopt;
+            return ExprValue::of(elections && elections->is_candidate(args[1].i, account) ? 1 : 0);
+        }
+        if (name == "Node_IsPlayerMayorCurrentNode") return ExprValue::of(elections && account != 0 && elections->mayor_node(account) == node_at(player_x, player_y) && node_at(player_x, player_y) != 0 ? 1 : 0);
+        if (name == "Node_CanPlayerBecomeCitizen") return ExprValue::of(citizen_node == 0 && !citizenship_cooldown ? 1 : 0);
+        // buy orders (world/buy_orders.h): the node's orders that still run and still need units
+        const auto live_orders = [&](int64_t node, int64_t commodity) {
+            int64_t n = 0;
+            if (const world::NodeBuyOrders* b = elections ? elections->buy_orders(node) : nullptr) {
+                for (const world::NodeBuyOrder& o : b->active) n += o.expires_ms > now_ms && o.fulfilled < o.requested && (commodity == 0 || o.commodity == commodity) ? 1 : 0;
+            }
+            return n;
+        };
+        if (name == "Node_IsBuyOrderActive" || name == "Node_GetNumBuyOrders") {
+            if (args.size() != 1) return std::nullopt;
+            const int64_t n = live_orders(args[0].i, 0);
+            return ExprValue::of(name == "Node_IsBuyOrderActive" ? (n > 0 ? 1 : 0) : n);
+        }
+        if (name == "Node_IsSpecificBuyOrderActive") {
+            if (args.size() != 2) return std::nullopt;
+            return ExprValue::of(args[1].i != 0 && live_orders(args[0].i, args[1].i) > 0 ? 1 : 0);
+        }
+        static const char* const kNodeActivity[] = {"Node_NumOfServiceBuildingsInState", "Node_NumOfServiceBuilding", "Node_IsExpansionInGivenState"};
         for (const char* f : kNodeActivity) {
             if (name == f) return ExprValue::of(0);
         }
@@ -138,7 +174,11 @@ std::unique_ptr<dialogue::Facts> PlayerSession::dialogue_facts(const world::Worl
         f->npc_y = npc->y;
     }
     f->citizen_node = pb_.setup().citizen_node;
+    f->citizenship_cooldown = citizenship_.node_guid == 0 && citizenship_.renounce_cooldown_until_ms > wall_ms();
+    f->elections = world_ ? world_->elections() : nullptr;
+    f->account = account_id_;
     f->nodes = world_ ? world_->city_nodes() : nullptr;
+    f->now_ms = wall_ms();
     if (quests_on_) f->quests = &quest_log_;
     return f;
 }
@@ -191,6 +231,8 @@ bool PlayerSession::open_dialogue(Connection& conn, const world::WorldActor& npc
     spdlog::log(level_for(dialogue_logged_), "[session] {}: talks to {} (node {}, {} line(s) shown)", name(), npc.npc.name, s.shown_node, s.lines.size());
     run_talk_actions(conn, r, npc, now);   // quests: what entering the greeting's nodes does
     send_dialogue(conn, "greeting");
+    if (r.open_buy_orders) open_buy_order_window(conn, npc, now);   // the Buy Order Manager's greeting is its window (session/player_buy_orders.cpp)
+    if (r.open_contribution) open_contribution_window(conn, npc, now);   // the Construction Foreman's greeting (session/player_node_buildings.cpp)
     return true;
 }
 
@@ -317,6 +359,15 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
     // the artisan certifier: the line certifies the profession (the choice was checked before the line took it) and the XPTracker follows it
     if (r.outcome == dialogue::Outcome::Changed && !r.certifications.empty()) apply_certifications(conn, r.certifications);
     if (r.outcome == dialogue::Outcome::Changed) run_talk_actions(conn, r, *npc, now);   // quests: the line's actions, the node left and the nodes entered
+    // node citizenship: the Node Administrator's lines open the join dialog or the renounce warning (session/player_citizenship.cpp)
+    if (r.citizenship == 3 && r.outcome == dialogue::Outcome::Changed) {
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: the character stands for mayor", name(), response->choice_index, response->node);
+        stand_for_mayor(conn, "the Sheriff's line");
+    } else if (r.citizenship != 0 && r.outcome == dialogue::Outcome::Changed) {
+        spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: it opens the {}", name(), response->choice_index, response->node,
+                    r.citizenship == 1 ? "citizenship dialog" : "renounce warning");
+        open_citizenship_dialog(conn, *npc, r.citizenship == 1, r.citizenship_vendor, now);
+    }
     switch (r.outcome) {
         case dialogue::Outcome::Changed:
             ++dialogue_steps_;
@@ -324,6 +375,8 @@ void PlayerSession::on_dialogue_choice(Connection& conn, const repl::ClientRpc& 
             spdlog::log(level_for(dialogue_logged_), "[session] {}: chose line {} of node {}: {}", name(), response->choice_index, response->node,
                         talk_.open() ? "on to node " + std::to_string(talk_.state().shown_node) : std::string("the conversation ends"));
             if (!warehouse_opened) send_dialogue(conn, "a line was chosen");   // (the warehouse's second half sends the clear after its window call)
+            if (r.open_buy_orders && talk_.open()) open_buy_order_window(conn, *npc, now);   // a line that leads to the buy order panel (session/player_buy_orders.cpp)
+            if (r.open_contribution) open_contribution_window(conn, *npc, now);   // the Construction Foreman's lines (session/player_node_buildings.cpp)
             break;
         case dialogue::Outcome::Nothing:
             if (r.open_vendor == 0) spdlog::log(level_for(dialogue_logged_), "[session] {}: line {} of node {} changes nothing: {}", name(), response->choice_index, response->node, r.why);

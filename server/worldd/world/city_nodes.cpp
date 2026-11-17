@@ -317,6 +317,31 @@ const std::vector<CityNodes::PlotChoice>& CityNodes::plot_choices(int64_t guid) 
 }
 // CoA + C.Y.B
 
+bool CityNodes::set_live_plots(int64_t guid, std::vector<PlotLive> plots) {
+    std::sort(plots.begin(), plots.end(), [](const PlotLive& a, const PlotLive& b) { return a.plot < b.plot; });
+    {
+        std::lock_guard<std::mutex> lock(live_mu_);
+        auto& cur = live_plots_[guid];
+        if (cur.plots == plots) return false;
+        cur.plots = std::move(plots);
+        ++cur.revision;
+    }
+    version_.fetch_add(1);
+    return true;
+}
+
+std::vector<CityNodes::PlotLive> CityNodes::live_plots(int64_t guid) const {
+    std::lock_guard<std::mutex> lock(live_mu_);
+    const auto it = live_plots_.find(guid);
+    return it == live_plots_.end() ? std::vector<PlotLive>{} : it->second.plots;
+}
+
+uint64_t CityNodes::plots_revision(int64_t guid) const {
+    std::lock_guard<std::mutex> lock(live_mu_);
+    const auto it = live_plots_.find(guid);
+    return it == live_plots_.end() ? 0 : it->second.revision;
+}
+
 std::string CityNodes::describe_levels() const {
     std::ostringstream out;
     bool first = true;

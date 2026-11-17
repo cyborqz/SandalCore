@@ -116,6 +116,16 @@ void write_bits_of(BunchWriter& out, const captured::CapturedBits& b) {
     out.write_bit_range(bytes.data(), 0, b.bits);
 }
 
+/// One element of OwnerInfo.NodeToPlayerReputation (Items.Value.NodeGuid 1, .Reputation 2, .LastDecayTime 3, Items.Key 4: the node again).
+repl::ElementState node_reputation_element(const NodeReputationEntry& r) {
+    repl::ElementState e;
+    e.values[1] = Value::i64(r.node);
+    e.values[2] = Value::f32(r.reputation);
+    e.values[3] = Value::i64(r.last_decay);
+    e.values[4] = Value::i64(r.node);
+    return e;
+}
+
 repl::Subobject make_component(const FIntrepidNetworkGUID& guid, const char* name, uint32_t checksum) {
     repl::Subobject s;
     s.guid = guid;
@@ -292,6 +302,16 @@ bool PlayerBootstrap::build_actors() {
                         e.values[1] = Value::u64(static_cast<uint64_t>(c.amount));
                         e.values[2] = Value::i64(c.currency);
                         if (!wallet->add(std::move(e))) all(fail("OwnerInfo.Currencies: an entry does not fit"));
+                    }
+                }
+            }
+            if (!s.node_reputation.empty()) {   // node reputation: a fast map of node -> {NodeGuid, Reputation, LastDecayTime}
+                repl::FastArrayState* reps = owner.obj.arrays.get(*owner.obj.schema, "NodeToPlayerReputation");
+                if (!reps) {
+                    all(fail("OwnerInfo has no NodeToPlayerReputation"));
+                } else {
+                    for (const NodeReputationEntry& r : s.node_reputation) {
+                        if (!reps->add(node_reputation_element(r))) all(fail("OwnerInfo.NodeToPlayerReputation: an entry does not fit"));
                     }
                 }
             }
@@ -1498,6 +1518,45 @@ bool PlayerBootstrap::set_ignored_names(const std::vector<std::string>& characte
     return put("IgnoredCharacterNames", characters) && put("IgnoredGuildNames", guilds);
 }
 
+std::optional<Send> PlayerBootstrap::citizenship_call(const char* rpc_name, const std::function<std::optional<repl::RpcParams>(const schema::RpcSchema&)>& build) {
+    if (!ok_ || !second_state_added_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc(rpc_name);
+    if (!rpc) return std::nullopt;
+    auto params = build(*rpc);
+    if (!params) return std::nullopt;
+    repl::RpcRequest call;
+    call.rpc = rpc_name;
+    call.params = std::move(*params);
+    return rpcs(Role::PlayerController, rpc_name, std::span<const repl::RpcRequest>(&call, 1));
+}
+
+bool PlayerBootstrap::set_citizen_node(int64_t node) {
+    setup_.citizen_node = node;
+    for (AccountCharacterNode& c : setup_.account_characters) c.citizen_node = node;
+    if (!ok_ || mode_ != GameStateMode::Tier3) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    if (!owner->obj.state.set(*owner->obj.schema, "CitizenNodeGuid", Value::i64(node))) return false;
+    if (setup_.account_characters.empty()) return true;
+    repl::ArrayValue list;
+    for (const AccountCharacterNode& c : setup_.account_characters) {
+        repl::ElementState e;
+        e.values[1] = Value::str("");   // CharacterId: retail leaves it empty
+        e.values[2] = Value::str(c.guid_hex);
+        e.values[3] = Value::str(c.name);
+        e.values[4] = Value::i64(c.citizen_node);
+        list.elements.push_back(std::move(e));
+    }
+    return owner->obj.state.set(*owner->obj.schema, "CharactersNodeData", Value(std::move(list)));
+}
+
+bool PlayerBootstrap::set_mayor_node(int64_t node) {
+    if (!ok_ || mode_ != GameStateMode::Tier3) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    return owner->obj.state.set(*owner->obj.schema, "MayorNode", Value::i64(node));
+}
+
 bool PlayerBootstrap::set_active_stations(const std::vector<std::array<int32_t, 4>>& stations) {
     if (!ok_) return false;
     repl::Subobject* owner = component(setup_.guids.owner_info);
@@ -1885,7 +1944,11 @@ std::optional<Send> PlayerBootstrap::craft_batched_events(std::span<const ItemEv
 }
 
 bool PlayerBootstrap::set_currency(int64_t currency, int64_t amount) {
-    if (!ok_ || amount < 0) return false;
+    if (amount < 0) return false;
+    for (CurrencyBalance& c : setup_.currencies) {   // (before the join is built: the join carries it)
+        if (c.currency == currency) c.amount = amount;
+    }
+    if (!ok_) return false;
     repl::Subobject* owner = component(setup_.guids.owner_info);
     if (!owner) return false;
     repl::FastArrayState* wallet = owner->obj.arrays.get(*owner->obj.schema, "Currencies");
@@ -1901,6 +1964,41 @@ bool PlayerBootstrap::set_currency(int64_t currency, int64_t amount) {
         return wallet->change(it.id, std::move(values));
     }
     return wallet->add(std::move(values)).has_value();
+}
+
+bool PlayerBootstrap::set_node_reputation(const std::vector<NodeReputationEntry>& entries) {
+    setup_.node_reputation = entries;   // (before the join is built: the join carries it)
+    if (!ok_) return false;
+    repl::Subobject* owner = component(setup_.guids.owner_info);
+    if (!owner) return false;
+    repl::FastArrayState* reps = owner->obj.arrays.get(*owner->obj.schema, "NodeToPlayerReputation");
+    if (!reps) return false;
+    std::map<int64_t, const NodeReputationEntry*> wanted;
+    for (const NodeReputationEntry& r : entries) wanted[r.node] = &r;
+    std::vector<int32_t> gone;
+    std::map<int64_t, int32_t> held;   // node -> the item's id
+    for (const repl::FastArrayItem& it : reps->items()) {
+        const auto key = it.values.values.find(4);
+        const int64_t* node = key == it.values.values.end() ? nullptr : key->second.get_if<int64_t>();
+        if (!node || !wanted.count(*node)) gone.push_back(it.id);
+        else held[*node] = it.id;
+    }
+    bool ok = true;
+    for (const int32_t id : gone) ok = reps->remove(id) && ok;
+    for (const auto& [node, r] : wanted) {
+        repl::ElementState e = node_reputation_element(*r);
+        if (const auto at = held.find(node); at != held.end()) {
+            const repl::FastArrayItem* now = nullptr;
+            for (const repl::FastArrayItem& it : reps->items()) {
+                if (it.id == at->second) now = &it;
+            }
+            if (now && now->values.values == e.values) continue;   // already so
+            ok = reps->change(at->second, std::move(e)) && ok;
+        } else {
+            ok = reps->add(std::move(e)).has_value() && ok;
+        }
+    }
+    return ok;
 }
 
 std::optional<Send> PlayerBootstrap::currencies_update() {

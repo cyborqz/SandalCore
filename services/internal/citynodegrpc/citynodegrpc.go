@@ -162,7 +162,7 @@ func toProtoNode(n citynode.Node) *citynodev1.Node {
 		Guid: n.Guid, Name: n.Name, DisplayName: n.DisplayName,
 		Level: uint32(n.Level), LevelName: citynode.LevelName(n.Level),
 		Experience: n.Experience, Percent: uint32(n.Percent), ExperienceToNextLevel: n.ToNext,
-		ParentGuid: n.ParentGuid, UpdatedAtMs: n.UpdatedAt.UnixMilli(),
+		ParentGuid: n.ParentGuid, UpdatedAtMs: n.UpdatedAt.UnixMilli(), LevelUpAtMs: levelUpAt(n),
 	}
 }
 
@@ -179,9 +179,13 @@ func toProtoClock(c citynode.Clock) *citynodev1.Clock {
 }
 
 var causes = map[citynode.Cause]citynodev1.ChangeCause{
-	citynode.CauseSetLevel:      citynodev1.ChangeCause_CHANGE_CAUSE_SET_LEVEL,
-	citynode.CauseAddExperience: citynodev1.ChangeCause_CHANGE_CAUSE_ADD_EXPERIENCE,
-	citynode.CauseSeed:          citynodev1.ChangeCause_CHANGE_CAUSE_SEED,
+	citynode.CauseSetLevel:       citynodev1.ChangeCause_CHANGE_CAUSE_SET_LEVEL,
+	citynode.CauseAddExperience:  citynodev1.ChangeCause_CHANGE_CAUSE_ADD_EXPERIENCE,
+	citynode.CauseSeed:           citynodev1.ChangeCause_CHANGE_CAUSE_SEED,
+	citynode.CauseLevelUp:        citynodev1.ChangeCause_CHANGE_CAUSE_LEVEL_UP,
+	citynode.CauseLevelUpPending: citynodev1.ChangeCause_CHANGE_CAUSE_LEVEL_UP_PENDING,
+	citynode.CauseAtrophy:        citynodev1.ChangeCause_CHANGE_CAUSE_ATROPHY,
+	citynode.CauseLevelDown:      citynodev1.ChangeCause_CHANGE_CAUSE_LEVEL_DOWN,
 }
 
 func toProtoChange(c citynode.NodeChange) *citynodev1.NodeChange {
@@ -189,4 +193,12 @@ func toProtoChange(c citynode.NodeChange) *citynodev1.NodeChange {
 		Node: toProtoNode(c.Node), PreviousLevel: uint32(c.PreviousLevel), PreviousExperience: c.PreviousExperience,
 		PreviousParentGuid: c.PreviousParentGuid, Cause: causes[c.Cause], VassalshipDisabled: c.VassalshipDisabled,
 	}
+}
+
+// levelUpAt is the end of a node's level-up countdown in unix milliseconds, 0 for none.
+func levelUpAt(n citynode.Node) int64 {
+	if n.LevelUpAt.IsZero() {
+		return 0
+	}
+	return n.LevelUpAt.UnixMilli()
 }

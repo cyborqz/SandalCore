@@ -286,6 +286,7 @@ void PlayerSession::on_processing_request(Connection& conn, const repl::ClientRp
     ++crafts_claimed_;
 
     // the experience: the profession's, then Adventuring's (the debt first), as a harvest pays it
+    earn_node_experience(rewards.adventuring_xp + rewards.profession_xp, "a processing job");   // Nodes 2
     professions::Professions after = professions_;
     if (professions_.valid() && rewards.profession_xp > 0 && rewards.profession != 0) after.add_xp(rewards.profession, rewards.profession_xp);
     const std::vector<professions::Change> changes = professions_.valid() ? set_professions(after) : std::vector<professions::Change>();

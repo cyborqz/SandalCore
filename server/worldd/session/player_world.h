@@ -74,6 +74,10 @@
 #include "vendor/town_shops.h"
 #include "warehouse/warehouse.h"
 #include "world/actor_registry.h"
+#include "world/citizenship.h"
+#include "world/elections.h"
+#include "world/node_reputation.h"
+#include "world/node_rewards.h"
 #include "world/city_nodes.h"
 #include "world/node_control.h"
 #include "dialogue/requirement.h"
@@ -149,6 +153,8 @@ public:
     /// certificate, and how a reward of Glint is split into kinds.  Null when the file has none of those tables (an older file or fixture): no stack of Glint changes kind and a reward
     /// is paid as it is rolled.
     const items::CurrencyTable* currencies() const { return currencies_ ? &*currencies_ : nullptr; }
+    /// A test's currency tiers (the area's content.db may have none).
+    void set_currencies_for_test(items::CurrencyTable table) { currencies_ = std::move(table); }
     /// Plan D2: every ability, hit, effect and expression of content.db's ab_* tables, read once at startup: what the generic ability runtime
     /// runs. Null when the file has none (an older fixture) or they did not read: then only Sprint, Dodge and Rest run, and the log says why.
     const abilities::Catalog* ability_catalog() const { return catalog_override_set_ ? ability_catalog_override_ : ability_catalog_ ? &*ability_catalog_ : nullptr; }
@@ -180,6 +186,15 @@ public:
     /// Plan A6: the movement limits and the save interval of every session started from now on.
     void                  set_movement(const MovementConfig& config) { movement_ = config; }
     const MovementConfig& movement() const { return movement_; }
+    /// Nodes 2 (session/player_node_xp.cpp): the node XP rate (--node-exp-rate: a node gets the players' base XP times it), the XP gathered for citynode.
+    void set_node_experience_rate(double multiplier) { node_experience_rate_ = multiplier >= 0.0 && multiplier <= 1000.0 ? multiplier : 100.0; }
+    double node_experience_rate() const { return node_experience_rate_; }
+    /// `base` XP a player earned in node `guid` (before any rate): true when it is a node that grows and the XP is kept for it.  `rated` false: the amount is the node's
+    /// XP itself (a construction project's CompletionNodeExperience), not scaled.
+    bool add_node_experience(int64_t guid, int64_t base, const char* why, bool rated = true) const;
+    /// Sends what was gathered to citynode, every 10 s (or now with `force`).
+    void flush_node_experience(int64_t now_ms, bool force = false) const;
+    int64_t node_experience_total() const { return node_xp_total_; }
     /// Where the sessions hand positions to be saved; null (the default) saves nothing. Must outlive the sessions.
     void          set_position_sink(PositionSink* sink) { sink_ = sink; }
     PositionSink* position_sink() const { return sink_; }
@@ -335,6 +350,48 @@ public:
     /// influence where the creature died.  The pointer must outlive this object.
     void set_city_nodes(world::CityNodes* nodes) { city_nodes_ = nodes; }
     world::CityNodes* city_nodes() const { return city_nodes_; }
+    /// Node citizenship (world/citizenship.h): its rules from content.db, set by main with the registry; null in a world with no citizenship (the Node Administrator's lines then
+    /// open nothing).
+    void set_citizenship_rules(std::optional<world::CitizenshipRules> rules) { citizenship_rules_ = std::move(rules); }
+    const world::CitizenshipRules* citizenship_rules() const { return citizenship_rules_ ? &*citizenship_rules_ : nullptr; }
+    /// Node reputation (world/node_reputation.h): its rules from content.db, set by main; a world without them uses the data's numbers (ReputationRules{}).
+    void set_reputation_rules(world::ReputationRules rules) { reputation_rules_ = std::move(rules); }
+    const world::ReputationRules& reputation_rules() const { return reputation_rules_; }
+    /// The mayoral commissions' node rewards (world/node_rewards.h): set by main from content.db; null for a file older than contentc version 49 (a done commission
+    /// then gives its first NodeModification, which puts nothing on anyone).
+    void set_node_rewards(std::optional<world::NodeRewards> rewards) { node_rewards_ = std::move(rewards); }
+    const world::NodeRewards* node_rewards() const { return node_rewards_ ? &*node_rewards_ : nullptr; }
+    /// The accounts' citizenship as the sessions changed it since worldd started (account id -> its citizenship): what a later login of the account reads is older than this.
+    const svc::Citizenship* account_citizenship(int64_t account) const {
+        const auto it = account_citizenship_.find(account);
+        return it == account_citizenship_.end() ? nullptr : &it->second;
+    }
+    void set_account_citizenship(int64_t account, const svc::Citizenship& c) const { if (account != 0) account_citizenship_[account] = c; }
+    /// Node citizenship, stage 2: the mayoral elections (world/elections.h), kept in `file` ("" : not kept, a restart loses them), read from it now.  Null in a world without them.
+    void set_elections(world::ElectionRules rules, std::string file);
+    /// Each node has what its record starts it with, once (session/player_node_inventory.cpp): set_elections calls it whatever the file held.
+    void stock_node_stores();
+    world::Elections* elections() const { return elections_ ? &*elections_ : nullptr; }   // (the sessions change it through a const world, as the banks)
+    /// Brings the elections to `now_ms` (at most every 5 s; `force`: now) and writes the file when they changed.  The phase changes.
+    std::vector<world::Elections::Change> tick_elections(int64_t now_ms, bool force = false) const;
+    /// Writes the elections' file if they changed since it was last written.
+    void save_elections() const;
+    /// Nodes 3 (session/player_node_buildings.cpp): brings every node's service buildings to `now_ms` (from tick_elections): constructions done or run out, expansions,
+    /// demolitions, repairs, the hourly income of the buildings' node effects and the weekly upkeep; a project built gives the node its XP; the news; then the plots shown.
+    void tick_buildings(int64_t now_ms) const;
+    /// The node's plots at its level now as the buildings' rules take them (NodeWire::plot_infos); empty without the node data.
+    std::vector<world::PlotInfo> node_plots(int64_t node) const;
+    /// Shows the node's buildings: its live plots to the registry (CityNodes::set_live_plots: the summary, the scenery and the people follow) and its running
+    /// modifications to the boons (building_mods).
+    void show_node_plots(int64_t node) const;
+    /// The modifications the node's Operational buildings and their expansions run now (their effects are boons, session/player_node_boons.cpp).
+    const std::vector<int64_t>& building_mods(int64_t node) const;
+    /// What the buildings' ticks did so far (the tests and the log).
+    size_t building_events() const { return building_events_; }
+    /// A test: the node's plots, with no node data (node_plots and tick_buildings use them).
+    void set_node_plots_for_test(int64_t node, std::vector<world::PlotInfo> plots) { plots_for_test_[node] = std::move(plots); }
+    /// A test: the modifications the node runs, in place of its buildings' (building_mods); an empty list runs none.
+    void set_building_mods_for_test(int64_t node, std::vector<int64_t> mods) { mods_for_test_[node] = std::move(mods); }
     /// Nodes 1, stage 2: what the client is told about the nodes (world/node_wire.h; built from content.db and the registry), set by main with the registry; null in a world
     /// with no nodes (a GameStateMode::Tier3 join then lists none).  The pointer must outlive this object.
     void set_node_wire(const world::NodeWire* wire) { node_wire_ = wire; }
@@ -617,6 +674,14 @@ private:
     protocol::emit::FIntrepidNetworkGUID game_state_;
     int32_t                              next_player_id_ = 1;
     MovementConfig                       movement_;
+    double                               node_experience_rate_ = 100.0;
+    mutable std::map<int64_t, std::vector<int64_t>> building_mods_;   // node -> the modifications its buildings run (show_node_plots)
+    std::map<int64_t, std::vector<world::PlotInfo>> plots_for_test_;
+    std::map<int64_t, std::vector<int64_t>>         mods_for_test_;
+    mutable size_t                       building_events_ = 0;
+    mutable std::map<int64_t, int64_t>   node_xp_pending_;      // node -> the XP gathered since the last flush
+    mutable int64_t                      node_xp_flushed_ms_ = 0;
+    mutable int64_t                      node_xp_total_ = 0;
     PositionSink*                        sink_ = nullptr;
     mutable std::unique_ptr<FriendLookups> friend_lookups_;   // created at the first friend lookup; destroyed with the world (before the sink it holds)
     world::ActorRegistry                 registry_;
@@ -652,6 +717,14 @@ private:
     std::optional<combat::RewardBook>    rewards_;
     std::unique_ptr<combat::Aftermath>   aftermath_;   // after combat_: it is destroyed first (it holds the death hook's `this`)
     world::CityNodes*                    city_nodes_ = nullptr;
+    std::optional<world::CitizenshipRules> citizenship_rules_;
+    world::ReputationRules                 reputation_rules_;
+    std::optional<world::NodeRewards>      node_rewards_;
+    mutable std::map<int64_t, svc::Citizenship> account_citizenship_;
+    mutable std::optional<world::Elections> elections_;
+    std::string                          elections_file_;
+    mutable uint64_t                     elections_saved_ = 0;
+    mutable int64_t                      elections_ticked_ms_ = 0;   // (as banks_: the sessions hold a const world)
     const world::NodeWire*               node_wire_ = nullptr;
     world::NodeControl*                  node_control_ = nullptr;
     std::optional<dialogue::Book>        dialogue_;

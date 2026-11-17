@@ -7,7 +7,7 @@ package db
 // Migration 0024 (social, step 7: the friends list). It ADDS TWO TABLES, character_friends and character_friend_requests, and touches nothing else (every migration is add-only). It is
 // tested for what it must not do first (every character reads back as it was, no other table, column, constraint or index changes), then for what it makes (the keys, the places, the
 // cascade that removes a deleted character's lists), a second run changes nothing, the rollback is the README's block, run as written, and a fresh database and one at the migration before
-// it both end with the two tables. The last two tests are about the number: 0020 stays free for the change that owns it, 0024 is recorded once, and a database that records 22 and 23 (another branch's) still gets the tables.
+// it both end with the two tables. The last two tests are about the number: 0020 is the node citizenship's (the change it was kept free for), 0024 is recorded once, and a database that records 22 and 23 (another branch's) still gets the tables.
 
 import (
 	"context"
@@ -24,13 +24,13 @@ import (
 
 var friendTables = []string{"character_friends", "character_friend_requests"}
 
-// before24 is the schema as it is at the migration before this one (0021, the ignore list), with the real-shaped characters.  upTo takes the versions below its limit, so 24 stops below
-// this migration, at 0021 in this tree.
+// before24 is the schema as it is at the migration before this one (0022, node reputation), with the real-shaped characters.  upTo takes the versions below its limit, so 24 stops below
+// this migration, at 0022 in this tree.
 func before24(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool, _, _ := legacySetup(t)
 	if err := migrate(context.Background(), pool, upTo(t, 24)); err != nil {
-		t.Fatalf("migrate to 0021: %v", err)
+		t.Fatalf("migrate to 0022: %v", err)
 	}
 	return pool
 }
@@ -103,10 +103,10 @@ func TestMigration0024AddsTheFriendTablesAndTouchesNothingElse(t *testing.T) {
 			t.Errorf("%s changed by 0024", b.name)
 		}
 	}
-	// the version is recorded once, and nothing is recorded at 20: that number stays free for the change that owns it
+	// the version is recorded once, and 20 is recorded for the change that owns that number (0020, node citizenship)
 	versions := appliedVersions(t, pool)
-	if !slices.Contains(versions, 24) || slices.Contains(versions, 20) {
-		t.Errorf("applied versions = %v, want 24 in it and 20 not", versions)
+	if !slices.Contains(versions, 24) || !slices.Contains(versions, 20) {
+		t.Errorf("applied versions = %v, want 24 and 20 (node citizenship) in it", versions)
 	}
 	if err := Migrate(ctx, pool); err != nil {
 		t.Errorf("second migrate: %v", err)
@@ -306,7 +306,7 @@ func TestMigration0024RollbackFromTheREADME(t *testing.T) {
 func TestFriendTablesAreMadeOnADatabaseThatAlreadyRecordsVersions22And23(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.Pool(t)
-	if err := migrate(ctx, pool, upTo(t, 22)); err != nil { // 1 to 19 and 21: what a database holds before that branch's two
+	if err := migrate(ctx, pool, upTo(t, 22)); err != nil { // 1 to 21: what a database holds before that branch's two
 		t.Fatalf("migrate to 0021: %v", err)
 	}
 	for _, version := range []int{22, 23} {

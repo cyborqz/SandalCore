@@ -8,6 +8,8 @@
 // ============================================================================
 #include "area_session_gm_vendor_tests.inc"
 #include "area_session_craft_tests.inc"
+#include "area_session_citizenship_tests.inc"
+#include "area_session_buildings_tests.inc"
 #include "friend_calls_tests.inc"
 #include "friend_store_race_tests.inc"
 #include "friend_login_window_tests.inc"

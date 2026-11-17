@@ -36,12 +36,25 @@ import (
 func main() {
 	seed := flag.String("seed", config.Load().CityNodeSeed,
 		"the node seed file, applied once at the first start; default $AOC_CITYNODE_SEED or deploy/citynode_seed.json")
+	lev := citynode.DefaultLeveling
+	flag.BoolVar(&lev.Enabled, "level-up", lev.Enabled, "Nodes 2: a node levels up from its XP, after the countdown")
+	flag.DurationVar(&lev.Countdown, "level-up-countdown", lev.Countdown, "between a node reaching its next threshold and the new level (the client's toast counts 5 s)")
+	flag.Float64Var(&lev.AtrophyPerHour, "atrophy-per-hour", lev.AtrophyPerHour, "the part of its level's XP span a node loses each hour (0: no atrophy)")
+	flag.Float64Var(&lev.DelevelGrace, "delevel-grace", lev.DelevelGrace, "how far below its threshold (a part of the span below) a node may fall before it loses the level")
 	flag.Parse()
+	if lev.AtrophyPerHour < 0 || lev.AtrophyPerHour > 1 || lev.DelevelGrace < 0 || lev.DelevelGrace > 1 || lev.Countdown < 0 || lev.Countdown > time.Hour {
+		slog.Error("citynode: --atrophy-per-hour and --delevel-grace take 0 to 1, --level-up-countdown 0 to 1h")
+		os.Exit(2)
+	}
+	leveling = lev
 	if err := run(*seed); err != nil {
 		slog.Error("citynode stopped", "err", err)
 		os.Exit(1)
 	}
 }
+
+// leveling is the flags' Nodes 2 leveling.
+var leveling citynode.Leveling
 
 // == C O A | C Y B ==
 
@@ -64,10 +77,11 @@ func run(seedPath string) error {
 		return startupErr(ctx, err)
 	}
 
-	svc := citynode.New(pool, citynode.DefaultRoster(), seedPath)
+	svc := citynode.New(pool, citynode.DefaultRoster(), seedPath, citynode.WithLeveling(leveling))
 	if err := svc.Start(ctx); err != nil {
 		return startupErr(ctx, err)
 	}
+	go svc.RunLeveling(ctx) // the level-up countdowns and the atrophy (Nodes 2)
 	lis, err := net.Listen("tcp", cfg.CityNodeGRPCAddr)
 	if err != nil {
 		return err

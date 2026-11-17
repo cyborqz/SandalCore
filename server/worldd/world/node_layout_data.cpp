@@ -157,17 +157,26 @@ std::vector<repl::NodeLayoutItem> NodeLayoutData::items(const NodeWire& wire, co
             state = req.plots == PlotPolicy::DataStartingState ? row.starting_state : row.state;
         }
         if (state == 0 || row.building == 0) continue;
-        const auto b = building_sets_.find(row.building);
-        if (b == building_sets_.end()) continue;
-        const auto sets = state_sets_.find({b->second, state});
-        if (sets == state_sets_.end()) continue;
-        for (size_t k = 0; k < sets->second.size(); ++k) {
-            if (!set_valid(sets->second[k], req.context)) continue;
+        // the building's asset sets for the state, and an expansion's (world/node_buildings.h: it replaces them or is added)
+        std::vector<int64_t> state_list;
+        if (row.asset_sets == 0 || !row.replace_assets) {
+            const auto b = building_sets_.find(row.building);
+            if (b != building_sets_.end()) {
+                const auto sets = state_sets_.find({b->second, state});
+                if (sets != state_sets_.end()) state_list = sets->second;
+            }
+        }
+        if (row.asset_sets != 0) {
+            const auto sets = state_sets_.find({row.asset_sets, state});
+            if (sets != state_sets_.end()) state_list.insert(state_list.end(), sets->second.begin(), sets->second.end());
+        }
+        for (size_t k = 0; k < state_list.size(); ++k) {
+            if (!set_valid(state_list[k], req.context)) continue;
             repl::NodeLayoutItem it;
             it.owner_guid = row.plot;
             it.owner_secondary = state;
             it.owner_index = static_cast<int32_t>(k);
-            it.asset_set = sets->second[k];
+            it.asset_set = state_list[k];
             double qx = row.qx, qy = row.qy, qz = row.qz;
             if (row.qw < 0) {
                 qx = -qx;

@@ -312,6 +312,16 @@ add_library(worldd_core STATIC
     vendor/node_tax.cpp
     vendor/node_tax.h
     vendor/node_tax_table.h
+    world/buy_orders.cpp
+    world/buy_orders.h
+    world/mayor_guid.h
+    world/node_reputation.cpp
+    world/node_reputation.h
+    world/node_rewards.cpp
+    world/node_rewards.h
+    world/node_buildings.cpp
+    world/node_buildings.h
+    world/node_buildings_table.h
     world/city_nodes.cpp
     world/city_nodes.h
     world/node_control.h
@@ -561,6 +571,10 @@ target_compile_definitions(test_worldd_node_state PRIVATE
     NODES_SEED_PATH="${PROJECT_SOURCE_DIR}/deploy/citynode_seed.json"
     MOUNT_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
     MOUNT_SPEEDS_PATH="${PROJECT_SOURCE_DIR}/dist/content/mount_speeds.tsv")
+
+# node citizenship's rules with no session and no game data (the mayoral elections, the runoff, the dues, the mayor's taxes): CI runs it; its checks of the real
+# content.db skip themselves without one
+worldd_add_test(test_worldd_elections)
 
 # the towns' scenery (Nodes 1, stage 3a): the items of each town's replicator built from the real content.db against the 18 retail payloads of the captures, the replicator actors
 # (their place, a level change as a new full payload), the actor view opening and closing them by range, and the world following the node levels

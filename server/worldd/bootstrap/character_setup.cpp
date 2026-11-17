@@ -933,6 +933,10 @@ CharacterSetupResult build_player_setup(const svc::Character& ch, const content:
     s.appearance_ids = items::appearance_ids(*inventory);
     // the vendors milestone, step 0: the purse is part of the first OwnerInfo (Copper, then Node currency, then any other the character holds)
     for (const svc::WalletEntry& e : items::Wallet(ch.wallet).entries()) s.currencies.push_back({e.currency_guid, e.amount});
+    // node reputation (migration 0022): the first OwnerInfo carries the character's reputation with each node, as saved (the session decays it to now and sends the change)
+    for (const svc::NodeReputation& r : ch.node_reputation) {
+        if (r.node_guid != 0 && r.reputation != 0) s.node_reputation.push_back({r.node_guid, static_cast<float>(r.reputation), r.last_decay_ms / 1000});
+    }
     // a note says what the character plays with (a character with no items has nothing to say: the session warns about it)
     if (inventory->size() > 0) {
         out.notes.push_back("items: " + std::to_string(inventory->count(svc::ItemContainer::Backpack)) + " in the bag, " +

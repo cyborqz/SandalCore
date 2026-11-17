@@ -120,6 +120,10 @@ message Character {
   // A character with none has none; a request at or past its expiry is not sent.
   repeated Friend friends = 33;
   repeated FriendRequest friend_requests = 34;
+  // Node citizenship (migration 0020): the citizenship of the character's account, with the items (include_items). Unset when the account never joined a node.
+  Citizenship citizenship = 36;
+  // Node reputation (migration 0022): the character's reputation with each node it has any with, by node, with the items (include_items).
+  repeated NodeReputation node_reputation = 37;
 }
 
 // One friend of a character (social, step 7, migration 0024): the friend's character GUID, its name, level, class and subclass, its guild's name and whether it still counts this character
@@ -142,6 +146,24 @@ message FriendRequest {
   string sender_name = 2;
   string recipient_guid = 3; // 32 lowercase hex digits, the character the request is for
   int64 expires_at_ms = 4; // Unix milliseconds; a request at or past this time is not sent
+}
+
+// A character's reputation with one city node (migration 0022; UOwnerInfoComponent.NodeToPlayerReputation). last_decay_ms is when it last decayed (Unix milliseconds on the server's
+// wall clock; 0 for never).
+message NodeReputation {
+  int64 node_guid = 1; // the city node record (CityNodeRecordBase guid)
+  double reputation = 2;
+  int64 last_decay_ms = 3;
+}
+
+// An account's node citizenship (migration 0020). node_guid 0 is none: then only renounce_cooldown_until_ms counts. Times are Unix milliseconds on the server's wall clock;
+// 0 is none.
+message Citizenship {
+  int64 node_guid = 1; // the city node record (CityNodeRecordBase guid)
+  string primary_character_id = 2; // the character that joined ("" when it was deleted); the account's other characters are its alternates
+  int64 joined_ms = 3;
+  int64 dues_due_ms = 4; // when the next citizenship dues are due
+  int64 renounce_cooldown_until_ms = 5; // the account cannot join a node again before this
 }
 
 // One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
@@ -408,6 +430,15 @@ message SaveProgressRequest {
   repeated Friend friends = 20;
   bool replace_friend_requests = 21;
   repeated FriendRequest friend_requests = 22;
+  // Node citizenship: with replace_citizenship the citizenship of the character's account becomes exactly `citizenship` (unset: none, no cooldown, and the row goes); without it it
+  // is left alone. InvalidArgument, with nothing changed, for a negative time, a primary character that is not of the account, or a node with no join time.
+  bool replace_citizenship = 23;
+  Citizenship citizenship = 24;
+  // Node reputation: with replace_node_reputation the character's reputations with the nodes become exactly `node_reputation` (a reputation of 0 keeps no row); without it they are
+  // left alone. InvalidArgument, with nothing changed, for a node of 0 or one given twice, a reputation that is not finite or not within a billion either way, a negative decay time,
+  // or more than 512.
+  bool replace_node_reputation = 25;
+  repeated NodeReputation node_reputation = 26;
 }
 
 message SaveProgressResponse {

@@ -20,6 +20,8 @@
 //  tab or own predicates do not hold for the player is not sold); every price is in money; the whole cart costs no more than a purse can hold.  Anything else is refused whole.
 //
 //  Only the shops in kOpenShops are switched on: the Barracks, the citizen outfitter and the mayor's shop keep answering "nothing to offer yet" until their systems exist.
+//  A tab or listing that needs a reputation rank shows to a citizen of the shopkeeper's settlement whose rank there is one it names (world/node_reputation.h); one that
+//  needs a citizenship holds for the citizens of the node it names (Node_GetActorCityNode of the player is the node the player is a citizen of).
 //
 //  The shops of shopkeepers who talk (the Black Market, the caravan salesman, the sheriff's tax vouchers) have no use link: a line of their conversation opens them.  A window can
 //  hide a whole tab, or hide or grey out a listing, for a player the tab's or the listing's predicates do not hold for (unavailable()); a price in Glint is paid with Glint T1 items.
@@ -33,6 +35,7 @@
 #include "protocol/repl/vendor_rpc.h"
 #include "vendor/node_tax_table.h"
 #include "world/city_nodes.h"
+#include "world/elections.h"
 
 #include <cmath>
 #include <cstdint>
@@ -80,6 +83,23 @@ inline TaxRate default_tax_rate(std::string_view tag) {
     return TaxRate{};
 }
 
+/// The rate a tag has in a node whose mayor set rates (`overrides`; null: the default table's): from the tag up the tag tree, the first the mayor set, else the
+/// default table's first row with both flags set.
+inline TaxRate node_tax_rate(std::string_view tag, const std::map<std::string, world::TaxOverride>* overrides) {
+    if (!overrides) return default_tax_rate(tag);
+    std::string t(tag);
+    while (!t.empty()) {
+        if (const auto it = overrides->find(t); it != overrides->end()) return TaxRate{it->second.percent, it->second.flat, true};
+        for (const tax_table::Row& r : tax_table::kRows) {
+            if (t == r.tag && r.flag_a && r.flag_b) return TaxRate{r.tax_percent, r.flat_tax, true};
+        }
+        const size_t dot = t.rfind('.');
+        if (dot == std::string::npos) break;
+        t.resize(dot);
+    }
+    return TaxRate{};
+}
+
 /// A price plus the tax on it (single precision, rounded up: the client's rule).
 inline int64_t taxed_unit(int64_t price, const TaxRate& rate) {
     if (!rate.found) return price;
@@ -89,7 +109,8 @@ inline int64_t taxed_unit(int64_t price, const TaxRate& rate) {
 }
 
 /// What a shop's predicates are asked against: the node the player stands in and, for a shop a shopkeeper opens, the node the shopkeeper stands in.  GetPlayer, GetInteractionTarget,
-/// GetCurrentNode, Node_GetActorCityNode and Node_InLevelRangeInclusive are the functions the shops' own predicates use; any other function ends the evaluation with no value, and the
+/// GetCurrentNode, Node_GetActorCityNode, Node_InLevelRangeInclusive and GetNodeToPlayerReputationRank are the functions the shops' own predicates use (Node_IsPlayerCitizen and
+/// Node_IsPlayerCitizenOfNode are answered too); any other function ends the evaluation with no value, and the
 /// predicate does not hold.
 class ShopFacts final : public dialogue::ExprHost {
 public:
@@ -97,6 +118,8 @@ public:
     double                  player_x = 0, player_y = 0;
     bool                    has_npc = false;
     double                  npc_x = 0, npc_y = 0;
+    int64_t                 citizen_node = 0;   // the node the player is a citizen of (0: none)
+    int                     reputation_rank = 5;   // ENodeReputationRank with the shopkeeper's settlement (world/node_reputation.h); 5 (cCount): none, no citizen of it
 
     std::optional<dialogue::ExprValue> call(const std::string& name, const std::vector<dialogue::ExprValue>& args) const override {
         using dialogue::ExprValue;
@@ -105,10 +128,18 @@ public:
         if (name == "GetInteractionTarget") return ExprValue::of(has_npc ? kNpc : 0);
         if (name == "Node_GetActorCityNode") {
             if (args.size() != 1 || !nodes) return std::nullopt;
-            const bool of_npc = args[0].i == kNpc && has_npc;
-            const world::NodeSite site = nodes->node_at(of_npc ? npc_x : player_x, of_npc ? npc_y : player_y);
+            // the client asks the character itself: a player's city node is the node the player is a citizen of (0: none), an NPC's the settlement it stands in.
+            // The data says so: `Node_GetActorCityNode(GetInteractionTarget()) == Node_GetActorCityNode(GetPlayer())` fails with "Must be a citizen of this settlement".
+            if (args[0].i == kPlayer) return ExprValue::of(citizen_node);
+            if (args[0].i != kNpc || !has_npc) return ExprValue::of(0);
+            const world::NodeSite site = nodes->node_at(npc_x, npc_y);
             const world::CityNodeInfo* n = nodes->by_rank(site.node_rank);
             return ExprValue::of(n ? n->guid : 0);
+        }
+        if (name == "Node_IsPlayerCitizen") return ExprValue::of(citizen_node != 0 ? 1 : 0);
+        if (name == "Node_IsPlayerCitizenOfNode") {
+            if (args.size() != 2) return std::nullopt;
+            return ExprValue::of(citizen_node != 0 && citizen_node == args[1].i ? 1 : 0);
         }
         if (name == "GetCurrentNode") {
             if (args.size() != 1 || !nodes) return std::nullopt;
@@ -122,6 +153,13 @@ public:
             if (lo < 0 || hi < 0) return std::nullopt;
             const int level = args[0].i == 0 ? 0 : nodes->level_of(args[0].i);
             return ExprValue::of(level >= lo && level <= hi ? 1 : 0);
+        }
+        if (name == "GetNodeToPlayerReputationRank") {   // the character's rank with the shopkeeper's settlement: the data asks `== ENodeReputationRank::Liege || ...`
+            static constexpr const char* kRanks[] = {"Peasant", "Commoner", "Liege", "Noble", "Aristocrat", "cCount"};
+            ExprValue v;
+            v.i = reputation_rank >= 0 && reputation_rank <= 5 ? reputation_rank : 5;
+            v.text = std::string("ENodeReputationRank::") + kRanks[v.i];
+            return v;
         }
         return std::nullopt;
     }
@@ -190,6 +228,11 @@ public:
     TaxRate default_rate(int64_t shop) const {
         const content::VendorData::Def* d = def(shop);
         return d && !d->tax_tag.empty() ? default_tax_rate(d->tax_tag) : TaxRate{};
+    }
+    /// The shop's rate in its node, with the rates the node's mayor set (null: the default table's).
+    TaxRate rate(int64_t shop, const std::map<std::string, world::TaxOverride>* overrides) const {
+        const content::VendorData::Def* d = def(shop);
+        return d && !d->tax_tag.empty() ? node_tax_rate(d->tax_tag, overrides) : TaxRate{};
     }
 
     struct Line {
