@@ -700,6 +700,8 @@ int main(int argc, char** argv) {
             combat_config.default_aggro_cm = npc_aggro_cm;
             combat_config.default_leash_cm = npc_leash_cm;
             combat_config.npc_damage_mult = npc_damage_mult;
+            combat_config.display_names_path = (std::filesystem::path(npc_motion_path).parent_path() / "npc_display_names.tsv").string();
+            combat_config.population_names_path = (std::filesystem::path(npc_motion_path).parent_path() / "npc_names.tsv").string();
             players.set_combat_config(std::move(combat_config));
             combat::AftermathConfig aftermath;
             aftermath.enabled = !no_loot;

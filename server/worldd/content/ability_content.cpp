@@ -140,7 +140,11 @@ constexpr const char* kProjectileSql = "SELECT guid, name, projectile_type, spee
 constexpr const char* kProjectileHitsSql = "SELECT hit_guid FROM ab_projectile_hit WHERE projectile_guid = ?1 ORDER BY ord";
 constexpr const char* kZoneSql = "SELECT guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, "
                                  "expire_after_hits_expr, expire_if_expr, targeting_guid FROM ab_zone WHERE guid = ?1";
+// contentc version 45: the zone's spawn transform, its attachment, its class and its fade time (one JSON column)
+constexpr const char* kZoneSpawnSql = "SELECT guid, name, life_time, tick_rate, use_global_tick_rate, charges, delay_time, delay_type, speed, "
+                                      "expire_after_hits_expr, expire_if_expr, targeting_guid, spawn FROM ab_zone WHERE guid = ?1";
 constexpr const char* kZoneHitsSql = "SELECT role, hit_guid FROM ab_zone_hit WHERE zone_guid = ?1 ORDER BY role, ord";
+constexpr const char* kTargetingDefSql = "SELECT guid, name, shape, radius, angle, volumes FROM ab_targeting_def WHERE guid = ?1";
 constexpr const char* kAllExprsSql = "SELECT id, text, terms, program, uses_target, error FROM ab_expr ORDER BY id";
 constexpr const char* kGuidListSql[] = {"SELECT guid FROM ab_ability ORDER BY guid", "SELECT guid FROM ab_hit ORDER BY guid",
                                         "SELECT guid FROM ab_effect ORDER BY guid", "SELECT guid FROM ab_projectile ORDER BY guid",
@@ -225,9 +229,16 @@ std::optional<AbilityContent> AbilityContent::open(const std::string& path, std:
     // every statement prepares: a missing table or column fails here
     for (const char* sql : {kStatProgramSql, kExprSql, kClassAbilitiesSql, kAutoRanksSql, kAbilityByGuidSql, kAbilityByNameSql, kCostsSql, kEffectCostsSql,
                             kMontagesSql, kAbilityHitsSql, kAbilityEffectsSql, kHitSql, kHitEffectsSql, kEffectByGuidSql, kEffectByNameSql, kEffectHitsSql,
-                            kModsSql, kProjectileSql, kProjectileHitsSql, kZoneSql, kZoneHitsSql, kAllExprsSql, kGuidListSql[0], kGuidListSql[1], kGuidListSql[2],
+                            kModsSql, kProjectileSql, kProjectileHitsSql, kZoneHitsSql, kAllExprsSql, kGuidListSql[0], kGuidListSql[1], kGuidListSql[2],
                             kGuidListSql[3], kGuidListSql[4], kCrowdControlSql, kAbilityDisableSql, kFragilitySql, kEffectFragilitiesSql}) {
         Stmt q(c.db_, sql);
+        if (!q.ok()) {
+            error = path + " lacks a table or column the ability reader uses: " + db_message(c.db_);
+            return std::nullopt;
+        }
+    }
+    {   // the zone row: its spawn column came with contentc version 45 (a file from before it is read without one)
+        Stmt q(c.db_, c.has_zone_spawn() ? kZoneSpawnSql : kZoneSql);
         if (!q.ok()) {
             error = path + " lacks a table or column the ability reader uses: " + db_message(c.db_);
             return std::nullopt;
@@ -774,9 +785,56 @@ std::optional<ProjectileRow> AbilityContent::projectile(int64_t guid, std::strin
 }
 // ~ C.Y.B - C.O.A ~
 
+namespace {
+
+/// The zone's spawn JSON (contentc version 45): its origin, attachment, class and fade time.  A value the file does not say is left at its default.
+void read_zone_spawn(const std::string& text, ZoneRow& z) {
+    const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
+    if (!j.is_object()) return;
+    const auto str = [&](const char* key) {
+        const auto it = j.find(key);
+        return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    const auto num = [&](const char* key) {
+        const auto it = j.find(key);
+        return it != j.end() && it->is_number() ? it->get<double>() : 0.0;
+    };
+    const auto flag = [&](const char* key) {
+        const auto it = j.find(key);
+        return it != j.end() && it->is_boolean() && it->get<bool>();
+    };
+    z.spawn.origin = str("origin");
+    z.spawn.origin_socket = str("origin_socket");
+    z.spawn.orientation = str("orientation");
+    z.spawn.attach = str("attach");
+    z.spawn.attach_socket = str("attach_socket");
+    z.spawn.effect_class = str("class");
+    z.spawn.deactivate_fx = num("deactivate_fx");
+    z.spawn.net_cull = num("net_cull");
+    const auto fx = j.find("fx");
+    z.spawn.fx = fx != j.end() && fx->is_number_integer() ? fx->get<int64_t>() : 0;
+    z.spawn.no_first_tick = flag("no_first_tick");
+    const auto rel = j.find("relative_location");
+    if (rel != j.end() && rel->is_array() && rel->size() == 3) {
+        z.spawn.rel_x = (*rel)[0].is_number() ? (*rel)[0].get<double>() : 0.0;
+        z.spawn.rel_y = (*rel)[1].is_number() ? (*rel)[1].get<double>() : 0.0;
+        z.spawn.rel_z = (*rel)[2].is_number() ? (*rel)[2].get<double>() : 0.0;
+    }
+    const auto scale = j.find("scale");
+    if (scale != j.end() && scale->is_array() && scale->size() == 3) {
+        z.spawn.scale_x = (*scale)[0].is_number() ? (*scale)[0].get<double>() : 1.0;
+        z.spawn.scale_y = (*scale)[1].is_number() ? (*scale)[1].get<double>() : 1.0;
+        z.spawn.scale_z = (*scale)[2].is_number() ? (*scale)[2].get<double>() : 1.0;
+    }
+    z.has_spawn = true;
+}
+
+}  // namespace
+
 std::optional<ZoneRow> AbilityContent::zone(int64_t guid, std::string& error) const {
     std::optional<ZoneRow> out;
-    if (!run(db_, kZoneSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+    const bool spawn = has_zone_spawn();
+    if (!run(db_, spawn ? kZoneSpawnSql : kZoneSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
             ZoneRow z;
             z.guid = col_i64(s, 0);
             z.name = col_text(s, 1);
@@ -790,6 +848,7 @@ std::optional<ZoneRow> AbilityContent::zone(int64_t guid, std::string& error) co
             z.expire_after_hits_expr = col_i64(s, 9);
             z.expire_if_expr = col_i64(s, 10);
             z.targeting_guid = col_i64(s, 11);
+            if (spawn) read_zone_spawn(col_text(s, 12), z);
             out = std::move(z);
             return true;
         }, error))
@@ -803,6 +862,24 @@ std::optional<ZoneRow> AbilityContent::zone(int64_t guid, std::string& error) co
             return true;
         }, error))
         return std::nullopt;
+    return out;
+}
+
+std::optional<TargetingDefRow> AbilityContent::targeting_def(int64_t guid, std::string& error) const {
+    std::optional<TargetingDefRow> out;
+    if (!run(db_, kTargetingDefSql, [&](sqlite3_stmt* s) { sqlite3_bind_int64(s, 1, guid); }, [&](sqlite3_stmt* s) {
+            TargetingDefRow t;
+            t.guid = col_i64(s, 0);
+            t.name = col_text(s, 1);
+            t.shape = col_text(s, 2);
+            t.radius = col_f64(s, 3);
+            t.angle = col_f64(s, 4);
+            t.volumes = col_text(s, 5);
+            out = std::move(t);
+            return true;
+        }, error))
+        return std::nullopt;
+    if (!out) error = "content.db has no targeting record " + std::to_string(guid);
     return out;
 }
 
@@ -886,6 +963,92 @@ bool AbilityContent::guids(Table table, std::vector<int64_t>& out, std::string& 
         out.push_back(col_i64(s, 0));
         return true;
     }, error);
+}
+
+namespace {
+
+/// A number an expression column holds as plain text ("100", "2500.0"), the way the game's own data writes a size it does not compute; false for a computed one.
+bool plain_number(const std::string& text, double& out) {
+    const char* begin = text.c_str();
+    while (*begin == ' ' || *begin == '\t') ++begin;
+    char* end = nullptr;
+    const double v = std::strtod(begin, &end);
+    if (end == begin) return false;
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') ++end;
+    if (*end != 0) return false;
+    out = v;
+    return true;
+}
+
+/// A vector an expression column holds as plain text ("Vector(1000.0, 2500.0, 1000.0)"); false for a computed one.
+bool plain_vector(const std::string& text, double& x, double& y, double& z) {
+    static const char kPrefix[] = "Vector(";
+    constexpr size_t kPrefixLen = sizeof(kPrefix) - 1;
+    if (text.size() <= kPrefixLen || text.compare(0, kPrefixLen, kPrefix) != 0 || text.back() != ')') return false;
+    const std::string inner = text.substr(kPrefixLen, text.size() - kPrefixLen - 1);
+    const size_t a = inner.find(','), b = a == std::string::npos ? std::string::npos : inner.find(',', a + 1);
+    if (b == std::string::npos || inner.find(',', b + 1) != std::string::npos) return false;
+    return plain_number(inner.substr(0, a), x) && plain_number(inner.substr(a + 1, b - a - 1), y) && plain_number(inner.substr(b + 1), z);
+}
+
+}  // namespace
+
+ZoneVolume zone_volume_of(const TargetingDefRow& t) {
+    ZoneVolume v;
+    v.shape = t.shape;
+    v.radius = t.radius;
+    v.angle = t.angle;
+    const nlohmann::json volumes = nlohmann::json::parse(t.volumes, nullptr, false);
+    if (!volumes.is_array() || volumes.empty()) return v;
+    const auto number = [](const nlohmann::json& obj, const char* key) {
+        const auto it = obj.find(key);
+        return it != obj.end() && it->is_number() ? it->get<double>() : 0.0;
+    };
+    const auto text = [](const nlohmann::json& obj, const char* key) {
+        const auto it = obj.find(key);
+        return it != obj.end() && it->is_string() ? it->get<std::string>() : std::string();
+    };
+    const auto point = [&](const nlohmann::json& obj, const char* key, double& x, double& y, double& z) {
+        const auto it = obj.find(key);
+        if (it == obj.end() || !it->is_object()) return;
+        x = number(*it, "X");
+        y = number(*it, "Y");
+        z = number(*it, "Z");
+    };
+    // the sphere's size: the record's SphereRadius, or the plain number its expression column holds (the Saga's four Pantheon spheres are 100 by expression and 24 raw)
+    if (volumes[0].is_object() && t.shape.find("SHAPE_Sphere") != std::string::npos) {
+        double expr = 0;
+        if (plain_number(text(volumes[0], "SphereRadiusExpr"), expr) && expr > 0) v.radius = expr;
+    }
+    for (const auto& volume : volumes) {
+        if (!volume.is_object()) continue;
+        // every volume of a targeting record carries a BoxExtent (24 by default), whatever its shape: only a volume of the box shape is a box
+        if (text(volume, "id").find("SHAPE_Box") == std::string::npos) continue;
+        const auto extent = volume.find("BoxExtent");
+        if (extent == volume.end() || !extent->is_object()) continue;
+        ZoneBox box;
+        box.ex = number(*extent, "X");
+        box.ey = number(*extent, "Y");
+        box.ez = number(*extent, "Z");
+        double ex = 0, ey = 0, ez = 0;   // (the extents by expression: the Saga's box is 1000 x 2500 x 1000 and 24 raw)
+        if (plain_vector(text(volume, "BoxExtentExpr"), ex, ey, ez) && ex > 0 && ey > 0 && ez > 0) {
+            box.ex = ex;
+            box.ey = ey;
+            box.ez = ez;
+        }
+        point(volume, "Location", box.cx, box.cy, box.cz);
+        const auto rotation = volume.find("Rotation");
+        if (rotation != volume.end() && rotation->is_object()) {
+            box.yaw = number(*rotation, "Yaw");
+            box.roll = number(*rotation, "Roll");
+        }
+        if (box.ex > 0 && box.ey > 0 && box.ez > 0) v.boxes.push_back(box);
+    }
+    if (volumes[0].is_object()) {
+        const auto los = volumes[0].find("bEnableLOSCheck");
+        v.los = los != volumes[0].end() && los->is_boolean() && los->get<bool>();
+    }
+    return v;
 }
 
 bool AbilityContent::all_exprs(std::map<int64_t, ExprRow>& out, std::string& error) const {

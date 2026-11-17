@@ -129,6 +129,7 @@ struct LingeringSpec {
     int64_t                    source = 0;                         // SourceRecordGuid: the ability
     double                     x = 0, y = 0, z = 0;                // where it opens, cm
     double                     yaw_degrees = 0;
+    bool                       attached = true;                    // the data's AttachedInstigator: on the pawn (a dance, an aura); false: it stands where it opens (a ground circle)
     std::optional<repl::QuantVec> velocity;                        // SerializeNewActor's velocity as the wire holds it (the retail actor had one; the session sends none)
     uint32_t                   effect_guid[4] = {0, 0, 0, 0};      // LingeringEffectGuid (an FGuid of its own)
     uint32_t                   instance_guid[4] = {0, 0, 0, 0};    // LingeringZoneInstGuid
@@ -883,6 +884,7 @@ private:
     std::string       error_;
     // plan A7: the runtime's keys and the fast arrays' ReplicationIDs (ability_replication.h "Keys")
     std::map<int64_t, int32_t>     effect_ids_, ability_ids_, cooldown_ids_;
+    std::set<int64_t>              stealth_keys_;   // the EffectId keys of the effects on the pawn that stealth it (bootstrap/stealth_effects.h): the pawn's StealthInfo.bInStealth is up while there is one
     std::set<int64_t>              trigger_pvp_;       // missing systems, step 1: the instances whose trigger carried the PvP flag (their item copies it)
     bool                           pawn_mounted_ = false;   // the mounts milestone, stage 3: pawn_mounted() ran and pawn_dismounted() has not
     std::map<uint64_t, int32_t>    callout_ids_;       // the mounts milestone: the callouts keys and their ReplicationIDs
@@ -896,6 +898,7 @@ private:
     struct EffectActor {
         repl::Actor       actor;
         repl::ActorShadow shadow;
+        bool              attached = true;   // its data attaches it to the pawn: its open carries the mesh export (a detached one names no component)
     };
     std::map<uint64_t, EffectActor> effect_actors_;
     emit::FIntrepidNetworkGUID      mesh_;   // the pawn's CharacterMesh0 the lingering actors attach to (the session's one guid)

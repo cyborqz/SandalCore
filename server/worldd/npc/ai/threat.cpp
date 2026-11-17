@@ -42,13 +42,14 @@ bool ThreatTable::has(uint64_t id) const {
     return false;
 }
 
-uint64_t ThreatTable::pick(uint64_t current) const {
+uint64_t ThreatTable::pick(uint64_t current, const std::function<bool(uint64_t)>& allowed) const {
     const Entry* top = nullptr;
     for (const Entry& e : entries_) {
+        if (allowed && !allowed(e.id)) continue;
         if (!top || e.threat > top->threat) top = &e;
     }
     if (!top) return 0;
-    if (current != 0 && current != top->id) {
+    if (current != 0 && current != top->id && (!allowed || allowed(current))) {
         const double cur = of(current);
         if (has(current) && top->threat < cur * kSwitchRatio) return current;
     }

@@ -48,7 +48,18 @@ bool parse_pair(const std::string& s, int& a, int& b) {
 
 }  // namespace
 
-bool HitContext::host_fn(int fn, const std::string& name, const double* /*args*/, int /*n*/, double& out) const {
+bool HitContext::host_fn(int fn, const std::string& name, const double* args, int n, double& out) const {
+    // GetEffectCountByRecordAndInstigator(GetTarget(), effect, caster): the stacks that caster put on the target, role by role (a requirement that asks the
+    // target, and the instance's own instigator is the caster of the hit).  The caster's own list is the ability runtime's read, not this one.
+    if (fn >= stats::kHostRoleBase + stats::kRoleTarget * 16 && fn < stats::kHostRoleBase + (stats::kRoleTarget + 1) * 16) {
+        const int op = fn - (stats::kHostRoleBase + stats::kRoleTarget * 16);
+        if (op == stats::kRoleOpEffectInst) {
+            const int instigator_role = n >= 1 ? static_cast<int>(args[0]) : stats::kRoleCaster;
+            const uint64_t from = instigator_role == stats::kRoleTarget ? target_actor : instigator_actor;
+            out = (target_effects && from != 0) ? target_effects->stacks_from(std::strtoll(name.c_str(), nullptr, 10), from) : 0.0;
+            return true;
+        }
+    }
     if (fn >= stats::kHostCalcDamage && fn <= stats::kHostCalcLast) {
         if (!profile || !instigator) {
             out = 0;

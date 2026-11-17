@@ -305,6 +305,9 @@ PlayerSession::GmMoveResult PlayerSession::move_to(Connection& conn, double x, d
     const float ts = checker_.good().has_time_stamp ? checker_.good().time_stamp : 0.0f;
     constexpr uint8_t mode = repl::kMoveFalling;   // the client lands and walks again by itself
     queue(gm ? "GM teleport" : "floor net teleport", [ts, x, y, z, mode](bootstrap::PlayerBootstrap& pb) { return pb.correction(ts, repl::Vec3d{x, y, z}, repl::Vec3d{}, mode); }, conn, /*must_build=*/true);
+    // a game master's teleport holds the client at the place until its own moves show it stands there (the floor may still be streaming in); the floor net
+    // has its own repeats and does not hold.  A place in the air (a height named over the ground) is not held: the client falls from it, and that is the game master's choice.
+    if (gm && (!world_ || world_->on_the_ground(x, y, z))) checker_.hold_after_teleport(mode, now);
     if (gm) ++gm_teleports_;
     r.to = checker_.good();
     spdlog::info("[{}] {}: teleported by {} from ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f}){}", gm ? "gm" : "floor-net", name(), by, r.from.x, r.from.y, r.from.z, x, y, z,
@@ -316,6 +319,18 @@ PlayerSession::GmMoveResult PlayerSession::move_to(Connection& conn, double x, d
 
 void PlayerSession::run_floor_net(Connection& conn, Clock::time_point now) {
     if (!phase_in_done_ || dead_ || finished_ || failed_ || !npc_world_) return;   // (before the phase-in the pawn is held at the join height and cannot fall)
+    // A teleport's hold: the client's own moves said it fell under the place it was put at (the floor there may still be streaming in).  The correction goes
+    // again, a few times a second, until it stands there (the move checker has released the hold then) or the hold's time is over.
+    if (checker_.hold_due(now) && room_for(2)) {
+        const MoveChecker::TeleportHold& hold = checker_.teleport_hold();
+        const GoodPosition at = checker_.good();
+        const float ts = at.has_time_stamp ? at.time_stamp : 0.0f;
+        queue("teleport hold", [ts, x = hold.x, y = hold.y, z = hold.z, mode = hold.mode](bootstrap::PlayerBootstrap& pb) {
+            return pb.correction(ts, repl::Vec3d{x, y, z}, repl::Vec3d{}, mode);
+        }, conn, /*must_build=*/true);
+        checker_.hold_sent(now);
+        spdlog::info("[session] {}: the client fell under the place it was sent to ({:.0f}, {:.0f}, {:.0f}) cm: held there (correction {} of this teleport)", name(), hold.x, hold.y, hold.z, hold.sent);
+    }
     const GoodPosition g = checker_.good();
     const auto rescue = npc_world_->floor_rescue(g.x, g.y, g.z);
     if (!rescue) {
@@ -405,7 +420,10 @@ void PlayerSession::on_gm_teleport_xyz(Connection& conn, const repl::ClientRpc& 
     char params[160];
     std::snprintf(params, sizeof params, "X=%.0f Y=%.0f Z=%.0f OptionalRadius=%g%s", x, y, z, radius, rpc.call.decoded ? "" : "; the parameters did not decode");
     if (!gm_rpc_admitted("ServerTeleportXYZ", params, now) || !rpc.call.decoded) return;
-    const GmMoveResult r = gm_teleport(conn, x, y, z, now, "ServerTeleportXYZ");
+    // the height the client names is kept unless it is under the ground there (the same as the admin API's point with a height)
+    double stands = z;
+    if (world_ && std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) world_->player_height(x, y, z, /*has_hint=*/true, /*keep_above=*/true, &stands);
+    const GmMoveResult r = gm_teleport(conn, x, y, stands, now, "ServerTeleportXYZ");
     if (r.status == GmMoveResult::Status::Moved) ++gm_rpcs_answered_;
     else spdlog::warn("[gm] {}: ServerTeleportXYZ to ({:.0f}, {:.0f}, {:.0f}) is refused ({})", name(), x, y, z, gm_refusal(r.status));
 }
@@ -438,7 +456,9 @@ void PlayerSession::on_gm_teleport_player(Connection& conn, const repl::ClientRp
     if (GmPort* port = world_ ? world_->gm_port() : nullptr) {
         moved = port->teleport_characters(names, x, y, z, "ServerTeleportPlayer by " + name(), now);
     } else if (iequals(names, name())) {   // (no port: a world with only this session)
-        moved = gm_teleport(conn, x, y, z, now, "ServerTeleportPlayer").status == GmMoveResult::Status::Moved ? 1 : 0;
+        double stands = z;
+        if (world_ && std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) world_->player_height(x, y, z, /*has_hint=*/true, /*keep_above=*/true, &stands);
+        moved = gm_teleport(conn, x, y, stands, now, "ServerTeleportPlayer").status == GmMoveResult::Status::Moved ? 1 : 0;
     }
     if (moved > 0) ++gm_rpcs_answered_;
     else spdlog::warn("[gm] {}: ServerTeleportPlayer \"{}\" moved no one", name(), log_text(names));

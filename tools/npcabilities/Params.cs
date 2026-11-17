@@ -216,9 +216,11 @@ static class Parameters
                             {
                                 string structName = desc.ValueTypeObject != null && !desc.ValueTypeObject.IsNull ? desc.ValueTypeObject.Name : "";
                                 var ar = new FAssetArchive(new FByteArchive("bag", data, g.Provider.Versions) { Position = pos }, loaded.Package);
-                                _ = new FStructFallback(ar, structName);
+                                var st = new FStructFallback(ar, structName);
                                 pos = (int)ar.Position;
-                                result[index] = "(struct)";
+                                // a record reference (an effect, an ability) is a struct with a Guid field: keep the Guid, so a condition bound to it can be read
+                                long guid = StructGuid(st);
+                                result[index] = guid != 0 ? guid : "(struct)";
                             }
                             break;
                         default:
@@ -231,6 +233,14 @@ static class Parameters
         }
         // a block that does not end where the format says it does was not read right: nothing from it is used
         return lost || pos != end ? null : result;
+    }
+
+    /// <summary>The Guid a record-reference struct holds (an effect, an ability or another record is a struct with one Guid field); 0 for any other struct.</summary>
+    static long StructGuid(FStructFallback st)
+    {
+        if (st.TryGetValue(out long gl, "Guid")) return gl;
+        if (st.TryGetValue(out ulong gu, "Guid")) return (long)gu;
+        return 0;
     }
 
     static int ElementSize(EPropertyBagPropertyType t) => t switch

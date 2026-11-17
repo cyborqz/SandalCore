@@ -74,6 +74,11 @@ void Aftermath::on_death(const DeathEvent& d) {
     }
     // (the Nodes 1 test of 2026-10-10: the death and loot lines had an empty creature name) the creature's name, else its Blueprint's
     c.name = d.info && !d.info->name.empty() ? d.info->name : d.blueprint;
+    // what the logs call it (the name above is what the corpse and the client keep): a creature that names itself keeps its own name, else the name the game shows for it
+    const bool plain = c.name == d.blueprint;
+    const std::string display = plain ? combat_.shown_name(d.npc, d.archetype, d.blueprint) : std::string();
+    const std::string shown = display.empty() ? c.name : display;
+    const std::string log_label = plain ? combat_.log_name(d.npc, d.archetype, d.blueprint) : c.name;
     std::string looter_note;   // for the death line: the highest looter's level, the level gap and the data's Loot_Falloff
     std::string roll_note;     // ... and what the rarity rolls did (item rarities, step 1)
 
@@ -196,7 +201,7 @@ void Aftermath::on_death(const DeathEvent& d) {
                     ++stats_.corpses_with_loot;
                     stats_.loot_stacks += c.loot.size();
                 } else {
-                    spdlog::warn("[loot] {} ({}) died with {} stack(s) of loot but its corpse takes no components: {}", c.name, d.blueprint, stacks.size(), why);
+                    spdlog::warn("[loot] {} ({}) died with {} stack(s) of loot but its corpse takes no components: {}", shown, d.blueprint, stacks.size(), why);
                 }
             } else if (!stacks.empty() && d.gm) {
                 // a game master's kill with nobody in the world to take it: the roll stays on the corpse (the log and Inspect say what it holds), but it gets no loot components
@@ -209,6 +214,7 @@ void Aftermath::on_death(const DeathEvent& d) {
                 KillReward kr;
                 kr.npc = d.npc;
                 kr.name = c.name;
+                kr.shown = log_label;
                 kr.blueprint = d.blueprint;
                 kr.level = d.level;
                 kr.instance = d.info ? d.info->instance_guid : 0;
@@ -234,7 +240,7 @@ void Aftermath::on_death(const DeathEvent& d) {
                  std::string(items::rarity_name(rarity_of(s.item, s.quality)));
     }
     const std::string who = d.gm ? std::to_string(fighters.size()) + " player(s) in the world may take its loot" : std::to_string(fighters.size()) + " fought it";
-    spdlog::info("[loot] {} ({}, level {}) died: {}{}{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", c.name, d.blueprint, d.level, who, looter_note, roll_note, c.loot.size(),
+    spdlog::info("[loot] {} ({}, level {}) died: {}{}{}, {} stack(s) of loot{}{}{}, closes in {:.0f} s{}{}", shown, d.blueprint, d.level, who, looter_note, roll_note, c.loot.size(),
                  listing.empty() ? "" : " (", listing, listing.empty() ? "" : ")", c.close_at - d.at, respawns_.empty() ? "" : "; its spawn point refills it",
                  huntable ? "; a huntable: its corpse is hunted with a Bow (no loot)" : "");
     corpses_[d.npc] = std::move(c);
@@ -345,15 +351,15 @@ void Aftermath::put_back(uint64_t npc, size_t slot) {
 // Cyb captures, C O A code
 
 uint64_t Aftermath::drop_pile(double x, double y, double z, const protocol::repl::GuidValue& owner, const std::string& name, std::vector<LootStack> stacks, double now,
-                              std::string& error) {
+                              std::string& error, bool item_drop) {
     if (stacks.empty()) return 0;
     int top = 0;
     for (const LootStack& s : stacks) top = std::max(top, rarity_of(s.item, s.quality));
-    const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, top, error);
+    const auto pile = world::add_pile(registry_, mint_, x, y, z, owner, name, {owner}, top, error, item_drop);
     if (!pile) return 0;
     Corpse c;
     c.npc = pile->actor;
-    c.name = name + "'s pile";
+    c.name = item_drop ? "Dropped loot" : name + "'s pile";
     c.died_at = now;
     c.close_at = now + cfg_.pile_seconds;
     c.loot = std::move(stacks);

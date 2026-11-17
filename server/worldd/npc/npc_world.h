@@ -264,6 +264,9 @@ public:
     /// The montage is over (or the NPC died or was sent home): writes the creature's place with the montage marked inactive, and gives its feet back.  False when none was playing.
     bool end_root_motion(uint64_t actor_id);
     bool root_motion_active(uint64_t actor_id) const;
+    /// Whether the montage that carries the creature holds it this step because a body is in the ability's freeze box (bRootMotionObstructed, the game's movement event RootMotionObstructed);
+    /// false when no montage carries it.
+    bool root_motion_obstructed(uint64_t actor_id) const;
     /// Orders a walk home at the NPC's run speed; its behaviour takes over on arrival.  False when no path.
     bool order_return_home(uint64_t actor_id);
     const Mover* mover(uint64_t actor_id) const;
@@ -321,6 +324,7 @@ private:
         double         ox = 0, oy = 0;            // where the creature stood when the montage began (the montage's root travels from here)
         double         position = 0;              // montage seconds at the last step
         bool           frozen = false;            // the freeze box has stopped the lunge
+        bool           obstructed = false;        // a body in the freeze box holds the creature in the last step (what bRootMotionObstructed says)
         double         skip_x = 0, skip_y = 0;    // the part of the montage's travel (ahead, to the right) the creature did not take while a pause held it: the montage's root minus this is where it goes
         double         last_tx = 0, last_ty = 0;  // where the last step put the creature in the montage's frame (the root minus the skipped part): a turn of the facing carries the rest of the travel on from here
         std::optional<uint64_t> saved_mode;       // the creature's ReplicatedMovementMode before the montage took it (it walks while the montage carries it)

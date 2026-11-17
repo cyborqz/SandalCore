@@ -641,6 +641,87 @@ static void test_book(const spawns::MountBook& book) {
     CHECK(archetype_ids.size() == blueprints.size(), "one archetype export per Blueprint (items that share a Blueprint share it)");
 }
 
+/// The mount Health values the server sends at a summon, on the real rows (M1): the saved Health is an absolute, clamped at the owner's level's
+/// MaxHealth (the item's factor included); the client's bar reads the EveryoneProxy Health and MaxHealth; the data's regeneration rating is the
+/// Mount_Base value at the owner's level (not replicated: the donor's open carries no such item). And what the level a Health was saved at means:
+/// the saved absolute value is a different share of another level's maximum (the data cannot settle a rescale; the value is kept).
+static void test_health_values(const spawns::MountBook& book) {
+    std::printf("the Health a summon sends, and the saved Health across levels\n");
+    const int64_t kRating = 109315114489464ll;
+    struct Case {
+        const char* item;
+        double      factor;
+        int         item_level;
+        int         owner_level;
+        double      max_health;
+        double      saved;       // the Health p.health names
+        double      health;      // what the EveryoneProxy item must hold
+    };
+    const Case cases[] = {
+        {"Mount_Grounded_Horse_0", 1, 1, 1, 500, -1, 500},
+        {"Mount_Grounded_Horse_0", 1, 1, 10, 1179, -1, 1179},
+        {"Mount_Grounded_Horse_0", 1, 1, 25, 4875, -1, 4875},
+        {"Mount_Grounded_Horse_0", 1, 1, 1, 500, 250, 250},
+        {"Mount_Grounded_Horse_0", 1, 1, 10, 1179, 250, 250},
+        {"Mount_Grounded_Horse_0", 1, 1, 1, 500, 600, 500},
+        {"Mount_Grounded_Horse_0", 1, 1, 10, 1179, 600, 600},
+        {"Mount_Flying_PTR_ONLY", 5, 25, 25, 24375, -1, 24375},
+        {"Mount_Flying_PTR_ONLY", 5, 25, 20, 17860, -1, 17860},
+        {"Mount_Flying_PTR_ONLY", 5, 25, 25, 24375, 3572, 3572},
+        {"Mount_Grounded_TerrorBird_0", 1, 20, 25, 4875, 3572, 3572},
+        {"Mount_Grounded_TerrorBird_0", 1, 20, 20, 3572, -1, 3572},
+    };
+    for (const Case& c : cases) {
+        const content::MountRow* row = row_named(book, c.item);
+        CHECK(row != nullptr, (std::string(c.item) + " is in the data").c_str());
+        if (!row) continue;
+        CHECK(row->health_factor() == c.factor, (std::string(c.item) + ": its Health factor is " + std::to_string(c.factor)).c_str());
+        CHECK(row->level == c.item_level, (std::string(c.item) + ": the item's own text level " + std::to_string(c.item_level) + " is not the owner's").c_str());
+        const double base = book.data().stat_at(c.owner_level, content::kGuidMaxHealth, -1);
+        CHECK(base > 0 && std::fabs(book.max_health(*row, c.owner_level) - c.max_health) < 0.01,
+              (std::string(c.item) + " at owner level " + std::to_string(c.owner_level) + ": MaxHealth " + std::to_string(c.max_health)).c_str());
+        CHECK(std::fabs(base * c.factor - c.max_health) < 0.01, "...the Mount_Base MaxHealth of that level times the item's factor");
+        spawns::MountParams p = plain_params();
+        p.owner_level = c.owner_level;
+        if (c.saved >= 0) p.health = c.saved;
+        std::string error;
+        auto made = book.make(*row, p, mint, error);
+        CHECK(made.has_value(), (std::string(c.item) + ": the summon is made").c_str());
+        if (!made) continue;
+        const auto stats = stat_values(sub_named(made->actor.actor, "UAoCStatsComponent"));
+        CHECK(stats.count(content::kGuidHealth) && std::fabs(stats.at(content::kGuidHealth) - c.health) < 0.01,
+              (std::string(c.item) + " at owner level " + std::to_string(c.owner_level) + ": the Health item the client's bar reads is " + std::to_string(c.health)).c_str());
+        CHECK(stats.count(content::kGuidMaxHealth) && std::fabs(stats.at(content::kGuidMaxHealth) - c.max_health) < 0.01, "...and its MaxHealth item is the level's, factor included");
+        CHECK(made->max_health == c.max_health, "...the maker's own maximum is the same number");
+        // the rating is not a replicated statistic: the donor's stats component carries none, and the maker does not add one
+        CHECK(!stats.count(kRating), "...and no HealthRegenerationRating item is sent (the data keeps the rating, the server works the regeneration out)");
+        CHECK(std::fabs(book.data().stat_at(c.owner_level, kRating, -1) - base / 2) < 0.01,
+              "...the data's HealthRegenerationRating at that level is half the Mount_Base MaxHealth");
+    }
+    // the factor separates the kinds at one level: a flyer's maximum is five times a horse's, its saved absolute Health the same
+    const content::MountRow* horse = row_named(book, "Mount_Grounded_Horse_0");
+    const content::MountRow* gryphon = row_named(book, "Mount_Flying_PTR_ONLY");
+    CHECK(horse && gryphon && book.max_health(*gryphon, 25) == 5 * book.max_health(*horse, 25), "at level 25 the flyer's maximum is five times the horse's");
+    // the rating at the levels the owner's mounts are used at: the rates the data's HealthRegeneration formula gives (rating / 250, five times out of combat)
+    const struct { int level; double rating, in_combat, out_of_combat; } rates[] = {{1, 250, 1.0, 5.0}, {20, 1786, 7.144, 35.72}, {25, 2437.5, 9.75, 48.75}};
+    for (const auto& r : rates) {
+        const double rating = book.data().stat_at(r.level, kRating, -1);
+        CHECK(std::fabs(rating - r.rating) < 0.01, ("level " + std::to_string(r.level) + ": the rating is " + std::to_string(r.rating)).c_str());
+        CHECK(std::fabs(rating / 250.0 - r.in_combat) < 1e-9 && std::fabs(rating / 250.0 * 5.0 - r.out_of_combat) < 1e-9,
+              ("...so a mount of that owner regenerates " + std::to_string(r.in_combat) + "/s in combat and " + std::to_string(r.out_of_combat) + "/s out of it").c_str());
+    }
+    // every row of every kind: the rating and the maximum at every level come from the same table, and the base maximum is always twice the rating
+    size_t rows = 0, bad = 0;
+    for (int level = 1; level <= 50; ++level) {
+        const double base = book.data().stat_at(level, content::kGuidMaxHealth, -1), rating = book.data().stat_at(level, kRating, -1);
+        for (const content::MountRow& row : book.data().mounts) {
+            ++rows;
+            bad += !(std::fabs(book.max_health(row, level) - base * row.health_factor()) < 0.01 && std::fabs(rating - base / 2) < 0.01);
+        }
+    }
+    CHECK(rows == 5050 && bad == 0, "all 101 mounts at all 50 owner levels: the maximum is the table's times the factor and the rating is the table's (5,050 pairs)");
+}
+
 
 // ---- stage 3 fix 2: the owner's alignments (no PvP flag), the rider's AnimBP --------------------------------------------------------------------
 // built by C-Y-B with C O A
@@ -1349,6 +1430,8 @@ static void test_desummon_early(const spawns::MountBook& book) {
 }
 // built with C | O | A and C-Y-B
 
+#include "mounts_regeneration_tests.inc"
+
 static void test_world_loads(const content::ContentDb& db) {
     std::printf("the world loads the mounts\n");
     aoc::protocol::ServerGuidAllocator guids(60, 1);
@@ -1411,6 +1494,7 @@ int main() {
     test_archetypes(*book);
     test_owner(*book);
     test_book(*book);
+    test_health_values(*book);
     test_alignments_are_the_owners(*book);
     test_rider_anim(*book);
     test_summon_timeline(*book);
@@ -1419,6 +1503,7 @@ int main() {
     test_cancel(*book);
     test_desummon(*book);
     test_desummon_early(*book);
+    test_regeneration(*book);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -10,7 +10,7 @@
 //  is what the world applies to an NPC target and what a session applies to its player (shields first), and what the confirmation carries.
 //
 //  The rolls [modelled: no capture shows a rate; the captured player's hits crit 8.9 % of the time, block 0.2 %]:
-//    miss   the target's Evasion over the instigator's Accuracy, of the hit's aspect (a hit that cannot miss: bForceCantMiss)
+//    miss   the target's Evasion over the instigator's Accuracy, of the hit's aspect (a hit that cannot miss: bForceCantMiss, and the tick of a damage over time: HitMeta::cannot_miss)
 //    block  the target's BlockChance of the aspect (physical hits and magical ones alike)
 //    crit   the instigator's CriticalChance less the target's CriticalAvoidance, of the aspect
 //  a hit's own CritRate / BlockRate / MissRate expression replaces the chance of the stats, and the hit's force flags decide what can happen at all.
@@ -75,6 +75,10 @@ struct HitMeta {
     bool                     active_in_hit = false;       // the caster's selected enemy is among the targets the hit reaches
     bool                     target_is_closest = false;   // this target is the one the hit reaches nearest the caster
     const TargetEffects*     target_effects = nullptr;    // the effects the target holds, for the reads of them (null: it holds none that the expressions can see)
+    /// The caster's actor id and the target's, for GetEffectCountByRecordAndInstigator(GetTarget(), effect, GetInstigator()) (0: unknown, the read answers 0).
+    uint64_t                 instigator_actor = 0;
+    uint64_t                 target_actor = 0;
+    bool                     cannot_miss = false;         // the hit rolls no miss, as if its record forced it: the tick of a damage over time (retail's recorded ticks never missed)
 };
 // (C-O-A ~ C.Y.B)
 
@@ -129,10 +133,15 @@ public:
     /// (the duration, the in-place stack limit, one stack's stat mod values) worked out for the two as they are now.  Appends the ones that pass to `out.effects`.
     /// Call it AFTER the hit's own stat mods were applied to the target: an effect may require what the mods just raised (the burn needs the burn the hit added).  A shield
     /// (TempHealth) is not a stat mod of the effect: it is left out.  False, with `why`, when the two cannot be evaluated.
-    bool resolve_effects(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why);
+    /// `self_rows`: work out the hit's `self` rows (what it puts on its caster) instead of the ones that apply to the target.  A player's own self rows are applied by its pipeline; a
+    /// creature's go into its own effect set (CombatWorld::land_self_effects).
+    bool resolve_effects(Fighter& attacker, Fighter& target, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why, bool self_rows = false);
     /// The same with the caller's own evaluation of the attacker and ContextHost (see resolve_with); `target` must be the target's evaluation as it is after the hit.
     bool resolve_effects_with(stats::CharacterStats::Evaluation& attacker, ContextHost& host, const stats::CharacterStats::Evaluation* target, double distance_cm, bool enemy,
-                              bool neutral, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why);
+                              bool neutral, const abilities::HitDef& hit, const HitMeta& meta, Resolved& out, std::string& why, bool self_rows = false);
+    /// The effects an ability itself lists (its `effects`, not a hit's), with their durations, requirements and one stack's stat mod values worked out for the caster: the state an
+    /// ability puts on the creature that plays the empty hit (the Skeletons' Block).  Appends to `out.effects`; false, with `why`, when the caster cannot be evaluated.
+    bool resolve_ability_effects(Fighter& caster, const abilities::AbilityDef& ability, Resolved& out, std::string& why);
     /// The shield (the TempHealth mods) one application of an effect gives its holder, worked out for the two as they are now; a mod that reads GetOwner() reads the holder (Brace's shield is a
     /// share of the pet's own Health, not its summoner's).  0 when it gives none or does not run.
     double effect_shield(Fighter& attacker, Fighter& holder, const abilities::EffectDef& effect);

@@ -1124,7 +1124,7 @@ void test_dodge_ends_the_deliverance() {
     cc.ahead = 4000;
     cc.aim_self = true;
     cc.ask_wolf = false;
-    cc.ask = {"Cleric_Deliverance_Hit"};   // the client asks for the heal once, as its key goes up (the Deliverance's montage runs 3.3 s)
+    cc.ask = {"Cleric_Deliverance_Hit"};   // the client asks for the heal once, as its key goes up (a client that never answers its bar is waited for 5.37 s)
     cc.ask_from = 2.5;
     cc.ask_gap = 100;
     cc.hurt = 300.0f;
@@ -1155,7 +1155,7 @@ void test_dodge_ends_the_deliverance() {
         CHECK(chan_ends(de, de.cast_id) == 1, "... the client is told the Deliverance is over: one ClientEndAbility for its instance");
         CHECK(spent_mana(de) < 3.0f, "... and what it paid is given back: the Mana (a regeneration tick may have added some)");
     }
-    // a Dodge just after the heal landed, while the montage still runs (it ends 3.3 s after the press): the heal is out, it costs full
+    // a Dodge just after the heal landed, while the montage still runs: the heal is out, it costs full
     cc.dodge_at = ce.healed_at + 0.25;
     {
         ChanEnd de;
@@ -1168,7 +1168,8 @@ void test_dodge_ends_the_deliverance() {
         CHECK(de.healed_at > 0 && de.health_after > de.health_before + 80.0f, "a Dodge after the heal landed changes nothing: the Cleric stays healed");
         CHECK(chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 10.0f, "... the client is told nothing and the heal costs full: the Mana stays spent (no free heal)");
     }
-    cc.dodge_at = 5.0;   // the Deliverance is over
+    cc.dodge_at = 7.0;   // the Deliverance is over (this client sends no branch request or release: the cast goes on by itself 5.37 s after the press, pays 70 ms later and clears its montage 1.24 s after that)
+    cc.seconds = 8.0;
     {
         ChanEnd de;
         ok = run_chan_cast(cleric, cc, de);

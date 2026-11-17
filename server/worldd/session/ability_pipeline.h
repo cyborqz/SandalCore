@@ -137,6 +137,7 @@
 
 #include "combat/hit_port.h"
 #include "combat/hit_resolver.h"
+#include "protocol/emit/intrepid_netguid.h"
 #include "session/abilities.h"
 #include "session/ability_catalog.h"
 #include "session/projectile_flight.h"
@@ -180,6 +181,16 @@ struct BranchedCast {
     int64_t     charged_branch = 0;
     double      charged_answer = 0;
     double      charged_cost = 0;
+    /// A held ability's full charge in the wall seconds the data gives (the Resplendent Beam's MaximumHoldTime of 3.0 s): the fill a branch request and
+    /// a release read (0: the recorded bar `full`, or the old rule).
+    double      charge_seconds = 0;
+    /// A held ability whose full charge is the montage reaching a section (the Deliverance's data has no MaximumHoldTime): that section's seconds into
+    /// the montage, 2.9629629 for the Deliverance (0: none).  A release's CancelledTime is in these montage seconds, and a request for the section's
+    /// branch has played this many at the caster's play rate, so the fill is the montage played over it, whatever the rate.
+    double      release_fill_seconds = 0;
+    /// A branch that ends the bar where it stands: the client's CancelIfFalling (the Disengage's backflip) moves no montage, and the montage's
+    /// clear follows the request by `end` (with no request the timing table's clear stands).
+    bool        no_jump = false;
 };
 
 /// An ability whose cast shoots again and again until its charges or its mana are gone, and then ends with a branch of its montage that the SERVER decides (the Ranger's Salvo: "fire all
@@ -223,6 +234,9 @@ struct GatheredCast {
     double      charged_speed = 0;
     const char* charged_montage = "";      // the soft path of the montage the cast jumps into
     uint64_t    charged_montage_guid = 0;
+    // The FX-only hit of the arcing arrows that fire it ("" : none): ten confirmations for each projectile record of the ability that fires it, at one point on
+    // the ground where the first homing arrow lands (the Ranger's Scatter Shot's ground marks).
+    const char* ground_hit = "";
 };
 
 /// An ability whose montage launches its projectiles at moments of its own: the SERVER plays those launches (the montage's FireProjectile notifies, counted from the trigger) and lands what they
@@ -320,6 +334,9 @@ public:
     /// 54-113 ms, median about 65].
     static constexpr double kItemCastDelay = 0.065;
     static constexpr int    kMaxRequestsPerHit = 8;
+    /// The bursts of projectiles the Bard's Saga sends at its allies in one cast: the Return to Verra's three (its first launcher hit once, its second twice)
+    /// [R: the recorded cast's three requests]; a further request for a launcher hit sends none.
+    static constexpr int    kSagaBursts = 3;
     static constexpr double kMinRequestGap = 0.100;
     /// A beam (the wand's finisher) keeps the client asking for its tick hit for as long as it burns: up to a dozen requests about 100 ms apart, the closest 68 ms.
     /// A cast of a beam step takes its requests that close together; how many of each hit it takes is in `kBeamHits` (ability_pipeline.cpp).
@@ -372,6 +389,8 @@ public:
     static constexpr int    kZoneExtraRequests = 8;
     /// The most zone actors alive at once.
     static constexpr size_t kMaxZones = 16;
+    /// The most actors one zone's tick looks at (a bound of the query, not a number of the data).
+    static constexpr size_t kMaxZoneTargets = 40;
     /// How many ClientInstanceIds are remembered to drop a replayed one.
     static constexpr size_t kRecentIds = 256;
     /// The most effect instances at once (a hostile ability list cannot grow it without bound), and the most steps one advance runs.
@@ -386,6 +405,22 @@ public:
     using ActiveTargetFn = std::function<uint64_t()>;
     /// A consumable's cast reaches its cost step: the session takes one off the item's stack and answers whether it could (false: the stack is gone since the trigger).
     using ItemTakeFn = std::function<bool(int32_t client_instance_id)>;
+    /// The caster's own mount as a heal's target: a friendly character whose Health is its own (the game heals an ally's Health; the mount is no NPC
+    /// the combat world knows, so the session gives this view of it). `surface_distance_cm` is from the caster's place to its body.
+    struct MountTarget {
+        uint64_t                                      actor = 0;
+        double                                        health = 0, max_health = 0;
+        double                                        x = 0, y = 0, z = 0;
+        double                                        surface_distance_cm = 0;
+        double                                        radius_cm = 50.0;
+        bool                                          alive = false;
+        protocol::emit::FIntrepidNetworkGUID          component;   // the mount's actor: the confirmation's HitComp
+        protocol::emit::FIntrepidNetworkGUID          cylinder;    // its CollisionCylinder, exported with the confirmation
+    };
+    /// A mount the caster may heal (the session's own summon, nullopt for any other actor).
+    using MountTargetFn = std::function<std::optional<MountTarget>(uint64_t actor)>;
+    /// Puts a heal on the mount's Health (clamped at its maximum) and answers what took effect; 0 when nothing did.
+    using MountHealFn = std::function<double(uint64_t actor, double amount)>;
 
     /// `catalog` may be null (a content.db without the ability tables, a test with none): only regeneration runs then. `stats` and `a7` belong to
     /// the session and outlive the pipeline; `worn` gives the equipment the stat engine runs with. `seed` seeds RandDouble.
@@ -487,9 +522,24 @@ public:
     void set_active_target(ActiveTargetFn fn) { active_target_ = std::move(fn); }
     /// Where a consumable's cast takes its item when its cost step runs (after the other costs); none set: such a cast takes nothing (the pipeline alone, a test with no bag).
     void set_item_taker(ItemTakeFn fn) { item_taker_ = std::move(fn); }
+    /// The caster's own mount for a heal's target (none set: a mount is no target the pipeline knows) and where the heal's Health goes.
+    void set_mount_targets(MountTargetFn target, MountHealFn heal) {
+        mount_target_ = std::move(target);
+        mount_heal_ = std::move(heal);
+    }
     /// An NPC's hit on the caster, resolved by the world: its stat mods move the character's Health through the shields, the confirmation names the NPC as the
     /// instigator and carries the flags (Lethal when the hit took the last Health). The change and the confirmation are an event.
     void receive_hit(const combat::IncomingHit& hit, double now);
+    /// A hit of ANOTHER player's ability that landed on this character (a Bard's Saga's heal): its stat mods move this character's Health, the confirmation
+    /// names that player as the instigator (its source is the projectile where the hit came from one), and the part of each mod that took effect is returned.
+    /// The change and the confirmation are an event.
+    std::vector<double> apply_ally_landing(const combat::PlayerIncomingHit& hit, double now);
+    /// The effects that hit put on this character, with their numbers worked out by its caster's hit (HitResolver::resolve_effects): they go on the
+    /// character's own effect list, run their Apply hits, and the change is an event.
+    void apply_ally_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now);
+    /// What another player's hit takes off this character (the three Blessings of the Pantheon that the fourth one removes): its EffectsToRemoveIds or
+    /// its filter, as the hit's own record says.  The change is an event.
+    void apply_ally_removal(const abilities::HitDef& hit, double now);
     // ---- a Summoner's pet (session/ability_pipeline_pets.cpp)
     /// What a pet's ability costs its owner: the Essence it takes from each stat (all the ability's cost hits added up) and the cooldown it starts.
     struct PetPayment {
@@ -571,6 +621,12 @@ public:
     /// montage's first notify of 300 ms (what the runtime's own tests of its mechanics use).
     void set_data_timings(bool on) { data_timings_ = on; }
 
+    /// The numbers RandDouble returns before its own draws (a test forces a data roll, such as the Pantheon's coin flips); the list must outlive the pipeline. Null: none.
+    void set_rand_script(const std::vector<double>* script) {
+        rng_.script = script;
+        rng_.scripted = 0;
+    }
+
     /// Takes every instance of an effect record off the caster (a dispel, an item's end); true when there was one.
     bool remove_effect(int64_t effect_guid, double now);
 
@@ -631,8 +687,8 @@ private:
         uint64_t source_actor = 0;
         /// The hit reaches its targets wherever they stand: a ball that flew on from the caster hurts what it touches, however far from the caster that is by now. Every other check of the hit holds.
         bool    reach_free = false;
-        /// The last hit of the Lullaby's cast: its Stun hit asks its own requirement (an Incapacitated target) of each target it reaches, and no other hit is asked so.
-        bool    ask_each_target = false;
+        /// The hit lands (its mods and effects) but is confirmed by the caller itself (the Saga's launcher, whose confirmation waits for the projectile's landing).
+        bool    silent = false;
     };
     /// A hit the character made, as the reactions that listen to hits see it (OwnerHits).
     struct HitEvent {
@@ -655,6 +711,8 @@ private:
         double at = 0;
         bool   found = true;   // the hit reached the caster (false: an empty confirmation)
         std::vector<uint64_t> targets;   // plan E1, stage 3: the other actors it names
+        double asked = 0;      // when the client asked (the Saga's projectile lands kProjectileDelay after this, never before its hit's earliest step)
+        int64_t targeting = 0; // the targeting record the client named (the Saga's ally hits take their rule from it)
     };
     struct HitSlot {
         const abilities::HitDef* hit = nullptr;
@@ -684,6 +742,8 @@ private:
         int                          max_requests = kMaxRequestsPerHit;   // a zone's tick hit is asked for as often as the zone's life holds ticks
         double                       min_gap = kMinRequestGap;            // the least time between two requests for one hit
         bool                         launched = false; // something of the cast has gone out (a hit, a projectile or a volley, an effect): a Dodge no longer cancels it
+        int                          ally_bursts = 0;  // the Saga's bursts of projectiles that left at the allies of this cast (the Return to Verra's are three, however the client asks)
+        std::string                  ally_targeting;   // the Saga's variant's targeting record (see Cast): the cast's record outlives the cast's own steps, and a late request still finds its rule
         std::vector<HitSlot>         slots;
         std::set<int64_t>            reach;            // every hit that belongs to the ability
         std::map<int64_t, std::pair<int, double>> asked;   // hit guid -> (requests, time of the last) for the hits that are no slot
@@ -757,7 +817,14 @@ private:
         };
         std::vector<Missile>                  missiles;
         const TimedCast*                      timed = nullptr;            // a cast whose montage launches its projectiles at moments of its own (kTimedCasts)
-        std::set<uint64_t>                    struck;                     // a Strike: the enemies its areas hurt already (the area hit lets none of them be hurt again by the same cast)
+        // A gathered cast whose arcing arrows show where they land (GatheredCast::ground_hit): their FX-only hits, confirmed together when the first homing
+        // arrow lands, at one point on the ground under the first enemy found (the caster when none).
+        struct GroundMarks {
+            double                                due = 0;
+            protocol::emit::FIntrepidNetworkGUID  component, cylinder;
+            double                                x = 0, y = 0, z = 0;
+        };
+        std::optional<GroundMarks>            ground;
         std::set<uint64_t>                    bounced;                    // a bouncing cast (kBounces): the enemies its projectiles have landed on
         bootstrap::ActiveAbilityItem          item;
         std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
@@ -770,6 +837,7 @@ private:
         bool                                  target = false;     // the call named a target (the caster)
         bool                                  self_reachable = true;   // E1 stage 3 fix: the ability's mask names Self, Ally, Party or Raid (a projectile may land on the caster)
         std::vector<uint64_t>                 target_actors;      // plan E1, stage 3: the other actors the call named (validated)
+        std::optional<AimPlace>               place;              // the place the call aimed at (a ground-targeted cast), when it names one
         bool                                  loop = false;       // a song or a toggle: the item, the cost and the cooldown only
         double                                cooldown = 0;
         int                                   max_charges = 1;
@@ -788,6 +856,22 @@ private:
         double                                flight = 0;                 // ... how long it flies, seconds (the target's distance over the projectile's speed)
         const BallCast*                       ball = nullptr;             // a cast whose projectile is a ball that flies on (kBalls): planned at the montage's jump, in flight from its first step
         BallFlight                            ball_flight;                // ... and its flight
+        // The Bard's Saga: the server chose the montage from its rows' AnimExpressions (the item's NetGUID is made from the path where the table has none), and the
+        // launcher confirmation of an ally hit waits for the first projectile's landing so that both go out together (the recorded solo Saga: one call, two hits).
+        bool                                  montage_selected = false;
+        struct LauncherTarget {
+            protocol::emit::FIntrepidNetworkGUID component;   // the ally's pawn (what the confirmation's HitComp names)
+            double x = 0, y = 0, z = 0;                       // where it stood when the projectile left
+        };
+        struct Launcher {
+            int64_t hit = 0;          // the launcher hit's record
+            int64_t ability = 0;      // the ability that cast it (the confirmation's source)
+            bool    response = true;  // it answers the client's request
+            std::vector<LauncherTarget> targets;
+        };
+        std::optional<Launcher>               launcher;      // the confirmation to send with the first landing
+        bool                                  launcher_sent = false;
+        std::string                           ally_targeting;   // the Saga's variant's targeting record (ab_targeting's name; "" for the other abilities)
     };
     struct EffectInst {
         int64_t                     owner = 0;                    // plan D2, stage 2: the looping ability whose effect this is (0: none)
@@ -801,10 +885,14 @@ private:
         double                      start = 0, end = 0;           // end: infinity for an infinite effect
         double                      next_tick = 0;                // infinity: none
         std::vector<stats::EffectMod> mods;                       // one stack's values
+        /// A creature's hit put it on the player: the world worked its numbers and runs its Apply, Tick and Expire hits from the creature (the player's own runtime only
+        /// shows it and moves the stats, so its ticks are not run again here with the player as the caster).
+        bool                        by_creature = false;
+        uint64_t                    instigator = 0;              // the creature that put it on (0: the player's own)
         uint64_t                    from_player = 0;              // PvP: the other player whose hit left it (0: the character's own, or a creature's): its ticks that aim at an enemy are his hits
     };
-    /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect) and the infinite effects its overlap hits
-    /// put on the caster, which end with the dance.
+    /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect, the Vine Field's circle), the place the
+    /// data puts it and the hits it lands on whoever stands in it.  The infinite effects its overlap hits put on the caster end with the dance.
     struct Zone {
         enum class State : uint8_t { Pending, Open, Ended };
         int64_t id = 0;
@@ -814,6 +902,28 @@ private:
         double  end_at = 0;            // the dance ends: the effects go (open + the zone's life, or an interrupt)
         double  fade_at = -1, close_at = -1;
         State   state = State::Pending;
+        /// Where the data puts the actor: the caster (Instigator), the place the call aimed at (HitLocation), the actor a hit landed on (HitLocation), or
+        /// the source.  `placed` is false for a zone whose data the file does not say: its actor opens at the caster, as before.
+        bool    placed = false;
+        double  x = 0, y = 0, z = 0, yaw = 0;
+        uint64_t anchor = 0;           // the actor the place is taken from at the open (0: the caster, or the hit's target)
+        bool    attached = true;       // the actor is attached to the caster's mesh
+        bool    visible = true;        // false: the zone runs on the server only (its circle is the client's own effect, not a zone actor)
+        /// The volume and the ticks: the zone record's life, its tick rate and its role hits (what they reach is the hit's own mask).
+        content::ZoneVolume volume;
+        double  tick = 0;              // seconds between ticks (0: the zone lands no tick, only its overlap and end hits)
+        double  next_tick = -1;        // the next tick's moment (-1: none due)
+        bool    no_first_tick = false; // bNoHitOnFirstTick: the first tick lands no Lingering hit
+        std::set<uint64_t> inside;     // the actors that stood in it at the last look: a new one takes the OnBeginOverlap hits
+        /// The ticks count from the moment its hits begin (`base`: its open, or the end of its DelayTime), and the tick `tick_no` is due at base + tick_no x tick, so that the
+        /// moments do not drift by the rounding of repeated sums (a zone of 10 s at 0.2 s lands 50 ticks, whatever second it opened at).
+        double  base = 0;
+        int64_t tick_no = 1;
+        bool    armed = true;          // false until its DelayTime is over (a trap: the Bear Trap's base zone waits 2 s): it lands no hit before
+        int     expire_after = 0;      // ExpireAfterAppliedHits: the zone ends once this many of its hits have landed (a trap: 1); 0: none
+        int     applied = 0;           // the hits of its lists that have landed so far
+        /// The infinite effects its hits put on others (an aura's silence, a dance's mark), as (actor, effect): they end when the actor leaves the zone and when the zone ends.
+        std::set<std::pair<uint64_t, int64_t>> held;
     };
     struct Group {
         int                  max_charges = 1;
@@ -874,6 +984,16 @@ void   step_multi_hit(Cast& cast, double t);
     /// A hit that names itself in its RecursiveHit (Chain Lightning): the same hit is applied to the nearest enemy within the recursive targeting's sphere of the one just hit,
     /// again from each enemy it reaches, up to the rule's number of enemies in all; none of them twice (ability_pipeline_chain.inc has the table and the evidence).
     void   chain_from(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& first, double t, const HitSource& src, const abilities::AbilityDef* ability);
+    /// The Resplendent Beam's own hit bounces from the target it landed on to the allies within 1,250 cm of it (the injured first, the nearest first, one
+    /// hit each, up to the data's maximum: progress x 4 + 1), each confirmed with the target just hit as its Source, all in the caller's event.
+    /// Another player's pawn takes his hit through his own session's ally path; the caster's own through this runtime.
+    void   beam_bounces(bootstrap::AbilityChange& c, const CastRecord& rec, const abilities::HitDef& hit, uint64_t first, double t, const HitSource& src,
+                        const abilities::AbilityDef* ability);
+    /// How many times this cast has fired the hit before (GetHitTriggerCount for its heal formula).
+    double hit_trigger_count(int64_t record) const;
+    /// The Redemptive passive's factor over the Deliverance's BaseValue for a heal at the caster himself, where the stat engine reads the term's 5.0 (1.0 for every other hit, and without
+    /// the passive); a heal at another actor runs the data's own formula, which already reads the passive.
+    double deliverance_passive_scale(const abilities::HitDef& hit, double health, double max_health) const;
     /// An ordinary cast that sends several projectiles at its target (kNoteCasts): each is a Fly step at the montage's notify of its own, and none of the cast's hits lands before its projectile gets there.
     void   plan_notes(Cast& cast, double t);
     /// A Fly step: the projectile leaves now; its landing is the target's distance (from the caster, or from the enemy a bounce left) over its speed away, never before the cast's cost step.
@@ -888,6 +1008,9 @@ void   step_multi_hit(Cast& cast, double t);
     void   step_branch(Cast& cast, double t);
     /// A gathering cast's montage has jumped: the enemies the cone holds (the line of the charged shot) each get a projectile that lands after its flight.
     void   launch_gathered(Cast& cast, double t);
+    /// The arcing arrows of a gathering cast (GatheredCast::ground_hit): ten FX-only confirmations for each of their projectile records, from that record as
+    /// their source (not the actor), at the one point on the ground `cast.ground` holds (they show where the arrows land, and no stat mod is taken or confirmed).
+    void   send_ground_marks(Cast& cast);
     /// A timed cast (TimedCast) starts: its launches are steps of the cast, and a Barrage's montage jumps to its end section and ends at moments of its own.
     void   start_timed(Cast& cast, const TimedCast& timed, double t);
     /// One step of a timed cast's list: a launch leaves (a Volley gathers its cone, a Strike's arrow flies down to the ground, a Barrage's arrow flies at the target) or a Strike's arrow lands.
@@ -898,6 +1021,23 @@ void   step_multi_hit(Cast& cast, double t);
     void   cancel_timed(int32_t client_instance_id, double now);
     /// A hit the client asked for lands and fires projectiles (ab_hit_projectile "fire": Maim's Slicing hit): a straight one flies the line ahead of the caster and lands on every enemy in its way.
     void   fire_from_hit(const CastRecord& rec, const abilities::HitDef& hit, double t);
+    // ---- the Bard's Saga's ally hits (ability_pipeline.cpp) ----------------------------------------------------------------------------------
+    /// The allies the hit's targeting record picks among the players of the caster's party (the caster included): its sphere, its own sorting
+    /// (an injured party member first, or the party first) and the hit's max targets, in `out`.  The record is the one the client named, else `fallback` (the cast's own
+    /// variant), else the hit's key map.  False for a hit that is no ally hit (its mask names no Ally, Party or Raid, or no ally targeting record is its own): the hits
+    /// of the Saga on the caster alone (the notes' consuming) and on enemies (the Apocalypse's, the Horrors') are the cast's ordinary hits.
+    bool   ally_targets(const abilities::AbilityDef& def, const abilities::HitDef& hit, size_t max, int64_t named, const std::string& fallback, std::vector<uint64_t>& out);
+    /// The same for a targeting record by name (the Silent Pantheon's spawn hits name no targeting of their own).
+    std::vector<uint64_t> ally_targets_of(const char* record, size_t max);
+    /// The Saga's launcher hit fires a Homing projectile: one flies at each ally, and the launcher's confirmation goes out with the first landing.
+    /// `first_at` is when the first projectile lands at 0 m (its request's answer + its flight).  A hit that fires no Homing projectile is not this.
+    void   fire_ally_from_hit(const abilities::AbilityDef& def, int32_t client_id, double trigger_at, const abilities::HitDef& hit, const std::vector<uint64_t>& allies,
+                              double first_at, const HitSource& src);
+    /// The launcher's confirmation, built where the first projectile lands (or at once for a launcher that fires none).
+    void   push_launcher_confirm(Cast& cast, double t);
+    /// The Silent Pantheon's four server-only spawn hits (their montage notifies are not in the data: they are fired at the cost step, each with its own
+    /// requirement, and the projectile each fires lands a 1 m blessing zone at the ally it was aimed at).
+    void   start_saga_pantheon(const Cast& cast, double t);
     /// Whether the character holds the skill (purchased, or granted by its level).
     bool   holds_skill(int64_t skill) const;
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
@@ -977,10 +1117,15 @@ void   step_multi_hit(Cast& cast, double t);
     static constexpr size_t kMaxDelayed = 64;
     void   land_delayed(const DelayedChild& child, double t);
     bool   chaining_ = false;   // a chain's own jumps apply their hit without starting another chain (chain_from)
+    int    resplendent_hits_ = 0;   // the Resplendent Beam's hits this cast has fired (GetHitTriggerCount: the heal's formula counts them)
     const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
+    /// `mods_override`: the one stack's mod values are the caller's (a hit of another player, worked out for the two actors), not the record's formulas run here.
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
-                        int64_t owner = 0);
+                        int64_t owner = 0, const std::vector<stats::EffectMod>* mods_override = nullptr);
+    /// An effect a creature's hit put on the player, with the numbers the world worked out as the creature's: the instance is shown and moves the stats, and its own hits and
+    /// ticks are the world's (by_creature), so this runtime does not run them.
+    void   apply_creature_effect(bootstrap::AbilityChange& c, const effects::Applied& applied, uint64_t instigator, double t);
     /// The numbers another player's hit worked out for an effect it puts on the character (abilities between players: receive_hit): the next apply_effect takes
     /// them instead of working its own out from the character, and forgets them.
     struct GivenEffect {
@@ -991,14 +1136,50 @@ void   step_multi_hit(Cast& cast, double t);
     const GivenEffect* given_effect_ = nullptr;
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
+    /// The game's damage breaks stealth: Camouflage's Incoming reaction ends it on any damage, and Rogue_Stealth's fragility ends it when the damage taken
+    /// since it was put on passes 5 % of MaxHealth.
+    void   break_stealth_on_damage(double damage, double now);
+    /// Takes every instance of an effect off as a hit that removes it does: its End hits run (remove_effect is the plain take-off, which runs none).  False when it was not on.
+    bool   end_effect(int64_t effect_guid, double now);
     void   restore_stacks(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, double t);   // stacks a cost took go back on (the instance keeps its time; one that has gone comes back whole)
     bootstrap::EffectItem effect_item(const EffectInst& e) const;
     void   run_effect_hits(bootstrap::AbilityChange& c, const EffectInst& e, const char* const* phases, size_t n, double t);
     void   step_loop(Cast& cast, double t);
     /// The zones of a cast's ability, spawned at its cost step; the caster's overlap hits are applied by the caller with `zone_owner_` set.
     void   spawn_zones(const Cast& cast, double open_at, double end_at);
+    /// The zones a cast opens: the ones its ability lists that no hit of it names (the dances), and the ones its own hits name when one of those hits holds for the caster
+    /// (the Magma Field's three zones are told apart by the talent each spawn hit asks for).
+    std::vector<int64_t> zones_of_cast(const abilities::AbilityDef& def);
     void   run_zone(size_t index, double t);
+    /// The index of the zone with the runtime's id (-1: it is gone), for the steps a hit may spawn or drop another zone in.
+    int    zone_index(int64_t id) const;
     double zone_due(const Zone& z) const;
+    /// Where the zone's actor stands when its data says (its SpawnTransform's origin): the caster (an actor at the caster's own place), the cast's
+    /// target or the place the call aimed at (HitLocation), or the source.  A zone whose data the file does not hold is not placed: its actor opens at the caster.
+    void   place_zone(Zone& z, double t);
+    /// Who stands in the zone now: the creatures and the other players whose bodies touch its volume, and the caster himself when he does (alive).
+    std::vector<uint64_t> zone_standers(const Zone& z) const;
+    /// One of the zone's role lists (InitialHitsIds, LingeringHitsIds, OnBeginOverlapHitsIds, EndHitsIds) on the actors it reaches, through the ordinary hit path.
+    /// The hits that landed are counted on the zone (ExpireAfterAppliedHits) and the infinite effects they put on others are kept with it.
+    void   zone_land(int64_t zone_id, int64_t zone_guid, int64_t ability, const char* role, const std::vector<uint64_t>& actors, double t);
+    /// The first look of a zone whose hits begin now: the actors already inside take its Initial hits and, as the first overlap, its OnBeginOverlap hits.
+    void   zone_first_look(int64_t zone_id, double t);
+    /// A zone that has landed as many hits as its record's ExpireAfterAppliedHits allows ends at `t`.
+    void   zone_check_expiry(int64_t zone_id, double t);
+    /// Whether a cast of the ability opens the zone itself (it lists it, or one of its own hits names it): a hit of it that lands does not open it again.
+    bool   cast_opens_zone(const abilities::AbilityDef& def, int64_t zone) const;
+    /// One tick of an open zone: the standers that entered take its overlap hits, then its Lingering hits.
+    void   tick_zone(size_t index, double t);
+    /// The end of an open zone (its life, its applied-hit limit, the caster's death): its End hits land when `end_hits`, the effects it put on others and on the caster go, and its
+    /// actor fades and closes.
+    void   end_zone(int64_t zone_id, double t, bool end_hits, const std::string& note);
+    /// The effects a zone's hits put on others (infinite ones) end: `leavers` only (the actors that left it), or every one when `leavers` is null.
+    void   release_zone_effects(int64_t zone_id, const std::vector<uint64_t>* leavers, double t);
+    /// The oldest zone goes at once when too many are alive: its effects end and its actor closes.
+    void   drop_zone(size_t index, double t);
+    /// The zones a hit spawns when it lands (its LingeringZonesIds), at the actor it landed on; a zone the ability itself already opens with its cast (listed, or named by its own
+    /// hits) is not opened twice.
+    void   spawn_hit_zones(const abilities::HitDef& hit, const abilities::AbilityDef* ability, uint64_t target, double t);
     /// The infinite effects the zone's hits put on the caster go: their Expire and End hits run.
     void   end_zone_effects(bootstrap::AbilityChange& c, int64_t zone_id, double t);
 
@@ -1009,15 +1190,19 @@ void   step_multi_hit(Cast& cast, double t);
     std::set<int64_t> effects_applied_by_hits(const abilities::AbilityDef& def) const;
     void   end_loop(bootstrap::AbilityChange& c, int64_t ability, double t);
     /// What the hit takes off its targets (the caster): the effects of EffectsToRemoveIds, at most MaxNumEffectsToRemove of them.
-    void   remove_by_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit);
+    void   remove_by_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t);
     /// The engine's effect list follows effects_ at once, so that a formula run now reads the effects that were just applied.
     void   sync_engine_effects();
     // hit requests and slots
     CastRecord*  record_of(int32_t client_id);
-    void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets);
-    /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target.
+    void   run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting);
+    /// The target as the world knows it (an NPC, a player's pawn), else the caster's own mount from the session's view (a friendly ally whose Health
+    /// the heal moves); nullopt when neither knows the actor. The mount is not a combat world actor: its place and distance come from the session.
+    std::optional<combat::TargetInfo> target_info(uint64_t actor);
+    /// Plan E1, stage 3: a hit on actors other than the caster (see the header). Appends the confirmation. `landed` (when given) says whether the hit reached any target;
+    /// `first_landed` (when given) is the first actor the hit took effect on (0: none), for a hit that goes on from the one it landed on.
     void   apply_hit_on_targets(bootstrap::AbilityChange& c, const abilities::HitDef& hit, const std::vector<uint64_t>& targets, double t, const HitSource& src,
-                                const abilities::AbilityDef* ability, bool* landed = nullptr);
+                                const abilities::AbilityDef* ability, bool* landed = nullptr, uint64_t* first_landed = nullptr);
     // reactions (session/ability_reactions.cpp)
     /// An expression of the reaction tables run for the event: the hit's tags and flags, the stat mods it resolved, the ability whose cost was paid.
     bool   eval_in_event(int64_t expr, const ReactionContext& rc, double& out, std::string& why);
@@ -1063,6 +1248,8 @@ void   step_multi_hit(Cast& cast, double t);
     WeaponTagsFn              weapon_tags_;
     ActiveTargetFn            active_target_;
     ItemTakeFn                item_taker_;
+    MountTargetFn             mount_target_;
+    MountHealFn               mount_heal_;
     double                    world_time_at_zero_;
     stats::SplitMix           rng_;
     std::unique_ptr<stats::CharacterStats::Evaluation> evaluation_;
@@ -1086,6 +1273,10 @@ void   step_multi_hit(Cast& cast, double t);
     std::vector<Cast>         casts_;
     std::vector<EffectInst>   effects_;
     std::map<std::string, Group> groups_;
+    /// While a cast pays (the reactions to its cost run before its cooldown starts): the cooldown group being paid for, and the seconds a hit of those reactions
+    /// asked to add to a cooldown that is not running yet (Camouflage's End hit: the 60 s on top of the ability's 1 s).
+    std::string paying_group_;
+    double      paying_extra_ = 0;
     std::deque<int32_t>       recent_ids_;
     std::optional<int64_t>    item_instance_;                       // the ability item on the pawn
     int32_t                   animation_counter_ = 0;
@@ -1138,6 +1329,7 @@ void   step_multi_hit(Cast& cast, double t);
     int                       reaction_depth_ = 0;                  // > 0 while a reaction's hits are applied: they raise no events (a reaction does not chain)
     size_t                    reactions_fired_ = 0;
     std::map<int64_t, int>    reaction_procs_;                      // reaction guid -> how often it fired (its proc limits)
+    double                    stealth_damage_ = 0;                  // the damage taken since Rogue_Stealth went on (its 5 % fragility)
     std::set<int64_t>         reaction_noted_;                      // reactions whose inert state or unserved shape was logged
     std::set<int64_t>         reaction_recursive_noted_;            // reactions whose hits fire further hits (not followed) that were logged
     std::set<int>             unserved_host_;                       // host functions an expression asked for and the runtime does not answer yet

@@ -17,7 +17,7 @@
 //
 //  Step 2, corruption (combat/pvp_corruption.h, GameStatProfile's formulas): a kill of a non-combatant outside a duel and his group adds corruption and blight
 //  (NotifyCorruptionDeltaForKill); while above 0 he is Corrupted (red), the Corruption stat says how much (every client is told it) and he holds his tier's
-//  debuff (Corruption_1 .. Corruption_5, contentc version 47); a creature's kill burns it off a little, a death a lot (NotifyCorruptionLostForDying); a corrupted
+//  debuff (Corruption_1 .. Corruption_5, contentc version 50); a creature's kill burns it off a little, a death a lot (NotifyCorruptionLostForDying); a corrupted
 //  death costs a bigger debt, more resources and some of the worn gear (into the death's pile).  The record keeps corruption and blight (migration 0025).
 // ============================================================================
 #include "session/player_session.h"
@@ -230,7 +230,7 @@ void PlayerSession::pvp_sync_stats(Connection& conn) {
         if (pvp_tier_effect_ != 0) pipeline_->remove_effect(pvp_tier_effect_, sec);
         pvp_tier_effect_ = 0;
         if (want != 0 && !pipeline_->grant_effect(want, 1, sec)) {
-            spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: the corruption debuff {} is not in the ability tables (content.db older than contentc version 47?): the tier costs nothing", name(), want);
+            spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: the corruption debuff {} is not in the ability tables (content.db older than contentc version 50?): the tier costs nothing", name(), want);
         } else {
             pvp_tier_effect_ = want;
         }

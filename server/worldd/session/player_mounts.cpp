@@ -163,6 +163,8 @@ void PlayerSession::mount_damaged(Clock::time_point now) {
 
 void PlayerSession::run_mounts(Connection& conn, Clock::time_point now) {
     if (!mounts_ || !abilities_) return;
+    // the game's regeneration of the mount while it is out: its Health rises once a second, five times faster out of the rider's fight
+    mounts_->regenerate(ability_seconds(now), mounted() && combat_flag_);
     // stage 4, modelled: a mount left farther than MountDesummonDistanceCentimeters from its owner is desummoned (the Blueprints turn bEnableMountDistanceDesummon on; no data
     // or capture has the distance).  A server-side move of the player (a respawn: the player died, which desummons anyway) shows up the same way.
     if (!mounted() && mounts_->phase() == MountController::Phase::Out) {

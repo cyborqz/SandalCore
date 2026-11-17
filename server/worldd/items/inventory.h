@@ -268,6 +268,10 @@ public:
     /// one Add event, `equipment_changed`.  Refused, changing nothing, for an item that is no crate, a quantity other than 1, an instance the inventory holds already, an unknown
     /// record or a cargo slot that holds a crate already.
     Outcome grant_cargo(svc::InventoryItem item, const ItemCatalog& catalog);
+    /// Weaponsmithing: puts a made tool in the Equipment slot its record lists (the field ItemDestination is Equipment), where the game puts a tool that is made: one Add event,
+    /// `equipment_changed`.  Refused, changing nothing, for an item that is not worn, a two-handed one, a quantity other than 1, a slot its record does not list or that holds an
+    /// item already, an instance the inventory holds already or an unknown record.
+    Outcome grant_equipment(svc::InventoryItem item, int slot, const ItemCatalog& catalog);
     /// ServerRequestStorageEvent, Swap: the two whole stacks change places; `to_guid` and `to_count` are what the client says is in the target slot.  Inside the Backpack, or inside
     /// the resource containers (with a `catalog`: each stack must fit the other's rectangle); a material and an item of the Backpack never swap.
     Outcome swap(svc::ItemContainer from, int from_slot, int32_t count, const std::string& guid, svc::ItemContainer to, int to_slot,

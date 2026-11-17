@@ -89,6 +89,47 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             pipeline_->set_weapon_tags([this] { return weapon_tags(); });
             pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
             pipeline_->set_item_taker([this](int32_t client_instance_id) { return consumable_paid(client_instance_id); });   // consumables: the cost step takes the item
+            // a player's heal reaches his own summoned mount: the mount is no combat world actor, its Health is the replicated stat the session holds
+            // (the caster's own mount, never another player's, and only while it stands: a mount that dissolves or dies has saved the Health it had, so a heal on it would be lost)
+            const auto healable = [this](uint64_t id) {
+                if (!mounts_ || mounts_->actor_id() != id) return false;
+                const MountController::Phase phase = mounts_->phase();
+                return phase == MountController::Phase::Summoning || phase == MountController::Phase::Out;
+            };
+            pipeline_->set_mount_targets(
+                [this, healable](uint64_t id) -> std::optional<AbilityPipeline::MountTarget> {
+                    if (!registry_ || !healable(id)) return std::nullopt;
+                    const world::WorldActor* m = registry_->find(id);
+                    if (!m || m->kind != world::ActorKind::Mount) return std::nullopt;
+                    const std::optional<double> health = spawns::stat_value(*m, content::kGuidHealth);
+                    const std::optional<double> maximum = spawns::stat_value(*m, content::kGuidMaxHealth);
+                    if (!health || !maximum) return std::nullopt;
+                    AbilityPipeline::MountTarget t;
+                    t.actor = id;
+                    t.health = *health;
+                    t.max_health = *maximum;
+                    t.x = m->x;
+                    t.y = m->y;
+                    t.z = m->z;
+                    t.alive = *health > 0;
+                    const GoodPosition at = checker_.good();
+                    t.surface_distance_cm = std::max(0.0, std::hypot(m->x - at.x, m->y - at.y) - t.radius_cm - 50.0);
+                    t.component = m->actor.guid;
+                    t.cylinder = m->actor.guid;
+                    t.cylinder.ObjectId = m->npc.collision_cylinder;
+                    return t;
+                },
+                [this, healable](uint64_t id, double amount) -> double {
+                    if (!registry_ || !healable(id) || !std::isfinite(amount) || amount <= 0) return 0;
+                    const world::WorldActor* m = registry_->find(id);
+                    if (!m) return 0;
+                    const std::optional<double> health = spawns::stat_value(*m, content::kGuidHealth);
+                    const std::optional<double> maximum = spawns::stat_value(*m, content::kGuidMaxHealth);
+                    if (!health || !maximum || !(*health < *maximum)) return 0;
+                    const double after = std::min(*maximum, *health + amount);
+                    registry_->modify(id, world::Change::State, [after](world::WorldActor& a) { spawns::set_stat_value(a, content::kGuidHealth, static_cast<float>(after)); });
+                    return after - *health;
+                });
             sync_ability_values();
             if (npc_world_ && npc_world_->combat()) {
                 combat_side_ = std::make_shared<CombatSide>(*this);
@@ -213,11 +254,20 @@ void PlayerSession::flush_zones(Connection& conn) {
             spec.pawn_mesh = *pawn_mesh_;
             spec.zone = op.zone;
             spec.source = op.ability;
-            const GoodPosition at = checker_.good();
-            spec.x = at.x;
-            spec.y = at.y;
-            spec.z = at.z;
-            spec.yaw_degrees = at.yaw_degrees;
+            // where the zone's data puts it (the target's point, the place the call aimed at); a zone at the caster keeps the checker's ground position
+            if (op.placed) {
+                spec.x = op.x;
+                spec.y = op.y;
+                spec.z = op.z;
+                spec.yaw_degrees = op.yaw_degrees;
+            } else {
+                const GoodPosition at = checker_.good();
+                spec.x = at.x;
+                spec.y = at.y;
+                spec.z = at.z;
+                spec.yaw_degrees = at.yaw_degrees;
+            }
+            spec.attached = op.attached;
             if (zone_random_ == 0) zone_random_ = 0x9E3779B97F4A7C15ull ^ (static_cast<uint64_t>(pb_.setup().player_id) * 0xBF58476D1CE4E5B9ull) ^ 1;
             const auto next_word = [&] {   // SplitMix64: the FGuids of an actor are random words
                 zone_random_ += 0x9E3779B97F4A7C15ull;
@@ -239,14 +289,14 @@ void PlayerSession::flush_zones(Connection& conn) {
             w.id = spec.actor.ObjectId;
             w.kind = world::ActorKind::Effect;
             w.actor = std::move(*actor);
-            w.x = at.x;
-            w.y = at.y;
-            w.z = at.z;
-            w.yaw_degrees = at.yaw_degrees;
+            w.x = spec.x;
+            w.y = spec.y;
+            w.z = spec.z;
+            w.yaw_degrees = spec.yaw_degrees;
             w.never_dormant = true;
             w.owner = static_cast<uint64_t>(pb_.setup().player_id);
             w.npc.source = world::Source::Runtime;
-            w.open_exports.push_back(pb_.lingering_mesh_export(*pawn_mesh_));
+            if (spec.attached) w.open_exports.push_back(pb_.lingering_mesh_export(*pawn_mesh_));
             if (!registry_->add(std::move(w))) {
                 spdlog::warn("[session] {}: the registry does not take the zone actor of ability {}: dropped", name(), op.ability);
                 continue;
@@ -431,6 +481,7 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
         info.input_y = t->input_y;
         info.target_count = t->target_count;
         info.target_actors = actors_of(t->targets, t->inline_targets);
+        if (trigger_place) info.place = AimPlace{trigger_place->x, trigger_place->y, trigger_place->z};
         info.item = t->item_slot != -1;
     } else if (const auto prefix = repl::read_trigger_prefix(bunch.data.data(), bunch.data.size(), rpc.call.param_pos,
                                                              rpc.call.param_pos + rpc.call.param_bits)) {
@@ -682,6 +733,44 @@ bool PlayerSession::consumable_paid(int32_t client_instance_id) {
     item_sends_[client_instance_id] = item_events_for(taken);
     item_taken_.push_back(client_instance_id);
     return true;
+}
+
+// ============================================================================================================================
+//  the Bard's Saga's ally hits: what another player's hit does to this player (session/members/saga.inc)
+// ============================================================================================================================
+
+bool PlayerSession::in_party_with(uint64_t actor) const {
+    if (actor == 0) return false;
+    if (actor == pb_.setup().guids.pawn.ObjectId) return true;
+    if (!party_group_) return false;
+    for (const PlayerSession* member : party_group_->members) {
+        if (member && member->pb_.setup().guids.pawn.ObjectId == actor) return true;
+    }
+    return false;
+}
+
+void PlayerSession::receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) {
+    effective.assign(hit.mods.size(), 0.0);
+    if (!pipeline_ || dead_) return;
+    // the world's clock is the combat world's; the pipeline's starts at the join (abilities_origin_)
+    effective = pipeline_->apply_ally_landing(hit, hit.at - pb_.setup().world_time);
+    take_ability_events();
+}
+
+void PlayerSession::receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double at) {
+    if (!pipeline_ || dead_) return;
+    pipeline_->apply_ally_effects(effects, instigator, at - pb_.setup().world_time);
+    take_ability_events();
+}
+
+void PlayerSession::receive_player_shield(double, double, double) {
+    // (the Sagas put no shield on another player: a TempHealth effect of a hostile hit stays the NPC world's; the session's own shields are its effects')
+}
+
+void PlayerSession::remove_player_effects(const abilities::HitDef& hit, double at) {
+    if (!pipeline_ || dead_) return;
+    pipeline_->apply_ally_removal(hit, at - pb_.setup().world_time);
+    take_ability_events();
 }
 
 /// The client calls of the ability component: triggers, held-ability cancels, branch and hit verification, ends (session/rpc_table.h).

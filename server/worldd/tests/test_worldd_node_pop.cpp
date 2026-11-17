@@ -1560,8 +1560,8 @@ static void test_bowl_world() {
     place.x = px;
     place.y = py;
     place.z = 11000;
-    CHECK(std::fabs(world.place_height(place) - (base + median + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm)) < 0.01,
-          "a GM teleport to a place in the bowl is put on the town's floor (+ the capsule), not 50 m under it");
+    CHECK(std::fabs(world.place_height(place) - (base + median + PlayerWorld::kCapsuleHalfHeightCm)) < 0.01,
+          "a GM teleport to a place in the bowl is put on the town's floor (+ the capsule, no slack), not 50 m under it");
     // far from the town the ground is the plain's
     double plain = 0;
     const auto far_ground = world.ground_at(25000, 500);

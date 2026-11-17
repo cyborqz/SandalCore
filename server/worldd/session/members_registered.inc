@@ -26,6 +26,7 @@
 #include "session/members/shown.inc"
 #include "session/members/fishing.inc"
 #include "session/members/certification.inc"
+#include "session/members/saga.inc"
 #include "session/members/resurrect.inc"
 #include "session/members/pvp.inc"
 #include "session/members/duels.inc"

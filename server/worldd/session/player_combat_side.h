@@ -12,6 +12,7 @@
 #include "session/player_session.h"
 
 #include "bootstrap/character_setup.h"
+#include "session/stealth_state.h"
 #include "combat/combat_world.h"
 #include "crafting/job.h"
 #include "crafting/rewards.h"
@@ -66,6 +67,11 @@ public:
     void receive_hit(const combat::IncomingHit& hit, double) override {
         if (inbox.size() < 256) inbox.push_back(hit);
     }
+    void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) override { s_.receive_player_hit(hit, effective); }
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now) override { s_.receive_player_effects(effects, instigator, now); }
+    void receive_player_shield(double amount, double seconds, double now) override { s_.receive_player_shield(amount, seconds, now); }
+    void remove_player_effects(const abilities::HitDef& hit, double now) override { s_.remove_player_effects(hit, now); }
+    bool in_party_with(uint64_t actor) const override { return s_.in_party_with(actor); }
     void set_in_combat(bool in_combat, double) override { wants_in_combat = in_combat; }
     std::array<uint32_t, 4> character_guid() const override { return s_.pb_.setup().character_guid; }
     FIntrepidNetworkGUID pawn_guid() const override { return s_.pb_.setup().guids.pawn; }
@@ -85,6 +91,8 @@ public:
     void effect_refused(const combat::EffectRefusal& refusal, double) override {
         if (effect_refusals.size() < 64) effect_refusals.push_back(refusal);
     }
+    bool holds_effect(int64_t effect_guid) const override { return s_.pipeline_ && s_.pipeline_->stacks_of(effect_guid) > 0; }
+    combat::StealthState stealth() const override { return stealth_state_of(s_.pipeline_ ? &*s_.pipeline_ : nullptr, s_.stats_ ? &*s_.stats_ : nullptr); }
     // abilities between players (combat/combat_players.cpp): the party is the key two members share; another player's Resurrect is asked at the session's tick
     uint64_t group_key() const override { return reinterpret_cast<uintptr_t>(s_.party_group_); }
     void prompt_resurrect(const std::array<uint32_t, 4>& by, double) override { resurrect_by = by; }

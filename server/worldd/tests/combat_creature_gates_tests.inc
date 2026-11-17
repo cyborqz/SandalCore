@@ -838,7 +838,9 @@ void test_creature_roll_gate(Fixture& f) {
     }
     std::printf("  60 s against a standing player: %d right swings, %d left swings, %d other attacks\n", rights, lefts, others);
     CHECKF(rights >= 3 && lefts >= 3, "the swings come in both hands: the roll lets the right one through about half the time (%d right, %d left)", rights, lefts);
-    CHECKF(rights + lefts >= 10, "and the Bear keeps attacking while it rolls (%d swings in 60 s)", rights + lefts);
+    // (the Bear's Rear Up, 7.8 s every 15 s or so once the fight is 10 s old, takes its share of the minute: the measured count with the alert in is 12 swings in
+    // this 60 s fight (6 right, 6 left); the old 10 is kept, not lowered, and the roll's own spread is checked above)
+    CHECKF(rights + lefts >= 10, "and the Bear keeps attacking while it rolls (%d swings in 60 s; 12 measured)", rights + lefts);
 }
 
 AOC_REGISTER_TEST(test_creature_roll_gate);

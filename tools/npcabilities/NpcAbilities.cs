@@ -40,16 +40,22 @@ namespace NpcAbilities;
 /// `arrival` is how near its target the creature's approach brings it: the arrival distance of the move-to-target task in a state directly below the Combat state (-1: the tree has none; the same on
 /// every line of a Blueprint's fight).  A timer of the tree that holds a charge once its seconds have passed since it was emptied (the accumulator tasks: a global cooldown, a special attack's) is said
 /// as a cooldown named "acc.<identifier>": the task's `gates` hold it, and `starts` has it as "acc.<identifier>=seconds" (or "=low~high" when the tree rolls the seconds anew each time) for the
-/// task whose completion empties it.  A few abilities the world cannot play yet are left out whatever their conditions say (`Waiting`), with a `why` that names what they wait for.
+/// task whose completion empties it.  `next` (the last column) is the sequence: the abilities of the later fight tasks of the same tree that wait on a cooldown this task starts (a tree's own
+/// readying: a cooldown started by at most three of its tasks and waited on by at most four), which the creature plays one after the other.  A few abilities the world cannot play yet are left out
+/// whatever their conditions say (`Waiting`), with a `why` that names what they wait for; a hold for a hit notify is lifted by targeting.py once the ability's montage has a hit window of one of
+/// the ability's hit keys, or the ability enters a montage with such hit notifies when its root motion is obstructed.  targeting.py also appends the last column of this table, `branches`.
 ///
 /// The settings a tree takes from its parameters (the distance of a bite, whether the creature may pounce) are read from the Blueprint's reference to the tree and the
 /// tree's own defaults (Params.cs).
 ///
 /// The montages are the animation assets of the Blueprint's folder.  `npc_montages.tsv` has one line per montage:
-///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires
+///   montage  guid  package  package_guid  length  rate_scale  sections  hits  root_motion  root_unreadable  anim_end  fires  hit_windows
 /// `anim_end` is the time of the montage's "animation end" notify in seconds at a play rate of 1 (the animation is over there and the rest of the montage is its blend out; an ability's task
 /// is done at that notify, and the cooldowns it starts run from there), empty for a montage of a folder that `--anim-end-dir` does not list.  `fires` is "time:key" separated by ';' for every
-/// notify that launches a projectile (the time in seconds at a play rate of 1; `key` picks the ability's projectile record, 0 when the notify names none), in time order.
+/// notify that launches a projectile (the time in seconds at a play rate of 1; `key` picks the ability's projectile record, 0 when the notify names none), in time order.  `hit_windows` is
+/// "start:end:key" separated by ';' for every hit-window notify state (AoCAnimNotifyState_AbilityHit), in time order: while the state is open its tick lands the hit of the ability's hit that
+/// the key names, once on each target; "start:end:key:interval" when the state allows several hits (bEnableMultipleHits): it lands the hit on a target again every `interval` seconds the target
+/// stays in reach (HitIntervalInSeconds; 0.001 when the state names none: every tick).
 /// `montage` is the asset's object path as an ability record names it ("/Game/.../Name.Name"), `length` the montage's length in seconds at a play rate of 1
 /// (the time a montage runs is length / rate_scale / the play rate), `sections` "name:start:next" separated by ';' and `hits` "time:key" separated by
 /// ';' for every hit notify of the montage, in time order.  `key` picks the hit record of the ability the notify fires (the ability's hits are keyed the
@@ -66,8 +72,8 @@ public static partial class Reader
 {
     public const string AbilitiesFile = "npc_abilities.tsv";
     public const string MontagesFile = "npc_montages.tsv";
-    public const string AbilitiesHeader = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival";
-    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires";
+    public const string AbilitiesHeader = "archetype\tability\ttask\tcooldown\tstop_movement\torder\tmin_distance\tmax_distance\tmax_angle\tgates\tunknown\tfight\tconds\twhy\tstarts\trotate\tarrival\tnext";
+    public const string MontagesHeader = "montage\tguid\tpackage\tpackage_guid\tlength\trate_scale\tsections\thits\troot_motion\troot_unreadable\tanim_end\tfires\thit_windows";
 
     public sealed class AbilityRow
     {
@@ -78,6 +84,8 @@ public static partial class Reader
         public int Order;
         public float MinDistance = -1f, MaxDistance = -1f, MaxAngle = -1f;
         public float Arrival = -1f;
+        public List<long> Next = new();          // the later tasks this one readies (a cooldown it starts, which they wait on): the sequence
+        public List<string> Waits = new();       // the cooldowns this task waits on (kept while the rows are made; not written)
     }
 
     public sealed class MontageRow
@@ -90,6 +98,7 @@ public static partial class Reader
         public List<(string Name, float Start, string Next)> Sections = new();
         public List<(float Time, int Key)> Hits = new();
         public List<(float Time, int Key)> Fires = new();   // the notifies that launch a projectile: when, and the key of the ability's projectile record
+        public List<(float Start, float End, int Key, float Interval)> Windows = new();   // the hit-window notify states: when they open and close, the key of the ability's hit they land, and the seconds between two hits on one target (0: one hit)
         public List<(float Time, float X, float Y, float Z)> RootMotion = new();
     }
 
@@ -508,7 +517,8 @@ public static partial class Reader
     /// Abilities the world cannot play yet.  A creature's tree skips them, as it skips a task with a condition the table cannot say, instead of landing them as hits nothing shows; the text says what
     /// each one waits for.  (The fire mage's Flame Burst is a spray of fire in front of it, its Flame Throw a stream it aims by a score among everyone it hates, its Flame Ring a ring of fire on the ground;
     /// the mushrooms' Launch is a montage with no hit notify, which would land as a hit nothing shows once the tree's clock lets the creature use it; the raven's raid carries a bird 15 m backwards
-    /// through the air, which a creature that cannot fly would do along the ground.)
+    /// through the air, which a creature that cannot fly would do along the ground.  An alert move, a cast that only shows, is played with nothing done: the ones whose whole point is a change the world cannot
+    /// make wait as well: a blink (the creature does not move), a change of form, a heal, a spawn, a picked-up prop.)
     /// </summary>
     static readonly Dictionary<long, string> Waiting = new()
     {
@@ -518,6 +528,55 @@ public static partial class Reader
         [6064631913484518364] = "waits for a hit notify in its montage (Mycellette Launch)",
         [6064630045035528536] = "waits for a hit notify in its montage (Mycellion Kid Launch)",
         [6064628816510976000] = "waits for flying creatures (Raven Raid)",
+        [6064633651089309761] = "waits for flying creatures (Hawk Raid)",
+        [6064633651095208002] = "waits for flying creatures (Stone Hawk Raid)",
+        [6064633485974241339] = "waits for flying creatures (Greenbill Tukana Raid)",
+        [6064628816609542145] = "waits for flying creatures (Raven Retreat)",
+        [6064629664340312070] = "waits for a hit notify in its montage (Goblin Headbutt)",
+        [6064629665039909073] = "waits for a hit notify in its montage (Goblin Stationary Headbutt)",
+        [6064631363908143595] = "waits for creatures that blink (Ocular Blink Far A)",
+        [6064631370196254920] = "waits for creatures that blink (Ocular Blink Far B)",
+        [6064631370195992775] = "waits for creatures that blink (Ocular Blink Far C)",
+        [6064631370196451529] = "waits for creatures that blink (Ocular Blink Close)",
+        [6064628782410760193] = "waits for creatures that change form (Hoarder Transit To Close)",
+        [6064628782444380162] = "waits for creatures that change form (Hoarder Transit To Close Recovery)",
+        [6064628782404599808] = "waits for creatures that change form (Hoarder Transit To Open)",
+        [6064628894441930752] = "waits for creatures that change form (Hoarder Transit To Open Remove Recovery)",
+        [6064630881844133892] = "waits for creatures that change form (Animated Armor Blaster Go To Normal Mode)",
+        [6064631030367917189] = "waits for creature heals (Skin Walker Revitalization)",
+        [6064630830577352705] = "waits for creatures that spawn others (Spider Spawn Frost Spiderlings)",
+        [6064629143937482752] = "waits for creatures that pick up props (Cyclops Shaman Tree Pickup)",
+        [6064631081206547392] = "waits for creatures that slip away (Skeleton Reaper Shadowslip)",
+        [6064632699434172492] = "waits for a hit notify in its montage (Minotaur Berserker Rage Strike)",
+        [6064629370955305094] = "waits for a hit notify in its montage (Skeleton Rib Toss)",
+        [6064632699333008752] = "waits for a hit notify in its montage (Fire Skeleton Searing Rib Toss)",
+        [6064633497420103691] = "waits for a hit notify in its montage (Coal Golem Coal Breath)",
+        [6064633763405692941] = "waits for a hit notify in its montage (Warbeast Earthshaking Low)",
+        [6064632138952998940] = "waits for a hit notify in its montage (Bandit Musician Sinister Lullaby)",
+        // the fight moves whose whole point is a change the world cannot make and that are no show: a potion's or a self-buff's stat change, a shift, a form change, a raise, a
+        // phase change, a storm, a spawn (the world holds them rather than playing their montage with nothing done)
+        [6064634291469090816] = "waits for a creature's own stat buff (Ancient Foot Soldier Foresight)",
+        [6064634372139778051] = "waits for creatures that spawn others (Ancient Lord Reinforce)",
+        [6064631629762658910] = "waits for a potion's stat change (Bandit Aerialist Celerity Potion)",
+        [6064629285876072618] = "waits for a potion's stat change (Bandit Physical Potion)",
+        [6064633259488051201] = "waits for a potion's stat change (Bandit Pirate Archer Grog)",
+        [6064633225601286146] = "waits for creatures that raise the dead (Birdperson Raise From Dead)",
+        [6064633181838114851] = "waits for a creature that shifts (Birdperson Shift Left)",
+        [6064633181861183524] = "waits for a creature that shifts (Birdperson Shift Right)",
+        [6064633334669901824] = "waits for creatures that spawn others (BogBrute MudSummon)",
+        [6064633589426749440] = "waits for a creature's own ability effects (ClayDunzenkell Fortify)",
+        [6064633174318645252] = "waits for a creature's own ability effects (Crab Retract)",
+        [6064630054967312384] = "waits for creatures that dash (Crocodile Dash)",
+        [6064632626846370784] = "waits for a creature's own ability effects (Dunir Tank Fortify)",
+        [6064632626856791010] = "waits for a creature's own ability effects (Dunir Tank Scorch)",
+        [6064631522220965889] = "waits for a creature's state (Elder Dragon Flame Absorption)",
+        [6064630989763117060] = "waits for creatures that call a storm (Elder Dragon Ice Storm)",
+        [6064631885199835137] = "waits for a creature's phase change (Elder Dragon Phase Transition Roar)",
+        [6064633259732369441] = "waits for a creature's own effect (Flangler Blinding Lure)",
+        [6064633493570125825] = "waits for creatures that spawn others (Ooze Magma Spawn Oozling)",
+        [6064633690077265924] = "waits for a creature's own stat buff (Pitchfire Raider Blood Pitch)",
+        [6064633136201925582] = "waits for creatures that change form (Sklarisha Nymph Transform Bury)",
+        [6064634177167294464] = "waits for a creature that shifts (Withered Combatant Shift Forward)",
     };
 
     /// <summary>How near its target a creature's approach brings it: the arrival distance of the move-to-target task of a state directly below the Combat state on `path`; -1 when there is none.</summary>
@@ -627,6 +686,7 @@ public static partial class Reader
                         tokens.Add((operand, IntOf(nodes[c], "DeltaIndent", 0), Encode(info, nodes[c], onPath, prm)));
                     }
                     foreach (var tk in tokens) if (tk.Atom.Unknown) { row.Unknown = true; why.Add(Uri.UnescapeDataString(tk.Atom.Text.Substring(1))); }
+                    foreach (var tk in tokens) if (tk.Atom.Kind == "cd" && tk.Atom.Name.Length > 0) row.Waits.Add(tk.Atom.Name);
                     bool plain = tokens.Skip(1).All(x => x.Operand == "And") && tokens.All(x => x.Delta == 0);
                     if (plain)
                     {
@@ -672,7 +732,103 @@ public static partial class Reader
                 rows.Add(row);
             }
         }
+        LinkStateGroups(rows);
+        LinkSequences(rows);
         return rows;
+    }
+
+    /// <summary>
+    /// Whether a task waits on a cooldown: by its own name, a gate, or a condition that asks for it (<c>cd(x)</c>).
+    /// </summary>
+    static bool WaitsOn(AbilityRow t, string name) {
+        if (t.Task.Length > 0 && t.Task == name) return true;
+        foreach (string gate in t.Gates.Split(';'))
+            if (gate == name) return true;
+        return t.Waits.Contains(name);
+    }
+
+    /// <summary>
+    /// The state after a state that plays the same task without a timer: the tree enters it next, and its timer is the move's (the goblin shamans' Rally and the aura after it, the
+    /// Withered Shambler's fallback Maw).  The untimed task starts that timer too, so the pair plays in the tree's order and the timer holds both back afterwards; the timed task's
+    /// ability is the untimed one's next move (never the same move: a chain to itself would play it twice).  A pair the rows already link (the untimed task starts a cooldown the timed one waits on) is left as it is.
+    /// </summary>
+    static void LinkStateGroups(List<AbilityRow> rows) {
+        for (int i = 0; i < rows.Count; i++) {
+            AbilityRow a = rows[i];
+            if (!a.Fight || a.Unknown || a.Why == "off" || a.Task.Length == 0 || a.Cooldown > 0f) continue;
+            for (int j = 0; j < rows.Count; j++) {
+                AbilityRow b = rows[j];
+                if (j == i || !b.Fight || b.Why == "off" || b.Task != a.Task || !(b.Cooldown > 0f)) continue;
+                if (!WaitsOn(a, b.Task)) continue;
+                bool linked = false;
+                foreach (string entry in a.Starts.Split(';')) {
+                    int eq = entry.IndexOf('=');
+                    string name = eq > 0 ? entry.Substring(0, eq) : entry;
+                    if (name.Length > 0 && WaitsOn(b, name)) linked = true;
+                }
+                if (linked) continue;
+                string own = b.Task + "=" + F(b.Cooldown);
+                a.Starts = a.Starts.Length == 0 ? own : a.Starts + ";" + own;
+                if (!b.Unknown && b.Order > a.Order && b.Ability != a.Ability && !a.Next.Contains(b.Ability)) a.Next.Add(b.Ability);
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The sequences of a tree: a task A that starts a cooldown X, and a later fight task B of the same tree that waits on X (its task is X, its gates hold X, or its conditions wait on
+    /// <c>cd(X)</c>).  A cooldown a large part of the tree starts or waits on is a shared gate (a global attack cooldown), not a sequence's readying, so only a cooldown started by at most
+    /// three fight tasks of the tree and waited on by at most four is kept (a task the tree switches off does not count).  A's `next` is the ability of every such B in tree order; the world
+    /// plays the first whose own conditions hold, and a held one (unknown) is not played.
+    /// </summary>
+    static void LinkSequences(List<AbilityRow> rows)
+    {
+        var starts = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        var waits = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        var own = new List<List<string>>(rows.Count);
+        var waiting = new List<List<string>>(rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var s = new List<string>();
+            foreach (var entry in rows[i].Starts.Split(';'))
+            {
+                int eq = entry.IndexOf('=');
+                string name = eq > 0 ? entry.Substring(0, eq) : entry;
+                if (name.Length > 0) s.Add(name);
+            }
+            if (rows[i].Task.Length > 0 && rows[i].Cooldown > 0) s.Add(rows[i].Task);
+            var w = new List<string>(rows[i].Waits);
+            foreach (var gate in rows[i].Gates.Split(';')) if (gate.Length > 0) w.Add(gate);
+            if (rows[i].Task.Length > 0) w.Add(rows[i].Task);
+            own.Add(s);
+            waiting.Add(w);
+            if (!rows[i].Fight || (!rows[i].Unknown && rows[i].Why == "off")) continue;   // (the sequences are the fight's, and a task the tree switches off neither readies nor waits)
+            foreach (string name in s.Distinct())
+            {
+                if (!starts.TryGetValue(name, out var set)) starts[name] = set = new HashSet<int>();
+                set.Add(i);
+            }
+            foreach (string name in w.Distinct())
+            {
+                if (!waits.TryGetValue(name, out var set)) waits[name] = set = new HashSet<int>();
+                set.Add(i);
+            }
+        }
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (!rows[i].Fight || (!rows[i].Unknown && rows[i].Why == "off")) continue;
+            foreach (string name in own[i].Distinct())
+            {
+                if (!starts.TryGetValue(name, out var started) || !waits.TryGetValue(name, out var waited)) continue;
+                if (started.Count > 3 || waited.Count > 4) continue;
+                for (int j = 0; j < rows.Count; j++)
+                {
+                    if (j == i || !rows[j].Fight || (!rows[j].Unknown && rows[j].Why == "off") || rows[j].Ability == rows[i].Ability || rows[j].Order <= rows[i].Order) continue;
+                    if (!waiting[j].Contains(name)) continue;
+                    if (!rows[i].Next.Contains(rows[j].Ability)) rows[i].Next.Add(rows[j].Ability);
+                }
+            }
+        }
     }
 
     static void ReadMontage(UObject e, string containerPath, List<MontageRow> rows, bool exportAnimEnd)
@@ -693,11 +849,35 @@ public static partial class Reader
         }
         foreach (var nt in StructsOf(e, "Notifies"))
         {
-            if (!nt.TryGetValue(out FPackageIndex idx, "Notify") || idx == null || idx.IsNull) continue;
+            // an event holds a point notify in its `Notify` or a notify state in its `NotifyStateClass`, never both
+            FPackageIndex idx = null;
+            bool isState = false;
+            if (nt.TryGetValue(out FPackageIndex pointIdx, "Notify") && pointIdx != null && !pointIdx.IsNull) idx = pointIdx;
+            else if (nt.TryGetValue(out FPackageIndex stateIdx, "NotifyStateClass") && stateIdx != null && !stateIdx.IsNull)
+            {
+                idx = stateIdx;
+                isState = true;
+            }
+            if (idx == null) continue;
             var obj = Lv.Resolve(idx);
             if (obj == null) continue;
             float time = nt.TryGetValue(out float lv, "LinkValue") ? lv : 0f;
             if (nt.TryGetValue(out float off, "TriggerTimeOffset")) time += off;
+            if (isState)
+            {
+                // a hit window: the state is open from here for `Duration` seconds and its tick lands the hit of `AbilityHitKey` (a 64-bit property, and a property at its default is not saved: none is key 0)
+                if (obj.ExportType != "AoCAnimNotifyState_AbilityHit") continue;
+                long windowKey = obj.TryGetValue(out long key64, "AbilityHitKey") ? key64 : obj.TryGetValue(out int key32, "AbilityHitKey") ? key32 : 0;
+                if (windowKey < 0 || windowKey > 1000) continue;   // (a key no ability hit carries: the table would not read)
+                float closes = time + (nt.TryGetValue(out float duration, "Duration") ? Math.Max(0f, duration) : 0f);
+                float repeat = 0f;
+                if (obj.TryGetValue(out bool several, "bEnableMultipleHits") && several)
+                {
+                    repeat = obj.TryGetValue(out float every, "HitIntervalInSeconds") && every > 0f ? every : 0.001f;
+                }
+                r.Windows.Add((time, closes, (int)windowKey, repeat));
+                continue;
+            }
             if (obj.ExportType == "AoCAnimNotify_AnimEnd")
             {
                 // the montage's animation is over here (the rest is the blend out): the ability's task is done at this notify
@@ -716,6 +896,7 @@ public static partial class Reader
         }
         r.Hits.Sort((a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Key.CompareTo(b.Key));
         r.Fires.Sort((a, b) => a.Time != b.Time ? a.Time.CompareTo(b.Time) : a.Key.CompareTo(b.Key));
+        r.Windows.Sort((a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : a.Key.CompareTo(b.Key));
         r.RootMotion = ReadRootMotion(e, r.Montage, out bool unreadable);
         r.RootUnreadable = unreadable;
         rows.Add(r);
@@ -767,7 +948,8 @@ public static partial class Reader
                 abilities.Add(new AbilityRow
                 {
                     Archetype = archetype, Ability = r.Ability, Task = r.Task, Gates = r.Gates, Cooldown = r.Cooldown, StopMovement = r.StopMovement, Unknown = r.Unknown, Order = r.Order,
-                    MinDistance = r.MinDistance, MaxDistance = r.MaxDistance, MaxAngle = r.MaxAngle, Fight = r.Fight, Conds = r.Conds, Why = r.Why, Starts = r.Starts, Rotate = r.Rotate, Arrival = r.Arrival
+                    MinDistance = r.MinDistance, MaxDistance = r.MaxDistance, MaxAngle = r.MaxAngle, Fight = r.Fight, Conds = r.Conds, Why = r.Why, Starts = r.Starts, Rotate = r.Rotate, Arrival = r.Arrival,
+                    Next = new List<long>(r.Next)
                 });
             }
         }
@@ -784,7 +966,8 @@ public static partial class Reader
         foreach (var r in rows)
             sb.Append(r.Archetype).Append('\t').Append(r.Ability.ToString(CultureInfo.InvariantCulture)).Append('\t').Append(r.Task).Append('\t').Append(F(r.Cooldown)).Append('\t').Append(r.StopMovement ? "1" : "0").Append('\t')
               .Append(r.Order.ToString(CultureInfo.InvariantCulture)).Append('\t').Append(F(r.MinDistance)).Append('\t').Append(F(r.MaxDistance)).Append('\t').Append(F(r.MaxAngle)).Append('\t')
-              .Append(r.Gates).Append('\t').Append(r.Unknown ? "1" : "0").Append('\t').Append(r.Fight ? "1" : "0").Append('\t').Append(r.Conds).Append('\t').Append(r.Why).Append('\t').Append(r.Starts).Append('\t').Append(r.Rotate).Append('\t').Append(F(r.Arrival)).Append('\n');
+              .Append(r.Gates).Append('\t').Append(r.Unknown ? "1" : "0").Append('\t').Append(r.Fight ? "1" : "0").Append('\t').Append(r.Conds).Append('\t').Append(r.Why).Append('\t').Append(r.Starts).Append('\t').Append(r.Rotate).Append('\t').Append(F(r.Arrival)).Append('\t')
+              .Append(string.Join(";", r.Next.Select(n => n.ToString(CultureInfo.InvariantCulture)))).Append('\n');
         return sb.ToString();
     }
 
@@ -801,7 +984,8 @@ public static partial class Reader
               .Append(string.Join(";", r.RootMotion.Select(m => F(m.Time) + ":" + F(m.X) + ":" + F(m.Y) + ":" + F(m.Z)))).Append('\t')
               .Append(r.RootUnreadable ? "1" : "0").Append('\t')
               .Append(r.AnimEnd >= 0f ? F(r.AnimEnd) : "").Append('\t')
-              .Append(string.Join(";", r.Fires.Select(f => F(f.Time) + ":" + f.Key.ToString(CultureInfo.InvariantCulture)))).Append('\n');
+              .Append(string.Join(";", r.Fires.Select(f => F(f.Time) + ":" + f.Key.ToString(CultureInfo.InvariantCulture)))).Append('\t')
+              .Append(string.Join(";", r.Windows.Select(w => F(w.Start) + ":" + F(w.End) + ":" + w.Key.ToString(CultureInfo.InvariantCulture) + (w.Interval > 0f ? ":" + F(w.Interval) : "")))).Append('\n');
         }
         return sb.ToString();
     }

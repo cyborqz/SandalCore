@@ -1796,7 +1796,7 @@ void test_bard_lullaby_cut_before_the_cost(Fixture& f) {
 AOC_REGISTER_TEST(test_bard_lullaby_cut_before_the_cost);
 
 void test_bard_target_hit_requirement(Fixture& f) {
-    std::printf("a non-Lullaby hit whose requirement reads the target is still asked of the caster, as before (the Snipe's Hemorrhage)\n");
+    std::printf("a hit whose requirement reads the target is asked of the target, whoever's hit it is (the Snipe's Hemorrhage on a bleeding Wolf)\n");
     const std::string wolf_path = wolf_archetype(f);
     const abilities::EffectDef* bleeding = f.catalog->effect_named("Status_Bleeding");
     const abilities::EffectDef* hemorrhage = f.catalog->effect_named("Status_Hemorrhage");
@@ -1817,6 +1817,6 @@ void test_bard_target_hit_requirement(Fixture& f) {
     CHECKF(bw.world->effect_stacks(wolf, bleeding->row.guid) == 1, "the Wolf is bleeding (the Hemorrhage's requirement holds of it)");
     const BardCast cast = bard_cast(bw, "Ranger_Snipe", {wolf}, "Snipe_Hemorrhage", 100.0, 100.5);
     CHECKF(cast.cast && cast.requested, "the Snipe's cast and the client's request for its Hemorrhage hit are accepted (cast %d, request %d)", cast.cast ? 1 : 0, cast.requested ? 1 : 0);
-    CHECKF(bw.world->effect_stacks(wolf, hemorrhage->row.guid) == 0, "the Hemorrhage does not land: its requirement is asked of the caster, as before");
+    CHECKF(bw.world->effect_stacks(wolf, hemorrhage->row.guid) == 1, "the Hemorrhage lands: its requirement is asked of the Wolf, which bleeds (%d stacks)", bw.world->effect_stacks(wolf, hemorrhage->row.guid));
 }
 AOC_REGISTER_TEST(test_bard_target_hit_requirement);

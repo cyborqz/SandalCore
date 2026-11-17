@@ -11,13 +11,17 @@
 #pragma once
 
 #include "ability_rig.h"
+#include "combat/aftermath.h"
+#include "combat/alert_move.h"
 #include "combat/combat_world.h"
 #include "combat/knockback.h"
 #include "combat/npc_replicator.h"
+#include "session/stealth_state.h"
 #include "nav_fixture.h"
 #include "npc/area_npcs.h"
 #include "spawns/captured_spawns.h"
 
+#include <array>
 #include <memory>
 #include <spdlog/sinks/ostream_sink.h>   // (the tests of the crowd control read the log lines the world writes)
 #include <spdlog/spdlog.h>
@@ -87,6 +91,27 @@ public:
         }
         rig_.take();
     }
+    /// A hit of another player's ability on this one (the Saga's heal): its rig applies it to its own pawn, as the session's pipeline does.
+    void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) override {
+        ally_lands.push_back(hit.hit_guid);
+        effective = rig_.pipe->apply_ally_landing(hit, hit.at);
+        rig_.take();
+    }
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now) override {
+        const size_t before = rig_.log.size();
+        rig_.pipe->apply_ally_effects(effects, instigator, now);
+        rig_.take();
+        ally_effects += rig_.log.size() - before;
+    }
+    /// What another player's hit takes off this one (a hit's EffectsToRemoveIds, the Pantheon's other three blessings): its rig removes them, as the session's pipeline does.
+    void remove_player_effects(const abilities::HitDef& hit, double now) override {
+        ++ally_removals;
+        rig_.pipe->apply_ally_removal(hit, now);
+        rig_.take();
+    }
+    std::vector<int64_t> ally_lands;   // the hit records another player's ability landed on this pawn
+    size_t               ally_effects = 0;
+    size_t               ally_removals = 0;   // the times another player's hit took effects off this pawn
     void set_in_combat(bool in_combat, double now) override {
         combat_flips.emplace_back(now, in_combat);
         this->in_combat = in_combat;
@@ -94,6 +119,9 @@ public:
     std::array<uint32_t, 4> character_guid() const override { return guid; }
     emit::FIntrepidNetworkGUID pawn_guid() const override { return rig_pawn_guid(fighter_.id()); }
     emit::FIntrepidNetworkGUID cylinder_guid() const override { return rig_cylinder_guid(fighter_.id()); }
+    /// The caster's actor id when this player stands in his party (a test of an ally hit sets it), else only his own.
+    bool in_party_with(uint64_t actor) const override { return actor == party_with || actor == fighter_.id(); }
+    uint64_t party_with = 0;   // the party's leader (or any member's) actor id
     void receive_kill(const combat::KillReward& kill, double now) override {
         kills.push_back(kill);
         (void)now;
@@ -115,6 +143,16 @@ public:
     void hit_from_pet(int64_t hit_guid, int64_t, double) override { from_pet.push_back(hit_guid); }
     /// A crowd control of this player's or his pet's was resisted or was immune on a creature: the session's line.
     void effect_refused(const combat::EffectRefusal& refusal, double) override { refusals.push_back(refusal); }
+    /// The player carries an effect record: what his session's effect state says (the pipeline the rig plays his abilities through).
+    bool holds_effect(int64_t effect_guid) const override { return rig_.pipe && rig_.pipe->stacks_of(effect_guid) > 0; }
+    /// The stealth the test hands him (the session's own state): the effects on him and the two stats the creatures' sight reads.
+    combat::StealthState stealth() const override {
+        return real_stealth ? stealth_state_of(rig_.pipe ? &*rig_.pipe : nullptr, rig_.cs ? &*rig_.cs : nullptr) : stealth_state;
+    }
+    /// The rig this player belongs to: a test's hand on his effect state and his pipeline (a bleed put on him, a spell cast).
+    ability_rig::Rig& rig() { return rig_; }
+    combat::StealthState                     stealth_state;
+    bool                                     real_stealth = false;   // true: the state is what the session reads from the rig's effects and stats (session/stealth_state.h), not `stealth_state`
     std::vector<combat::DealtHit>            dealt;
     std::vector<int64_t>                     from_pet;
     std::vector<combat::EffectRefusal>       refusals;
@@ -243,6 +281,22 @@ inline uint64_t active_target(const world::WorldActor& a) {
         return g ? g->ObjectId : 0;
     }
     return 0;
+}
+
+/// The CharacterGuid words of an NPC's UNPCInfo (the FGuid its effect items name as their instigator and source).
+inline std::array<uint32_t, 4> character_guid_words(const world::WorldActor& a) {
+    std::array<uint32_t, 4> words = {0, 0, 0, 0};
+    for (const repl::Subobject& s : a.actor.subobjects) {
+        if (!s.obj.schema || std::string(s.obj.schema->name) != "UNPCInfo") continue;
+        const char* names[4] = {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D"};
+        for (int i = 0; i < 4; ++i) {
+            const repl::Value* v = s.obj.state.get(*s.obj.schema, names[i]);
+            const int64_t* n = v ? v->get_if<int64_t>() : nullptr;
+            if (n) words[static_cast<size_t>(i)] = static_cast<uint32_t>(static_cast<int32_t>(*n));
+        }
+        break;
+    }
+    return words;
 }
 
 }  // namespace combat_rig

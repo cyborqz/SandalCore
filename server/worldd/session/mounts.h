@@ -188,6 +188,10 @@ public:
     bool desummon(double now);
     /// A hit that does damage reached the player: it cancels a summon that has not opened yet; a mount that has appeared stays (stage 4).
     void on_damage(double now);
+    /// The game's regeneration of the mount while it is out: once a second its Health rises by the Mount_Base rating / 250 (five times out of combat),
+    /// never above the MaxHealth item it was summoned with. `in_combat`: the rider's fight (the mount is in the fight while it is ridden). Dead, dissolving
+    /// and dismissed mounts do not regenerate; the item keeps the Health they had. The session calls it every tick, at the clock `advance` runs on.
+    void regenerate(double now, bool in_combat);
     /// Runs what is due at `now` and returns what to send.
     Effects advance(double now);
     /// The mount died (its Health reached 0 under its rider's hits): it is dead at once, closes kDeathClose later, and its item keeps Health 0 and a lock of kLockSeconds from
@@ -263,6 +267,7 @@ private:
     bool                     item_shown_ = false;  // the ability item stands with its montage
     double                   clock_offset_ = 0;    // the world clock minus the session clock, at the request: the mount's timestamps
     double                   run_end_ = 0;
+    double                   regen_at_ = -1.0;    // the next second the mount's Health rises (one a second from its open; -1: not set yet)
     Effects                  pending_effects_;     // what a call made (a cancel) and the next advance returns
     int64_t                  item_instance_ = -1;  // the pawn's ServerInstanceId of the ability item that stands (-1: none)
     int32_t                  animation_counter_ = 1;

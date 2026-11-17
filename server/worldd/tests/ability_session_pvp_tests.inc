@@ -340,7 +340,7 @@ void test_pvp_corruption() {
     const stats::StatValue* held = b.h.s->character_stats() ? b.h.s->character_stats()->find(pvp::kStatCorruption) : nullptr;
     CHECKF(held && about(held->value, 7.0) && b.h.s->bootstrap().has_stat_item(pvp::kStatCorruption), "the Corruption stat is 7, with its item in the pawn's stats (%.3f)",
            held ? held->value : -1.0);
-    CHECKF(b.h.s->corruption_debuff() == pvp::tier_effect(3), "he holds tier 3's debuff, Corruption_3 (%lld; content.db of contentc version 47)",
+    CHECKF(b.h.s->corruption_debuff() == pvp::tier_effect(3), "he holds tier 3's debuff, Corruption_3 (%lld; content.db of contentc version 50)",
            static_cast<long long>(b.h.s->corruption_debuff()));
     CHECK(worn_count(*b.h.s) == 4, "(he wears four items)");
 

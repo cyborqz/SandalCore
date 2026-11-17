@@ -46,8 +46,11 @@
 
 namespace aoc::worldd::vendor {
 
-/// The shops this step switches on, by their def's name.
-inline constexpr const char* kOpenShops[] = {"Marketplace_Vendor", "Node_Vendor_BlackMarket", "Caravansary_VendorDef", "ServiceBuilding_TownHallAdmin_Vendor"};
+/// The shops this step switches on, by their def's name.  The last two are the Smithy vendor and the Woodshop vendor of the artisan outposts the Riverlands start in (Aven's End and
+/// Briarmoor Workshops, whose NPCs the world spawns at their plots): they sell the pickaxe, sickle, hunting bow and fishing pole reagents the gathering-tool recipes take; the other
+/// shops that list them belong to service buildings no node has built or to no NPC at all, so without these two those tools have no source in the live world.
+inline constexpr const char* kOpenShops[] = {"Marketplace_Vendor", "Node_Vendor_BlackMarket", "Caravansary_VendorDef", "ServiceBuilding_TownHallAdmin_Vendor", "ArtisanshipPOI_Smithy_Vendor",
+                                             "ArtisanshipPOI_Woodshop_Vendor"};
 
 /// How far the shopkeeper may be from the player, in cm, in three dimensions, for the shop to open and for a purchase to go through (12 m).
 inline constexpr double kShopRangeCm = 1200.0;

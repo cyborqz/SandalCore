@@ -1069,9 +1069,13 @@ void test_dance_zones() {
         const abilities::AbilityDef* d = r.catalog->ability_named(name);
         CHECKF(d && d->zones.size() == 1 && r.catalog->zone(d->zones[0]) != nullptr, "%s spawns one zone with its cast", name);
     }
-    CHECK(r.catalog->ability_named("Bard_Saga")->zones.empty() && r.catalog->ability_named("Bard_Misc_Flourish")->zones.empty() &&
-              r.catalog->ability_named("Bard_Misc_QuickWit_Jest")->zones.empty(),
-          "the Saga (its zone comes with a hit), Flourish and Jest spawn none");
+    // the ability's own zones (its LingeringEffectsIds) open with the cast, the ones a hit of it also names included (the record lists them: the game's cast opens the actor);
+    // a zone only a hit spawns comes with the hit, which is not this cast's list
+    const abilities::AbilityDef* saga = r.catalog->ability_named("Bard_Saga");
+    CHECK(saga != nullptr && saga->zones.size() == 1 && r.catalog->zone(saga->zones.front()) != nullptr,
+          "the Saga spawns its one zone with the cast (the main zone its record lists)");
+    CHECK(r.catalog->ability_named("Bard_Misc_Flourish")->zones.empty() && r.catalog->ability_named("Bard_Misc_QuickWit_Jest")->zones.empty(),
+          "Flourish and Jest spawn none");
     const content::ZoneRow* zone = r.catalog->zone(r.catalog->ability_named("Bard_Dance_Shielding")->zones[0]);
 
     // the cast: with no captured timing the actor opens 35 ms after the ability item (retail: Maddening +362 ms, its item +328)

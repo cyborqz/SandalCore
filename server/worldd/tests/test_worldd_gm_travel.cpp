@@ -1027,14 +1027,17 @@ static void test_teleport_into_a_bowl() {
     Harness h(cyb_on_the_ground(), a_bowl_at_5000_3000);
     h.play();
     GmTravel travel = make_travel(h);
-    // a point in the town, no z: the floor + the slack + the capsule
+    // a point in the town, no z: the floor + the capsule (no slack: the teleport's hold keeps the client on it until its floor is there)
     GmTeleportResult r = travel.teleport(to_point(5000, 3000), "the test");
-    CHECK(r.status == GmStatus::Ok && r.ground_height && near_to(r.to.z, kTownFloor + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm),
-          "a point in the town with no z: the player is put on the town's floor (50.6 m over the baked plain) plus the slack");
-    CHECK(near_to(h.s->movement().good().z, kTownFloor + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm), "(the checker is there)");
-    // the same point asked with a z: believed
+    CHECK(r.status == GmStatus::Ok && r.ground_height && near_to(r.to.z, kTownFloor + PlayerWorld::kCapsuleHalfHeightCm),
+          "a point in the town with no z: the player is put on the town's floor (50.6 m over the baked plain) with the capsule");
+    CHECK(near_to(h.s->movement().good().z, kTownFloor + PlayerWorld::kCapsuleHalfHeightCm), "(the checker is there)");
+    // the same point asked with a z under the floor: lifted onto it; one above it: kept
     r = travel.teleport(to_point_z(5000, 3000, 1500), "the test");
-    CHECK(r.status == GmStatus::Ok && !r.ground_height && near_to(r.to.z, 1500), "a GM who names z is believed (in a bowl too)");
+    CHECK(r.status == GmStatus::Ok && !r.ground_height && near_to(r.to.z, kTownFloor + PlayerWorld::kCapsuleHalfHeightCm),
+          "a z under the town's floor is lifted onto it (a pawn is never put in the world's floor)");
+    r = travel.teleport(to_point_z(5000, 3000, 9000), "the test");
+    CHECK(r.status == GmStatus::Ok && !r.ground_height && near_to(r.to.z, 9000), "a z above the town's floor is kept as given (a tower)");
     // a point 200 m from the town: the plain
     r = travel.teleport(to_point(5000 + 20000, 3000), "the test");
     CHECK(r.status == GmStatus::Ok && near_to(r.to.z, 1098), "200 m from the town: the baked ground + the capsule, as before");
@@ -1106,10 +1109,10 @@ static void test_teleport_into_a_platform_bowl() {
     h.play();
     GmTravel travel = make_travel(h);
     GmTeleportResult r = travel.teleport(to_point(5000, 3000), "the test");
-    CHECK(r.status == GmStatus::Ok && r.ground_height && near_to(r.to.z, kTownFloor + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm),
-          "the platform's centre: the floor + the slack + the capsule (a pit of 1,000 under it)");
+    CHECK(r.status == GmStatus::Ok && r.ground_height && near_to(r.to.z, kTownFloor + PlayerWorld::kCapsuleHalfHeightCm),
+          "the platform's centre: the floor + the capsule (a pit of 1,000 under it)");
     r = travel.teleport(to_point(5000 + 2000, 3000 - 500), "the test");
-    CHECK(r.status == GmStatus::Ok && near_to(r.to.z, kTownFloor + 100.0 + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm),
+    CHECK(r.status == GmStatus::Ok && near_to(r.to.z, kTownFloor + 100.0 + PlayerWorld::kCapsuleHalfHeightCm),
           "20 m along the slope (5 cm per metre): the floor there is 100 cm higher, and the player is put on that");
     CHECK(h.fx.world->ground_at(5000, 3000) && near_to(*h.fx.world->ground_at(5000, 3000), kTownFloor + PlayerWorld::kBowlSlackCm), "(the world's ground_at says so for every caller)");
     r = travel.teleport(to_point(5000 + 20000, 3000), "the test");
@@ -1127,9 +1130,9 @@ static void test_a_hill_through_a_platform_town() {
     h.play();
     GmTravel travel = make_travel(h);
     GmTeleportResult r = travel.teleport(to_point(6000, 0), "the test");
-    CHECK(r.status == GmStatus::Ok && near_to(r.to.z, 1400.0 + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm), "on the hill top (the landscape 1,400, the platform 1,200) the player is put on the hill");
+    CHECK(r.status == GmStatus::Ok && near_to(r.to.z, 1400.0 + PlayerWorld::kCapsuleHalfHeightCm), "on the hill top (the landscape 1,400, the platform 1,200) the player is put on the hill");
     r = travel.teleport(to_point(6000 + 2500, 0), "the test");
-    CHECK(r.status == GmStatus::Ok && near_to(r.to.z, 1200.0 + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm), "past the hill's foot (the landscape at 1,067) on the platform");
+    CHECK(r.status == GmStatus::Ok && near_to(r.to.z, 1200.0 + PlayerWorld::kCapsuleHalfHeightCm), "past the hill's foot (the landscape at 1,067) on the platform");
     h.run(milliseconds(2500));
     CHECK(h.s->floor_net_rescues() == 0, "(the net does not touch either)");
 }
@@ -1169,6 +1172,39 @@ static void test_login_under_a_platform_town() {
 }
 // built with C-Y-B and CoA
 
+/// The client falls to `z` at where it stands: a falling move each with the most the checker's fall law allows (6,000 cm/s for the 5 s the pace bank holds: 30,000 cm),
+/// the server's clock first earning the time the move claims when the bank does not hold it yet.  True when it reached z.
+static bool gp_drop_to(Harness& h, double z) {
+    if (!h.s->movement().good().has_time_stamp) {
+        // the first move of the client's clock: a small one, which starts it (the checker measures the first by the second it allows a new one)
+        const GoodPosition g = h.s->movement().good();
+        g_pawn_ts += 0.1f;
+        move_pawn(h, move_at(g_pawn_ts, g.x, g.y, g.z));
+        h.step(milliseconds(100));
+    }
+    for (int i = 0; i < 12; ++i) {
+        const GoodPosition g = h.s->movement().good();
+        const double dz = z - g.z;
+        if (std::fabs(dz) < 1.0) return true;
+        const double drop = std::max(-30000.0, std::min(30000.0, dz));
+        const double claim = std::min(5.0, std::fabs(drop) / 6000.0 + 0.1);
+        const double need = std::max(0.0, claim - h.s->movement().pace_bank());
+        if (need > 0.01) h.run(milliseconds(static_cast<int>(std::lround(need / 1.25 * 1000.0)) + 100));
+        g_pawn_ts += static_cast<float>(claim);
+        move_pawn(h, move_at(g_pawn_ts, g.x, g.y, g.z + drop, 0, repl::kMoveFalling));
+        h.step(milliseconds(20));
+    }
+    return std::fabs(h.s->movement().good().z - z) < 1.0;
+}
+
+/// The player walks away from a teleport's hold: 4 m along the ground, which ends it (a GM teleport's hold is the test's to leave).
+static void gp_leave_the_hold(Harness& h) {
+    const GoodPosition g = h.s->movement().good();
+    g_pawn_ts += 0.2f;
+    move_pawn(h, move_at(g_pawn_ts, g.x + 400.0, g.y, g.z));
+    h.step(milliseconds(200));
+}
+
 static void test_the_floor_net() {
     std::printf("the floor net: a player far under a town's floor, or under the kill plane, is put back on it\n");
     std::ostringstream log;
@@ -1177,20 +1213,21 @@ static void test_the_floor_net() {
     logger->set_level(spdlog::level::info);
     spdlog::set_default_logger(logger);
     {
-        Harness h(cyb_on_the_ground(), a_platform_bowl_at_5000_3000);
+        // the player starts on the town's floor (no teleport: a teleport's hold would keep it there); the net is what moves it
+        svc::Character at_the_floor = cyb_on_the_ground();
+        at_the_floor.position = {5000.0, 3000.0, kTownFloor + PlayerWorld::kCapsuleHalfHeightCm, 0.0f};
+        Harness h(at_the_floor, a_platform_bowl_at_5000_3000);
         h.play();
-        GmTravel travel = make_travel(h);
         const double on_floor = kTownFloor + PlayerWorld::kCapsuleHalfHeightCm + PlayerWorld::kBowlSlackCm;   // the town's centre has a slope of 0.05 * u = 0 there
-        // a long teleport into the town: the client had no floor yet and fell; here a GM says the player is 500 m under the town
         const size_t from = h.got.size();
-        GmTeleportResult r = travel.teleport(to_point_z(5000, 3000, -50000), "the test");
-        CHECK(r.status == GmStatus::Ok && near_to(r.to.z, -50000), "(a GM puts the player 500 m under the town: a z that is given is believed)");
+        // 150 m under the town: the client's own fall (a z a game master gives under the ground is no longer believed: it is lifted onto the ground)
+        CHECK(gp_drop_to(h, kTownFloor - 15000.0), "(the client falls 150 m under the town)");
         h.run(milliseconds(800));
-        CHECK(h.s->floor_net_rescues() == 0 && near_to(h.s->movement().good().z, -50000), "0.8 s later it is still there (the net waits a second: one bad position is not a fall)");
+        CHECK(h.s->floor_net_rescues() == 0 && near_to(h.s->movement().good().z, kTownFloor - 15000.0), "0.8 s later it is still there (the net waits a second: one bad position is not a fall)");
         h.run(milliseconds(500));
         CHECK(h.s->floor_net_rescues() == 1 && near_to(h.s->movement().good().z, on_floor) && near_to(h.s->movement().good().x, 5000, 0.01) && near_to(h.s->movement().good().y, 3000, 0.01),
               "a second later it is back on the floor (floor + 98 + 200), at the same x and y");
-        CHECK(corrections_on(h, h.pawn_ch, from, "PlayerPawn_C") == 2, "the client is sent two position corrections: the GM's and the net's");
+        CHECK(corrections_on(h, h.pawn_ch, from, "PlayerPawn_C") == 1, "the client is sent one position correction: the net's");
         CHECK(!h.sink.positions.empty() && near_to(h.sink.positions.back().z, on_floor), "the saved position is the floor's (a crash must not take the player back under)");
         CHECK(log.str().find("[floor-net] cyb:") != std::string::npos && log.str().find("under the floor of") != std::string::npos, "the log says who, where and whose floor");
         std::istringstream lines(log.str());
@@ -1199,47 +1236,60 @@ static void test_the_floor_net() {
             if (line.find("[floor-net] cyb: its last") != std::string::npos) std::printf("    %s\n", line.c_str());
         }
         // the client fell again at once (its floor had not streamed in yet): the net waits 3 s from the last rescue, then puts it back again
-        r = travel.teleport(to_point_z(5000, 3000, -50000), "the test");
+        CHECK(gp_drop_to(h, kTownFloor - 15000.0), "(it falls under again at once)");
         h.run(milliseconds(1500));
         CHECK(h.s->floor_net_rescues() == 1, "a player that is under again 0.1 s after a rescue is not rescued again within 3 s of it");
-        h.run(milliseconds(2000));
+        h.run(milliseconds(2500));
         CHECK(h.s->floor_net_rescues() == 2 && near_to(h.s->movement().good().z, on_floor), "...but is, once the 3 s have passed");
         // 90 m under the floor is not far enough (the pit is 50 m); 101 m is
-        travel.teleport(to_point_z(5000, 3000, kTownFloor - 9000.0), "the test");
+        CHECK(gp_drop_to(h, kTownFloor - 9000.0), "(the client falls 90 m under)");
         h.run(milliseconds(4500));
         CHECK(h.s->floor_net_rescues() == 2 && near_to(h.s->movement().good().z, kTownFloor - 9000.0), "90 m under the floor: left alone");
-        travel.teleport(to_point_z(5000, 3000, kTownFloor - 10100.0), "the test");
+        CHECK(gp_drop_to(h, kTownFloor - 10100.0), "(the client falls 101 m under)");
         h.run(milliseconds(1500));
         CHECK(h.s->floor_net_rescues() == 3 && near_to(h.s->movement().good().z, on_floor), "101 m under the floor: put back");
         // standing in the pit: the landscape's collision caught the pawn 50 m under the town (the fixture's plain, 1,000, is 50.6 m under the floor); in the air above it, or under it, it is not
         // standing on it
-        travel.teleport(to_point_z(5000, 3000, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm + 1000.0), "the test");
+        CHECK(gp_drop_to(h, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm + 1000.0), "(the client falls to 10 m over the pit)");
         h.run(milliseconds(4500));
         CHECK(h.s->floor_net_rescues() == 3 && near_to(h.s->movement().good().z, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm + 1000.0), "10 m over the pit, in the air: left alone (a fall through that height is not standing on it)");
-        travel.teleport(to_point_z(5000, 3000, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm), "the test");
+        CHECK(gp_drop_to(h, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm), "(it falls to the pit)");
         h.run(milliseconds(1500));
         CHECK(h.s->floor_net_rescues() == 4 && near_to(h.s->movement().good().z, on_floor), "standing on the baked pit 50 m under the town for a second: put back on the floor");
         CHECK(log.str().find("stands on the pit") != std::string::npos, "...and the log says it was the pit");
-        // outside every bowl: the kill plane (z -10,000) and the ground under the point
-        travel.teleport(to_point_z(5000 + 20000, 3000, -9000.0), "the test");
+        // outside every bowl: the kill plane (z -10,000) and the ground under the point.  A teleport to the plain (the hold is left first: this is the net's test)
+        GmTravel travel = make_travel(h);
+        const GmTeleportResult plain = travel.teleport(to_point(25000, 3000), "the test");
+        CHECK(plain.status == GmStatus::Ok && near_to(plain.to.z, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm, 2.0), "(a teleport to the open plain puts the player on its ground)");
+        h.run(milliseconds(100));
+        gp_leave_the_hold(h);
+        const double on_the_plain_x = h.s->movement().good().x;
+        const size_t plain_from = h.got.size();
+        CHECK(gp_drop_to(h, -9000.0), "(the client falls on the plain, above the kill plane)");
         h.run(milliseconds(4500));
         CHECK(h.s->floor_net_rescues() == 4 && near_to(h.s->movement().good().z, -9000.0), "over the open plain, above the kill plane: left alone");
-        travel.teleport(to_point_z(5000 + 20000, 3000, -20000.0), "the test");
+        CHECK(gp_drop_to(h, -20000.0), "(it falls under the kill plane)");
         h.run(milliseconds(1500));
-        CHECK(h.s->floor_net_rescues() == 5 && near_to(h.s->movement().good().z, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm + PlayerWorld::kBowlSlackCm) && near_to(h.s->movement().good().x, 25000, 0.01),
+        CHECK(h.s->floor_net_rescues() == 5 && near_to(h.s->movement().good().z, 1000.0 + PlayerWorld::kCapsuleHalfHeightCm + PlayerWorld::kBowlSlackCm) && near_to(h.s->movement().good().x, on_the_plain_x, 0.01),
               "over the open plain under the kill plane: put back on the baked ground (+ 98 + 200)");
+        CHECK(corrections_on(h, h.pawn_ch, plain_from, "PlayerPawn_C") == 1, "(one correction on the plain: the net's)");
         // a dead player is left to its respawn
-        travel.teleport(to_point_z(5000, 3000, -50000), "the test");
+        const GmTeleportResult back = travel.teleport(to_point(5000, 3000), "the test");
+        CHECK(back.status == GmStatus::Ok, "(back in the town)");
+        h.run(milliseconds(100));
+        gp_leave_the_hold(h);
+        CHECK(gp_drop_to(h, kTownFloor - 15000.0), "(it falls 150 m under the town again)");
         h.s->set_current_value(content::kGuidHealth, 0.0f);
         h.run(milliseconds(1800));
-        CHECK(h.s->dead() && h.s->floor_net_rescues() == 5 && near_to(h.s->movement().good().z, -50000), "a dead player under the town is not touched by the net (it comes back at a shrine)");
+        CHECK(h.s->dead() && h.s->floor_net_rescues() == 5 && near_to(h.s->movement().good().z, kTownFloor - 15000.0), "a dead player under the town is not touched by the net (it comes back at a shrine)");
     }
     {
         // without any platform (the file is missing) the kill plane still holds in a bowl of the interim model's
-        Harness h(cyb_on_the_ground(), a_bowl_at_5000_3000);
+        svc::Character on_the_model_floor = cyb_on_the_ground();
+        on_the_model_floor.position = {5000.0, 3000.0, kTownFloor + PlayerWorld::kCapsuleHalfHeightCm, 0.0f};
+        Harness h(on_the_model_floor, a_bowl_at_5000_3000);
         h.play();
-        GmTravel travel = make_travel(h);
-        travel.teleport(to_point_z(5000, 3000, -50000), "the test");
+        CHECK(gp_drop_to(h, kTownFloor - 30000.0), "(the client falls 300 m under the modelled town, under the kill plane)");
         h.run(milliseconds(1500));
         CHECK(h.s->floor_net_rescues() == 1 && near_to(h.s->movement().good().z, kTownFloor + PlayerWorld::kBowlSlackCm + PlayerWorld::kCapsuleHalfHeightCm), "without a platform the kill plane puts the player on the interim model's floor");
     }
@@ -1767,6 +1817,7 @@ static void test_admin_queue() {
 
 #include "gm_admin_commands_tests.inc"
 #include "gm_options_tests.inc"
+#include "ground_placement_tests.inc"
 
 int main() {
     spdlog::set_level(std::getenv("AOC_TEST_LOG") ? spdlog::level::debug : spdlog::level::off);
@@ -1807,6 +1858,20 @@ int main() {
     test_client_text_in_the_log();
     test_admin_api();
     test_admin_queue();
+    test_the_real_rows_on_the_ground();
+    test_the_real_rows_with_the_walking_map();
+    test_a_respawn_on_a_hill_and_in_a_town();
+    test_a_teleport_to_a_named_place_stands_on_the_floor();
+    test_a_teleport_into_a_building();
+    test_a_given_height_is_kept_unless_under_the_ground();
+    test_the_teleport_holds_the_client();
+    test_the_same_teleport_twice();
+    test_a_place_in_the_air_is_not_held();
+    test_the_hold_ends_by_itself();
+    test_a_walking_client_under_the_place_has_a_floor();
+    test_the_clients_gm_calls_stand_on_the_ground();
+    test_the_teleport_hold_mounted();
+    test_a_respawn_hands_over_its_place();
     g_fail += aoc_tests::run();   // every check registered in gm_admin_commands_tests.inc and gm_options_tests.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

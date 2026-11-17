@@ -15,8 +15,8 @@
 //                     profession's XP and Adventuring's, as debt removal first) and BroadcastPlayLevelUpEffects for a level; the node is Gathered in the same step [R: 1427 packet 674:
 //                     the node's done update, the pawn's clear, then the PlayerController's XPTracker maps]
 //    a cancel         the pawn's ChannelingData cleared in the same form [inferred: no capture shows a cancel]
-//    a full bag       the stacks that do not fit are not lost: an APlayerLootPile where the player stands, 100 ms after the experience frame, and a callout "Unable to loot, not
-//                     enough inventory space." (3 s) in that frame [R: 1461]
+//    a full bag       the stacks that do not fit are not lost: an ALootPile (the class the game spawns dropped items in, not a dead player's pile) where the player stands,
+//                     100 ms after the experience frame, and a callout "Unable to loot, not enough inventory space." (3 s) in that frame [R: 1461]
 //
 //  Every refusal and every cancellation is logged and counted; the first few of each kind at info.  The log lines the user's test reads start with "[gather]".
 // ============================================================================
@@ -25,6 +25,7 @@
 #include "bootstrap/constants.h"
 #include "gather/rules.h"
 #include "items/acquired.h"
+#include "session/pile_ground.h"
 #include "world/interaction_state.h"
 
 #include <spdlog/spdlog.h>
@@ -564,7 +565,7 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
         const GoodPosition at = checker_.good();
         pile.x = at.x;
         pile.y = at.y;
-        pile.z = at.z;
+        pile.z = world_ ? pile_ground(*world_, at.x, at.y, at.z) : at.z - PlayerWorld::kCapsuleHalfHeightCm;
         pile.node_name = node_name;
         gather_piles_.push_back(std::move(pile));
     }
@@ -593,6 +594,27 @@ void PlayerSession::deliver_harvest(Connection& conn, Clock::time_point now, con
 /// The client calls of gathering from resource nodes (session/rpc_table.h).
 void PlayerSession::register_gather_rpcs(RpcTable& t) {
     t.add(RpcScope::Pawn, "ServerInterruptChannel", [](PlayerSession& s, const RpcContext& c) { s.on_interrupt_channel(c.conn, c.now); });
+}
+
+double pile_ground(const PlayerWorld& world, double x, double y, double body_z) {
+    constexpr double kBelowCm = 400.0;      // how far under the feet the walking map's floor is looked for (a step down, a short drop)
+    constexpr double kLandscapeTolCm = 40.0;   // the landscape's samples are exact: a floor of the walking map this close to it is the landscape itself
+    const double feet = body_z - PlayerWorld::kCapsuleHalfHeightCm;
+    // the ground the data has at the spot: a town's floor inside a bowl (the baked landscape there is a pit under the town), else the landscape
+    const auto town = world.town_ground_at(x, y);
+    const std::optional<double> ground = town ? std::optional<double>(town->z) : world.ground_at(x, y);
+    // the walking map's floor under the feet: a slope, a bridge, a roof, a terrace, a town's street.  For feet at or over the ground a floor farther under it is a cave, a cellar or a
+    // tunnel (the walking map has one under a slope too steep to walk, where it has no polygon of the landscape's own): never the floor of a player who stands on the ground
+    double below = kBelowCm;
+    if (ground && feet >= *ground - kLandscapeTolCm) below = std::min(below, feet - (*ground - kLandscapeTolCm));
+    if (const auto floor = world.floor_under(x, y, feet, below)) {
+        if (ground && std::fabs(*floor - *ground) <= kLandscapeTolCm) return *ground;   // (the map's surface of the landscape is within about 10 cm of it: the exact height)
+        return *floor;                                                                  // a deck, a roof, a terrace, a cave the player is in
+    }
+    // the data has no floor for the feet: the ground where the body stands on it (the landscape's own height, exact), else the feet themselves, never a ground far from the
+    // player (a deck whose part of the map is not loaded, a rock the client stands on, a cave under the hill) where the pile could not be reached
+    if (ground && std::fabs(*ground - feet) <= kLandscapeTolCm) return *ground;
+    return feet;
 }
 
 }}  // namespace aoc::worldd

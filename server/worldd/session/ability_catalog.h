@@ -169,6 +169,8 @@ public:
     const stats::StatBundle& bundle() const { return *bundle_; }
 
     size_t abilities() const { return abilities_.size(); }
+    /// Every ability record by guid (a test or a support rule reads the data's own set, not a list written by hand).
+    const std::map<int64_t, AbilityDef>& all_abilities() const { return abilities_; }
     size_t effects() const { return effects_.size(); }
     /// Every effect record by guid (a test reads the data's own set, not a list written in the test).
     const std::map<int64_t, EffectDef>& all_effects() const { return effects_; }

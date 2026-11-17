@@ -1115,6 +1115,32 @@ void test_character_stats(const StatBundle& b) {
     CHECK(pc.update(with_heavy, changed, e) && changed.empty(), "a current value of -0.0 under the same maximum is no change");
 }
 
+/// The game's HealthRegeneration formula, the one a mount's Mount_Base rating feeds: the stat is the rating divided by 250, five times out of combat
+/// (the data's formula, CharacterType 1.0 to 1.15 and IsInCombat). The mount's ratings are the mount_stat values at the owner's level; the divisor this
+/// checks is the same for them.
+void test_health_regeneration_rate(const StatBundle& b) {
+    std::printf("the HealthRegeneration formula: rating / 250, five times out of combat\n");
+    const int64_t kRegen = guid_named(b, "HealthRegeneration"), kRating = guid_named(b, "HealthRegenerationRating");
+    CHECK(kRegen && kRating, "the real graph has HealthRegeneration and HealthRegenerationRating");
+    TableCatalog none_cat;
+    const std::vector<WornItem> none;
+    std::string e;
+    CharacterStats out_of_combat(b, none_cat, 2, 25);   // Bard, level 25, bare
+    CHECK(out_of_combat.start(none, e) && out_of_combat.find(kRegen) && out_of_combat.find(kRating), "(a level-25 Bard starts out of combat)");
+    if (!out_of_combat.started() || !out_of_combat.find(kRegen) || !out_of_combat.find(kRating)) return;
+    const float rating = out_of_combat.find(kRating)->value;
+    const float regen_out = out_of_combat.find(kRegen)->value;
+    std::printf("    (rating %.6f, regen out %.6f)\n", static_cast<double>(rating), static_cast<double>(regen_out));
+    CHECK(std::fabs(rating - 373.0f) < 1e-3, "its HealthRegenerationRating is 373 (the level-25 Bard's Constitution)");
+    CHECK(std::fabs(regen_out - rating / 250.0f * 5.0f) < 1e-3, "out of combat the regeneration is the rating / 250 x 5");
+    CharacterStats in_combat(b, none_cat, 2, 25);
+    in_combat.set_in_combat(true);
+    CHECK(in_combat.start(none, e) && in_combat.find(kRegen) && in_combat.find(kRating), "(the same Bard in combat)");
+    if (!in_combat.find(kRegen) || !in_combat.find(kRating)) return;
+    CHECK(std::fabs(in_combat.find(kRegen)->value - rating / 250.0f) < 1e-3, "in combat it is the rating / 250");
+    CHECK(std::fabs(in_combat.find(kRating)->value - rating) < 1e-6, "...and the rating itself does not move");
+}
+
 /// A worn item whose stat is clamped (Hook_Rate's maximum is 100) and whose contribution is more than any float32: the clamp keeps the VALUE finite,
 /// so the fault must come from the equipment's sum, which the client is sent too (a bucket stat). Nothing that is not a finite float32 may reach
 /// the character's stats.
@@ -1259,6 +1285,7 @@ int main() {
     }
     test_gear_rules();
     if (bundles.count("main")) test_character_stats(bundles["main"]);
+    if (bundles.count("main")) test_health_regeneration_rate(bundles["main"]);
     if (bundles.count("main")) test_equipment_beyond_a_float(bundles["main"], bundles.count("main_double") ? &bundles["main_double"] : nullptr);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

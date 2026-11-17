@@ -259,7 +259,8 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 	// the recipes
 	rewardWanted := map[int64]bool{}
 	nInputs, nFuel := 0, 0
-	inputTags := map[string]bool{} // the tags that name a recipe input, alone or with others (lower case): craft_tag_item answers for each
+	inputTags := map[string]bool{}   // the tags that name a recipe input, alone or with others (lower case): craft_tag_item answers for each
+	inputFilters := map[int64]bool{} // the gather-item filters that name a recipe input: craft_filter_item answers for each (version 47)
 	for _, r := range src.rows["CraftingRecipeDefRecordBase"] {
 		f := newFields(fmt.Sprintf("CraftingRecipe %s (%d)", r.Name, r.Guid), r.Fields)
 		prof, _ := f.id("ProfessionId")
@@ -325,6 +326,9 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 					inputTags[strings.ToLower(strings.TrimSpace(t))] = true
 				}
 			}
+			if filter != 0 {
+				inputFilters[filter] = true
+			}
 			if err := w.exec(`INSERT INTO craft_recipe_input (recipe_guid, kind, ord, item_guid, filter_guid, tags, quantity, min_rarity, consume) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				r.Guid, "general", i, item, filter, strings.Join(tags, ","), qty, minRarity, b2i(consume)); err != nil {
 				return err
@@ -350,6 +354,44 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 		}
 		if err := writeCraftPreds(w, "recipe", r.Guid, f.where, preds); err != nil {
 			return err
+		}
+	}
+
+	// the items of each gather-item filter a recipe input names (version 47): the client shows the filter's list as the input's allowed materials and sends the pick in a tag
+	// selection, and the server checks each pick against these items, not against the wider tag (45 plants carry Item.Resource.Raw.Plant and 22 are in ALL_Raw_Plants_Any).
+	// A filter whose record lists no item (30 of the 51 the real recipes name: the trade and construction crates' own, the gatherers' fish, plants and ore, the processed goods
+	// of each profession; none of them carries a tag query) gets no row: the input's own tags name its materials, and the server falls back on them.
+	filterGuids := make([]int64, 0, len(inputFilters))
+	for g := range inputFilters {
+		filterGuids = append(filterGuids, g)
+	}
+	sort.Slice(filterGuids, func(i, j int) bool { return filterGuids[i] < filterGuids[j] })
+	filterRows := byGuid(src.rows["GatherItemFilterRecordBase"])
+	filterItems, filtersListed := 0, 0
+	for _, g := range filterGuids {
+		r, ok := filterRows[g]
+		if !ok {
+			opt.logf("warning: a recipe input names the gather-item filter %d, which is no row: skipped", g)
+			continue
+		}
+		f := newFields(fmt.Sprintf("GatherItemFilter %s (%d)", r.Name, r.Guid), r.Fields)
+		items := f.ids("ItemsIds")
+		if f.err != nil {
+			return f.err
+		}
+		seen := map[int64]bool{}
+		for _, item := range items {
+			if item == 0 || seen[item] {
+				continue
+			}
+			seen[item] = true
+			if err := w.exec(`INSERT INTO craft_filter_item (filter_guid, item_guid) VALUES (?, ?)`, g, item); err != nil {
+				return err
+			}
+			filterItems++
+		}
+		if len(seen) > 0 {
+			filtersListed++
 		}
 	}
 
@@ -475,11 +517,14 @@ func buildCrafting(w *writer, src *source, opt *Options, meta map[string]string)
 		}
 	}
 
-	opt.logf("crafting: %d station definitions, %d assets linked to a station, %d recipes with %d inputs (%d need fuel), %d reward tables (%d missing), %d item/tag pairs for %d tags, %d equipped effects of items", len(defs), linked,
-		len(src.rows["CraftingRecipeDefRecordBase"]), nInputs, nFuel, len(written)-missing, missing, tagItems, len(wantedTags), equippedEffects)
+	opt.logf("crafting: %d station definitions, %d assets linked to a station, %d recipes with %d inputs (%d need fuel), %d reward tables (%d missing), %d item/tag pairs for %d tags, %d filter item rows for %d of the %d filters the recipe inputs name, %d equipped effects of items",
+		len(defs), linked, len(src.rows["CraftingRecipeDefRecordBase"]), nInputs, nFuel, len(written)-missing, missing, tagItems, len(wantedTags), filterItems, filtersListed, len(filterGuids), equippedEffects)
 	meta["crafting.stations"] = strconv.Itoa(len(defs))
 	meta["crafting.recipes"] = strconv.Itoa(len(src.rows["CraftingRecipeDefRecordBase"]))
 	meta["crafting.tag_items"] = strconv.Itoa(tagItems)
+	meta["crafting.filter_items"] = strconv.Itoa(filterItems)
+	meta["crafting.filters"] = strconv.Itoa(len(filterGuids))
+	meta["crafting.filters_listed"] = strconv.Itoa(filtersListed)
 	meta["crafting.equipped_effects"] = strconv.Itoa(equippedEffects)
 	return nil
 }

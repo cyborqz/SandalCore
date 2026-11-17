@@ -129,27 +129,14 @@ AOC_REGISTER_TEST(test_forged_scatter_shot);
 
 // ---- a cast bar the client ends ---------------------------------------------------------------------------------------------------------------------
 // A cast opens the lingering zones its ability owns (the Bard's dances do) as it starts. When the client ends a cast bar before its end nothing is paid and nothing fires, and the zones the cast
-// opened end with it (before this they stayed open for their whole life with no cast behind them). No ability with a cast bar owns a zone in the data today (a Cleric's Chains of Restraint opens
-// its zone with a hit), so the check gives the Mage's Magma Field the two zones its record lists, for the length of the check, and puts them back.
-struct ForgedOwnZones {
-    abilities::AbilityDef* def = nullptr;
-    std::vector<int64_t>   before;
-    ForgedOwnZones(const abilities::AbilityDef* ability, std::vector<int64_t> zones) : def(const_cast<abilities::AbilityDef*>(ability)) {
-        if (!def) return;
-        before = def->zones;
-        def->zones = std::move(zones);
-    }
-    ~ForgedOwnZones() {
-        if (def) def->zones = before;
-    }
-};
+// opened end with it (before this they stayed open for their whole life with no cast behind them). The Mage's Magma Field has a cast bar and opens its field with the cast: the field its talents
+// pick (each of its three spawn hits asks for its own), so the check is of a Mage who bought both talents, whose cast opens the Pyromania and the Wildfire field.
 void test_forged_cast_bar_zone(Fixture&) {
     std::printf("a cast bar the client ends takes its zone with it\n");
-    Rig rig(8, 25, {});
+    Rig rig(8, 25, {"Mage_Passive_MagmaField_Pyromania", "Mage_Passive_MagmaField_Wildfire"});
     CHECKF(rig.ok(), "the rig: %s", rig.problem.c_str());
     if (!rig.ok()) return;
     rig.know({"Mage_MagmaField"});
-    const ForgedOwnZones zones(rig.catalog->ability_named("Mage_MagmaField"), {6064631404175951226ll, 6064631522804306548ll});   // (the Pyromania and the Wildfire field)
     constexpr double t0 = 1.0;
     const Refusal refusal = rig.trigger("Mage_MagmaField", t0, false);
     CHECKF(refusal == Refusal::None, "Magma Field is cast (%s)", refusal_name(refusal));

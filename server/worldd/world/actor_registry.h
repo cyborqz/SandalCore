@@ -53,7 +53,7 @@ enum class ActorKind : uint8_t {
     Npc,         // ANPCCharacter: a creature, a villager, a vendor, a service building
     Gatherable,  // AGatherableActor: a resource node (visible only in stage 1)
     Effect,      // a player's lingering zone (AAoCAbilityLingeringEffect), D2's dance effect
-    Pile,        // a dead player's loot pile (APlayerLootPile; plan E1, stage 3, part 2)
+    Pile,        // a loot pile: a dead player's (APlayerLootPile; plan E1, stage 3, part 2) or the items that fell out of a full bag (ALootPile)
     Mount,       // a summoned mount (the mounts milestone, stage 2): an ANPCCharacter-layout actor with an owner, never dormant
     NodeLayout,  // a town's ANodeLayoutReplicator (Nodes 1, stage 3a): the scenery of a city node, awake within 1.45 km, never dormant
     Foliage,     // a foliage cell's AIntrepidStateIFA (Gathering stage 3, "Foliage gathering"): which instances of the cell are cut or growing; opened as a snapshot, never awake

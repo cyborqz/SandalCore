@@ -209,7 +209,8 @@ CREATE TABLE ab_zone (
     speed       REAL NOT NULL,
     expire_after_hits_expr INTEGER NOT NULL,
     expire_if_expr         INTEGER NOT NULL,
-    targeting_guid         INTEGER NOT NULL   -- LingeringHitTargetingInfoId
+    targeting_guid         INTEGER NOT NULL,  -- LingeringHitTargetingInfoId (the volume's record: ab_targeting_def)
+    spawn                  TEXT NOT NULL     -- contentc version 44: the spawn transform, attachment, actor class and fade time, as JSON
 );
 -- role: the zone's list the hit is in: InitialHitsIds, LingeringHitsIds (every tick), OnBeginOverlapHitsIds, OnEndOverlapHitsIds, EndHitsIds.
 CREATE TABLE ab_zone_hit (
