@@ -128,31 +128,54 @@ void test_forged_scatter_shot(Fixture& f) {
 AOC_REGISTER_TEST(test_forged_scatter_shot);
 
 // ---- a cast bar the client ends ---------------------------------------------------------------------------------------------------------------------
-// A cast opens the lingering zones its ability owns (the Bard's dances do) as it starts. When the client ends a cast bar before its end nothing is paid and nothing fires, and the zones the cast
-// opened end with it (before this they stayed open for their whole life with no cast behind them). The Mage's Magma Field has a cast bar and opens its field with the cast: the field its talents
-// pick (each of its three spawn hits asks for its own), so the check is of a Mage who bought both talents, whose cast opens the Pyromania and the Wildfire field.
+// A cast opens the lingering zones its ability owns as it starts (the Bard's dances and the Cleric's Chains of Restraint do). When the client ends a cast bar before its end nothing is paid and
+// nothing fires, and the zones the cast opened end with it (before this they stayed open for their whole life with no cast behind them). The Mage's Magma Field is the other way round: its
+// field comes with the end of its bar, so a bar the client ends opens none (the field its talents pick: each of its three spawn hits asks for its own, so the Mage who bought both talents
+// would open the Pyromania and the Wildfire field).
 void test_forged_cast_bar_zone(Fixture&) {
     std::printf("a cast bar the client ends takes its zone with it\n");
-    Rig rig(8, 25, {"Mage_Passive_MagmaField_Pyromania", "Mage_Passive_MagmaField_Wildfire"});
-    CHECKF(rig.ok(), "the rig: %s", rig.problem.c_str());
-    if (!rig.ok()) return;
-    rig.know({"Mage_MagmaField"});
     constexpr double t0 = 1.0;
-    const Refusal refusal = rig.trigger("Mage_MagmaField", t0, false);
-    CHECKF(refusal == Refusal::None, "Magma Field is cast (%s)", refusal_name(refusal));
-    rig.run_to(t0 + 0.5);
-    int64_t instance = -1;
-    for (const auto& [key, item] : rig.pawn.abilities) {
-        if (item.ability_guid == rig.ability("Mage_MagmaField")) instance = key;
+    {
+        Rig rig(3, 25, {});   // a Cleric
+        CHECKF(rig.ok(), "the rig: %s", rig.problem.c_str());
+        if (!rig.ok()) return;
+        rig.know({"Cleric_ChainsOfRestraint"});
+        const Refusal refusal = rig.trigger("Cleric_ChainsOfRestraint", t0, false);
+        CHECKF(refusal == Refusal::None, "the Chains of Restraint are cast (%s)", refusal_name(refusal));
+        rig.run_to(t0 + 0.5);
+        int64_t instance = -1;
+        for (const auto& [key, item] : rig.pawn.abilities) {
+            if (item.ability_guid == rig.ability("Cleric_ChainsOfRestraint")) instance = key;
+        }
+        CHECKF(instance >= 0 && forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open) == 1, "the cast bar is under way: its item is on the pawn and its zone has opened (%zu opened)",
+               forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open));
+        if (instance < 0) return;
+        CHECK(rig.pipe->end_request(static_cast<int32_t>(instance), t0 + 0.6), "the client ends the instance before its bar is over");
+        rig.run_to(t0 + 3.0);
+        CHECKF(forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Fade) == 1 && forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Close) == 1,
+               "the zone fades out and closes with the cancelled cast, 2.4 s on (%zu faded, %zu closed)", forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Fade), forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Close));
+        CHECK(rig.pawn.broken.empty(), "(the pawn took every change)");
     }
-    CHECKF(instance >= 0 && forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open) == 2, "the cast bar is under way: its item is on the pawn and its two zones have opened (%zu opened)",
-           forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open));
-    if (instance < 0) return;
-    CHECK(rig.pipe->end_request(static_cast<int32_t>(instance), t0 + 0.6), "the client ends the instance before its bar is over");
-    rig.run_to(t0 + 3.0);
-    CHECKF(forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Fade) == 2 && forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Close) == 2,
-           "both zones fade out and close with the cancelled cast, 2.4 s on (%zu faded, %zu closed)", forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Fade), forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Close));
-    CHECK(rig.pawn.broken.empty(), "(the pawn took every change)");
+    {
+        Rig rig(8, 25, {"Mage_Passive_MagmaField_Pyromania", "Mage_Passive_MagmaField_Wildfire"});
+        CHECKF(rig.ok(), "the Mage's rig: %s", rig.problem.c_str());
+        if (!rig.ok()) return;
+        rig.know({"Mage_MagmaField"});
+        const Refusal refusal = rig.trigger("Mage_MagmaField", t0, false);
+        CHECKF(refusal == Refusal::None, "Magma Field is cast (%s)", refusal_name(refusal));
+        rig.run_to(t0 + 0.5);
+        int64_t instance = -1;
+        for (const auto& [key, item] : rig.pawn.abilities) {
+            if (item.ability_guid == rig.ability("Mage_MagmaField")) instance = key;
+        }
+        CHECKF(instance >= 0 && forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open) == 0, "the cast bar is under way: its item is on the pawn and no field has opened (%zu opened)",
+               forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open));
+        if (instance < 0) return;
+        CHECK(rig.pipe->end_request(static_cast<int32_t>(instance), t0 + 0.6), "the client ends the instance before its bar is over");
+        rig.run_to(t0 + 5.0);
+        CHECKF(forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open) == 0, "the cancelled cast opens no field, not even at the deadline (%zu opened)", forged_zone_ops(rig, bootstrap::ZoneOp::Kind::Open));
+        CHECK(rig.pawn.broken.empty(), "(the pawn took every change)");
+    }
 }
 AOC_REGISTER_TEST(test_forged_cast_bar_zone);
 

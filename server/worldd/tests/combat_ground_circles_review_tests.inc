@@ -286,7 +286,7 @@ void test_ground_circles_the_magma_field_opens_the_field_its_talent_picks(Fixtur
         if (!rig.ok()) continue;
         rig.know({"Mage_MagmaField"});
         const Refusal refusal = rig.trigger("Mage_MagmaField", 1.0, false);
-        rig.run_to(4.0);
+        rig.run_to(5.0);   // (the field opens with the bar's end: no request comes, so at its deadline, 4.3 s)
         const std::vector<std::string> opened = ground::opened_zones(rig);
         CHECKF(refusal == Refusal::None && opened == v.zones, "a Mage with %s opens %s only (cast: %s; %zu zone(s) opened, the first %s)", v.what, v.zones[0].c_str(), refusal_name(refusal),
                opened.size(), opened.empty() ? "none" : opened[0].c_str());

@@ -608,13 +608,20 @@ void PlayerSession::on_ability_end(Connection& conn, const repl::ClientRpc& rpc,
 void PlayerSession::on_hit_request(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
     AbilityRuntime* runtime = ability_runtime(now);
     if (!runtime || !pipeline_) return;
+    // The client asks the same hit again and again while a channel burns (the recorded Prismatic Beam: 566 requests of its Arcane Mana in three seconds, about 190 a second, against the 40 a
+    // second the budget refills). A request the cast has used up is dropped and counted but takes no token: the flood would empty the budget and the beam's real tick requests would go with it.
+    decltype(repl::parse_hit_request(rpc.call)) req;
+    if (!dead_) req = repl::parse_hit_request(rpc.call);
+    if (req && pipeline_->hit_request_spent(req->ability_guid, req->hit_guid, ability_seconds(now))) {
+        ++hit_dropped_;
+        return;
+    }
     if (!within_budget(hit_budget_, "RequestHitVerification_Server", now)) {
         ++hit_dropped_;
         return;
     }
     ++hit_requests_;
     if (dead_) return;
-    const auto req = repl::parse_hit_request(rpc.call);
     if (!req) {
         if (++hit_unreadable_logged_ <= kLoggedPerKind) spdlog::warn("[session] {}: a RequestHitVerification_Server does not read ({} parameter bits): ignored", name(), rpc.call.param_bits);
         return;

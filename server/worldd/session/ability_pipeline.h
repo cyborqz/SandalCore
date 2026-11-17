@@ -333,7 +333,13 @@ public:
     /// A consumable's ability item, cost and stack removal come in one packet this long after the use [R: the retail captures of a food, an elixir and four scrolls:
     /// 54-113 ms, median about 65].
     static constexpr double kItemCastDelay = 0.065;
-    static constexpr int    kMaxRequestsPerHit = 8;
+    /// The most requests one hit takes in a cast: a channel's tick is asked for as long as it is held (the recorded beam asks ten of its tick in three
+    /// seconds, the Blizzard's nine-second channel ten), and a forged client is held to the same count.
+    static constexpr int    kMaxRequestsPerHit = 16;
+    /// How long past a held channel's own end its last tick's request is still taken: the client's tick at the montage's clear comes at the end.
+    static constexpr double kChannelRequestSlack = 0.5;
+    /// How much longer than the recorded one a held channel may run on a client that plays its montage slower (1.13 to 1.4 times in the casts seen).
+    static constexpr double kChannelSlowest = 1.5;
     /// The bursts of projectiles the Bard's Saga sends at its allies in one cast: the Return to Verra's three (its first launcher hit once, its second twice)
     /// [R: the recorded cast's three requests]; a further request for a launcher hit sends none.
     static constexpr int    kSagaBursts = 3;
@@ -504,6 +510,9 @@ public:
     static const char* verdict_name(HitVerdict v);
     /// `targets`: the actors other than the caster's own that the components name (an NPC's ObjectId), as the session resolved them.
     HitVerdict hit_request(int64_t ability, int64_t targeting_guid, int64_t hit_guid, size_t components, size_t own, double now, const std::vector<uint64_t>& targets = {});
+    /// Whether a request for `hit_guid` of `ability` is one the cast has used up: the hit's count is reached, or the request comes within the gap of the last one taken. hit_request
+    /// answers it TooMany, so the session spends none of its request budget on it (the client of a Prismatic Beam asks one of its self hits about every frame).
+    bool hit_request_spent(int64_t ability, int64_t hit_guid, double now) const;
 
     /// Plan E1, stage 3, part 2: the character died (or came back): a dead character casts nothing (every trigger is refused, Refusal::Dead), the casts waiting
     /// are dropped (a consumable's cast that had not paid its cost takes the hit requests it holds with it: its item stays in the bag), nothing regenerates and the
@@ -814,6 +823,8 @@ private:
         float                                 branch_position = 0;        // where that section starts
         bool                                  branch_predicted = true;    // the client took the branch itself (its cast bar); false when the server decided it
         bool                                  by_server = false;          // the server began the cast (an emote): its item is not one the client predicted
+        bool                                  channel = false;            // a held channel (the data's Smart held behavior, the Blizzard): the client asks its ticks while the key is down
+        std::optional<double>                 cast_seconds;               // the record's DynamicCastDuration, the time the client's cast bar shows (none: the montage's)
         std::optional<double>                 branch_due, end_due;
         struct Missile {
             double   due = 0;
@@ -930,6 +941,7 @@ private:
         uint64_t anchor = 0;           // the actor the place is taken from at the open (0: the caster, or the hit's target)
         bool    attached = true;       // the actor is attached to the caster's mesh
         bool    visible = true;        // false: the zone runs on the server only (its circle is the client's own effect, not a zone actor)
+        bool    with_cost = false;     // opens with the cost step of its cast's bar (the Magma Field's): the client's request for the bar's end moves it (bring_sooner)
         /// The volume and the ticks: the zone record's life, its tick rate and its role hits (what they reach is the hit's own mask).
         content::ZoneVolume volume;
         double  tick = 0;              // seconds between ticks (0: the zone lands no tick, only its overlap and end hits)
@@ -1064,6 +1076,7 @@ void   step_multi_hit(Cast& cast, double t);
     /// A held cast goes on: its jump comes at `branch_at`, its cost `cost_after` later and its end after that; its record of hit requests follows.
     void   reschedule_branch(Cast& cast, double branch_at, double cost_after);
     void   abort_cast(size_t index, double t, const char* why, bool give_back = false);   // a cast that ends here: none of its steps happens, its item keeps its place with the montage cleared; `give_back`: what it had paid comes back (refund)
+    void   end_channel(Cast& cast, double t, const char* why);   // a held channel's ticks stop (its key went up, or another ability took its place); its cast runs to its recorded end
     void   end_zones_of(const Cast& cast, double t);              // the zones a cast made go with it: one that did not open is dropped, one that did ends now
     bool   in_cast_bar(const Cast& cast) const;                   // the cast's bar is running: the client's request for its branch has not come (a held cast's key is still down, its charge not full), or a summon has not run out
     void   refund(bootstrap::AbilityChange& c, Cast& cast);   // what a cast paid comes back (a Dodge or the client's own end in its bar): its stat costs, its effect stacks, its charge (the cooldown ends when every charge is back) and the class resource it gave
@@ -1187,7 +1200,7 @@ void   step_multi_hit(Cast& cast, double t);
     void   run_effect_hits(bootstrap::AbilityChange& c, const EffectInst& e, const char* const* phases, size_t n, double t);
     void   step_loop(Cast& cast, double t);
     /// The zones of a cast's ability, spawned at its cost step; the caster's overlap hits are applied by the caller with `zone_owner_` set.
-    void   spawn_zones(const Cast& cast, double open_at, double end_at);
+    void   spawn_zones(const Cast& cast, double open_at, double end_at, bool with_cost = false);
     /// The zones a cast opens: the ones its ability lists that no hit of it names (the dances), and the ones its own hits name when one of those hits holds for the caster
     /// (the Magma Field's three zones are told apart by the talent each spawn hit asks for).
     std::vector<int64_t> zones_of_cast(const abilities::AbilityDef& def);
@@ -1216,6 +1229,8 @@ void   step_multi_hit(Cast& cast, double t);
     void   end_zone(int64_t zone_id, double t, bool end_hits, const std::string& note);
     /// The effects a zone's hits put on others (infinite ones) end: `leavers` only (the actors that left it), or every one when `leavers` is null.
     void   release_zone_effects(int64_t zone_id, const std::vector<uint64_t>* leavers, double t);
+    /// The infinite effects a zone's hits put on the caster go when he steps out of it: its Expire and End hits run, while the zone still stands.
+    void   release_zone_owner_effects(int64_t zone_id, double t);
     /// The oldest zone goes at once when too many are alive: its effects end and its actor closes.
     void   drop_zone(size_t index, double t);
     /// The zones a hit spawns when it lands (its LingeringZonesIds), at the actor it landed on; a zone the ability itself already opens with its cast (listed, or named by its own
@@ -1277,6 +1292,8 @@ void   step_multi_hit(Cast& cast, double t);
     /// The caster's evaluation, made when it is not (the same one `eval` uses).
     bool   ensure_evaluation(std::string& why);
     double slot_due(const CastRecord& rec, const HitSlot& s) const;
+    /// A request for a hit (its slot, or none) the cast has used up: its count is reached, or it comes within the record's gap of the last one taken.
+    bool   request_spent(const CastRecord& rec, const HitSlot* slot, int64_t hit_guid, double now) const;
     double record_reference(const CastRecord& rec) const { return rec.cost_at >= 0 ? rec.cost_at : rec.cost_due; }
     void   prune_records(double t);
     void   sync_shields(bootstrap::AbilityChange& c);

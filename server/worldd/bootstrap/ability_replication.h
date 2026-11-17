@@ -78,6 +78,7 @@ struct ActiveAbilityItem {
     uint64_t    montage_guid = 0;         // the montage's static NetGUID: the table's where it has one, else the id the server computes for an emote (0: none)
     std::string montage_group = "DefaultGroup";   // MontageGroup: the Rest's and the Dodge's are "DefaultGroup", the Sprint's "Sprint"
     float       play_rate = 1.0f;         // PlayRate: the character's animation speed for an ability whose speed stat is known (other clients play the montage at it), else 1
+    float       cast_duration = 0;        // ReplicatedProgressInfo.CastDuration: the record's DynamicCastDuration (0: the client reads the montage's time)
     float       montage_position = 0;
     bool        may_jump_to_position = false;
     bool        branch_predicted = true;   // bBranchPredictedOnAutonomous: the client took the branch itself (its cast bar); false for a branch the server decided (a loop's end)

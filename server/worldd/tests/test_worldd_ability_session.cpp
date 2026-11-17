@@ -2042,6 +2042,28 @@ static void test_d2_held_cancel() {
     r.play(0.5, false);
     CHECK(r.m.end_ids().size() == ends && !r.h.s->abilities_failed() && r.m.unreadable == 0, "a cancel again and a cancel of an unknown id change nothing");
 }
+
+/// The client of a channel asks one of its self hits about every frame (the recorded Prismatic Beam: 566 requests of its Arcane Mana in three seconds, against the 40 a second the budget
+/// refills): a request the cast has used up is dropped and counted but takes no token, so the flood does not empty the budget and the request that matters, the beam's tick, is still read.
+static void test_d2_hit_flood_spares_the_budget() {
+    std::printf("D2: a flood of one used-up hit leaves the request budget to the beam's tick\n");
+    constexpr int64_t kBeam = 6064631449182011444ll, kArcaneMana = 6064631449460344006ll, kRecurse = 6064631517291282630ll;   // Mage_PrismaticBeam and two of its hits
+    const svc::Character rec = class25(8, "Mage", 17750);
+    Run r(0, true, &rec);
+    r.play(0.5, true);
+    const bs::PlayerSetup& setup = r.h.s->bootstrap().setup();
+    r.h.s->teach_ability(kBeam);
+    r.trigger(kBeam);
+    r.play(0.6, false);
+    CHECK(r.h.s->pipeline() != nullptr && r.h.s->pipeline()->handles(kBeam), "the Mage casts the Prismatic Beam");
+    const size_t read_before = r.h.s->hit_requests(), dropped_before = r.h.s->hit_requests_dropped();
+    for (int i = 0; i < 200; ++i) r.send_reliable(hit_request_bunch(setup, kBeam, kTargetingSelf, kArcaneMana, i % 2 == 0));   // (fewer than the 255 reliable bunches in flight the channel takes)
+    r.send_reliable(hit_request_bunch(setup, kBeam, kTargetingSelf, kRecurse));
+    const size_t read = r.h.s->hit_requests() - read_before, dropped = r.h.s->hit_requests_dropped() - dropped_before;
+    CHECK(dropped >= 190, "the flood's repeats are dropped and counted (200 asked, all but the first repeats)");
+    CHECK(read == 2, "and only the flood's first request and the beam's tick were read: the flood took no more of the budget than that");
+    CHECK(!r.h.s->abilities_failed(), "(the session is fine after the flood)");
+}
 // C-O-A.C_Y_B
 
 /// ServerEndAbility: the client ends an instance it was given; 259 ms later the item's montage is cleared and the client's instance is ended.
@@ -4817,6 +4839,7 @@ int main() {
         test_d2_floating_numbers();
         test_d2_shielding();
         test_d2_hit_hostile();
+        test_d2_hit_flood_spares_the_budget();
         test_d2_hostile();
         test_d2_song();
         test_d2_held_cancel();

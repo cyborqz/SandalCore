@@ -688,7 +688,7 @@ void test_ground_circles_a_zone_confirms_only_the_hits_that_show_something(Fixtu
         const ground::Cast cast = ground::cast_zone(m.rig, "Mage_MagmaField", t0, combat::Vec3{300, 0, 1000});
         CHECKF(cast.cast, "the Magma Field is cast at the ground under the Wolf");
         if (!cast.cast) return;
-        ground::run(m.rig, m.world, t0, t0 + 2.5);
+        ground::run(m.rig, m.world, t0, t0 + 4.5);   // (no request for the bar's end comes: the cast goes on at its deadline, 3.3 s, and the field opens with it)
         CHECKF(ground::zone_hits(m.rig, damage->row.guid).size() >= 1, "the field's damage hit is confirmed (%zu)", ground::zone_hits(m.rig, damage->row.guid).size());
         CHECKF(ground::zone_hits(m.rig, burning->row.guid).empty(), "the Burning hit's only stat mods are the status' own: no confirmation (%zu)", ground::zone_hits(m.rig, burning->row.guid).size());
         CHECKF(m.world.effect_stacks(wolf, burning_stat->row.guid) >= 1, "...and the Wolf still burns (%d stack)", m.world.effect_stacks(wolf, burning_stat->row.guid));

@@ -2600,9 +2600,9 @@ void AbilityPipeline::set_dead(bool dead) {
             }
             if (!flying || c.missiles.empty()) casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
         }
-        // a consumable's cast that had not paid its cost is over with the death and takes nothing from the bag (the session lets its item go): the hit the client asked for
-        // before the death must not give the buff of an item that stays where it was
-        records_.erase(std::remove_if(records_.begin(), records_.end(), [](const CastRecord& r) { return r.item_cast && r.cost_at < 0; }), records_.end());
+        // a dead caster fires nothing: the hits the client asked for before the death are dropped, and a later one finds no cast (a consumable's
+        // cast that had not paid its cost takes nothing from the bag: its item stays where it was)
+        records_.clear();
         // the zones go with their caster, as everything a player put on the creatures does when he dies (the world drops it at once) and a dead caster fires nothing: a zone that has not
         // opened never does, and one that is open ends now with no End hits (its actor fades out and closes as at the end of its life, the effects it put on others and on him go)
         for (size_t i = zones_.size(); i-- > 0;) {
@@ -3168,7 +3168,6 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
         if (h && h->row.name == c->shot->ask) anchor_shot(*c, now_);
     }
     if (!rec->reach.count(hit_guid)) return HitVerdict::NotItsHit;
-    const int max_requests = rec->max_requests;
     HitSlot* slot = nullptr;
     for (HitSlot& s : rec->slots) {
         if (s.hit->row.guid == hit_guid) slot = &s;
@@ -3178,7 +3177,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
         if (targeting_guid == content::kTargetingDefaultSelf) return HitVerdict::Quiet;
         const auto [it, fresh] = rec->asked.try_emplace(hit_guid, std::make_pair(0, -1e9));
         (void)fresh;
-        if (it->second.first >= max_requests || now - it->second.second < rec->min_gap) return HitVerdict::TooMany;
+        if (request_spent(*rec, nullptr, hit_guid, now)) return HitVerdict::TooMany;
         ++it->second.first;
         it->second.second = now;
         return HitVerdict::Unsupported;
@@ -3198,7 +3197,7 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
         }
         return HitVerdict::Quiet;
     }
-    if (slot->requests >= (slot->max_requests >= 0 ? slot->max_requests : max_requests) || now - slot->last_request < rec->min_gap) return HitVerdict::TooMany;
+    if (request_spent(*rec, slot, hit_guid, now)) return HitVerdict::TooMany;
     ++slot->requests;
     slot->last_request = now;
     const bool found = own > 0 && slot->reaches;
@@ -3215,6 +3214,30 @@ AbilityPipeline::HitVerdict AbilityPipeline::hit_request(int64_t ability, int64_
     const double at = std::max(now + kConfirmDelay, record_reference(*rec) + rec->hit_delay);
     slot->due.push_back({at, found, others, now, targeting_guid});
     return (found || !others.empty()) ? HitVerdict::Scheduled : HitVerdict::Empty;
+}
+
+bool AbilityPipeline::request_spent(const CastRecord& rec, const HitSlot* slot, int64_t hit_guid, double now) const {
+    if (slot) return slot->requests >= (slot->max_requests >= 0 ? slot->max_requests : rec.max_requests) || now - slot->last_request < rec.min_gap;
+    const auto it = rec.asked.find(hit_guid);
+    return it != rec.asked.end() && (it->second.first >= rec.max_requests || now - it->second.second < rec.min_gap);
+}
+
+bool AbilityPipeline::hit_request_spent(int64_t ability, int64_t hit_guid, double now) const {
+    // the cast hit_request would pick: the newest of the ability whose window is open
+    const CastRecord* rec = nullptr;
+    for (auto it = records_.rbegin(); it != records_.rend(); ++it) {
+        if (it->ability == ability && now <= it->window_end) {
+            rec = &*it;
+            break;
+        }
+    }
+    if (!rec || !rec->reach.count(hit_guid)) return false;   // (no open cast, or a hit that is none of its: the pipeline answers that, and it costs budget)
+    const HitSlot* slot = nullptr;
+    for (const HitSlot& s : rec->slots) {
+        if (s.hit->row.guid == hit_guid) slot = &s;
+    }
+    if (slot && (slot->server_self_use || slot->server_multi)) return false;   // (those are answered Quiet and counted nowhere)
+    return request_spent(*rec, slot, hit_guid, now);
 }
 
 void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool response, bool found, const std::vector<uint64_t>& targets, double asked, int64_t targeting) {
@@ -3327,6 +3350,10 @@ bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held
     advance(now);
     cancel_timed(client_instance_id, now);
     release_held(client_instance_id, now_);
+    // a held channel's key went up: its ticks stop (the client ends the channel itself, so no ClientEndAbility is sent)
+    for (Cast& cast : casts_) {
+        if (cast.client_id == client_instance_id) end_channel(cast, now_, "the key of the held ability went up");
+    }
     // a cast that a talent made a held one (Scatter Shot with Concentrated) goes on from the key's release [R: 99 and 121 ms later the montage jumped]
     for (Cast& cast : casts_) {
         if (cast.client_id != client_instance_id || !cast.held || cast.charged || !cast.branched || !cast.branch_due) continue;
@@ -3390,6 +3417,22 @@ void AbilityPipeline::bring_sooner(Cast& cast, double earlier) {
         rec->cost_due += earlier;
         rec->window_end += earlier;
     }
+    if (!cost_first) {   // (a field that opens with the cost step, the Magma Field's, comes with it)
+        for (Zone& z : zones_) {
+            if (z.client_id != cast.client_id || z.ability != cast.def->row.guid || z.state != Zone::State::Pending || !z.with_cost) continue;
+            z.open_at += earlier;
+            z.end_at += earlier;
+        }
+    }
+}
+
+// A held channel ends (its key went up, or another ability took its place): its ticks stop, but its record still takes the hit the client asks as the channel ends (the Blizzard's freeze) for
+// kChannelRequestSlack more. The cast itself runs to its recorded end, where its montage is cleared, as it did before; its cost is paid and stays.
+void AbilityPipeline::end_channel(Cast& cast, double t, const char* why) {
+    if (!cast.channel) return;
+    cast.channel = false;   // (a second release or press has nothing left to end)
+    spdlog::info("[abilities] {} {:.3f} s after the trigger: {}: its ticks stop", cast.def->row.name, t - cast.trigger_at, why);
+    if (CastRecord* rec = record_of(cast.client_id)) rec->window_end = std::min(rec->window_end, t + kChannelRequestSlack);
 }
 
 void AbilityPipeline::abort_cast(size_t index, double t, const char* why, bool give_back) {
@@ -3981,6 +4024,18 @@ int32_t AbilityPipeline::emote_montage_index(const AbilityDef& def, int32_t fall
     return first;
 }
 
+// A held channel: the data's Smart held behavior and no held animation. The client asks its tick hits while the key is down (the Blizzard); the
+// Sprint, Reflect and the Whirlwind hold an animation and have their own loops, and a caster's other channels are cast bars.
+bool is_held_channel(const content::AbilityRow& row) {
+    return row.held_behavior.find("Smart") != std::string::npos && !row.hold_animation;
+}
+
+// A ground field that opens with the end of its cast bar, not with its start: the Magma Field's talent says "upon cast completion", and the recorded field's first damage came with the
+// cost step, 1,378 ms after the trigger (the bar's request at 1,277 ms). The other ground casts keep opening with the cast (the recordings open the Chains' and the Vine Field's actors with it).
+bool zone_follows_bar(const std::string& ability) {
+    return ability == "Mage_MagmaField";
+}
+
 Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now, const TriggerInfo& info) {
     advance(now);
     const double t = now_;
@@ -4112,6 +4167,12 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     if (!eval_requirement(row.requirement_expr, target_actors, ok, why)) return broken("its activation requirement");
     if (!ok) return refused(Refusal::Requirement);
     if (const char* what = resolve_formulas(cast, *def, why)) return broken(what);
+    // The record's DynamicCastDuration is the time the client's cast bar shows; the ability item carries it (none: the client reads the montage's time).
+    if (def->row.cast_expr != 0) {
+        double seconds = 0;
+        if (eval(def->row.cast_expr, seconds, why)) cast.cast_seconds = seconds;
+    }
+    cast.channel = is_held_channel(def->row);
     if (cast.toggle_off) {   // ending a loop is free
         cast.stat_costs.clear();
         cast.effect_costs.clear();
@@ -4392,6 +4453,9 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     rec.trigger_at = t;
     rec.cost_due = *cast.cost_due;
     rec.window_end = rec.cost_due + (info.item_cast ? kItemRequestWindow : kRequestWindow);
+    // a held channel's ticks are asked for as long as the key is down: its window is the channel's own recorded end (not 5 s from the cost), stretched as a client that plays it slower
+    // than the recording needs (a recorded Prismatic Beam ticked every 0.339 s, a slower client's every 0.385 s), and a little more. What bounds the ticks is the most a hit takes, not the time.
+    if (cast.channel && cast.end_due) rec.window_end = std::max(rec.window_end, t + (*cast.end_due - t) * kChannelSlowest + kChannelRequestSlack);
     rec.item_cast = info.item_cast;
     rec.hit_delay = hit_delay >= 0 ? hit_delay : has_montage ? kHitDelay : 0.0;
     rec.ally_targeting = cast.ally_targeting;
@@ -4455,11 +4519,18 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     // the zones the cast spawns: their actors open at retail's offset after the trigger where the captures show it, else a moment after the item
     // [R: the retail capture: Maddening +362 (item +328), Nimble +300 (+300), Mesmerizing +389 (+324), Shielding +462 (+331)]; what their overlap hits put on the
     // caster at the cost step belongs to them, and the cast's record takes the client's requests for their ticks while they live
-    spawn_zones(cast, t + (zone_delay >= 0 ? zone_delay : (has_montage ? item_delay : cost_delay) + kZoneOpenDelay), zone_end >= 0 ? t + zone_end : -1.0);
+    // (the Magma Field's field comes with the end of its bar: the cost step, which the client's request for the bar's end moves sooner)
+    const bool zones_follow_bar = cast.branched && !cast.branched->cost_first && !cast.branched->no_jump && !cast.held && cast.cost_due && zone_follows_bar(row.name);
+    spawn_zones(cast, zones_follow_bar ? *cast.cost_due : t + (zone_delay >= 0 ? zone_delay : (has_montage ? item_delay : cost_delay) + kZoneOpenDelay), zone_end >= 0 ? t + zone_end : -1.0, zones_follow_bar);
     // an accepted press ends a held cast the key has not released (the client chose another ability): nothing of it happens, since its cost comes after its jump.
-    // A press the server refuses changes nothing, and a released or a charged held cast has gone out and is left alone.
+    // A press the server refuses changes nothing, and a released or a charged held cast has gone out and is left alone. A held channel's cost is already paid:
+    // its ticks stop, and the cost stays.
     for (size_t i = casts_.size(); i-- > 0;) {
         Cast& held = casts_[i];
+        if (held.channel) {
+            end_channel(held, now_, "another ability ended the held channel");
+            continue;
+        }
         if (!held.held || held.released || held.charged || !held.branch_due) continue;
         abort_cast(i, now_, "another ability ended the held cast", true);
     }
@@ -4518,6 +4589,7 @@ void AbilityPipeline::step_item(Cast& cast, double t) {
     }
     item.montage_group = montage_group_of(def);
     item.play_rate = static_cast<float>(item_rate(def));   // (the character's animation speed where the ability's table rows say which stat its montage plays at: other clients play the montage at it)
+    if (cast.cast_seconds) item.cast_duration = static_cast<float>(*cast.cast_seconds);   // (the client's cast bar: the record's DynamicCastDuration)
     item.animation_counter = ++animation_counter_;
     cast.item = item;
     c.abilities_added.push_back(std::move(item));
@@ -5386,7 +5458,7 @@ std::vector<int64_t> AbilityPipeline::zones_of_cast(const AbilityDef& def) {
     return out;
 }
 
-void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_at) {
+void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_at, bool with_cost) {
     if (cast.loop) return;
     for (const int64_t guid : zones_of_cast(*cast.def)) {
         const content::ZoneRow* row = catalog_->zone(guid);
@@ -5397,6 +5469,7 @@ void AbilityPipeline::spawn_zones(const Cast& cast, double open_at, double end_a
         z.zone = guid;
         z.client_id = cast.client_id;
         z.open_at = open_at;
+        z.with_cost = with_cost;
         const double life = row->life_time > 0 ? row->life_time : 30.0;
         // the dance ends where the captures show (ability_timings.h), else when the zone's life in the data is over
         z.end_at = end_at >= 0 ? std::max(end_at, open_at) : open_at + life;
@@ -5664,7 +5737,9 @@ void AbilityPipeline::tick_zone(size_t index, double t) {
             if (std::find(standers.begin(), standers.end(), a) == standers.end()) left.push_back(a);
         }
         z.inside = std::set<uint64_t>(standers.begin(), standers.end());   // (one that left takes the overlap again when it comes back)
+        const bool self_left = combat_ && std::find(left.begin(), left.end(), combat_->self().id()) != left.end();
         if (!left.empty()) release_zone_effects(id, &left, t);
+        if (self_left) release_zone_owner_effects(id, t);
         if (!entered.empty()) zone_land(id, guid, ability, "OnBeginOverlapHitsIds", entered, t);
         if (!first) zone_land(id, guid, ability, "LingeringHitsIds", standers, t);
     }
@@ -5685,6 +5760,26 @@ void AbilityPipeline::release_zone_effects(int64_t zone_id, const std::vector<ui
         combat_->remove_effect_from(it->first, it->second, self, t);
         it = z.held.erase(it);
     }
+}
+
+void AbilityPipeline::release_zone_owner_effects(int64_t zone_id, double t) {
+    // the caster's own infinite effects of this zone (the Arcane Circle's buff): they end the moment he steps out, while the zone still stands,
+    // and a zone's OnBeginOverlap hit puts them on him again when he steps back in
+    AbilityChange c;
+    bool any = false;
+    for (size_t i = 0; i < effects_.size();) {
+        if (effects_[i].zone != zone_id || !std::isinf(effects_[i].end)) {
+            ++i;
+            continue;
+        }
+        const EffectInst gone = effects_[i];
+        remove_instance(c, i);
+        run_effect_hits(c, gone, kExpirePhases, 2, t);
+        any = true;
+    }
+    if (!any) return;
+    recompute(c);
+    emit({std::move(c), std::nullopt, t, "the caster steps out of the zone: its effects on him end"});
 }
 
 void AbilityPipeline::end_zone(int64_t zone_id, double t, bool end_hits, const std::string& note) {

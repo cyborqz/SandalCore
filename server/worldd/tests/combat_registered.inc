@@ -57,3 +57,5 @@
 #include "combat_reactions2_review_tests.inc"
 #include "combat_reactions3_fix_tests.inc"
 #include "combat_reactions4_review_tests.inc"
+#include "combat_mage_fixes_tests.inc"
+#include "combat_mage_review_tests.inc"
