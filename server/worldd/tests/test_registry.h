@@ -26,10 +26,14 @@
 //    "N passed, M failed" line and the exit code stay true.
 //  - AOC_TEST_ONLY=<word>[,<word>...] in the environment makes run() run only the registered tests whose name contains one of the words, and print "[only] N of M tests". A word that matches
 //    no test is a failure. Use it to run one test of a big program while hunting a failing check; the whole program (no variable) is what a gate runs.
+//  - AOC_TEST_TIMES=1 in the environment prints "  [time] <name> <seconds> s" after each registered test (the seconds each one took: what to balance a split by).
+//  - set_share(part, parts) makes run() run only the tests of one share: a program that is built several times from one source (a slow program split into parts, each with its own
+//    part number) runs the tests whose name hashes to its part, so that every test runs in exactly one of them (in_share). AOC_TEST_ONLY looks in all the tests, whatever the share.
 //  - Nothing here needs a build-file change: the checks are plain .inc files included by the program's .cpp (see tests/README.md).
 // ============================================================================
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -74,6 +78,8 @@ inline const char* base_name(const char* path) {
 struct Registry {
     std::vector<Entry> list;
     bool               ran = false;   // run() was called
+    int                part = 1;      // set_share(): this program runs the tests of share `part` of `parts`
+    int                parts = 1;
     ~Registry() {
         if (!ran && !list.empty()) {
             std::printf("  [FAIL] test registry: %zu test(s) are registered (the first is %s, %s:%d) but this program never calls aoc_tests::run(): none of them ran\n", list.size(),
@@ -124,8 +130,10 @@ int run_list(const std::vector<detail::Entry>& list, Ctx& ctx, std::FILE* out) {
             ++problems;
             continue;
         }
+        const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
         try {
             e.call(e.context ? static_cast<void*>(&ctx) : nullptr);
+            if (std::getenv("AOC_TEST_TIMES")) std::fprintf(out, "  [time] %s %.2f s\n", e.name, std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
         } catch (const std::exception& ex) {
             std::fprintf(out, "  [FAIL] %s threw: %s\n", e.name, ex.what());
             ++problems;
@@ -173,6 +181,36 @@ int run_only(const std::vector<detail::Entry>& list, const char* only, Ctx& ctx,
     return run_list(chosen, ctx, out);
 }
 
+/// The share (1 to `parts`) the test called `name` belongs to: the 32-bit FNV-1a hash of the name, modulo `parts`. A name belongs to one share only, and it is the same on every machine
+/// and build, so the programs that a source is split into run every one of its tests between them, each once.
+inline int share_of(const char* name, int parts) {
+    if (parts <= 1) return 1;
+    unsigned h = 2166136261u;
+    for (const char* p = name; *p; ++p) {
+        h ^= static_cast<unsigned char>(*p);
+        h *= 16777619u;
+    }
+    return static_cast<int>(h % static_cast<unsigned>(parts)) + 1;
+}
+
+/// Whether the test called `name` is part `part` of `parts` (every test is, when `parts` is 1).
+inline bool in_share(const char* name, int part, int parts) { return share_of(name, parts) == part; }
+
+/// The tests of `list` that belong to share `part` of `parts`, in their order.
+inline std::vector<detail::Entry> select_share(const std::vector<detail::Entry>& list, int part, int parts) {
+    std::vector<detail::Entry> chosen;
+    for (const detail::Entry& e : list) {
+        if (in_share(e.name, part, parts)) chosen.push_back(e);
+    }
+    return chosen;
+}
+
+/// This program runs only share `part` of `parts` of the registered tests (see share_of). Call it before run().
+inline void set_share(int part, int parts) {
+    detail::registry().part = part;
+    detail::registry().parts = parts;
+}
+
 /// Runs every registered test in the order of the registrations, with `ctx` for the tests that take a fixture. Returns the number of problems it
 /// found itself (a test that threw, a test made for another fixture type, a name registered twice); each one is printed as a "[FAIL]" line. When the environment variable AOC_TEST_ONLY
 /// is set it runs only the tests whose name contains one of its comma-separated words (run_only).
@@ -180,8 +218,8 @@ template <class Ctx>
 int run(Ctx& ctx) {
     detail::registry().ran = true;
     const char* only = std::getenv("AOC_TEST_ONLY");
-    if (only && *only) return run_only(detail::entries(), only, ctx, stdout);
-    return run_list(detail::entries(), ctx, stdout);
+    if (only && *only) return run_only(detail::entries(), only, ctx, stdout);   // (the filter looks in every test, whatever the share: a test is found in whichever part holds it)
+    return run_list(select_share(detail::entries(), detail::registry().part, detail::registry().parts), ctx, stdout);
 }
 
 /// The same for a program that has no fixture: only the tests that take nothing can run.

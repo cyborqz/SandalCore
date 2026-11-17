@@ -5,6 +5,9 @@
 # (it prints a "[skip]" line and exits 0) does not: CI runs it and counts the skip.
 test_worldd_abilities          # the stat corpus
 test_worldd_ability_session    # the stat corpus
+test_worldd_ability_session_2  # the stat corpus (a quarter of test_worldd_ability_session)
+test_worldd_ability_session_3  # the stat corpus (a quarter of test_worldd_ability_session)
+test_worldd_ability_session_4  # the stat corpus (a quarter of test_worldd_ability_session)
 test_worldd_area               # the content database
 test_worldd_area_session       # the stat corpus
 test_worldd_character_setup    # the stat corpus

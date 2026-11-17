@@ -76,3 +76,48 @@ void test_registry_only_filter(Fixture& f) {
           "...and says so with a failure line, so a misspelled name never passes");
 }
 AOC_REGISTER_TEST(test_registry_only_filter);
+
+void test_registry_shares(Fixture&) {
+    std::printf("the test registry shares the tests of one program out among the programs built from its source\n");
+    // 400 names of the shape the real tests have: every one belongs to exactly one of 4 parts, each part gets a fair share, and a program of one part runs them all
+    std::vector<aoc_tests::detail::Entry> list;
+    std::vector<std::string> names;
+    for (int i = 0; i < 400; ++i) names.push_back("test_e1_a_session_test_number_" + std::to_string(i * 7919 % 1000));
+    for (const std::string& n : names) list.push_back({n.c_str(), __FILE__, __LINE__, nullptr, [](void*) {}});
+    std::size_t sum = 0;
+    bool each_once = true, stays_the_same = true;
+    for (int part = 1; part <= 4; ++part) {
+        const std::vector<aoc_tests::detail::Entry> mine = aoc_tests::select_share(list, part, 4);
+        sum += mine.size();
+        for (const aoc_tests::detail::Entry& e : mine) each_once = each_once && aoc_tests::share_of(e.name, 4) == part;
+        CHECKF(mine.size() > 60 && mine.size() < 140, "part %d of 4 gets a fair share of 400 tests (%zu)", part, mine.size());
+    }
+    for (const std::string& n : names) stays_the_same = stays_the_same && aoc_tests::share_of(n.c_str(), 4) == aoc_tests::share_of(std::string(n.begin(), n.end()).c_str(), 4);
+    CHECKF(sum == list.size() && each_once, "the four parts hold every test once between them (%zu of %zu)", sum, list.size());
+    CHECK(stays_the_same, "a name belongs to the same part every time it is asked");
+    CHECK(aoc_tests::select_share(list, 1, 1).size() == list.size(), "one part of one is every test (a program that is not split runs them all)");
+    CHECK(aoc_tests::share_of("test_sprint", 1) == 1 && aoc_tests::in_share("test_sprint", 1, 1), "a name is in part 1 of 1");
+    // FNV-1a of "a" is 0xE40C292C: the hash is the one the programs use on every machine, whatever the build
+    CHECK(aoc_tests::share_of("a", 4) == static_cast<int>(0xE40C292Cu % 4u) + 1, "the part of a name is its FNV-1a hash modulo the number of parts, plus one");
+    // the runner of a list with a part: only the tests of that part run
+    int ran_here = 0;
+    std::vector<aoc_tests::detail::Entry> small;
+    small.push_back({"alpha_test", __FILE__, __LINE__, nullptr, [&](void*) { ++ran_here; }});
+    small.push_back({"beta_test", __FILE__, __LINE__, nullptr, [&](void*) { ++ran_here; }});
+    small.push_back({"gamma_test", __FILE__, __LINE__, nullptr, [&](void*) { ++ran_here; }});
+    small.push_back({"delta_test", __FILE__, __LINE__, nullptr, [&](void*) { ++ran_here; }});
+    int total = 0;
+    for (int part = 1; part <= 3; ++part) {
+        ran_here = 0;
+        std::FILE* out = std::tmpfile();
+        if (!out) return;
+        struct None {};
+        None none;
+        const int problems = aoc_tests::run_list(aoc_tests::select_share(small, part, 3), none, out);
+        std::fclose(out);
+        CHECKF(problems == 0, "the tests of part %d of 3 run without a problem (%d)", part, problems);
+        total += ran_here;
+    }
+    CHECKF(total == 4, "three parts run the four tests once each between them (%d)", total);
+}
+AOC_REGISTER_TEST(test_registry_shares);

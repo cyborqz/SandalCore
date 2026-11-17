@@ -376,6 +376,12 @@ if(MSVC)
     target_compile_options(worldd_core PRIVATE /bigobj)
 endif()
 set_target_properties(worldd_core PROPERTIES FOLDER "Servers/worldd")
+# The precompiled header of the library (worldd_pch.h: the standard library, spdlog, libs/aocnet's wire headers and the stat engine, which hardly ever change; not the headers that change
+# often).  Each of the library's files starts from the parsed state instead of reading those headers again.  -DAOC_WORLDD_PCH=OFF builds without it.
+option(AOC_WORLDD_PCH "Build worldd_core with a precompiled header (server/worldd/worldd_pch.h)" ON)
+if(AOC_WORLDD_PCH)
+    target_precompile_headers(worldd_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/worldd_pch.h")
+endif()
 
 # ── worldd ──────────────────────────────────────────────────────────────────
 add_executable(worldd main.cpp)
@@ -383,8 +389,13 @@ target_link_libraries(worldd PRIVATE worldd_core CLI11::CLI11)
 set_target_properties(worldd PROPERTIES FOLDER "Servers")
 
 # ── tests: plain executables that print [ok ]/[FAIL], like libaocnet's ──────
+# worldd_add_test(<program> [<source>]): the program of tests/<program>.cpp, or of tests/<source>.cpp when a second name is given (one source built into several programs)
 function(worldd_add_test name)
-    add_executable(${name} tests/${name}.cpp)
+    set(source ${name})
+    if(ARGC GREATER 1)
+        set(source ${ARGV1})
+    endif()
+    add_executable(${name} tests/${source}.cpp)
     target_link_libraries(${name} PRIVATE worldd_core)
     # capture_packets.h lives with the libaocnet tests.
     target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/libs/aocnet/tests)
@@ -635,6 +646,20 @@ worldd_add_test(test_worldd_ability_npc)
 target_compile_definitions(test_worldd_ability_npc PRIVATE
     ABILITY_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
     NPC_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv")
+# test_worldd_ability_session is the slowest program of the unit step (about 75 worlds on the real content.db): its one source is built into four programs, each running a quarter of the
+# tests (AOC_SESSION_PART of AOC_SESSION_PARTS; tests/test_worldd_ability_session.cpp says how they are shared out), so that the programs run side by side
 target_compile_definitions(test_worldd_ability_session PRIVATE
+    AOC_SESSION_PART=1
+    AOC_SESSION_PARTS=4
     ABILITY_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
     NPC_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv")
+worldd_add_test(test_worldd_ability_session_2 test_worldd_ability_session)
+worldd_add_test(test_worldd_ability_session_3 test_worldd_ability_session)
+worldd_add_test(test_worldd_ability_session_4 test_worldd_ability_session)
+foreach(part 2 3 4)
+    target_compile_definitions(test_worldd_ability_session_${part} PRIVATE
+        AOC_SESSION_PART=${part}
+        AOC_SESSION_PARTS=4
+        ABILITY_CONTENT_DB_PATH="${PROJECT_SOURCE_DIR}/dist/content/content.db"
+        NPC_MOTION_PATH="${PROJECT_SOURCE_DIR}/dist/content/npc_motion.tsv")
+endforeach()

@@ -2007,7 +2007,7 @@ with `ClientEndAbility`), the client's ids against the server's instance numbers
 length of a Dodge, refused outside it), a trigger before the join is on the wire and an update behind a full window (both wait, nothing is lost), the log
 (the first 100 transitions at info; abilities off with the pawn's state drifted: the warning) and a seeded hostile client (random operations with hostile
 ids, stalls and held acknowledgements, and triggers and cancels damaged bit by bit, 3 seeds each: Stamina never outside [0, max] on the server or the client,
-nothing fails, every chain reads, the client's view is the runtime's once settled). With `AOC_CONTENT_DB` set the session test runs on the real file.
+nothing fails, every chain reads, the client's view is the runtime's once settled). With `AOC_CONTENT_DB` set the session test runs on the real file. The one source is built into four programs (`test_worldd_ability_session` and `test_worldd_ability_session_2` to `_4`) that each run a quarter of the tests, so that they run side by side: a test belongs to the part its name hashes to (`tests/README.md`).
 `test_repl_ability_rpc` (libaocnet) decodes all 54 captured trigger and cancel calls of the two captures in the repo to their last bit
 and writes them back to the client's bits, refuses export flags the inline-object form does not define on the way in, then reads 16,254
 mutated copies (a seeded fuzz) without a crash. `test_worldd_move_checker` also replays the retail Rogue's dash (the retail capture: 2,237 cm/s) with

@@ -19,6 +19,8 @@
 #      .\scripts\build.ps1 -Jobs 6          # at most 6 projects and at most 6 compiler processes at a time
 #                                          # (default: every core for projects, and as many compilers as the free memory allows)
 #      .\scripts\build.ps1 -Configure      # run CMake again (this also switches an older build folder to the settings below)
+#      $env:AOC_VCPKG_SHARED = '<folder>'; .\scripts\build.ps1 -Configure
+#                                          # one Release-only vcpkg install, in <folder>, for every build folder that is configured with it (see the configure below)
 #
 #  What makes it fast:
 #   - MSBuild's MultiToolTask compiles the files of one project in parallel (without it a project is one compiler call, one file after the other).
@@ -126,7 +128,37 @@ if (Test-Path $cacheFile) {
         }
     }
 }
-$needConfigure = $Configure -or (-not (Test-Path $cacheFile))
+# ── The shared vcpkg install (AOC_VCPKG_SHARED), see the configure below ───
+# The folder of one shared install is named by the hash of vcpkg.json (with vcpkg-configuration.json and the triplet).
+$sharedTriplet = 'x64-windows-release'
+function Get-ManifestHash([string] $triplet) {
+    $manifest = @(Join-Path $repoRoot 'vcpkg.json'; Join-Path $repoRoot 'vcpkg-configuration.json') | Where-Object { Test-Path $_ }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $bytes = @(); foreach ($m in $manifest) { $bytes += [IO.File]::ReadAllBytes($m) }; $bytes += [Text.Encoding]::ASCII.GetBytes($triplet)
+    return (($sha.ComputeHash([byte[]]$bytes) | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 12)
+}
+# a relative AOC_VCPKG_SHARED is the folder of the caller (worked out here, before the configure moves into the build folder), so that every build folder gets the same install
+$sharedRoot = $null
+if ($env:AOC_VCPKG_SHARED) { $sharedRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:AOC_VCPKG_SHARED) }
+# A build folder that holds a shared install follows vcpkg.json.  CMake's configure installs the packages that vcpkg.json names into the install folder it has in its cache, and it runs again by itself
+# when vcpkg.json changes: in a shared install that would change the libraries under every other build folder that uses it.  So a changed vcpkg.json is configured here, into the install the new file
+# names, before anything builds.  The shared install has no Debug libraries: a Debug build of such a folder is refused.
+$cachedInstall = $null; $cachedTriplet = $null
+if (Test-Path $cacheFile) {
+    foreach ($line in Get-Content -LiteralPath $cacheFile) {
+        if ($line -match '^VCPKG_INSTALLED_DIR:[A-Z]+=(.+)$') { $cachedInstall = $Matches[1].Trim() }
+        elseif ($line -match '^VCPKG_TARGET_TRIPLET:[A-Z]+=(.+)$') { $cachedTriplet = $Matches[1].Trim() }
+    }
+}
+$followShared = $false
+if ($vcpkgRoot -and $cachedInstall -and $cachedTriplet -eq $sharedTriplet) {
+    if ($Config -eq 'Debug') { throw "This build folder holds the shared vcpkg install, which is Release-only (it has no Debug libraries): use another -Config, or a build folder without AOC_VCPKG_SHARED." }
+    if ((Split-Path -Leaf $cachedInstall) -ne "$sharedTriplet-$(Get-ManifestHash $sharedTriplet)") {
+        $followShared = $true
+        Write-Host "vcpkg   : vcpkg.json changed since this build folder was configured; configuring again into the shared install that it names."
+    }
+}
+$needConfigure = $Configure -or (-not (Test-Path $cacheFile)) -or $followShared
 if ($needConfigure) {
     Write-Host "Running CMake configure ..."
     New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
@@ -139,11 +171,42 @@ if ($needConfigure) {
         )
         if ($vcpkgRoot) {
             $cmakeArgs += "-DCMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake"
-            $cmakeArgs += "-DVCPKG_TARGET_TRIPLET=x64-windows"
+            $vcpkgTriplet = 'x64-windows'
+            if ($sharedRoot -or $followShared) {
+                # One shared, Release-only install of the libraries for every build folder on this PC (set AOC_VCPKG_SHARED to the folder that holds it).
+                # It is named by the hash of vcpkg.json (with the triplet), so a changed dependency list or baseline gets its own install, and a build folder
+                # holds no vcpkg_installed of its own (about 11 GB each, 5.9 GB of it Debug libraries that no build uses).  Release, RelWithDebInfo and MinSizeRel
+                # builds only: there are no Debug libraries in it.  A build folder that already holds a shared install keeps to the folder the install is in when the variable is not set.
+                if ($Config -eq 'Debug') { throw "AOC_VCPKG_SHARED is set: the shared vcpkg install is Release-only; use another -Config or unset it." }
+                $vcpkgTriplet = $sharedTriplet
+                $manifestHash = Get-ManifestHash $vcpkgTriplet
+                $sharedFolder = if ($sharedRoot) { $sharedRoot } else { Split-Path -Parent $cachedInstall }
+                $sharedInstall = Join-Path $sharedFolder "$vcpkgTriplet-$manifestHash"
+                New-Item -ItemType Directory -Force -Path $sharedInstall | Out-Null
+                $cmakeArgs += "-DVCPKG_INSTALLED_DIR=$sharedInstall"
+                Write-Host "vcpkg   : shared Release-only install $sharedInstall"
+            }
+            $cmakeArgs += "-DVCPKG_TARGET_TRIPLET=$vcpkgTriplet"
             # the DLLs are copied once after the build (below), not after every program
             $cmakeArgs += "-DVCPKG_APPLOCAL_DEPS=OFF"
         }
-        & $cmake @cmakeArgs
+        # Two configures at once on the one shared install would run vcpkg twice on the same folder: take a PC-wide lock named by the install (the second waits, then finds the libraries installed).
+        $installLock = $null
+        if ($sharedInstall) {
+            $installLock = New-Object System.Threading.Mutex($false, "Global\AocVcpkgInstall_$manifestHash")
+            $held = $false
+            try { $held = $installLock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+            if (-not $held) {
+                Write-Host "vcpkg   : another configure is using the shared install; waiting for it (up to 60 minutes) ..."
+                try { $held = $installLock.WaitOne([TimeSpan]::FromMinutes(60)) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+                if (-not $held) { throw "another configure kept the shared vcpkg install for 60 minutes." }
+            }
+        }
+        try {
+            & $cmake @cmakeArgs
+        } finally {
+            if ($installLock) { try { $installLock.ReleaseMutex() } catch { }; $installLock.Dispose() }
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "CMake configure failed."
         }

@@ -34,6 +34,11 @@
 //                runtime's once settled) hold
 //
 //  With AOC_CONTENT_DB set the sessions run on the real content.db instead of the small fixture (the numbers are the same).
+//
+//  The file is built four times (server/worldd/CMakeLists.txt): test_worldd_ability_session, _2, _3 and _4, each with AOC_SESSION_PART (its number) and AOC_SESSION_PARTS (4). Each program
+//  runs a quarter of the tests, so that no one program holds the unit step of a gate for minutes: a test belongs to the part its name hashes to (aoc_tests::share_of; the text of the
+//  call for the tests main() calls), so every test runs in exactly one part, and a new test lands in a part by itself. A build without the two macros is the whole program.
+//  AOC_TEST_TIMES=1 prints the seconds each test took.
 // ============================================================================
 #include "ability_rig.h"
 #include "combat_rig.h"
@@ -4802,73 +4807,91 @@ static void test_level_up_in_the_tick_of_the_death() {
 #include "tailoring_fight_tests.inc"
 #include "ability_session_registered.inc"
 
+#ifndef AOC_SESSION_PARTS
+#define AOC_SESSION_PART 1
+#define AOC_SESSION_PARTS 1
+#endif
+static_assert(AOC_SESSION_PART >= 1 && AOC_SESSION_PART <= AOC_SESSION_PARTS, "AOC_SESSION_PART is the number of this program among the AOC_SESSION_PARTS programs built from this file (1 to AOC_SESSION_PARTS): any other number runs no test and still passes");
+
+/// Runs a test that main() calls, when this program is the part that the text of the call belongs to (the registered tests are shared out by name in the same way: aoc_tests::set_share).
+#define RUN_HERE(call)                                                                                                                                                                 \
+    do {                                                                                                                                                                               \
+        if (aoc_tests::in_share(#call, AOC_SESSION_PART, AOC_SESSION_PARTS)) {                                                                                                         \
+            const auto run_here_started = std::chrono::steady_clock::now();                                                                                                            \
+            call;                                                                                                                                                                      \
+            if (std::getenv("AOC_TEST_TIMES")) std::printf("  [time] %s %.2f s\n", #call, std::chrono::duration<double>(std::chrono::steady_clock::now() - run_here_started).count()); \
+        }                                                                                                                                                                              \
+    } while (0)
+
 int main() {
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
     logger->set_level(spdlog::level::debug);
     spdlog::set_default_logger(logger);
 
-    test_sprint();
-    test_sprint_cancel();
-    test_sprint_standing();
-    test_dodge();
-    test_rest();
-    test_sprint_and_dodge();
-    test_instance_ids();
-    test_dodge_dash();
-    test_ability_waits_for_the_join();
-    test_ability_update_waits_for_the_window();
-    test_ability_log();
-    test_refusals();
-    test_laggy_client();
-    test_server_stall();
-    test_through_the_endpoint();
-    test_hostile_client();
+    RUN_HERE(test_sprint());
+    RUN_HERE(test_sprint_cancel());
+    RUN_HERE(test_sprint_standing());
+    RUN_HERE(test_dodge());
+    RUN_HERE(test_rest());
+    RUN_HERE(test_sprint_and_dodge());
+    RUN_HERE(test_instance_ids());
+    RUN_HERE(test_dodge_dash());
+    RUN_HERE(test_ability_waits_for_the_join());
+    RUN_HERE(test_ability_update_waits_for_the_window());
+    RUN_HERE(test_ability_log());
+    RUN_HERE(test_refusals());
+    RUN_HERE(test_laggy_client());
+    RUN_HERE(test_server_stall());
+    RUN_HERE(test_through_the_endpoint());
+    RUN_HERE(test_hostile_client());
     if (ability_rig::real_db_present()) {
-        test_d2_glee_heals();
-        test_d2_flourish_dash();
-        test_d2_dodge_keeps_cooldowns();
-        test_d2_sprint_speed();
-        test_d2_sprint_drain();
-        test_d2_dance_actor();
-        test_e1_sprint_with_world();
-        test_e1_sprint_under_load();
-        test_e1_clock_reset();
-        test_e1_long_session_with_loss(0, 1);
-        test_e1_long_session_with_loss(5, 4);
-        test_e1_long_session_with_loss(10, 20);
-        test_d2_floating_numbers();
-        test_d2_shielding();
-        test_d2_hit_hostile();
-        test_d2_hit_flood_spares_the_budget();
-        test_d2_hostile();
-        test_d2_song();
-        test_d2_held_cancel();
-        test_d2_end_ability();
-        test_d2_class_resource();
-        test_e1_combat_session();
-        test_e1_inline_target_session();
-        test_ws_fight();
-        test_tlf_fight();
-        test_a3_effect_outcome_on_the_wire();
-        test_e1_npc_cylinder_export();
-        test_e1_one_clock();
-        test_e1_ranged_book_at_wolf();
-        test_flight_leftovers();
-        test_ball_lightning_after_death();
-        test_e1_cylinder_in_own_block();
-        test_e1_zone_abilities_export_rule();
-        test_e1_clock_resync();
-        test_e1_whole_fight();
-        test_e1_loot_with_full_bag();
-        test_e1_player_death();
-        test_gm_teleport_in_a_fight();
-        test_e1_death_without_loss();
-        test_level_up_of_a_dead_player();
-        test_level_up_in_the_tick_of_the_death();
+        RUN_HERE(test_d2_glee_heals());
+        RUN_HERE(test_d2_flourish_dash());
+        RUN_HERE(test_d2_dodge_keeps_cooldowns());
+        RUN_HERE(test_d2_sprint_speed());
+        RUN_HERE(test_d2_sprint_drain());
+        RUN_HERE(test_d2_dance_actor());
+        RUN_HERE(test_e1_sprint_with_world());
+        RUN_HERE(test_e1_sprint_under_load());
+        RUN_HERE(test_e1_clock_reset());
+        RUN_HERE(test_e1_long_session_with_loss(0, 1));
+        RUN_HERE(test_e1_long_session_with_loss(5, 4));
+        RUN_HERE(test_e1_long_session_with_loss(10, 20));
+        RUN_HERE(test_d2_floating_numbers());
+        RUN_HERE(test_d2_shielding());
+        RUN_HERE(test_d2_hit_hostile());
+        RUN_HERE(test_d2_hit_flood_spares_the_budget());
+        RUN_HERE(test_d2_hostile());
+        RUN_HERE(test_d2_song());
+        RUN_HERE(test_d2_held_cancel());
+        RUN_HERE(test_d2_end_ability());
+        RUN_HERE(test_d2_class_resource());
+        RUN_HERE(test_e1_combat_session());
+        RUN_HERE(test_e1_inline_target_session());
+        RUN_HERE(test_ws_fight());
+        RUN_HERE(test_tlf_fight());
+        RUN_HERE(test_a3_effect_outcome_on_the_wire());
+        RUN_HERE(test_e1_npc_cylinder_export());
+        RUN_HERE(test_e1_one_clock());
+        RUN_HERE(test_e1_ranged_book_at_wolf());
+        RUN_HERE(test_flight_leftovers());
+        RUN_HERE(test_ball_lightning_after_death());
+        RUN_HERE(test_e1_cylinder_in_own_block());
+        RUN_HERE(test_e1_zone_abilities_export_rule());
+        RUN_HERE(test_e1_clock_resync());
+        RUN_HERE(test_e1_whole_fight());
+        RUN_HERE(test_e1_loot_with_full_bag());
+        RUN_HERE(test_e1_player_death());
+        RUN_HERE(test_gm_teleport_in_a_fight());
+        RUN_HERE(test_e1_death_without_loss());
+        RUN_HERE(test_level_up_of_a_dead_player());
+        RUN_HERE(test_level_up_in_the_tick_of_the_death());
     } else {
         std::printf("no content.db at %s: the plan D2 session tests are skipped\n", ability_rig::real_db_path().c_str());
     }
-    g_fail += aoc_tests::run();   // every check registered in ability_session_registered.inc
+    if (AOC_SESSION_PARTS > 1) std::printf("part %d of %d of the ability session tests (the tests that hash to it)\n", AOC_SESSION_PART, AOC_SESSION_PARTS);
+    aoc_tests::set_share(AOC_SESSION_PART, AOC_SESSION_PARTS);
+    g_fail += aoc_tests::run();   // every check registered in ability_session_registered.inc (this part's share)
 
     if (const char* f = std::getenv("AOC_TEST_LOG_FILTER")) {   // (a debugging aid: the log lines that contain the text)
         std::istringstream in(g_log.str());
