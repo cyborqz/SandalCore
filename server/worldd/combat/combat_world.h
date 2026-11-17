@@ -352,6 +352,9 @@ public:
     /// Every living player within `radius_cm` of `centre` whose side is not hostile to the player `from` (a hit that jumps from one ally to the next
     /// looks for the injured ones among them, the nearest first).  The players' list is read, never the registry, where a player's pawn stands too.
     std::vector<AllyInfo> players_around(uint64_t from, const Vec3& centre, double radius_cm) const;
+    /// The player took part in an exchange (a hit of his on a creature, or one of a creature's on him): his combat state goes up, and ends six seconds after the last
+    /// exchange.  The session's port is told once, when the state changes.
+    void player_exchange(uint64_t player_id, double now);
 
     // ---- NPCs
     /// The NPC's fighter (its combatant made when it is not yet); null for an actor that is no NPC of a kind that has stats.
@@ -869,7 +872,6 @@ private:
     /// stats component).  Never makes a combatant: the NPC has no AI, no threat and no fight state.
     bool  fill_stats(const world::WorldActor& a);
     PlayerPort* player(uint64_t actor_id);
-    void  player_exchange(uint64_t player_id, double now);
 
     world::ActorRegistry&  registry_;
     npc::NpcWorld*         npcs_world_;

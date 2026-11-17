@@ -235,6 +235,20 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     cancel_quick_make(&conn, "the player died");   // Crafting, step 3
     cancel_gather(&conn, "the player died", Interrupt::Death);   // Gathering stage 2
     if (pipeline_) pipeline_->set_dead(true);
+    // the death ends the fight's state and puts the draw away: the death update below carries bIsDead 1 with bInCombat 0 (as retail's death frame does) and bIsTargeting 0 (modelled:
+    // nothing records the draw), and the pawn the other players are shown takes them in the same update (sync_shown_death and sync_shown_stance)
+    if (combat_side_) combat_side_->wants_in_combat = false;   // (the world's timer is gone with the death: nothing else would clear the flag)
+    if (combat_flag_) {
+        combat_flag_ = false;
+        if (stats_) stats_->set_in_combat(false);
+        if (abilities_) abilities_->set_in_combat(false, ability_seconds(now));
+        if (pipeline_) pipeline_->refresh(ability_seconds(now), "combat ends", true);
+        pb_.set_in_combat(false);
+    }
+    if (targeting_) {
+        targeting_ = false;
+        pb_.set_targeting(false);
+    }
     if (combat_side_ && npc_world_ && npc_world_->combat()) npc_world_->combat()->player_died(combat_side_->actor_id());   // what he put on the creatures ends at once, not at the next tick of an effect
     dismiss_pet(now);
     item_reserved_.clear();   // consumables: the casts that had not paid are gone with the death (set_dead dropped them): their items stay in the bag and can be used again

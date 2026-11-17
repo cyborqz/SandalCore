@@ -16,3 +16,5 @@
 #include "others_health_mana_more_tests.inc"
 #include "others_death_tests.inc"
 #include "others_death_more_tests.inc"
+#include "others_stance_tests.inc"
+#include "others_stance_more_tests.inc"

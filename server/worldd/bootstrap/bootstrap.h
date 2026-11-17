@@ -688,6 +688,9 @@ public:
     /// Plan E1, stage 3: the pawn's CombatInfo.bInCombat (the first exchange of a fight sets it, six seconds without one clears it). The caller sends the
     /// pawn's update (pawn_state_update).
     bool set_in_combat(bool in_combat);
+    /// Social, seeing other players (their combat stances): the pawn's CombatInfo.bIsTargeting (the client's draw, ServerSetTargeting). The caller sends the
+    /// pawn's update (pawn_state_update).
+    bool set_targeting(bool targeting);
     /// Plan E1, stage 3 fix: the pawn's CombatInfo.bIsUsingRangedWeapon (ServerSetUseRangedWeapon's answer in retail: the client's weapon in hand follows
     /// it). The caller sends the pawn's update.
     bool set_using_ranged_weapon(bool ranged);
@@ -698,6 +701,10 @@ public:
     bool set_hover_target(const std::array<uint32_t, 4>& words);
     /// bPvPForceFlag: the player's own PvP flag.
     bool set_pvp_force_flag(bool on);
+    /// Social, seeing other players (their combat stances): the AlignmentComponent's Alignments as the PvP flag says them.  The player carries either NonCombatant
+    /// (the plain name) or Combatant (the purple name, the game's own alignment record) in place of the other: `flagged` on keeps the Combatant, off the NonCombatant;
+    /// the other instances (Player, the Instigator with his CharacterGuid, PVPSuppressed_Perceiver) stay as they are.  False when the pawn has no such instance.
+    bool set_flag_alignment(bool flagged);
     /// The PvP flag a ServerTriggerAbility carried, for the ReplicatedActiveAbilities item that trigger makes (the item copies it): note it before the trigger is run.  Only a set flag is
     /// kept, at most kMaxTriggerFlags of them, and it goes with the item.
     void note_trigger_pvp_flag(int64_t instance, bool flag);
@@ -823,6 +830,18 @@ public:
     /// ... the death bit (CombatInfo.bIsDead): the pawn the other players are shown says whether this player is dead, as his own pawn does.  Social, seeing
     /// other players: their death (the update that carries Health and Mana 0 carries the bit too).
     bool set_observer_dead(repl::Actor& shown, bool dead);
+    /// The five stance bits the pawn the other players are shown carries, as the player's own pawn says them: CombatInfo.bIsTargeting, bInCombat, bPvPForceFlag,
+    /// InPvpSuppressionArea and bInPVPCombat.  Social, seeing other players: their combat stances (one update carries them with whatever else moved in the tick).
+    struct ObserverStance {
+        bool targeting = false;
+        bool in_combat = false;
+        bool pvp_flag = false;
+        bool suppression = false;
+        bool pvp_combat = false;
+    };
+    bool set_observer_stance(repl::Actor& shown, const ObserverStance& stance);
+    /// ... the AlignmentComponent's Alignments, copied from this player's pawn when the PvP flag changed it (the name colour the other players see).
+    bool set_observer_alignments(repl::Actor& shown);
     /// Whether one of the stats `records` differs between this player's pawn and the pawn the others are shown (the version of that pawn is not touched when none does).
     bool observer_live_stats_differ(const repl::Actor& shown, std::span<const int64_t> records) const;
 

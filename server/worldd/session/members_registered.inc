@@ -29,3 +29,4 @@
 #include "session/members/saga.inc"
 #include "session/members/party_stats.inc"
 #include "session/members/resurrect.inc"
+#include "session/members/stance.inc"

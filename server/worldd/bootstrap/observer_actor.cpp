@@ -17,6 +17,7 @@
 #include "bootstrap/bootstrap.h"
 
 #include "bootstrap/constants.h"
+#include "content/alignment_ids.h"
 #include "content/emote_commands.h"
 #include "protocol/repl/move_packed.h"
 #include "protocol/schema/generated/index.h"
@@ -111,7 +112,9 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
         {&g.base_character_info,
          {"CharacterGuid.A", "CharacterGuid.B", "CharacterGuid.C", "CharacterGuid.D", "CharacterName", "Race", "Gender", "Level", "ServerId", "bHasBeenPossessed"},
          {"HeldItems"}},
-        {&g.combat_info, {"bIsDead", "PrimaryClassId.Guid", "bIsUsingRangedWeapon"}, {}},
+        {&g.combat_info,
+         {"bIsTargeting", "bIsDead", "bInCombat", "bPvPForceFlag", "InPvpSuppressionArea", "bInPVPCombat", "PrimaryClassId.Guid", "bIsUsingRangedWeapon"},
+         {}},
         {&g.ability, {}, {}},   // the emotes: observer_ability_component
         {&g.stats, {}, {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}},
         {&g.appearance, {"SharedAppearanceInfoId.Guid", "CharacterCustomization", "AppearanceIDs"}, {}},
@@ -122,6 +125,13 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
         repl::Subobject sub;
         if (!observer_component(*from, w.paths, w.arrays, sub)) return std::nullopt;
         if (w.guid == &g.ability && !observer_ability_component(*from, sub)) return std::nullopt;
+        if (w.guid == &g.combat_info) {
+            // the stance bits go out even when the player's pawn never set one, so another client's copy starts from the game's own defaults (0) and the bits are current in the open
+            for (const char* path : {"bIsTargeting", "bInCombat", "bPvPForceFlag", "InPvpSuppressionArea", "bInPVPCombat"}) {
+                if (sub.obj.state.get(*sub.obj.schema, path)) continue;
+                if (!sub.obj.state.set(*sub.obj.schema, path, Value::boolean(false))) return std::nullopt;
+            }
+        }
         a.subobjects.push_back(std::move(sub));
     }
     if (!ok) return std::nullopt;
@@ -207,6 +217,68 @@ bool PlayerBootstrap::set_observer_dead(repl::Actor& shown, bool dead) {
     repl::Subobject* combat = shown.find(setup_.guids.combat_info);
     if (!combat || !combat->obj.schema || !combat->obj.schema->command("bIsDead")) return false;
     return combat->obj.state.set(*combat->obj.schema, "bIsDead", Value::boolean(dead));
+}
+
+bool PlayerBootstrap::set_observer_stance(repl::Actor& shown, const ObserverStance& stance) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* combat = shown.find(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema) return false;
+    const schema::ClassSchema& cls = *combat->obj.schema;
+    for (const char* path : {"bIsTargeting", "bInCombat", "bPvPForceFlag", "InPvpSuppressionArea", "bInPVPCombat"}) {
+        if (!cls.command(path)) return false;
+    }
+    bool ok = true;
+    ok = combat->obj.state.set(cls, "bIsTargeting", Value::boolean(stance.targeting)) && ok;
+    ok = combat->obj.state.set(cls, "bInCombat", Value::boolean(stance.in_combat)) && ok;
+    ok = combat->obj.state.set(cls, "bPvPForceFlag", Value::boolean(stance.pvp_flag)) && ok;
+    ok = combat->obj.state.set(cls, "InPvpSuppressionArea", Value::boolean(stance.suppression)) && ok;
+    ok = combat->obj.state.set(cls, "bInPVPCombat", Value::boolean(stance.pvp_combat)) && ok;
+    return ok;
+}
+
+bool PlayerBootstrap::set_observer_alignments(repl::Actor& shown) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* dst = shown.find(setup_.guids.alignment);
+    const repl::Subobject* src = pawn_.find(setup_.guids.alignment);
+    if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
+    const repl::Value* held = src->obj.state.get(*src->obj.schema, "Alignments");
+    if (!held) return false;
+    return dst->obj.state.set(*dst->obj.schema, "Alignments", *held);
+}
+
+// ---- the player's own pawn: the draw and the PvP flag's name (Social, seeing other players: their combat stances) -------------------------------------
+// (these write the player's own pawn, as set_in_combat does; the pawn the other players are shown takes them from there, session/player_stance.inc)
+
+static_assert(static_cast<uint64_t>(content::kAlignmentNonCombatant) == kAlignmentKeyB, "the join's second alignment is the NonCombatant");
+
+bool PlayerBootstrap::set_targeting(bool targeting) {
+    if (!ok_) return false;
+    repl::Subobject* combat = component(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema->command("bIsTargeting")) return false;
+    return combat->obj.state.set(*combat->obj.schema, "bIsTargeting", Value::boolean(targeting));
+}
+
+bool PlayerBootstrap::set_flag_alignment(bool flagged) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* al = component(setup_.guids.alignment);
+    if (!al || !al->obj.schema) return false;
+    const repl::Value* held = al->obj.state.get(*al->obj.schema, "Alignments");
+    const auto* now = held ? held->get_if<repl::AlignmentContainer>() : nullptr;
+    if (!now) return false;
+    const int64_t want = flagged ? content::kAlignmentCombatant : content::kAlignmentNonCombatant;
+    const int64_t other = flagged ? content::kAlignmentNonCombatant : content::kAlignmentCombatant;
+    repl::AlignmentContainer next = *now;
+    bool found = false;
+    for (repl::AlignmentContainer::Instance& i : next.instances) {
+        if (i.key == other) {
+            i.key = static_cast<uint64_t>(want);   // the data's own set: a player is the one or the other, never both
+            found = true;
+        } else if (i.key == static_cast<uint64_t>(want)) {
+            found = true;
+        }
+    }
+    if (!found) return false;
+    return al->obj.state.set(*al->obj.schema, "Alignments", Value(std::move(next)));
 }
 
 bool PlayerBootstrap::set_observer_stats(repl::Actor& shown) {

@@ -252,6 +252,13 @@ void PlayerSession::on_set_pvp_flag(Connection& conn, const repl::ClientRpc& rpc
         spdlog::warn("[session] {}: the pawn does not take CombatInfo.bPvPForceFlag: the client is not told", name());
         return;
     }
+    // the name the others see: the game's own alignment records carry the colour, so the flag puts the Combatant (the purple name) on the player and takes the
+    // NonCombatant away, and the flag off gives the NonCombatant back (modelled: the data puts the Combatant at the first harmful action, which this part has not)
+    if (pb_.set_flag_alignment(pvp_flag_)) {
+        note_shown_alignment();   // (the pawn the other players are shown takes it at this session's next tick, with the flag's bit)
+    } else {
+        spdlog::warn("[session] {}: the pawn does not take AlignmentComponent.Alignments: the other players are not shown the PvP flag's name", name());
+    }
     queue_later("CombatInfo (PvP flag)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("PvP flag"); }, conn, now, /*must_build=*/false);
     spdlog::log(level_for(flag_logged_, 20), "[session] {}: the PvP flag is {} (kept until the session ends)", name(), pvp_flag_ ? "on" : "off");
 }

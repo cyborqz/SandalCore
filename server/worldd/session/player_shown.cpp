@@ -75,6 +75,7 @@ void PlayerSession::run_shown(Connection& conn, Clock::time_point now) {
     sync_shown_level_ups(conn);
     sync_shown_stats();
     sync_shown_death();
+    sync_shown_stance();   // (Social, seeing other players: their combat stances; the declaration is in session/members/stance.inc)
 }
 
 void PlayerSession::sync_shown_mount(Clock::time_point now) {
@@ -316,5 +317,8 @@ void PlayerSession::sync_shown_level_ups(Connection& conn) {
         shown_players_seen_ = epoch;
     }
 }
+
+// Social, seeing other players (their combat stances): the five stance bits and the name colour on the pawn the other players are shown, and the client's draw request.
+#include "session/player_stance.inc"
 
 }}  // namespace aoc::worldd

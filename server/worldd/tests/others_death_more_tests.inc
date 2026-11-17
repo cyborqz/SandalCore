@@ -333,7 +333,7 @@ static BunchWriter targeted_trigger(const emit::FIntrepidNetworkGUID& component,
 }
 
 static void test_an_ability_that_raises_nobody_is_still_not_cast_at_another_player() {
-    std::printf("only the Resurrection reaches another player: a heal cast at a player is refused as before, and costs nothing\n");
+    std::printf("a heal can now be cast at another player (abilities between players): the cast starts and spends its Mana\n");
     ResurrectScene sc;
     CHECK(sc.ok(), "(the world's fights are on)");
     if (!sc.ok()) return;
@@ -344,8 +344,8 @@ static void test_an_ability_that_raises_nobody_is_still_not_cast_at_another_play
     const float mana = session_stat(*cleric.s, content::kGuidMana);
     cleric.client_sends({cleric.client.actor(cleric.pawn_ch, targeted_trigger(cleric.s->bootstrap().setup().guids.ability, kMend, sc.bard->s->bootstrap().setup().guids.pawn, 1), true)});
     cleric.run(milliseconds(400));
-    CHECK(cleric.s->pipeline() && cleric.s->pipeline()->casts_started() == casts, "a heal cast at another player starts no cast");
-    CHECK(session_stat(*cleric.s, content::kGuidMana) >= mana, "...and spends no Mana");
+    CHECK(cleric.s->pipeline() && cleric.s->pipeline()->casts_started() == casts + 1, "a heal cast at another player starts its cast");
+    CHECK(session_stat(*cleric.s, content::kGuidMana) < mana, "...and spends its Mana");
 }
 AOC_REGISTER_TEST(test_an_ability_that_raises_nobody_is_still_not_cast_at_another_player);
 

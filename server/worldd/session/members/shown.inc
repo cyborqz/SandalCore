@@ -12,7 +12,7 @@ public:
 
 private:
     /// Every tick, after sync_presence and run_emotes (tick_logic, so that the registry is written before the view passes): brings the pawn the other players are shown in line with the
-    /// player.  Each part of seeing other players adds its own `sync_*` call here and writes through show_in_pawn (the combat stances are the next one).
+    /// player.  Each part of seeing other players adds its own `sync_*` call here and writes through show_in_pawn (the combat stances are session/members/stance.inc).
     void run_shown(Connection& conn, Clock::time_point now);
     /// The one place a change to the pawn the other players are shown is made: `fn(WorldActor&)` runs on the registry's Player actor of this player, which counts the change (`kind`: a
     /// position alone is Change::Movement, anything else State).  False when the pawn is not in the world (yet).
