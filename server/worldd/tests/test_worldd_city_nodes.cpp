@@ -136,7 +136,7 @@ void test_zoi_tables_agree() {
         rows_cells += cells;
         wrong_cells += wrong;
     }
-    CHECKF(region::kZoiCount == 12 && guids.size() == 12, "G1's table has %zu zones, want 12", region::kZoiCount);
+    CHECKF(region::kZoiCount == 54 && guids.size() == 54, "the world's table has %zu zones, want 54", region::kZoiCount);
     CHECKF(bad_zones == 0 && wrong_cells == 0, "%d zones differ (%llu cells)", bad_zones, static_cast<unsigned long long>(wrong_cells));
     CHECKF(rows_cells == region::kRiverlandsAreaCells, "the zones' cells add up to %llu, the Riverlands has %u", static_cast<unsigned long long>(rows_cells), region::kRiverlandsAreaCells);
     // the other way: inside the Riverlands' box, every cell the surface table gives to one of the 12 zones is a cell of G1's table (no extra cell)

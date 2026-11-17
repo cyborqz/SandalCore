@@ -2394,7 +2394,7 @@ static void test_real_roads() {
     std::printf("stage 4: the roads of the area (mapc roads, contentc roads): the real file, and a mount riding along one\n");
     const std::string path = MOUNT_ROADS_PATH;
     const std::vector<RealRoad> roads = read_real_roads(path);
-    CHECK(roads.size() >= 30, "dist/content/roads.tsv holds the area's roads (91 at Wilderness over the whole region: 54 tier 1, 37 tier 2)");
+    CHECK(roads.size() >= 30, "dist/content/roads.tsv holds the area's roads (223 at Wilderness over the whole world: 186 tier 1, 37 tier 2)");
     if (roads.empty()) return;
     world::RoadMap map;
     std::string error;
@@ -2407,7 +2407,7 @@ static void test_real_roads() {
         for (size_t i = 1; i < r.xy.size(); ++i) metres += std::hypot(r.xy[i].first - r.xy[i - 1].first, r.xy[i].second - r.xy[i - 1].second) / 100.0;
     }
     CHECK(t1 >= 5 && t2 >= 20 && other == 0, "the area's roads are tier 1 (the Riverlands Artery at level 0) and tier 2 (Lions Hold's)");
-    CHECK(metres > 25000.0 && metres < 45000.0, "about 34 km of road in all (the region's 91 roads at Wilderness: 24.7 km of tier 1, 9.1 km of tier 2)");
+    CHECK(metres > 95000.0 && metres < 115000.0, "about 105 km of road in all (the world's 223 roads at Wilderness, the Riverlands' and the Anvils': the new regions' 15 roads have a tier at a node level only)");
     CHECK(narrow >= 500.0, "no road is narrower than half of max(RoadWidth, 1000): the overlap's half width is at least 500 cm");
     // every vertex of every road is on a road of at least its own tier; a point 3 km from all of them is on none
     bool self = true;

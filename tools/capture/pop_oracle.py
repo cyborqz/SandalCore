@@ -76,6 +76,7 @@ class Region:
         z = json.load(open(os.path.join(root, 'fixtures', 'region', 'riverlands_zoi_rects.json')))
         self.rects = [tuple(int(v) for v in q) for q in r['rects_xy_cm']]
         self.zois = [(int(q['guid']), q['name'], [tuple(int(v) for v in a) for a in q['rects_xy_cm']]) for q in z['zois']]
+        ANVILS_ZONES.update(g for g, n, _ in self.zois if n.startswith('Verra_ANV_'))
         self.rows = {}
         for i, (x0, y0, x1, y1) in enumerate(self.rects):
             for k in range(y0 // 8192, (y1 - 1) // 8192 + 1):
@@ -204,13 +205,18 @@ def f_point(d, ws, s, i, ctx):
     return 'Spawns'
 
 
+ANVILS_ZONES = set()   # the Anvils' zones: their people are Dunir and their biome TabletopMountains, whatever the context says (spawn_filter.cpp)
+
+
 def f_filter(f, tags, ctx, zoi):
     level = lvl(ctx.node_level)
     lo = lvl(f['node_level_min'])
     hi = lvl(f['node_level_max'])
     if lo < 0 or hi < 0 or lo >= 7 or hi >= 7 or level < lo or level > hi:
         return 'NodeLevel'
-    if f['cultures'] and ctx.culture not in f['cultures']:
+    zone_ = zoi if zoi else ctx.zone
+    anvils = zone_ in ANVILS_ZONES
+    if f['cultures'] and ('Dunir' if anvils else ctx.culture) not in f['cultures']:
         return 'Culture'
     if f['node_ids'] and ctx.node_id not in f['node_ids']:
         return 'NodeOrZone'
@@ -219,7 +225,7 @@ def f_filter(f, tags, ctx, zoi):
         return 'NodeOrZone'
     if f['node_types'] and ctx.node_type not in f['node_types']:
         return 'NodeType'
-    if f['biomes'] and ctx.biome not in f['biomes']:
+    if f['biomes'] and ('TabletopMountains' if anvils else ctx.biome) not in f['biomes']:
         return 'Biome'
     if f['seasons'] and ctx.season not in f['seasons']:
         return 'Season'

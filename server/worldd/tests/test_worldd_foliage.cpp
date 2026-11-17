@@ -6,18 +6,18 @@
 //
 //  The painted foliage without a session: the map, the state of every instance and its regrowth, the cell actors, and the data of the real content.db (version 15).
 //
-//  the map          dist/content/region_foliage.tsv: 84,218 instances of 73 defs in 671 owners with 10,613 components; the three instances the captures harvested are the rows the client
+//  the map          dist/content/region_foliage.tsv: 588,362 instances of 97 defs in 3,761 owners with 42,267 components (the Riverlands, the Anvils, SAN, the Turquoise coast and Jundark); the three instances the captures harvested are the rows the client
 //                   named (1428's Oak, 1451's Daffodil, 1519's Oak) at the positions the file has; a damaged line stops the load naming it; a key twice is refused
 //  the store        Empty -> Infancy -> Juvenile -> Adult with a fake clock: an Oak large 300 + 1800 + 1800 s, a plant 1800 + 300 s, a stone 840 s; the multiplier scales every phase (the
 //                   launcher's 0.01: 3 + 18 + 18 s); a long pause brings an instance through all its phases in order; a harvest at any state is Empty again and the old timer is void; the
 //                   instance is cut by one player at a time
 //  the cells        every cell has its state actor from the start (28 components for the captured cell, in byte order, at the cell's centre); a harvest is an item {index, 3}, a
 //                   growing instance 0 or 1, an instance whole again leaves the list; a connection's first look lists the Empty instances as 11
-//  the client's     (the fix after the user's test 1, 2026-10-12: no tree, plant or stone showed a prompt because an untouched cell had no state actor) the 671 actors are read back from
-//  needs            their bits the way the client builds FoliageStateActorLookup and FoliageStateComponentLookup, and each of the 84,218 rows of the TSV, read again here, resolves to an
+//  the client's     (the fix after the user's test 1, 2026-10-12: no tree, plant or stone showed a prompt because an untouched cell had no state actor) the 3,761 actors are read back from
+//  needs            their bits the way the client builds FoliageStateActorLookup and FoliageStateComponentLookup, and each of the 588,362 rows of the TSV, read again here, resolves to an
 //                   initialized component through UE's FName split (trees, plants, stones); an untouched cell's open equals the retail opens of the retail capture's login and a later one, the
 //                   actor block, the spawn location and 166 component blocks, bit for bit but for the retail server's own AuthServerIDReplicated; the cost of making them (time, memory)
-//  the data         content.db's foliage tables resolve the map's 73 defs (69 harvestable, the duplicate name once); the Oak's and the Daffodil's states, interactions and reach cover
+//  the data         content.db's foliage tables resolve the map's 97 defs (93 harvestable, the duplicate name once); the Oak's and the Daffodil's states, interactions and reach cover
 //                   the three captured starts with a margin of 50 cm or more; the Oak, Ash and Daffodil rewards reproduce the captured items (record, quantity, quality) of 1428, 1451, 1463,
 //                   1465, 1468 and 1519
 // ============================================================================
@@ -175,7 +175,7 @@ static void test_map_real() {
         std::printf("    %s\n", error.c_str());
         return;
     }
-    CHECK(m->rows().size() == 84218 && m->def_names().size() == 73 && m->owners().size() == 671 && m->components() == 10613, "84,218 instances, 73 defs, 671 owners and 10,613 components");
+    CHECK(m->rows().size() == 588362 && m->def_names().size() == 97 && m->owners().size() == 3761 && m->components() == 42267, "588,362 instances, 97 defs, 3,761 owners and 42,267 components");
     size_t pillars = 0, max_comps = 0;
     for (const auto& o : m->owners()) max_comps = std::max(max_comps, o.components.size());
     CHECK(max_comps == 38, "an owner has at most 38 components");
@@ -387,8 +387,8 @@ static constexpr const char* kCell41_19 = "InstancedFoliageActor_25600_-41_19_0"
 
 static void test_data(World& w) {
     std::printf("the data: the map's defs against content.db's foliage tables\n");
-    CHECK(w.f->defs() == 73 && w.f->unresolved_defs() == 0, "all 73 defs of the map resolve to a foliage_def");
-    CHECK(w.f->harvestable_defs() == 69, "69 can be harvested (the four Riverlands_ pillars have no interaction)");
+    CHECK(w.f->defs() == 97 && w.f->unresolved_defs() == 0, "all 97 defs of the map resolve to a foliage_def");
+    CHECK(w.f->harvestable_defs() == 93, "93 can be harvested (the four Riverlands_ pillars have no interaction)");
     CHECK(w.f->duplicated_names() == 0, "no def of the map has two records in the design data (the one repeated name, Stone_Limestone_Large_2, is no def of the Riverlands)");
     CHECK(w.g->interactions() == 236, "Gathering holds all 236 interactions");
     const uint32_t oak_row = w.row_of(kCell41_19, "IntrepidGatherableFISMC_0", 0);
@@ -592,7 +592,7 @@ static void test_every_instance_has_its_state(World& w) {
     });
     char msg[240];
     std::snprintf(msg, sizeof msg, "%zu state actors in the world, %zu read back from their bits, %zu FoliageName twice, %zu components, %zu not initialized", actors, actors - unreadable, doubled, components, not_init);
-    CHECK(actors == 671 && unreadable == 0 && doubled == 0 && components == 10613 && not_init == 0 && client.size() == 671, msg);
+    CHECK(actors == 3761 && unreadable == 0 && doubled == 0 && components == 42267 && not_init == 0 && client.size() == 3761, msg);
     // every row of dist/content/region_foliage.tsv, read again here: trees, plants and stones
     const char* path = tsv_path();
     std::ifstream in(path, std::ios::binary);
@@ -634,10 +634,10 @@ static void test_every_instance_has_its_state(World& w) {
     }
     std::snprintf(msg, sizeof msg, "%zu of the %zu rows resolve to an initialized component (%zu without a state actor, %zu without a component, %zu not initialized)", resolved, rows, no_actor, no_component,
                   uninitialized);
-    CHECK(rows == 84218 && resolved == rows, msg);
+    CHECK(rows == 588362 && resolved == rows, msg);
     std::snprintf(msg, sizeof msg, "... %zu of %zu trees, %zu of %zu plants, %zu of %zu stones (and the four rock pillars)", trees_ok, trees, plants_ok, plants, stones_ok, stones);
-    CHECK(trees == 42250 && trees_ok == trees && plants == 21046 && plants_ok == plants && stones == 20922 && stones_ok == stones, msg);
-    CHECK(foreign == 0, "every row, the 20,922 stones among them, is in an IntrepidGatherableFISMC_<n> component: the class the client's target scan accepts");
+    CHECK(trees == 294820 && trees_ok == trees && plants == 148686 && plants_ok == plants && stones == 144856 && stones_ok == stones, msg);
+    CHECK(foreign == 0, "every row, the 144,856 stones among them, is in an IntrepidGatherableFISMC_<n> component: the class the client's target scan accepts");
 }
 
 /// An untouched cell's open against the retail opens of the retail capture's login and a later one (the ten painted cells the generator kept whole): the actor block, the spawn location and
@@ -762,12 +762,12 @@ static void test_cell_actor(World& w) {
     const uint16_t owner = map.rows()[stone_row].owner;
     CHECK(w.f->name_of(stone_row) == "Stone_Granite_Large_3", "(a Granite stone)");
     const uint64_t actor_id = cells.actor_of(owner);
-    CHECK(actor_id != 0 && cells.actors() == 671 && cells.items_of(owner) == 0, "every cell has its state actor before anything in it is cut: 671, this one with no item");
+    CHECK(actor_id != 0 && cells.actors() == 3761 && cells.items_of(owner) == 0, "every cell has its state actor before anything in it is cut: 3,761, this one with no item");
     const size_t in_registry = w.world->registry().size();
     const Clock::time_point t0{seconds(1000)};
     const auto change = w.f->harvested(stone_row, t0);
     CHECK(change && change->state == fol::kEmpty, "the harvest is Empty");
-    CHECK(cells.actor_of(owner) == actor_id && cells.actors() == 671 && w.world->registry().size() == in_registry, "the first cut of the cell changed its actor and made no other");
+    CHECK(cells.actor_of(owner) == actor_id && cells.actors() == 3761 && w.world->registry().size() == in_registry, "the first cut of the cell changed its actor and made no other");
     const world::WorldActor* a = w.world->registry().find(actor_id);
     CHECK(a && a->kind == world::ActorKind::Foliage && a->snapshot_only && a->keep_fast_shadow && a->dormancy_delay == fol::kStateActorOpen && !a->never_dormant,
           "it is a snapshot-only foliage actor with a 265 ms open, whose fast arrays the view keeps");
@@ -878,7 +878,7 @@ static void test_duplicate_name(World& w) {
           "a missing map is an error that names the file and `mapc extract`");
 }
 
-// ---- the load: what the state actors of all 671 cells cost ---------------------------------------------------------------------------------
+// ---- the load: what the state actors of all 3,761 cells cost ---------------------------------------------------------------------------------
 
 static size_t working_set_bytes() {
 #ifdef _WIN32
@@ -890,7 +890,7 @@ static size_t working_set_bytes() {
 }
 
 static void test_load(const char* db, const char* tsv) {
-    std::printf("the load: the 671 state actors made at start\n");
+    std::printf("the load: the 3,761 state actors made at start\n");
     World w;
     if (!w.open(db, tsv, /*all_cells=*/false)) return;
     const size_t registry_before = w.world->registry().size();
@@ -918,7 +918,7 @@ static void test_load(const char* db, const char* tsv) {
                 made ? grown_mb * 1024.0 / static_cast<double>(made) : 0.0, subobjects ? grown_mb * 1024.0 * 1024.0 / static_cast<double>(subobjects) : 0.0);
     std::printf("    a cell's open is %zu bits of blocks on average (%zu at most, a cell of 38 components); all %zu cells together %.1f KB\n", opens ? total_bits / opens : 0, max_bits, opens,
                 static_cast<double>(total_bits) / 8.0 / 1024.0);
-    CHECK(made == 671 && subobjects == 10613 && w.world->registry().size() == registry_before + 671 && opens == 671, "671 actors with 10,613 components were made and each builds its open");
+    CHECK(made == 3761 && subobjects == 42267 && w.world->registry().size() == registry_before + 3761 && opens == 3761, "3,761 actors with 42,267 components were made and each builds its open");
     CHECK(ms < 2000.0, "they are made in under two seconds, once, at start");
     CHECK(ws0 == 0 || grown_mb < 100.0, "and they hold under 100 MB of the process (the measurement: see above)");
 }

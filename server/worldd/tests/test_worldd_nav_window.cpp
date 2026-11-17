@@ -732,20 +732,20 @@ static void test_real() {
     nav::NavFile idx;
     CHECK(nav::read_nav_index(path, &idx, &err), "the index of the real file reads");
     std::printf("  %zu terrain grids, %zu chunks, %llu tiles, %zu region rectangles\n", idx.terrain.size(), idx.chunks.size(), static_cast<unsigned long long>(idx.tile_count_v2), idx.region.size());
-    CHECK(idx.region.size() == 401 && idx.chunk_tiles == 8 && idx.settings.max_tiles == 4096 && idx.settings.max_polys == 1024, "401 rectangles, chunks of 8 x 8 tiles, a mesh of 4,096 tiles and 1,024 polygons");
+    CHECK(idx.region.size() == 2946 && idx.chunk_tiles == 8 && idx.settings.max_tiles == 4096 && idx.settings.max_polys == 1024, "2,946 rectangles, chunks of 8 x 8 tiles, a mesh of 4,096 tiles and 1,024 polygons");
     CHECK(std::fabs(idx.center_x - (-777664.5)) < 1e-6 && std::fabs(idx.center_y - 616578.6875) < 1e-6, "the grid is anchored on E1's corner (the login spot - 112,000)");
     {
-        // the file's footprint is the header's (spawns/region_data.h): the same 401 rectangles, and the per-ZOI rectangles tile the same area
+        // the file's footprint is the header's (spawns/region_data.h): the same 2,946 rectangles, and the per-ZOI rectangles tile the same area
         namespace rg = aoc::worldd::spawns::region;
         bool same = rg::kRiverlandsRectCount == idx.region.size();
         for (size_t i = 0; same && i < idx.region.size(); ++i)
             same = idx.region[i].x0 == rg::kRiverlandsRects[i].x0 && idx.region[i].y0 == rg::kRiverlandsRects[i].y0 && idx.region[i].x1 == rg::kRiverlandsRects[i].x1 && idx.region[i].y1 == rg::kRiverlandsRects[i].y1;
-        CHECK(same, "the nav file's region is the header's 401 rectangles (the same generator)");
+        CHECK(same, "the nav file's region is the header's 2,946 rectangles (the same generator)");
         uint64_t cells = 0;
         for (const auto& r : rg::kRiverlandsRects) cells += static_cast<uint64_t>((r.x1 - r.x0) / rg::kCellCm) * static_cast<uint64_t>((r.y1 - r.y0) / rg::kCellCm);
         uint64_t zoi_cells = 0;
         for (const auto& z : rg::kZois) zoi_cells += z.cells;
-        CHECK(cells == rg::kRiverlandsAreaCells && zoi_cells == cells && rg::kZoiCount == 12, "the header's 12 ZOIs hold the footprint's 1,873,943 cells (49.12 km2)");
+        CHECK(cells == rg::kRiverlandsAreaCells && zoi_cells == cells && rg::kZoiCount == 54, "the header's 54 ZOIs hold the footprint's 10,647,662 cells (279.12 km2)");
     }
     uint64_t largest = 0;
     for (const auto& c : idx.chunks) largest = std::max<uint64_t>(largest, c.tiles);

@@ -41,7 +41,7 @@ uint64_t mix(uint64_t z) {
 std::string AreaReport::describe() const {
     std::ostringstream o;
     if (area.region) {
-        o << "area: the Riverlands (" << region::kRiverlandsRectCount << " rectangles, " << region::kRiverlandsAreaCells * (region::kCellCm / 100.0) * (region::kCellCm / 100.0) / 1.0e6
+        o << "area: the world footprint (" << region::kRiverlandsRectCount << " rectangles, " << region::kRiverlandsAreaCells * (region::kCellCm / 100.0) * (region::kCellCm / 100.0) / 1.0e6
           << " km2, " << region::kZoiCount << " zones of influence)";
     } else {
         o << "area: centre (" << static_cast<long long>(area.center_x) << ", " << static_cast<long long>(area.center_y) << ") cm, radius " << area.radius_cm / 100.0 << " m";

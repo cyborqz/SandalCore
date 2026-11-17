@@ -6,7 +6,10 @@
 // ============================================================================
 #include "spawns/spawn_filter.h"
 
+#include "spawns/region_data.h"
+
 #include <algorithm>
+#include <string_view>
 
 namespace aoc::worldd::spawns {
 
@@ -83,6 +86,18 @@ namespace {
 
 bool has(const std::vector<std::string>& list, const std::string& v) { return std::find(list.begin(), list.end(), v) != list.end(); }
 
+/// The zone of influence is one of the Anvils' (the region's Verra_ANV_ zones, Biome TabletopMountains), whose people are Dunir and Nikua: the context's culture and biome are the Riverlands'.
+bool anvils_zone(int64_t zone) {
+    static const std::set<int64_t> zones = [] {
+        std::set<int64_t> out;
+        for (size_t z = 0; z < region::kZoiCount; ++z) {
+            if (std::string_view(region::kZois[z].name).rfind("Verra_ANV_", 0) == 0) out.insert(static_cast<int64_t>(region::kZois[z].guid));
+        }
+        return out;
+    }();
+    return zones.count(zone) != 0;
+}
+
 }  // namespace
 
 Why SpawnFilter::point(const content::PopulationData& data, const content::NpcWorldSpawn* world_spawn, const content::NpcSetRow& set, const content::NpcInstanceRow& instance) const {
@@ -106,14 +121,15 @@ Why SpawnFilter::filter(const content::PopFilter& f, const std::set<std::string>
     const int lo = node_level_number(f.node_level_min), hi = node_level_number(f.node_level_max);
     // cCount (7) is no level: a filter that bounds the level with it is the design data's "never" (StartArcSpawn and the like)
     if (lo < 0 || hi < 0 || lo >= 7 || hi >= 7 || level < lo || level > hi) return Why::NodeLevel;
-    if (!f.cultures.empty() && !has(f.cultures, ctx_.culture)) return Why::Culture;
-    if (!f.node_ids.empty() && std::find(f.node_ids.begin(), f.node_ids.end(), ctx_.node_id) == f.node_ids.end()) return Why::NodeOrZone;
-    // a zone of influence: the point's own (G1: the Riverlands' grid); an area with none (E1's circle: zoi 0) matches no zone
+    // a zone of influence: the point's own (G1: the region's grid); an area with none (E1's circle: zoi 0) matches no zone
     // (Nodes 1, stage 3b: the context's own zone stands in for a point that has none, a node's populations)
     const int64_t zone = zoi != 0 ? zoi : ctx_.zone;
+    const bool anvils = anvils_zone(zone);
+    if (!f.cultures.empty() && !has(f.cultures, anvils ? std::string("Dunir") : ctx_.culture)) return Why::Culture;
+    if (!f.node_ids.empty() && std::find(f.node_ids.begin(), f.node_ids.end(), ctx_.node_id) == f.node_ids.end()) return Why::NodeOrZone;
     if (!f.zones.empty() && (zone == 0 || std::find(f.zones.begin(), f.zones.end(), zone) == f.zones.end())) return Why::NodeOrZone;
     if (!f.node_types.empty() && !has(f.node_types, ctx_.node_type)) return Why::NodeType;
-    if (!f.biomes.empty() && !has(f.biomes, ctx_.biome)) return Why::Biome;
+    if (!f.biomes.empty() && !has(f.biomes, anvils ? std::string("TabletopMountains") : ctx_.biome)) return Why::Biome;
     if (!f.seasons.empty() && !has(f.seasons, ctx_.season)) return Why::Season;
     if (!f.weather.empty() && !has(f.weather, ctx_.weather)) return Why::Weather;
     if (f.time_of_day_start != -1 || f.time_of_day_end != -1) {

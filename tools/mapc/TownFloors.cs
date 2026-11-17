@@ -30,11 +30,16 @@ public static class TownFloors
     const string Dir = "AOC/Content/ENV/Nodes/Nodes_Master/Node_Sublevels/Landscape_Platforms/";
 
     /// <summary>Layout_Flat_D (layout prop 14 NS_Flat_D_Master_01_Landscape: Winstead, Joeva, New Aela) and Layout_River_C (prop 53 NS_River_C_Landscape: Halcyon, Miraleth): the
-    /// Riverlands' variant of each (the other variants in the folders are for other biomes).</summary>
+    /// Riverlands' variant of each.  The asset set holds one definition per biome (node_asset_def.biomes, a mask of EBiomeType bits), and the Anvils are TabletopMountains (bit 17):
+    /// Landscape_Flat_D_Master_01's mask (1701791) does not hold it, so Vexhelm, Duunhold and Dhurgrum stand on Flat_D's TabletopMountains variant (mask 131072), a layout key of its
+    /// own; Landscape_River_C_Master_01 serves both regions (Vhalgadim).  Kal Torhum's layout is Layout_Coastal_Flat_A (prop 9, set 6064633374306664448), whose definition for the
+    /// biome is NA_Landscape_Coastal_Flat_A_Anvils (mask 147456).</summary>
     public static readonly Source[] Sources =
     {
         new("Layout_Flat_D", Dir + "Layout_Flat_D/Landscape_Flat_D_Master_01.umap"),
         new("Layout_River_C", Dir + "Layout_River_C/Landscape_River_C_Master_01.umap"),
+        new("Layout_Flat_D_TabletopMountains", Dir + "Layout_Flat_D/Landscape_Flat_D_Master_01_TabletopMountains.umap"),
+        new("Layout_Coastal_Flat_A_Anvils", Dir + "Layout_Coastal_Flat_A/NA_Landscape_Coastal_Flat_A_Anvils.umap"),
     };
 
     /// <summary>The visibility layer's weight from which a vertex is a hole (UE's shader clips the landscape where the layer is 0.5 or more).</summary>

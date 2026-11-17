@@ -526,7 +526,7 @@ static void test_husbandry_hunts(const content::ContentDb& db, PlayerWorld& worl
         if (blueprint == "Hunting_TerrorBird") blueprint = "Hunting_Terrorbird";
         spawned_kinds += spawned_in_the_riverlands(blueprint) ? 1 : 0;
     }
-    CHECK_SHOWN(spawn_blueprints == 17 && spawned_kinds == 17, "the population golden of the Riverlands spawns exactly those 17 hunting kinds, so the sources the recipes name are the live region's");
+    CHECK_SHOWN(spawn_blueprints == 34 && spawned_kinds == 17, "the world's population golden spawns the Riverlands' 17 hunting kinds (34 hunting Blueprints over the five regions), so the sources the recipes name are the live world's");
     const bootstrap::StatContext ctx = world.stat_context();
     auto owner = ctx.bundle && ctx.gear ? std::make_unique<stats::CharacterStats>(*ctx.bundle, *ctx.gear, 2, 25, ctx.rounding) : nullptr;
     std::string why;
