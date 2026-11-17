@@ -32,6 +32,7 @@
 
 #include "bootstrap/character_setup.h"
 #include "bootstrap/observer_rider.h"
+#include "combat/pvp.h"   // #23 (MrJambix)
 #include "content/content_db.h"
 #include "items/inventory.h"
 #include "protocol/repl/move_packed.h"
@@ -248,14 +249,15 @@ void PlayerSession::sync_shown_level() {
 }
 
 void PlayerSession::sync_shown_stats() {
-    static constexpr int64_t kLiveStats[] = {content::kGuidHealth, content::kGuidMaxHealth, content::kGuidMana, content::kGuidMaxMana};
+    static constexpr int64_t kLiveStats[] = {content::kGuidHealth,      content::kGuidMaxHealth,     content::kGuidMana,
+                                             content::kGuidMaxMana,    combat::pvp::kStatCorruption, combat::pvp::kStatCorruptionTier};   // #23 (MrJambix)
     const world::WorldActor* now = registry_->find(world_pawn_);
     if (!now || !pb_.observer_live_stats_differ(now->actor, kLiveStats)) return;   // (the version of the shown pawn moves only on a change)
     bool ok = false;
     const bool done = show_in_pawn(world::Change::State, [&](world::WorldActor& w) { ok = pb_.set_observer_live_stats(w.actor, kLiveStats); });
     if (!done || !ok) {
         if (++shown_failures_ <= kLoggedPerKind) {
-            spdlog::warn("[players] {}: the pawn the other players are shown does not take its Health and Mana ({}): they do not see it", name(),
+            spdlog::warn("[players] {}: the pawn the other players are shown does not take its Health, Mana and Corruption ({}): they do not see it", name(),
                          done ? "a value does not fit" : "the pawn is not in the world");
         }
     }

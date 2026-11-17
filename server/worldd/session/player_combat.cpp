@@ -8,6 +8,7 @@
 //  the player's death and the loot window.
 // ============================================================================
 #include "session/player_session.h"
+#include "combat/pvp_corruption.h"   // #23 (MrJambix)
 
 #include "bootstrap/character_setup.h"
 #include "combat/combat_world.h"
@@ -97,16 +98,36 @@ std::vector<uint64_t> PlayerSession::actors_of(const std::vector<protocol::emit:
 }
 // C.O.A with C | Y | B
 
-void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& h, Clock::time_point now) {
+void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& in, Clock::time_point now) {   // #23 (MrJambix)
     if (!pipeline_) return;
-    // the mounts milestone, stage 3: a hit aimed at a mounted rider lands on the MOUNT's Health; the rider's own is untouched
-    if (mounted()) {
+    // Abilities between players: contributed by MrJambix in #23.
+    if (in.from_player && dead_) return;   // another player's hit that left its caster before this player fell (a Resurrect asks him instead)
+    // the mounts milestone, stage 3: a hit aimed at a mounted rider lands on the MOUNT's Health; the rider's own is untouched.  Another player's hit that helps (a heal, a
+    // buff) is for the rider; his harmful hit lands on the mount, as a creature's does
+    const bool to_mount = mounted() && (!in.from_player || in.hostile);
+    // PvP: contributed by MrJambix in #23.
+    // PvP: a duel partner's blow leaves him 1 Health (and the duel is lost); another player's harm ends his duel (session/player_duels.cpp).  A blow that lands on
+    // his mount is not judged against his Health (#23 review: it neither scales it by the rider's Health nor ends the duel at once)
+    combat::IncomingHit h = in;
+    const bool duel_lost = duel_filter(h, now, to_mount);
+    // PvP: who landed the last harmful blow (another player's, or 0 for a creature's): the killer the world is told when this player falls.  Only a blow that
+    // reached the rider counts, and only until the end of this tick (a blow that did not kill him credits nobody)
+    if (!to_mount && (h.flags & stats::kHitMiss) == 0 && (!h.from_player || h.hostile)) {
+        for (const combat::ResolvedMod& m : h.mods) {
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) {
+                last_blow_by_ = h.from_player ? h.instigator : 0;
+                break;
+            }
+        }
+    }
+    if (to_mount) {
         hit_on_mount(conn, h, now);
         // ... but the rider's own effects that listen to being hit still see it (the hit's numbers went to the mount)
         pipeline_->raise_hit_taken(h, ability_seconds(now));
         return;
     }
     pipeline_->receive_hit(h, ability_seconds(now));
+    if (duel_lost && duel_book_) duel_book_->defeated(pb_.setup().character_guid, pvp_world_now(now));   // #23 (MrJambix)
     if (mounts_ && (h.flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : h.mods) {
             if (m.stat_guid == content::kGuidHealth && m.value < 0) {
@@ -124,6 +145,12 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
     std::vector<combat::IncomingHit> hits;
     hits.swap(combat_side_->inbox);
     for (const combat::IncomingHit& h : hits) take_hit(conn, h, now);
+    // PvP: a blow credits its caster only as the killing blow (#23 review): a blow that leaves him standing credits nobody, so a later death of something that is
+    // not that blow (a fall, a GM kill) corrupts no one.  A blow that took his last Health keeps the credit for check_death (same call).
+    if (!dead_) {
+        const stats::StatValue* hp = stats_ ? stats_->find(content::kGuidHealth) : nullptr;
+        if (hp && hp->value > 0) last_blow_by_ = 0;
+    }
     // the hits of the effects he put on creatures (a burn's damage each second): confirmed to his client, which draws the number
     std::vector<combat::EffectHitNote> notes;
     notes.swap(combat_side_->effect_notes);
@@ -151,6 +178,7 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
             queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("combat state"); }, conn, /*must_build=*/true);
         }
     }
+    drain_pvp(conn, now);   // PvP: the flag, its notices and its end, bInPVPCombat, the kills (session/player_pvp.cpp)   // #23 (MrJambix)
 }
 // C.Y.B x C O A
 
@@ -249,7 +277,14 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
         targeting_ = false;
         pb_.set_targeting(false);
     }
-    if (combat_side_ && npc_world_ && npc_world_->combat()) npc_world_->combat()->player_died(combat_side_->actor_id());   // what he put on the creatures ends at once, not at the next tick of an effect
+    // PvP: contributed by MrJambix in #23.
+    // PvP: a death of anything but his duel partner's blow ends his duel (session/player_duels.cpp; the partner's ended it at the blow)
+    duel_died(now);
+    // what he put on the creatures ends at once, not at the next tick of an effect; PvP: the player whose blow it was hears of the kill, while the victim's flag is as it was
+    if (combat_side_ && npc_world_ && npc_world_->combat()) npc_world_->combat()->player_died(combat_side_->actor_id(), last_blow_by_, pvp_world_now(now));
+    const combat::pvp::Flag flag_at_death = pvp_state_;
+    const int tier_at_death = combat::pvp::corruption_tier(corruption_);   // PvP: what a corrupted death costs is the tier he died with
+    last_blow_by_ = 0;
     dismiss_pet(now);
     item_reserved_.clear();   // consumables: the casts that had not paid are gone with the death (set_dead dropped them): their items stay in the bag and can be used again
     // the mounts milestone, stage 3: the dead player is dismounted (the death frame below restarts its pawn) and its mount is desummoned
@@ -273,7 +308,11 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
     const leveling::LevelCurve* curve = world_ ? world_->level_curve() : nullptr;
     int64_t debt_added = 0;
     if (curve) {
-        const leveling::Progress next = leveling::with_death_debt(*curve, progress_, 0.02);
+        // PvP: contributed by MrJambix in #23.
+        // GameStatProfile.ExperienceDebt: a combatant's debt is half (PlayerIsCombatant(GetPlayer()): mult * 0.5), a corrupted player's is 2 % times the tier's
+        // multiplier (CorruptionTier->XpDebtMult: 2 4 7 10 15)
+        const double share = tier_at_death > 0 ? 0.02 * combat::pvp::xp_debt_mult(tier_at_death) : flag_at_death == combat::pvp::Flag::Combatant ? 0.01 : 0.02;
+        const leveling::Progress next = leveling::with_death_debt(*curve, progress_, share);
         debt_added = next.debt - progress_.debt;
         progress_ = next;
         progress_changed_ = true;
@@ -287,7 +326,10 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
         for (const svc::InventoryItem& it : inventory_.items()) {
             // Gathering stage 3: the materials are in the resource containers now (the Backpack holds them only for a bag that had no room at the login)
             if ((it.container != svc::ItemContainer::Backpack && !items::is_resource(it.container)) || it.quantity <= 0 || !is_material(*db, it.item_record_id)) continue;
-            const int32_t take = it.quantity == 1 ? 1 : (it.quantity + 1) / 2;
+            // PvP: contributed by MrJambix in #23.
+            // about half of each stack, and a corrupted player's tier adds to the share (CorruptionTier->DropRateAdditive: +.25 .35 .45 .65 1)
+            const double share = std::min(1.0, 0.5 + combat::pvp::resource_drop_add(tier_at_death));
+            const int32_t take = it.quantity == 1 ? 1 : std::clamp(static_cast<int32_t>(std::ceil(it.quantity * share - 1e-9)), 1, it.quantity);
             const items::Outcome c = inventory_.consume(it.container, it.slot, it.instance_guid, take);
             if (!c.ok) continue;
             all.events.insert(all.events.end(), c.events.begin(), c.events.end());
@@ -309,6 +351,10 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
             queue("ClientReceiveStorageEvent (death)", [part](bootstrap::PlayerBootstrap& pb) { return pb.item_events(part); }, conn, /*must_build=*/true);
         }
     }
+    // PvP: contributed by MrJambix in #23.
+    // PvP: a corrupted death drops worn items into the pile (when deaths cost items at all: the aftermath's death_loss), and burns corruption off; before the
+    // death's save, which carries the corruption left
+    if (tier_at_death > 0 || corruption_ > 0) pvp_corrupted_death(conn, db && loss_on ? tier_at_death : 0, lost);
     queue("pawn state (death)", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("death"); }, conn, /*must_build=*/true);
     if (curve) {
         const int64_t total = progress_.xp, debt = progress_.debt;
@@ -316,8 +362,8 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
             if (!pb.set_progress(total, debt)) return std::nullopt;
             return pb.leveling_update();
         }, conn, /*must_build=*/true);
-        hand_over_progress("a death");
     }
+    if (curve || pvp_changed_) hand_over_progress("a death");   // #23 (MrJambix)
     // the pile
     pile_actor_ = 0;
     if (!lost.empty() && npc_world_ && npc_world_->aftermath()) {
@@ -337,6 +383,7 @@ void PlayerSession::die(Connection& conn, Clock::time_point now) {
 
 void PlayerSession::apply_kill(Connection& conn, const combat::KillReward& k, Clock::time_point now) {
     ++kills_rewarded_;
+    pvp_npc_kill(conn, k.npc, static_cast<double>(k.adventuring_xp));   // PvP: a creature's kill burns corruption off (CorruptionReductionOnKillNPC)   // #23 (MrJambix)
     const leveling::LevelCurve* curve = world_ ? world_->level_curve() : nullptr;
     const std::span<const content::AutoGrant> grants = world_ ? world_->auto_grants() : std::span<const content::AutoGrant>();
     leveling::XpResult xp;

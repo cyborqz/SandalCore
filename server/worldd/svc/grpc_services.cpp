@@ -225,6 +225,11 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
         x.expires_at_ms = q.expires_at_ms();
         r.character.friend_requests.push_back(std::move(x));
     }
+    if (c.has_pvp()) {   // PvP (migration 0025)
+        // PvP: contributed by MrJambix in #23.
+        r.character.corruption = c.pvp().corruption();
+        r.character.blight = c.pvp().blight();
+    }
     for (const auto& e : c.experience()) {
         Experience x;
         x.leveling_type_guid = e.leveling_type_guid();
@@ -346,6 +351,14 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
         p->set_sender_name(q.sender_name);
         p->set_recipient_guid(q.recipient_guid);
         p->set_expires_at_ms(q.expires_at_ms);
+    }
+    if (progress.replace_pvp) {   // PvP (migration 0025): both 0 sends no state (no row)
+        // PvP: contributed by MrJambix in #23.
+        req.set_replace_pvp(true);
+        if (progress.corruption != 0 || progress.blight != 0) {
+            req.mutable_pvp()->set_corruption(progress.corruption);
+            req.mutable_pvp()->set_blight(progress.blight);
+        }
     }
     characterv1::SaveProgressResponse resp;
     return map_grpc_status(stubs_->character->SaveProgress(&ctx, req, &resp));

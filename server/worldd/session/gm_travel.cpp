@@ -523,6 +523,7 @@ const char* kind_word(world::ActorKind k) {
         case world::ActorKind::Station: return "crafting station";
         case world::ActorKind::Shrine: return "Emberspring";
         case world::ActorKind::Prop: return "quest object";
+        case world::ActorKind::DuelBanner: return "duel banner";   // #23 (MrJambix)
     }
     return "actor";
 }
@@ -957,6 +958,11 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
         const PlayerSession::GmKillResult r = handle.player->gm_kill(*handle.connection, now_(), by);
         if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);
         out.message = out.character + " was killed (death " + std::to_string(r.deaths) + " of this session)";
+    } else if (def->name == "pvp") {
+        // PvP: contributed by MrJambix in #23.
+        const PlayerSession::GmPvpResult r = handle.player->gm_pvp(*handle.connection, text("state"), number("amount"), now_(), by);
+        if (!r.ok) return failed(GmStatus::InvalidArgument, r.refusal);
+        out.message = r.text;
     } else if (def->name == "give-experience") {
         const PlayerSession::GmXpResult r = handle.player->gm_give_experience(*handle.connection, whole("amount"), now_(), by);
         if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);

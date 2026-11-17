@@ -212,6 +212,11 @@ inline const std::vector<AdminCommand>& admin_commands() {
          {character_field(), number_field("value", "Mana", true, "0 or more; above the maximum is the maximum", true, 0, true, 10000000)}},
         {"revive", "Brings a dead character back at the nearest place it may return, alive and with full Health and Mana.", "character", true, {character_field()}},
         {"kill", "Kills a character the way a blow does: the same death, experience debt, dropped materials and respawn choices.", "combat", true, {character_field()}},
+        // PvP: contributed by MrJambix in #23.
+        {"pvp", "Sets a character's PvP flag, for testing the nameplates and the rules: a non-combatant (white), a combatant (purple, for 60 s) or corrupted (red) by an amount.", "combat",
+         true,
+         {character_field(), choice_field("state", "State", true, "noncombatant clears the flag and the corruption; corruption needs an amount", {"noncombatant", "combatant", "corruption"}),
+          number_field("amount", "Corruption", false, "0 or more; for the corruption state", true, 0, true, 999999)}},
         {"give-experience", "Adds Adventuring experience to a character; the levels it crosses are applied and the client is told.", "character", true,
          {character_field(), whole_field("amount", "Experience", true, "1 or more", true, 1, true, 1000000000)}},
         {"start-quest", "Starts a quest for a character by its name or Guid, as the game's own debug command does.", "quests", true,

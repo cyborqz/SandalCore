@@ -159,7 +159,8 @@ void test_reactions4_a_bard_alone_keeps_his_own_buff(Fixture& f) {
     CHECK(g.rig.pawn.broken.empty(), "(the pawn took every change)");
 }
 
-// Two Bards in one party, each with his own melody: each holds the other's Buff and his own, once.
+// Two Bards in one party, each with his own melody: each holds the other's Buff and his own, once.  The party is one key both answer with (PlayerPort's
+// group_key, as one party's sessions share their group pointer), and each knows the other as a member (in_party_with asks of both sides).
 void test_reactions4_two_bards_buff_each_other(Fixture& f) {
     std::printf("two Bards of one party playing Epic and Cheerful: each holds both Buffs once\n");
     Aura epic, cheerful;
@@ -168,8 +169,11 @@ void test_reactions4_two_bards_buff_each_other(Fixture& f) {
     Duo d(f);
     CHECKF(d.ok(), "the world: %s%s", d.a.problem.c_str(), d.w.problem.c_str());
     if (!d.ok()) return;
-    d.pb.party_with = d.pa.actor_id();
+    d.pb.party_with = d.pa.actor_id();   // (each Bard knows the other: in_party_with asks of both sides)
     d.pa.party_with = d.pb.actor_id();
+    d.pa.party_key = d.pb.party_key = d.pa.actor_id();   // (the one key both name, as one party's sessions share one group pointer)
+    d.pa.pvp_rules = true;               // the PvP rules judge the two players: one party is the support-only tier
+    d.pb.pvp_rules = true;
     const double t0 = 100.0;
     CHECK(grant(d.a, epic.self, 1, t0) && grant(d.b, cheerful.self, 1, t0), "(the first Bard plays Epic, the second Cheerful)");
     d.a.run_to(t0 + 2.1);
@@ -180,8 +184,11 @@ void test_reactions4_two_bards_buff_each_other(Fixture& f) {
     Duo e(f);
     CHECKF(e.ok(), "the second world: %s%s", e.a.problem.c_str(), e.w.problem.c_str());
     if (!e.ok()) return;
-    e.pb.party_with = e.pa.actor_id();
+    e.pb.party_with = e.pa.actor_id();   // (the one key again: two Bards in one party)
     e.pa.party_with = e.pb.actor_id();
+    e.pa.party_key = e.pb.party_key = e.pa.actor_id();
+    e.pa.pvp_rules = true;
+    e.pb.pvp_rules = true;
     CHECK(grant(e.a, epic.self, 1, t0) && grant(e.b, epic.self, 1, t0), "(both play Epic)");
     e.a.run_to(t0 + 0.1);
     e.b.run_to(t0 + 0.1);

@@ -52,6 +52,6 @@ inline int resurrect_life_states(const Catalog& catalog, const AbilityDef& def) 
     return hit ? hit->life_states : 0;
 }
 
-/// The target of an ability when it is another player is CombatWorld::inspect's player branch (another player's Fighter): there is one way to name him.
+/// (another player is a target of an ability through CombatWorld::inspect: combat/combat_players.cpp)
 
 }  // namespace aoc::worldd::abilities

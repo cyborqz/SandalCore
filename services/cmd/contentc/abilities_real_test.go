@@ -39,14 +39,14 @@ func TestRealAbilityTables(t *testing.T) {
 		// PR #10 review: his numbers (1,406 abilities, 2,383 hits and so on) were measured before the pet attacks of version 40; these include them
 		// version 42: the knock-back export writes the impulses of 30 hits, the pushes of 7 crowd-control records and 5 teleports, with the expressions their numbers are (12 more: ab_expr 2,552 -> 2,564,
 		// after all the others, so that no id moves); the removal tags it adds to 5 hits are in the hit rows' extra
-		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1521, "ab_expr": 2564, "ab_effect_control": 1521,
+		"ab_ability": 1410, "ab_hit": 2389, "ab_projectile": 309, "ab_zone": 109, "ab_effect": 1528, "ab_expr": 2571, "ab_effect_control": 1528,
 		"ab_hit_impulse": 30, "ab_crowd_push": 7, "ab_teleport": 5,
 	} {
 		if n := scalarInt(t, db, `SELECT count(*) FROM `+table); n != want {
 			t.Errorf("%s has %d rows, want %d", table, n, want)
 		}
 	}
-	for key, want := range map[string]string{"ab.abilities": "1410", "ab.hits": "2389", "ab.effects": "1521", "ab.projectiles": "309", "ab.zones": "109", "ab.exprs": "1969", "loot.exprs": "534", "gather.exprs": "35",
+	for key, want := range map[string]string{"ab.abilities": "1410", "ab.hits": "2389", "ab.effects": "1528", "ab.projectiles": "309", "ab.zones": "109", "ab.exprs": "1976", "loot.exprs": "534", "gather.exprs": "35",
 		"ab.hit_impulses": "30", "ab.crowd_pushes": "7", "ab.teleports": "5"} {
 		if meta[key] != want {
 			t.Errorf("meta %s = %q, want %q", key, meta[key], want)

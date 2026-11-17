@@ -154,6 +154,7 @@ PlayerSession::~PlayerSession() {
     finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
     leave_friends("the session is destroyed");
     forget_party();
+    leave_duels(last_now_);   // #23 (MrJambix)
     forget_friends();   // social, step 7: the reverse index loses this session
     clear_pet();
     cancel_quick_make(nullptr, "the session is destroyed");
@@ -243,6 +244,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         spdlog::warn("[session] {}: the {} recipes the character was taught do not fit the player's state: the client is not told of them", p->pb_.setup().name, p->taught_.size());
     }
     p->init_ignored(character);   // social, step 6: the players and the guilds the character ignores, sent with the join
+    p->pvp_init(character);       // PvP (migration 0025): the corruption and blight he left with  // #23 (MrJambix)
     p->init_friends(character);   // social, step 7: the friends and the pending requests, sent with the join in the SocialComponent
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
@@ -385,6 +387,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
         }
         spdlog::info("[session] {}: {} weapon lines, {} with XP{}", setup.name, p->weapon_.lines()->size(), p->weapon_.with_xp().size(), lines.empty() ? std::string() : ": " + lines);
     }
+    p->connect_duels(world);    // PvP: the world's duels  // #23 (MrJambix)
     p->list_item_chunk(conn);   // storage clerks, step 0: the base item chunk is on the pawn from the join, listed in OwnerInfo (queued behind the join)
     p->pump(conn);
     if (refusal) *refusal = bootstrap::SetupRefusal::None;
@@ -584,6 +587,7 @@ void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
     leave_party_on_finish();
+    leave_duels(last_now_);   // #23 (MrJambix)
     leave_friends(why);   // social, step 7: the sessions that list this character are told it is offline
     clear_pet();
     cancel_quick_make(nullptr, why);   // Crafting, step 3: nothing was taken, so nothing is given back
@@ -684,6 +688,12 @@ void PlayerSession::hand_over_progress(const char* why) {
     for (const int n : attunements_.discovered) p.attunements.push_back(n);
     p.home_attunement = attunements_.home;
     p.home_last_used_ms = attunements_.home_last_used_ms;
+    // PvP: contributed by MrJambix in #23.
+    if (pvp_changed_) {   // PvP (migration 0025): the corruption and blight, once this session changed them
+        p.replace_pvp = true;
+        p.corruption = corruption_;
+        p.blight = blight_;
+    }
     p.replace_completed_ftues = true;   // missing systems, step 0: the finished tutorials go whole with every hand-over (what the session holds is what the character has)
     p.completed_ftues = completed_ftues_;
     p.replace_ignored_names = true;   // social, step 6: the ignored players and guilds go whole with every hand-over (what the session holds is what the character has)

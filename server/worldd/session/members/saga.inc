@@ -11,8 +11,9 @@ public:
     /// A hit of another player's ability landed on this player (a heal, a blessing): its mods, put on this player's own pawn, with the part of each
     /// that took effect; the session's next tick sends the change and the confirmation to this player's client.
     void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective);
-    /// The effects that hit put on this player, their numbers worked out for the two; `instigator` is the caster's actor id, `at` the world's clock.
-    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double at);
+    /// The effects that hit put on this player, their numbers worked out for the two; `instigator` is the caster's actor id, `at` the world's clock, `shields` the
+    /// shield each effect's TempHealth mod gives (null: none).
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double at, const std::vector<double>* shields = nullptr);
     /// A shield the hit gave this player.
     void receive_player_shield(double amount, double seconds, double at);
     /// What the hit takes off this player (the blessings the other three of the Pantheon are).

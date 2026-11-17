@@ -635,13 +635,14 @@ struct Harness {
 
     /// `clog_pc_channel` bunches of filler on channel 3, held (the client acknowledges nothing): the PlayerController's chains of
     /// the join do not all fit the window, so the join stays queued until release() and settle().
-    explicit Harness(size_t clog_pc_channel = 0, bool real = false, const svc::Character* record = nullptr, const std::function<void(PlayerWorld&)>& prepare = {}) : fx(real) {
+    explicit Harness(size_t clog_pc_channel = 0, bool real = false, const svc::Character* record = nullptr, const std::function<void(PlayerWorld&)>& prepare = {},
+                     PlayerWorld* shared = nullptr) : fx(real) {   // `shared`: join another Harness's world (two players in one world: abilities between players)   // #23 (MrJambix)
         if (prepare) prepare(*fx.world);   // (plan E1, stage 3: the NPCs' ground and the fights are the world's before the session joins)
         if (clog_pc_channel) {
             hold = true;
             filler(3, clog_pc_channel);
         }
-        s = PlayerSession::join(conn, *fx.world, record ? *record : cyb_record(), identity(), world_time_at(t), error);
+        s = PlayerSession::join(conn, shared ? *shared : *fx.world, record ? *record : cyb_record(), identity(), world_time_at(t), error);   // #23 (MrJambix)
         if (!s) {
             std::printf("  [FAIL] the session does not join: %s\n", error.c_str());
             std::exit(2);
@@ -721,8 +722,9 @@ struct Run {
     double x = kX;
     int32_t next_id = 0;   // the client counts every trigger of any ability from 0
 
-    explicit Run(size_t clog_pc_channel = 0, bool real = false, const svc::Character* record = nullptr, const std::function<void(PlayerWorld&)>& prepare = {})
-        : h(clog_pc_channel, real, record, prepare), m(h.s->bootstrap().setup()), seen(h.got.size()) {}
+    explicit Run(size_t clog_pc_channel = 0, bool real = false, const svc::Character* record = nullptr, const std::function<void(PlayerWorld&)>& prepare = {},   // #23 (MrJambix)
+                 PlayerWorld* shared = nullptr)
+        : h(clog_pc_channel, real, record, prepare, shared), m(h.s->bootstrap().setup()), seen(h.got.size()) {}   // #23 (MrJambix)
 // built by C O A with Cyb
 
     double now() const { return world_time_at(h.t); }

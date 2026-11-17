@@ -4,16 +4,17 @@
 //  tests/others_stance_tests.inc: other players see a player's combat stance (Social, seeing other players: their combat stances)
 //
 //  A player (cyb) and a watcher (ayla), or two players and a watcher, in one world (tests/mounts_ride_others_rig.h).  The player draws (ServerSetTargeting), is in a fight
-//  (bInCombat: up with the first exchange, down six seconds after the last, down at death), turns the PvP flag on and off, dies in a fight and rides; what a watcher's client is
-//  sent is read chain by chain (the update of the pawn the watchers hold): the five stance bits of CombatInfo (bIsTargeting, bInCombat, bPvPForceFlag, InPvpSuppressionArea and
-//  bInPVPCombat) and, with the flag, the AlignmentComponent's Alignments (the name colour: Combatant while flagged, NonCombatant when not).
+//  (bInCombat: up with the first exchange, down six seconds after the last, down at death), turns the PvP flag on and off, flags himself by a harmful action on the other player,
+//  dies in a fight and rides; what a watcher's client is sent is read chain by chain (the update of the pawn the watchers hold): the five stance bits of CombatInfo
+//  (bIsTargeting, bInCombat, bPvPForceFlag, InPvpSuppressionArea and bInPVPCombat) and the AlignmentComponent's Alignments (the name colour: the Combatant from the first
+//  flagging action, the NonCombatant before it and after its 60 s).
 //
 //  Also: a player who comes into view in the middle of a fight gets the bits in the open, the same change twice sends nothing, a draw request over the budget is dropped, a
 //  mounted player's seated pawn carries his stance, a player who logs out and back in starts with no stance, and two players' stances stay on their own pawn.
 //
-//  Modelled: no recording shows another player's pawn receive the stance (nothing records an observer), and the data's own sequence gives the Combatant alignment at the
-//  first harmful action, not at the flag bit.  Milestone 5 has no harmful action yet, so the flag toggle is modelled as the flagging action (Combatant while the flag is on,
-//  NonCombatant when it is off), with the game's own alignment records and colours; bInPVPCombat and InPvpSuppressionArea stay 0 until PvP and a suppression area exist.
+//  Modelled: no recording shows another player's pawn receive the stance (nothing records an observer).  The data's own sequence gives the Combatant alignment at the first
+//  harmful action, not at the flag bit, and that is what session/player_pvp.cpp runs now; bInPVPCombat comes with a harmful hit between two players, and InPvpSuppressionArea
+//  stays 0 (this world has no suppression area).
 // ============================================================================
 
 /// The two alignment records the PvP flag swaps on a player (the design data): Combatant is purple with a 60 s removal timer, NonCombatant white; both override the
@@ -173,7 +174,7 @@ static void exchange(Harness& h) { h.fx.world->combat()->player_exchange(h.s->bo
 // ---- the bits and the name colour ---------------------------------------------------------------------------------------------------------
 
 static void test_other_players_see_a_players_stance_change() {
-    std::printf("other players see a player's stance: the draw, the fight, the PvP flag with the Combatant name and back; one update carries the flag and the colour\n");
+    std::printf("other players see a player's stance: the draw, the fight, the PvP flag (which does not colour the name) and the flagging action's Combatant name\n");
     StanceScene sc;
     CHECK(sc.ok(), "(the world's fights are on)");
     if (!sc.ok()) return;
@@ -199,34 +200,48 @@ static void test_other_players_see_a_players_stance_change() {
     a.client_sends({a.client.actor(a.pawn_ch, targeting_call(true), true)});
     a.run(milliseconds(250));
     CHECK(!stance_chain(b, pch, pawn_copy, combat, alignment, from_draw_again, "bIsTargeting", 1).has_value(), "the same targeting again sends nothing");
-    // the PvP flag: the bit and the name colour in one update
+    // the PvP flag: the bit alone, and no colour with it (the Combatant comes from a harmful action)
     const size_t from_flag = b.got.size();
     a.client_sends({a.client.actor(a.pc_ch, pvp_flag_call(true), true)});
     a.run(milliseconds(300));
     CHECK(a.s->pvp_flag() && own_pawn_bit(a, "bPvPForceFlag") == 1, "the player's own pawn takes bPvPForceFlag 1");
     const auto flag = stance_chain(b, pch, pawn_copy, combat, alignment, from_flag, "bPvPForceFlag", 1);
     CHECK(flag.has_value(), "the watcher is sent bPvPForceFlag 1");
-    CHECK(flag && flag->alignments && names_alignment(*flag->alignments, kStanceCombatant) && !names_alignment(*flag->alignments, kStanceNonCombatant),
-          "...and that same update carries the Combatant alignment and no NonCombatant (the purple name)");
+    CHECK(flag && !(flag->alignments && names_alignment(*flag->alignments, kStanceCombatant)),
+          "...and the flag alone carries no Combatant: the data's sequence colours a player at his first harmful action, not at the key");
     const auto shown_flag = shown_alignments(*shown_pawn(a));
     const auto own_flag = own_alignments(a);
-    CHECK(shown_flag && names_alignment(*shown_flag, kStanceCombatant), "the pawn the watchers hold carries the Combatant alignment");
-    CHECK(own_flag && names_alignment(*own_flag, kStanceCombatant), "...and so does the player's own pawn");
-    CHECK(!stance_chain(b, pch, pawn_copy, combat, alignment, from_flag, "bInPVPCombat", 1).has_value(), "bInPVPCombat stays 0 (PvP is the next part)");
+    CHECK(shown_flag && names_alignment(*shown_flag, kStanceNonCombatant), "the pawn the watchers hold keeps the NonCombatant name");
+    CHECK(own_flag && names_alignment(*own_flag, kStanceNonCombatant), "...and so does the player's own pawn");
+    // a harmful action with the key on: the first flagging action, the Combatant name and bInPVPCombat
+    const size_t from_harm = b.got.size();
+    combat::Resolved blow;
+    blow.mods.push_back({1, content::kGuidHealth, -20.0});
+    a.fx.world->combat()->apply_hit_to_player(b.s->bootstrap().setup().guids.pawn.ObjectId, a.s->bootstrap().setup().guids.pawn.ObjectId, blow, world_time_at(a.t), nullptr);
+    a.run(milliseconds(400));
+    CHECK(a.s->pvp_flag_state() == combat::pvp::Flag::Combatant && a.s->pvp_flaggings() == 1, "a harmful action of his on another player flags him (Combatant)");
+    CHECK(stance_chain(b, pch, pawn_copy, combat, alignment, from_harm, "bInPVPCombat", 1).has_value(), "the watcher is sent bInPVPCombat 1: the two trade a harmful hit");
+    const auto shown_harm = shown_alignments(*shown_pawn(a));
+    const auto own_harm = own_alignments(a);
+    CHECK(shown_harm && names_alignment(*shown_harm, kStanceCombatant) && !names_alignment(*shown_harm, kStanceNonCombatant), "the pawn the watchers hold takes the Combatant name (the purple name)");
+    CHECK(own_harm && names_alignment(*own_harm, kStanceCombatant), "...and so does the player's own pawn");
     // the same flag again: nothing goes out
     const size_t from_flag_again = b.got.size();
     a.client_sends({a.client.actor(a.pc_ch, pvp_flag_call(true), true)});
     a.run(milliseconds(250));
     CHECK(!stance_chain(b, pch, pawn_copy, combat, alignment, from_flag_again, "bPvPForceFlag", 1).has_value(), "the same flag again sends nothing");
-    // the flag off: back to the white name
+    // the flag off: the bit only; the Combatant stays its 60 s after the flagging action
     const size_t from_off = b.got.size();
     a.client_sends({a.client.actor(a.pc_ch, pvp_flag_call(false), true)});
     a.run(milliseconds(300));
     CHECK(!a.s->pvp_flag() && own_pawn_bit(a, "bPvPForceFlag") == 0, "the PvP flag goes off on the player's own pawn");
     const auto off_flag = stance_chain(b, pch, pawn_copy, combat, alignment, from_off, "bPvPForceFlag", 0);
     CHECK(off_flag.has_value(), "the watcher is sent bPvPForceFlag 0");
-    CHECK(off_flag && off_flag->alignments && names_alignment(*off_flag->alignments, kStanceNonCombatant) && !names_alignment(*off_flag->alignments, kStanceCombatant),
-          "...with the NonCombatant alignment again and no Combatant");
+    const auto shown_off = shown_alignments(*shown_pawn(a));
+    CHECK(shown_off && names_alignment(*shown_off, kStanceCombatant), "...and the Combatant name stays (the key does not take it off; the record's 60 s timer does)");
+    a.run(milliseconds(61000));
+    const auto shown_end = shown_alignments(*shown_pawn(a));
+    CHECK(shown_end && names_alignment(*shown_end, kStanceNonCombatant) && !names_alignment(*shown_end, kStanceCombatant), "60 s after the last flagging action the Combatant name is gone");
     // a fight: bInCombat up, and down six seconds after the last exchange
     const size_t from_fight = b.got.size();
     const Clock::time_point exchanged_at = a.t;
@@ -252,7 +267,7 @@ AOC_REGISTER_TEST(test_other_players_see_a_players_stance_change);
 // ---- the open of a player who comes into view in a fight ------------------------------------------------------------------------------------
 
 static void test_a_player_who_comes_into_view_mid_fight_gets_his_stance_in_the_open() {
-    std::printf("a watcher who comes into view in the middle of a fight is shown the player's draw, combat and PvP flag, and the Combatant colour, in the open\n");
+    std::printf("a watcher who comes into view in the middle of a fight with another player is shown the player's draw, combat, PvP flag and Combatant colour when its view opens\n");
     StanceScene sc(30000);   // the watcher stands 300 m east of where the player starts
     CHECK(sc.ok(), "(the world's fights are on)");
     if (!sc.ok()) return;
@@ -263,11 +278,23 @@ static void test_a_player_who_comes_into_view_mid_fight_gets_his_stance_in_the_o
     if (!pawn) return;
     const uint64_t pawn_id = pawn->id;
     CHECK(sc.channel(pawn_id) == 0, "300 m away the watcher holds nothing of the player");
+    // a third player beside him: the harmful action is between the two of them, so the far watcher is sent nothing of it
+    auto victim = join_world(a, sc.all, other_record(other_id(3), "kira", 5));
+    a.run(milliseconds(200));
+    CHECK(victim && victim->s && victim->s->bootstrap().setup().guids.pawn.ObjectId != 0, "(a third player stands beside him)");
+    if (!victim || !victim->s) return;
+    const uint64_t victim_pawn = victim->s->bootstrap().setup().guids.pawn.ObjectId;
     a.client_sends({a.client.actor(a.pawn_ch, targeting_call(true), true)});
     a.client_sends({a.client.actor(a.pc_ch, pvp_flag_call(true), true)});
     exchange(a);
     a.run(milliseconds(300));
+    // a harmful action with the key on: the first flagging action, which colours him and puts bInPVPCombat up on both
+    combat::Resolved blow;
+    blow.mods.push_back({1, content::kGuidHealth, -20.0});
+    a.fx.world->combat()->apply_hit_to_player(victim_pawn, a.s->bootstrap().setup().guids.pawn.ObjectId, blow, world_time_at(a.t), nullptr);
+    a.run(milliseconds(300));
     CHECK(a.s->targeting() && a.s->pvp_flag() && shown_bit(*shown_pawn(a), "bInCombat") == 1, "(the player draws, flags and fights out of the watcher's sight)");
+    CHECK(a.s->pvp_flag_state() == combat::pvp::Flag::Combatant && shown_bit(*shown_pawn(a), "bInPVPCombat") == 1, "...and his harmful action flags him and puts the PvP combat bit up");
     CHECK(sc.channel(pawn_id) == 0, "(the watcher still holds nothing of the player)");
     const GoodPosition at = a.s->movement().good();
     CHECK(b.s->gm_teleport(b.conn, at.x + 50.0, at.y, at.z, b.t, "the test").status == PlayerSession::GmMoveResult::Status::Moved, "(the watcher is put beside the player)");
@@ -283,12 +310,15 @@ static void test_a_player_who_comes_into_view_mid_fight_gets_his_stance_in_the_o
     CHECK(frame && frame->targeting == 1, "the open carries bIsTargeting 1");
     CHECK(frame && frame->in_combat == 1, "...bInCombat 1");
     CHECK(frame && frame->pvp_flag == 1, "...bPvPForceFlag 1");
-    CHECK(frame && frame->pvp_combat == 0 && frame->suppression == 0, "...and the two bits that are 0 until PvP and a suppression area exist");
+    CHECK(frame && frame->pvp_combat == 1 && frame->suppression == 0, "...bInPVPCombat 1 (his harmful action on the third player) and InPvpSuppressionArea 0");
     CHECK(frame && frame->dead == 0, "...the player is alive");
     CHECK(frame && frame->alignments && names_alignment(*frame->alignments, kStanceCombatant), "the open carries the Combatant alignment (the flagged name)");
-    CHECK(shown_bit(*pawn2, "bInCombat") == 1 && shown_bit(*pawn2, "bPvPForceFlag") == 1 && shown_bit(*pawn2, "bIsTargeting") == 1,
-          "the pawn the watchers hold carries the three bits the player has");
+    CHECK(shown_bit(*pawn2, "bIsTargeting") == 1 && shown_bit(*pawn2, "bInCombat") == 1 && shown_bit(*pawn2, "bPvPForceFlag") == 1 && shown_bit(*pawn2, "bInPVPCombat") == 1,
+          "the pawn the watcher opens carries the draw, the fight, the key and the PvP combat");
+    const auto opened = shown_alignments(*pawn2);
+    CHECK(opened && names_alignment(*opened, kStanceCombatant), "the pawn the watcher opens carries the Combatant name");
 }
+
 AOC_REGISTER_TEST(test_a_player_who_comes_into_view_mid_fight_gets_his_stance_in_the_open);
 
 // ---- the rate limit and the same request twice ----------------------------------------------------------------------------------------------
@@ -366,7 +396,7 @@ AOC_REGISTER_TEST(test_a_death_mid_fight_clears_the_combat_and_draw_bits_in_the_
 // ---- a mounted player ---------------------------------------------------------------------------------------------------------------------------
 
 static void test_a_mounted_players_stance_is_shown_on_the_seated_pawn() {
-    std::printf("a player who rides is still shown with his stance: the seated pawn carries the draw, the flag and the Combatant name\n");
+    std::printf("a player who rides is still shown with his stance: the seated pawn carries the draw and the flag (and the key alone does not colour the name)\n");
     Scene sc;
     Harness& a = sc.a;
     Harness& b = *sc.b;
@@ -388,7 +418,7 @@ static void test_a_mounted_players_stance_is_shown_on_the_seated_pawn() {
     CHECK(draw.has_value(), "the watcher is sent the seated pawn's bIsTargeting 1");
     const auto flag = stance_chain(b, pch, pawn_copy, combat, alignment, from, "bPvPForceFlag", 1);
     CHECK(flag.has_value(), "and its bPvPForceFlag 1");
-    CHECK(flag && flag->alignments && names_alignment(*flag->alignments, kStanceCombatant), "...with the Combatant alignment in that same update");
+    CHECK(flag && !(flag->alignments && names_alignment(*flag->alignments, kStanceCombatant)), "...with no Combatant on the seated pawn (the key alone is no flagging action)");
     CHECK(a.s->mounted(), "(the player still rides)");
     const world::WorldActor* now = shown_pawn(a);
     CHECK(now != nullptr && same_object(actor_object(now->actor, "AttachmentReplication.AttachParent"), mount->actor.guid), "...and the pawn the watchers hold is still attached to the mount");
@@ -439,14 +469,21 @@ static void test_a_relogged_player_comes_back_with_no_stance() {
     a2->client_sends({a2->client.actor(a2->pc_ch, pvp_flag_call(true), true)});
     a.run(milliseconds(300));
     const auto flag = stance_chain(b, pch2, pawn2->actor, combat, alignment, from2, "bPvPForceFlag", 1);
-    CHECK(flag.has_value() && flag->alignments && names_alignment(*flag->alignments, kStanceCombatant), "a flag turned on after the relog reaches the watcher, with the Combatant name");
+    CHECK(flag.has_value() && !(flag->alignments && names_alignment(*flag->alignments, kStanceCombatant)),
+          "a flag turned on after the relog reaches the watcher, with no Combatant (the key alone)");
 }
 AOC_REGISTER_TEST(test_a_relogged_player_comes_back_with_no_stance);
+
+// ---- another player's harm on a mounted player ---------------------------------------------------------------------------------------------
+// Not tested here: the mounts_ride rig can ride only in its non-real world (there is no mount in the real-content world: `ride_on` fails), and a
+// non-real world has no fights (`PlayerWorld::combat()` is null), so another player's harmful hit on a mounted player cannot be driven.  The code
+// path (take_hit's `to_mount`: a player's harmful hit lands on the mount and is not judged against the rider's Health) is the fix of finding 5;
+// it is reported as not tested.
 
 // ---- two players side by side -------------------------------------------------------------------------------------------------------------------
 
 static void test_two_players_stances_side_by_side() {
-    std::printf("two players who stand side by side keep their stances on their own pawns: the flagged one and the drawing one are told apart by the watcher\n");
+    std::printf("two players who stand side by side keep their stances on their own pawns: the keyed one and the drawing one are told apart by the watcher\n");
     Harness a(cyb_record());
     a.play();
     Players all;
@@ -476,7 +513,8 @@ static void test_two_players_stances_side_by_side() {
     CHECK(flag_a.has_value(), "the watcher is sent the first player's PvP flag");
     CHECK(draw_c.has_value(), "and the second player's draw, on its own channel");
     CHECK(!stance_chain(*b, pc_b, pc->actor, combat_c, alignment_c, from_b, "bPvPForceFlag", 1).has_value(), "the second player is not flagged");
-    CHECK(flag_a && flag_a->alignments && names_alignment(*flag_a->alignments, kStanceCombatant), "the first player's name is the Combatant's");
+    CHECK(flag_a && !(flag_a->alignments && names_alignment(*flag_a->alignments, kStanceCombatant)),
+          "the first player's chain carries no Combatant (his key alone does not colour it)");
     const auto name_c = shown_alignments(*pc);
     CHECK(name_c && names_alignment(*name_c, kStanceNonCombatant) && !names_alignment(*name_c, kStanceCombatant), "...and the second player's the NonCombatant's (his draw did not change the name)");
     CHECK(stance_chain(a, pc_a, pc->actor, combat_c, alignment_c, from_a, "bIsTargeting", 1).has_value(), "the first player sees the second's draw on his own client");

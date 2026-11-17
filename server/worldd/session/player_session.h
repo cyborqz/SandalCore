@@ -1407,7 +1407,7 @@ private:
     void on_home_attunement(Connection& conn, const protocol::repl::ClientRpc& rpc, Clock::time_point now);   // RequestServerSetHomeAttunement(bYes)
     void send_respawn_choices(Connection& conn, bool previous_invalid, bool home_on_cooldown);
     void on_plain_respawn(Connection& conn, Clock::time_point now);                   // the Respawn RPC: the window listed nothing
-    void finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now);
+    void finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now, bool at_respawn_point = true);
     /// Experience of a kill (the combat world's PlayerPort::receive_kill, queued by the CombatSide): the progress, the XPTracker, a level-up.
     void apply_kill(Connection& conn, const combat::KillReward& kill, Clock::time_point now);
     /// The vendor NPC the window is open on, when it is still held, a GM vendor, and within range of the last good position; else nullptr (the

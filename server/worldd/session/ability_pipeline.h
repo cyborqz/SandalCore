@@ -535,8 +535,9 @@ public:
     /// The change and the confirmation are an event.
     std::vector<double> apply_ally_landing(const combat::PlayerIncomingHit& hit, double now);
     /// The effects that hit put on this character, with their numbers worked out by its caster's hit (HitResolver::resolve_effects): they go on the
-    /// character's own effect list, run their Apply hits, and the change is an event.
-    void apply_ally_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now);
+    /// character's own effect list, run their Apply hits, and the change is an event.  `shields`: per effect, the shield its TempHealth mod gives (worked out for the two
+    /// by the caster's side; null: none).
+    void apply_ally_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now, const std::vector<double>* shields = nullptr);
     /// What another player's hit takes off this character (the three Blessings of the Pantheon that the fourth one removes): its EffectsToRemoveIds or
     /// its filter, as the hit's own record says.  The change is an event.
     void apply_ally_removal(const abilities::HitDef& hit, double now);
@@ -908,6 +909,8 @@ private:
         /// shows it and moves the stats, so its ticks are not run again here with the player as the caster).
         bool                        by_creature = false;
         uint64_t                    instigator = 0;              // the creature that put it on (0: the player's own)
+        uint64_t                    from_player = 0;              // PvP: the other player whose hit left it (0: the character's own, or a creature's): its ticks that aim at an enemy are his hits   // #23 (MrJambix)
+        bool                        pvp_force = false;             // ... and the force flag his action carried (its ticks are judged with it, not with the last trigger's)   // #23 (MrJambix)
     };
     /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect, the Vine Field's circle), the place the
     /// data puts it and the hits it lands on whoever stands in it.  The infinite effects its overlap hits put on the caster end with the dance.
@@ -1157,12 +1160,21 @@ void   step_multi_hit(Cast& cast, double t);
     int    resplendent_hits_ = 0;   // the Resplendent Beam's hits this cast has fired (GetHitTriggerCount: the heal's formula counts them)
     const ReactionContext* active_reaction_ = nullptr;   // while a hit's carried reactions apply their hits: the event their formulas read (GetHitEvent())
     /// `raw`: the stacks are the instance's own count whatever the record's stacking says (a grant, not an application of the ability).
-    /// `mods_override`: the one stack's mod values are the caller's (a hit of another player, worked out for the two actors), not the record's formulas run here.
     void   apply_effect(bootstrap::AbilityChange& c, const abilities::EffectDef& def, int stacks, std::optional<double> duration, double t, bool raw = false,
-                        int64_t owner = 0, const std::vector<stats::EffectMod>* mods_override = nullptr);
+                        int64_t owner = 0);
     /// An effect a creature's hit put on the player, with the numbers the world worked out as the creature's: the instance is shown and moves the stats, and its own hits and
     /// ticks are the world's (by_creature), so this runtime does not run them.
     void   apply_creature_effect(bootstrap::AbilityChange& c, const effects::Applied& applied, uint64_t instigator, double t);
+    /// The numbers another player's hit worked out for an effect it puts on the character (abilities between players: receive_hit): the next apply_effect takes
+    /// them instead of working its own out from the character, and forgets them.
+    // Abilities between players: contributed by MrJambix in #23.
+    struct GivenEffect {
+        std::vector<stats::EffectMod> mods;   // one stack's stat mods, the caster's
+        double                        shield = 0;   // what its TempHealth mod gives (0: none)
+        uint64_t                      from = 0;     // the caster's pawn (PvP: what its ticks aimed at an enemy are, EffectInst::from_player)
+        bool                          pvp_force = false;   // the force flag the caster's action carried (its ticks keep it, #23 review)
+    };
+    const GivenEffect* given_effect_ = nullptr;
     void   remove_instance(bootstrap::AbilityChange& c, size_t index);
     void   remove_stacks(bootstrap::AbilityChange& c, int64_t effect_guid, int stacks);
     /// The game's damage breaks stealth: Camouflage's Incoming reaction ends it on any damage, and Rogue_Stealth's fragility ends it when the damage taken

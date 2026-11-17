@@ -136,14 +136,17 @@ void CombatWorld::remove_player(PlayerPort* port) {
     players_.erase(std::remove(players_.begin(), players_.end(), port), players_.end());
     if (port) {
         player_combat_until_.erase(port->actor_id());
+        player_pvp_until_.erase(port->actor_id());   // #23 (MrJambix)
         drop_effects_of(port->actor_id());   // what a player put on the creatures ends with him
         creature_effects_.erase(std::remove_if(creature_effects_.begin(), creature_effects_.end(), [&](const CreatureEffect& e) { return e.player == port->actor_id(); }), creature_effects_.end());
     }
 }
 
-void CombatWorld::player_died(uint64_t actor_id) {
+void CombatWorld::player_died(uint64_t actor_id, uint64_t killer, double now) {
     player_combat_until_.erase(actor_id);
     drop_effects_of(actor_id);   // (his pet's holds stand under his name too, so they end with his)
+    // PvP: contributed by MrJambix in #23.
+    pvp_player_died(actor_id, killer, now);   // PvP: the player whose blow it was hears of the kill (combat/combat_pvp.cpp)
 }
 
 PlayerPort* CombatWorld::player(uint64_t actor_id) {
@@ -417,7 +420,8 @@ bool CombatWorld::holds_effect(uint64_t actor_id, int64_t effect_guid, double no
 
 Fighter* CombatWorld::fighter_of(uint64_t actor_id) {
     // (another player's pawn is a fighter too: an ally hit's formulas run against his own stats; a pet stands in players_ for the creatures' code and stays an NPC here)
-    if (PlayerPort* p = player(actor_id); p && !is_pet(actor_id)) return &p->fighter();
+    // Abilities between players: contributed by MrJambix in #23.
+    if (PlayerPort* p = player_pawn(actor_id)) return &p->fighter();
     return combatant(actor_id);
 }
 
@@ -435,23 +439,11 @@ uint64_t CombatWorld::hit_component_of(uint64_t actor_id) const {
 }
 
 TargetInfo CombatWorld::inspect(uint64_t target_actor, const Fighter& from) {
+    // another player, the caster's own pawn included: his Fighter says where he stands, whether he lives, what he is to the caster and what the rules
+    // between players allow (abilities between players, combat/combat_players.cpp)
+    // Abilities between players: contributed by MrJambix in #23.
+    if (PlayerPort* p = player_pawn(target_actor)) return inspect_player(*p, from);
     TargetInfo t;
-    // Another player's pawn: his fighter says where he stands, whether he lives and what he is to the caster (a party's ally, an ungrouped player: Neutral).
-    // (A pet stands in players_ for the creatures' code: it stays an NPC here.)
-    if (PlayerPort* p = player(target_actor); p && !is_pet(target_actor)) {
-        const Fighter& f = p->fighter();
-        t.exists = true;
-        t.alive = f.alive();
-        t.position = f.position();
-        t.velocity = {0, 0, 0};
-        t.radius_cm = f.radius_cm();
-        t.half_height_cm = 88.0;
-        t.relation = data_.relation(from.alignments(), f.alignments());
-        t.surface_distance_cm = std::max(0.0, distance_xy_cm(from.position(), t.position) - from.radius_cm() - t.radius_cm);
-        t.in_line_of_sight = true;
-        t.is_player = true;
-        return t;
-    }
     const world::WorldActor* a = registry_.find(target_actor);
     if (!a || a->kind != world::ActorKind::Npc) return t;
     t.exists = true;
@@ -496,7 +488,7 @@ std::vector<GatheredTarget> CombatWorld::enemies_in_cone(const Fighter& from, do
     registry_.query(me.x, me.y, length_cm + std::max(0.0, behind_cm), ids);
     for (const uint64_t id : ids) {
         const TargetInfo ti = inspect(id, from);
-        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile || !ti.in_line_of_sight) continue;
+        if (!ti.exists || !ti.alive || !harmable(ti) || !ti.in_line_of_sight) continue;   // #23 (MrJambix)
         subject.tx = ti.position.x;
         subject.ty = ti.position.y;
         subject.tradius = ti.radius_cm;
@@ -518,7 +510,7 @@ std::vector<GatheredTarget> CombatWorld::enemies_in_line(const Fighter& from, do
     registry_.query(me.x, me.y, length_cm + radius_cm, ids);
     for (const uint64_t id : ids) {
         const TargetInfo ti = inspect(id, from);
-        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile || !ti.in_line_of_sight) continue;
+        if (!ti.exists || !ti.alive || !harmable(ti) || !ti.in_line_of_sight) continue;   // #23 (MrJambix)
         const double dx = ti.position.x - me.x, dy = ti.position.y - me.y;
         const double ahead = dx * fx + dy * fy, aside = std::fabs(dy * fx - dx * fy);
         if (ahead + ti.radius_cm < 0 || ahead - ti.radius_cm > length_cm || aside > radius_cm + ti.radius_cm) continue;
@@ -537,7 +529,7 @@ std::vector<GatheredTarget> CombatWorld::enemies_around(const Fighter& from, con
     registry_.query(centre.x, centre.y, radius_cm + kBodyMargin, ids);
     for (const uint64_t id : ids) {
         const TargetInfo ti = inspect(id, from);
-        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile) continue;
+        if (!ti.exists || !ti.alive || !harmable(ti)) continue;   // #23 (MrJambix)
         const double d = distance_xy_cm(centre, ti.position);
         if (d - ti.radius_cm > radius_cm) continue;
         // a sphere reaches up and down by its radius as well (the centre is on the ground: a body on a ledge far above it is out)
@@ -559,7 +551,7 @@ std::vector<GatheredTarget> CombatWorld::enemies_touching(const Fighter& from, c
     registry_.query(centre.x, centre.y, radius_cm + kBodyMargin, ids);
     for (const uint64_t id : ids) {
         const TargetInfo ti = inspect(id, from);
-        if (!ti.exists || !ti.alive || ti.relation != Relation::Hostile) continue;
+        if (!ti.exists || !ti.alive || !harmable(ti)) continue;   // #23 (MrJambix)
         const double d = distance_xy_cm(centre, ti.position);
         if (d - ti.radius_cm > radius_cm) continue;
         if (std::fabs(ti.position.z - centre.z) - ti.radius_cm > radius_cm + 200.0) continue;   // (a body on a ledge far above or below the ball is out)
@@ -2502,6 +2494,7 @@ void CombatWorld::tick(double now) {
             ++it;
         }
     }
+    expire_pvp_combat(now);   // PvP: ... and so do their PvP combat flags (combat/combat_pvp.cpp)   // #23 (MrJambix)
 
     std::set<uint64_t> todo;
     for (PlayerPort* p : players_) {

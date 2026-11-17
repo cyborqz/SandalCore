@@ -68,7 +68,9 @@ public:
         if (inbox.size() < 256) inbox.push_back(hit);
     }
     void receive_player_hit(const combat::PlayerIncomingHit& hit, std::vector<double>& effective) override { s_.receive_player_hit(hit, effective); }
-    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now) override { s_.receive_player_effects(effects, instigator, now); }
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now, const std::vector<double>* shields) override {
+        s_.receive_player_effects(effects, instigator, now, shields);
+    }
     void receive_player_shield(double amount, double seconds, double now) override { s_.receive_player_shield(amount, seconds, now); }
     void remove_player_effects(const abilities::HitDef& hit, double now) override { s_.remove_player_effects(hit, now); }
     bool in_party_with(uint64_t actor) const override { return s_.in_party_with(actor); }
@@ -93,6 +95,22 @@ public:
     }
     bool holds_effect(int64_t effect_guid) const override { return s_.pipeline_ && s_.pipeline_->stacks_of(effect_guid) > 0; }
     combat::StealthState stealth() const override { return stealth_state_of(s_.pipeline_ ? &*s_.pipeline_ : nullptr, s_.stats_ ? &*s_.stats_ : nullptr); }
+    // abilities between players (combat/combat_players.cpp): the party is the key two members share
+    // Abilities between players: contributed by MrJambix in #23.
+    uint64_t group_key() const override { return reinterpret_cast<uintptr_t>(s_.party_group_); }
+    // PvP (session/player_pvp.cpp): the flag changes at once (the rules of the next hit read it), the client hears of it at the session's tick
+    // PvP: contributed by MrJambix in #23.
+    bool pvp_side(combat::pvp::Side& out, bool& force) const override {
+        s_.pvp_side_of(out, force);
+        return true;
+    }
+    void pvp_flagged(uint64_t target, uint8_t intention, double now) override {
+        if (s_.pvp_mark_flagged(now) && pvp_notices.size() < 16) pvp_notices.emplace_back(target, intention);
+    }
+    void set_in_pvp_combat(bool on, double) override { wants_pvp_combat = on; }
+    void pvp_kill(const combat::PvpKill& kill, double) override {
+        if (pvp_kills.size() < 16) pvp_kills.push_back(kill);
+    }
 
     // Fighter
     uint64_t id() const override { return actor_id(); }
@@ -119,6 +137,10 @@ public:
     std::vector<std::pair<int64_t, int64_t>> pet_hits; // the hits of his pet that land on him: (hit record, ability)
     std::vector<combat::EffectRefusal> effect_refusals; // A3: the crowd controls of his (or his pet's) hits a mob refused, to tell his client
     bool                             wants_in_combat = false;
+    // PvP: contributed by MrJambix in #23.
+    std::vector<std::pair<uint64_t, uint8_t>> pvp_notices;   // PvP: the first flagging's (the other player's pawn, the intention)
+    std::vector<combat::PvpKill>     pvp_kills;
+    bool                             wants_pvp_combat = false;
 
 private:
     PlayerSession&       s_;

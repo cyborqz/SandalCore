@@ -32,13 +32,17 @@ public:
     /// A shield (a TempHealth effect's amount) on the target for `seconds` (0: until it is used up).
     virtual void shield(uint64_t target_actor, double amount, double seconds, double now) = 0;
     /// Puts the effects a resolved hit applies on the target, each with its numbers worked out (HitResolver::resolve_effects): the world keeps them on the target, runs their hits
-    /// and ticks and shows them to the clients.  A port that has no effect lists ignores them.
-    virtual void apply_effects(uint64_t /*target_actor*/, const std::vector<effects::Applied>& /*effects*/, double /*now*/) {}
+    /// and ticks and shows them to the clients.  A port that has no effect lists ignores them.  `helpful`: a heal's or a blessing's effects on another
+    /// player go the ally path (the caster's numbers, the target's own pipeline), not the PvP path.
+    virtual void apply_effects(uint64_t /*target_actor*/, const std::vector<effects::Applied>& /*effects*/, double /*now*/, bool /*helpful*/ = false) {}
     /// What a hit takes off the target (its EffectsToRemoveIds, or its filter), and every instance of one effect (Dimensional Bolt's mark).
-    virtual void remove_effects(uint64_t /*target_actor*/, const abilities::HitDef& /*hit*/, double /*now*/) {}
+    virtual void remove_effects(uint64_t /*target_actor*/, const abilities::HitDef& /*hit*/, double /*now*/, bool /*helpful*/ = false) {}
     virtual void remove_effect(uint64_t /*target_actor*/, int64_t /*effect_guid*/, double /*now*/) {}
     /// ... and every instance of one effect that one instigator put on the target (what a lingering zone's infinite effect is when its target leaves the zone).
     virtual void remove_effect_from(uint64_t /*target_actor*/, int64_t /*effect_guid*/, uint64_t /*instigator*/, double /*now*/) {}
+    // PvP: contributed by MrJambix in #23.
+    /// PvP: a tick of an effect another player (`from`) left on this one: his hit, worked out and judged by the world (CombatWorld::player_effect_hit).
+    virtual void player_effect_hit(uint64_t /*from*/, int64_t /*hit_guid*/, int64_t /*effect_guid*/, double /*now*/, bool /*pvp_force*/) {}
     /// The player's pet in the world (0: none).
     virtual uint64_t own_pet() const { return 0; }
     /// Seconds left of an effect record on the target (0: it is not on): what GetEffectRemainingDuration(GetTarget(), effect) reads.
@@ -89,20 +93,39 @@ public:
     Fighter* fighter(uint64_t target_actor) override { return world_.fighter_of(target_actor); }
     HitResolver& resolver() override { return world_.resolver(); }
     const CombatData& data() const override { return world_.data(); }
+    // (another player's pawn takes a hit, its effects and what it takes off through his own session: combat/combat_players.cpp)
+    // Abilities between players: contributed by MrJambix in #23.
     Delivery deliver(uint64_t target_actor, const Resolved& hit, double now) override {
+        if (world_.player_pawn(target_actor)) return world_.apply_hit_to_player(target_actor, self_.id(), hit, world_time(now), nullptr);
         return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now));
     }
     Delivery deliver_from(uint64_t target_actor, const Resolved& hit, double now, const HitOrigin& origin) override {
+        if (world_.player_pawn(target_actor)) return world_.apply_hit_to_player(target_actor, self_.id(), hit, world_time(now), &origin);
         return world_.apply_hit_to_npc(target_actor, self_.id(), hit, world_time(now), 0, &origin);
     }
-    void shield(uint64_t target_actor, double amount, double seconds, double now) override { world_.add_shield(target_actor, amount, seconds, world_time(now)); }
-    void remove_effects(uint64_t target_actor, const abilities::HitDef& hit, double now) override { world_.remove_effects_from_npc(target_actor, hit, world_time(now)); }
+    // Abilities between players: contributed by MrJambix in #23.
+    /// (a player's shield is the effect instance's that his session holds: apply_effects_to_player works it out with the effect)
+    void shield(uint64_t target_actor, double amount, double seconds, double now) override {
+        if (world_.player_pawn(target_actor)) return;
+        world_.add_shield(target_actor, amount, seconds, world_time(now));
+    }
+    void remove_effects(uint64_t target_actor, const abilities::HitDef& hit, double now, bool helpful) override {
+        if (world_.player_pawn(target_actor)) return world_.remove_effects_from_player(target_actor, self_.id(), hit, world_time(now), helpful);
+        world_.remove_effects_from_npc(target_actor, hit, world_time(now));
+    }
     void remove_effect(uint64_t target_actor, int64_t effect_guid, double now) override { world_.remove_npc_effect(target_actor, effect_guid, world_time(now)); }
     void remove_effect_from(uint64_t target_actor, int64_t effect_guid, uint64_t instigator, double now) override {
         world_.remove_npc_effect_from(target_actor, effect_guid, instigator, world_time(now));
     }
     uint64_t own_pet() const override { return world_.pet_of(self_.id()); }
-    void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now) override { world_.apply_effects(target_actor, self_.id(), effects, world_time(now)); }
+    void apply_effects(uint64_t target_actor, const std::vector<effects::Applied>& effects, double now, bool helpful) override {
+        if (world_.player_pawn(target_actor)) return world_.apply_effects_to_player(target_actor, self_.id(), effects, world_time(now), helpful);
+        world_.apply_effects(target_actor, self_.id(), effects, world_time(now));
+    }
+    // PvP: contributed by MrJambix in #23.
+    void player_effect_hit(uint64_t from, int64_t hit_guid, int64_t effect_guid, double now, bool pvp_force) override {
+        world_.player_effect_hit(from, self_.id(), hit_guid, effect_guid, world_time(now), pvp_force);
+    }
     double effect_remaining(uint64_t target_actor, int64_t effect_guid, double now) const override { return world_.effect_remaining(target_actor, effect_guid, world_time(now)); }
     double effect_stacks_from(uint64_t target_actor, int64_t effect_guid, uint64_t instigator, double now) const override {
         return world_.effect_stacks_from(target_actor, effect_guid, instigator);

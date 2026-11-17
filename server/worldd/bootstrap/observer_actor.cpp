@@ -258,29 +258,6 @@ bool PlayerBootstrap::set_targeting(bool targeting) {
     return combat->obj.state.set(*combat->obj.schema, "bIsTargeting", Value::boolean(targeting));
 }
 
-bool PlayerBootstrap::set_flag_alignment(bool flagged) {
-    if (!ok_ || !second_state_added_) return false;
-    repl::Subobject* al = component(setup_.guids.alignment);
-    if (!al || !al->obj.schema) return false;
-    const repl::Value* held = al->obj.state.get(*al->obj.schema, "Alignments");
-    const auto* now = held ? held->get_if<repl::AlignmentContainer>() : nullptr;
-    if (!now) return false;
-    const int64_t want = flagged ? content::kAlignmentCombatant : content::kAlignmentNonCombatant;
-    const int64_t other = flagged ? content::kAlignmentNonCombatant : content::kAlignmentCombatant;
-    repl::AlignmentContainer next = *now;
-    bool found = false;
-    for (repl::AlignmentContainer::Instance& i : next.instances) {
-        if (i.key == other) {
-            i.key = static_cast<uint64_t>(want);   // the data's own set: a player is the one or the other, never both
-            found = true;
-        } else if (i.key == static_cast<uint64_t>(want)) {
-            found = true;
-        }
-    }
-    if (!found) return false;
-    return al->obj.state.set(*al->obj.schema, "Alignments", Value(std::move(next)));
-}
-
 bool PlayerBootstrap::set_observer_stats(repl::Actor& shown) {
     if (!ok_ || !second_state_added_) return false;
     repl::Subobject* dst = shown.find(setup_.guids.stats);
@@ -317,22 +294,26 @@ bool PlayerBootstrap::set_observer_live_stats(repl::Actor& shown, std::span<cons
     repl::Subobject* dst = shown.find(setup_.guids.stats);
     const repl::Subobject* src = pawn_.find(setup_.guids.stats);
     if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
-    repl::FastArrayState* to = observer_array(*dst, "StatRepInt32EveryoneProxy");
-    const repl::FastArrayState* from = observer_array(*src, "StatRepInt32EveryoneProxy");
-    if (!to || !from) return false;
-    bool added = false;
-    for (const int64_t record : records) {
-        const repl::FastArrayItem* mine = observer_stat_item(*from, record);
-        if (!mine) continue;   // (a stat this character has no item for: nothing to show)
-        const repl::FastArrayItem* have = observer_stat_item(*to, record);
-        if (!have) {
-            if (!to->insert(mine->id, mine->values)) return false;
-            added = true;
-        } else if (!(have->values == mine->values)) {
-            if (!to->change(have->id, mine->values)) return false;
+    // PvP: contributed by MrJambix in #23.
+    // the two audiences every client is sent: the int32 stats (Health and Mana) and the float ones (Corruption): both items are FStatInt32InstRep, a float's bits in its word
+    for (const std::string_view name : {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}) {
+        repl::FastArrayState* to = observer_array(*dst, name);
+        const repl::FastArrayState* from = observer_array(*src, name);
+        if (!to || !from) continue;
+        bool added = false;
+        for (const int64_t record : records) {
+            const repl::FastArrayItem* mine = observer_stat_item(*from, record);
+            if (!mine) continue;   // (a stat this character has no item for, or not in this array: nothing to show)
+            const repl::FastArrayItem* have = observer_stat_item(*to, record);
+            if (!have) {
+                if (!to->insert(mine->id, mine->values)) return false;
+                added = true;
+            } else if (!(have->values == mine->values)) {
+                if (!to->change(have->id, mine->values)) return false;
+            }
         }
+        if (added) to->mark_array_dirty();   // (an insert alone replicates nothing)
     }
-    if (added) to->mark_array_dirty();   // an insert alone replicates nothing
     return true;
 }
 
@@ -341,14 +322,17 @@ bool PlayerBootstrap::observer_live_stats_differ(const repl::Actor& shown, std::
     const repl::Subobject* dst = shown.find(setup_.guids.stats);
     const repl::Subobject* src = pawn_.find(setup_.guids.stats);
     if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
-    const repl::FastArrayState* to = observer_array(*dst, "StatRepInt32EveryoneProxy");
-    const repl::FastArrayState* from = observer_array(*src, "StatRepInt32EveryoneProxy");
-    if (!to || !from) return false;
-    for (const int64_t record : records) {
-        const repl::FastArrayItem* mine = observer_stat_item(*from, record);
-        if (!mine) continue;
-        const repl::FastArrayItem* have = observer_stat_item(*to, record);
-        if (!have || !(have->values == mine->values)) return true;
+    // PvP: contributed by MrJambix in #23.
+    for (const std::string_view name : {"StatRepInt32EveryoneProxy", "StatRepFloatArrayEveryoneProxy"}) {
+        const repl::FastArrayState* to = observer_array(*dst, name);
+        const repl::FastArrayState* from = observer_array(*src, name);
+        if (!to || !from) continue;
+        for (const int64_t record : records) {
+            const repl::FastArrayItem* mine = observer_stat_item(*from, record);
+            if (!mine) continue;
+            const repl::FastArrayItem* have = observer_stat_item(*to, record);
+            if (!have || !(have->values == mine->values)) return true;
+        }
     }
     return false;
 }

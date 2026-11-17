@@ -17,3 +17,8 @@
 #include "ability_session_emotes_seen_tests.inc"
 #include "ability_session_interrupt_budget_tests.inc"
 #include "ability_session_loot_light_tests.inc"
+#include "ability_session_players_tests.inc"   // #23 (MrJambix)
+#include "ability_session_pvp_rules_tests.inc"   // #23 (MrJambix)
+#include "ability_session_pvp_tests.inc"   // #23 (MrJambix)
+#include "ability_session_duels_tests.inc"   // #23 (MrJambix)
+#include "ability_session_pvp_more_tests.inc"

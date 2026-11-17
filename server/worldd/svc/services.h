@@ -302,6 +302,11 @@ struct Character {
     /// expiry is not sent.  A service of an older version sends none.
     std::vector<Friend>        friends;
     std::vector<FriendRequest> friend_requests;
+    // PvP: contributed by MrJambix in #23.
+    /// PvP (migration 0025): the character's Corruption and Corruption_Blight between sessions (with the items).  Both 0 for a character with neither, or from a service of an older
+    /// version.
+    double corruption = 0;
+    double blight = 0;
     /// Quests, slice 1: the character's saved quest log, read from the quest service at the login.  Empty (nullopt) when the world server has no quest service or it did not answer: the
     /// character then plays without quests, and nothing is saved over what the service holds.
     std::optional<SavedQuestLog> quest_log;
@@ -349,6 +354,12 @@ struct Progress {
     std::vector<Friend>          friends;
     bool                         replace_friend_requests = false;
     std::vector<FriendRequest>   friend_requests;
+    // PvP: contributed by MrJambix in #23.
+    /// PvP: with replace_pvp the character's corruption and blight become exactly these (both 0: no row); without it they are left alone (the character service refuses a value
+    /// that is not finite, below 0 or not under a million).
+    bool                         replace_pvp = false;
+    double                       corruption = 0;
+    double                       blight = 0;
     bool operator==(const Progress& o) const {
         if (level != o.level || class_id != o.class_id || experience.size() != o.experience.size()) return false;
         for (size_t i = 0; i < experience.size(); ++i) {
@@ -358,7 +369,8 @@ struct Progress {
                action_bar == o.action_bar && professions == o.professions && replace_completed_ftues == o.replace_completed_ftues && completed_ftues == o.completed_ftues &&
                replace_attunements == o.replace_attunements && attunements == o.attunements && home_attunement == o.home_attunement && home_last_used_ms == o.home_last_used_ms &&
                replace_ignored_names == o.replace_ignored_names && ignored_character_names == o.ignored_character_names && ignored_guild_names == o.ignored_guild_names &&
-               replace_friends == o.replace_friends && friends == o.friends && replace_friend_requests == o.replace_friend_requests && friend_requests == o.friend_requests;
+               replace_friends == o.replace_friends && friends == o.friends && replace_friend_requests == o.replace_friend_requests && friend_requests == o.friend_requests &&
+               replace_pvp == o.replace_pvp && corruption == o.corruption && blight == o.blight;   // #23 (MrJambix)
     }
 };
 // [C:Y:B :: C O A]

@@ -88,19 +88,22 @@ public:
     RigFighter& rig_fighter() { return fighter_; }
     void receive_hit(const combat::IncomingHit& hit, double now) override {
         hits.push_back(hit);
-        // the session's own path (PlayerSession::take_hit): the pipeline takes the numbers through the shields, confirms the hit and raises the being-hit
-        // events of the character's effects (the Thorns' reflection and the like).  A test that replays a retail reply keeps the old bare damage: its
-        // expected reply was recorded without the events this path adds.
-        if (pipeline_hits) {
-            rig_.pipe->receive_hit(hit, rig_.clock = std::max(rig_.clock, now));
-            rig_.take();
+        // a harmful hit another player lands waits in his session's inbox and is applied in his own next step (PlayerSession::CombatSide queues it,
+        // PlayerSession::take_hit then runs the pipeline); a creature's hit keeps the immediate path the other tests replay
+        if (queue_player_hits && hit.from_player) {
+            inbox.push_back(hit);
             return;
         }
-        for (const combat::ResolvedMod& m : hit.mods) {
-            if (m.stat_guid == content::kGuidHealth && m.value < 0) rig_.pipe->take_damage(-m.value, rig_.clock = std::max(rig_.clock, now));
-        }
-        rig_.take();
+        apply_incoming(hit, now);
     }
+    /// The player's own next step: the harmful hits another player left in his inbox, applied as PlayerSession::take_hit does.
+    void take_incoming(double now) {
+        std::vector<combat::IncomingHit> waiting;
+        waiting.swap(inbox);
+        for (const combat::IncomingHit& hit : waiting) apply_incoming(hit, now);
+    }
+    /// True: a harmful hit another player lands on this one waits in his inbox for his own step (PlayerSession::CombatSide::receive_hit).
+    bool queue_player_hits = false;
     /// True: the hit goes through AbilityPipeline::receive_hit (the session's path).  False: the bare Health loss the replay expects.
     bool pipeline_hits = false;
     /// A hit of another player's ability on this one (the Saga's heal): its rig applies it to its own pawn, as the session's pipeline does.
@@ -109,9 +112,9 @@ public:
         effective = rig_.pipe->apply_ally_landing(hit, hit.at);
         rig_.take();
     }
-    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now) override {
+    void receive_player_effects(const std::vector<effects::Applied>& effects, uint64_t instigator, double now, const std::vector<double>* shields) override {
         const size_t before = rig_.log.size();
-        rig_.pipe->apply_ally_effects(effects, instigator, now);
+        rig_.pipe->apply_ally_effects(effects, instigator, now, shields);
         rig_.take();
         ally_effects += rig_.log.size() - before;
     }
@@ -133,7 +136,28 @@ public:
     emit::FIntrepidNetworkGUID cylinder_guid() const override { return rig_cylinder_guid(fighter_.id()); }
     /// The caster's actor id when this player stands in his party (a test of an ally hit sets it), else only his own.
     bool in_party_with(uint64_t actor) const override { return actor == party_with || actor == fighter_.id(); }
+    /// The key two party members share (the session's CombatSide shares its party's pointer): the leader's actor id, or `party_key` when a test lets
+    /// each member name the other (in_party_with asks whether an actor is one of the party, the key names the party all of them share).
+    uint64_t group_key() const override { return party_key != 0 ? party_key : (party_with ? party_with : fighter_.id()); }
     uint64_t party_with = 0;   // the party's leader (or any member's) actor id
+    uint64_t party_key = 0;    // the one key the members share (0: group_key names party_with)
+    // PvP: the side the rules between players read.  Off by default: most tests of the Saga and the melodies keep two players with no rules between them,
+    // as they were written before PvP; a test of a hit between players turns it on for both.
+    bool pvp_rules = false;
+    combat::pvp::Flag pvp_flag = combat::pvp::Flag::NonCombatant;
+    bool pvp_force = false;   // the player's PvP key
+    bool pvp_side(combat::pvp::Side& out, bool& force) const override {
+        if (!pvp_rules) return false;
+        out.actor = fighter_.id();
+        out.flag = pvp_flag;
+        force = pvp_force;
+        return true;
+    }
+    void pvp_flagged(uint64_t target, uint8_t intention, double) override {
+        pvp_marks.emplace_back(target, intention);
+        if (pvp_flag != combat::pvp::Flag::Corrupted) pvp_flag = combat::pvp::Flag::Combatant;   // (the world asks only when the rules flag him)
+    }
+    std::vector<std::pair<uint64_t, uint8_t>> pvp_marks;   // (the other player's pawn, the intention) of each flagging the world asked
     void receive_kill(const combat::KillReward& kill, double now) override {
         kills.push_back(kill);
         (void)now;
@@ -176,6 +200,23 @@ public:
 // -- CoA & C Y B --
 
 private:
+    /// What the session does with a hit at its next step.
+    void apply_incoming(const combat::IncomingHit& hit, double now) {
+        // the session's own path (PlayerSession::take_hit): the pipeline takes the numbers through the shields, confirms the hit and raises the being-hit
+        // events of the character's effects (the Thorns' reflection and the like).  A test that replays a retail reply keeps the old bare damage: its
+        // expected reply was recorded without the events this path adds.
+        if (pipeline_hits) {
+            rig_.pipe->receive_hit(hit, rig_.clock = std::max(rig_.clock, now));
+            rig_.take();
+            return;
+        }
+        for (const combat::ResolvedMod& m : hit.mods) {
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) rig_.pipe->take_damage(-m.value, rig_.clock = std::max(rig_.clock, now));
+        }
+        rig_.take();
+    }
+
+    std::vector<combat::IncomingHit> inbox;   // the harmful hits another player landed, waiting for this player's own next step
     ability_rig::Rig& rig_;
     RigFighter        fighter_;
 };

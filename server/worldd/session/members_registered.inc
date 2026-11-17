@@ -30,3 +30,5 @@
 #include "session/members/party_stats.inc"
 #include "session/members/resurrect.inc"
 #include "session/members/stance.inc"
+#include "session/members/pvp.inc"   // #23 (MrJambix)
+#include "session/members/duels.inc"   // #23 (MrJambix)

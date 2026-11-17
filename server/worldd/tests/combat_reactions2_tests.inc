@@ -800,8 +800,9 @@ void test_reactions2_two_creatures_hit_the_tank_at_once(Fixture& f) {
     CHECKF(g.world.health_of(first) < first_before - 1.0 && g.world.health_of(second) < second_before - 1.0, "both Wolves lost Health to it");
 }
 
-// Another player's hit on the Tank: the session hands it over through its ally path (apply_ally_landing), the same event fires in the Tank's own next step,
-// and the Reflect lands on that player.  (The two players are hostile here: the alignment rules of player against player are another milestone's.)
+// Another player's hit on the Tank: the PvP rules take a harmful hit between players to the target's session inbox (IncomingHit, receive_hit), which
+// applies it in the Tank's own next step; the same event fires there, and the Reflect lands back on that player through the same harmful route.  The attacker
+// holds the PvP key, so his first harmful action on the Tank is allowed and makes him a combatant; the Tank's reflect may then harm a combatant.
 void test_reactions2_tank_reflect_on_another_players_hit(Fixture& f) {
     std::printf("another player's hit on the Tank fires his Reflect onto that player\n");
     const abilities::EffectDef* reflect = f.catalog->effect_named("Tank_Reflect");
@@ -812,16 +813,14 @@ void test_reactions2_tank_reflect_on_another_players_hit(Fixture& f) {
     Duo d(f, 7, 5, {"Tank_Passive_Reflect_Refreshing"}, {});
     CHECKF(d.ok(), "the two players and the world: %s%s", d.a.problem.c_str(), d.w.problem.c_str());
     if (!d.ok()) return;
-    // the attacker stands on a creature's side, so that the Tank's reflect (its mask is an enemy's) reaches him
-    const auto wolf = f.motion.find(d.wolf_path);
-    CHECK(wolf.has_value(), "(the Wolf's Blueprint, whose alignments make an enemy, is in the motion table)");
-    if (!wolf) return;
-    std::vector<int64_t> enemy(wolf->alignments.begin(), wolf->alignments.end());
-    d.pb.rig_fighter().set_alignments(enemy);
+    d.pa.pvp_rules = true;           // the PvP rules judge a hit between the two
+    d.pb.pvp_rules = true;
+    d.pb.pvp_force = true;           // the attacker holds the PvP key: his first harmful action on a non-combatant is allowed and flags him
+    d.pa.pipeline_hits = true;       // his session applies what reaches his inbox through the pipeline (PlayerSession::take_hit)
+    d.pa.queue_player_hits = true;   // ... in his own next step, not inside the attacker's call (PlayerSession::CombatSide)
     const double t0 = 100.0;
     CHECK(grant(d.a, reflect->row.guid, 1, t0 - 0.5), "(the Tank holds the Reflect)");
     const double attacker_before = d.b.health();
-    const size_t from = d.b.log.size();
     combat::Resolved r;
     r.mods.push_back({1, content::kGuidHealth, -40.0});
     combat::HitOrigin origin;
@@ -829,15 +828,25 @@ void test_reactions2_tank_reflect_on_another_players_hit(Fixture& f) {
     origin.source_type = content::kSourceTypeAbility;
     origin.source_guid = 0;
     const double tank_before = d.a.health();
-    d.world.apply_hit_to_npc(d.pa.actor_id(), d.pb.actor_id(), r, t0, 0, &origin);
-    d.a.run_to(t0 + 0.1);   // (the Tank's reflect runs in his own next step, not inside the call that landed the hit on him)
+    const combat::Delivery hit_on_tank = d.portb.deliver_from(d.pa.actor_id(), r, t0, origin);   // the caster's pipeline delivers a harmful hit to another player
+    CHECKF(hit_on_tank.applied, "the other player's hit reached the Tank's session");
+    d.pa.take_incoming(t0);   // (the Tank's own next step applies it and raises his being-hit reactions there)
+    d.a.run_to(t0 + 0.1);
     d.a.take();
     d.b.take();
     CHECKF(d.a.health() < tank_before - 39.0 && d.a.health() > tank_before - 41.0, "the other player's hit took its 40 from the Tank (%.1f)", d.a.health());
     CHECKF(d.b.health() < attacker_before - 0.5, "the Tank's Reflect took its part from the other player (%.1f of %.1f)", d.b.health(), attacker_before);
-    bool landed = false;
-    for (const int64_t h : d.pb.ally_lands) landed = landed || h == reflect_hit->row.guid;
-    CHECKF(landed, "the reflect landed through the other player's own ally path (apply_ally_landing)");
+    bool through_inbox = false;
+    for (const combat::IncomingHit& h : d.pb.hits) through_inbox = through_inbox || h.hit_guid == reflect_hit->row.guid;
+    CHECKF(through_inbox, "the reflect landed through the other player's own ally path (apply_ally_landing) no more: the PvP harmful route took it to his session's inbox (receive_hit)");
+    bool through_ally = false;
+    for (const int64_t h : d.pb.ally_lands) through_ally = through_ally || h == reflect_hit->row.guid;
+    CHECKF(!through_ally, "the reflect is a harmful hit: it does not take the ally path (apply_ally_landing)");
+    const auto reflects = confirms_of(d.a, reflect_hit->row.guid);
+    CHECKF(reflects.size() == 1 && reflects[0].targets.size() == 1 && reflects[0].targets[0].component.ObjectId == d.pb.actor_id(),
+           "the Tank's runtime confirmed the reflect on the other player (%zu)", reflects.size());
+    CHECKF(d.pb.pvp_flag == combat::pvp::Flag::Combatant, "the attacker who harmed the Tank is a combatant now: his first harmful action flags him");
+    CHECKF(d.pa.pvp_flag == combat::pvp::Flag::Combatant, "the Tank's harmful reflect flags the Tank in turn (harming a combatant)");
     CHECK(d.a.pawn.broken.empty() && d.b.pawn.broken.empty(), "(both pawns took every change)");
 }
 

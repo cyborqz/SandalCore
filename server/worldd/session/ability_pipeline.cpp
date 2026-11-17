@@ -5,6 +5,7 @@
 //  session/ability_pipeline.cpp  (see ability_pipeline.h)
 // ============================================================================
 #include "session/ability_pipeline.h"
+#include "combat/pvp_corruption.h"   // #23 (MrJambix)
 
 #include "bootstrap/constants.h"
 #include "bootstrap/stealth_effects.h"
@@ -866,7 +867,11 @@ AbilityPipeline::AbilityPipeline(const abilities::Catalog* catalog, stats::Chara
                                  uint64_t seed)
     : catalog_(catalog), stats_(stats), a7_(a7), worn_(std::move(worn)), world_time_at_zero_(world_time_at_zero) {
     rng_.state = seed;
-    stats_.set_resources(std::set<int64_t>(std::begin(content::kResourceStats), std::end(content::kResourceStats)));
+    std::set<int64_t> held(std::begin(content::kResourceStats), std::end(content::kResourceStats));
+    // PvP: contributed by MrJambix in #23.
+    held.insert(combat::pvp::kStatCorruption);   // PvP: the corruption and the blight are values the character holds (session/player_pvp.cpp), not formulas
+    held.insert(combat::pvp::kStatBlight);
+    stats_.set_resources(std::move(held));
     resolve_resource();
 }
 
@@ -1348,8 +1353,7 @@ bootstrap::EffectItem AbilityPipeline::effect_item(const EffectInst& e) const {
     return item;
 }
 
-void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner,
-                                   const std::vector<stats::EffectMod>* mods_override) {
+void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int stacks_in, std::optional<double> duration, double t, bool raw, int64_t owner) {
     const content::EffectRow& row = def.row;
     if (stacks_in < 1) stacks_in = 1;
     if (row.guid == bootstrap::kEffectRogueStealth && stacks_of(bootstrap::kEffectRogueStealth) == 0) stealth_damage_ = 0;   // its damage count starts with it
@@ -1369,23 +1373,27 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         }
         if (!(dur >= 0)) dur = 0;
     }
-    // the values of its stat mods, for one stack, as the character is now (a hit of another player's has them already worked out for the two)
+    // Abilities between players: contributed by MrJambix in #23.
+    // the values of its stat mods, for one stack, as the character is now (another player's effect: as its caster worked them out)
+    const GivenEffect* given = given_effect_;
+    given_effect_ = nullptr;   // (the effect's own Apply hits below work theirs out)
     std::vector<stats::EffectMod> mods;
     std::optional<float> shield;   // a mod on TempHealth is a shield: its amount is held by the instance, not run through the engine
-    if (mods_override) {
-        mods = *mods_override;
-    } else {
-        for (const content::ModRow& m : def.mods) {
-            if (m.shield_absorb || m.value_expr == 0) continue;
-            double v = 0;
-            std::string why;
-            if (!eval(m.value_expr, v, why)) continue;   // a mod that does not run is left out (the engine's none)
-            if (m.stat_guid == content::kGuidTempHealth) {
-                if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
-                continue;
-            }
-            mods.push_back({m.stat_guid, v});
+    if (given) {
+        mods = given->mods;
+        if (std::isfinite(given->shield) && given->shield > 0) shield = static_cast<float>(given->shield);
+    }
+    static const std::vector<content::ModRow> kNoMods;
+    for (const content::ModRow& m : given ? kNoMods : def.mods) {
+        if (m.shield_absorb || m.value_expr == 0) continue;
+        double v = 0;
+        std::string why;
+        if (!eval(m.value_expr, v, why)) continue;   // a mod that does not run is left out (the engine's none)
+        if (m.stat_guid == content::kGuidTempHealth) {
+            if (std::isfinite(v) && v > 0) shield = static_cast<float>(shield.value_or(0.0f) + v);
+            continue;
         }
+        mods.push_back({m.stat_guid, v});
     }
     auto give_shield = [&](EffectInst& e) {
         if (!shield) return;
@@ -1428,6 +1436,8 @@ void AbilityPipeline::apply_effect(AbilityChange& c, const EffectDef& def, int s
         e.def = &def;
         e.owner = owner;
         e.zone = zone_owner_;
+        e.from_player = given ? given->from : 0;   // (PvP: another player's effect ticks as his hit)   // #23 (MrJambix)
+        e.pvp_force = given ? given->pvp_force : false;   // #23 (MrJambix)
         e.stacks = stacks;
         e.start = t;
         e.end = std::isinf(dur) ? kInf : t + dur;
@@ -1645,6 +1655,13 @@ void AbilityPipeline::run_effect_hits(AbilityChange& c, const EffectInst& e, con
         if (!wanted) continue;
         const HitDef* h = catalog_->hit(hit_guid);
         if (!h) continue;
+        // PvP: contributed by MrJambix in #23.
+        // PvP: another player's bleed or burn on the character: the tick aims at an enemy of whoever left it, so it is that player's hit on the character (judged by the
+        // rules between the two: combat/combat_pvp.cpp), not one the character makes
+        if (e.from_player != 0 && combat_ && (h->row.applicable_targets & 2) != 0) {
+            combat_->player_effect_hit(e.from_player, hit_guid, e.def->row.guid, t, e.pvp_force);
+            continue;   // #23 review: lane 7's party aura below follows the character's own hits only
+        }
         apply_hit(c, *h, t, false, src);
         // a Tick hit that fires a hit at the caster's party around him (a melody's Buff on the Bard and the members within 3,000 cm) goes on to it every tick; the
         // children are the server's own, as a reaction's are: the client never predicted them
@@ -1786,8 +1803,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     const auto reached = [&](const combat::TargetInfo& ti) {
         if (!ti.exists) return false;
         if (!ti.alive && !raises_the_dead) return false;
-        const bool hostile = ti.relation == combat::Relation::Hostile;
-        if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
+        if (!combat::mask_reaches(mask, ti)) return false;   // a side this hit does not reach (another player: Ally, or Party and Raid in one group; PvP: what the rules allow)   // #23 (MrJambix)
         return src.reach_free || !combat_ || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
     };
     const uint64_t active = active_target_ ? active_target_() : 0;
@@ -1806,7 +1822,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         ask.instigator = &self_view;
         ask.target = &target_view;
         ask.distance_cm = ti.surface_distance_cm + ti.radius_cm + combat_->self().radius_cm();
-        ask.enemy = ti.relation == combat::Relation::Hostile;
+        ask.enemy = combat::harms(mask, ti);
         ask.neutral = ti.relation == combat::Relation::Neutral;
         ask.active_is_target = id == active;
         ask.active_in_hit = active_named;
@@ -1854,7 +1870,7 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         if (static_cast<double>(outs.size()) >= max_targets) break;
         const std::optional<combat::TargetInfo> ti = target_info(id);
         if (!ti || !reached(*ti)) continue;
-        const bool hostile = ti->relation == combat::Relation::Hostile;
+        const bool hostile = combat::harms(mask, *ti);   // (another player the caster may both harm and support: a hit with Enemy harms him)   // #23 (MrJambix)
         combat::Fighter* tf = combat_ ? combat_->fighter(id) : nullptr;
         // a Resurrection's hit on a dead player raises him: its record goes to the session, which asks him or brings him back (no stat of the hit lands; the
         // record's own values do)
@@ -2023,8 +2039,8 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
             }
             // what the hit takes off its target: the effects it names, or the debuffs or buffs its filter names, up to its limit (the creature's own book decides which of them it holds); a filter that
             // an older content.db does not say is not served here, as it is not on the character
-            if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) combat_->remove_effects(id, hit, t);
-            if (gated && !gate.effects.empty()) combat_->apply_effects(id, gate.effects, t);
+            if (!hit.remove_effects.empty() || (hit.max_remove > 0 && hit.removal != HitDef::Removal::Unknown)) combat_->remove_effects(id, hit, t, !hostile);
+            if (gated && !gate.effects.empty()) combat_->apply_effects(id, gate.effects, t, !hostile);
         }
     }
     // what the hit applies to its caster ("self" rows) comes with the hit once, if it found anyone
@@ -2193,13 +2209,33 @@ void AbilityPipeline::receive_hit(const combat::IncomingHit& in, double now) {
             h.mods.push_back({m.stat_mod_guid, static_cast<float>(m.value), static_cast<float>(effective[i])});
         }
         // what the hit puts on the player: a creature's debuff, with its own numbers and the world running its ticks
-        for (const effects::Applied& applied : in.effects) apply_creature_effect(c, applied, in.instigator, now_);
+        if (!in.from_player) {
+            for (const effects::Applied& applied : in.effects) apply_creature_effect(c, applied, in.instigator, now_);
+        }
+    }
+    // abilities between players: what another player's hit takes off the character, then what it puts on him, with the numbers its caster worked out
+    // Abilities between players: contributed by MrJambix in #23.
+    if (in.from_player) {
+        if (in.removes) remove_by_hit(c, *in.removes, now_);
+        for (size_t i = 0; i < in.effects.size(); ++i) {
+            const effects::Applied& a = in.effects[i];
+            if (!a.def) continue;
+            const GivenEffect given{a.mods, i < in.effect_shields.size() ? in.effect_shields[i] : 0.0, in.from_player ? in.instigator : 0, in.pvp_force};
+            given_effect_ = &given;
+            apply_effect(c, *a.def, a.stacks, std::isinf(a.duration) ? std::nullopt : std::optional<double>(a.duration), now_);
+            given_effect_ = nullptr;
+            sync_engine_effects();
+        }
     }
     if (before > 0 && stat_now(content::kGuidHealth) <= 0) flags |= stats::kHitLethal;   // (the hit took the last Health)
     h.flags = flags;
-    confirmations_.push_back(std::move(h));
-    // reactions: the character took a hit (after its confirmation is queued, so a reaction's follow it)
-    raise_hit_taken(c, in.hit_guid, in.source_type, in.source_guid, in.instigator, flags, in.mods, effective, now_, true);
+    // (what another player's hit puts on or takes off comes after the hit itself, which was confirmed: it has no confirmation of its own)
+    if (in.hit_guid != 0 || !in.mods.empty()) {   // #23 (MrJambix)
+        confirmations_.push_back(std::move(h));
+        // reactions: the character took a hit (after its confirmation is queued, so a reaction's follow it); #23 review: not for what another
+        // player's hit puts on or takes off, which comes after that hit and its own reactions
+        raise_hit_taken(c, in.hit_guid, in.source_type, in.source_guid, in.instigator, flags, in.mods, effective, now_, true);
+    }
     drop_evaluation();
     recompute(c);
     emit({std::move(c), std::nullopt, now_, "a hit of actor " + std::to_string(in.instigator) + " on the character"});
@@ -2249,13 +2285,17 @@ std::vector<double> AbilityPipeline::apply_ally_landing(const combat::PlayerInco
     return effective;
 }
 
-void AbilityPipeline::apply_ally_effects(const std::vector<effects::Applied>& list, uint64_t instigator, double now) {
+void AbilityPipeline::apply_ally_effects(const std::vector<effects::Applied>& list, uint64_t instigator, double now, const std::vector<double>* shields) {
     const double at = std::max(now, now_);   // (see apply_ally_landing: no steps of this runtime run inside another player's step)
     AbilityChange c;
-    for (const effects::Applied& a : list) {
+    for (size_t i = 0; i < list.size(); ++i) {
+        const effects::Applied& a = list[i];
         if (!a.def || a.stacks < 1) continue;
         const std::optional<double> duration = std::isfinite(a.duration) ? std::optional<double>(a.duration) : std::nullopt;
-        apply_effect(c, *a.def, a.stacks, duration, at, false, 0, &a.mods);
+        const GivenEffect given{a.mods, shields && i < shields->size() ? (*shields)[i] : 0.0, 0, false};
+        given_effect_ = &given;
+        apply_effect(c, *a.def, a.stacks, duration, at);
+        given_effect_ = nullptr;
     }
     sync_engine_effects();
     recompute(c);
@@ -4014,8 +4054,9 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
                 return refused(Refusal::BadTarget, ti->alive ? " (it does not reach a living target)" : " (it does not reach a dead target)");
             }
             const bool hostile = ti->relation == combat::Relation::Hostile;
-            // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493])
-            if (hostile ? (row.applicable_targets & 2) == 0 : row.applicable_targets != 0 && (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
+            // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493]; another player is reached by Ally, or by Party
+            // and Raid in one group: combat_world.h mask_reaches)
+            if (row.applicable_targets != 0 ? !combat::mask_reaches(row.applicable_targets, *ti) : hostile) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");   // #23 (MrJambix)
             const double reach = combat_ ? combat_->reach_cm(melee) + combat_->data().activation_leeway_cm() : 1e9;   // (a mount's own range is the client's)
             if (ti->surface_distance_cm > reach) return refused(Refusal::OutOfRange);
             // Line of sight is NOT a refusal for a player's cast (E1 review I4): `TargetInfo::in_line_of_sight` is the navmesh's 2D raycast, which a

@@ -270,12 +270,32 @@ void PlayerSession::on_plain_respawn(Connection& conn, Clock::time_point now) {
     finish_respawn(conn, spot, now);
 }
 
-void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now) {
-    // alive again: full Health and Mana, the pawn not dead, the character at the spot (the move checker moves with it, the client is snapped)
+void PlayerSession::finish_respawn(Connection& conn, const PlayerWorld::RespawnSpot& spot, Clock::time_point now, bool at_respawn_point) {
+    // #23 review: `at_respawn_point` keeps a GM's revive from unflagging a combatant and from giving the PvP protection (a respawn point does both).
+    // alive again: full Health and Mana, the pawn not dead, the character at the spot (the move checker moves with it, the client is snapped).  `at_respawn_point`:
+    // a respawn the player chose (the death window's Respawn or a place), not a GM's revive or another player's Resurrect: only a respawn point unflags a
+    // combatant and gives the opt-in protection (RespawnRecord.bUnflagCombatants and the record's Emberspring_PVPOptInProtection).
     dead_ = false;
     ++respawns_;
+    // PvP: contributed by MrJambix in #23.
+    // PvP: the respawn points unflag combatants (RespawnRecord.bUnflagCombatants, true for all but a forward operating base); a corrupted player stays corrupted
+    if (at_respawn_point && pvp_state_ == combat::pvp::Flag::Combatant) {   // #23 review: only a respawn point unflags (not a GM's revive)
+        pvp_state_ = combat::pvp::Flag::NonCombatant;
+        pvp_send_alignments(conn, "the respawn");
+    }
     if (pipeline_) pipeline_->set_dead(false);
     pb_.set_dead(false);
+    // PvP: contributed by MrJambix in #23.
+    // PvP: a respawn point's opt-in protection (every respawn record's Emberspring_PVPOptInProtection, 60 s); its requirement, !IsCombatant(GetOwner()) &&
+    // !IsCorrupted(GetOwner()), is checked here (aocexpr does not run IsCombatant): a corrupted player comes back unprotected
+    if (at_respawn_point && pipeline_ && pvp_state_ == combat::pvp::Flag::NonCombatant) {   // #23 review: only a respawn point protects
+        if (pipeline_->grant_effect(combat::pvp::kEffectEmberspringProtection, 1, pipeline_->now())) {
+            ++pvp_protections_;
+            take_ability_events();
+        } else {
+            spdlog::log(level_for(pvp_logged_, 20), "[pvp] {}: the respawn's PvP protection is not in the ability tables (content.db older than the PvP effects?)", name());
+        }
+    }
     const stats::StatValue* hp = stats_ ? stats_->find(content::kGuidMaxHealth) : nullptr;
     const stats::StatValue* mp = stats_ ? stats_->find(content::kGuidMaxMana) : nullptr;
     if (hp) set_current_value(content::kGuidHealth, hp->value);

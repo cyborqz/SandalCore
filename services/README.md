@@ -608,6 +608,18 @@ DELETE FROM schema_migrations WHERE version = 21;
 COMMIT;
 ```
 
+**Rolling back migration 0025.** Migration 0025 (PvP) adds one table, `character_pvp`, and writes to nothing else. worldd saves a character's corruption and blight with
+the progress of that character (`SaveProgress` with `replace_pvp`) and reads them at the login (`GetCharacter`, `pvp`). Rolling it back clears every character's corruption and
+blight and nothing else; stop worldd first, or its progress saves fail until it runs a build without PvP persistence.
+
+```sql
+-- rollback of migration 0025 (PvP)
+BEGIN;
+DROP TABLE character_pvp;
+DELETE FROM schema_migrations WHERE version = 25;
+COMMIT;
+```
+
 **Rolling back migration 0024.** Migration 0024 (social, step 7, "the friends list") adds TWO tables, `character_friends` and `character_friend_requests` (a character's friends, and the friend requests waiting for it, each with its place in the list, oldest first); it writes nowhere else, backfills nothing and touches no existing table or column. worldd loads both lists at the login and saves them with the progress (`SaveProgress` with `replace_friends` and `replace_friend_requests`). The rollback drops the tables with whatever they hold: every friend and every pending request is forgotten (a player adds them again). The characters, their items, their progress, their jobs, their tutorials, their places, their quests and their ignored names are untouched, and the migration applies again. Stop the character service and worldd first, and start the ones from before 0024 afterwards: the character service of 0024 reads the tables at every login.
 
 ```sql

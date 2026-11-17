@@ -63,7 +63,7 @@ AOC_REGISTER_TEST(test_a_fight_that_goes_on_ends_six_seconds_after_its_last_exch
 // ---- a death in a fight, and the way back --------------------------------------------------------------------------------------------------------
 
 static void test_a_player_brought_back_after_a_death_in_a_fight_has_no_fight_and_no_draw() {
-    std::printf("a player who dies in a fight and is brought back has no fight and no draw (the PvP flag stays); the draw and a new fight are shown again\n");
+    std::printf("a player who dies in a fight with another player and is brought back has no fight and no draw (the PvP flag and the Combatant name stay); the draw and a new fight are shown again\n");
     StanceScene sc;
     CHECK(sc.ok(), "(the world's fights are on)");
     if (!sc.ok()) return;
@@ -80,7 +80,13 @@ static void test_a_player_brought_back_after_a_death_in_a_fight_has_no_fight_and
     a.client_sends({a.client.actor(a.pc_ch, pvp_flag_call(true), true)});
     exchange(a);
     a.run(milliseconds(300));
-    CHECK(a.s->targeting() && a.s->pvp_flag() && shown_bit(*shown_pawn(a), "bInCombat") == 1, "(the player draws, flags and fights)");
+    // his harmful action on the other player: the flagging action, the Combatant name and bInPVPCombat
+    combat::Resolved blow;
+    blow.mods.push_back({1, content::kGuidHealth, -20.0});
+    a.fx.world->combat()->apply_hit_to_player(b.s->bootstrap().setup().guids.pawn.ObjectId, a.s->bootstrap().setup().guids.pawn.ObjectId, blow, world_time_at(a.t), nullptr);
+    a.run(milliseconds(300));
+    CHECK(a.s->targeting() && a.s->pvp_flag() && a.s->pvp_flag_state() == combat::pvp::Flag::Combatant && shown_bit(*shown_pawn(a), "bInCombat") == 1,
+          "(the player draws, flags by a harmful action and fights)");
     CHECK(a.s->gm_kill(a.conn, a.t, "the test").ok, "(the player dies in the fight)");
     a.run(milliseconds(500));
     CHECK(pawn_dead(*shown_pawn(a)) == 1, "(the watchers hold him dead)");
@@ -92,10 +98,10 @@ static void test_a_player_brought_back_after_a_death_in_a_fight_has_no_fight_and
     if (!back) return;
     const uint32_t pch2 = sc.channel(back->id);
     CHECK(pch2 == pch, "(the watcher still holds the same pawn on the same channel)");
-    CHECK(shown_bit(*back, "bInCombat") == 0 && shown_bit(*back, "bIsTargeting") == 0, "...with no fight and no draw");
+    CHECK(shown_bit(*back, "bInCombat") == 0 && shown_bit(*back, "bIsTargeting") == 0 && shown_bit(*back, "bInPVPCombat") == 0, "...with no fight, no draw and no PvP combat");
     CHECK(shown_bit(*back, "bPvPForceFlag") == 1, "...and the PvP flag, which a death does not take");
     const auto name = shown_alignments(*back);
-    CHECK(name && names_alignment(*name, kStanceCombatant) && !names_alignment(*name, kStanceNonCombatant), "...with the Combatant name still");
+    CHECK(name && names_alignment(*name, kStanceCombatant) && !names_alignment(*name, kStanceNonCombatant), "...with the Combatant name still (the flagging action's 60 s)");
     CHECK(!stance_chain(b, pch, pawn_copy, combat, alignment, from_revive, "bInCombat", 1).has_value(), "the watcher is never sent a fight after the revive");
     CHECK(!stance_chain(b, pch, pawn_copy, combat, alignment, from_revive, "bIsTargeting", 1).has_value(), "...and never a draw");
     CHECK(own_pawn_bit(a, "bInCombat") == 0 && own_pawn_bit(a, "bIsTargeting") == 0 && own_pawn_bit(a, "bIsDead") == 0, "the player's own pawn says alive with no fight and no draw");
@@ -138,7 +144,7 @@ AOC_REGISTER_TEST(test_a_draw_and_a_death_in_the_same_tick_show_no_draw);
 // ---- the flag three times in one tick ------------------------------------------------------------------------------------------------------------
 
 static void test_the_flag_on_off_and_on_in_one_tick_is_shown_once_as_it_ended() {
-    std::printf("the PvP flag turned on, off and on again before one tick is shown as it ended: one change to the Combatant name, no white name in between\n");
+    std::printf("the PvP flag turned on, off and on again before one tick is shown as it ended, and the key alone does not colour the name\n");
     StanceScene sc;
     CHECK(sc.ok(), "(the world's fights are on)");
     if (!sc.ok()) return;
@@ -157,7 +163,8 @@ static void test_the_flag_on_off_and_on_in_one_tick_is_shown_once_as_it_ended() 
     CHECK(a.s->pvp_flag() && own_pawn_bit(a, "bPvPForceFlag") == 1, "(the flag ended on)");
     const auto on = stance_chain(b, pch, pawn_copy, combat, alignment, from, "bPvPForceFlag", 1);
     CHECK(on.has_value(), "the watcher is sent the flag on");
-    CHECK(on && on->alignments && names_alignment(*on->alignments, kStanceCombatant) && !names_alignment(*on->alignments, kStanceNonCombatant), "...with the Combatant name and no NonCombatant");
+    CHECK(on && !(on->alignments && names_alignment(*on->alignments, kStanceCombatant)),
+          "...with no Combatant: the key alone is no flagging action");
     CHECK(!stance_chain(b, pch, pawn_copy, combat, alignment, from, "bPvPForceFlag", 0).has_value(), "the watcher is never sent the flag off in between");
     const auto shown = shown_alignments(*shown_pawn(a));
     const auto own = own_alignments(a);
@@ -168,11 +175,12 @@ AOC_REGISTER_TEST(test_the_flag_on_off_and_on_in_one_tick_is_shown_once_as_it_en
 // ---- what the player's own client is told ---------------------------------------------------------------------------------------------------------
 
 static void test_the_players_own_client_is_told_his_draw_his_flag_with_its_name_and_his_death_frame() {
-    std::printf("the player's own client is sent his draw, his flag with the name it gives, and a death frame with the fight and the draw gone\n");
+    std::printf("the player's own client is sent his draw, his PvP flag (no colour with it), the Combatant name of his flagging action, and a death frame with the fight and the draw gone\n");
     StanceScene sc;
     CHECK(sc.ok(), "(the world's fights are on)");
     if (!sc.ok()) return;
     Harness& a = sc.a;
+    Harness& b = *sc.b;
     const size_t from_draw = a.got.size();
     a.client_sends({a.client.actor(a.pawn_ch, targeting_call(true), true)});
     a.run(milliseconds(300));
@@ -182,8 +190,15 @@ static void test_the_players_own_client_is_told_his_draw_his_flag_with_its_name_
     a.run(milliseconds(300));
     const auto flag = own_stance_chain(a, from_flag, "bPvPForceFlag", 1);
     CHECK(flag.has_value(), "...and bPvPForceFlag 1");
-    CHECK(flag && flag->alignments && names_alignment(*flag->alignments, kStanceCombatant) && !names_alignment(*flag->alignments, kStanceNonCombatant),
-          "...with the Combatant alignment in that same update (his own name)");
+    CHECK(flag && !(flag->alignments && names_alignment(*flag->alignments, kStanceCombatant)), "...with no Combatant: the key alone does not colour his name");
+    // his harmful action on another player: the flagging action, which colours him and puts bInPVPCombat up
+    combat::Resolved blow;
+    blow.mods.push_back({1, content::kGuidHealth, -20.0});
+    a.fx.world->combat()->apply_hit_to_player(b.s->bootstrap().setup().guids.pawn.ObjectId, a.s->bootstrap().setup().guids.pawn.ObjectId, blow, world_time_at(a.t), nullptr);
+    a.run(milliseconds(400));
+    const auto own_name = own_alignments(a);
+    CHECK(own_name && names_alignment(*own_name, kStanceCombatant) && !names_alignment(*own_name, kStanceNonCombatant), "his own client is sent the Combatant alignment of the flagging action");
+    CHECK(own_stance_chain(a, from_flag, "bInPVPCombat", 1).has_value(), "...and bInPVPCombat 1 with it");
     exchange(a);
     a.run(milliseconds(300));
     CHECK(own_stance_chain(a, from_flag, "bInCombat", 1).has_value(), "...and bInCombat 1 with the fight");
@@ -198,7 +213,8 @@ static void test_the_players_own_client_is_told_his_draw_his_flag_with_its_name_
     a.client_sends({a.client.actor(a.pc_ch, pvp_flag_call(false), true)});
     a.run(milliseconds(500));
     const auto off = own_stance_chain(a, from_off, "bPvPForceFlag", 0);
-    CHECK(off.has_value() && off->alignments && names_alignment(*off->alignments, kStanceNonCombatant) && !names_alignment(*off->alignments, kStanceCombatant),
-          "the flag off gives his own client the NonCombatant alignment back, with the bit");
+    CHECK(off.has_value(), "the flag off is sent with the bit");
+    const auto own_after = own_alignments(a);
+    CHECK(off && own_after && names_alignment(*own_after, kStanceCombatant), "...and the Combatant name stays (the key does not take it off)");
 }
 AOC_REGISTER_TEST(test_the_players_own_client_is_told_his_draw_his_flag_with_its_name_and_his_death_frame);

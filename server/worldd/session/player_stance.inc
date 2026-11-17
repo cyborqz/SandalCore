@@ -7,16 +7,17 @@
 //
 //  A stance is not a message of its own: it is bits of the player's pawn's UPlayerCombatInfo, replicated to every client that holds the pawn.  bIsTargeting is the
 //  draw (the client's own ServerSetTargeting asks for it), bInCombat the fight (the world's flag goes up with the first exchange and ends six seconds after the last,
-//  combat_config.in_combat_timer), bPvPForceFlag the flag the client sets (ServerSetPvpFlag), and InPvpSuppressionArea and bInPVPCombat have no source yet: this
-//  world has no suppression area and no PvP hit, so both stay 0 until milestone 6.  A dead player's bInCombat and bIsTargeting are 0 in the death's update.
+//  combat_config.in_combat_timer), bPvPForceFlag the flag the client sets (ServerSetPvpFlag), bInPVPCombat the fight with another player (session/player_pvp.cpp),
+//  and InPvpSuppressionArea has no source yet: this world has no suppression area, so it stays 0.  A dead player's bInCombat, bIsTargeting and bInPVPCombat are 0 in
+//  the death's update.
 //
-//  The name colour comes from the AlignmentComponent, not from the flag bit: the game's own records carry the colour (Combatant purple, NonCombatant white), and a
-//  player carries the one or the other.  The data's sequence puts the Combatant on a player at his first harmful action, not at the flag; this part has no harmful
-//  action yet, so the flag toggle is MODELLED as the flagging action: flagged, the player carries the Combatant, and the flag off puts the NonCombatant back.  The
-//  colour itself is the game's own record's, and the other instances stay as they are.
+//  The name colour comes from the AlignmentComponent, not from the flag bit: the game's own records carry the colour (Combatant purple, NonCombatant white, Corrupted
+//  red), and a player carries one of the three.  The data's sequence puts the Combatant on a player at his first harmful action, and that is what session/player_pvp.cpp
+//  does now (a flagging action, its 60 s removal timer refreshed by each one); the flag bit alone does not add it.  The colour itself is the game's own record's, and
+//  the other instances of the container stay as they are (combat/pvp.cpp's merge_container).
 //
-//  The Combatant stays while the flag is on: the record's 60 s removal timer, and its refresh by each harmful action, are not run (milestone 6's, with the action itself), and a
-//  mount keeps the alignments its owner had when it was summoned (the mount copies them once, session/player_mounts.cpp).
+//  The Combatant stays for 60 s after the last harmful action that flagged (the record's RemovalTimer, run by session/player_pvp.cpp), and a mount keeps the
+//  alignments its owner had when it was summoned (the mount copies them once, session/player_mounts.cpp).
 //
 //  Modelled too: no recording shows another player's pawn receive these (nothing records an observer); the shape is the player's own reply's, kept current on the
 //  pawn the watchers hold; and nothing records the draw (bIsTargeting), so its clear at death is ours.  A request over the draw's budget is dropped, and a request that
@@ -28,8 +29,8 @@ void PlayerSession::sync_shown_stance() {
     const bool targeting = targeting_ && !dead_;
     const bool in_combat = combat_flag_ && !dead_;
     const bool pvp_flag = pvp_flag_;
-    const bool suppression = false;   // (this world has no PvP suppression area: milestone 6's PvP sets it)
-    const bool pvp_combat = false;    // (PvP is milestone 6: no PvP hit exists, so the bit stays 0)
+    const bool suppression = false;   // (this world has no PvP suppression area)
+    const bool pvp_combat = pvp_combat_ && !dead_;   // (session/player_pvp.cpp: a harmful hit with another player, for the in-combat time)
     const bool bits_change = targeting != shown_targeting_ || in_combat != shown_in_combat_ || pvp_flag != shown_pvp_flag_ || suppression != shown_suppression_ ||
                              pvp_combat != shown_pvp_combat_;
     if (!bits_change && !shown_alignment_dirty_) return;   // (the stance of the shown pawn moves only on a change)

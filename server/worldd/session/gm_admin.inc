@@ -120,7 +120,7 @@ PlayerSession::GmReviveResult PlayerSession::gm_revive(Connection& conn, Clock::
         spot.z = death_z_;
         spot.name = "where it fell";
     }
-    finish_respawn(conn, spot, now);
+    finish_respawn(conn, spot, now, /*at_respawn_point=*/false);   // (a GM's revive is no respawn point: it does not unflag a combatant nor give the PvP protection)  // #23 (MrJambix)
     r.ok = true;
     r.place = spot.name;
     r.x = spot.x;

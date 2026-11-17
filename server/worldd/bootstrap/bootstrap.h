@@ -701,10 +701,6 @@ public:
     bool set_hover_target(const std::array<uint32_t, 4>& words);
     /// bPvPForceFlag: the player's own PvP flag.
     bool set_pvp_force_flag(bool on);
-    /// Social, seeing other players (their combat stances): the AlignmentComponent's Alignments as the PvP flag says them.  The player carries either NonCombatant
-    /// (the plain name) or Combatant (the purple name, the game's own alignment record) in place of the other: `flagged` on keeps the Combatant, off the NonCombatant;
-    /// the other instances (Player, the Instigator with his CharacterGuid, PVPSuppressed_Perceiver) stay as they are.  False when the pawn has no such instance.
-    bool set_flag_alignment(bool flagged);
     /// The PvP flag a ServerTriggerAbility carried, for the ReplicatedActiveAbilities item that trigger makes (the item copies it): note it before the trigger is run.  Only a set flag is
     /// kept, at most kMaxTriggerFlags of them, and it goes with the item.
     void note_trigger_pvp_flag(int64_t instance, bool flag);
@@ -844,6 +840,20 @@ public:
     bool set_observer_alignments(repl::Actor& shown);
     /// Whether one of the stats `records` differs between this player's pawn and the pawn the others are shown (the version of that pawn is not touched when none does).
     bool observer_live_stats_differ(const repl::Actor& shown, std::span<const int64_t> records) const;
+
+    // PvP: contributed by MrJambix in #23.
+    /// PvP: CombatInfo.bInPVPCombat (a harmful hit between two players, for the in-combat time); the caller sends the pawn's update.
+    bool set_in_pvp_combat(bool on);
+    /// PvP: the pawn's AlignmentComponent.Alignments (combat/pvp.h container: the flag's alignment and its removal timer); the caller sends the pawn's update.
+    /// False before the possession added the component.
+    bool set_alignments(const repl::AlignmentContainer& alignments);
+    /// A bool of the PlayerController by its schema path (the account's settings echoed there: "CharacterInGameSettings.CombatSettings.PVP...."); `fallback` when it holds none.
+    bool controller_bool(std::string_view path, bool fallback) const;
+    /// PvP: NotifyFlaggingReason(Intention, Target): the chat line "Flagged as combatant for harming / supporting {Target}".  `target` is the other player's pawn.
+    std::optional<Send> notify_flagging_reason(uint8_t intention, const emit::FIntrepidNetworkGUID& target);
+    /// PvP: NotifyCorruptionDeltaForKill(CorruptionDelta, Target) ("Gained {0} corruption for killing {1}") and NotifyCorruptionLostForDying(CorruptionDelta).
+    std::optional<Send> notify_corruption_for_kill(float delta, const emit::FIntrepidNetworkGUID& target);
+    std::optional<Send> notify_corruption_lost_for_dying(float delta);
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 

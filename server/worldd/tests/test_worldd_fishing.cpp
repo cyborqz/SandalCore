@@ -130,23 +130,29 @@ static fishing::Facts facts_of(int certification, int tier) {
 
 static void test_predicates(World& w) {
     std::printf("the reward predicates the stat programs cannot compile, on the data's own text\n");
-    // each predicate: the first (the certification) and the second (the rod's tier) number it names: `cert >= A && tier == B` (or >= B)
+    // Fishing test: contributed by MrJambix in #23.
+    // the predicates are found by their text, in the order of their ab_expr ids: the ids are contentc's own numbering, which moves when a contentc version seeds more of the
+    // ability tables (2095 to 2373 in a version 44 file; version 46's node boons put them about 140 later), and the order stays the data's: nine predicates of a certification
+    // and a rod's tier, and the world events' one, which also asks for an objective
+    std::vector<int64_t> rod_exprs, event_exprs;
+    for (int64_t id = 1; id <= static_cast<int64_t>(w.catalog().exprs()); ++id) {   // (contentc numbers ab_expr from 1 with no gap)
+        const content::ExprRow* e = w.catalog().expr(id);
+        if (!e || e->text.find("GetEquipmentCertificationTier") == std::string::npos || e->text.find("EEquipSlot::FishingRod") == std::string::npos) continue;
+        (e->text.find("Player_HasObjective") == std::string::npos ? rod_exprs : event_exprs).push_back(id);
+    }
+    CHECK(rod_exprs.size() == 9 && event_exprs.size() == 1, "the tables hold nine predicates of a certification and a rod's tier, and the world events' one");
+    // each predicate, in that order: the first (the certification) and the second (the rod's tier) number it names: `cert >= A && tier == B` (or >= B)
     struct Case {
-        int64_t expr;
-        int     cert_min, tier;
-        bool    tier_at_least;
+        int  cert_min, tier;
+        bool tier_at_least;
     };
-    const Case cases[] = {{2095, 0, 0, false}, {2096, 1, 1, false}, {2097, 2, 2, false}, {2303, 0, 0, false}, {2304, 1, 1, false}, {2305, 2, 2, false},
-                          {2306, 3, 3, false}, {2307, 4, 4, false}, {2310, 3, 3, false}};
+    const Case cases[] = {{0, 0, false}, {1, 1, false}, {2, 2, false}, {0, 0, false}, {1, 1, false}, {2, 2, false}, {3, 3, false}, {4, 4, false}, {3, 3, false}};
     size_t unsupported = 0, checked = 0;
     bool all_ok = true;
-    for (const Case& c : cases) {
-        const content::ExprRow* e = w.catalog().expr(c.expr);
-        if (!e) {
-            all_ok = false;
-            std::printf("      (expression %lld is not in the tables)\n", static_cast<long long>(c.expr));
-            continue;
-        }
+    for (size_t i = 0; i < std::size(cases) && i < rod_exprs.size(); ++i) {
+        const Case& c = cases[i];
+        const int64_t expr = rod_exprs[i];
+        const content::ExprRow* e = w.catalog().expr(expr);
         unsupported += (e->program < 0 && !e->error.empty()) ? 1 : 0;
         for (int cert = 0; cert <= 4; ++cert) {
             for (int tier = 0; tier <= 4; ++tier) {
@@ -155,7 +161,7 @@ static void test_predicates(World& w) {
                 ++checked;
                 if (!v || (*v != 0.0) != want) {
                     all_ok = false;
-                    std::printf("      (expression %lld: certification %d, rod tier %d gives %s, want %d)\n", static_cast<long long>(c.expr), cert, tier, v ? (*v != 0 ? "true" : "false") : "nothing", want);
+                    std::printf("      (expression %lld: certification %d, rod tier %d gives %s, want %d)\n", static_cast<long long>(expr), cert, tier, v ? (*v != 0 ? "true" : "false") : "nothing", want);
                 }
             }
         }
@@ -163,11 +169,11 @@ static void test_predicates(World& w) {
     CHECK(unsupported == 9, "the stat programs cannot compile any of the nine (their error column says unsupported function)");
     CHECK(all_ok && checked == 9 * 25, "every certification and rod tier gives what the text says: the certification at least the table's, the rod's tier its own");
     // the world events' fish also ask for an objective: none is tracked, so the answer is false whatever the rest says
-    if (const content::ExprRow* e = w.catalog().expr(2373)) {
+    if (const content::ExprRow* e = event_exprs.empty() ? nullptr : w.catalog().expr(event_exprs.front())) {
         const std::optional<double> v = fishing::evaluate_predicate(e->text, facts_of(4, 4));
         CHECK(v && *v == 0.0, "the world events' predicate (an objective as well as the rod) is false: no objective is tracked");
     } else {
-        CHECK(false, "expression 2373 is in the tables");
+        CHECK(false, "the world events' predicate is in the tables");
     }
     // texts that are not of these shapes
     const fishing::Facts f = facts_of(1, 1);

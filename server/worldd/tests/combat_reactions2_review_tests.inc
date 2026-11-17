@@ -155,8 +155,9 @@ void test_reactions2_review_an_injured_stranger_comes_before_a_whole_bard(Fixtur
     CHECK(d.a.pawn.broken.empty() && d.b.pawn.broken.empty() && c.pawn.broken.empty(), "(the pawns took every change)");
 }
 
-// A hit that lands on another player runs that player's effects' reactions between his own steps (the contract of the Bard's Saga): a Tank hit by a player
-// whose cast is still under way reflects at that player when the Tank's runtime next runs, and the cast goes on and reaches its other target.
+// A hit that lands on another player runs that player's effects' reactions between his own steps (the contract of the Bard's Saga): under the PvP rules a
+// harmful hit between players waits in the target's session inbox, so a Tank hit by a player whose cast is still under way reflects at that player when the
+// Tank's own step applies the hit, and the cast goes on and reaches its other target.
 void test_reactions2_review_a_reflect_waits_for_the_tanks_own_tick(Fixture& f) {
     std::printf("a player's cast hits a Tank and a Wolf: the Tank's reflect lands on him on the Tank's own tick and the cast reaches the Wolf\n");
     const abilities::EffectDef* reflect = f.catalog->effect_named("Tank_Reflect");
@@ -166,10 +167,11 @@ void test_reactions2_review_a_reflect_waits_for_the_tanks_own_tick(Fixture& f) {
     Duo d(f, 5, 7, {}, {});
     CHECKF(d.ok(), "the two players and the world: %s%s", d.a.problem.c_str(), d.w.problem.c_str());
     if (!d.ok()) return;
-    const auto wolf_motion = f.motion.find(d.wolf_path);
-    CHECK(wolf_motion.has_value(), "(the Wolf's Blueprint is in the motion table)");
-    if (!wolf_motion) return;
-    d.pb.rig_fighter().set_alignments(std::vector<int64_t>(wolf_motion->alignments.begin(), wolf_motion->alignments.end()));   // (the Tank stands on a creature's side)
+    d.pa.pvp_rules = true;           // the PvP rules judge the cast's hit on the Tank
+    d.pb.pvp_rules = true;
+    d.pa.pvp_force = true;           // the caster holds the PvP key: his harmful hit on a non-combatant is allowed and flags him
+    d.pb.pipeline_hits = true;       // his session applies what reaches his inbox through the pipeline (PlayerSession::take_hit)
+    d.pb.queue_player_hits = true;   // ... in his own step, not inside the attacker's cast (PlayerSession::CombatSide)
     const uint64_t wolf = d.wolf(300, 200);
     if (wolf == 0) return;
     d.a.know({"WeaponCombo_Melee_1H_Axe"});
@@ -177,20 +179,22 @@ void test_reactions2_review_a_reflect_waits_for_the_tanks_own_tick(Fixture& f) {
     CHECK(grant(d.b, reflect->row.guid, 1, t0 - 0.5), "(the Tank holds the Reflect)");
     wake(d.world, wolf, d.pa.actor_id(), t0 - 1.0);
     const double attacker_before = d.a.health(), tank_before = d.b.health(), wolf_before = d.world.health_of(wolf);
-    const size_t from = d.a.log.size();
     int32_t id = 500;
     CHECK(finish_axe_at(d.a, id, t0, {d.pb.actor_id(), wolf}), "the finishing hit was accepted");
-    const double tank_after_hit = d.b.health();   // (before the Tank's own tick: his Health regenerates in it)
+    const double tank_after_hit = d.b.health();   // (the harmful hit waits in his inbox until his own step)
     const size_t reflects_before = confirms_of(d.b, reflect_hit->row.guid, 0).size();
-    CHECKF(reflects_before == 0, "the Tank's runtime has not reflected yet: the hit landed between his own steps (%zu)", reflects_before);
-    // the Tank's own tick brings the reflect
+    CHECKF(reflects_before == 0, "the Tank's runtime has not reflected yet: the hit waits in his inbox for his own step (%zu)", reflects_before);
+    CHECKF(near(tank_after_hit, tank_before, 1e-3), "the hit has not taken its Health yet: it waits for his own step (%.1f of %.1f)", tank_after_hit, tank_before);
+    // the Tank's own step applies the hit and brings the reflect
     d.b.run_to(t0 + 1.9);
+    d.pb.take_incoming(t0 + 1.9);
     d.a.take();
-    CHECKF(tank_after_hit < tank_before - 1.0, "the attacker's hit took Health from the Tank (%.1f of %.1f)", tank_after_hit, tank_before);
+    CHECKF(d.b.health() < tank_before - 1.0, "the attacker's hit took Health from the Tank on his own step (%.1f of %.1f)", d.b.health(), tank_before);
     CHECKF(d.world.health_of(wolf) < wolf_before - 1.0, "the cast went on to the Wolf (%.1f of %.1f)", d.world.health_of(wolf), wolf_before);
     CHECKF(d.a.health() < attacker_before - 0.5, "the Tank's reflect took its part from the attacker (%.1f of %.1f)", d.a.health(), attacker_before);
     CHECKF(!confirms_of(d.b, reflect_hit->row.guid, 0).empty(), "the reflect was confirmed by the Tank's runtime");
-    (void)from;
+    CHECKF(d.pa.pvp_flag == combat::pvp::Flag::Combatant, "the caster who harmed the Tank is a combatant now: his first harmful action flags him");
+    CHECKF(d.pb.pvp_flag == combat::pvp::Flag::Combatant, "the Tank's harmful reflect flags the Tank in turn (harming a combatant)");
     CHECK(d.a.pawn.broken.empty() && d.b.pawn.broken.empty(), "(both pawns took every change)");
 }
 
