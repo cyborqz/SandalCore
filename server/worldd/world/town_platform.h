@@ -70,13 +70,19 @@ struct TownBowl {
     const char* layout;
     int64_t     asset_set;
 };
-inline constexpr int64_t kFlatDPlatformSet = 6064632779982176256ll, kRiverCPlatformSet = 6064632757347942400ll;
+inline constexpr int64_t kFlatDPlatformSet = 6064632779982176256ll, kRiverCPlatformSet = 6064632757347942400ll, kCoastalFlatAPlatformSet = 6064633374306664448ll;
 inline constexpr TownBowl kTownBowls[] = {
     {108646108518008ll, "Verra_RVR_Winstead", "Layout_Flat_D", kFlatDPlatformSet},
     {108646121231993ll, "Verra_RVR_Joeva", "Layout_Flat_D", kFlatDPlatformSet},
     {108646608033403ll, "Verra_RVR_NewAela", "Layout_Flat_D", kFlatDPlatformSet},
     {108646610851452ll, "Verra_RVR_Halcyon", "Layout_River_C", kRiverCPlatformSet},
     {108646615701117ll, "Verra_RVR_Miraleth", "Layout_River_C", kRiverCPlatformSet},
+    // the Anvils are TabletopMountains: Flat_D's definition for that biome is its own file (tools/mapc/TownFloors.cs), River_C's serves both regions
+    {6064633651969589265ll, "Verra_ANV_Vexhelm", "Layout_Flat_D_TabletopMountains", kFlatDPlatformSet},
+    {6064633651985711129ll, "Verra_ANV_Duunhold", "Layout_Flat_D_TabletopMountains", kFlatDPlatformSet},
+    {6064633652009173023ll, "Verra_ANV_Dhurgrum", "Layout_Flat_D_TabletopMountains", kFlatDPlatformSet},
+    {6064633652023394340ll, "Verra_ANV_Vhalgadim", "Layout_River_C", kRiverCPlatformSet},
+    {6064633652044300331ll, "Verra_ANV_KalTorhum", "Layout_Coastal_Flat_A_Anvils", kCoastalFlatAPlatformSet},
 };
 // ~ C | O | A & Cyb ~
 

@@ -11,7 +11,7 @@
 //  kept unless it is under the ground.  After a teleport the client is held at the place (a position correction again every half second) until its
 //  own moves show it stands there, because the floor it was sent to may still be streaming in.
 //
-//    the real rows       the Riverlands' 24 Embersprings (the respawn points), its 10 named places and its 24 fast travel destinations (the attune
+//    the real rows       the world's 64 Embersprings (the respawn points; four stand under the ground, in the Anvils' Dunzenkell), its 47 named places and its 64 fast travel destinations (the attune
 //                        points): the height the respawn and the teleport set for each against the landscape and the five towns' platforms, on the
 //                        real content.db and the real walking map's terrain; the retail respawn recorded at Joeva against the platform's floor
 //    a hill              the nav fixture's hill: a spot whose data height is four metres under the hill top comes back on the top, not in it
@@ -39,7 +39,7 @@ static bool gp_ground_without_floors(const PlayerWorld& w, double x, double y, d
 }
 
 static void test_the_real_rows_on_the_ground() {
-    std::printf("the Riverlands' real rows: the respawn points, the named places and the fast travel destinations on the ground\n");
+    std::printf("the real rows of the world: the respawn points, the named places and the fast travel destinations on the ground\n");
     std::string error;
     auto real = content::ContentDb::open(real_db_path(), error);
     CHECK(real.has_value(), "the real content.db opens");
@@ -59,7 +59,7 @@ static void test_the_real_rows_on_the_ground() {
         const auto def = link == respawn_data->instance_respawn.end() ? respawn_data->respawns.end() : respawn_data->respawns.find(link->second);
         if (def != respawn_data->respawns.end() && def->second.name.rfind("NODE_RVR_", 0) == 0) ++towns;
     }
-    CHECK(shrines == 24, "24 Embersprings stand in the Riverlands (the respawn points the nearest, the home and the plain Respawn use)");
+    CHECK(shrines == 64, "64 Embersprings stand in the world (the respawn points the nearest, the home and the plain Respawn use): the Riverlands' 24 and the new continent's 40");
     CHECK(towns == 5, "... 5 of them the towns' own (NODE_RVR_*): Winstead, Joeva, New Aela, Halcyon, Miraleth");
 
     auto nav = nav::AreaNav::load("dist/content/area_nav.bin", &error);
@@ -76,7 +76,8 @@ static void test_the_real_rows_on_the_ground() {
     // the respawn points: the height the shrine's respawn sets (spawn_height, the session's call) against the data's surface
     // (the walking map's window is empty here: no chunk of it is loaded, as for a player who died far from the shrine.  One shrine, the Wreckage of Carphin, stands on a hull 4 m
     // over the landscape, which only the walking map shows: its data's height stands, as it always did, instead of the landscape under the hull)
-    size_t on = 0, under = 0, above = 0, no_ground = 0;
+    // (the four shrines of the Anvils' Dunzenkell stand 300 to 500 m under the mountains: their data's height stands too, not the mountain's top over them)
+    size_t on = 0, under = 0, above = 0, no_ground = 0, deep = 0;
     double worst = 0, structure_over = 0;
     for (const spawns::RespawnPoint& p : points) {
         if (!p.attuneable) continue;
@@ -87,6 +88,11 @@ static void test_the_real_rows_on_the_ground() {
             ++no_ground;
             continue;
         }
+        if (p.z < ground - PlayerWorld::kUndergroundCm) {
+            if (std::fabs(z - p.z) <= 5.0) ++deep;
+            else ++under;
+            continue;
+        }
         const double d = z - (ground + PlayerWorld::kCapsuleHalfHeightCm);
         if (d > 5.0) structure_over = p.z - ground;
         ++(d < -5.0 ? under : (d > 5.0 ? above : on));
@@ -95,7 +101,8 @@ static void test_the_real_rows_on_the_ground() {
     char line[360];
     std::snprintf(line, sizeof line, "every Emberspring's respawn: the surface + the capsule's 98 cm (%zu on, %zu under, %zu above: the shrine on a hull %.0f cm over the landscape keeps its data's height; the worst %.1f cm)", on, under, above,
                   structure_over, worst);
-    CHECK(on == 23 && under == 0 && above == 1 && no_ground == 0 && structure_over > 400.0 && structure_over < 500.0, line);
+    CHECK(on + deep == 63 && under == 0 && above == 1 && no_ground == 0 && structure_over > 400.0 && structure_over < 500.0, line);
+    CHECK(deep == 4, "four Embersprings stand under the ground (the Anvils' Dunzenkell, 300 to 500 m under the mountains): their data's height stands");
 
     // the named places (the admin API's list, the city nodes and not "login")
     const std::vector<world::Place> places = real_world.places().all();
@@ -109,10 +116,11 @@ static void test_the_real_rows_on_the_ground() {
         else ++place_off;
     }
     std::snprintf(line, sizeof line, "the %zu named places of the Riverlands: the surface + the capsule's 98 cm (%zu on, %zu not)", place_n, place_on, place_off);
-    CHECK(place_n == 10 && place_off == 0, line);
+    CHECK(place_n == 47 && place_off == 0, line);
 
     // the fast travel destinations: the attune points (the raven network's places), at the height the respawn puts a player
-    size_t raven_n = 0, raven_on = 0, raven_off = 0, raven_data_under = 0, raven_deep = 0;
+    // (an attune point under the ground, in the Anvils' Dunzenkell, keeps its data's height as its shrine does)
+    size_t raven_n = 0, raven_on = 0, raven_off = 0, raven_data_under = 0, raven_deep = 0, raven_cave = 0, raven_cave_off = 0;
     double raven_data_under_worst = 0;
     for (const auto& [guid, p] : respawn_data->places) {
         (void)guid;
@@ -121,6 +129,11 @@ static void test_the_real_rows_on_the_ground() {
         bool grounded = false;
         const double z = real_world.spawn_height(p.x, p.y, p.z, &grounded);
         double ground = 0;
+        if (gp_ground_without_floors(real_world, p.x, p.y, &ground) && p.z < ground - PlayerWorld::kUndergroundCm) {
+            ++raven_cave;
+            if (std::fabs(z - p.z) > 5.0) ++raven_cave_off;
+            continue;
+        }
         if (grounded && gp_ground_without_floors(real_world, p.x, p.y, &ground) && std::fabs(z - (ground + PlayerWorld::kCapsuleHalfHeightCm)) <= 5.0) ++raven_on;
         else ++raven_off;
         if (gp_ground_without_floors(real_world, p.x, p.y, &ground) && p.z < ground) {
@@ -129,10 +142,11 @@ static void test_the_real_rows_on_the_ground() {
             if (p.z < ground - 5.0) ++raven_deep;
         }
     }
-    std::snprintf(line, sizeof line, "the %zu fast travel destinations (the attune points): the surface + 98 cm (%zu on, %zu not: the Wreckage of Carphin's hull); %zu of their own data heights are under the surface (the lowest %.0f cm, %zu more than 5 cm under)",
-                  raven_n, raven_on, raven_off, raven_data_under, raven_data_under_worst, raven_deep);
-    CHECK(raven_n == 24 && raven_on == 23 && raven_off == 1, line);
-    CHECK(raven_data_under == 7 && raven_deep == 1, "... seven of the data's own heights are under the landscape by a fraction of a centimetre to 45 cm; the deepest is Gravepeak, 45 cm under");
+    std::snprintf(line, sizeof line, "the %zu fast travel destinations (the attune points): the surface + 98 cm (%zu on, %zu not: the Wreckage of Carphin's hull; %zu under the ground at their data's height, %zu not); %zu of the others' own data heights are under the surface (the lowest %.0f cm, %zu more than 5 cm under)",
+                  raven_n, raven_on, raven_off, raven_cave, raven_cave_off, raven_data_under, raven_data_under_worst, raven_deep);
+    CHECK(raven_n == 64 && raven_on == 59 && raven_off == 1 && raven_cave == 4 && raven_cave_off == 0, line);
+    std::printf("    (%zu of the others' own data heights under the surface, %zu more than 5 cm, the lowest %.0f cm)\n", raven_data_under, raven_deep, raven_data_under_worst);
+    CHECK(raven_data_under == 14 && raven_deep == 3 && raven_data_under_worst > -650.0, "... the others' data heights under the landscape are a fraction of a centimetre to 6 m under it (Gravepeak 45 cm; the lowest 6 m, under the 10 m of a cave)");
 
     // the respawn recorded at Joeva (a level-19 character's Emberspring): where it appeared, where the floor caught it, and the platform's floor there
     const double rx = -1087033.02, ry = 510595.4;
@@ -424,6 +438,7 @@ static void test_the_real_rows_with_the_walking_map() {
         alone[i] = world.spawn_height(points[i].x, points[i].y, points[i].z);
     }
     size_t shrines = 0, apart = 0, not_here = 0, ring_n = 0, ring_under = 0, scan_n = 0, scan_under = 0, hint_under = 0, loads_failed = 0, on_a_structure = 0;
+    size_t cave_shrines = 0, ring_cave = 0, ring_cave_off = 0;
     double apart_worst = 0, ring_worst = 0, scan_worst = 0;
     std::string apart_name;
     for (size_t i = 0; i < points.size(); ++i) {
@@ -445,13 +460,21 @@ static void test_the_real_rows_with_the_walking_map() {
                 }
             }
         }
-        // the respawn ring (the spots a session puts the player at: 2 to 5 m round the shrine, its data height the hint)
+        // the respawn ring (the spots a session puts the player at: 2 to 5 m round the shrine, its data height the hint); a shrine under the ground (the Anvils' Dunzenkell) has its
+        // ring on its cave's floor, within a few metres of its own height
+        const bool cave = p.z < shrine_ground - PlayerWorld::kUndergroundCm;
+        if (cave) ++cave_shrines;
         for (int a = 0; a < 360; a += 10)
             for (const double r : {200.0, 350.0, 500.0}) {
                 const double x = p.x + r * std::cos(a * 3.14159265358979 / 180.0), y = p.y + r * std::sin(a * 3.14159265358979 / 180.0);
                 double ground = 0;
                 if (!gp_ground_without_floors(world, x, y, &ground)) continue;
                 const double z = world.spawn_height(x, y, p.z);
+                if (cave) {
+                    ++ring_cave;
+                    if (std::fabs(z - p.z) > 300.0) ++ring_cave_off;
+                    continue;
+                }
                 ++ring_n;
                 if (z < ground + PlayerWorld::kCapsuleHalfHeightCm - 40.0) {
                     ++ring_under;
@@ -472,9 +495,11 @@ static void test_the_real_rows_with_the_walking_map() {
             }
     }
     char line[360];
-    CHECK(shrines == 24 && loads_failed == 0, "24 Embersprings, the chunks round each of them load");
+    CHECK(shrines == 64 && loads_failed == 0, "64 Embersprings, the chunks round each of them load");
     std::snprintf(line, sizeof line, "the respawn ring of every Emberspring (2 to 5 m round it): %zu spots, %zu of them more than 40 cm under the landscape or the town's floor (the worst %.0f cm)", ring_n, ring_under, ring_worst);
     CHECK(ring_n > 2000 && ring_under == 0, line);
+    std::snprintf(line, sizeof line, "the ring of the %zu Embersprings under the ground (the Anvils' Dunzenkell): %zu spots, %zu of them more than 3 m from the shrine's own height", cave_shrines, ring_cave, ring_cave_off);
+    CHECK(cave_shrines == 4 && ring_cave > 0 && ring_cave_off == 0, line);
     std::snprintf(line, sizeof line, "a point with no height, 100 m square round every Emberspring: %zu points, %zu under the landscape (the worst %.0f cm)", scan_n, scan_under, scan_worst);
     CHECK(scan_n > 30000 && scan_under == 0, line);
     std::snprintf(line, sizeof line, "... and with the height of a standing player: %zu of them under the landscape", hint_under);

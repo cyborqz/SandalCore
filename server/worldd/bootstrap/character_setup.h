@@ -154,6 +154,8 @@ struct Spawn {
 /// Where a character with no saved position spawns: the captured character's spawn point (pkt#22 SpawnLocation) and
 /// the yaw whose compressed short is 16550 (pkt#78 rotation).  The world's real spawn points are a later plan.
 inline constexpr Spawn kDefaultSpawn = {-777664.5, 616578.6875, 15952.0498046875, 16550.0 * 360.0 / 65536.0};
+/// The Anvils' start, near the Dunzenkell Divine Gate: the first place of the game's Anvils Player Starts (a new character there takes any of them, services/internal/kit/starts.go).
+inline constexpr Spawn kAnvilsSpawn = {-1057812.596543, -694683.919803, 5370.263113, 90.0};
 
 // ---- the setup ----------------------------------------------------------------------------------------------------------
 

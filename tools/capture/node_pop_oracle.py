@@ -287,6 +287,11 @@ class Looks:
             return r is not None and permission.get(r) == HOSTILE
         everyone = set(relation) | {o for others in relation.values() for o in others}
         self.hostile_alignments = {a for a in everyone if hostile_between(a, PLAYER_ALIGNMENT) or hostile_between(PLAYER_ALIGNMENT, a)}
+        # the humanoids whose fights are built (spawns/generic_npc.cpp kFightingHumanoids: the bandit raiders and captains, the pirates, the blood cultists) are dressed though
+        # they are the players' enemies (NpcLooks::can_dress); the list is read from the C++ source, as the captures' templates are read from spawns/area_spawns.h
+        src = open(os.path.join(P.ROOT, 'server', 'worldd', 'spawns', 'generic_npc.cpp'), encoding='utf-8').read()
+        block = re.search(r'kFightingHumanoids\[\]\s*=\s*\{(.*?)\};', src, re.S)
+        self.fighting = set(re.findall(r'"([^"]+)"', block.group(1))) if block else set()
 
     def appearance_of(self, asset):
         """The NPCAppearance record a person of the asset is made from: its own when that is a record, else its Blueprint's default; 0 for none."""
@@ -299,7 +304,9 @@ class Looks:
         if not asset['path']:
             return False
         m = self.motion.get(asset['path'])
-        if m is None or 'SK_PC_MASTER' not in m['mesh'] or any(a in self.hostile_alignments for a in m['alignments']):
+        if m is None or 'SK_PC_MASTER' not in m['mesh']:
+            return False
+        if any(a in self.hostile_alignments for a in m['alignments']) and P.leaf(asset['path']) not in self.fighting:
             return False
         look = self.appearance.get(self.appearance_of(asset))
         if look is None or look[0] == 0:

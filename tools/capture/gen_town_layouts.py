@@ -51,8 +51,9 @@ DEFAULT_DB = os.path.join(ROOT, 'dist', 'content', 'content.db')
 DEFAULT_OUT = os.path.join(ROOT, 'dist', 'content', 'town_layout_items.tsv')
 DEFAULT_SEED = os.path.join(ROOT, 'deploy', 'citynode_seed.json')
 
-# The five bowls (server/worldd/world/town_platform.h kTownBowls): the node records by guid.
-BOWLS = [108646108518008, 108646121231993, 108646608033403, 108646610851452, 108646615701117]
+# The bowls (server/worldd/world/town_platform.h kTownBowls): the node records by guid, the Riverlands' five and the Anvils' five.
+BOWLS = [108646108518008, 108646121231993, 108646608033403, 108646610851452, 108646615701117,
+         6064633651969589265, 6064633651985711129, 6064633652009173023, 6064633652023394340, 6064633652044300331]
 LEVELS = range(7)
 
 # What the scenery sends (server/worldd/world/node_scenery.h): Kaelar, spring, and the biome of the node's zone of influence.
@@ -129,8 +130,10 @@ def frame_matrix(x, y, z, yaw_degrees):
 FILTER_KEYS = ('NodeLevelMinimum', 'NodeLevelMaximum', 'ValidCultures', 'ValidNodeTypes', 'ValidSeasons', 'bAllBiomes', 'ValidBiomes')
 
 
-def def_valid(d, level, ntype):
-    """Whether a definition (its filter fields) holds for a node of `ntype` at `level` in the Riverlands, for Kaelar in spring."""
+def def_valid(d, level, ntype, biome='Riverlands'):
+    """Whether a definition (its filter fields) holds for a node of `ntype` at `level` in `biome`, for Kaelar in spring.  The client's own test
+    (ANodeLayoutReplicator::AddOrRemoveContainedAssetDefinitions, 0x146588cd0) is the same: the level within the definition's, the culture, the node type, the season and the
+    biome of the node's FZoiRecord each in the definition's lists (bAllBiomes waives the biome), and every definition that holds is loaded."""
     if not (d.get('NodeLevelMinimum', 0) <= level <= d.get('NodeLevelMaximum', 6)):
         return False
     if 'ECharacterRace::' + RACES[CULTURE] not in d.get('ValidCultures', []):
@@ -139,7 +142,7 @@ def def_valid(d, level, ntype):
         return False
     if 'ESeasons::' + SEASONS[SEASON] not in d.get('ValidSeasons', []):
         return False
-    return bool(d.get('bAllBiomes')) or 'EBiomeType::Riverlands' in d.get('ValidBiomes', [])
+    return bool(d.get('bAllBiomes')) or 'EBiomeType::' + biome in d.get('ValidBiomes', [])
 
 
 class Layouts:
@@ -147,6 +150,7 @@ class Layouts:
         self.rec = records
         self.defs = {}      # definition guid -> parsed assets (None: no such record)
         self.valid = {}
+        self.biome = 'Riverlands'   # the biome of the node being read (its zone of influence's)
 
     def definition(self, guid):
         """The definition's asset instances of the two kinds with a collision: [(kind, path, (n,4,4) matrices, stepup flags)], and its filter."""
@@ -193,7 +197,7 @@ class Layouts:
         for cd in s[2].get('ContainedAssetDefinitions', []):
             g = cd.get('Asset', {}).get('Guid', 0)
             d = self.definition(g)
-            if d is None or not def_valid(d['filter'], level, ntype):
+            if d is None or not def_valid(d['filter'], level, ntype, self.biome):
                 continue
             out.append((g, cd.get('Transform', {})))
         return out
@@ -234,7 +238,7 @@ class Layouts:
         return out, ntype
 
     def set_valid(self, set_guid, level, ntype):
-        key = (set_guid, level, ntype)
+        key = (set_guid, level, ntype, self.biome)
         v = self.valid.get(key)
         if v is None:
             v = len(self.valid_defs(set_guid, level, ntype)) > 0
@@ -300,8 +304,7 @@ def build(db_path, seed_path=None):
         layout_name = rec.get(row[6])[1]
         nodes.append({'guid': guid, 'name': row[1], 'node_name': row[7], 'x': row[2], 'y': row[3], 'z': row[4], 'yaw': row[5], 'layout': layout_name, 'rec': nr})
         biome = zoi_biome.get(guid)
-        if biome is not None and BIOMES[biome] != 'Riverlands':
-            raise SystemExit('gen_town_layouts: %s is not a Riverlands node (biome %s)' % (row[1], BIOMES[biome]))
+        nodes[-1]['biome'] = BIOMES[biome] if biome is not None else 'Riverlands'   # the definitions are judged in the node's own biome (the Anvils: TabletopMountains)
     levels = seed_levels(seed_path, nodes)
     for n in nodes:
         n['level'] = levels[n['guid']]
@@ -310,6 +313,7 @@ def build(db_path, seed_path=None):
     stats = {}
     for n in nodes:
         frame = frame_matrix(n['x'], n['y'], n['z'], n['yaw'])
+        lay.biome = n['biome']
         merged = {}     # (asset, rounded matrix) -> [mask, stepup, matrix, kind]
         for level in LEVELS:
             items, ntype = lay.items(n['rec'], level)
@@ -340,7 +344,7 @@ def build(db_path, seed_path=None):
     assets = sorted(asset_ids.items(), key=lambda kv: (kv[1], kv[0]))
     aid = {k: i for i, (k, _) in enumerate(assets)}
     rows.sort(key=lambda r: (r[0], aid[r[1]], r[3], tuple(round(v, 3) for v in r[5])))
-    lines = ['# town_layout_items v1: the placed static meshes (M) and level instances (L) of the five towns\' layouts, each node at the level it starts at (tools/capture/gen_town_layouts.py)']
+    lines = ['# town_layout_items v1: the placed static meshes (M) and level instances (L) of the towns\' layouts, each node at the level it starts at (tools/capture/gen_town_layouts.py)']
     lines.append('# node levels: ' + ', '.join('%s %d' % (n['name'], n['level']) for n in nodes))
     lines.append('# columns of a row: node, asset, levels (hex, bit n = node level n), stepup (0: a character cannot step up onto it), m00 m01 m02 m10 m11 m12 m20 m21 m22 tx ty tz (world cm)')
     for n in nodes:

@@ -6,7 +6,7 @@
 //
 //  The Riverlands as worldd's area, on the real content.db (the working tree's dist/content/content.db, or AOC_CONTENT_DB) and npc_motion.tsv (dist/content, or AOC_NPC_MOTION):
 //
-//    the index        spawns/region_index.h answers the footprint (401 rectangles, 1,873,943 cells of 512 cm) and the zone of influence of a point (12 zones, each with its own
+//    the index        spawns/region_index.h answers the footprint (2,946 rectangles, 10,647,662 cells of 512 cm: the Riverlands, the Anvils, SAN, the Turquoise coast and Jundark) and the zone of influence of a point (54 zones, each with its own
 //                     cell count) exactly as region_data.h holds them; the login spot is in Ruins of Aela; a rectangle's edge is half open; a hostile number is outside
 //    the golden       the region's population through the real spawn filter equals the counts of an independent Python port (tools/capture/pop_oracle.py, gen_pop_golden.py:
 //                     tests/pop_golden_region.h): the stage counts, the points dropped by reason, the NPCs by Blueprint and by zone, and a digest of the whole list.  With the
@@ -76,7 +76,7 @@ static void test_index() {
     std::printf("the Riverlands' index\n");
     namespace R = spawns::region;
     const R::Index& idx = R::Index::get();
-    CHECK(idx.rect_count() == 401 && idx.zoi_count() == 12, "401 rectangles and 12 zones of influence");
+    CHECK(idx.rect_count() == 2946 && idx.zoi_count() == 54, "2,946 rectangles and 54 zones of influence");
     // every cell of the bounding box: inside the footprint exactly as often as the data says, each inside cell in exactly one zone, and the zones' cell counts
     std::vector<uint64_t> per_zone(R::kZoiCount, 0);
     uint64_t inside = 0, zoned_outside = 0, unzoned_inside = 0;
@@ -94,7 +94,7 @@ static void test_index() {
             }
         }
     }
-    CHECK(inside == R::kRiverlandsAreaCells, "the footprint holds 1,873,943 cells of 512 cm (49.12 km2)");
+    CHECK(inside == R::kRiverlandsAreaCells, "the footprint holds 10,647,662 cells of 512 cm (279.12 km2)");
     CHECK(unzoned_inside == 0 && zoned_outside == 0, "every cell of the footprint is in a zone, and no zone has a cell outside it");
     bool counts = true;
     for (size_t z = 0; z < R::kZoiCount; ++z) counts = counts && per_zone[z] == R::kZois[z].cells;
@@ -244,8 +244,8 @@ static void test_golden(const content::ContentDb& db, const spawns::CapturedData
     const auto list_plain = spawns::select_data_spawns(w.data, templates, plain, st_plain, &filter);
     std::printf("    selected in %s: %zu NPCs\n", ms_since(t0).c_str(), list_plain.size());
     compare_golden("zones off (the research's pop.py: E1's rule over the whole footprint)", tests::kGoldenPlain, list_plain, st_plain);
-    CHECK(st_plain.spawned == 10556 && st_plain.points_in_area + st_plain.area_points == 22122,
-          "10,556 NPCs and stations from 22,122 points (the research's ~10,850 NPCs and 22,421 points were the 55 km2 upper bound of the chunks)");
+    CHECK(st_plain.spawned == 42228 && st_plain.points_in_area + st_plain.area_points == 89190,
+          "42,228 NPCs and stations from 89,190 points over the five regions (the Riverlands and the Anvils were 21,795 from 64,386)");
 
     const spawns::AreaConfig zoned = spawns::AreaConfig::riverlands();
     spawns::PopulationStats st_zoi;
@@ -277,9 +277,9 @@ static void test_golden(const content::ContentDb& db, const spawns::CapturedData
                 others_with_interactable += !hunting && s.open && s.open->category != "station" && s.open->find("UInteractableComponent") > 0 && s.generic ? 1 : 0;
             }
             std::printf("    %zu huntable creatures of %zu NPCs in %zu kinds\n", huntable, list_hunt.size(), kinds.size());
-            CHECK(list_hunt.size() == 10556, "the same 10,556 NPCs and stations");
-            CHECK(huntable == 759 && eight == huntable, "759 of them are huntable (7.2 %), each with its eighth block, a UInteractableComponent");
-            CHECK(kinds.size() == 17 && others_with_interactable == 0, "17 kinds, and no other generic creature has an interactable block");
+            CHECK(list_hunt.size() == 42228, "the same 42,228 NPCs and stations");
+            CHECK(huntable == 2512 && eight == huntable, "2,512 of them are huntable (5.9 %), each with its eighth block, a UInteractableComponent");
+            CHECK(kinds.size() == 34 && others_with_interactable == 0, "34 kinds, and no other generic creature has an interactable block");
         }
     }
     std::printf("    zones off: %zu points dropped, %zu without a template; zones on: %zu dropped, %zu without a template\n", st_plain.filtered_total(), st_plain.no_template, st_zoi.filtered_total(), st_zoi.no_template);
@@ -337,6 +337,18 @@ static void test_region(const content::ContentDb& db, const spawns::CapturedData
     CHECK(registry.size() == report->total(), "the registry holds every actor the report counts");
     CHECK(report->data_npcs == tests::kGoldenZoi.stage[6].value && std::string(tests::kGoldenZoi.stage[6].name) == "spawned", "the data NPCs are the oracle's 'spawned' count (zones on)");
     CHECK(report->gatherables > 100, "the nodes retail's captures saw in the Riverlands stand in the registry (more than the 28 of E1's circle)");
+    {
+        // the Anvils: the start stands in one of their zones, and an Emberspring is there to come back at
+        const spawns::region::Index& index = spawns::region::Index::get();
+        const char* start_zone = index.zoi_name(bootstrap::kAnvilsSpawn.x, bootstrap::kAnvilsSpawn.y);
+        CHECK(start_zone && std::string(start_zone) == "Verra_ANV_StartingArea_DivineGate", "the Anvils' start stands in the zone of the Dunzenkell Divine Gate");
+        size_t anvils_points = 0;
+        for (const spawns::RespawnPoint& p : report->respawn_points) {
+            if (p.attuneable && std::hypot(p.x - bootstrap::kAnvilsSpawn.x, p.y - bootstrap::kAnvilsSpawn.y) < 400000.0) ++anvils_points;
+        }
+        std::printf("    %zu attuned respawn points within 4 km of the Anvils' start\n", anvils_points);
+        CHECK(anvils_points > 0, "the Anvils have an attuned respawn point near their start");
+    }
     CHECK(report->gm_vendors == gm->vendors().size(), "one GM vendor for each PTR vendor def");
     bool even = true, inside = true, controllers = true;
     std::set<uint64_t> ids;

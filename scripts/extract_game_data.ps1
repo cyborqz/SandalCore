@@ -22,14 +22,14 @@
     dist\content\npc_looks.tsv,              how the people (humanoid NPCs) look and are called: each Blueprint's own look (the game's containers), the appearance records
       npc_appearances.tsv, npc_names.tsv       with their outfits and the display names of the population data (tools\npcabilities, content.db)
     dist\content\npc_trees.tsv                 what each Blueprint's state tree has tasks for (wander, patrol): an NPC whose tree has neither stands at its post (tools\npcabilities)
-    dist\content\town_platforms.bin           the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
+    dist\content\town_platforms.bin           the floor of the ten towns (four city platform maps)  (mapc, from the game's containers)
     dist\content\town_layout_items.tsv,        the buildings, walls and terraces of the five towns' layouts at the level each town starts at (deploy\citynode_seed.json):
                                                what stands where (a python list from content.db),
       town_layouts.bin                         then their collision geometry (mapc, from the game's containers)
     dist\content\area_geom.bin, area_nav.bin   the navigation mesh (combat needs it)             (mapc and aoc_navbuild)
     dist\content\client_config\, zoi_chunks\   the game's Config files and its zone-of-influence grid (read by the generators below)
     the sources the build includes             world\zoi_surface_table.h, node_constants.h, constants_gen.go, region_data.h, garden_defs.h,
-                                               region_rects.tsv, the Riverlands' rectangles, and the test fixtures (listed in .gitignore)
+                                               region_rects.tsv, the world's rectangles (the Riverlands, the Anvils, SAN, the Turquoise coast and Jundark), and the test fixtures (listed in .gitignore)
     dist\content\aoc.usmap                     a copy of layouts\aoc.usmap, where the tools look for it
 
   It needs: the game (Steam, or GAME_ROOT / -GameRoot), the .NET 8 SDK (mapc), Go (contentc), Python 3.10+ (the generators), and Visual Studio 2022 Build Tools
@@ -38,7 +38,7 @@
   4 GB of memory for any one program; the first build of the C++ libraries (vcpkg) comes on top and can take a long time.
 
   Every step is skipped when what it reads is unchanged since the last run (a stamp per step in dist\content\.extract), so install.bat and the launchers can call
-  this every time. The navigation mesh step, the longest, reads the map, the towns' floors and buildings, the Riverlands' rectangles and where the five towns' nodes stand
+  this every time. The navigation mesh step, the longest, reads the map, the towns' floors and buildings, the world's rectangles and where the five towns' nodes stand
   in content.db: it runs again when one of those changes, not when other game numbers do. The supported client build is the one of 2026-01-29 (AOCClient-Win64-Shipping.exe
   235,606,624 bytes, CacheDB.dbc 144,085,052 bytes); with another build the script warns and goes on.
 
@@ -410,7 +410,7 @@ function Get-SeedLevels {
     return (($pairs | Sort-Object) -join ';')
 }
 function Get-CodeLayouts  { (Get-CodeHash @('tools\capture\gen_town_layouts.py')) + ' ' + (Get-SeedLevels) }
-# The navigation mesh step reads, of what other steps write, the Riverlands' rectangles (tools\mapc\region_rects.tsv), the towns' buildings (town_layouts.bin) and, in content.db, the
+# The navigation mesh step reads, of what other steps write, the world's rectangles (tools\mapc\region_rects.tsv), the towns' buildings (town_layouts.bin) and, in content.db, the
 # rows of city_node (aoc_navbuild stands the towns' floors at the nodes; scripts\nav_inputs.py prints them). It reads nothing else of content.db. Its id holds those bytes and rows,
 # not the ids of the steps that write them: those ids change with every change of content.db (a new ability), the files and rows they write mostly do not, and the step takes
 # 8 minutes or more.
@@ -529,7 +529,7 @@ $steps = @(
                 '--artisan-curves', (Join-Path $outDir 'artisan_curves.tsv'), '--item-names', (Join-Path $outDir 'item_names.tsv'), '--out', (Join-Path $outDir 'content.db')) 'contentc'
         } finally { $env:GOMEMLIMIT = $savedLimit }
     } },
-    @{ Name = 'region'; Title = "Read the zone-of-influence grid and cut the Riverlands' rectangles"; Outputs = @('dist\content\zoi_chunks', 'fixtures\region\riverlands_rects.json', 'fixtures\region\riverlands_zoi_rects.json', 'server\worldd\spawns\region_data.h', 'tools\mapc\region_rects.tsv'); Run = {
+    @{ Name = 'region'; Title = "Read the zone-of-influence grid and cut the world's rectangles (the Riverlands, the Anvils, SAN, the Turquoise coast, Jundark)"; Outputs = @('dist\content\zoi_chunks', 'fixtures\region\riverlands_rects.json', 'fixtures\region\riverlands_zoi_rects.json', 'server\worldd\spawns\region_data.h', 'tools\mapc\region_rects.tsv'); Run = {
         Assert-Files @('dist\content\content.db', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the earlier steps first'
         Invoke-Checked $dotnet @($mapcDll, 'export-zoi', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_export_zoi'
         $gen = Join-Path $repoRoot 'tools\capture'
@@ -557,7 +557,7 @@ $steps = @(
         Assert-Files @('server\worldd\world\zoi_surface_table.h', 'server\worldd\spawns\region_data.h', 'server\worldd\spawns\garden_defs.h') 'run the earlier steps first'
         Invoke-Checked 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repoRoot 'scripts\build.ps1'), '-Target', 'aoc_navbuild', '-Jobs', "$Jobs") 'build_navbuild'
     } },
-    @{ Name = 'roads'; Title = 'Read the road splines of the Riverlands (mapc) and resolve them (contentc)'; Outputs = @('dist\content\roads_raw.tsv', 'dist\content\roads.tsv', 'dist\content\roads_levels.tsv'); Run = {
+    @{ Name = 'roads'; Title = 'Read the road splines of the world (mapc) and resolve them (contentc)'; Outputs = @('dist\content\roads_raw.tsv', 'dist\content\roads.tsv', 'dist\content\roads_levels.tsv'); Run = {
         Assert-Files @('dist\content\content.db', 'tools\mapc\region_rects.tsv', 'dist\tools\contentc.exe', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the earlier steps first'
         Invoke-Checked $dotnet @($mapcDll, 'roads', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_roads'
         $db = Join-Path $outDir 'content.db'
@@ -565,7 +565,7 @@ $steps = @(
         Invoke-Checked $contentc @('roads', '--content', $db, '--raw', $raw, '--out', (Join-Path $outDir 'roads.tsv')) 'contentc_roads'
         Invoke-Checked $contentc @('roads', '--levels', '--content', $db, '--raw', $raw, '--out', (Join-Path $outDir 'roads_levels.tsv')) 'contentc_roads_levels'
     } },
-    @{ Name = 'townfloors'; Title = 'Read the floor of the five towns from the two city platform maps (mapc; a few seconds)'; Outputs = @('dist\content\town_platforms.bin'); Run = {
+    @{ Name = 'townfloors'; Title = 'Read the floor of the ten towns from the four city platform maps (mapc; a few seconds)'; Outputs = @('dist\content\town_platforms.bin'); Run = {
         Assert-Files @('tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools step first'
         Invoke-Checked $dotnet @($mapcDll, 'town-floors', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_town_floors'
     } },

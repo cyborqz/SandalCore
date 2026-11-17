@@ -402,7 +402,8 @@ public:
     static double spot_height(const nav::AreaNav* nav, double x, double y, double data_z, bool* grounded = nullptr);
     /// The height a player is put at over a spawn point (a respawn shrine) whose data height is `data_z`: the surface the data has at the spot (below) plus the capsule's half
     /// height.  Where the chunk of the walking map is not here and the data's height is over the landscape (up to kStructureReachCm: a shrine on a deck, a hull or a roof), the data's
-    /// height stands.  `grounded` says whether a ground or a floor was found; a world with none gives the data's height.
+    /// height stands; so it does when it is more than kUndergroundCm under what was found (a shrine of a city under the mountains, the Anvils' Dunzenkell, 300 to 500 m down, whose
+    /// floor only the map shows: its chunk not here, or a spot of its ring with no floor of the cave near it).  `grounded` says whether a ground or a floor was found; a world with none gives the data's height.
     double spawn_height(double x, double y, double data_z, bool* grounded = nullptr) const;
     /// The surface (where a body's feet stand) the data has at (x, y), the walking map and the landscape: inside a town's bowl its floor (the street, or the floor of a
     /// building at the spot within kFloorReachCm of it); elsewhere the walking map's floor nearest `z_hint` within kSpotBelowCm under it and kSpotAboveCm over it (a building's
@@ -417,6 +418,9 @@ public:
     static constexpr double kTerrainTolCm = 40.0;
     /// A shrine whose chunk of the walking map is not here keeps its data's height over the landscape up to this far (cm): it stands on a deck, a hull or a roof that only the map shows.
     static constexpr double kStructureReachCm = 1000.0;
+    /// ... and keeps its data's height when it is this far (cm) or more under the landscape: it stands in a cave or a city under the ground (a data height a few centimetres under the
+    /// landscape, Gravepeak's 45 cm among them, is the landscape's and is still lifted onto it).
+    static constexpr double kUndergroundCm = 1000.0;
     /// Where a player's origin is put at (x, y): the surface (surface_at) plus the capsule's half height.  `has_hint` and `keep_above`: a height the caller names (a game
     /// master's z, a place's data height) is kept as given unless it is under the ground there.  False, with the height unchanged, when the world has no ground there.
     bool player_height(double x, double y, double z_hint, bool has_hint, bool keep_above, double* z, bool* grounded = nullptr) const;
@@ -512,6 +516,8 @@ public:
     /// under the floor of a bowl, or has stood on the pit under one (see kPlatformUnderCm: a pawn that fell through a town with no floor yet and was caught by the landscape's collision
     /// 50 m down), is put back on the floor (or the ground) with the same slack a teleport has.
     static constexpr double kKillPlaneCm = -10000.0;
+    /// (x, y) is nearer the Anvils' start than the login spot; never in a circle area, which has only the login spot.
+    bool nearer_anvils_start(double x, double y) const;
     static constexpr double kBelowFloorCm = 10000.0;
     struct FloorRescue {
         double      x = 0, y = 0, z = 0;   // where to put the character (its origin)

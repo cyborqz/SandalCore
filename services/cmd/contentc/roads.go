@@ -461,8 +461,13 @@ func runRoads(args []string, stdout, stderr io.Writer) int {
 	for _, n := range names {
 		fmt.Fprintf(stdout, "contentc roads:   (nothing for mounts) %s: %d\n", n, sum.NoWorthByPreset[n])
 	}
-	if sum.NoPreset > 0 {
-		fmt.Fprintf(stderr, "contentc roads: %d road actors name a preset that is no RoadPresetRecord: %v\n", sum.NoPreset, sum.UnknownPresetGuids)
+	// a road with no preset at all (guid 0: the Anvils have 15) gives a mount nothing; a guid that names no record is data this build cannot read
+	if none := sum.UnknownPresetGuids[0]; none > 0 {
+		fmt.Fprintf(stdout, "contentc roads:   (nothing for mounts) no preset: %d\n", none)
+		delete(sum.UnknownPresetGuids, 0)
+	}
+	if len(sum.UnknownPresetGuids) > 0 {
+		fmt.Fprintf(stderr, "contentc roads: road actors name a preset that is no RoadPresetRecord: %v\n", sum.UnknownPresetGuids)
 		return 1
 	}
 	if *check {

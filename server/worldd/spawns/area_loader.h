@@ -50,6 +50,8 @@ struct AreaSources {
     const SpawnFilter*           filter = nullptr;    // null: stage 2's behaviour, every point whose Blueprint opens (plan E1, stage 3: spawns/spawn_filter.h)
     const NpcLooks*              looks = nullptr;     // null: the humanoids keep the look and name of the open they are made from (spawns/npc_looks.h)
     const content::ObjectData*   objects = nullptr;   // null: no quest object has an actor definition (quests part 3)
+    /// The named mobs the data defines but places nowhere stand at their places (spawns/hand_placed.h; modelled).  false: the data alone (the tests, the goldens).
+    bool                         hand_placed = false;
 };
 
 /// What a quest object that has been used is made again from (quests part 3, slice 1): the open, the instance parameters and when it comes back.
@@ -82,6 +84,7 @@ struct AreaReport {
     size_t                        duplicates = 0;        // captured NPCs dropped for a data NPC at the same point
     size_t                        gatherable_duplicates = 0;
     size_t                        refused = 0;           // spawns that did not instantiate (their `error` is in `notes`)
+    size_t                        hand_placed = 0;       // the points spawns/hand_placed.h added to the data (AreaSources::hand_placed)
     std::map<std::string, size_t> npcs_by_archetype;     // leaf name, all sources
     /// Stage 2: the rows the data NPCs' lives come from (how a PopulationInstance's NPC wanders or patrols): the instances that spawned something
     /// and the routes they walk.

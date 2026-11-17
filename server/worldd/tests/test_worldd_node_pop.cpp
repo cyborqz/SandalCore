@@ -12,7 +12,7 @@
 //                    area's circle), a set gated by the Layout source spawns only when the source runs
 //    the frames      a node's layout sets are placed at the node RECORD's location and yaw, a building's sets at the plot's transform in that frame; the 10 retail NPCs the retail capture shows
 //                    at Joeva (a town, level 4) - guards, villagers, animals, the warehouse clerk and a gear vendor - stand within 1 m of a point of our selection
-//    the golden      for every city node inside the Riverlands at each of the 7 node levels (70 cases) the selection equals the independent Python port's counts (tests/node_pop_golden.h,
+//    the golden      for every city node inside the region at each of the 7 node levels (308 cases) the selection equals the independent Python port's counts (tests/node_pop_golden.h,
 //                    tools/capture/node_pop_oracle.py): the sets and points of the layout and the buildings, the NPCs from each, the points lost by reason, the NPCs by Blueprint and the digest of
 //                    the whole list
 //    the manager     spawns/node_populations.h: at the seed's levels each node has the golden number of NPCs; a level change spawns the NPCs the new level adds, removes the ones it no longer
@@ -487,7 +487,7 @@ static void test_anchors() {
 // ---- the golden -----------------------------------------------------------------------------------------------------------------------------
 
 static void test_golden() {
-    std::printf("the golden counts: %zu cases (10 nodes inside the Riverlands, 7 levels)\n", tests::kNodePopCaseCount);
+    std::printf("the golden counts: %zu cases (44 nodes inside the region, 7 levels)\n", tests::kNodePopCaseCount);
     size_t mismatches = 0, total_npcs = 0;
     const auto t0 = std::chrono::steady_clock::now();
     for (size_t i = 0; i < tests::kNodePopCaseCount; ++i) {
@@ -664,7 +664,7 @@ static void test_manager() {
         if (const tests::NodePopCase* c = golden_of(n.name, nodes->level_of(n.guid))) want += c->spawned_layout + c->spawned_building;
     }
     CHECK(made == want && rig.pops->made() == want && people_of(rig.registry) == want && rig.spawned.size() == want, "start: every node inside the area has the oracle's number of NPCs at its seed level");
-    CHECK(rig.pops->nodes() == 10 && rig.pops->start(0.0) == 0, "10 nodes inside the Riverlands; started once");
+    CHECK(rig.pops->nodes() == 44 && rig.pops->start(0.0) == 0, "44 nodes inside the region (the five regions' towns, harbours and outposts); started once");
     CHECK(rig.npcs_of(kJoeva) == golden_npcs("Verra_RVR_Joeva", 4) && rig.npcs_of(kHalcyon) == golden_npcs("Verra_RVR_Halcyon", 3) && rig.npcs_of(kWinstead) == golden_npcs("Verra_RVR_Winstead", 0),
           "Joeva (Town), Halcyon (Village) and Winstead (Wilderness) have their level's people");
     bool tagged = true, in_range = true, grounding = true;

@@ -1682,7 +1682,7 @@ static size_t working_set_bytes() {
 /// What the state actors cost the view: the opens at login and when the last of them was sent, the time of a step with and without them, and what a player who walks through every cell of
 /// the map makes the server hold (the shadows the view keeps of the arrays of each cell it has seen) and send.
 static void test_view_load() {
-    std::printf("the load on the view: 671 state actors, tracked and sent to one player\n");
+    std::printf("the load on the view: 3,761 state actors, tracked and sent to one player\n");
     double step_us[2] = {0, 0};
     size_t tracked[2] = {0, 0}, opens_at_login[2] = {0, 0};
     double last_open_ms[2] = {0, 0};
@@ -1756,24 +1756,24 @@ static void test_view_load() {
         }
     }
     std::printf("    without state actors: %.1f us a 20 ms step (%zu actors tracked, %zu snapshots, %zu passes capped by the 16 opens)\n", step_us[0], tracked[0], snapshots[0], capped[0]);
-    std::printf("    with 671 state actors: %.1f us a 20 ms step (%zu actors tracked, %zu snapshots, %zu passes capped); %zu state actors sent at login, the last %.0f ms after the phase-in\n", step_us[1],
+    std::printf("    with 3,761 state actors: %.1f us a 20 ms step (%zu actors tracked, %zu snapshots, %zu passes capped); %zu state actors sent at login, the last %.0f ms after the phase-in\n", step_us[1],
                 tracked[1], snapshots[1], capped[1], opens_at_login[1], last_open_ms[1]);
     std::printf("    a tour of all %zu cells (a stop at each centre): %zu cells and %zu components delivered, %zu opens (%.1f KB each on the wire, exports included), the view tracking %zu at the end; "
                 "%.0f ms of real time; the process grew by %.1f MB\n", tour_cells, tour_cells, tour_components, tour_opens, tour_kb_per_open, tour_tracked, tour_ms, tour_mb);
     CHECK(opens_at_login[0] == 0 && opens_at_login[1] >= 3, "the player is sent the state actors of the cells around him at login (none without them)");
     CHECK(last_open_ms[1] < 4000.0, "the last of them arrives within four seconds of the phase-in (retail: 4.1 to 4.7 s after its capture began; the view paces 16 opens a pass)");
     CHECK(step_us[1] < step_us[0] + 2000.0 && step_us[1] < 20000.0, "a standing player's step costs less than 2 ms more with all the cells tracked");
-    CHECK(tour_cells == 671 && tour_components == 10613 && tour_uninitialized == 0, "a player who stops in every cell is sent all 671 state actors, 10,613 components, each initialized");
+    CHECK(tour_cells == 3761 && tour_components == 42267 && tour_uninitialized == 0, "a player who stops in every cell is sent all 3,761 state actors, 42,267 components, each initialized");
     std::printf("    (the tour: %zu opens, %zu Dormancy closes, %zu other closes)\n", tour_opens, tour_dormancy, tour_other_closes);
     CHECK(tour_other_closes == 0 && tour_dormancy == tour_opens, "... each closed with Dormancy, none destroyed");
-    CHECK(tour_mb < 200.0, "and the server holds under 200 MB for him (the shadows of 671 cells and what he was sent)");
+    CHECK(tour_mb < 200.0, "and the server holds under 200 MB for him (the shadows of 3,761 cells and what he was sent)");
 }
 // [C | O | A + C.Y.B]
 
-/// The login in the real world: the Riverlands' creatures and nodes (spawns::AreaConfig::riverlands(), worldd's default area) in the registry beside the 671 state actors, one player at the
+/// The login in the real world: the Riverlands' creatures and nodes (spawns::AreaConfig::riverlands(), worldd's default area) in the registry beside the 3,761 state actors, one player at the
 /// login spot.  The view paces its opens (16 a pass, nearest first), so the state actors, 96 to 340 m away, wait behind the creatures nearer than they: when do they arrive?
 static void test_login_in_the_real_world() {
-    std::printf("the login in the real world: the Riverlands' creatures and nodes beside the 671 state actors\n");
+    std::printf("the login in the real world: the Riverlands' creatures and nodes beside the 3,761 state actors\n");
     Rig rig;
     std::string open_error;
     rig.db = content::ContentDb::open(g_path, open_error);
