@@ -257,6 +257,16 @@ void PlayerSession::on_item_activated(Connection& conn, const repl::ItemUse& use
     }
     const use::Plan plan = use::plan_use(*db, item.item_record_id, ctx);
     if (!plan.ok) return refuse(plan.refusal);
+    // Social, step 9: the guild creation scroll opens the client's create panel; the scroll is taken when the guild is made (session/player_guild.inc),
+    // so it stays in the bag while the panel is open
+    if (plan.open_guild_window) {
+        if (!room_for(1)) return;
+        ++uses_applied_;
+        ++items_applied_;
+        queue("ClientOpenCreateGuildPanel", [](bootstrap::PlayerBootstrap& pb) { return pb.guild_create_panel(); }, conn, /*must_build=*/true);
+        spdlog::log(level_for(use_logged_), "[session] {}: the guild creation scroll is used: the create panel opens (the scroll is taken when the guild is made)", name());
+        return;
+    }
     // Gathering stage 2, the recipe items (contentc version 44): the recipes are learned, the item consumed as the data says and the client told; the inventory's save carries them
     if (!plan.learn_recipes.empty()) {
         if (const std::string why = learn_recipes_from_use(conn, plan, use, item); !why.empty()) return refuse(why);

@@ -70,6 +70,9 @@ struct Plan {
     std::vector<professions::Change> profession_changes;
     /// The recipes a LearnRecipes item teaches (contentc version 44): the session adds them to the character's known list, which is saved with it.
     std::vector<int64_t>             learn_recipes;
+    /// Social, step 9: the guild creation scroll (item_use.activation = "OpenGuildCreationMenu"): the use opens the client's create panel, and the
+    /// scroll is taken when the guild is made (session/player_guild.inc), not here.
+    bool                     open_guild_window = false;
     std::vector<std::string> notes;           // what was skipped
     std::string              summary;         // one line for the log ("+418,410 XP, 19 items")
 };

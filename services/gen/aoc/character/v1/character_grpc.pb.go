@@ -31,6 +31,8 @@ const (
 	CharacterService_DeleteCharacter_FullMethodName    = "/aoc.character.v1.CharacterService/DeleteCharacter"
 	CharacterService_SaveInventory_FullMethodName      = "/aoc.character.v1.CharacterService/SaveInventory"
 	CharacterService_SaveProgress_FullMethodName       = "/aoc.character.v1.CharacterService/SaveProgress"
+	CharacterService_SaveGuild_FullMethodName          = "/aoc.character.v1.CharacterService/SaveGuild"
+	CharacterService_SaveGuildCooldown_FullMethodName  = "/aoc.character.v1.CharacterService/SaveGuildCooldown"
 )
 
 // CharacterServiceClient is the client API for CharacterService service.
@@ -77,6 +79,12 @@ type CharacterServiceClient interface {
 	// the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
 	// Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues). Social, step 6: and the players and the guilds it ignores (replace_ignored_names).
 	SaveProgress(ctx context.Context, in *SaveProgressRequest, opts ...grpc.CallOption) (*SaveProgressResponse, error)
+	// Social, step 9: writes a guild whole (its ranks and members) in one transaction; version 0 creates it and any other version must be its current one (see
+	// SaveGuildRequest). NotFound for an unknown character; InvalidArgument, with nothing changed, for a row the store's rules refuse; FailedPrecondition for a stale
+	// version.
+	SaveGuild(ctx context.Context, in *SaveGuildRequest, opts ...grpc.CallOption) (*SaveGuildResponse, error)
+	// Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). NotFound for an unknown id, InvalidArgument for a negative time.
+	SaveGuildCooldown(ctx context.Context, in *SaveGuildCooldownRequest, opts ...grpc.CallOption) (*SaveGuildCooldownResponse, error)
 }
 
 type characterServiceClient struct {
@@ -167,6 +175,26 @@ func (c *characterServiceClient) SaveProgress(ctx context.Context, in *SaveProgr
 	return out, nil
 }
 
+func (c *characterServiceClient) SaveGuild(ctx context.Context, in *SaveGuildRequest, opts ...grpc.CallOption) (*SaveGuildResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveGuildResponse)
+	err := c.cc.Invoke(ctx, CharacterService_SaveGuild_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *characterServiceClient) SaveGuildCooldown(ctx context.Context, in *SaveGuildCooldownRequest, opts ...grpc.CallOption) (*SaveGuildCooldownResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveGuildCooldownResponse)
+	err := c.cc.Invoke(ctx, CharacterService_SaveGuildCooldown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CharacterServiceServer is the server API for CharacterService service.
 // All implementations must embed UnimplementedCharacterServiceServer
 // for forward compatibility.
@@ -211,6 +239,12 @@ type CharacterServiceServer interface {
 	// the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
 	// Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues). Social, step 6: and the players and the guilds it ignores (replace_ignored_names).
 	SaveProgress(context.Context, *SaveProgressRequest) (*SaveProgressResponse, error)
+	// Social, step 9: writes a guild whole (its ranks and members) in one transaction; version 0 creates it and any other version must be its current one (see
+	// SaveGuildRequest). NotFound for an unknown character; InvalidArgument, with nothing changed, for a row the store's rules refuse; FailedPrecondition for a stale
+	// version.
+	SaveGuild(context.Context, *SaveGuildRequest) (*SaveGuildResponse, error)
+	// Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). NotFound for an unknown id, InvalidArgument for a negative time.
+	SaveGuildCooldown(context.Context, *SaveGuildCooldownRequest) (*SaveGuildCooldownResponse, error)
 	mustEmbedUnimplementedCharacterServiceServer()
 }
 
@@ -244,6 +278,12 @@ func (UnimplementedCharacterServiceServer) SaveInventory(context.Context, *SaveI
 }
 func (UnimplementedCharacterServiceServer) SaveProgress(context.Context, *SaveProgressRequest) (*SaveProgressResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SaveProgress not implemented")
+}
+func (UnimplementedCharacterServiceServer) SaveGuild(context.Context, *SaveGuildRequest) (*SaveGuildResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveGuild not implemented")
+}
+func (UnimplementedCharacterServiceServer) SaveGuildCooldown(context.Context, *SaveGuildCooldownRequest) (*SaveGuildCooldownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveGuildCooldown not implemented")
 }
 func (UnimplementedCharacterServiceServer) mustEmbedUnimplementedCharacterServiceServer() {}
 func (UnimplementedCharacterServiceServer) testEmbeddedByValue()                          {}
@@ -410,6 +450,42 @@ func _CharacterService_SaveProgress_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CharacterService_SaveGuild_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveGuildRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).SaveGuild(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_SaveGuild_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).SaveGuild(ctx, req.(*SaveGuildRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CharacterService_SaveGuildCooldown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveGuildCooldownRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CharacterServiceServer).SaveGuildCooldown(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CharacterService_SaveGuildCooldown_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CharacterServiceServer).SaveGuildCooldown(ctx, req.(*SaveGuildCooldownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CharacterService_ServiceDesc is the grpc.ServiceDesc for CharacterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -448,6 +524,14 @@ var CharacterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SaveProgress",
 			Handler:    _CharacterService_SaveProgress_Handler,
+		},
+		{
+			MethodName: "SaveGuild",
+			Handler:    _CharacterService_SaveGuild_Handler,
+		},
+		{
+			MethodName: "SaveGuildCooldown",
+			Handler:    _CharacterService_SaveGuildCooldown_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

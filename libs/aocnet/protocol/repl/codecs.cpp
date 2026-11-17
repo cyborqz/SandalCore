@@ -115,7 +115,7 @@ enum class S {
     Unknown, Vec3, Vec2, Ticks, Rotator, Quantized, Normal, RepMovement, LoadTracker, UniqueId, Tag, TagContainer,
     StatInt32, Quat, GuidToBool, Alignment, AppearanceId, Customization, ItemInstance, ItemStorageEvent, HitConfirmations,
     MovementInput, VendorPurchase, VendorTransaction, NodeTax, LocalizedMessage, ChannelingData, CraftState, RewardInstance, HashedVariable,
-    WarehouseEntry, CraftTags,
+    WarehouseEntry, CraftTags, GuildData,
 };
 
 S find_struct(std::string_view n) {
@@ -150,6 +150,7 @@ S find_struct(std::string_view n) {
     if (n == "FHashedVariable") return S::HashedVariable;
     if (n == "FWarehouseItemChunkSummary" || n == "FWarehouseMaterialTabSummary") return S::WarehouseEntry;
     if (n == "FCraftingResourceTagCostSelection") return S::CraftTags;
+    if (n == "FGuildData") return S::GuildData;
     return S::Unknown;
 }
 
@@ -432,6 +433,124 @@ bool alignment_fits(const AlignmentContainer& c) {
     }
     return true;
 }
+
+// FGuildData: the guild component's roster (social, step 9).  The struct's own serializer writes GeneralGuildInfo (the name as an FString, the guid, the
+// ranks as a count and their names and 35 four-byte booleans, the level and experience, the skill points, the capacity and level cap, the bought ranks,
+// the war charges and the unlocked groups), then the member rows, then the guild-guid-to-war map.  The guilds of this world keep the data's three ranks
+// and no perks, so the four arrays it never fills are written as zero counts and the war map too; the reader accepts only that form (a guild with perks
+// or wars is not read).
+//
+// The 35 permission booleans of a rank are written one after the other in the order the game's own serializer has, which is not the order of the record's
+// members: the n-th boolean on the wire is the permission with the record's index kGuildPermissionWireOrder[n] (bit 0 bInvitePlayer ... bit 34 bAdjustGuildPoints).
+// A client that reads them in the record's order would give every rank the permissions of another.
+constexpr uint8_t kGuildPermissionWireOrder[GuildRankData::kPermissionCount] = {0,  1,  12, 7,  2,  3,  4,  6,  5,  30, 29, 31, 32, 33, 34, 28, 27, 26,
+                                                                                25, 24, 23, 22, 21, 20, 19, 18, 15, 14, 13, 16, 17, 10, 11, 9,  8};
+
+std::optional<Value> read_guild_data(PacketReader& r) {
+    GuildData g;
+    auto name = read_fstring(r);
+    if (!name) return std::nullopt;
+    g.info.name = std::move(*name);
+    g.info.guid = read_guid(r);
+    const auto ranks = read_count(r, 4);
+    if (!ranks || *ranks > 255) return std::nullopt;
+    for (uint32_t i = 0; i < *ranks; ++i) {
+        GuildRankData rank;
+        auto rank_name = read_fstring(r);
+        if (!rank_name) return std::nullopt;
+        rank.name = std::move(*rank_name);
+        for (uint8_t bit = 0; bit < GuildRankData::kPermissionCount; ++bit) {
+            const uint32_t b = r.read_uint32();
+            if (b > 1) return std::nullopt;   // the archive's bool: 0 or 1, else an error
+            if (b) rank.permissions |= 1ull << kGuildPermissionWireOrder[bit];
+        }
+        g.info.ranks.push_back(std::move(rank));
+    }
+    g.info.level = r.read_uint8();
+    g.info.experience = r.read_uint32();
+    const auto skill_points = read_count(r, 0);
+    if (!skill_points || *skill_points != 0) return std::nullopt;   // (the perk tree is not built: an empty list)
+    g.info.capacity = r.read_uint16();
+    g.info.level_cap = r.read_uint8();
+    const auto purchased = read_count(r, 0);
+    if (!purchased || *purchased != 0) return std::nullopt;
+    const auto charges = read_count(r, 64);
+    if (!charges || *charges != 0) return std::nullopt;
+    const auto groups = read_count(r, 0);
+    if (!groups || *groups != 0) return std::nullopt;
+    const auto members = read_count(r, 480);
+    if (!members || *members > 4096) return std::nullopt;
+    for (uint32_t i = 0; i < *members; ++i) {
+        GuildMemberData m;
+        auto member_name = read_fstring(r);
+        if (!member_name) return std::nullopt;
+        m.name = std::move(*member_name);
+        m.character_guid = read_guid(r);
+        m.rank = r.read_uint8();
+        m.level = r.read_uint8();
+        m.class_id = r.read_uint8();
+        m.last_online = r.read_uint64();
+        m.joined = r.read_uint64();
+        m.group = static_cast<int8_t>(r.read_uint8());
+        m.guild_guid = read_guid(r);
+        const uint32_t online = r.read_uint32();
+        if (online > 1) return std::nullopt;
+        m.online = online != 0;
+        g.members.push_back(std::move(m));
+    }
+    const auto wars = read_count(r, 0);
+    if (!wars || *wars != 0) return std::nullopt;
+    if (overran(r)) return std::nullopt;
+    return Value(std::move(g));
+}
+
+bool write_guild_data(BunchWriter& out, const GuildData& g) {
+    if (!write_fstring(out, g.info.name)) return false;
+    write_guid(out, g.info.guid);
+    if (!write_count(out, g.info.ranks.size())) return false;
+    for (const GuildRankData& rank : g.info.ranks) {
+        if (!write_fstring(out, rank.name)) return false;
+        for (uint8_t bit = 0; bit < GuildRankData::kPermissionCount; ++bit) out.write_uint32(((rank.permissions >> kGuildPermissionWireOrder[bit]) & 1ull) != 0 ? 1u : 0u);
+    }
+    out.write_uint8(g.info.level);
+    out.write_uint32(g.info.experience);
+    if (!write_count(out, 0)) return false;   // GuildSkillPoints
+    out.write_uint16(g.info.capacity);
+    out.write_uint8(g.info.level_cap);
+    if (!write_count(out, 0)) return false;   // PurchasedSkillRanks
+    if (!write_count(out, 0)) return false;   // WarDeclarationChargesOnCooldown
+    if (!write_count(out, 0)) return false;   // UnlockedGroups
+    if (!write_count(out, g.members.size())) return false;
+    for (const GuildMemberData& m : g.members) {
+        if (!write_fstring(out, m.name)) return false;
+        write_guid(out, m.character_guid);
+        out.write_uint8(m.rank);
+        out.write_uint8(m.level);
+        out.write_uint8(m.class_id);
+        out.write_uint64(m.last_online);
+        out.write_uint64(m.joined);
+        out.write_uint8(static_cast<uint8_t>(m.group));
+        write_guid(out, m.guild_guid);
+        out.write_uint32(m.online ? 1u : 0u);
+    }
+    return write_count(out, 0);   // GuildGuidToWarData
+}
+
+bool guild_data_fits(const GuildData& g) {
+    if (!fstring_fits(g.info.name) || g.info.ranks.size() > 255) return false;
+    for (const GuildRankData& rank : g.info.ranks) {
+        if (!fstring_fits(rank.name)) return false;
+        if (rank.permissions >> GuildRankData::kPermissionCount != 0) return false;
+    }
+    if (g.members.size() > 4096) return false;
+    std::set<std::tuple<uint32_t, uint32_t, uint32_t, uint32_t>> seen;
+    for (const GuildMemberData& m : g.members) {
+        if (!fstring_fits(m.name)) return false;
+        if (!seen.insert(guid_key(m.character_guid)).second) return false;   // one row per member
+    }
+    return true;
+}
+// Cyb | C O A
 
 // FCharacterCustomizationSaveData.
 // == C-Y-B | C O A ==
@@ -1163,6 +1282,10 @@ bool struct_accepts(std::string_view struct_name, const Value& v) {
             const auto* s = v.get_if<CraftTagSelection>();
             return s && craft_tag_selection_fits(*s);
         }
+        case S::GuildData: {
+            const auto* g = v.get_if<GuildData>();
+            return g && guild_data_fits(*g);
+        }
         case S::Unknown:     break;
     }
     return false;
@@ -1366,6 +1489,8 @@ std::optional<Value> read_struct(std::string_view struct_name, PacketReader& r, 
             if (!s) return std::nullopt;
             return Value(std::move(*s));
         }
+        case S::GuildData:
+            return read_guild_data(r);
         case S::Unknown:
             break;
     }
@@ -1477,6 +1602,8 @@ bool write_struct(std::string_view struct_name, const Value& v, BunchWriter& out
             return write_warehouse_entry(out, *v.get_if<WarehouseSummaryEntry>());
         case S::CraftTags:
             return write_craft_tag_selection(out, *v.get_if<CraftTagSelection>());
+        case S::GuildData:
+            return write_guild_data(out, *v.get_if<GuildData>());
         case S::Unknown:
             break;
     }

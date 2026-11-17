@@ -134,6 +134,20 @@ std::optional<repl::Actor> PlayerBootstrap::observer_pawn() const {
         }
         a.subobjects.push_back(std::move(sub));
     }
+    {   // the guild's name over the nameplate (social, step 9).  The owner's own guild component goes out after the phase-in, so the pawn the others are shown never waits for it
+        repl::Subobject sub;
+        if (const repl::Subobject* own = pawn_.find(g.guild)) {
+            if (!observer_component(*own, {"GuildName"}, {}, sub)) return std::nullopt;
+        } else {
+            sub.guid = g.guild;
+            sub.name = "GuildComponent";
+            sub.checksum = kChecksumGuild;
+            sub.obj.schema = schema::gen::find_component_schema("GuildComponent");
+            if (!sub.obj.schema) return std::nullopt;
+            if (!guild_wire_.name.empty() && !sub.obj.state.set(*sub.obj.schema, "GuildName", Value::str(guild_wire_.name))) return std::nullopt;
+        }
+        a.subobjects.push_back(std::move(sub));
+    }
     if (!ok) return std::nullopt;
     return a;
 }
@@ -244,6 +258,13 @@ bool PlayerBootstrap::set_observer_alignments(repl::Actor& shown) {
     const repl::Value* held = src->obj.state.get(*src->obj.schema, "Alignments");
     if (!held) return false;
     return dst->obj.state.set(*dst->obj.schema, "Alignments", *held);
+}
+
+bool PlayerBootstrap::set_observer_guild(repl::Actor& shown, const std::string& guild_name) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* dst = shown.find(setup_.guids.guild);
+    if (!dst || !dst->obj.schema || !dst->obj.schema->command("GuildName")) return false;
+    return dst->obj.state.set(*dst->obj.schema, "GuildName", Value::str(guild_name));
 }
 
 // ---- the player's own pawn: the draw and the PvP flag's name (Social, seeing other players: their combat stances) -------------------------------------

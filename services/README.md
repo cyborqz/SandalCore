@@ -631,6 +631,19 @@ DELETE FROM schema_migrations WHERE version = 24;
 COMMIT;
 ```
 
+**Rolling back migration 0026.** Migration 0026 (social, step 9, "the guilds") adds FOUR tables, `guilds`, `guild_ranks`, `guild_members` and `character_guild_cooldowns` (a guild, its three ranks, its members and the join cooldown a character carries after leaving one); it writes nowhere else, backfills nothing and touches no existing table or column. worldd reads a character's guild with the character at the login (`GetCharacter`) and saves it whole after every change (`SaveGuild`, with `disband` for a guild that is done away with) and the cooldown with `SaveGuildCooldown`. The rollback drops the tables with whatever they hold: every guild, its ranks and members and every cooldown are forgotten (the players make or join a guild again). The characters and everything else they own are untouched, and the migration applies again. Stop the character service and worldd first: a worldd of this version reads the tables at every login.
+
+```sql
+-- rollback of migration 0026 (social, step 9: the guilds)
+BEGIN;
+DROP TABLE character_guild_cooldowns;
+DROP TABLE guild_members;
+DROP TABLE guild_ranks;
+DROP TABLE guilds;
+DELETE FROM schema_migrations WHERE version = 26;
+COMMIT;
+```
+
 **The quest service (quests, slice 1).** `quests` listens on gRPC `127.0.0.1:50058` (`AOC_QUESTS_GRPC_ADDR`) and serves `QuestService`: `LoadLog` and `SaveLog` (a character's whole log: the quests it took,
 the ones it finished and its quest variables, replaced in one transaction), and `QueueCommand` / `TakeCommands` (the inbox of GM commands for a character). `questctl give|finish|fail|abandon <character> <quest>`,
 `questctl clear <character> [quest]`, `questctl set-var <character> <name> <value>` and `questctl log <character>` call it; a quest is named by its record id or its design name, a character by its id or

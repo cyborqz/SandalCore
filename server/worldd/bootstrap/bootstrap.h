@@ -231,6 +231,47 @@ struct FriendRequestWire {
     int64_t                 expires = 0;
 };
 
+/// Social, step 9: one rank of a guild as FGuildData.GeneralGuildInfo.Ranks carries it: its name and its 35 permissions, bit 0 the first of the record's
+/// order (bInvitePlayer ... bit 34 bAdjustGuildPoints).
+struct GuildRankWire {
+    std::string name;
+    uint64_t    permissions = 0;
+};
+
+/// Social, step 9: one member of a guild as FGuildData.Members' row carries it (the character's GUID and name, its rank, level, class, last online and
+/// joined times, its group), the guild's GUID and whether the member is online now.
+struct GuildMemberWire {
+    std::array<uint32_t, 4> guid{};
+    std::string             name;
+    uint8_t                 rank = 0;
+    uint8_t                 level = 1;
+    uint8_t                 class_id = 0;
+    uint64_t                last_online = 0;   // Unix milliseconds (the client's real-time field)
+    uint64_t                joined = 0;
+    int8_t                  group = -1;
+    std::array<uint32_t, 4> guild_guid{};
+    bool                    online = false;
+};
+
+/// Social, step 9: what the pawn's guild component (UIntrepidGuildComponent, "GuildComponent") says: the guild's name, the roster (the guild's GUID, its
+/// ranks, level, experience and capacity, and every member), the character's own row (GuildMemberData) and its join cooldown (GuildCooldown, Unix
+/// milliseconds; 0: none).  A character with no guild has an empty name and no member.
+struct GuildWire {
+    std::array<uint32_t, 4>        guid{};
+    std::string                    name;
+    std::vector<GuildRankWire>     ranks;
+    uint8_t                        level = 1;
+    uint32_t                       experience = 0;
+    uint16_t                       capacity = 0;
+    uint8_t                        level_cap = 1;
+    std::vector<GuildMemberWire>   members;
+    GuildMemberWire                self;
+    int64_t                        cooldown_until = 0;
+};
+
+/// Social, step 9: the alignment record that makes two players guildmates (CharacterAlignmentRecordBase "GuildMember", the guild's GUID as its instance).
+inline constexpr uint64_t kAlignmentGuildMember = 6064630560782155776ull;
+
 /// The most ClientReceiveStorageEvent calls one chain carries (a Backpack's 70 Adds go out in five).
 inline constexpr size_t kMaxEventsPerChain = 16;
 
@@ -320,6 +361,30 @@ public:
     bool set_party_stats(std::span<const GroupMember> members);
     /// The answer to ServerCheckIfCharacterNameExistsRequest: ClientCheckIfCharacterNameExistsResponse(name, exists) on the PlayerController.
     std::optional<Send> name_check_answer(const std::string& name, bool exists);
+
+    /// Social, step 9: the pawn's guild component as the guild carries it: the guild's name (the nameplate), the roster (GuildData), the character's own
+    /// member row (GuildMemberData) and its join cooldown (GuildCooldown).  Before the component is on the pawn the values are kept for the join; after a
+    /// change they are written at once and guild_update() sends the pawn's block.  False when the schema is missing or a value does not fit.
+    bool set_guild(const GuildWire& guild);
+    /// What set_guild changed on the pawn's guild component since the last update, as one pawn chain, reliable; nullopt when nothing did (or before the
+    /// component is on the pawn).
+    std::optional<Send> guild_update();
+    /// Social, step 9: the guild component's first chain on the pawn's channel, once the character has phased in: the component with its export, what set_guild holds (nothing
+    /// for a character that never had a guild) and, for a guild's member, the GuildMember alignment.  The join's own chains hold no guild component, as the retail
+    /// login's.  Once the component is there this is guild_update().
+    std::optional<Send> guild_open();
+    /// Social, step 9: the pawn's AlignmentComponent gets the GuildMember instance for `guild` (a zero GUID: it is taken off), after the game's own
+    /// instances and the flag's, as the game's own alignment container carries the guild instance; every other instance stays.  False when the component is not there
+    /// (yet) or a value does not fit.
+    bool set_guild_alignment(const std::array<uint32_t, 4>& guild);
+    /// Social, step 9: ClientGuildRequestSucceeded(RequestType, Message, bChatMessageOnly 0) or ClientGuildRequestFailed(RequestType, Message) on the pawn's
+    /// guild component: one for every request the guild answers.  `request_type` is the client's EGuildRequestType value.
+    std::optional<Send> guild_reply(bool ok, uint64_t request_type, const std::string& message);
+    /// ... ClientInvitePlayerToGuild(GuildRequestUUID, SourceCharacterName, InGuildName): the popup the invited player's client shows.
+    std::optional<Send> guild_invite(const std::string& request_uuid, const std::string& source_name, const std::string& guild_name);
+    /// Social, step 9: the guild creation scroll's use: ClientOpenCreateGuildPanel on the PlayerController (reliable, no parameters), which opens the
+    /// client's create panel.  The scroll is taken when ServerCreateGuild makes the guild (session/player_guild.inc).
+    std::optional<Send> guild_create_panel();
 
     // ---- replies ----------------------------------------------------------------------------------------------------
 
@@ -838,6 +903,9 @@ public:
     bool set_observer_stance(repl::Actor& shown, const ObserverStance& stance);
     /// ... the AlignmentComponent's Alignments, copied from this player's pawn when the PvP flag changed it (the name colour the other players see).
     bool set_observer_alignments(repl::Actor& shown);
+    /// ... the guild component's name, copied from this player's pawn when the guild changed (the guild's name over the nameplate).  A character with no guild
+    /// empties it.
+    bool set_observer_guild(repl::Actor& shown, const std::string& guild_name);
     /// Whether one of the stats `records` differs between this player's pawn and the pawn the others are shown (the version of that pawn is not touched when none does).
     bool observer_live_stats_differ(const repl::Actor& shown, std::span<const int64_t> records) const;
 
@@ -899,6 +967,8 @@ private:
     /// Social, step 7: puts the social component on the PlayerController after the quest and tutorial components (once) and brings its two arrays
     /// to the lists set_friends holds.
     bool add_social_component();
+    /// Social, step 9: puts the guild component on the pawn at its second state (once) and writes what set_guild holds into it.
+    bool add_guild_component();
     /// Social, step 7: brings a FastArrays' FriendsList and PendingFriendRequests to the lists set_friends holds (adds, changes and removes exactly
     /// what differs, so a delta carries the changed items only).
     bool sync_social(repl::FastArrays& arrays);
@@ -955,6 +1025,10 @@ private:
     repl::FastArrays              social_arrays_;          // ... and, until it is, its two arrays
     std::vector<FriendWire>        friend_wire_;           // the lists set_friends was given, for the join and the diff
     std::vector<FriendRequestWire> friend_request_wire_;
+    /// Social, step 9: the guild component is on the pawn, and the values set_guild was given until it was (the join sets them before the possession adds it).
+    bool                           guild_added_ = false;
+    bool                           guild_written_ = false;   // a guild has been written into the component: no guild is then a change to send
+    GuildWire                      guild_wire_;
     /// Nodes 1, stage 2: the GameState's node maps as they were before the last node_maps_update that built an update (it changes them before the chain exists); restore()
     /// puts them back, checkpoint() forgets them, so a reply step that is not a node update copies no array
     std::optional<repl::FastArrays> node_maps_before_;

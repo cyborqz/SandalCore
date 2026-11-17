@@ -195,6 +195,9 @@ struct SessionGuids {
     /// Social, step 7: the PlayerController's social component ("SocialComponent", UIntrepidSocialComponent), minted after the quest component so that no earlier
     /// id moves.  It is a default subobject the client knows by name: its content block is what gives it this id.
     emit::FIntrepidNetworkGUID social;
+    /// Social, step 9: the pawn's guild component ("GuildComponent", UIntrepidGuildComponent), minted after the social component so that no earlier id moves.  It
+    /// is a default subobject of the player character the client knows by name: its content block is what gives it this id.
+    emit::FIntrepidNetworkGUID guild;
 };
 
 // ---- the progress (plan D1) --------------------------------------------------------------------------------------------------

@@ -80,6 +80,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The Bard's Saga: its six variants are chosen from the Bard's three themes, its Return to Verra's bursts heal the party's allies (injured first, up to eight within 40 m) on their own characters, and its Silent Pantheon's four projectiles land 1 m blessing zones; the notes are the Bard_Notes group of three, so three stories of one theme build the variant.
 - The light of a loot pile that holds equipment: the rarity's colour with the embers, spike and ribbon, on a mob's corpse, a group's kill and a full bag's pile; the best equipment's rarity while it holds equipment, and the best of what is left once the equipment is taken.
 - PvP, first part: the rules between players (the PvP key, the account's PvP settings and parties), the combatant flag at the first harmful action with its 60 s colour, corruption from a kill with its costs on death and kept on the character, duels with their banner, and the respawn's 60 s of protection. Still to come: suppression areas, guards and pets, guild and node wars.
+- Guilds, first part: creating one (letters with single spaces, no cost, a name no stored guild has, the data's 432,000 s cooldown after leaving), inviting players for 60 s each, accepting and declining, leaving, kicking, disbanding, promoting and demoting within the data's three ranks and 35 permissions, the leader's leaving (the next-highest-ranking member leads), the roster (level, class, rank, last online and online) with its refresh, the guild's name over the nameplate and the green name of a guildmate, guild chat between the ranks that may read and write it, the guild and its members kept by the character service, and a game-master command that puts a character into a guild for a one-client test. Still to come: the perks and guild levels, storage, wars, the board, the calendar, the patron guild hall, and raids and mail.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.
@@ -105,7 +106,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The world: spawns that follow node levels, mobs that appear and leave at dawn and dusk, lava, world events and weather, treasure hunts, random gatherables, and camp props (tents, totems, caches, doors).
 - Nodes: the Camp's stations, harvesting a node's own trees, node experience and vassals, citizenship and mayor, and node taxes.
 - Economy: player trading, marketplaces, node currency and crates.
-- Social: guilds, raids and mail.
+- Social: raids and mail.
 - Node sieges and territory wars.
 - Caravans and trade routes.
 - Conversations: NPC voice and animation while they talk.

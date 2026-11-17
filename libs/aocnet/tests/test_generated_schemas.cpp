@@ -466,6 +466,81 @@ static void test_social_component() {
     CHECK(listed, "UIntrepidSocialComponent is among all_class_schemas()");
 }
 
+// Guilds (social, step 9): the pawn's UIntrepidGuildComponent.  Five of its eight properties are replicated: the pawn's guild name (the nameplate), the roster's
+// data (a NetSerialize struct), the member's own row, the wars and the join cooldown.  Every guild call is on this component.
+static void test_guild_component() {
+    std::printf("UIntrepidGuildComponent (the pawn's GuildComponent, the guild)\n");
+    const ClassSchema* gc = find_component_schema("GuildComponent");
+    CHECK(gc != nullptr, "GuildComponent resolves by its export name");
+    if (!gc) return;
+    const ClassSchema& s = *gc;
+    CHECK(find_class_schema("UIntrepidGuildComponent") == &s && same(s.name, "UIntrepidGuildComponent") && same(s.super_name, "UIntrepidRepKeyComponent") && !s.is_actor,
+          "UIntrepidGuildComponent by its class name too: a component class on UIntrepidRepKeyComponent");
+    CHECK(s.commands.size() == 22 && s.num_fields() == 41 && s.field_max() == 42 && s.rpcs.size() == 34 && s.element_commands.size() == 13 && s.first_own_handle == 3 &&
+              s.first_own_field == 2,
+          "22 commands, 41 net fields (SerializeInt max 42), 34 RPCs, 13 element commands, its own from handle 3 and field 2");
+    CHECK(cmd_is(s, 1, "bReplicates", PropType::Bool, 1) && cmd_is(s, 2, "bIsActive", PropType::Bool, 1) &&
+              cmd_is(s, 3, "GuildName", PropType::Str, 0) && cmd_is(s, 4, "GuildData", PropType::NetSerializeStruct, 0) &&
+              cmd_is(s, 21, "GuildWarData", PropType::DynamicArray, 0) && cmd_is(s, 22, "GuildCooldown", PropType::NetSerializeStruct, 64),
+          "handles: 3 GuildName (a string), 4 GuildData (a NetSerialize struct), 21 GuildWarData (an array), 22 GuildCooldown (FDateTime, 64 bits)");
+    CHECK(same(s.command(4)->struct_name, "FGuildData") && same(s.command(22)->struct_name, "FDateTime") && s.command(21)->flags == kRepNotify && s.command(4)->flags == kRepNotify,
+          "GuildData's codec is FGuildData and the cooldown's FDateTime; GuildData and the war list are repnotified");
+    CHECK(cmd_is(s, 5, "GuildMemberData.PersistedGuildMemberData.CharacterName", PropType::Str, 0) &&
+              cmd_is(s, 6, "GuildMemberData.PersistedGuildMemberData.CharacterGuid.A", PropType::Int32, 32) &&
+              cmd_is(s, 9, "GuildMemberData.PersistedGuildMemberData.CharacterGuid.D", PropType::Int32, 32) &&
+              cmd_is(s, 10, "GuildMemberData.PersistedGuildMemberData.RankIndex", PropType::UInt8, 8) &&
+              cmd_is(s, 11, "GuildMemberData.PersistedGuildMemberData.CharacterLevel", PropType::UInt8, 8) &&
+              cmd_is(s, 12, "GuildMemberData.PersistedGuildMemberData.CharacterClass", PropType::Enum, 5) &&
+              cmd_is(s, 13, "GuildMemberData.PersistedGuildMemberData.LastTimeOnlineRealTime", PropType::UInt64, 64) &&
+              cmd_is(s, 14, "GuildMemberData.PersistedGuildMemberData.TimeJoinedRealTime", PropType::UInt64, 64) &&
+              cmd_is(s, 15, "GuildMemberData.PersistedGuildMemberData.AssignedGroupIndex", PropType::Int8, 8) &&
+              cmd_is(s, 16, "GuildMemberData.GuildGuid.A", PropType::Int32, 32) && cmd_is(s, 20, "GuildMemberData.bIsOnline", PropType::Bool, 1),
+          "GuildMemberData: the member's row flattened (name, guid, rank, level, class, last online, joined, group, the guild's guid, online)");
+    CHECK(same(s.command(12)->enum_name, "ECharacterClass"), "the member's class is ECharacterClass (5 bits)");
+    const auto wars = s.elements(*s.command(21));
+    CHECK(wars.size() == 13 && elem_is(wars, 0, "GuildWarData.WarRecordID", PropType::Int64, 64) && elem_is(wars, 9, "GuildWarData.WarGuid.A", PropType::Int32, 32) &&
+              elem_is(wars, 12, "GuildWarData.WarGuid.D", PropType::Int32, 32),
+          "GuildWarData's item: 13 commands (the war's record, phase, dates, names, scores and guid)");
+    CHECK(field_is(s, 2, "GuildName", FieldKind::Property) && s.field(2)->handle == 3 && field_is(s, 3, "GuildData", FieldKind::Property) && s.field(3)->handle == 4 &&
+              field_is(s, 4, "GuildMemberData", FieldKind::Property) && s.field(4)->handle == 5 && field_is(s, 5, "GuildWarData", FieldKind::Property) &&
+              s.field(5)->handle == 21 && field_is(s, 6, "GuildCooldown", FieldKind::Property) && s.field(6)->handle == 22,
+          "fields: GuildName 2, GuildData 3, GuildMemberData 4, GuildWarData 5, GuildCooldown 6");
+    bool replicated = true;
+    for (const char* name : {"GuildName", "GuildData", "GuildMemberData", "GuildWarData", "GuildCooldown"}) replicated = replicated && s.field(name) != nullptr;
+    CHECK(replicated, "the five replicated properties are the component's net fields");
+
+    const RpcSchema* ok = s.rpc("ClientGuildRequestSucceeded");
+    const RpcSchema* failed = s.rpc("ClientGuildRequestFailed");
+    const RpcSchema* timeout = s.rpc("ClientGuildRequestTimeout");
+    const RpcSchema* invite = s.rpc("ClientInvitePlayerToGuild");
+    CHECK(ok && ok->params.size() == 3 && same(ok->params[0].name, "RequestType") && ok->params[0].width_bits == 5 && same(ok->params[1].name, "Message") &&
+              same(ok->params[2].name, "bChatMessageOnly") && ok->params[2].type == PropType::Bool && !ok->params[2].send_bit,
+          "ClientGuildRequestSucceeded(RequestType (5 bits), Message, bChatMessageOnly)");
+    CHECK(failed && failed->params.size() == 2 && same(failed->params[1].name, "Message") && timeout && timeout->params.empty(),
+          "ClientGuildRequestFailed(RequestType, Message); ClientGuildRequestTimeout()");
+    CHECK(invite && invite->params.size() == 3 && same(invite->params[2].name, "InGuildName"), "ClientInvitePlayerToGuild(GuildRequestUUID, SourceCharacterName, InGuildName)");
+    const RpcSchema* create = s.rpc("ServerCreateGuild");
+    const RpcSchema* kick = s.rpc("ServerKickPlayerFromGuild");
+    const RpcSchema* ranks = s.rpc("ServerReassignMemberRanks");
+    const RpcSchema* chat = s.rpc("ServerSendMessageToGuild");
+    CHECK(create && create->params.size() == 1 && same(create->params[0].name, "InGuildName") && (create->function_flags & kFuncNetServer) != 0,
+          "ServerCreateGuild(InGuildName), a server call");
+    CHECK(kick && kick->params.size() == 1 && same(kick->params[0].name, "MemberGuidToKick") && kick->commands.size() == 4 && ranks && ranks->params.size() == 1 &&
+              ranks->element_commands.size() == 5 && elem_is(ranks->element_commands, 4, "MemberRanksToUpdate.NewRankIndex", PropType::UInt8, 8),
+          "ServerKickPlayerFromGuild(MemberGuidToKick); ServerReassignMemberRanks(MemberRanksToUpdate[]: guid 4x32, a byte rank)");
+    CHECK(chat && chat->params.size() == 3 && same(chat->params[1].name, "Category") && chat->commands.size() == 3 && same(chat->commands[1].enum_name, "EChatCategory") &&
+              chat->params[1].width_bits == 8,
+          "ServerSendMessageToGuild(Message, Category (EChatCategory, 8 bits), EmblemsToSend)");
+    const RpcSchema* hierarchy = s.rpc("ServerUpdateRankHierarchy");
+    CHECK(hierarchy && hierarchy->params.size() == 1 && hierarchy->element_commands.size() == 36 &&
+              elem_is(hierarchy->element_commands, 1, "UpdatedRankData.Permissions.bInvitePlayer", PropType::Bool, 1) &&
+              elem_is(hierarchy->element_commands, 35, "UpdatedRankData.Permissions.bAdjustGuildPoints", PropType::Bool, 1),
+          "ServerUpdateRankHierarchy(UpdatedRankData[]: the name and the 35 permissions)");
+    bool listed = false;
+    for (const ClassSchema* c : all_class_schemas()) listed = listed || c == &s;
+    CHECK(listed, "UIntrepidGuildComponent is among all_class_schemas()");
+}
+
 static void test_invariants() {
     std::printf("table invariants over every generated schema\n");
     bool handles = true, fields = true, by_path = true, by_name = true, rpcs = true, elems = true, supers = true;
@@ -541,7 +616,7 @@ static void test_index() {
     bool sorted = true;
     auto all = all_class_schemas();
     for (size_t i = 0; i + 1 < all.size(); ++i) sorted = sorted && std::strcmp(all[i]->name, all[i + 1]->name) < 0;
-    CHECK(all.size() == 65 && sorted, "65 schemas (61 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with the quests, the pawn's two warehouse container classes with storage clerks, step 0, the two Emberspring classes (AAoCPlayerSpawner, AAoCAttunablePlayerSpawner) with the Embersprings, the quest objects' actor class (AInteractableStateMachineBase) with the quest objects, the PlayerController's social component (UIntrepidSocialComponent) with the friends list, the duel's banner (ADuelCenter) with PvP's duels");   // #23 (MrJambix)
+    CHECK(all.size() == 66 && sorted, "66 schemas (62 native, 4 Blueprint), sorted by name (an alias is not one of them); AIntrepidStateIFA and UIntrepidFoliageStateComponent joined with Gathering stage 3, the crafting stations' four classes with the crafting milestone, the PlayerController's tutorial component with missing systems, step 0, its quest component with the quests, the pawn's two warehouse container classes with storage clerks, step 0, the two Emberspring classes (AAoCPlayerSpawner, AAoCAttunablePlayerSpawner) with the Embersprings, the quest objects' actor class (AInteractableStateMachineBase) with the quest objects, the PlayerController's social component (UIntrepidSocialComponent) with the friends list, the duel's banner (ADuelCenter) with PvP's duels, the pawn's guild component (UIntrepidGuildComponent) with the guilds");   // #23 (MrJambix)
     const ClassSchema* res = find_class_schema("UResourceStorageComponent");   // the pawn's dynamic subobject (pkt#107)
     CHECK(res && !res->is_actor && same(res->super_name, "UItemStorageComponent") && res->command("ItemLocationType") &&
               res->command("ItemLocationType")->type == PropType::Enum && res->command("ItemLocationType")->width_bits == 5,
@@ -581,6 +656,7 @@ int main() {
     test_npc_and_gatherable_schemas();
     test_mount_component();
     test_social_component();
+    test_guild_component();
     test_invariants();
     test_index();
     test_duel_center();   // #23 (MrJambix)

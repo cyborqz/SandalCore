@@ -81,6 +81,21 @@ public:
         (void)character_id;
         (void)progress;
     }
+    /// Social, step 9: queues a whole-guild save (SaveGuild: a create when its version is 0).  Never blocks on the network; the latest save of one guild wins.
+    virtual void save_guild(const svc::Guild& guild) { (void)guild; }
+    /// Social, step 9: queues the character's join cooldown (Unix milliseconds; 0 clears it).  Never blocks on the network.
+    virtual void save_guild_cooldown(const std::string& character_id, int64_t until_ms) {
+        (void)character_id;
+        (void)until_ms;
+    }
+    /// Social, step 9: writes a new guild (a create: version 0, with its leader as the only member) to the character service at once and answers what the service
+    /// said, so a name that another guild has (a guild none of whose members is online here, which this world does not know) is refused before the guild exists.
+    /// Called from the network thread, once for each create.  Ok: the service holds the guild at version 1 and the guild needs no create save.  Refused: the name is
+    /// taken.  A sink that cannot ask (a test's, or one whose service does not answer) answers Unavailable: the guild is made here and saved with save_guild.
+    virtual svc::CallStatus create_guild_now(const svc::Guild& guild) {
+        (void)guild;
+        return svc::CallStatus::Unavailable;
+    }
     /// Social, step 6: the two lists of a progress hand-over the sink still holds for the character and has not written yet (the latest one), when that hand-over carries them.  A sink that
     /// keeps nothing (a test's) answers false.
     virtual bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
@@ -140,6 +155,11 @@ public:
     void save_inventory(const std::string& character_id, std::vector<svc::InventoryItem> items, std::vector<svc::WalletEntry> wallet, std::vector<svc::ProcessingJob> jobs,
                         std::vector<int64_t> known_recipes, std::vector<svc::WarehouseItem> warehouse) override;
     void save_progress(const std::string& character_id, svc::Progress progress) override;
+    /// Social, step 9: a whole-guild save and a character's cooldown, queued behind the character saves (each guild's latest save wins).
+    void save_guild(const svc::Guild& guild) override;
+    void save_guild_cooldown(const std::string& character_id, int64_t until_ms) override;
+    /// Social, step 9: the create of a guild, asked of the character service at once (see PositionSink).
+    svc::CallStatus create_guild_now(const svc::Guild& guild) override;
     /// Social, step 6: the ignored players and guilds of the progress the saver still holds for the character (see PositionSink).
     bool pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) override;
     /// Social, step 7: the friends and the pending requests of the progress the saver still holds for the character (see PositionSink).
@@ -175,9 +195,14 @@ private:
         std::optional<std::vector<int64_t>>            known_recipes;   // crafting, step 3: saved in the inventory's call when set
         std::optional<std::vector<svc::WarehouseItem>> warehouse;       // storage, step 0: saved in the inventory's call when set
         std::optional<svc::Progress>                   progress;   // plan D1: saved between the position and the inventory
+        /// Social, step 9: a whole guild (the entry's key starts with kGuildKey) or a character's cooldown (kGuildCooldownKey), saved after the inventory.
+        std::optional<svc::Guild>                      guild;
+        std::optional<std::pair<std::string, int64_t>> guild_cooldown;   // (the character, the cooldown's Unix milliseconds)
         int                                            position_attempts = 0;
         int                                            inventory_attempts = 0;
         int                                            progress_attempts = 0;
+        int                                            guild_attempts = 0;
+        int                                            guild_cooldown_attempts = 0;
     };
 
     void run();

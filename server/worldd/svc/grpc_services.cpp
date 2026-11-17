@@ -35,12 +35,40 @@ std::shared_ptr<grpc::Channel> channel(const std::string& address) {
     return grpc::CreateCustomChannel(address, grpc::InsecureChannelCredentials(), args);
 }
 
+/// Social, step 9: a guild as GetCharacter and GetCharacterByName send it, mapped to worldd's own form.
+Guild guild_of(const characterv1::Guild& g) {
+    Guild out;
+    out.id = g.id();
+    out.name = g.name();
+    out.version = g.version();
+    for (const auto& r : g.ranks()) out.ranks.push_back({r.name(), r.permissions()});
+    out.level = g.level();
+    out.experience = g.experience();
+    out.capacity = g.capacity();
+    out.level_cap = g.level_cap();
+    for (const auto& m : g.members()) {
+        GuildMember row;
+        row.character_id = m.character_id();
+        row.name = m.name();
+        row.rank = m.rank();
+        row.level = m.level();
+        row.class_id = m.class_id();
+        row.joined_ms = m.joined_ms();
+        row.last_online_ms = m.last_online_ms();
+        out.members.push_back(std::move(row));
+    }
+    out.self_rank = g.self_rank();
+    out.cooldown_until_ms = g.cooldown_until_ms();
+    return out;
+}
+
 }  // namespace
 
 CallStatus map_grpc_status(const grpc::Status& s) {
     switch (s.error_code()) {
     case grpc::StatusCode::OK: return CallStatus::Ok;
     case grpc::StatusCode::PERMISSION_DENIED:
+    case grpc::StatusCode::ALREADY_EXISTS:   // (a guild name another guild has)
     case grpc::StatusCode::INVALID_ARGUMENT: return CallStatus::Refused;
     case grpc::StatusCode::NOT_FOUND: return CallStatus::NotFound;
     case grpc::StatusCode::UNAVAILABLE:
@@ -104,6 +132,7 @@ CharacterResult GrpcServices::get_character_by_name(const std::string& name) {
     r.character.archetype_id = c.archetype_id();
     r.character.class_name = c.class_name();
     r.character.level = c.level();
+    if (c.has_guild()) r.character.guild = guild_of(c.guild());   // social, step 9
     return r;
 }
 CharacterResult GrpcServices::get_character(const std::string& id) {
@@ -127,6 +156,7 @@ CharacterResult GrpcServices::get_character(const std::string& id) {
     r.character.class_name = c.class_name();
     r.character.appearance_json = c.appearance_json();
     r.character.level = c.level();
+    if (c.has_guild()) r.character.guild = guild_of(c.guild());   // social, step 9
     r.character.has_position = c.has_position();
     if (c.has_position()) {
         r.character.position = {c.position().x(), c.position().y(), c.position().z(), c.position().yaw()};
@@ -362,6 +392,46 @@ CallStatus GrpcServices::save_progress(const std::string& id, const Progress& pr
     }
     characterv1::SaveProgressResponse resp;
     return map_grpc_status(stubs_->character->SaveProgress(&ctx, req, &resp));
+}
+
+CallStatus GrpcServices::save_guild(const Guild& guild) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::SaveGuildRequest req;
+    auto* g = req.mutable_guild();
+    g->set_id(guild.id);
+    g->set_name(guild.name);
+    g->set_version(guild.version);
+    for (const GuildRank& r : guild.ranks) {
+        auto* p = g->add_ranks();
+        p->set_name(r.name);
+        p->set_permissions(r.permissions);
+    }
+    g->set_level(guild.level);
+    g->set_experience(guild.experience);
+    g->set_capacity(guild.capacity);
+    g->set_level_cap(guild.level_cap);
+    for (const GuildMember& m : guild.members) {
+        auto* p = g->add_members();
+        p->set_character_id(m.character_id);
+        p->set_name(m.name);
+        p->set_rank(m.rank);
+        p->set_joined_ms(m.joined_ms);
+        p->set_last_online_ms(m.last_online_ms);
+    }
+    characterv1::SaveGuildResponse resp;
+    req.set_disband(guild.disband);
+    return map_grpc_status(stubs_->character->SaveGuild(&ctx, req, &resp));
+}
+
+CallStatus GrpcServices::save_guild_cooldown(const std::string& character_id, int64_t until_ms) {
+    grpc::ClientContext ctx;
+    prepare(ctx, save_timeout_);
+    characterv1::SaveGuildCooldownRequest req;
+    req.set_character_id(character_id);
+    req.set_until_ms(until_ms);
+    characterv1::SaveGuildCooldownResponse resp;
+    return map_grpc_status(stubs_->character->SaveGuildCooldown(&ctx, req, &resp));
 }
 
 CallStatus GrpcServices::save_position(const std::string& id, const Position& position) {

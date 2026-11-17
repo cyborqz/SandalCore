@@ -243,6 +243,55 @@ struct AlignmentContainer {
     bool operator==(const AlignmentContainer&) const = default;
 };
 
+// ---- Guilds (social, step 9): FGuildData, the guild component's roster ----------
+
+/// One row of FGuildData.GeneralGuildInfo.Ranks: the rank's name and its 35 permission booleans in the record's order (bit 0 bInvitePlayer, bit 1
+/// bKickPlayer, ... bit 34 bAdjustGuildPoints).  The wire carries each boolean as an int32 0 or 1, as the struct's own serializer does.
+struct GuildRankData {
+    std::string name;
+    uint64_t    permissions = 0;
+    bool operator==(const GuildRankData&) const = default;
+    static constexpr uint8_t kPermissionCount = 35;
+};
+
+/// One row of FGuildData.Members: an FGuildMemberData, the persisted member's fields flattened (its name, guid, rank, level, class, last online and
+/// joined times, its group), the guild's guid and whether the member is online.
+struct GuildMemberData {
+    std::string name;
+    GuidValue   character_guid;
+    uint8_t     rank = 0;              // the index into the guild's ranks
+    uint8_t     level = 1;
+    uint8_t     class_id = 0;          // ECharacterClass as a byte (the member carries it as TEnumAsByte)
+    uint64_t    last_online = 0;       // Unix milliseconds, the client's real-time field
+    uint64_t    joined = 0;
+    int8_t      group = -1;
+    GuidValue   guild_guid;
+    bool        online = false;
+    bool operator==(const GuildMemberData&) const = default;
+};
+
+/// FGuildData.GeneralGuildInfo: the guild's name and guid, its ranks, level and experience, the current capacity and level cap.
+struct GuildGeneralInfo {
+    std::string                name;
+    GuidValue                  guid;
+    std::vector<GuildRankData> ranks;
+    uint8_t                    level = 1;
+    uint32_t                   experience = 0;
+    uint16_t                   capacity = 0;
+    uint8_t                    level_cap = 1;
+    bool operator==(const GuildGeneralInfo&) const = default;
+};
+
+/// FGuildData (UIntrepidGuildComponent.GuildData, a NetSerialize struct): GeneralGuildInfo, the member rows and the guild-guid-to-war map.  The guilds
+/// of this world keep the data's three ranks and no perks, so the arrays the server never fills (the skill points, the bought ranks, the war charges
+/// and the unlocked groups) are empty, and the war map with them; the codec reads and writes only that form and refuses any other.
+struct GuildData {
+    GuildGeneralInfo             info;
+    std::vector<GuildMemberData> members;
+    bool operator==(const GuildData&) const = default;
+};
+// Cyb | C O A
+
 /// FAppearanceId (the AppearanceIDs of UCharacterAppearanceComponent): the
 /// reflection members RecordGuid and TypeId (int64), EnchantmentLevel and
 /// ItemEquipSlot (bytes).
@@ -753,6 +802,7 @@ public:
         Vec3d, Vec2d, Rot, QuantVec, Normal16, RepMovement, LoadTracker, UniqueNetId, Ticks,
         GameplayTag, GameplayTagContainer, StatInt32Inst,
         Quat, GuidToBoolWrapper, AlignmentContainer, AppearanceId, CharacterCustomization, ItemInstance, InlineObject,
+        GuildData,
         EventBox, HitConfirmations, PlayerMovementInput, VendorPurchaseCart, VendorTransactionCart, NodeTaxDetails, LocalizedMessage, ChannelingData, CraftItemState,
         RewardInstance, HashedVariable, WarehouseSummaryEntry, CraftTagSelection>;
 

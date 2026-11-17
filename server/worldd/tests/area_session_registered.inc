@@ -19,3 +19,4 @@
 #include "friend_unknown_line_tests.inc"
 #include "friend_wire_edges_tests.inc"
 #include "certification_session_tests.inc"
+#include "guild_saver_tests.inc"

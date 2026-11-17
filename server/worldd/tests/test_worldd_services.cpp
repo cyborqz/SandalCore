@@ -320,6 +320,8 @@ int main() {
     CHECK(gw.deadline > before && gw.deadline <= before + std::chrono::seconds(3), "the call has a 2 s deadline");
     gw.code = grpc::StatusCode::PERMISSION_DENIED;
     CHECK(s.redeem_ticket("x", "y", 7).status == svc::CallStatus::Refused, "PermissionDenied -> Refused");
+    gw.code = grpc::StatusCode::ALREADY_EXISTS;
+    CHECK(s.redeem_ticket("x", "y", 7).status == svc::CallStatus::Refused, "AlreadyExists (a guild name another guild has) -> Refused");
     gw.code = grpc::StatusCode::UNAUTHENTICATED;
     CHECK(s.redeem_ticket("x", "y", 7).status == svc::CallStatus::Failed,
           "Unauthenticated (a wrong service token) -> Failed");

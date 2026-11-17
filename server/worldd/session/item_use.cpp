@@ -178,6 +178,25 @@ Plan plan_use(const content::ContentDb& db, int64_t item_record, const Context& 
         plan.summary = "learned " + std::to_string(plan.learn_recipes.size()) + " recipe(s)";
         return plan;
     }
+    if (use->activation == "OpenGuildCreationMenu") {
+        // Social, step 9: the guild creation scroll opens the client's create panel (ClientOpenCreateGuildPanel).  The scroll is not taken here: the guild
+        // the player makes is what it pays for (session/player_guild.inc takes one when the guild is made), so a panel closed without a create keeps it.
+        // The data's action response says what the item opens; one of this activation that names another response is refused.
+        for (const int64_t action_guid : use->actions) {
+            const auto action = db.action_response(action_guid, error);
+            if (!action) {
+                if (!error.empty()) return refuse("content.db failed: " + error);
+                return refuse("the item names the action response " + std::to_string(action_guid) + ", which content.db does not have");
+            }
+            if (action->response_type != "OpenGuildWindow") {
+                return refuse("the action response " + action->name + " is of type " + action->response_type + ", not OpenGuildWindow");
+            }
+        }
+        plan.ok = true;
+        plan.open_guild_window = true;
+        plan.summary = "opens the guild creation panel";
+        return plan;
+    }
     if (use->activation != "ActivateActionResponses") return refuse("the item's activation is " + use->activation + ", which stage 1 does not run");
     if (use->actions.empty()) return refuse("the item has an activation archetype and no action");
     plan.consume = use->consume_on_use;

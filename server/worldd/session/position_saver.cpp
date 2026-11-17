@@ -171,6 +171,94 @@ void CharacterSaver::save_progress(const std::string& character_id, svc::Progres
     cv_.notify_one();
 }
 
+namespace {
+/// Social, step 9: the keys of the guild saves in the characters' queue.  A guild is not a character: its key starts with one of these, and no character id
+/// can (a character id is 32 hex digits).
+constexpr const char* kGuildKey = "guild:";
+constexpr const char* kGuildCooldownKey = "cooldown:";
+
+/// A guild save that takes the place of an older one of the same guild that the service has not seen (still waiting, or being tried again): the newer state, to be
+/// written over the version the older save was to write over.  The service still holds that version (the older save never reached it), so the newer save's own
+/// version, which counts the older one as written, would be refused as stale.  A create that an update replaces stays a create; a disband that replaces a create
+/// leaves nothing to write (nullopt).
+std::optional<svc::Guild> guild_save_over(const svc::Guild& older, svc::Guild newer) {
+    if (newer.disband && older.version == 0) return std::nullopt;
+    newer.version = older.version;
+    return newer;
+}
+}  // namespace
+
+void CharacterSaver::save_guild(const svc::Guild& guild) {
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (stop_) return;
+        const std::string key = std::string(kGuildKey) + guild.id;
+        const auto it = entries_.find(key);
+        if (it != entries_.end()) {
+            // the latest state of the guild is the one to write, over the version the waiting save was to write over (the version check is the service's)
+            const std::optional<svc::Guild> merged = it->second.guild ? guild_save_over(*it->second.guild, guild) : std::optional<svc::Guild>(guild);
+            ++replaced_;
+            if (!merged) {   // made and done away with before the service saw it
+                entries_.erase(it);
+                order_.erase(std::remove(order_.begin(), order_.end(), key), order_.end());
+                idle_cv_.notify_all();   // (a flush may be waiting for exactly this entry)
+            } else {
+                it->second.guild = *merged;
+                it->second.guild_attempts = 0;
+            }
+        } else {
+            if (entries_.size() >= config_.max_queued) {
+                const std::string oldest = std::move(order_.front());
+                order_.pop_front();
+                entries_.erase(oldest);
+                ++dropped_;
+                spdlog::error("[saver] {} saves are waiting: the oldest ({}) is dropped", config_.max_queued, oldest);
+            }
+            order_.push_back(key);
+            Entry e;
+            e.guild = guild;
+            entries_.emplace(key, std::move(e));
+        }
+    }
+    cv_.notify_one();
+}
+
+void CharacterSaver::save_guild_cooldown(const std::string& character_id, int64_t until_ms) {
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (stop_) return;
+        const std::string key = std::string(kGuildCooldownKey) + character_id;
+        const auto it = entries_.find(key);
+        if (it != entries_.end()) {
+            it->second.guild_cooldown = std::make_pair(character_id, until_ms);
+            it->second.guild_cooldown_attempts = 0;
+            ++replaced_;
+        } else {
+            if (entries_.size() >= config_.max_queued) {
+                const std::string oldest = std::move(order_.front());
+                order_.pop_front();
+                entries_.erase(oldest);
+                ++dropped_;
+                spdlog::error("[saver] {} saves are waiting: the oldest ({}) is dropped", config_.max_queued, oldest);
+            }
+            order_.push_back(key);
+            Entry e;
+            e.guild_cooldown = std::make_pair(character_id, until_ms);
+            entries_.emplace(key, std::move(e));
+        }
+    }
+    cv_.notify_one();
+}
+
+svc::CallStatus CharacterSaver::create_guild_now(const svc::Guild& guild) {
+    try {
+        return api_.save_guild(guild);
+    } catch (const std::exception& e) {
+        spdlog::error("[saver] creating the guild {} threw {}", guild.name, e.what());
+    }
+    return svc::CallStatus::Unavailable;
+}
+
 bool CharacterSaver::pending_ignored_names(const std::string& character_id, std::vector<std::string>& players, std::vector<std::string>& guilds) {
     std::lock_guard<std::mutex> lock(mu_);
     const auto it = entries_.find(character_id);
@@ -270,9 +358,65 @@ void CharacterSaver::run() {
                 spdlog::error("[saver] saving the inventory of {} threw {}", id, e.what());
             }
         }
+        svc::CallStatus guild_status = svc::CallStatus::Ok, cooldown_status = svc::CallStatus::Ok;
+        if (entry.guild) {
+            guild_status = svc::CallStatus::Failed;
+            try {
+                guild_status = api_.save_guild(*entry.guild);
+            } catch (const std::exception& e) {
+                spdlog::error("[saver] saving the guild {} threw {}", entry.guild->name, e.what());
+            }
+        }
+        if (entry.guild_cooldown) {
+            cooldown_status = svc::CallStatus::Failed;
+            try {
+                cooldown_status = api_.save_guild_cooldown(entry.guild_cooldown->first, entry.guild_cooldown->second);
+            } catch (const std::exception& e) {
+                spdlog::error("[saver] saving the guild cooldown of {} threw {}", entry.guild_cooldown->first, e.what());
+            }
+        }
         lock.lock();
         // in_flight_ stays set through the pause before a retry: flush() must not report an empty queue while one is due
-        bool retry_position = false, retry_inventory = false, retry_progress = false;
+        bool retry_position = false, retry_inventory = false, retry_progress = false, retry_guild = false, retry_cooldown = false;
+        if (entry.guild) {
+            switch (guild_status) {
+                case svc::CallStatus::Ok:
+                    spdlog::debug("[saver] guild {} ({}): saved, version {}", entry.guild->name, entry.guild->id, entry.guild->version);
+                    break;
+                case svc::CallStatus::Unavailable:
+                    if (++entry.guild_attempts < config_.max_attempts && !stop_) {
+                        spdlog::warn("[saver] guild {}: the character service is unavailable: guild try {} of {}", entry.guild->name, entry.guild_attempts + 1,
+                                     config_.max_attempts);
+                        retry_guild = true;
+                        break;
+                    }
+                    [[fallthrough]];
+                default:
+                    ++failed_;
+                    spdlog::error("[saver] guild {}: the guild could not be saved ({}): given up", entry.guild->name, svc::call_status_name(guild_status));
+                    break;
+            }
+        }
+        if (entry.guild_cooldown) {
+            switch (cooldown_status) {
+                case svc::CallStatus::Ok:
+                    spdlog::debug("[saver] {}: guild cooldown saved ({})", entry.guild_cooldown->first, entry.guild_cooldown->second);
+                    break;
+                case svc::CallStatus::Unavailable:
+                    if (++entry.guild_cooldown_attempts < config_.max_attempts && !stop_) {
+                        spdlog::warn("[saver] {}: the character service is unavailable: guild cooldown try {} of {}", entry.guild_cooldown->first,
+                                     entry.guild_cooldown_attempts + 1, config_.max_attempts);
+                        retry_cooldown = true;
+                        break;
+                    }
+                    [[fallthrough]];
+                default:
+                    ++failed_;
+                    spdlog::error("[saver] {}: the guild cooldown could not be saved ({}): given up", entry.guild_cooldown->first,
+                                  svc::call_status_name(cooldown_status));
+                    break;
+            }
+        }
         if (entry.position) {
             switch (position_status) {
                 case svc::CallStatus::Ok:
@@ -337,10 +481,11 @@ void CharacterSaver::run() {
                     break;
             }
         }
-        if (retry_position || retry_inventory || retry_progress) {
+        if (retry_position || retry_inventory || retry_progress || retry_guild || retry_cooldown) {
             // try again after a pause, unless a newer save came in meanwhile (that one is tried instead): each part on its own
             const int attempts = std::max({retry_position ? entry.position_attempts : 0, retry_inventory ? entry.inventory_attempts : 0,
-                                           retry_progress ? entry.progress_attempts : 0});
+                                           retry_progress ? entry.progress_attempts : 0, retry_guild ? entry.guild_attempts : 0,
+                                           retry_cooldown ? entry.guild_cooldown_attempts : 0});
             cv_.wait_for(lock, config_.retry_delay * attempts, [this] { return abandon_; });
             if (!abandon_) {
                 Entry again;
@@ -359,6 +504,14 @@ void CharacterSaver::run() {
                 if (retry_progress) {
                     again.progress = std::move(entry.progress);
                     again.progress_attempts = entry.progress_attempts;
+                }
+                if (retry_guild) {
+                    again.guild = std::move(entry.guild);
+                    again.guild_attempts = entry.guild_attempts;
+                }
+                if (retry_cooldown) {
+                    again.guild_cooldown = std::move(entry.guild_cooldown);
+                    again.guild_cooldown_attempts = entry.guild_cooldown_attempts;
                 }
                 const auto newer = entries_.find(id);
                 if (newer == entries_.end()) {
@@ -380,6 +533,18 @@ void CharacterSaver::run() {
                     if (!newer->second.progress && again.progress) {
                         newer->second.progress = std::move(again.progress);
                         newer->second.progress_attempts = again.progress_attempts;
+                    }
+                    if (again.guild) {
+                        if (!newer->second.guild) {
+                            newer->second.guild = std::move(again.guild);
+                            newer->second.guild_attempts = again.guild_attempts;
+                        } else {   // a newer save of the guild came in while the retry waited: it writes over the version the retried one was to write over
+                            newer->second.guild = guild_save_over(*again.guild, *newer->second.guild);
+                        }
+                    }
+                    if (!newer->second.guild_cooldown && again.guild_cooldown) {
+                        newer->second.guild_cooldown = std::move(again.guild_cooldown);
+                        newer->second.guild_cooldown_attempts = again.guild_cooldown_attempts;
                     }
                 }
             }

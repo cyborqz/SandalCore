@@ -22,7 +22,7 @@ namespace aoc { namespace worldd { namespace svc {
 /// How a call ended, from worldd's point of view.
 enum class CallStatus {
     Ok,
-    Refused,      // the service said no (PermissionDenied, InvalidArgument)
+    Refused,      // the service said no (PermissionDenied, InvalidArgument, AlreadyExists)
     NotFound,
     Unavailable,  // unreachable, timed out, or shutting down: worth retrying
     Failed,       // anything else
@@ -255,6 +255,52 @@ struct FriendRequest {
     bool operator==(const FriendRequest&) const = default;
 };
 
+/// Social, step 9: one rank of a guild (migration 0026): its name and its 35 permissions as a mask, bit 0 the first of the record's order (bInvitePlayer ...
+/// bit 34 bAdjustGuildPoints).
+struct GuildRank {
+    std::string name;
+    uint64_t    permissions = 0;
+    bool operator==(const GuildRank&) const = default;
+};
+
+/// Social, step 9: one member of a guild: the character's GUID and name, its rank index, its level and class (from the character row when the guild is read),
+/// when it joined and when it was last seen online (Unix milliseconds).
+struct GuildMember {
+    std::string character_id;   // 32 lowercase hex digits
+    std::string name;
+    int32_t     rank = 0;
+    int32_t     level = 1;
+    int32_t     class_id = 0;
+    int64_t     joined_ms = 0;
+    int64_t     last_online_ms = 0;
+    bool operator==(const GuildMember&) const = default;
+};
+
+/// Social, step 9: a guild (migration 0026): its GUID and name, its data's ranks, level, experience and capacity, its members and the save version (0: a
+/// create; the service bumps it and refuses a save of an older version).  A read for one character carries that character's rank (self_rank; -1: not a
+/// member) and its join cooldown (cooldown_until_ms; 0: none).
+struct Guild {
+    std::string              id;      // 32 lowercase hex digits
+    std::string              name;
+    int64_t                  version = 0;
+    std::vector<GuildRank>   ranks;
+    int32_t                  level = 1;
+    int32_t                  experience = 0;
+    int32_t                  capacity = 50;
+    int32_t                  level_cap = 10;
+    std::vector<GuildMember> members;
+    int32_t                  self_rank = -1;
+    int64_t                  cooldown_until_ms = 0;
+    /// A save removes the guild whole (a disband); the read never sets it.
+    bool                     disband = false;
+    bool operator==(const Guild&) const = default;
+};
+
+struct GuildResult {
+    CallStatus status = CallStatus::Failed;
+    Guild      guild;
+};
+
 struct Character {
     std::string id;
     int64_t account_id = 0;
@@ -302,6 +348,9 @@ struct Character {
     /// expiry is not sent.  A service of an older version sends none.
     std::vector<Friend>        friends;
     std::vector<FriendRequest> friend_requests;
+    /// Social, step 9: the guild the character is in, read with the character (GetCharacter): its ranks, its members and the character's rank and join
+    /// cooldown.  Empty: the character is in no guild (or the service is of an older version).
+    std::optional<Guild> guild;
     // PvP: contributed by MrJambix in #23.
     /// PvP (migration 0025): the character's Corruption and Corruption_Blight between sessions (with the items).  Both 0 for a character with neither, or from a service of an older
     /// version.
@@ -445,6 +494,19 @@ public:
     virtual CallStatus save_progress(const std::string& id, const Progress& progress) {
         (void)id;
         (void)progress;
+        return CallStatus::Failed;
+    }
+    /// Social, step 9: SaveGuild, which writes a guild whole (its ranks and members) in one transaction.  `guild.version` 0 creates it (the name must be
+    /// free); any other version must be the guild's current one, and the save makes it one more.  Refused: a name or a set of rows the store's rules
+    /// refuse, a stale version, or a member the character table does not know.  A fake that does not care answers Failed.
+    virtual CallStatus save_guild(const Guild& guild) {
+        (void)guild;
+        return CallStatus::Failed;
+    }
+    /// Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it), written with SaveGuildCooldown.
+    virtual CallStatus save_guild_cooldown(const std::string& character_id, int64_t until_ms) {
+        (void)character_id;
+        (void)until_ms;
         return CallStatus::Failed;
     }
 };

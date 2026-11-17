@@ -20,3 +20,6 @@
 #include "session_friends_tests.inc"
 #include "session_chat_fixes_tests.inc"
 #include "session_party_resurrect_tests.inc"
+#include "session_guild_tests.inc"
+#include "session_guild_rules_tests.inc"
+#include "session_guild_scroll_tests.inc"

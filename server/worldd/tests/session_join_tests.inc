@@ -236,8 +236,14 @@ static void test_phase_in_and_moves() {
     h.client_sends({h.client.actor(pawn_ch, hex_bits(capture_blocks::kClientReadyToPhaseIn), true)});
     h.settle();
     const auto phase = h.on_channel(pawn_ch, before);
-    CHECK(phase.size() == 1 && phase[0]->reliable && phase[0]->exports.empty(), "ServerClientIsReadyToPhaseIn: one reliable update on the pawn's channel, no exports");
-    if (phase.size() == 1) {
+    CHECK(phase.size() == 2 && phase[0]->reliable && phase[0]->exports.empty(),
+          "ServerClientIsReadyToPhaseIn: one reliable update on the pawn's channel, no exports, and one chain behind it (the guild component's open, checked below)");
+    if (phase.size() == 2) {
+        const auto guild = repl::read_content_blocks(phase[1]->content.data(), phase[1]->content.bit_pos(), 0);
+        CHECK(guild && guild->size() == 1 && !(*guild)[0].header.is_actor && (*guild)[0].header.object == h.s->bootstrap().setup().guids.guild && !phase[1]->exports.empty(),
+              "the chain behind the phase-in is the pawn's guild component's open (its export and its block): the join's own 16 chains hold none");
+    }
+    if (phase.size() == 2) {
         const auto blocks = repl::read_content_blocks(phase[0]->content.data(), phase[0]->content.bit_pos(), 0);
         CHECK(blocks && blocks->size() == 2, "the actor's block and one subobject's");
         if (blocks && blocks->size() == 2) {
@@ -259,7 +265,7 @@ static void test_phase_in_and_moves() {
     }
     h.client_sends({h.client.actor(pawn_ch, hex_bits(capture_blocks::kClientReadyToPhaseIn), true)});
     h.settle();
-    CHECK(h.on_channel(pawn_ch, before).size() == 1, "a second request is not answered again: once");
+    CHECK(h.on_channel(pawn_ch, before).size() == 2, "a second request is not answered again: the phase-in and the guild component's open, once each");
 
     // moves: three of the capture's, and the largest
     const std::array<const capture_bootstrap::Bits*, 4> moves = {&capture_bootstrap::kClientMovePacked1, &capture_bootstrap::kClientMovePacked2,

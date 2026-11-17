@@ -18,3 +18,4 @@
 #include "others_death_more_tests.inc"
 #include "others_stance_tests.inc"
 #include "others_stance_more_tests.inc"
+#include "others_guild_tests.inc"

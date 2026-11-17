@@ -23,7 +23,7 @@
 //    PVPSuppressed (either side)           support only
 //    Duel (the same active duel)           Hostile: harm only, no flagging (Duel FlaggingActions 0)
 //    Party, Raid (one group)               Friendly: support only
-//    GuildMember (one guild)               Friendly_Guild: support only (no guild is kept yet: Side::guild stays zero and the tier never decides)
+//    GuildMember (one guild)               Friendly_Guild: support only (Side::guild is the guild the player is in; zero: none, and the tier never decides)
 //    Corrupted / Combatant / NonCombatant  Neutral_Player (CombatPermissions 3): harm and support
 //  Without the force flag (the client's PvP key: ServerSetPvpFlag, and each ServerTriggerAbility's bPvpForceFlag) every permission whose
 //  use would flag the actor is taken away, then given back: harm on a corrupted target always, harm on a combatant unless the actor's

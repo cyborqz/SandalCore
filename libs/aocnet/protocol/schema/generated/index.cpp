@@ -63,6 +63,7 @@
 #include "protocol/schema/generated/UFTUEComponent.h"
 #include "protocol/schema/generated/UInteractableComponent.h"
 #include "protocol/schema/generated/UIntrepidFoliageStateComponent.h"
+#include "protocol/schema/generated/UIntrepidGuildComponent.h"
 #include "protocol/schema/generated/UIntrepidRepKeyComponent.h"
 #include "protocol/schema/generated/UIntrepidSocialComponent.h"
 #include "protocol/schema/generated/UItemStorageComponent.h"
@@ -141,6 +142,7 @@ constexpr Entry kByName[] = {
     {"UFTUEComponent", &kUFTUEComponent},
     {"UInteractableComponent", &kUInteractableComponent},
     {"UIntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
+    {"UIntrepidGuildComponent", &kUIntrepidGuildComponent},
     {"UIntrepidRepKeyComponent", &kUIntrepidRepKeyComponent},
     {"UIntrepidSocialComponent", &kUIntrepidSocialComponent},
     {"UItemStorageComponent", &kUItemStorageComponent},
@@ -176,6 +178,7 @@ constexpr Entry kComponents[] = {
     {"FTUE Component", &kUFTUEComponent},
     {"FlyingMountComponent", &kUMountComponent},
     {"GroundMountComponent", &kUMountComponent},
+    {"GuildComponent", &kUIntrepidGuildComponent},
     {"InteractInfo", &kUNPCSecondaryInfo},
     {"InteractableComponent", &kUInteractableComponent},
     {"IntrepidFoliageStateComponent", &kUIntrepidFoliageStateComponent},
@@ -237,6 +240,7 @@ constexpr const ClassSchema* kAll[] = {
     &kUFTUEComponent,
     &kUInteractableComponent,
     &kUIntrepidFoliageStateComponent,
+    &kUIntrepidGuildComponent,
     &kUIntrepidRepKeyComponent,
     &kUIntrepidSocialComponent,
     &kUItemStorageComponent,

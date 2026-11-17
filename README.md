@@ -265,7 +265,7 @@ We welcome contributions from the community! Please read [`CONTRIBUTING.md`](.gi
 
 Developed by Cyb. Special thanks to Hatemost for building the foundation and CoA (Creation of Ashes) / the Ashes community who participated in capturing the PCAPs.
 
-Special thanks to Debuggin for providing private tools, resources, and guidance which helped refine the workflow / process of the project. And for creating a Linux based version of the fork: https://github.com/debuggin/SandalCore
+Special thanks to Debuggin for providing private tools, resources, and guidance which helped refine the workflow / process of the project. And for creating a Linux based version of the fork: https://github.com/debuggin/SandalCore/tree/feature/linux
 
 ---
 

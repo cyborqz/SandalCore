@@ -26,7 +26,7 @@ const (
 	// MaxFriendNameLength bounds a friend's or a sender's name, in bytes.  A character's name is 3 to 20 letters or digits; the bound is the table's, so a name the store takes is
 	// stored whole.
 	MaxFriendNameLength = 64
-	// MaxGuildNameLength bounds a guild's name, in bytes; empty until the world has a guild system.
+	// MaxGuildNameLength bounds a guild's name, in bytes: the guild table's own bound (guilds.go).
 	MaxGuildNameLength = 64
 	// FriendRequestLifetimeMs is how long a pending request stays: 14 days, the game data's PendingFriendRequestTimeInterval (1,209,600,000 ms).
 	FriendRequestLifetimeMs int64 = 14 * 24 * 60 * 60 * 1000

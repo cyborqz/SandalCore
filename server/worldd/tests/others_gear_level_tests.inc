@@ -652,7 +652,7 @@ AOC_REGISTER_TEST(test_a_players_gear_change_while_riding_is_shown_on_the_seated
 // ---- the first open, unchanged ---------------------------------------------------------------------------------------------------------------------------
 
 static void test_the_first_open_still_carries_the_level_gear_and_look() {
-    std::printf("the first open still carries the six components, the level, the 23 held items and the appearance list: the earlier milestone's values stay right\n");
+    std::printf("the first open still carries the seven components, the level, the 23 held items and the appearance list: the earlier milestone's values stay right\n");
     Scene sc;
     Harness& a = sc.a;
     Harness& b = *sc.b;
@@ -669,7 +669,7 @@ static void test_the_first_open_still_carries_the_level_gear_and_look() {
     const uint64_t look_id = id_of_component(*pawn, "UCharacterAppearanceComponent");
     const uint64_t stats_id = id_of_component(*pawn, "UAoCStatsComponent");
     const uint64_t combat_id = id_of_component(*pawn, "UPlayerCombatInfo");
-    CHECK(pawn_copy.subobjects.size() == 6 && base_id != 0 && look_id != 0 && stats_id != 0 && combat_id != 0, "it has the six components that show the character");
+    CHECK(pawn_copy.subobjects.size() == 7 && base_id != 0 && look_id != 0 && stats_id != 0 && combat_id != 0, "it has the seven components that show the character (the guild's name included)");
     const auto level = number_in(st, base_id, "Level");
     CHECK(!level || *level == 1, "the level is the class default (1), or not on the wire at all (a level-1 character's pawn does not send it)");
     const auto held = sent_array(*open, pawn_copy, "UPlayerInfo", "HeldItems");

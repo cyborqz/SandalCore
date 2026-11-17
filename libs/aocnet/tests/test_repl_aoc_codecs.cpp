@@ -611,11 +611,135 @@ static void test_ability_payloads() {
     }
 }
 
+// ---- FGuildData -----------------------------------------------------------------------
+
+static void test_guild_data() {
+    std::printf("FGuildData (the guild component's roster)\n");
+    CHECK(is_known_struct("FGuildData"), "FGuildData has a codec");
+    GuildData g;
+    g.info.name = "Sandal Makers";
+    g.info.guid = guid(1, 2, 3, 4);
+    g.info.ranks = {{"Guild Leader", (1ull << 35) - 1}, {"Officer", 0x1c000000ull}, {"Member", 0x40000001ull}};
+    g.info.level = 3;
+    g.info.experience = 450000;
+    g.info.capacity = 50;
+    g.info.level_cap = 10;
+    GuildMemberData a;
+    a.name = "cyb";
+    a.character_guid = guid(0xb, 0xb, 0xb, 0xb);
+    a.rank = 0;
+    a.level = 25;
+    a.class_id = 2;
+    a.last_online = 1763000000000ull;
+    a.joined = 1762000000000ull;
+    a.group = -1;
+    a.guild_guid = g.info.guid;
+    a.online = true;
+    GuildMemberData b = a;
+    b.name = "dee";
+    b.character_guid = guid(0xc, 0xc, 0xc, 0xc);
+    b.rank = 2;
+    b.level = 1;
+    b.online = false;
+    g.members = {a, b};
+    const auto t = trip("FGuildData", Value(g));
+    // (the layout: the name 4+14 bytes, the guid, the rank count and each rank's name and 35 four-byte booleans, the level, the experience, the four
+    //  empty arrays' counts, the capacity and the level cap, the member count and each member's row, the empty war map's count)
+    const size_t expect = 144 + 128 + 32 + (136 + 35 * 32) + (96 + 35 * 32) + (88 + 35 * 32) + 8 + 32 + 32 + 16 + 8 + 32 + 32 + 32 + 32 + 2 * (64 + 128 + 8 + 8 + 8 + 64 + 64 + 8 + 128 + 32) + 32;
+    CHECK(t.whole && t.bits == expect && t.value->get_if<GuildData>() && *t.value->get_if<GuildData>() == g,
+          "three ranks (the leader's 35 permissions all set), two members and no perks or wars round trip: 5,264 bits");
+    CHECK(t.value && t.value->get_if<GuildData>()->info.ranks[0].permissions == (1ull << 35) - 1,
+          "the 35 permission booleans come back as the leader's mask");
+
+    // The empty guild: its counts are zero but for the level, the level cap and the name.
+    GuildData empty;
+    empty.info.name = "G";
+    empty.info.level = 1;
+    empty.info.level_cap = 10;
+    const auto e = trip("FGuildData", Value(empty));
+    CHECK(e.whole && e.bits == 48 + 128 + 32 + 8 + 32 + 32 + 16 + 8 + 32 + 32 + 32 + 32 + 32, "an empty guild is 464 bits: the name, the guid, the counts and the level and cap");
+
+    // Refusals: a permission above the 35th, a member twice, a name the FString cannot carry, another value type.
+    GuildData high = g;
+    high.info.ranks[1].permissions = 1ull << 35;
+    GuildData twice = g;
+    twice.members[1].character_guid = twice.members[0].character_guid;
+    GuildData nul = g;
+    nul.members[0].name = std::string("cyb\0x", 5);
+    BunchWriter out;
+    CHECK(!struct_accepts("FGuildData", Value(high)) && !struct_accepts("FGuildData", Value(twice)) && !struct_accepts("FGuildData", Value(nul)) &&
+              !write_struct("FGuildData", Value(high), out) && out.bit_pos() == 0 && !struct_accepts("FGuildData", Value(Vec3d{})),
+          "a 36th permission, a member twice, a NUL in a name and another value type are not written");
+    BunchWriter neg;
+    neg.write_int32(-3);
+    CHECK(!read_bits_as("FGuildData", neg).has_value(), "a negative count is not read");
+
+    // RepState accepts it for the schema's GuildData command and refuses it for a string.
+    const auto& guild = schema_named("UIntrepidGuildComponent");
+    RepState st;
+    CHECK(st.set(guild, "GuildData", Value(g)) && !st.set(guild, "GuildName", Value(g)), "RepState::set takes a GuildData for GuildData, not for GuildName");
+}
+
+/// The permission booleans of rank `rank` of a written FGuildData that holds the ranks "L", "O" and "M" and nothing else, as the 35 words after the rank's name.
+static std::vector<uint32_t> guild_rank_words(const BunchWriter& out, size_t rank) {
+    // the guild's name "G" is 4 + 2 bytes, then the guid (16 bytes), the rank count (4 bytes); a rank's name "L" is 4 + 2 bytes and its 35 words follow
+    const size_t head = (6 + 16 + 4) * 8;
+    const size_t one_rank = (6 + 35 * 4) * 8;
+    std::vector<uint32_t> words;
+    const uint8_t* data = out.data();
+    for (size_t n = 0; n < 35; ++n) {
+        const size_t at = head + rank * one_rank + 6 * 8 + n * 32;
+        uint32_t word = 0;
+        for (size_t k = 0; k < 32; ++k) word |= static_cast<uint32_t>((data[(at + k) >> 3] >> ((at + k) & 7)) & 1u) << k;
+        words.push_back(word);
+    }
+    return words;
+}
+
+static void test_guild_permission_order() {
+    std::printf("FGuildData: a rank's 35 permission booleans are written in the game's own order, not the record's\n");
+    GuildData g;
+    g.info.name = "G";
+    g.info.level = 1;
+    g.info.capacity = 50;
+    g.info.level_cap = 10;
+    // the record's own masks (bit 0 bInvitePlayer ... bit 34 bAdjustGuildPoints): the leader all 35, an officer 26, a member 8
+    g.info.ranks = {{"L", (1ull << 35) - 1}, {"O", 0x7ffcfc7full}, {"M", 0x65006014ull}};
+    BunchWriter out;
+    CHECK(write_struct("FGuildData", Value(g), out), "the guild is written");
+    const std::vector<uint32_t> leader = guild_rank_words(out, 0);
+    const std::vector<uint32_t> member = guild_rank_words(out, 2);
+    uint32_t leader_true = 0, member_true = 0;
+    for (const uint32_t w : leader) leader_true += w;
+    for (const uint32_t w : member) member_true += w;
+    CHECK(leader_true == 35 && member_true == 8, "the leader's 35 booleans are all 1 and the member's 8 true ones are 8 words of 1");
+    // The game's serializer writes bInvitePlayer, bKickPlayer, bAssignMemberRanks, bDisbandGuild, bReadGuildMemberDescription, bEditOwnGuildMemberDescription,
+    // bReadOfficerDescription, bEditOtherOfficerDescription, bEditOtherGuildMemberDescription, then bWriteGuildChat as the 10th and bReadGuildChat as the 11th,
+    // and ends with bManageGuildRanks, bManageGuildRankPermissions, bReassignGuildMemberGroup and bRenameGuildGroups.  A member's true permissions are
+    // bReadGuildMemberDescription, bReadOfficerDescription, bViewGuildBank, bDepositGuildBank, bViewGuildAlerts, bViewGuildBoard, bReadGuildChat and
+    // bWriteGuildChat: the words at these places (counted from 0) in the game's order.
+    const std::vector<size_t> member_places = {4, 6, 9, 10, 17, 19, 27, 28};
+    std::vector<size_t> found;
+    for (size_t n = 0; n < member.size(); ++n) {
+        if (member[n] != 0) found.push_back(n);
+    }
+    CHECK(found == member_places, "a member's true permissions are the words 4, 6, 9, 10, 17, 19, 27 and 28 (the chat's two among them)");
+    CHECK(member[9] == 1 && member[10] == 1, "...the 10th word is bWriteGuildChat and the 11th bReadGuildChat, both set for a member");
+    // and back: the words read as the record's order again
+    const auto back = trip("FGuildData", Value(g));
+    const GuildData* read = back.value && back.value->get_if<GuildData>() ? back.value->get_if<GuildData>() : nullptr;
+    CHECK(read && read->info.ranks.size() == 3 && read->info.ranks[0].permissions == (1ull << 35) - 1 && read->info.ranks[1].permissions == 0x7ffcfc7full &&
+              read->info.ranks[2].permissions == 0x65006014ull,
+          "the three masks come back as they were");
+}
+
 int main() {
     test_quat();
     test_guid_to_bool();
     test_interactable_payload();
     test_alignment();
+    test_guild_data();
+    test_guild_permission_order();
     test_appearance_id();
     test_customization();
     test_ability_payloads();

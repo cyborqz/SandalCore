@@ -47,6 +47,12 @@ service CharacterService {
   // the banks 0-19 and slots 0-15 or one held twice. Gathering stage 2: and the professions it names (see SaveProgressRequest.professions).
   // Missing systems, step 0: and the tutorials the character finished (replace_completed_ftues). Social, step 6: and the players and the guilds it ignores (replace_ignored_names).
   rpc SaveProgress(SaveProgressRequest) returns (SaveProgressResponse);
+  // Social, step 9: writes a guild whole (its ranks and members) in one transaction; version 0 creates it and any other version must be its current one (see
+  // SaveGuildRequest). NotFound for an unknown character; InvalidArgument, with nothing changed, for a row the store's rules refuse; FailedPrecondition for a stale
+  // version.
+  rpc SaveGuild(SaveGuildRequest) returns (SaveGuildResponse);
+  // Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). NotFound for an unknown id, InvalidArgument for a negative time.
+  rpc SaveGuildCooldown(SaveGuildCooldownRequest) returns (SaveGuildCooldownResponse);
 }
 
 message Position {
@@ -123,6 +129,9 @@ message Character {
   // PvP: contributed by MrJambix in #23.
   // PvP (migration 0025): the character's corruption and blight, with the items (include_items). Unset when it has neither. (35 to 37 are taken by a branch in progress.)
   PvpState pvp = 38;
+  // Social, step 9: the guild the character is in (migration 0026), with the items (include_items): its ranks, its member rows, the character's rank and
+  // its join cooldown (Unix milliseconds; 0: none). Unset when the character is in no guild.
+  Guild guild = 39;
 }
 
 // A character's PvP state between sessions (migration 0025): the Corruption stat (GameStatProfile.CorruptionId, every client is told it) and Corruption_Blight
@@ -152,6 +161,42 @@ message FriendRequest {
   string sender_name = 2;
   string recipient_guid = 3; // 32 lowercase hex digits, the character the request is for
   int64 expires_at_ms = 4; // Unix milliseconds; a request at or past this time is not sent
+}
+
+// One rank of a guild (social, step 9, migration 0026): its name and its 35 permission booleans as a mask, bit 0 the first of the game data's order
+// (bInvitePlayer ... bit 34 bAdjustGuildPoints).
+message GuildRank {
+  string name = 1;
+  uint64 permissions = 2; // below 2^35
+}
+
+// One member of a guild (migration 0026). Its level and class are read from the character row when the guild is read, so an offline member's roster row is
+// current; joined_ms and last_online_ms are Unix milliseconds on the server's wall clock (0: never seen).
+message GuildMember {
+  string character_id = 1; // 32 lowercase hex digits, not all zero
+  string name = 2;
+  int32 rank = 3; // the index into the guild's ranks
+  int32 level = 4; // 1-25
+  int32 class_id = 5; // ECharacterClass 0-8
+  int64 joined_ms = 6;
+  int64 last_online_ms = 7;
+}
+
+// A guild (social, step 9, migration 0026): its GUID and name, its ranks, its level, experience and capacity, its members and the save version (0: a create; the store
+// makes it one more on every save and refuses a save of an older version). A read for one character also says that character's rank (self_rank; -1: not a member) and
+// its join cooldown (cooldown_until_ms; 0: none).
+message Guild {
+  string id = 1; // 32 lowercase hex digits, not all zero
+  string name = 2;
+  int64 version = 3;
+  repeated GuildRank ranks = 4;
+  int32 level = 5;
+  int32 experience = 6;
+  int32 capacity = 7;
+  int32 level_cap = 8;
+  repeated GuildMember members = 9;
+  int32 self_rank = 10;
+  int64 cooldown_until_ms = 11;
 }
 
 // One item instance in a character's warehouse (storage clerks, step 0, migration 0017). area is "Items" (the item chunks, the same in every town: node_guid 0, container_guid the
@@ -428,3 +473,26 @@ message SaveProgressRequest {
 message SaveProgressResponse {
   Character character = 1; // with its experience rows
 }
+
+// Social, step 9: SaveGuild writes a guild whole (its ranks and its members) in one transaction. version 0 creates the guild (the name must be free); any other
+// version must be the guild's current one, and the save makes it one more, so two sessions cannot write over each other. InvalidArgument, with nothing changed, for a
+// name the store refuses or one another guild has, a rank or member the rules refuse, or a member the character table does not know; FailedPrecondition for a
+// stale version.
+message SaveGuildRequest {
+  Guild guild = 1;
+  // Social, step 9: with disband the guild is removed whole (the row and its ranks and members; the members' cooldowns are saved with SaveGuildCooldown) and the
+  // guild's version is checked like any other save.
+  bool disband = 2;
+}
+
+message SaveGuildResponse {
+  int64 version = 1;
+}
+
+// Social, step 9: the character's join cooldown (Unix milliseconds; 0 clears it). A character whose guild cooldown is in the future cannot create or join a guild.
+message SaveGuildCooldownRequest {
+  string character_id = 1;
+  int64 until_ms = 2;
+}
+
+message SaveGuildCooldownResponse {}

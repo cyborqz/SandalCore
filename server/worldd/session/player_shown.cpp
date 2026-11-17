@@ -77,6 +77,7 @@ void PlayerSession::run_shown(Connection& conn, Clock::time_point now) {
     sync_shown_stats();
     sync_shown_death();
     sync_shown_stance();   // (Social, seeing other players: their combat stances; the declaration is in session/members/stance.inc)
+    sync_shown_guild();    // (social, step 9: the guild's name over the nameplate; session/members/guild.inc)
 }
 
 void PlayerSession::sync_shown_mount(Clock::time_point now) {

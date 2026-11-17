@@ -52,6 +52,9 @@ public:
     CallStatus save_inventory(const std::string& id, const std::vector<InventoryItem>& items, const std::vector<WalletEntry>& wallet, const std::vector<ProcessingJob>& jobs,
                               const std::vector<int64_t>& known_recipes, const std::vector<WarehouseItem>& warehouse) override;
     CallStatus save_progress(const std::string& id, const Progress& progress) override;
+    /// Social, step 9: SaveGuild / SaveGuildCooldown (migration 0026).
+    CallStatus save_guild(const Guild& guild) override;
+    CallStatus save_guild_cooldown(const std::string& character_id, int64_t until_ms) override;
     RegisterResult register_server(const std::string& address,
                                    const std::vector<std::string>& regions) override;
     CallStatus heartbeat(uint32_t server_id) override;

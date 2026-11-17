@@ -40,6 +40,7 @@ type fakeStore struct {
 	ranks   map[string][]character.TreeRanks // plan D1, stage 2
 	bar     map[string][]character.ActionbarSlot
 	profs   map[string][]character.Profession // Gathering stage 2
+	guilds  map[string]character.Guild       // social, step 9: by guild id
 }
 
 func (f *fakeStore) Create(_ context.Context, n character.New) (character.Character, error) {

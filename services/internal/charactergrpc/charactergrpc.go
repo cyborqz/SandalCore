@@ -110,6 +110,16 @@ type FriendsStore interface {
 
 var _ FriendsStore = (*character.Store)(nil)
 
+// GuildStore is the part of character.Store that keeps the guilds (social, step 9). A store without it keeps none: GetCharacter sends no guild and SaveGuild and
+// SaveGuildCooldown are refused.
+type GuildStore interface {
+	SaveGuild(ctx context.Context, g character.Guild) (character.Guild, error)
+	GuildByCharacter(ctx context.Context, characterID string) (character.Guild, bool, error)
+	SetGuildCooldown(ctx context.Context, characterID string, untilMs int64) error
+}
+
+var _ GuildStore = (*character.Store)(nil)
+
 // NameStore is the part of character.Store that finds a character by its name without regard to the case of the letters (social, step 7: the name check and the request to an offline
 // character). A store without it cannot answer GetCharacterByName.
 type NameStore interface {
@@ -351,6 +361,18 @@ func (s *Server) GetCharacter(ctx context.Context, r *characterv1.GetCharacterRe
 			out.Friends = toProtoFriends(friends.Friends)
 			out.FriendRequests = toProtoFriendRequests(friends.Requests)
 		}
+		// Social, step 9: the guild the character is in, with its roster and the character's rank and join cooldown.
+		if gs, ok := s.store.(GuildStore); ok {
+			guild, inGuild, err := gs.GuildByCharacter(ctx, c.ID)
+			if err != nil {
+				return nil, toStatus(ctx, err)
+			}
+			if inGuild {
+				out.Guild = toProtoGuild(guild)
+			} else if guild.CooldownUntilMs != 0 {
+				out.Guild = &characterv1.Guild{SelfRank: -1, CooldownUntilMs: guild.CooldownUntilMs}
+			}
+		}
 	}
 	return &characterv1.GetCharacterResponse{Character: out}, nil
 }
@@ -419,6 +441,67 @@ func (s *Server) SaveProgress(ctx context.Context, r *characterv1.SaveProgressRe
 	}
 	out.Professions = toProtoProfessions(profs)
 	return &characterv1.SaveProgressResponse{Character: out}, nil
+}
+
+// Social, step 9: guilds, mapped to and from the service's messages.
+func toProtoGuild(g character.Guild) *characterv1.Guild {
+	out := &characterv1.Guild{
+		Id: g.ID, Name: g.Name, Version: g.Version, Level: g.Level, Experience: g.Experience, Capacity: g.Capacity, LevelCap: g.LevelCap,
+		SelfRank: g.SelfRank, CooldownUntilMs: g.CooldownUntilMs,
+	}
+	for _, r := range g.Ranks {
+		out.Ranks = append(out.Ranks, &characterv1.GuildRank{Name: r.Name, Permissions: r.Permissions})
+	}
+	for _, m := range g.Members {
+		out.Members = append(out.Members, &characterv1.GuildMember{CharacterId: m.CharacterID, Name: m.Name, Rank: m.Rank, Level: m.Level, ClassId: m.ClassID,
+			JoinedMs: m.JoinedMs, LastOnlineMs: m.LastOnlineMs})
+	}
+	return out
+}
+
+func fromProtoGuild(g *characterv1.Guild) character.Guild {
+	out := character.Guild{ID: g.GetId(), Name: g.GetName(), Version: g.GetVersion(), Level: g.GetLevel(), Experience: g.GetExperience(),
+		Capacity: g.GetCapacity(), LevelCap: g.GetLevelCap()}
+	for _, r := range g.GetRanks() {
+		out.Ranks = append(out.Ranks, character.GuildRank{Name: r.GetName(), Permissions: r.GetPermissions()})
+	}
+	for _, m := range g.GetMembers() {
+		out.Members = append(out.Members, character.GuildMember{CharacterID: m.GetCharacterId(), Name: m.GetName(), Rank: m.GetRank(), Level: m.GetLevel(),
+			ClassID: m.GetClassId(), JoinedMs: m.GetJoinedMs(), LastOnlineMs: m.GetLastOnlineMs()})
+	}
+	return out
+}
+
+// SaveGuild writes a guild whole (social, step 9, migration 0026): version 0 creates it, any other version must be the guild's current one. The save makes the version one
+// more and the reply carries it. AlreadyExists for a name another guild has; FailedPrecondition for a stale save; NotFound for a guild the version names and the store
+// does not hold; InvalidArgument for a row the store's rules refuse.
+func (s *Server) SaveGuild(ctx context.Context, r *characterv1.SaveGuildRequest) (*characterv1.SaveGuildResponse, error) {
+	gs, ok := s.store.(GuildStore)
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "this character store keeps no guilds")
+	}
+	if r.GetGuild() == nil {
+		return nil, status.Error(codes.InvalidArgument, "no guild is given")
+	}
+	g := fromProtoGuild(r.GetGuild())
+	g.Disband = r.GetDisband()
+	saved, err := gs.SaveGuild(ctx, g)
+	if err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.SaveGuildResponse{Version: saved.Version}, nil
+}
+
+// SaveGuildCooldown writes the time before which a character cannot create or join a guild again (social, step 9, migration 0026). InvalidArgument for a negative time.
+func (s *Server) SaveGuildCooldown(ctx context.Context, r *characterv1.SaveGuildCooldownRequest) (*characterv1.SaveGuildCooldownResponse, error) {
+	gs, ok := s.store.(GuildStore)
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "this character store keeps no guild cooldowns")
+	}
+	if err := gs.SetGuildCooldown(ctx, r.GetCharacterId(), r.GetUntilMs()); err != nil {
+		return nil, toStatus(ctx, err)
+	}
+	return &characterv1.SaveGuildCooldownResponse{}, nil
 }
 
 // addTalents puts the character's bought ranks and its action bar (plan D1, stage 2) into a reply.
@@ -617,8 +700,10 @@ func toStatus(ctx context.Context, err error) error {
 	switch {
 	case errors.Is(err, character.ErrCharacterLimit):
 		return status.Error(codes.ResourceExhausted, err.Error())
-	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken):
+	case errors.Is(err, character.ErrNameTaken), errors.Is(err, character.ErrIDTaken), errors.Is(err, character.ErrGuildNameTaken):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, character.ErrGuildVersion):
+		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, character.ErrNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, character.ErrInvalid):

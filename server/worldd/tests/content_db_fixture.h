@@ -124,7 +124,9 @@ inline constexpr const char* kProgressStatements[] = {
     "(6064632139774033920, 'GM_Scroll_MakeMeLevel20', 1, 0, 0), (6064632956008729280, 'GM_Scroll_MakeMeLevel25', 1, 0, 0), "
     "(6064632988571664384, 'GM_Scroll_PrimaryArchetypeBard', 1, 0, 0), (6064632988571926530, 'GM_Scroll_PrimaryArchetypeTank', 1, 0, 0), "
     "(6064634082466267136, 'GM_Scroll_Gear 01 (Light ) Starter', 5, 0, 0), (6064633408453149160, 'GM_Scroll_Consumables 06', 5, 0, 0), "
-    "(6064631187700000020, 'Test_Odd_Scroll', 1, 0, 0), (6064631187700000021, 'Test_Random_Scroll', 1, 0, 0), (6064631187700000022, 'Test_Keep_Scroll', 1, 0, 0)",
+    "(6064631187700000020, 'Test_Odd_Scroll', 1, 0, 0), (6064631187700000021, 'Test_Random_Scroll', 1, 0, 0), (6064631187700000022, 'Test_Keep_Scroll', 1, 0, 0), "
+    "(6064632203848384541, 'Consumable_GuildScroll_GuildCreation', 10, 0, 0)",   // the guild creation scroll (item_use OpenGuildCreationMenu)
+    "UPDATE item SET display_name = 'Guild Creation Scroll' WHERE guid = 6064632203848384541",
     "UPDATE item SET max_stack_size = 20 WHERE guid = 6064631187700000007",   // Test_Potion stacks to 20
     "UPDATE item SET quality_curve_guid = 109166871729784 WHERE guid = 6064631187700000007",   // ... and shows the real colour bands (Common 1-5 ... Artifact 101-200)
     "UPDATE item SET max_durability = 11 WHERE guid IN (6064630214426886486, 6064630214427083132)",   // the chest and the legs
@@ -133,17 +135,19 @@ inline constexpr const char* kProgressStatements[] = {
     "(6064632988571664384, 'ActivateActionResponses', 1, 0, 0), (6064632988571926530, 'ActivateActionResponses', 1, 0, 0), "
     "(6064634082466267136, 'ActivateActionResponses', 1, 0, 0), (6064633408453149160, 'ActivateActionResponses', 1, 0, 0), "
     "(6064631187700000020, 'ActivateActionResponses', 1, 0, 0), (6064631187700000021, 'ActivateActionResponses', 1, 0, 0), "
-    "(6064631187700000022, 'ActivateActionResponses', 0, 0, 0)",
+    "(6064631187700000022, 'ActivateActionResponses', 0, 0, 0), (6064632203848384541, 'OpenGuildCreationMenu', 1, 2.0, 0)",
     "INSERT INTO item_action VALUES (6064634615524884604, 0, 6064634615529013375), (6064630843430862909, 0, 108329676396190), "
     "(6064632139774033920, 0, 6064632139805425666), (6064632956008729280, 0, 6064632956017773249), (6064632988571664384, 0, 6064632988321120266), "
     "(6064632988571926530, 0, 6064632988317974535), (6064634082466267136, 0, 6064634082573549569), (6064633408453149160, 0, 6064633408454328809), "
-    "(6064631187700000020, 0, 7100000000000000020), (6064631187700000021, 0, 7100000000000000021), (6064631187700000022, 0, 6064633408454328809)",
+    "(6064631187700000020, 0, 7100000000000000020), (6064631187700000021, 0, 7100000000000000021), (6064631187700000022, 0, 6064633408454328809), "
+    "(6064632203848384541, 0, 6064630491749351431)",
     "INSERT INTO action_response VALUES (6064634615529013375, 'GM_Scroll_Level10Reward', 'GiveItem', 0, '', 1), (108329676396190, 'GM_Scroll_Level15Reward', 'GiveItem', 0, '', 1), "
     "(6064632139805425666, 'GM_Scroll_Level20Reward', 'GiveItem', 0, '', 1), (6064632956017773249, 'GM_Scroll_Level25Reward', 'GiveItem', 0, '', 1), "
     "(6064632988321120266, 'SetPrimaryArchetypeBard', 'SetPrimaryArchetype', 108640158570105, 'Bard', 1), "
     "(6064632988317974535, 'SetPrimaryArchetypeTank', 'SetPrimaryArchetype', 108640201692798, 'Tank', 1), "
     "(6064634082573549569, 'GM_Scroll_Gear 01 (Light ) Starter', 'GiveItem', 0, '', 1), (6064633408454328809, 'GM_Scroll_Consumables 06', 'GiveItem', 0, '', 1), "
-    "(7100000000000000020, 'Test_Callout', 'Callout', 0, '', 1), (7100000000000000021, 'Test_Random', 'GiveItem', 0, '', 1)",
+    "(7100000000000000020, 'Test_Callout', 'Callout', 0, '', 1), (7100000000000000021, 'Test_Random', 'GiveItem', 0, '', 1), "
+    "(6064630491749351431, 'AR_OpenGuildWindow_Generic', 'OpenGuildWindow', 0, '', 1)",
     "INSERT INTO action_reward VALUES (6064634615529013375, 0, 6064634615529865344), (108329676396190, 0, 6064630843443445822), "
     "(6064632139805425666, 0, 6064632139788779521), (6064632956017773249, 0, 6064632956018035394), (6064634082573549569, 0, 6064634082574270466), "
     "(6064633408454328809, 0, 6064633408454984170), (7100000000000000021, 0, 7100000000000000031)",

@@ -27,8 +27,9 @@ namespace aoc { namespace worldd {
 
 class PlayerSession;
 
-/// The places a client call can come from: the PlayerController's own calls, the pawn's own calls, the calls on the pawn's ability component and on the PlayerController's tutorial component.
-enum class RpcScope : uint8_t { PlayerController, Pawn, AbilityComponent, FtueComponent };
+/// The places a client call can come from: the PlayerController's own calls, the pawn's own calls, the calls on the pawn's ability component, on the
+/// PlayerController's tutorial component and on the pawn's guild component.
+enum class RpcScope : uint8_t { PlayerController, Pawn, AbilityComponent, FtueComponent, GuildComponent };
 
 /// What one call brings to its handler.
 struct RpcContext {

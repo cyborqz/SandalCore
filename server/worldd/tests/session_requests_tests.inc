@@ -238,14 +238,14 @@ static void test_phase_in_waits() {
     h.client_sends({h.client.actor(pawn_ch, hex_bits(capture_blocks::kClientReadyToPhaseIn), true)});
     h.s->tick(h.conn);
     h.flush();
-    CHECK(h.s->replies_pending() == 1, "the phase-in waits");
+    CHECK(h.s->replies_pending() == 2, "the phase-in waits, and the guild component's open behind it");
     h.client_receives = true;
     h.give_held();
     h.settle();
     // the filler's bunches are 8 bits; the phase-in is the one that is not
     size_t real = 0;
     for (const auto* d : h.on_channel(pawn_ch, before)) if (d->content.bit_pos() != 8) ++real;
-    CHECK(real == 1, "after the acknowledgement the phase-in update arrives, exactly once (the checkpoint was restored while it waited)");
+    CHECK(real == 2, "after the acknowledgement the phase-in update arrives, exactly once, and the guild component's open behind it (the checkpoint was restored while they waited)");
     CHECK(h.s->replies_pending() == 0, "nothing pending");
 }
 // [CoA x C-Y-B]

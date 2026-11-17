@@ -154,6 +154,7 @@ PlayerSession::~PlayerSession() {
     finished_ = true;   // (a session dropped without finish() is over too: the reverse index below must not leave it looking online)
     leave_friends("the session is destroyed");
     forget_party();
+    forget_guild();   // social, step 9: the roster loses its online flag
     leave_duels(last_now_);   // #23 (MrJambix)
     forget_friends();   // social, step 7: the reverse index loses this session
     clear_pet();
@@ -246,6 +247,7 @@ std::unique_ptr<PlayerSession> PlayerSession::join(Connection& conn, PlayerWorld
     p->init_ignored(character);   // social, step 6: the players and the guilds the character ignores, sent with the join
     p->pvp_init(character);       // PvP (migration 0025): the corruption and blight he left with  // #23 (MrJambix)
     p->init_friends(character);   // social, step 7: the friends and the pending requests, sent with the join in the SocialComponent
+    p->init_guild(character);     // social, step 9: the guild, its roster and the join cooldown, sent with the join in the pawn's GuildComponent
     p->notes_ = std::move(built.notes);
     if (built.items_repaired) {   // Gathering stage 3: the login moved resource items out of the Backpack: the record in the database is the old layout
         p->inventory_dirty_ = true;
@@ -587,6 +589,7 @@ void PlayerSession::finish(const char* why) {
     if (finished_) return;
     finished_ = true;
     leave_party_on_finish();
+    leave_guild_on_finish();   // social, step 9: the roster says the member is offline now, and the other members are told
     leave_duels(last_now_);   // #23 (MrJambix)
     leave_friends(why);   // social, step 7: the sessions that list this character are told it is offline
     clear_pet();
@@ -927,6 +930,7 @@ void PlayerSession::dispatch(Connection& conn, Role role, const repl::ClientRpc&
     else if (rpc.on_actor && role == Role::Pawn) scope = RpcScope::Pawn;
     else if (!rpc.on_actor && role == Role::Pawn && rpc.object == pb_.setup().guids.ability) scope = RpcScope::AbilityComponent;
     else if (!rpc.on_actor && role == Role::PlayerController && rpc.object == pb_.setup().guids.ftue) scope = RpcScope::FtueComponent;
+    else if (!rpc.on_actor && role == Role::Pawn && rpc.object == pb_.setup().guids.guild) scope = RpcScope::GuildComponent;   // social, step 9
     if (scope) {
         if (const RpcHandler handler = rpc_table().find(*scope, name_of_rpc)) return handler(*this, RpcContext{conn, role, rpc, bunch, now});
     }
@@ -978,6 +982,7 @@ void PlayerSession::on_phase_in_ready(Connection& conn, Clock::time_point now) {
         return send;
     }, conn, /*must_build=*/true);
     send_welcome(conn);   // the first chat line, behind the phase-in (session/player_chat.cpp)
+    open_guild(conn);     // social, step 9: the pawn's guild component, in a chain of its own once the character is in the world (the join's chains are the retail login's)
     // E1 stage 3 fix: the client's synchronized clock is set again once its loading frames are over (1 s and 5 s after the phase-in), then every
     // 120 s (retail's cadence). The client adds each frame's whole DeltaTime to the clock after a set, so the join's ClientSetTime, processed in
     // the first frame after the 3 s LoadMap, left the clock 3 s ahead: every cooldown ended 3 s early on the client (a play test of 2026-10-06).
@@ -1032,5 +1037,8 @@ void PlayerSession::register_core_rpcs(RpcTable& t) {
 
 // Social, step 7: the friends list's load and save.  It is part of this file so that the feature adds no source-list line of its own.
 #include "session/player_friends.inc"
+
+// Social, step 9: the guilds.  It is part of this file so that the feature adds no source-list line of its own.
+#include "session/player_guild.inc"
 
 }}  // namespace aoc::worldd

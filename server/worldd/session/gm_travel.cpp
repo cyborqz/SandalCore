@@ -963,6 +963,15 @@ GmRunResult GmTravel::run_command(const std::string& command, const std::map<std
         const PlayerSession::GmPvpResult r = handle.player->gm_pvp(*handle.connection, text("state"), number("amount"), now_(), by);
         if (!r.ok) return failed(GmStatus::InvalidArgument, r.refusal);
         out.message = r.text;
+    } else if (def->name == "guild") {
+        // Social, step 9: the second player of a one-client test (the load-test bot cannot accept an invitation)
+        const std::string action = text("action");
+        const std::string rank = text("rank");
+        const std::string guild_name = text("guild");
+        if (action == "join" && guild_name.empty()) return failed(GmStatus::InvalidArgument, "join needs the guild's name");
+        const PlayerSession::GmGuildResult r = handle.player->gm_guild(*handle.connection, action, guild_name, rank, now_(), by);
+        if (!r.ok) return failed(GmStatus::InvalidArgument, r.refusal);
+        out.message = r.text;
     } else if (def->name == "give-experience") {
         const PlayerSession::GmXpResult r = handle.player->gm_give_experience(*handle.connection, whole("amount"), now_(), by);
         if (!r.ok) return failed(GmStatus::FailedPrecondition, r.refusal);

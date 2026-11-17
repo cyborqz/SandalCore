@@ -61,6 +61,7 @@ void PlayerSession::pvp_side_of(pvp::Side& out, bool& force) const {
     force = pvp_flag_ || pvp_trigger_flag_;
     if (duel_book_) out.duel = duel_book_->fighting_key(pb_.setup().character_guid);   // step 3: the duel he fights (Duel -> Duel: Hostile)
     out.protection = pvp_protected();   // step 4: an opt-in protection (no harm from another player outside a duel)
+    out.guild = guild_ ? guild_->id : std::array<uint32_t, 4>{};   // social, step 9: one guild is the Friendly_Guild tier of the rules
 }
 
 bool PlayerSession::pvp_protected() const {
