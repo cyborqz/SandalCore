@@ -392,6 +392,8 @@ bool PlayerWorld::load_area(const spawns::AreaConfig& area, std::string& error) 
     sources.db = content_;
     sources.captured = &*captured_;
     sources.gm = &*gm_;
+    // the named mobs the design data places nowhere stand at their own places (spawns/hand_placed.h: modelled)
+    sources.hand_placed = true;
     sources.generic = &*generic_;
     sources.looks = looks_.get();
     sources.objects = objects_ ? &*objects_ : nullptr;

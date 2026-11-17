@@ -8,6 +8,7 @@
 // ============================================================================
 #include "spawns/area_loader.h"
 #include "respawn/make_shrines.h"
+#include "spawns/hand_placed.h"
 
 #include "spawns/npc_looks.h"
 #include "world/interaction_state.h"
@@ -50,7 +51,7 @@ std::string AreaReport::describe() const {
       << population.area_sets << " area sets in the area: " << population.generic_spawned << " NPCs made from a generic Blueprint template, " << population.area_spawned
       << " from area points, " << population.no_template << " points without any template, " << population.blacklisted << " blacklisted, " << population.no_asset
       << " without an asset, " << population.filtered_total() << " dropped by the spawn filter), " << captured_npcs << " captured NPCs (" << duplicates << " dropped as the data's), " << gatherables << " resource nodes, " << gm_vendors
-      << " GM vendors, " << shrines_made << " Embersprings (" << respawn_points.size() << " respawn points in the area, " << shrines_no_record << " without a respawn definition, " << shrines_refused << " refused)";
+      << " GM vendors, " << hand_placed << " hand-placed points, " << shrines_made << " Embersprings (" << respawn_points.size() << " respawn points in the area, " << shrines_no_record << " without a respawn definition, " << shrines_refused << " refused)";
     return o.str();
 }
 // (Cyb) (C.O.A)
@@ -130,6 +131,7 @@ std::optional<AreaReport> load_area(world::ActorRegistry& registry, const AreaSo
     report.area = area;
     auto loaded = sources.db->population_data(error);
     if (!loaded) return std::nullopt;
+    if (sources.hand_placed) report.hand_placed = static_cast<size_t>(add_hand_placed(*loaded));
     // (kept by the report: the node populations select from the same chain, and an NPC's life needs its instance's and route's rows)
     report.data = std::make_shared<const content::PopulationData>(std::move(*loaded));
     const content::PopulationData* population = report.data.get();

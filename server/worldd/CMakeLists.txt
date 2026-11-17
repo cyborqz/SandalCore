@@ -288,6 +288,8 @@ add_library(worldd_core STATIC
     spawns/generic_npc.cpp
     spawns/gm_garden.cpp
     spawns/gm_garden.h
+    spawns/hand_placed.cpp
+    spawns/hand_placed.h
     spawns/garden_defs.h
     spawns/generic_npc.h
     spawns/mount_donors.h
