@@ -9,8 +9,8 @@
 //    its pawn       the registry's Player actor (ActorKind::Player), the pawn as a simulated proxy shows it: built once the phase-in is out (bootstrap/observer_actor.cpp), kept where the
 //                   player is and in line with what the player does by its own session, once a tick, in the first part of the server's tick (session/player_presence.cpp: the place and the
 //                   walk; session/player_emotes.cpp: the emotes; session/player_shown.cpp: the mount it has out and the mount it rides, the held items and the look, the weapon set in hand, the
-//                   level with the level-up call the game multicasts, and the live Health, MaxHealth, Mana and MaxMana).  The next parts of seeing other players (death, combat stances) add one `sync_*` each to
-//                   PlayerSession::run_shown and write into this pawn through PlayerSession::show_in_pawn.  Modelled: no recording shows another player's pawn receive these, so the shape
+//                   level with the level-up call the game multicasts, the live Health, MaxHealth, Mana and MaxMana, and the death bit).  The next part of seeing other players (the combat stances) adds one
+//                   `sync_*` to PlayerSession::run_shown and writes into this pawn through PlayerSession::show_in_pawn.  Modelled: no recording shows another player's pawn receive these, so the shape
 //                   is the owner's own reply's, kept current on the pawn the watchers hold; the inactive weapon pair's back placement is animation, not replicated data.
 //    its mount      the registry's Mount actor (ActorKind::Mount), summoned and ridden by its owner's session in the OWNER's form (session/mounts.h, session/riding.h).  Every other player's
 //                   view is sent the form below: the same actor, as a simulated proxy that moves.

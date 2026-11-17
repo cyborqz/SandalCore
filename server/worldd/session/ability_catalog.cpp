@@ -234,6 +234,10 @@ std::optional<Catalog> Catalog::load(const std::string& path, const stats::StatB
                 if (auto t = db->teleport(tp->get<int64_t>(), unread)) d.teleport = std::move(*t);
             }
         }
+        // social, seeing other players (their death): a hit that raises the dead names its ResurrectRecordBase, and the life states it reaches (the dead alone
+        // for the Cleric's Resurrection; a file from before the two keys gives 0, and the hit raises nobody)
+        if (const auto rs = extra.find("ResurrectId"); rs != extra.end() && rs->is_number_integer()) d.resurrect = rs->get<int64_t>();
+        if (const auto ls = extra.find("ApplicableLifeStates"); ls != extra.end() && ls->is_number_integer()) d.life_states = ls->get<int>();
         c.hit_names_[d.row.name] = g;
         c.hits_.emplace(g, std::move(d));
     }

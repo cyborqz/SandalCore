@@ -567,6 +567,20 @@ public:
         transpose_with_ = 0;
         return id;
     }
+    /// Social, seeing other players (their death): a Resurrection hit that landed on a dead player.  The session asks him (ClientPromptResurrect) or revives him,
+    /// with the values of the record its ResurrectId names.  Once.
+    struct ResurrectRequest {
+        uint64_t target = 0;   // the dead player's pawn
+        int64_t  record = 0;   // the ResurrectRecordBase the hit names
+    };
+    ResurrectRequest take_resurrect() {
+        const ResurrectRequest r = resurrect_;
+        resurrect_ = ResurrectRequest{};
+        return r;
+    }
+    /// The record of a running Resurrection cast of this caster that names `target` (0: no such cast): the client's ServerResurrect confirms the cast the trigger
+    /// started, so a request without one is refused.  The trigger spent the ability's Mana, started its cooldown and checked the target's side and reach.
+    int64_t resurrect_cast_for(uint64_t target) const;
     /// Where Dimensional Bolt's second press sends the pet (target 0: nowhere), once.
     struct BoltRecall {
         uint64_t target = 0;
@@ -1099,6 +1113,7 @@ void   step_multi_hit(Cast& cast, double t);
     void   apply_hit(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t, bool skip_resource, const HitSource& src);
     void   apply_hit_here(bootstrap::AbilityChange& c, const abilities::HitDef& hit, double t, bool skip_resource, const HitSource& src);   // the same, whoever its mask names
     uint64_t   transpose_with_ = 0;
+    ResurrectRequest resurrect_;   // social, seeing other players: the Resurrection hit that landed on a dead player, once
     BoltRecall bolt_recall_;
     void   land_bolt_recall(int32_t client_id, uint64_t target, double t);
     /// The hit's ModifyCooldownsIds: seconds added to what is left of each ability's cooldown; one that is not running starts, and spends no charge [R: Bolt, CD charges 1].

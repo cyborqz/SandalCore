@@ -2256,6 +2256,27 @@ std::optional<Send> PlayerBootstrap::group_invite(const std::array<uint32_t, 4>&
     return finish(Role::PlayerController, false, "ClientRequestJoinGroup", std::move(e));
 }
 
+std::optional<Send> PlayerBootstrap::resurrect_prompt(const std::array<uint32_t, 4>& instigator) {
+    if (!ok_) return std::nullopt;
+    const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientPromptResurrect");
+    if (!rpc) return std::nullopt;
+    repl::RpcParams params;
+    bool good = true;
+    for (int i = 0; i < 4; ++i) {
+        good = repl::set_rpc_param(*rpc, params, std::string("InstigatorGuid.") + "ABCD"[i], Value::i64(static_cast<int32_t>(instigator[static_cast<size_t>(i)]))) && good;
+    }
+    if (!good) return std::nullopt;
+    BunchWriter bits;
+    bool failed = false;
+    if (repl::write_rpc_params(*rpc, params, bits, {}, &failed) == 0 || failed) return std::nullopt;
+    BunchWriter field;
+    if (repl::write_field(*pc_.obj.schema, rpc->field_index, bits, field) == 0) return std::nullopt;
+    Emission e;
+    repl::BlockHeader header;
+    if (repl::write_content_block(e.payload, header, field) == 0) return std::nullopt;
+    return finish(Role::PlayerController, false, "ClientPromptResurrect", std::move(e));
+}
+
 std::optional<Send> PlayerBootstrap::group_settings() {
     if (!ok_) return std::nullopt;
     const schema::RpcSchema* rpc = pc_.obj.schema->rpc("ClientUpdateGroupSettings");

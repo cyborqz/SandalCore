@@ -12,7 +12,7 @@ public:
 
 private:
     /// Every tick, after sync_presence and run_emotes (tick_logic, so that the registry is written before the view passes): brings the pawn the other players are shown in line with the
-    /// player.  Each later part of seeing other players (death, combat stances) adds its own `sync_*` call here and writes through show_in_pawn.
+    /// player.  Each part of seeing other players adds its own `sync_*` call here and writes through show_in_pawn (the combat stances are the next one).
     void run_shown(Connection& conn, Clock::time_point now);
     /// The one place a change to the pawn the other players are shown is made: `fn(WorldActor&)` runs on the registry's Player actor of this player, which counts the change (`kind`: a
     /// position alone is Change::Movement, anything else State).  False when the pawn is not in the world (yet).
@@ -35,6 +35,11 @@ private:
     /// ... the current Health, MaxHealth, Mana and MaxMana, from the player's pawn: every change of them is shown (damage, a heal, regeneration, an effect that
     /// changes a maximum), and no change means no update of the shown pawn.
     void sync_shown_stats();
+    /// ... the death bit (CombatInfo.bIsDead), kept equal to the player's own life: written in the same tick as the Health and Mana 0 of a death, so
+    /// that the watchers get them in one update, and cleared with the values of a respawn or a revive.
+    void sync_shown_death();
+    /// The death bit the pawn the other players are shown carries now (tests).
+    bool shown_dead() const { return shown_dead_; }
     /// The player's equipment changed in an update that moved `marks` equipment slots: the pawn the others are shown takes its look, held items and stats at the next tick.
     void note_shown_gear(size_t marks) {
         shown_gear_dirty_ = true;
@@ -71,6 +76,8 @@ private:
     bool                                 shown_weapon_dirty_ = false;
     bool                                 shown_level_dirty_ = false;
     int                                  shown_level_ = 0;
+    bool                                 shown_dead_ = false;      // the death bit the pawn the others are shown carries
+    size_t                               shown_death_logged_ = 0;
     /// The announcement serial each other player's pawn had when this session last looked at it (a pawn it never looked at is not an effect to play: its open has the level).
     std::unordered_map<uint64_t, uint64_t> shown_level_ups_;
     uint64_t                             shown_level_ups_seen_ = 0;     // the registry's count when it last looked

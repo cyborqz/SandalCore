@@ -3,8 +3,8 @@
 // ============================================================================
 //  tests/others_health_mana_more_tests.inc: other players see a player's live Health and Mana, the cases that follow the first ones (Social, seeing other players: live Health and Mana)
 //
-//  Included after tests/others_health_mana_tests.inc (its helpers: stat_in, stat_deltas_on, shown_stat, session_stat).  A player who dies and is revived (the bars of a dead player: the
-//  next milestone adds the death itself on top of them), and changes that cancel out inside one tick.
+//  Included after tests/others_health_mana_tests.inc (its helpers: stat_in, stat_deltas_on, shown_stat, session_stat).  A player who dies and is revived (the bars of a dead player; the
+//  death itself is milestone 4's, tests/others_death_tests.inc), and changes that cancel out inside one tick.
 // ============================================================================
 
 static void test_a_dead_players_bars_fall_to_zero_stay_there_and_fill_again_at_the_revive() {
@@ -29,7 +29,7 @@ static void test_a_dead_players_bars_fall_to_zero_stay_there_and_fill_again_at_t
     CHECK(!mana.empty() && mana.back().value == 0.0f, "...and Mana 0");
     CHECK(shown_stat(*shown_pawn(a), content::kGuidHealth) == 0.0f && shown_stat(*shown_pawn(a), content::kGuidMana) == 0.0f, "the pawn the watchers hold has both at 0");
     CHECK(shown_stat(*shown_pawn(a), content::kGuidMaxHealth) == max_h && shown_stat(*shown_pawn(a), content::kGuidMaxMana) == max_m, "...and keeps its maxima");
-    CHECK(closes_on(b, pch, from).empty() && sc.channel(pawn_id) == pch, "the pawn stays in the watcher's world (the death itself is the next milestone's)");
+    CHECK(closes_on(b, pch, from).empty() && sc.channel(pawn_id) == pch, "the pawn stays in the watcher's world (the pawn is the corpse; the bit is milestone 4's)");
     // a dead player does not regenerate
     const size_t from_dead = b.got.size();
     a.run(milliseconds(3000));

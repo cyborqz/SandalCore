@@ -24,6 +24,7 @@
 #include "protocol/repl/item_rpc.h"
 #include "protocol/repl/move_packed.h"
 #include "protocol/repl/storage_rpc.h"
+#include "session/ability_resurrect.h"
 #include "session/gm_travel.h"
 #include "protocol/repl/rpc_fields.h"
 #include "items/acquired.h"
@@ -580,5 +581,8 @@ void PlayerSession::on_loot_request(Connection& conn, const repl::ClientRpc& rpc
 void PlayerSession::register_combat_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerRequestLootStorageEvents", [](PlayerSession& s, const RpcContext& c) { s.on_loot_request(c.conn, c.rpc, c.now); });
 }
+
+// Social, seeing other players (their death): the Resurrect, a dead player brought back in place, in a file of its own.
+#include "session/player_resurrect.inc"
 
 }}  // namespace aoc::worldd

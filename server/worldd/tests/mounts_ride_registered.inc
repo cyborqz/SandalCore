@@ -14,3 +14,5 @@
 #include "mounts_ride_health_tests.inc"
 #include "others_health_mana_tests.inc"
 #include "others_health_mana_more_tests.inc"
+#include "others_death_tests.inc"
+#include "others_death_more_tests.inc"

@@ -93,6 +93,10 @@ struct HitDef {
     /// contentc version 42: the velocity change this hit gives its target when it lands (Get Off The Stage), the teleport record it names (the Grapple's pull); empty for a hit that has none.
     std::optional<content::HitImpulseRow> impulse;
     std::optional<content::TeleportRow>   teleport;
+    /// Social, seeing other players (their death): the ResurrectRecordBase the hit names (extra's ResurrectId; 0 for a hit that raises nobody) and the life states of
+    /// its targets (extra's ApplicableLifeStates: 1 alive, 2 dead, 3 both).  The Cleric's Resurrection names the dead alone.
+    int64_t                            resurrect = 0;
+    int                                life_states = 0;
     std::vector<int64_t>               zones;            // the lingering zones the hit spawns (LingeringZonesIds)
     std::vector<int64_t>               fires;            // E1 stage 3 fix 2: the projectiles the hit fires when it lands (ab_hit_projectile "fire": the book's Split hits)
     // plan E1, stage 3: what the damage rules read of the hit (extra's EventTags ...)

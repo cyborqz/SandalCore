@@ -10,6 +10,7 @@
 #include "bootstrap/stealth_effects.h"
 #include "content/content_db.h"
 #include "content/emote_commands.h"
+#include "session/ability_resurrect.h"
 #include "session/ability_timings.h"
 #include "session/summoner_pets.h"
 #include "session/consumable_timings.h"
@@ -1779,9 +1780,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
     }
     const bool melee = ability && (ability->row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                                    std::find(ability->row.tags.begin(), ability->row.tags.end(), "ability.Melee") != ability->row.tags.end());
-    // whether the hit reaches a target: it is there and alive, on a side the hit helps or harms, and within reach (a ball's hit has no reach to keep: it hurts what the ball touches, wherever the caster is by now)
+    // whether the hit reaches a target: it is there and in the life state the hit reaches (alive; dead for a Resurrection's hit), on a side the hit helps or harms, and
+    // within reach (a ball's hit has no reach to keep: it hurts what the ball touches, wherever the caster is by now) [social, seeing other players: their death]
+    const bool raises_the_dead = hit.resurrect != 0 && (hit.life_states & 2) != 0;
     const auto reached = [&](const combat::TargetInfo& ti) {
-        if (!ti.exists || !ti.alive) return false;
+        if (!ti.exists) return false;
+        if (!ti.alive && !raises_the_dead) return false;
         const bool hostile = ti.relation == combat::Relation::Hostile;
         if (hostile ? (mask & 2) == 0 : (mask & (1 | 4 | 8 | 16)) == 0) return false;   // a side this hit does not reach
         return src.reach_free || !combat_ || ti.surface_distance_cm <= combat_->reach_cm(melee) + combat_->data().activation_leeway_cm();
@@ -1852,6 +1856,12 @@ void AbilityPipeline::apply_hit_on_targets(AbilityChange& c, const HitDef& hit, 
         if (!ti || !reached(*ti)) continue;
         const bool hostile = ti->relation == combat::Relation::Hostile;
         combat::Fighter* tf = combat_ ? combat_->fighter(id) : nullptr;
+        // a Resurrection's hit on a dead player raises him: its record goes to the session, which asks him or brings him back (no stat of the hit lands; the
+        // record's own values do)
+        if (raises_the_dead && !ti->alive && tf && tf->is_player()) {
+            resurrect_ = ResurrectRequest{id, hit.resurrect};
+            continue;
+        }
         if (!tf) {
             // The caster's own mount: not a fighter of the combat world, its Health is its own stat (the session's heal puts it there). Only a hit
             // that helps allies and heals does anything; a damage hit on a friendly mount reaches nobody.
@@ -3987,16 +3997,22 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
     }
     const bool is_toggle = row.held_behavior.find("Toggle") != std::string::npos;
 
-    // the other actors the call names: each must be there, alive, of the side the ability reaches, in range and in sight [plan E1, stage 3].  The
-    // caster's own mount is no combat world actor: the session's view of it stands in (a friendly ally whose Health a heal reaches).
+    // the other actors the call names: each must be there, of the side the ability reaches, in the life state it reaches (alive, or dead for a
+    // Resurrection), in range and in sight [plan E1, stage 3; social, seeing other players: their death].  The caster's own mount is no combat world
+    // actor: the session's view of it stands in (a friendly ally whose Health a heal reaches).
     std::vector<uint64_t> target_actors;
     {
         const bool melee = row.name.rfind("WeaponCombo_Melee", 0) == 0 ||
                            std::find(row.tags.begin(), row.tags.end(), "ability.Melee") != row.tags.end();
+        const int life_states = abilities::resurrect_life_states(*catalog_, *def);
         for (const uint64_t id : info.target_actors) {
             if (target_actors.size() >= 16) break;
             const std::optional<combat::TargetInfo> ti = target_info(id);
-            if (!ti || !ti->exists || !ti->alive) return refused(Refusal::BadTarget, " (the target is not there or is dead)");
+            if (!ti || !ti->exists) return refused(Refusal::BadTarget, " (the target is not there)");
+            if (!ti->alive && life_states == 0) return refused(Refusal::BadTarget, " (the target is dead)");
+            if (life_states != 0 && (life_states & (ti->alive ? 1 : 2)) == 0) {
+                return refused(Refusal::BadTarget, ti->alive ? " (it does not reach a living target)" : " (it does not reach a dead target)");
+            }
             const bool hostile = ti->relation == combat::Relation::Hostile;
             // (a mask of 0 leaves the aim to the targeting record: Reconstruct and Siphon, whose calls name the pet [R: 490, 493])
             if (hostile ? (row.applicable_targets & 2) == 0 : row.applicable_targets != 0 && (row.applicable_targets & (1 | 4 | 8 | 16)) == 0) return refused(Refusal::BadTarget, hostile ? " (it does not harm enemies)" : " (it does not help allies)");
@@ -4231,6 +4247,9 @@ Refusal AbilityPipeline::trigger(int64_t ability, int32_t client_id, double now,
         cast.end_due = std::max(t + table_end, *cast.cost_due + 0.05);
         cast.clears_montage = true;
     }
+    // A Resurrection's cast stands for the cast's window, as a hit the client asks for does: the client confirms it with ServerResurrect (the generated schema's call,
+    // its hit being a NET_ServerVerify one), and the confirmation has to find the cast.  Social, seeing other players: their death.
+    if (!cast.end_due && abilities::resurrect_hit_of(*catalog_, *def)) cast.end_due = *cast.cost_due + kRequestWindow;
     if (!loop) {
         bool direct = false, projectile = false;
         const bool aimed = !cast.target_actors.empty();
@@ -6423,5 +6442,8 @@ void AbilityPipeline::start_saga_pantheon(const Cast& cast, double t) {
 }
 
 #include "session/ability_pipeline_chain.inc"
+
+// Social, seeing other players (their death): the Resurrection's cast and the Stamina a revive fills, in a file of their own.
+#include "session/ability_pipeline_resurrect.inc"
 
 }  // namespace aoc::worldd

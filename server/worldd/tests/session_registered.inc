@@ -19,3 +19,4 @@
 #include "session_party_stats_more_tests.inc"
 #include "session_friends_tests.inc"
 #include "session_chat_fixes_tests.inc"
+#include "session_party_resurrect_tests.inc"

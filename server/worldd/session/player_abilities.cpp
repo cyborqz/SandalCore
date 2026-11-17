@@ -433,6 +433,7 @@ void PlayerSession::run_abilities(Connection& conn, Clock::time_point now) {
         drain_combat(conn, now);
     }
     take_ability_events();
+    take_resurrect_request(now);   // (a Resurrection's hit on a dead player: his session is asked, or he is revived)
     check_death(conn, now);
     flush_abilities(conn);
 }

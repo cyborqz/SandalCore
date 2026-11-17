@@ -28,3 +28,4 @@
 #include "session/members/certification.inc"
 #include "session/members/saga.inc"
 #include "session/members/party_stats.inc"
+#include "session/members/resurrect.inc"

@@ -19,10 +19,13 @@
 //    a level          the new Level, and the level-up call retail multicasts (BroadcastPlayLevelUpEffects: the announcement on the pawn, answered by every other session with one call
 //                     of its own on that pawn's channel);
 //    Health and Mana  the current values and the maxima (damage, a heal, regeneration, an effect, a level, a piece of gear), item by item, only when a value differs: no change, no
-//                     update of the pawn; a regeneration moves a value once a second, so that is how often a watcher is sent it.
+//                     update of the pawn; a regeneration moves a value once a second, so that is how often a watcher is sent it;
+//    death            CombatInfo.bIsDead, kept equal to the player's own life: with the Health 0 and Mana 0 of a death in one update, and cleared with the values of a respawn or a
+//                     revive (the client plays the death and the resurrection from the bit; there is no corpse actor).
 //
 //  Modelled: no recording shows another player's pawn receive these (nothing records an observer), so the shape is the owner's own reply's, kept current on the pawn the watchers hold;
-//  the inactive weapon pair's back placement is animation, not replicated data.
+//  the inactive weapon pair's back placement is animation, not replicated data.  The death frame itself is the game's: the bit and Health 0 and Mana 0 in one update (session/player_shown.cpp's
+//  sync_shown_stats and sync_shown_death write them in one tick).
 //  Modelled too, not retail: the ride's velocity's 200 ms of stillness (retail's server integrates the mount's own physics), and a flying or swimming mount's vertical velocity from the step.
 // ============================================================================
 #include "session/player_session.h"
@@ -71,6 +74,7 @@ void PlayerSession::run_shown(Connection& conn, Clock::time_point now) {
     sync_shown_level();
     sync_shown_level_ups(conn);
     sync_shown_stats();
+    sync_shown_death();
 }
 
 void PlayerSession::sync_shown_mount(Clock::time_point now) {
@@ -254,6 +258,21 @@ void PlayerSession::sync_shown_stats() {
                          done ? "a value does not fit" : "the pawn is not in the world");
         }
     }
+}
+
+void PlayerSession::sync_shown_death() {
+    if (dead_ == shown_dead_) return;   // (the death bit of the shown pawn moves only on a change)
+    bool ok = false;
+    const bool done = show_in_pawn(world::Change::State, [&](world::WorldActor& w) { ok = pb_.set_observer_dead(w.actor, dead_); });
+    if (!done || !ok) {
+        if (++shown_failures_ <= kLoggedPerKind) {
+            spdlog::warn("[players] {}: the pawn the other players are shown does not take its death bit ({}): they do not see it", name(),
+                         done ? "a value does not fit" : "the pawn is not in the world");
+        }
+        return;   // (tried again at the next tick)
+    }
+    shown_dead_ = dead_;
+    spdlog::log(level_for(shown_death_logged_), "[players] {}: the other players are shown it {}", name(), dead_ ? "dead" : "alive again");
 }
 
 void PlayerSession::sync_shown_level_ups(Connection& conn) {

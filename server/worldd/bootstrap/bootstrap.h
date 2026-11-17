@@ -543,6 +543,9 @@ public:
     std::optional<Send> group_invite(const std::array<uint32_t, 4>& group_guid, const std::string& inviter_name);
     /// ClientUpdateGroupSettings with the settings a party starts with (member shouts on, the loot methods of the party frame).
     std::optional<Send> group_settings();
+    /// ClientPromptResurrect(InstigatorGuid): the dead player is asked whether `instigator` (the Cleric's character GUID) raises him.  Social, seeing other
+    /// players: their death (the three calls are the generated schema's, AAoCPlayerController; no recording of the path exists).
+    std::optional<Send> resurrect_prompt(const std::array<uint32_t, 4>& instigator);
     std::optional<Send> default_action_bar();
     /// Plan D1, stage 2: the character's own action bar as one ClientReceiveActionbarSlotPayload on the PlayerController (reliable): the reply to
     /// ServerRequestClientLoad, and the clearing of a class's slots when the class changes.
@@ -817,6 +820,9 @@ public:
     /// ... the current values of the stats `records` (Health, MaxHealth, Mana, MaxMana), from this player's pawn: only the items whose values changed are marked.  The
     /// party's live values: the pawn the others hold follows every change of them (damage, a heal, regeneration, an effect), not only a change of gear or level.
     bool set_observer_live_stats(repl::Actor& shown, std::span<const int64_t> records);
+    /// ... the death bit (CombatInfo.bIsDead): the pawn the other players are shown says whether this player is dead, as his own pawn does.  Social, seeing
+    /// other players: their death (the update that carries Health and Mana 0 carries the bit too).
+    bool set_observer_dead(repl::Actor& shown, bool dead);
     /// Whether one of the stats `records` differs between this player's pawn and the pawn the others are shown (the version of that pawn is not touched when none does).
     bool observer_live_stats_differ(const repl::Actor& shown, std::span<const int64_t> records) const;
 

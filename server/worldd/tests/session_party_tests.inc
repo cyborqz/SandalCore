@@ -386,6 +386,9 @@ struct PartyWorld {
     };
     std::array<Player, kMaxPartyTestPlayers> p;
 
+    /// `real_db`: the world runs on that content.db (the ability tables and the fights are only there); empty: the small fixture of content_db_fixture.h.
+    explicit PartyWorld(const std::string& real_db = "") : fx(bs::GameStateMode::Tier2, true, real_db) {}
+
     Player& operator[](size_t i) { return p[i]; }
 
     bool join(size_t i, const svc::Character& rec, const bs::LoginIdentity& id) {

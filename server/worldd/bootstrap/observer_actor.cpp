@@ -202,6 +202,13 @@ bool PlayerBootstrap::set_observer_ranged(repl::Actor& shown, bool ranged) {
     return combat->obj.state.set(*combat->obj.schema, "bIsUsingRangedWeapon", Value::boolean(ranged));
 }
 
+bool PlayerBootstrap::set_observer_dead(repl::Actor& shown, bool dead) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* combat = shown.find(setup_.guids.combat_info);
+    if (!combat || !combat->obj.schema || !combat->obj.schema->command("bIsDead")) return false;
+    return combat->obj.state.set(*combat->obj.schema, "bIsDead", Value::boolean(dead));
+}
+
 bool PlayerBootstrap::set_observer_stats(repl::Actor& shown) {
     if (!ok_ || !second_state_added_) return false;
     repl::Subobject* dst = shown.find(setup_.guids.stats);
