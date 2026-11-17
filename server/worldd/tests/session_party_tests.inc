@@ -292,8 +292,39 @@ static bool frame_is_empty(const PartyFrame& frame) {
            frame.master_looter_guid == std::array<uint32_t, 4>{} && frame.members.empty();
 }
 
-/// True when every field of the two-member frame is the game's shape (the members and the GUIDs are the caller's).
-static bool frame_has_the_game_shape(const PartyFrame& frame, const std::array<uint32_t, 4>& leader, const std::array<uint32_t, 4>& member, std::string* why) {
+/// True when two floats are the same within `tolerance` (the tests do not include <cmath>).
+static bool party_near(float a, float b, float tolerance = 1e-6f) { return a <= b + tolerance && b <= a + tolerance; }
+
+/// The PlayerStats a member's frame row and its live item should carry, from the member's own session: the health and mana shares of their maxima, the maxima, the
+/// level, the alive state (0 alive, 1 dead: modelled), where it stands (whole centimetres) and which way it faces (degrees).
+struct PartyStatsExpected {
+    float          health_percent = 0.0f, max_health = 0.0f, mana_percent = 0.0f, max_mana = 0.0f, heading = 0.0f;
+    int64_t        level = 0;
+    uint64_t       alive = 0;
+    repl::QuantVec location;
+};
+static PartyStatsExpected party_stats_expected(const PlayerSession& s) {
+    const stats::CharacterStats* cs = s.character_stats();
+    const auto value = [cs](int64_t record) {
+        const stats::StatValue* v = cs ? cs->find(record) : nullptr;
+        return v ? v->value : 0.0f;
+    };
+    PartyStatsExpected e;
+    e.max_health = value(content::kGuidMaxHealth);
+    e.max_mana = value(content::kGuidMaxMana);
+    e.health_percent = e.max_health > 0 ? value(content::kGuidHealth) / e.max_health : 0.0f;
+    e.mana_percent = e.max_mana > 0 ? value(content::kGuidMana) / e.max_mana : 0.0f;
+    e.level = s.progress().level;
+    e.alive = s.dead() ? 1 : 0;
+    const GoodPosition at = s.movement().good();
+    e.location = repl::quantize_vector(1, at.x, at.y, at.z);
+    e.heading = static_cast<float>(at.yaw_degrees);
+    return e;
+}
+
+/// True when every field of the two-member frame is the game's shape and each row carries the member's real stats (the members and the GUIDs are the caller's).
+static bool frame_has_the_game_shape(const PartyFrame& frame, const std::array<uint32_t, 4>& leader, const std::array<uint32_t, 4>& member, const PlayerSession& leader_session,
+                                     const PlayerSession& member_session, std::string* why) {
     if (frame.group_type != 0) {
         *why = "the group type is not 0 (a party)";
         return false;
@@ -312,10 +343,13 @@ static bool frame_has_the_game_shape(const PartyFrame& frame, const std::array<u
         *why = "the members' GUIDs are not the two characters'";
         return false;
     }
+    const PartyStatsExpected want0 = party_stats_expected(leader_session), want1 = party_stats_expected(member_session);
     for (const PartyMemberFrame* m : {&first, &second}) {
-        if (!m->online || m->health_percent != 0.0f || m->max_health != 0.0f || m->mana_percent != 0.0f || m->max_mana != 0.0f ||
-            m->level != 1 || m->alive_status != 0 || !(m->location == repl::QuantVec{}) || !(m->marker == repl::QuantVec{}) || m->heading != 0.0f) {
-            *why = "a member's waiting stats are not zero with level 1";
+        const PartyStatsExpected& want = m == &first ? want0 : want1;
+        if (!m->online || !party_near(m->health_percent, want.health_percent) || m->max_health != want.max_health || !party_near(m->mana_percent, want.mana_percent) ||
+            m->max_mana != want.max_mana || m->level != want.level || m->alive_status != want.alive || !(m->location == want.location) ||
+            !(m->marker == repl::QuantVec{}) || !party_near(m->heading, want.heading)) {
+            *why = "a member's row does not carry the stats the member has";
             return false;
         }
     }
@@ -564,7 +598,7 @@ static void test_party_wire_two_member_frame() {
     if (one_member.size() == 1) {
         std::string why;
         CHECK(frame_lists(one_member[0], {"Silverwhisper"}, kMadeUpLeaderGuid, &why), ("the one-member state lists the leader alone: " + why).c_str());
-        CHECK(one_member[0].param_bits == 1168, "the one-member frame is 1,168 bits, the recorded frame's size");
+        CHECK(one_member[0].param_bits == 1228, ("the one-member frame is " + std::to_string(one_member[0].param_bits) + " bits: the recorded waiting state's 1,168 with the member's real place in it").c_str());
         CHECK(one_member[0].group_guid != kNoPartyGuid && one_member[0].group_guid == requests[0].group_guid,
               "the frame's group GUID is the one the invitation carries");
     }
@@ -579,8 +613,8 @@ static void test_party_wire_two_member_frame() {
         const PartyFrame& frame = frames_a[0];
         std::string why;
         CHECK(frame_lists(frame, {"Silverwhisper", "Tavin"}, kMadeUpLeaderGuid, &why), ("the leader's frame lists both members: " + why).c_str());
-        CHECK(frame.param_bits == 1596, "the two-member frame is 1,596 bits, the recorded frame's size");
-        CHECK(frame_has_the_game_shape(frame, kMadeUpLeaderGuid, kMadeUpMemberGuid, &why),
+        CHECK(frame.param_bits == 1716, ("the two-member frame is " + std::to_string(frame.param_bits) + " bits: the recorded waiting state's 1,596 with both members' real places in it").c_str());
+        CHECK(frame_has_the_game_shape(frame, kMadeUpLeaderGuid, kMadeUpMemberGuid, *w[0].s, *w[1].s, &why),
               ("the frame has the game's fields (the GUIDs, the squad, the stats, the defaults): " + why).c_str());
         CHECK(frame.group_guid == requests[0].group_guid, "the two-member frame keeps the invitation's group GUID");
         CHECK(frame.leader_guid == kMadeUpLeaderGuid && frame.master_looter_guid == kMadeUpLeaderGuid && frame.squad_leaders.size() == 1 &&
@@ -590,7 +624,7 @@ static void test_party_wire_two_member_frame() {
     if (!frames_b.empty()) {
         std::string why;
         CHECK(frame_lists(frames_b[0], {"Silverwhisper", "Tavin"}, kMadeUpLeaderGuid, &why), ("Tavin's frame lists both members too: " + why).c_str());
-        CHECK(frames_b[0].param_bits == 1596 && frames_b[0].group_guid == requests[0].group_guid, "Tavin's frame is the same 1,596-bit group");
+        CHECK(frames_b[0].param_bits == 1716 && frames_b[0].group_guid == requests[0].group_guid, "Tavin's frame is the same 1,716-bit group");
     }
     const auto settings_a = party_settings_in(w[0].got, pc_cls, before_accept);
     const auto settings_b = party_settings_in(w[1].got, pc_cls, before_accept_b);

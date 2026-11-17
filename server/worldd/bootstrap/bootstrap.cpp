@@ -2209,23 +2209,7 @@ std::optional<Send> PlayerBootstrap::group_update(const GroupClientData& group) 
     repl::ElementState squad;
     squad.values[1] = Value::i64(1);   // SquadNumber
     repl::ArrayValue members;
-    for (const GroupMember& shown : group.members) {
-        repl::ElementState member;
-        member.values[1] = Value::str(shown.name);
-        for (int i = 0; i < 4; ++i) member.values[static_cast<uint16_t>(2 + i)] = Value::i64(static_cast<int32_t>(shown.guid[i]));
-        member.values[6] = Value::u64(static_cast<uint64_t>(shown.primary_class));
-        member.values[7] = Value::boolean(true);   // bIsOnline: the session is in the group
-        member.values[8] = Value::f32(0.0f);       // HealthPercent: the waiting state of this step
-        member.values[9] = Value::f32(0.0f);       // MaxHealth
-        member.values[10] = Value::f32(0.0f);      // ManaPercent
-        member.values[11] = Value::f32(0.0f);      // MaxMana
-        member.values[12] = Value::i64(1);         // Level
-        member.values[13] = Value::u64(0);         // AliveStatus
-        member.values[14] = Value(repl::QuantVec{});   // Location
-        member.values[15] = Value(repl::QuantVec{});   // MapMarkerLocation
-        member.values[16] = Value::f32(0.0f);      // Heading
-        members.elements.push_back(std::move(member));
-    }
+    for (const GroupMember& shown : group.members) members.elements.push_back(group_member_element(shown));
     squad.values[2] = Value(std::move(members));
     repl::ArrayValue leaders;
     repl::ElementState leader;
@@ -2993,5 +2977,6 @@ std::optional<Send> PlayerBootstrap::correction(float time_stamp, const repl::Ve
 #include "respawn/bootstrap_embersprings.inc"
 #include "quest/bootstrap_objects.inc"
 #include "bootstrap/bootstrap_social.inc"
+#include "bootstrap/group_member.inc"
 
 }  // namespace aoc::worldd::bootstrap

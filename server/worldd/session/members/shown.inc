@@ -12,7 +12,7 @@ public:
 
 private:
     /// Every tick, after sync_presence and run_emotes (tick_logic, so that the registry is written before the view passes): brings the pawn the other players are shown in line with the
-    /// player.  Each later part of seeing other players (live Health and Mana, death, combat stances) adds its own `sync_*` call here and writes through show_in_pawn.
+    /// player.  Each later part of seeing other players (death, combat stances) adds its own `sync_*` call here and writes through show_in_pawn.
     void run_shown(Connection& conn, Clock::time_point now);
     /// The one place a change to the pawn the other players are shown is made: `fn(WorldActor&)` runs on the registry's Player actor of this player, which counts the change (`kind`: a
     /// position alone is Change::Movement, anything else State).  False when the pawn is not in the world (yet).
@@ -32,6 +32,9 @@ private:
     void sync_shown_level();
     /// ... the level-up calls of every player whose announcement this session has not answered yet: one call of its own on each of those pawns' channels (the call is a multicast in the game).
     void sync_shown_level_ups(Connection& conn);
+    /// ... the current Health, MaxHealth, Mana and MaxMana, from the player's pawn: every change of them is shown (damage, a heal, regeneration, an effect that
+    /// changes a maximum), and no change means no update of the shown pawn.
+    void sync_shown_stats();
     /// The player's equipment changed in an update that moved `marks` equipment slots: the pawn the others are shown takes its look, held items and stats at the next tick.
     void note_shown_gear(size_t marks) {
         shown_gear_dirty_ = true;

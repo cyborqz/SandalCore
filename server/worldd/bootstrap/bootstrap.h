@@ -174,12 +174,25 @@ struct LootRemoval {
     repl::ItemInstance item;
 };
 
-/// One member of a party as ClientUpdateGroup draws it (social step 8): the name and the character GUID the frame shows, and the class.
-/// The frame's stats are the waiting state of the step (zero health and mana, level 1); step 9 fills them.
+/// One member of a party as ClientUpdateGroup draws it (social step 8), and as the SocialComponent's PlayerStatsReplication carries it: the name and the character
+/// GUID the frame shows, the class, and the stats the party window draws.  HealthPercent and ManaPercent are the current value as the share of its maximum (0 to 1);
+/// AliveStatus is 0 for a living member and 1 for a dead one (the game's 2-bit values beyond that are not in the read data); Location is the place in whole
+/// centimetres (FVector_NetQuantize) and Heading the yaw in degrees.
 struct GroupMember {
     std::string             name;
     std::array<uint32_t, 4> guid{};
     int32_t                 primary_class = 0;
+    float                   health_percent = 0.0f;
+    float                   max_health = 0.0f;
+    float                   mana_percent = 0.0f;
+    float                   max_mana = 0.0f;
+    int32_t                 level = 0;
+    uint64_t                alive_status = 0;
+    repl::QuantVec          location;
+    repl::QuantVec          map_marker;
+    float                   heading = 0.0f;
+
+    bool operator==(const GroupMember&) const = default;
 };
 
 /// The whole group a ClientUpdateGroup carries: the group's GUID, its leader and its master looter, and the members in squad order.
@@ -189,6 +202,10 @@ struct GroupClientData {
     std::array<uint32_t, 4>  master_looter_guid{};
     std::vector<GroupMember> members;
 };
+
+/// One member of a group as ClientUpdateGroup's squad element carries it: the name, the character GUID, the class, the nine PlayerStats values and the online flag
+/// (bootstrap/group_member.inc).
+repl::ElementState group_member_element(const GroupMember& shown);
 
 /// One friend as the client's SocialComponent (UIntrepidSocialComponent) carries it: the friend's character GUID as four words, the name, level,
 /// class and subclass, the guild's name, the online flag (the session's: a session of this world has the character now), the last online time
@@ -296,6 +313,11 @@ public:
     /// What set_friends changed on the SocialComponent since the last update, as one PlayerController chain, reliable; nullopt when nothing did
     /// (or before the join's last chain).
     std::optional<Send> friends_update();
+    /// Social, live Health and Mana: the party's live stats in the SocialComponent's PlayerStatsReplication array (UIntrepidSocialComponent), one item per member keyed
+    /// by his character GUID, carrying the same nine values the party frame's PlayerStats carries.  The items of members that left are removed, so the array is the
+    /// party and nothing else; an empty list empties it.  False when the component is not on the PlayerController yet or a value does not fit.  friends_update()
+    /// sends the change.
+    bool set_party_stats(std::span<const GroupMember> members);
     /// The answer to ServerCheckIfCharacterNameExistsRequest: ClientCheckIfCharacterNameExistsResponse(name, exists) on the PlayerController.
     std::optional<Send> name_check_answer(const std::string& name, bool exists);
 
@@ -792,6 +814,11 @@ public:
     bool set_observer_ranged(repl::Actor& shown, bool ranged);
     /// ... the two EveryoneProxy stat arrays, from this player's pawn: only the items whose values changed are marked, so their deltas alone go out.
     bool set_observer_stats(repl::Actor& shown);
+    /// ... the current values of the stats `records` (Health, MaxHealth, Mana, MaxMana), from this player's pawn: only the items whose values changed are marked.  The
+    /// party's live values: the pawn the others hold follows every change of them (damage, a heal, regeneration, an effect), not only a change of gear or level.
+    bool set_observer_live_stats(repl::Actor& shown, std::span<const int64_t> records);
+    /// Whether one of the stats `records` differs between this player's pawn and the pawn the others are shown (the version of that pawn is not touched when none does).
+    bool observer_live_stats_differ(const repl::Actor& shown, std::span<const int64_t> records) const;
 
     // ---- acknowledgements and atomicity ---------------------------------------------------------------------------
 
@@ -840,6 +867,8 @@ private:
     /// Social, step 7: brings a FastArrays' FriendsList and PendingFriendRequests to the lists set_friends holds (adds, changes and removes exactly
     /// what differs, so a delta carries the changed items only).
     bool sync_social(repl::FastArrays& arrays);
+    /// Social, live Health and Mana: brings a FastArrays' PlayerStatsReplication to `members` (adds, changes and removes exactly what differs).
+    bool sync_party_stats(repl::FastArrays& arrays, std::span<const GroupMember> members);
     std::optional<Send> update(Role role, const char* what, repl::Actor& actor, repl::ActorShadow& shadow);
     std::optional<Send> rpcs(Role role, const char* what, std::span<const repl::RpcRequest> calls);
     std::optional<Send> verbatim_block(Role role, const char* what, const char* hex, size_t bits);

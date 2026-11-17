@@ -170,6 +170,106 @@ bool PlayerBootstrap::sync_social(repl::FastArrays& arrays) {
     return true;
 }
 
+namespace {
+
+/// One party member as the SocialComponent's PlayerStatsReplication item carries it: the nine PlayerStats values by path and the member's GUID as the item's key, so a
+/// schema whose order moved is refused rather than written wrong.
+std::optional<repl::ElementState> social_party_stats_element(const repl::FastArrayLayout& layout, const GroupMember& m) {
+    repl::ElementState es;
+    for (const schema::RepCommand& c : layout.element) {
+        const std::string_view path = c.path;
+        const auto ends = [&](std::string_view suffix) {
+            return path.size() >= suffix.size() && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
+        Value v;
+        if (ends("Value.HealthPercent")) {
+            v = Value::f32(m.health_percent);
+        } else if (ends("Value.MaxHealth")) {
+            v = Value::f32(m.max_health);
+        } else if (ends("Value.ManaPercent")) {
+            v = Value::f32(m.mana_percent);
+        } else if (ends("Value.MaxMana")) {
+            v = Value::f32(m.max_mana);
+        } else if (ends("Value.Level")) {
+            v = Value::i64(m.level);
+        } else if (ends("Value.AliveStatus")) {
+            v = Value::u64(m.alive_status);
+        } else if (ends("Value.Location")) {
+            v = Value(m.location);
+        } else if (ends("Value.MapMarkerLocation")) {
+            v = Value(m.map_marker);
+        } else if (ends("Value.Heading")) {
+            v = Value::f32(m.heading);
+        } else if (ends("Key.A")) {
+            v = Value::i64(static_cast<int32_t>(m.guid[0]));
+        } else if (ends("Key.B")) {
+            v = Value::i64(static_cast<int32_t>(m.guid[1]));
+        } else if (ends("Key.C")) {
+            v = Value::i64(static_cast<int32_t>(m.guid[2]));
+        } else if (ends("Key.D")) {
+            v = Value::i64(static_cast<int32_t>(m.guid[3]));
+        } else {
+            return std::nullopt;
+        }
+        es.values[c.handle] = std::move(v);
+    }
+    if (!repl::element_fits(layout.element, layout.table, es)) return std::nullopt;
+    return es;
+}
+
+/// The key of a PlayerStatsReplication item: the member's character GUID as its four words (the item's Key commands 10 to 13).
+std::optional<std::array<uint32_t, 4>> social_party_stats_key(const repl::ElementState& values) {
+    std::array<uint32_t, 4> words{};
+    for (uint16_t i = 10; i <= 13; ++i) {
+        const auto it = values.values.find(i);
+        const int64_t* v = it == values.values.end() ? nullptr : it->second.get_if<int64_t>();
+        if (!v) return std::nullopt;
+        words[i - 10] = static_cast<uint32_t>(*v);
+    }
+    return words;
+}
+
+}  // namespace
+
+bool PlayerBootstrap::sync_party_stats(repl::FastArrays& arrays, std::span<const GroupMember> members) {
+    const schema::ClassSchema* cls = gen::find_component_schema("SocialComponent");
+    if (!cls) return fail("no schema for the social component (UIntrepidSocialComponent)");
+    repl::FastArrayState* stats = arrays.get(*cls, "PlayerStatsReplication");
+    if (!stats) return fail("the social component has no PlayerStatsReplication array");
+    std::map<std::array<uint32_t, 4>, int32_t> ids;
+    for (const repl::FastArrayItem& item : stats->items()) {
+        const auto key = social_party_stats_key(item.values);
+        if (!key) return fail("a social component party item does not read");
+        ids[*key] = item.id;
+    }
+    std::set<int32_t> kept;
+    for (const GroupMember& m : members) {
+        auto element = social_party_stats_element(stats->layout(), m);
+        if (!element) return fail("a party member does not fit the social component's stats list: " + m.name);
+        const auto it = ids.find(m.guid);
+        if (it == ids.end()) {
+            if (!stats->add(std::move(*element))) return fail("the social component's stats list refused a member: " + m.name);
+            continue;
+        }
+        kept.insert(it->second);
+        const repl::FastArrayItem* held = stats->find(it->second);
+        if (!held) return fail("a social component party item went missing: " + m.name);
+        if (!(held->values == *element) && !stats->change(it->second, std::move(*element))) {
+            return fail("the social component's stats list refused a changed member: " + m.name);
+        }
+    }
+    for (const auto& [guid, id] : ids) {
+        if (!kept.count(id)) stats->remove(id);
+    }
+    return true;
+}
+
+bool PlayerBootstrap::set_party_stats(std::span<const GroupMember> members) {
+    if (!ok_ || !social_added_) return false;
+    repl::Subobject* social = pc_.find(setup_.guids.social);
+    return social && sync_party_stats(social->obj.arrays, members);
+}
+
 bool PlayerBootstrap::set_friends(const std::vector<FriendWire>& friends, const std::vector<FriendRequestWire>& requests) {
     friend_wire_ = friends;
     friend_request_wire_ = requests;

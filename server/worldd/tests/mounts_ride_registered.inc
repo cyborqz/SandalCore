@@ -12,3 +12,5 @@
 #include "others_gear_level_tests.inc"
 #include "others_gear_level_edges_tests.inc"
 #include "mounts_ride_health_tests.inc"
+#include "others_health_mana_tests.inc"
+#include "others_health_mana_more_tests.inc"

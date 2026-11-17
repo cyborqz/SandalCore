@@ -16,8 +16,9 @@
 //  is LeaderGuid and nothing else; SquadLeaders carries the current leader's GUID as well, and the frame never reads it as the
 //  mark.  MasterLooterGuid is the master looter: the leader when the group is made, and it stays at a transfer.
 //
-//  The frame: the members' names, character GUIDs, classes, their online flag and the waiting stats of this step (zero health
-//  and mana, level 1).  Step 9 fills the stats and the positions.  The members are the sessions that are in the world now.
+//  The frame: the members' names, character GUIDs, classes, their online flag and their stats (the health and mana shares of their maxima, the maxima, the level, the
+//  alive state, where they stand and which way they face).  The live values ride the SocialComponent's PlayerStatsReplication items as well (player_party_stats.inc),
+//  and the frame itself is refreshed about every 4.5 s and on every membership change.  The members are the sessions that are in the world now.
 //
 //  The rules: a party holds 8 members and a 9th is refused; one pending invitation at a time; a name that is not online, a
 //  player already in a party and a name that already has an invitation are refused with one SYSBROADCAST line and no request.
@@ -110,6 +111,31 @@ PlayerSession::PartyGroup* find_pending_for(const std::string& name) {
     return nullptr;
 }
 
+/// One member of the frame as the client reads it: the name, the character GUID and the class, and the stats the party window draws.  The health and mana shares are the
+/// current value over its maximum; the alive state is 0 alive and 1 dead (the game's 2-bit values beyond that are not in the read data); the place is the last good
+/// position in whole centimetres and the heading its yaw in degrees.
+bootstrap::GroupMember party_member_of(const PlayerSession& member) {
+    bootstrap::GroupMember shown;
+    shown.name = member.name();
+    shown.guid = party_guid_of(member);
+    shown.primary_class = member.class_id();
+    const stats::CharacterStats* cs = member.character_stats();
+    const auto value = [cs](int64_t record) {
+        const stats::StatValue* v = cs ? cs->find(record) : nullptr;
+        return v ? v->value : 0.0f;
+    };
+    shown.max_health = value(content::kGuidMaxHealth);
+    shown.max_mana = value(content::kGuidMaxMana);
+    shown.health_percent = shown.max_health > 0 ? value(content::kGuidHealth) / shown.max_health : 0.0f;
+    shown.mana_percent = shown.max_mana > 0 ? value(content::kGuidMana) / shown.max_mana : 0.0f;
+    shown.level = member.progress().level;
+    shown.alive_status = member.dead() ? 1 : 0;
+    const GoodPosition at = member.movement().good();
+    shown.location = repl::quantize_vector(1, at.x, at.y, at.z);   // (FVector_NetQuantize: whole centimetres)
+    shown.heading = static_cast<float>(at.yaw_degrees);
+    return shown;
+}
+
 /// The group frame's data: the GUIDs and the members in their order.
 bootstrap::GroupClientData party_frame_data(const PlayerSession::PartyGroup& group) {
     bootstrap::GroupClientData data;
@@ -118,11 +144,7 @@ bootstrap::GroupClientData party_frame_data(const PlayerSession::PartyGroup& gro
     data.master_looter_guid = group.master_looter_guid;
     for (PlayerSession* member : group.members) {
         if (!member) continue;
-        bootstrap::GroupMember shown;
-        shown.name = member->name();
-        shown.guid = party_guid_of(*member);
-        shown.primary_class = member->class_id();
-        data.members.push_back(std::move(shown));
+        data.members.push_back(party_member_of(*member));
     }
     return data;
 }
@@ -167,6 +189,7 @@ void PlayerSession::send_party_frame(PlayerSession& to, const PartyGroup& group,
     Connection* conn = to.chat_entry_.connection;
     if (!conn || to.finished_ || to.failed_) return;
     const bootstrap::GroupClientData data = party_frame_data(group);
+    to.note_party_frame_sent(data.members);   // (the frame the next refresh compares against)
     to.queue(what, [data](bootstrap::PlayerBootstrap& pb) { return pb.group_update(data); }, *conn);
 }
 
@@ -200,8 +223,10 @@ void PlayerSession::send_party_line(PlayerSession& to, const std::string& text) 
 void PlayerSession::queue_party_or_empty(Connection& conn) {
     if (party_group_) {
         const bootstrap::GroupClientData data = party_frame_data(*party_group_);
+        note_party_frame_sent(data.members);
         queue("ClientUpdateGroup", [data](bootstrap::PlayerBootstrap& pb) { return pb.group_update(data); }, conn);
     } else {
+        party_frame_sent_.clear();
         queue("ClientUpdateGroup", [](bootstrap::PlayerBootstrap& pb) { return pb.empty_group(); }, conn);
     }
 }
@@ -289,7 +314,6 @@ void PlayerSession::forget_party() {
 }
 
 void PlayerSession::run_party(Connection& conn, Clock::time_point now) {
-    (void)conn;
     std::vector<PartyGroup*> expired;
     for (const auto& group : party_groups()) {
         if (!group->pending_name.empty() && now >= group->pending_expires) expired.push_back(group.get());
@@ -300,6 +324,9 @@ void PlayerSession::run_party(Connection& conn, Clock::time_point now) {
                     group->pending_name);
         expire_party_invite(*group);
     }
+    // the party's live stats: the social component's array follows the members' values, and the frame's stats and places follow them at their own cadence
+    sync_party_stats(conn, now);
+    sync_party_frame(conn, now);
 }
 
 void PlayerSession::on_party_invite(Connection& conn, const repl::ClientRpc& rpc, Clock::time_point now) {
@@ -533,3 +560,6 @@ void PlayerSession::register_party_rpcs(RpcTable& t) {
     t.add(RpcScope::PlayerController, "ServerTransferGroupLeadership", [](PlayerSession& s, const RpcContext& c) { s.on_party_transfer(c.conn, c.rpc, c.now); });
     t.add(RpcScope::PlayerController, "ServerDisbandGroup", [](PlayerSession& s, const RpcContext& c) { s.on_party_disband(c.conn, c.now); });
 }
+
+// The party's live stats (social, live Health and Mana): the social component's items and the frame's refresh, in a file of their own.
+#include "session/player_party_stats.inc"

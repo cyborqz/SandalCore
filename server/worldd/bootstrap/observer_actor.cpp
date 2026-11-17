@@ -140,6 +140,15 @@ const repl::FastArrayState* observer_array(const repl::Subobject& sub, std::stri
     const schema::NetField* f = sub.obj.schema->field(name);
     return f ? sub.obj.arrays.find(f->index) : nullptr;
 }
+/// The item of the stat `record` in an EveryoneProxy array (nullptr: the array has none).
+const repl::FastArrayItem* observer_stat_item(const repl::FastArrayState& array, int64_t record) {
+    for (const repl::FastArrayItem& it : array.items()) {
+        const auto found = it.values.values.find(1);
+        const auto* t = found != it.values.values.end() ? found->second.get_if<repl::StatInt32Inst>() : nullptr;
+        if (t && t->record == record) return &it;
+    }
+    return nullptr;
+}
 }  // namespace
 
 bool PlayerBootstrap::set_observer_gear(repl::Actor& shown, std::span<const HeldItem> held, std::span<const repl::AppearanceId> appearance, size_t marks) {
@@ -222,6 +231,47 @@ bool PlayerBootstrap::set_observer_stats(repl::Actor& shown) {
         if (added) to->mark_array_dirty();   // an insert alone replicates nothing
     }
     return true;
+}
+
+bool PlayerBootstrap::set_observer_live_stats(repl::Actor& shown, std::span<const int64_t> records) {
+    if (!ok_ || !second_state_added_) return false;
+    repl::Subobject* dst = shown.find(setup_.guids.stats);
+    const repl::Subobject* src = pawn_.find(setup_.guids.stats);
+    if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
+    repl::FastArrayState* to = observer_array(*dst, "StatRepInt32EveryoneProxy");
+    const repl::FastArrayState* from = observer_array(*src, "StatRepInt32EveryoneProxy");
+    if (!to || !from) return false;
+    bool added = false;
+    for (const int64_t record : records) {
+        const repl::FastArrayItem* mine = observer_stat_item(*from, record);
+        if (!mine) continue;   // (a stat this character has no item for: nothing to show)
+        const repl::FastArrayItem* have = observer_stat_item(*to, record);
+        if (!have) {
+            if (!to->insert(mine->id, mine->values)) return false;
+            added = true;
+        } else if (!(have->values == mine->values)) {
+            if (!to->change(have->id, mine->values)) return false;
+        }
+    }
+    if (added) to->mark_array_dirty();   // an insert alone replicates nothing
+    return true;
+}
+
+bool PlayerBootstrap::observer_live_stats_differ(const repl::Actor& shown, std::span<const int64_t> records) const {
+    if (!ok_ || !second_state_added_) return false;
+    const repl::Subobject* dst = shown.find(setup_.guids.stats);
+    const repl::Subobject* src = pawn_.find(setup_.guids.stats);
+    if (!dst || !src || !dst->obj.schema || !src->obj.schema) return false;
+    const repl::FastArrayState* to = observer_array(*dst, "StatRepInt32EveryoneProxy");
+    const repl::FastArrayState* from = observer_array(*src, "StatRepInt32EveryoneProxy");
+    if (!to || !from) return false;
+    for (const int64_t record : records) {
+        const repl::FastArrayItem* mine = observer_stat_item(*from, record);
+        if (!mine) continue;
+        const repl::FastArrayItem* have = observer_stat_item(*to, record);
+        if (!have || !(have->values == mine->values)) return true;
+    }
+    return false;
 }
 
 }  // namespace aoc::worldd::bootstrap

@@ -17,7 +17,9 @@
 //    gear             an item worn or taken off: the held items (all 23 marked, as the player's own reply does), the appearance list and the two EveryoneProxy stat arrays;
 //    a weapon swap    the flag the client picks the two weapons in hand from (CombatInfo.bIsUsingRangedWeapon) and the stats the other line gives;
 //    a level          the new Level, and the level-up call retail multicasts (BroadcastPlayLevelUpEffects: the announcement on the pawn, answered by every other session with one call
-//                     of its own on that pawn's channel).
+//                     of its own on that pawn's channel);
+//    Health and Mana  the current values and the maxima (damage, a heal, regeneration, an effect, a level, a piece of gear), item by item, only when a value differs: no change, no
+//                     update of the pawn; a regeneration moves a value once a second, so that is how often a watcher is sent it.
 //
 //  Modelled: no recording shows another player's pawn receive these (nothing records an observer), so the shape is the owner's own reply's, kept current on the pawn the watchers hold;
 //  the inactive weapon pair's back placement is animation, not replicated data.
@@ -68,6 +70,7 @@ void PlayerSession::run_shown(Connection& conn, Clock::time_point now) {
     sync_shown_weapon();
     sync_shown_level();
     sync_shown_level_ups(conn);
+    sync_shown_stats();
 }
 
 void PlayerSession::sync_shown_mount(Clock::time_point now) {
@@ -237,6 +240,20 @@ void PlayerSession::sync_shown_level() {
     }
     shown_level_dirty_ = false;
     registry_->note_level_up();   // (every other session reads it at its next tick: sync_shown_level_ups)
+}
+
+void PlayerSession::sync_shown_stats() {
+    static constexpr int64_t kLiveStats[] = {content::kGuidHealth, content::kGuidMaxHealth, content::kGuidMana, content::kGuidMaxMana};
+    const world::WorldActor* now = registry_->find(world_pawn_);
+    if (!now || !pb_.observer_live_stats_differ(now->actor, kLiveStats)) return;   // (the version of the shown pawn moves only on a change)
+    bool ok = false;
+    const bool done = show_in_pawn(world::Change::State, [&](world::WorldActor& w) { ok = pb_.set_observer_live_stats(w.actor, kLiveStats); });
+    if (!done || !ok) {
+        if (++shown_failures_ <= kLoggedPerKind) {
+            spdlog::warn("[players] {}: the pawn the other players are shown does not take its Health and Mana ({}): they do not see it", name(),
+                         done ? "a value does not fit" : "the pawn is not in the world");
+        }
+    }
 }
 
 void PlayerSession::sync_shown_level_ups(Connection& conn) {
