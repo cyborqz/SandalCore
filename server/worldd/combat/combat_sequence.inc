@@ -96,6 +96,7 @@ CombatWorld::Attack CombatWorld::choose_chain(Npc& n, CondContext ctx, double di
             Attack a;
             a.ability = d;
             a.task = &t;
+            bind_pick(a, n, t, ctx, attack);   // (a step with a selector of its own is aimed at the actor it picked, as the tree's first move would be)
             if (t.max_distance >= 0) a.range_cm = static_cast<int>(t.max_distance);
             return a;
         }

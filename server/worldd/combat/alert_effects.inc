@@ -48,7 +48,7 @@ void CombatWorld::refresh_creature_stats(Npc& n) {
     }
 }
 
-void CombatWorld::land_alert_hit(Npc& caster, const abilities::AbilityDef& ability, const BiteArea& area, int64_t hit_guid, double now, std::set<std::pair<int64_t, uint64_t>>& logged) {
+void CombatWorld::land_alert_hit(Npc& caster, const abilities::AbilityDef& ability, const BiteArea& area, int64_t hit_guid, double now, std::set<std::pair<int64_t, uint64_t>>& logged, uint64_t picked) {
     const abilities::HitDef* hit = catalog_.hit(hit_guid);
     if (!hit) return;
     const int mask = hit->row.applicable_targets;
@@ -64,7 +64,12 @@ void CombatWorld::land_alert_hit(Npc& caster, const abilities::AbilityDef& abili
         double v = 0;
         if (row && row->program >= 0 && evaluation && evaluation->eval(row->program, host, v, err) && std::isfinite(v) && v >= 1) max_targets = std::min(max_targets, v);
     }
-    if ((mask & (4 | 8 | 16)) != 0) {
+    // a selector of the move picked the creature its effects are for (a heal's ally): the hit lands on that one, not on every creature of the side its record reaches
+    Npc* chosen = picked != 0 && picked != caster.actor_id && (mask & (4 | 8 | 16)) != 0 ? combatant(picked) : nullptr;
+    if (chosen && chosen->dead) chosen = nullptr;
+    if (chosen) {
+        targets.assign(1, chosen);   // (the move is aimed at that one creature: its own targeting reached it, not the rest of the side)
+    } else if ((mask & (4 | 8 | 16)) != 0) {
         const world::WorldActor* me = registry_.find(caster.actor_id);
         std::vector<std::pair<double, Npc*>> allies;
         if (me) {

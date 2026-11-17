@@ -728,6 +728,9 @@ public static partial class Reader
                 }
                 row.Gates = string.Join(";", gates);
                 row.Conds = string.Join("|", groups);
+                // a utility-score selector's winner is the task's target when the task reads the selector's blackboard; the atom says which (the reader's own Get BBCharacter
+                // task of that name feeding the Use Ability's StoredTarget)
+                if (row.Conds.Contains("pick(", StringComparison.Ordinal)) row.Conds = FixPickUses(row.Conds, ReadBlackboard(info, nodes[k]));
                 row.Why = row.Unknown ? string.Join(",", why) : off ? "off" : "";
                 rows.Add(row);
             }

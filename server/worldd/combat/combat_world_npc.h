@@ -81,6 +81,9 @@ public:
     double                                 alert_cast_logged_at = -1e9;   // when its last alert cast was named in the log (the per-creature limit of those lines)
     double                                 tree_began = 0;   // when its state tree began to run (the tree asks how long it has run): when the actor was put into the world (NpcInfo::spawned_at; 0 for the creatures the world starts with); a respawn is a new actor, so it starts again
     std::map<std::string, double>          fight_rolls;     // the numbers its tree rolled when this fight began, by the tree's variable (a first special attack comes only after one of them)
+    /// The actors its tree's utility-score selectors picked, by the blackboard variable they are kept in (a heal's ally, a pounce's target): what a mover or an
+    /// ability reads (`pick_target` writes it; a reset clears it with the fight).
+    std::map<std::string, uint64_t>        bb_targets;
     uint64_t                               killer = 0;
     std::set<uint64_t>                     attackers;
     struct Shield {

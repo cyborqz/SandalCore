@@ -371,6 +371,7 @@ public:
     /// The tables outlive the world.
     void set_ability_data(const NpcAbilityData* data) {
         anim_ = data;
+        pick_reaches_.clear();
         alert_effect_sources_.clear();
         player_effect_sources_.clear();
         effect_sources_ready_ = false;
@@ -622,6 +623,8 @@ private:
         int    windup_ms = 500;
         int    range_cm = 220;
         const CreatureAbility* task = nullptr;   // the Blueprint's task that picked it (a creature with its own animation)
+        uint64_t pick = 0;                       // the actor a utility-score selector of the task picked (0: none)
+        bool     pick_casts = false;             // the ability casts at the pick (its task reads the selector's blackboard, or the move is not an attack)
     };
     /// A projectile an attack launches: when (seconds after the attack begins), the projectile record that flies and the hits it lands where it arrives.
     struct PlannedFire {
@@ -632,6 +635,8 @@ private:
     struct Pending {
         double   due = 0;
         uint64_t npc = 0, target = 0;
+        uint64_t pick = 0;                              // the ally a utility-score selector picked for the landing (0: none): a support move's effects go to it
+        bool     by_pick = false;                       // the cast is aimed at the actor a selector picked, not at the one the creature fights: its hits find that actor as their target
         const abilities::AbilityDef* ability = nullptr;
         const CreatureAbility*        task = nullptr;   // the tree's task that picked it (its `next` moves are tried when the cast is over)
         std::vector<int64_t> hits;
@@ -722,7 +727,35 @@ private:
     /// Whether a hit of `area` lands on `body` now (the creature as it stands and faces): see combat/bite_area.h.  `is_target`: the body is the one the record's target part finds.
     bool  hit_reaches(const Npc& n, const Fighter& body, const BiteArea& area, bool is_target) const;
     /// The player the target part of `area` finds for a hit of an attack aimed at `cast_target`: the creature's own target and the one the cast was aimed at, in the order the record says (0: none).
-    uint64_t aimed_at(const Npc& n, const BiteArea& area, uint64_t cast_target);
+    /// `by_pick`: the cast was aimed at an actor a selector picked, so that actor is the creature's target for this move (the one it fights is not).
+    uint64_t aimed_at(const Npc& n, const BiteArea& area, uint64_t cast_target, bool by_pick = false);
+    /// One actor a tree's utility-score selector may pick, as the selector's expressions read it: where it stands from the creature, its health and its elite rank.
+    struct PickCandidate {
+        uint64_t actor = 0;
+        bool     player = false;
+        double   distance = 0;        // centre to centre, cm
+        double   angle = 0;           // between the creature's facing and the way to it, degrees (0 to 180)
+        double   facing = 1;          // the dot of the creature's forward with the way to it (1 ahead, -1 behind)
+        double   candidate_angle = 0; // between the actor's facing and the way to the creature, degrees (a player's facing; 0 for a creature)
+        double   health = 1;          // health over its maximum
+        double   rank = 0;            // its elite rank
+        bool     sees = true;         // the creature has a line of sight to it
+    };
+    /// A selector expression's value for one candidate (the terms of combat_mob_target_pick.inc).
+    double pick_score(const PickTerm& term, const Npc& caster, const PickCandidate& candidate, double now);
+    /// The living actors of the world a selector may pick from that pass its filters, nearest first (or by health when the tree sorts them): the creature's hated
+    /// players, the creatures on its friendly side and itself, or every actor it perceives (no spawn list is kept: that set is empty).
+    std::vector<PickCandidate> pick_candidates(const Npc& caster, const PickRule& rule, double now);
+    /// The target a tree's utility-score selector picks now: the best-scoring candidate, kept in the creature's blackboard under the selector's variable (0: none scored).
+    uint64_t pick_target(Npc& caster, const PickRule& rule, double now);
+    /// What a selector scores one candidate: each consideration clamped to [0, 1] and combined by the rule's scheme.
+    double pick_combined(const PickRule& rule, const Npc& caster, const PickCandidate& candidate, double now);
+    /// How far from the creature a selector can name a target, in cm: the farthest distance at which a candidate that is otherwise neutral still scores, or 0 when the selector does not bound
+    /// the distance (or names nobody it could probe).  A move gated by it is one the creature starts from that far, not from melee.
+    double pick_reach(Npc& caster, const PickRule& rule);
+    /// Records on `a` what a task's utility-score selector gives the move: the actor it picked while the task's conditions were asked in `ctx` (the move is cast at it when its task reads the
+    /// selector's blackboard, and a move that is not an attack, a heal or a shield, always is), and, for an attack whose task names no reach of its own, the reach the selector bounds (pick_reach).
+    void bind_pick(Attack& a, Npc& n, const CreatureAbility& task, const CondContext& ctx, bool attack);
     /// Whether every hit of the ability that hurts an enemy has a targeting record the world can decide by; an ability with one it cannot decide by is not animated.
     bool  areas_usable(const abilities::AbilityDef& def) const;
     /// Whether a hit of the ability trips its target (a bear's grab throws a player down while the two play a paired animation): the world has no tripping of a player and no animation for the target
@@ -745,9 +778,10 @@ private:
     void  drop_attack(Npc& n);
     void  resolve_pending(double now);
     /// Where an alert's hit lands, from the hit's mask and its targeting record: the caster itself (Self) and the living creatures on its friendly side (Ally: the relation of the alignments, not the
-    /// Blueprint's family) inside the record's volumes, nearest first up to the hit's cap; each gets the hit's effects through the same resolver and land_effect a player's debuffs use.  `logged`: the
+    /// Blueprint's family) inside the record's volumes, nearest first up to the hit's cap; each gets the hit's effects through the same resolver and land_effect a player's debuffs use.  `picked`: the
+    /// creature a selector picked for the move (0: none): when it is a living creature that the hit's mask reaches as an ally, the hit lands on it instead of on the scanned creatures.  `logged`: the
     /// (effect, creature) pairs this cast has already named in the log (one line for each effect and pulse, listing the creatures it newly landed on, however many pulses put it there).
-    void  land_alert_hit(Npc& caster, const abilities::AbilityDef& ability, const BiteArea& area, int64_t hit_guid, double now, std::set<std::pair<int64_t, uint64_t>>& logged);
+    void  land_alert_hit(Npc& caster, const abilities::AbilityDef& ability, const BiteArea& area, int64_t hit_guid, double now, std::set<std::pair<int64_t, uint64_t>>& logged, uint64_t picked = 0);
     bool  animates(const Npc& n, const abilities::AbilityDef& def) const;
     /// Whether any task of the creature's tree that a fight can use is an attack it can play (its ability is in the data, its open lists it, its montage is read): a creature with none keeps the
     /// single swing every creature had before the trees.
@@ -1041,6 +1075,8 @@ private:
     double                 now_ = 0;
     Stats                  stats_;
     stats::SplitMix        rng_;
+    std::map<const PickRule*, double> pick_reaches_;   // the reach of each selector, worked out the first time it is asked (pick_reach)
+    bool                   probing_ = false;                  // pick_reach is trying a selector with a neutral candidate: no random number is drawn
     size_t                 npc_hits_logged_ = 0;                 // the NPC hits on players written to the log so far (the first kLoggedNpcHits)
     static constexpr size_t kLoggedNpcHits = 400;
     size_t                 npc_casts_logged_ = 0;                // the attacks with their own animation written to the log so far (the first kLoggedNpcCasts)

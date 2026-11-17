@@ -30,6 +30,9 @@ namespace NpcAbilities;
 ///   eff(G) / neff(G) the creature carries the effect record G / does not (its own effects: the ones its abilities put on it and its Blueprint's from spawn)
 ///   teff(G) / tneff(G) the same about its primary target (a player's effects, or another creature's)
 ///   los / nlos       the creature sees its target / does not
+///   pick(SET,SCHEME,USE,FLAGS,FILTER,C...)  the tree's utility-score selector (Selectors.cs): the actors it scores (hated, perceived, spawned), how the scores combine
+///                    (product, highest, average), whether the ability casts at the winner (t) or the selector only gates the state (g), its flags, the filter every candidate
+///                    must pass and the considerations, each in the postfix terms of combat/npc_ability_data.h
 ///   ?NAME            a condition this tool cannot say (the task is left out)
 /// </summary>
 public static partial class Reader
@@ -63,7 +66,6 @@ public static partial class Reader
         public bool Unknown;
         public string Constant = "";    // "T" or "F"
     }
-
     static TreeInfo LoadTree(UObject tree)
     {
         var t = new TreeInfo
@@ -247,10 +249,12 @@ public static partial class Reader
         || (l.Kind == "Evaluator" && l.Class == "AoCSTE_TrackTime" && l.Path == "TreeElapsedTimeInSeconds");
 
     static bool IsSelf(Source s) => s.Kind == "Context" && s.Name == "Actor" && s.Path.Length == 0;
-    /// <summary>The condition's target is the creature's primary target: the hate list's most hated character, or the creature's own picker for it (the Raptor's Courage target is
-    /// the player its Smell of Blood and Courage moves look at).</summary>
+    /// <summary>The condition's target is the creature's primary target: the hate list's most hated character, the creature's own picker for it (the Raptor's Courage target is
+    /// the player its Smell of Blood and Courage moves look at), or the tree's own target evaluator (a class named ..._UpdateTarget_C: its PrimaryTarget is what the tree's
+    /// Rotate To and Use Ability tasks read as their target, as the Raptor's Tooth tree does for its Smell of Blood).</summary>
     static bool IsPrimaryTarget(Source s) =>
         (s.Kind == "Evaluator" && (s.Class == "AoCSTE_UpdateMostHated" || s.Class == "STE_UpdateMostHated_C") && s.Path == "PrimaryTarget")
+        || (s.Kind == "Evaluator" && s.Class.StartsWith("STE_", StringComparison.Ordinal) && s.Class.EndsWith("_UpdateTarget_C", StringComparison.Ordinal) && s.Path == "PrimaryTarget")
         || s.Class == "STC_Raptor_PickCourageTarget_C";
     /// <summary>The target a Rotate To task of a state on the way down stored (the creature turned to it): for the condition of the move that follows, it is the creature's target.</summary>
     static bool IsStoredTarget(Source s, HashSet<int> path) =>
@@ -381,6 +385,16 @@ public static partial class Reader
         }
         switch (cls)
         {
+            case "STC_UtilityScoreTargetSelector_C":
+            {
+                // the tree's own choice of target: the candidates, the filter each passes, the considerations and the scheme (Selectors.cs).  A form the reader does not know
+                // leaves the task held with the reason; the row's Use Ability task decides whether the winner is its target (FixPickUses).
+                if (obj == null) return Unsaid(cls);
+                var rule = Selectors.Read(obj, str);
+                if (rule == null) return Unsaid(cls + "(settings)");
+                if (rule.Why.Length > 0) return Unsaid(cls + "(" + rule.Why + ")");
+                return new Atom { Text = Selectors.Atom(rule), Kind = "pick" };
+            }
             case "AoCSTC_DistanceCheck":
             {
                 var d = Setting(obj, str, binds, prm, "Distance");
@@ -513,8 +527,46 @@ public static partial class Reader
         return Unsaid("struct:" + TextOf(node, "Name"));
     }
 
-    const string NumberText = @"(?:-?[0-9]+\.?[0-9]*|-?\.[0-9]+)";
-    static readonly Regex PlainNumber = new(@"^\s*(" + NumberText + @")\s*;?\s*$", RegexOptions.CultureInvariant);
+    /// <summary>The blackboard variable a task's StoredTarget reads (a Get BBCharacter task's Variable Name); "" when it names none.</summary>
+    static string ReadBlackboard(TreeInfo t, FStructFallback node)
+    {
+        if (!BindingsOf(t, node).TryGetValue("StoredTarget", out var src) || src.Handle == null) return "";
+        if (src.Kind != "Task" || !src.Class.Contains("GetBBCharacter", StringComparison.Ordinal) || src.Path != "Output") return "";
+        foreach (var task in t.Nodes)
+        {
+            if (task == null || !ClassOf(task, "TaskClass").Contains("GetBBCharacter", StringComparison.Ordinal)) continue;
+            var handle = StructOf(task, "InstanceDataHandle");
+            if (handle == null || !SameHandle(handle, src.Handle)) continue;
+            var instance = InstanceOf(task, t.Defaults);
+            return instance != null ? NameOf(instance, "Variable Name") : "";
+        }
+        return "";
+    }
+
+    /// <summary>One selector atom in a task's conditions: `pick(...)`, whose arguments are filled in for the task (FixPickUses).</summary>
+    static readonly Regex PickAtom = new(@"pick\(([^()]*)\)", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Sets each pick atom's USE: "t" when the task reads the selector's blackboard variable (its StoredTarget comes from the Get BBCharacter task of that name), "g" when the
+    /// selector only gates the state and the task keeps its own target.  Returns the conditions text.
+    /// </summary>
+    static string FixPickUses(string conds, string readBlackboard)
+    {
+        return PickAtom.Replace(conds, m =>
+        {
+            var args = m.Groups[1].Value.Split(',');
+            if (args.Length < 5) return m.Value;
+            string bb = "";
+            foreach (string flag in args[3].Split(';'))
+            {
+                if (flag.StartsWith("bb:", StringComparison.Ordinal)) bb = Uri.UnescapeDataString(flag.Substring(3));
+            }
+            args[2] = bb.Length > 0 && bb == readBlackboard ? "t" : "g";
+            return "pick(" + string.Join(",", args) + ")";
+        });
+    }
+
+    const string NumberText = @"(?:-?[0-9]+\.?[0-9]*|-?\.[0-9]+)";    static readonly Regex PlainNumber = new(@"^\s*(" + NumberText + @")\s*;?\s*$", RegexOptions.CultureInvariant);
     static readonly Regex RangeOnly = new(@"^\s*RandDoubleRange\(\s*(" + NumberText + @")\s*,\s*(" + NumberText + @")\s*\)\s*;?\s*$", RegexOptions.CultureInvariant);
     static readonly Regex ChanceOfRange = new(@"^\s*var\s+(\w+)\s*=\s*(" + NumberText + @")\s*;\s*if\s*\(\s*RandDouble\(\)\s*<\s*(" + NumberText + @")\s*\)\s*\{\s*set\s+\1\s*=\s*(?:RandDoubleRange\(\s*(" + NumberText + @")\s*,\s*(" + NumberText + @")\s*\)|(" + NumberText + @"))\s*;\s*\}\s*\1\s*;?\s*$", RegexOptions.CultureInvariant);
 

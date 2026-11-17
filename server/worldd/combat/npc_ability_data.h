@@ -51,11 +51,41 @@
 
 namespace aoc::worldd::combat {
 
+/// One term of a utility-score selector's expression, as the table says it (postfix: the operands first, the operator last; see Conditions.cs).
+struct PickTerm {
+    enum class Kind : uint8_t {
+        Number, Random, RandomRange, Distance, Health, HasEffect, SourceHasEffect, IsSelf, IsMostHated, IsFriendly, Sees, FacesAway, SourceAngle, CandidateFacing,
+        IsDead, EliteRank, SourceEliteRank, Nearby, Blackboard, Alignment,
+        Add, Sub, Mul, Div, Negate, Abs, Max, Min, Clamp, Lerp, Choose, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Not
+    };
+    Kind        kind = Kind::Number;
+    double      value = 0;                  // Number: the number
+    int64_t     effect = 0;                 // HasEffect, SourceHasEffect, Alignment: the record's guid
+    std::string name;                       // Blackboard: the variable
+    std::vector<PickTerm> args;             // the operands, in the order the text has them
+};
+
+/// How a tree's utility-score selector picks its target (the condition `STC_UtilityScoreTargetSelector_C`): whom it may pick, how each is scored, how the scores
+/// combine, and the blackboard variable the winner goes into.  The reader says the part of an expression it recognizes and holds the task when it does not.
+struct PickRule {
+    enum class Candidates : uint8_t { Hated, Friendly, Perceived, Spawned };
+    enum class Scheme : uint8_t { Product, Highest, Average };
+    Candidates            candidates = Candidates::Hated;
+    Scheme                scheme = Scheme::Product;
+    bool                  casts_at_pick = false;   // the ability's task reads the selector's blackboard (its StoredTarget): the cast aims at the winner
+    bool                  clear_on_fail = true;    // Clear BB Var at Failure: the variable goes when no candidate scores
+    bool                  sort_by_health = false;  // the tree sorts the candidates by their health before scoring (SortByHealthPercentage)
+    size_t                crop = 0;                // at most this many candidates count (ArrayCrop; 0: all)
+    std::string           bb;                      // the blackboard variable the winner goes into (empty: none)
+    std::vector<PickTerm> filters;                 // every one must hold for a candidate to count
+    std::vector<PickTerm> considerations;          // each gives a score in [0, 1]; none: every candidate scores 1
+};
+
 /// One condition of a task, as the creature table says it (tools/npcabilities writes these as text; see its Conditions.cs for the grammar).
 struct CondAtom {
     enum class Kind : uint8_t {
         True, False, In, Out, CentreIn, CentreOut, Angle, Cooldown, Random, HealthUnder, HealthNotUnder, FightTime, FightRoll, TreeTime, Sees, NotSees,
-        HasEffect, NotHasEffect, TargetHasEffect, TargetNotHasEffect
+        HasEffect, NotHasEffect, TargetHasEffect, TargetNotHasEffect, Pick
     };
     enum Op : int { Eq, Ne, Lt, Le, Gt, Ge };
     Kind        kind = Kind::True;
@@ -64,6 +94,7 @@ struct CondAtom {
     std::string name;        // Cooldown: the cooldown's name; FightRoll: the tree's variable
     double      chance = 0, low = 0, high = 0;   // FightRoll: with this chance the number is a fresh one between `low` and `high`
     int64_t     effect = 0;  // HasEffect and its kin: the effect record the condition asks about
+    PickRule    pick;        // Pick: the selector the condition is (a task's target pick)
 };
 
 /// A condition with how it joins the ones before it: `operand` 'c' (the first of a list), 'a' (and) or 'o' (or), and `delta` the brackets it opens before itself (> 0) or closes after itself (< 0).
@@ -93,6 +124,10 @@ struct CondContext {
     std::function<bool(int64_t)> target_has_effect;
     /// The number a FightRoll condition compares the fight's seconds with: rolled the first time it is asked in a fight and the same for the rest of that fight.  Null: the condition's own `value`.
     std::function<double(const CondAtom&)> fight_roll;
+    /// Picks the target of a `pick` condition (the tree's utility-score selector) and returns the winning actor's id (0: no candidate scored).  Null: no picker is asked.
+    std::function<uint64_t(const PickRule&)> pick_target;
+    /// The winners of the `pick` conditions this context has evaluated, by the condition's rule: what the task that held is cast at.
+    mutable std::map<const PickRule*, uint64_t> picks;
     /// Asked only about the fight clock, the tree's clock and the creature's health (hp, fc, fcr, tt): every other condition counts as holding.  Tells whether those timers alone keep a task shut.
     bool timers_only = false;
 };
@@ -141,6 +176,14 @@ inline bool eval_atom(const CondAtom& a, const CondContext& c) {
         case K::NotHasEffect: return c.preview || !c.has_effect || !c.has_effect(a.effect);
         case K::TargetHasEffect: return c.preview || !c.has_target || !c.target_has_effect || c.target_has_effect(a.effect);
         case K::TargetNotHasEffect: return c.preview || !c.has_target || !c.target_has_effect || !c.target_has_effect(a.effect);
+        case K::Pick: {
+            // the tree's selector is a target condition like the others: no standing-ready answer, and no candidate means the state is not entered
+            if (c.preview) return true;
+            if (!c.pick_target) return false;
+            const uint64_t who = c.pick_target(a.pick);
+            c.picks[&a.pick] = who;
+            return who != 0;
+        }
     }
     return false;
 }
@@ -714,6 +757,153 @@ private:
         }
         return out;
     }
+
+    /// One selector expression from its postfix text ("d;420;<;face;-0.5;<;and": the operands first, the operator last, ';'-joined).
+    static bool pick_expression(const std::string& text, PickTerm& out) {
+        std::vector<PickTerm> stack;
+        const auto pop = [&stack](PickTerm& t) {
+            if (stack.empty()) return false;
+            t = std::move(stack.back());
+            stack.pop_back();
+            return true;
+        };
+        using K = PickTerm::Kind;
+        const auto starts = [](const std::string& s, const char* with) { return s.rfind(with, 0) == 0; };
+        for (const std::string& token : split(text, ';')) {
+            if (token.empty()) continue;
+            PickTerm t;
+            double n = 0;
+            int64_t g = 0;
+            if (starts(token, "eff:")) {
+                if (!number(token.substr(4), g) || g <= 0) return false;
+                t.kind = K::HasEffect;
+                t.effect = g;
+            } else if (starts(token, "seff:")) {
+                if (!number(token.substr(5), g) || g <= 0) return false;
+                t.kind = K::SourceHasEffect;
+                t.effect = g;
+            } else if (starts(token, "align:")) {
+                if (!number(token.substr(6), g) || g <= 0) return false;
+                t.kind = K::Alignment;
+                t.effect = g;
+            } else if (starts(token, "bb:")) {
+                t.kind = K::Blackboard;
+                t.name = percent_decoded(token.substr(3));
+                if (t.name.empty()) return false;
+            } else if (number(token, n)) {
+                t.kind = K::Number;
+                t.value = n;
+            } else if (token == "r") {
+                t.kind = K::Random;
+            } else if (token == "d") {
+                t.kind = K::Distance;
+            } else if (token == "h") {
+                t.kind = K::Health;
+            } else if (token == "self") {
+                t.kind = K::IsSelf;
+            } else if (token == "most") {
+                t.kind = K::IsMostHated;
+            } else if (token == "friendly") {
+                t.kind = K::IsFriendly;
+            } else if (token == "los") {
+                t.kind = K::Sees;
+            } else if (token == "ang") {
+                t.kind = K::SourceAngle;
+            } else if (token == "angc") {
+                t.kind = K::CandidateFacing;
+            } else if (token == "face") {
+                t.kind = K::FacesAway;
+            } else if (token == "dead") {
+                t.kind = K::IsDead;
+            } else if (token == "rank") {
+                t.kind = K::EliteRank;
+            } else if (token == "srank") {
+                t.kind = K::SourceEliteRank;
+            } else {
+                // the operators: the operands are on the stack, the operator takes them off
+                static const std::map<std::string, K> binary = {{"+", K::Add},  {"-", K::Sub}, {"*", K::Mul},  {"/", K::Div}, {"max", K::Max}, {"min", K::Min},
+                                                                {"lt", K::Lt},  {"le", K::Le}, {"gt", K::Gt},  {"ge", K::Ge}, {"eq", K::Eq},   {"ne", K::Ne},
+                                                                {"and", K::And}, {"or", K::Or}};
+                static const std::map<std::string, K> unary = {{"neg", K::Negate}, {"abs", K::Abs}, {"not", K::Not}};
+                static const std::map<std::string, K> ternary = {{"clamp", K::Clamp}, {"lerp", K::Lerp}, {"if", K::Choose}};
+                PickTerm b, a, c;
+                if (const auto it = unary.find(token); it != unary.end()) {
+                    if (!pop(a)) return false;
+                    t.kind = it->second;
+                    t.args.push_back(std::move(a));
+                } else if (const auto it = binary.find(token); it != binary.end()) {
+                    if (!pop(b) || !pop(a)) return false;
+                    t.kind = it->second;
+                    t.args.push_back(std::move(a));
+                    t.args.push_back(std::move(b));
+                } else if (const auto it = ternary.find(token); it != ternary.end()) {
+                    if (!pop(c) || !pop(b) || !pop(a)) return false;
+                    t.kind = it->second;
+                    t.args.push_back(std::move(a));
+                    t.args.push_back(std::move(b));
+                    t.args.push_back(std::move(c));
+                } else if (token == "rr" || token == "near") {
+                    if (!pop(b) || (token == "rr" && !pop(a))) return false;
+                    t.kind = token == "rr" ? K::RandomRange : K::Nearby;
+                    if (token == "rr") t.args.push_back(std::move(a));
+                    t.args.push_back(std::move(b));
+                } else {
+                    return false;
+                }
+            }
+            stack.push_back(std::move(t));
+        }
+        if (stack.size() != 1) return false;
+        out = std::move(stack.back());
+        return true;
+    }
+
+    /// A selector as the table says it: "pick(SET,SCHEME,USE,FLAGS,FILTER,CONSIDERATION...)".  SET is hated, friendly, perceived or spawned; SCHEME product,
+    /// highest or average; USE t when the ability's task reads the selector's blackboard (the cast aims at the winner), g when the selector only gates the state;
+    /// FLAGS are 'c'<N> (at most N candidates count), "s" (they are sorted by health) and "!c" (the variable is kept when no candidate scores); FILTER and each
+    /// CONSIDERATION are postfix expressions, and the FILTER empty when the tree has none.
+    static bool parse_pick(const std::string& text, PickRule& out) {
+        const std::vector<std::string> args = split(text, ',');
+        if (args.size() < 5) return false;
+        static const std::map<std::string, PickRule::Candidates> sets = {
+            {"hated", PickRule::Candidates::Hated}, {"friendly", PickRule::Candidates::Friendly}, {"perceived", PickRule::Candidates::Perceived}, {"spawned", PickRule::Candidates::Spawned}};
+        static const std::map<std::string, PickRule::Scheme> schemes = {
+            {"product", PickRule::Scheme::Product}, {"highest", PickRule::Scheme::Highest}, {"average", PickRule::Scheme::Average}};
+        const auto set = sets.find(args[0]);
+        const auto scheme = schemes.find(args[1]);
+        if (set == sets.end() || scheme == schemes.end() || (args[2] != "t" && args[2] != "g")) return false;
+        out.candidates = set->second;
+        out.scheme = scheme->second;
+        out.casts_at_pick = args[2] == "t";
+        for (const std::string& flag : split(args[3], ';')) {
+            if (flag.empty()) continue;
+            if (flag == "s") {
+                out.sort_by_health = true;
+            } else if (flag == "!c") {
+                out.clear_on_fail = false;
+            } else if (flag.size() > 1 && flag[0] == 'c') {
+                if (!number(flag.substr(1), out.crop) || out.crop == 0) return false;
+            } else if (flag.rfind("bb:", 0) == 0) {
+                out.bb = percent_decoded(flag.substr(3));
+                if (out.bb.empty()) return false;
+            } else {
+                return false;
+            }
+        }
+        if (!args[4].empty()) {
+            PickTerm filter;
+            if (!pick_expression(args[4], filter)) return false;
+            out.filters.push_back(std::move(filter));
+        }
+        for (size_t i = 5; i < args.size(); ++i) {
+            if (args[i].empty()) continue;
+            PickTerm consideration;
+            if (!pick_expression(args[i], consideration)) return false;
+            out.considerations.push_back(std::move(consideration));
+        }
+        return true;
+    }
+
     /// The conditions column of a task: groups joined by '|', in each the conditions joined by ' ' as `<c|a|o><indent>:<atom>`.  False for text that does not read.
     static bool parse_conditions(const std::string& text, std::vector<CondGroup>& out) {
         out.clear();
@@ -742,7 +932,10 @@ private:
                     const std::string name = atom.substr(0, open);
                     const std::vector<std::string> args = split(atom.substr(open + 1, atom.size() - open - 2), ',');
                     using K = CondAtom::Kind;
-                    if (name == "cd") {
+                    if (name == "pick") {
+                        if (!parse_pick(atom.substr(open + 1, atom.size() - open - 2), t.atom.pick)) return false;
+                        t.atom.kind = K::Pick;
+                    } else if (name == "cd") {
                         if (args.size() != 1) return false;
                         t.atom.kind = K::Cooldown;
                         t.atom.name = percent_decoded(args[0]);

@@ -3,7 +3,7 @@
 > [!NOTE]
 > This roadmap reflects the ongoing development progress of SandalCore. SandalCore is a work in progress, not a final product. Features and milestones evolve continuously as the protocol is worked out and the server emulation advances.
 
-**Last updated:** 17 November 2026
+**Last updated:** 18 November 2026
 
 ---
 
@@ -81,6 +81,7 @@ Phases 1-5 (the network protocol, login, entering the world, stats and mounts) a
 - The light of a loot pile that holds equipment: the rarity's colour with the embers, spike and ribbon, on a mob's corpse, a group's kill and a full bag's pile; the best equipment's rarity while it holds equipment, and the best of what is left once the equipment is taken.
 - PvP, first part: the rules between players (the PvP key, the account's PvP settings and parties), the combatant flag at the first harmful action with its 60 s colour, corruption from a kill with its costs on death and kept on the character, duels with their banner, and the respawn's 60 s of protection. Still to come: suppression areas, guards and pets, guild and node wars.
 - Guilds, first part: creating one (letters with single spaces, no cost, a name no stored guild has, the data's 432,000 s cooldown after leaving), inviting players for 60 s each, accepting and declining, leaving, kicking, disbanding, promoting and demoting within the data's three ranks and 35 permissions, the leader's leaving (the next-highest-ranking member leads), the roster (level, class, rank, last online and online) with its refresh, the guild's name over the nameplate and the green name of a guildmate, guild chat between the ranks that may read and write it, the guild and its members kept by the character service, and a game-master command that puts a character into a guild for a one-client test. Still to come: the perks and guild levels, storage, wars, the board, the calendar, the patron guild hall, and raids and mail.
+- The mobs' target-scoring choices and their checks on the target: a move plays at the actor its tree's selector scores (the players a creature hates, a heal's most hurt ally) from as far away as the selector reaches, and a target-effect check such as the Raptor's Smell of Blood reads the effects its target holds.
 
 ### In progress
 - Node stages: building sites below Village, and the Wilderness camp.

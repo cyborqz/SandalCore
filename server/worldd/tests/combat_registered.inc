@@ -59,3 +59,5 @@
 #include "combat_reactions4_review_tests.inc"
 #include "combat_mage_fixes_tests.inc"
 #include "combat_mage_review_tests.inc"
+#include "combat_mob_target_pick_tests.inc"
+#include "combat_mob_target_pick_review_tests.inc"

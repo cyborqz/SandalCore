@@ -5,7 +5,8 @@
 //  tests/combat_rally_group_tests.inc
 //
 //  Registered tests of test_worldd_combat: the state groups of a creature's tree whose later state carries the move's timer (the goblin shamans' Rally and the aura after it,
-//  the Withered Shambler's fallback Maw).  The untimed state's task starts the timed state's timer and readies it, so the pair plays in the tree's order and the timer holds both
+//  the Withered Shamblers' Maw and the post-Lunge row the rank Blueprints' fallback Maw waits on; the base Blueprint switches that row off, so its fallback is left as the file has it).
+//  The untimed state's task starts the timed state's timer and readies it, so the pair plays in the tree's order and the timer holds both
 //  back afterwards; the loaded table is read against the file for exactly the rows the pass changes.  The Flamespeaker's real rows are fought through: the Rally at 40 s of the fight,
 //  the Fire Shield Aura after it, the effects on the caster and on the allies the records name, the reaction that strikes a player back, and the log lines that name each of them;
 //  with two Flamespeakers and a second player, a reset and a respawn; and a camp of twelve goblins that all rally, whose landing lines grow with the casts, not their square.
@@ -265,17 +266,21 @@ AOC_REGISTER_TEST(test_the_flamespeaker_rallies_then_shields);
 
 // R2: every one of the table's state groups (a 0 s row of a task and a timed row of the same task) under the same rule: the untimed row starts the timed row's timer when the
 // rows do not already link; a pair the rows already link is left; a 0 s row outside the fight, a row the tree switches off, and an ability the world does not play are not
-// changed in what the player sees.  The reader's own row for the Flamespeaker (its starts and next written out) loads the same way.
+// changed in what the player sees.  A timed row the tree switches off for the creature (the base Withered Shambler's post-Lunge Maw) leaves the untimed row as the file has it:
+// the timer it would copy is a state the creature never enters, and the fallback is the same move, so there is no chain either.  The table of the build this test runs on says
+// which reading it has: a corrected table switches that row off, an older one keeps it held and the pass copies its 4 s timer.  The reader's own row for the Flamespeaker (its
+// starts and next written out) loads the same way.
 void test_the_state_groups_of_the_ability_table(Fixture& f) {
-    std::printf("the state groups of the creature table: the untimed row starts the timed row's timer unless the rows already link, and 13 Blueprints cast differently\n");
+    std::printf("the state groups of the creature table: the untimed row starts the timed row's timer unless the rows already link, and each row is counted for the reading the table has\n");
     combat::NpcAbilityData tables;
     if (!load_creature_tables(tables)) return;
-    size_t groups = 0, changed = 0, pre_linked = 0, outside = 0, switched_off = 0, unplayable = 0;
+    size_t groups = 0, changed = 0, pre_linked = 0, outside = 0, switched_off = 0, unplayable = 0, timed_off = 0;
     const combat::CreatureAbility* flame_a = nullptr;
     const combat::CreatureAbility* flame_b = nullptr;
     const combat::CreatureAbility* shaman_a = nullptr;
     const combat::CreatureAbility* shaman_b = nullptr;
     const combat::CreatureAbility* maw_a = nullptr;
+    const combat::CreatureAbility* maw_b = nullptr;
     const combat::CreatureAbility* basic_a = nullptr;
     const combat::CreatureAbility* basic_b = nullptr;
     const std::string flame_path = creature_path(f, "/GoblinFlameShaman/Goblin_FlameShaman_Gravehide.Default__Goblin_FlameShaman_Gravehide_C");
@@ -324,12 +329,17 @@ void test_the_state_groups_of_the_ability_table(Fixture& f) {
                 shaman_b = b;
             }
             if (archetype == maw_path && a->ability == maw->row.guid) maw_a = a;
+            if (archetype == maw_path && b->ability == maw->row.guid) maw_b = b;
             if (archetype == basic_path && a->ability == sweep->row.guid) {
                 basic_a = a;
                 basic_b = b;
             }
             if (a->off || a->unknown) {
                 ++switched_off;   // (a parameter of the tree switches the 0 s row off, or a condition the table cannot say keeps it: it is never played)
+                continue;
+            }
+            if (b->off) {
+                ++timed_off;   // (the timed row is switched off for this creature: the tree never enters the state, so the 0 s row has no timer to copy and the same move is not chained)
                 continue;
             }
             // the rows already link through a cooldown of their own that the timed row waits on (the shamans' RallyLastUsed): the pair and its timer already work
@@ -347,16 +357,26 @@ void test_the_state_groups_of_the_ability_table(Fixture& f) {
     ALERT_EFFECT(outside == 27, "in 27 of them the 0 s rows are outside the fight (the bears' rear-up chain and the Reaper's soultheft): the world never plays them and they are left as they are (%zu)", outside);
     ALERT_EFFECT(switched_off == 9, "in 9 of them the tree switches the 0 s row off (the bandit musicians that do not use the song): left as they are (%zu)", switched_off);
     ALERT_EFFECT(pre_linked == 10, "in 10 of them the rows already link through their own cooldown (the shamans' RallyLastUsed): the pair and the 40 s timer already work (%zu)", pre_linked);
-    ALERT_EFFECT(changed == 16, "in 16 of them the untimed row now starts the timed row's timer (%zu)", changed);
-    ALERT_EFFECT(unplayable == 3, "three of those 16 are a heal the world does not play (the bandit musician's Lustful Serenade): their timer changes nothing the player sees (%zu)", unplayable);
-    ALERT_EFFECT(changed - unplayable == 13, "13 Blueprints cast differently: the 9 goblin shamans' Rally groups, the 3 Withered Shamblers' Maw and the one development Blueprint's spears (%zu)", changed - unplayable);
+    // (the table's reading of the base Shambler's post-Lunge Maw: the corrected table switches it off; the older table keeps it held, and the pass copies its 4 s timer)
+    const bool timed_off_data = maw_b && maw_b->off;
+    const size_t expect_timed_off = timed_off_data ? 1 : 0;
+    const size_t expect_changed = timed_off_data ? 15 : 16;
+    const size_t expect_different = timed_off_data ? 12 : 13;
+    ALERT_EFFECT(timed_off == expect_timed_off, "in %zu of them the timed row is switched off for the creature (the base Withered Shambler's post-Lunge Maw): the fallback row is left as the file has it, with no 4 s timer and no chain (%zu)", expect_timed_off, timed_off);
+    ALERT_EFFECT(changed == expect_changed, "in %zu of them the untimed row starts the timed row's timer (%zu)", expect_changed, changed);
+    ALERT_EFFECT(unplayable == 3, "three of those are a heal the world does not play (the bandit musician's Lustful Serenade): their timer changes nothing the player sees (%zu)", unplayable);
+    ALERT_EFFECT(changed - unplayable == expect_different, "%zu Blueprints cast differently: the 9 goblin shamans' Rally groups, the 2 Withered Shambler ranks' Maw (the base's pair counts only while its post-Lunge row reads as held) and the one development Blueprint's spears (%zu)",
+                 expect_different, changed - unplayable);
     ALERT_EFFECT(flame_a && flame_b && flame_a->starts.size() == 1 && flame_a->starts[0].name == "Rally" && near(flame_a->starts[0].low, 40.0, 1e-6) &&
                      flame_b->cooldown == 40.0f && std::find(flame_a->next.begin(), flame_a->next.end(), flame_aura->row.guid) != flame_a->next.end(),
                  "the Flamespeaker's untimed Rally starts the aura's 40 s timer once and readies the aura (the aura also starts its own 40 s cooldown).");
     ALERT_EFFECT(shaman_a && shaman_b && std::find(shaman_a->next.begin(), shaman_a->next.end(), shaman_aura->row.guid) != shaman_a->next.end(),
                  "a shaman whose Rally already starts RallyLastUsed leaves it to that cooldown: its pair was already linked and is not changed");
-    ALERT_EFFECT(maw_a && maw_a->starts.size() == 1 && maw_a->starts[0].name == "Maw" && near(maw_a->starts[0].low, 4.0, 1e-6) && maw_a->next.empty(),
-                 "the Withered Shambler's fallback Maw starts the timed row's 4 s timer and does not chain the row whose condition the table cannot say");
+    const bool maw_right = maw_a && maw_b && (timed_off_data ? (maw_a->starts.empty() && maw_a->next.empty())
+                                                             : (maw_b->unknown && maw_a->starts.size() == 1 && maw_a->starts[0].name == "Maw" && near(maw_a->starts[0].low, 4.0, 1e-6) && maw_a->next.empty()));
+    ALERT_EFFECT(maw_right, "the Withered Shambler's fallback Maw follows the table's reading of the post-Lunge row: %s (%s)",
+                 timed_off_data ? "the row is switched off for the base, so the fallback keeps no 4 s timer and no chain" : "the row is held, so the fallback carries the old 4 s timer and no chain",
+                 timed_off_data ? "the corrected reading" : "the older reading");
     ALERT_EFFECT(basic_a && basic_b && basic_a->starts.size() == 1 && basic_a->starts[0].name == "Basic" && near(basic_a->starts[0].low, 1.0, 1e-6) &&
                      std::find(basic_a->next.begin(), basic_a->next.end(), thrust->row.guid) != basic_a->next.end(),
                  "the development Blueprint's Spear Sweep starts the timed Spear Thrust's 1 s timer and readies it");
@@ -393,7 +413,8 @@ AOC_REGISTER_TEST(test_the_state_groups_of_the_ability_table);
 
 // R2, the loaded table: the pass changes the starts of exactly the rows the 62 groups' census names and the chains of those that can chain, and no other row of the table.  The file's
 // own rows are read back: a row outside the list loads with the starts and the chain the file gives it; a row of the list carries the timed twin's timer once and (when the twin can
-// play) the twin's ability in its chain, whether the file already says so (a reader that writes the pass itself) or not.
+// play) the twin's ability in its chain, whether the file already says so (a reader that writes the pass itself) or not.  The base Withered Shambler's fallback Maw is in the list
+// only while the table keeps its timed row (the post-Lunge state) held: a corrected table switches that row off and the pass leaves the fallback as the file has it.
 namespace rally_group {
 
 /// A row of the creature table as the file has it, before the loader's passes: what the state-group pass may change.
@@ -466,7 +487,8 @@ bool same_starts(const std::vector<combat::CooldownStart>& a, const std::vector<
     return true;
 }
 
-/// A row the pass changes: the 0 s row of a task, the task's timer its timed twin carries, and the twin's ability when the twin can play (0: it is held, so nothing chains to it).
+/// A row the pass changes: the 0 s row of a task, the task's timer its timed twin carries, and the twin's ability when the twin can play and is a later move (0: it is held, it is the
+/// same move, or it is an earlier state, so nothing chains to it).
 struct PassRow {
     const char* leaf;
     int64_t     ability;
@@ -478,6 +500,8 @@ struct PassRow {
 
 constexpr int64_t kRallyAbility = 6064629982192795650, kFlameAura = 6064631997786095616, kShamanTwin = 6064629982195220483, kSweep = 6064632228125671424, kThrust = 6064632227747004416;
 constexpr int64_t kMaw = 6064633610525802509, kSerenade = 6064632138952278043;
+/// The rows the pass changes for a corrected table (the base Shambler's post-Lunge row is switched off there, so its fallback is not in this list).  A table that still
+/// keeps that row held adds the base fallback in the test, because the pass then copies its 4 s timer.
 const PassRow kPassRows[] = {
     {"Goblin_FlameShaman", kRallyAbility, 15, "Rally", 40, kFlameAura},
     {"Goblin_FlameShaman1_Dreadtide", kRallyAbility, 15, "Rally", 40, kFlameAura},
@@ -489,7 +513,6 @@ const PassRow kPassRows[] = {
     {"Goblin_HighFlameShaman_LawlessTropics", kRallyAbility, 21, "Rally", 40, kShamanTwin},
     {"Goblin_Shaman_RareSpawn_TheHighJubjub", kRallyAbility, 21, "Rally", 40, kShamanTwin},
     {"Najash_Tracker_RotationTest", kSweep, 24, "Basic", 1, kThrust},
-    {"Withered_Shambler", kMaw, 30, "Maw", 4, 0},
     {"Withered_Shambler1", kMaw, 30, "Maw", 4, 0},
     {"Withered_Shambler2", kMaw, 30, "Maw", 4, 0},
     {"Bandit_Musician2", kSerenade, 42, "Serenade", 7, 0},
@@ -499,10 +522,21 @@ const PassRow kPassRows[] = {
 
 }  // namespace rally_group
 
-void test_the_state_group_pass_changes_exactly_the_rows_it_names(Fixture&) {
-    std::printf("the state groups' pass: 16 rows of the creature table carry the timer of the timed state after them, 10 of them chain to it, and every other row loads as its file says\n");
+void test_the_state_group_pass_changes_exactly_the_rows_it_names(Fixture& f) {
+    std::printf("the state groups' pass: the rows the creature table's reading lists carry the timer of the timed state after them, 10 of them chain to it, and every other row loads as its file says\n");
     combat::NpcAbilityData tables;
     if (!load_creature_tables(tables)) return;
+    // the base Shambler's post-Lunge row: the corrected table switches it off and the pass leaves the fallback alone; the older table keeps it held and the pass copies
+    // the 4 s timer, so that fallback row is one of the rows the pass changes there.
+    const std::string maw_path = creature_path(f, "/Shambler/Withered_Shambler.Default__Withered_Shambler_C");
+    bool base_maw_held = false;
+    if (const std::vector<combat::CreatureAbility>* maw_rows = tables.abilities_of(maw_path); maw_rows) {
+        for (const combat::CreatureAbility& t : *maw_rows) {
+            if (t.ability == rally_group::kMaw && t.order == 26) base_maw_held = t.unknown;
+        }
+    }
+    std::vector<rally_group::PassRow> pass_rows(std::begin(rally_group::kPassRows), std::end(rally_group::kPassRows));
+    if (base_maw_held) pass_rows.push_back({"Withered_Shambler", rally_group::kMaw, 30, "Maw", 4, 0});
     std::string dir = NPC_MOTION_PATH;
     dir.erase(dir.find_last_of("/\\") + 1);
     std::map<std::string, rally_group::FileRow> file;
@@ -523,7 +557,7 @@ void test_the_state_group_pass_changes_exactly_the_rows_it_names(Fixture&) {
             const rally_group::FileRow& raw = it->second;
             if (raw.seen != 1) ++ambiguous;
             const rally_group::PassRow* wanted = nullptr;
-            for (const rally_group::PassRow& p : rally_group::kPassRows) {
+            for (const rally_group::PassRow& p : pass_rows) {
                 if (leaf == p.leaf && t.ability == p.ability && t.order == p.order) wanted = &p;
             }
             if (!wanted) {
@@ -558,7 +592,8 @@ void test_the_state_group_pass_changes_exactly_the_rows_it_names(Fixture&) {
         }
     }
     ALERT_EFFECT(loaded_rows == file_rows && missing == 0 && ambiguous == 0, "every row of the file loads once (%zu of %zu rows, %zu not found, %zu doubled)", loaded_rows, file_rows, missing, ambiguous);
-    ALERT_EFFECT(listed == 16 && listed_seen.size() == 16, "the 16 rows of the 13 Blueprints that cast differently and the 3 bandit musicians' heals are all in the table (%zu rows of %zu Blueprints)", listed, listed_seen.size());
+    ALERT_EFFECT(listed == pass_rows.size() && listed_seen.size() == pass_rows.size(), "the %zu rows the table's reading lists carry the timed twin's timer and the bandit musicians' heals are all in the table (%zu rows of %zu Blueprints)",
+                 pass_rows.size(), listed, listed_seen.size());
     ALERT_EFFECT(listed_right == listed, "each of them carries the timed twin's timer exactly once, with the twin's cooldown, and chains to the twin only when it can play (%zu of %zu right)", listed_right, listed);
     ALERT_EFFECT(chained == 10, "ten of them chain to their twin: the nine goblin shamans' Rally rows and the development Blueprint's Spear Sweep (%zu)", chained);
     ALERT_EFFECT(others > 6000 && others_changed == 0, "no other row's starts or chain differ from the file's (%zu other rows, %zu differ)", others, others_changed);

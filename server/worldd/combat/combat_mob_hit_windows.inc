@@ -118,7 +118,7 @@ void CombatWorld::sweep_windows(Npc& n, Pending& p, double now) {
     for (Pending::PendingWindow& w : p.windows) {
         if (now < w.start || now > w.end || w.hit == 0) continue;
         // the target part of the record finds the creature's target or the one the cast was aimed at; its volumes reach every player inside them
-        const uint64_t aimed = w.area.has_target_part() ? aimed_at(n, w.area, p.target) : 0;
+        const uint64_t aimed = w.area.has_target_part() ? aimed_at(n, w.area, p.target, p.by_pick) : 0;
         const std::vector<PlayerPort*> candidates = players_;
         for (PlayerPort* q : candidates) {
             if (!q->fighter().alive()) continue;

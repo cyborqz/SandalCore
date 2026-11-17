@@ -831,6 +831,8 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         return until == n.cooldown_until.end() || now_ >= until->second;
     };
     ctx.roll = [this]() { return rng_.rand_double(); };
+    // the tree's utility-score selectors: each scores the actors its candidate set names and keeps the best in its blackboard (a `pick` condition)
+    ctx.pick_target = [this, &n](const PickRule& rule) { return pick_target(n, rule, now_); };
     // the effects the creature carries (its own, from its abilities and from spawn) and those its target carries: the tree's "carries effect E" conditions
     ctx.has_effect = [this, &n](int64_t effect) { return n.holds_effect(effect, now_); };
     if (target) {
@@ -913,6 +915,9 @@ CombatWorld::Attack CombatWorld::choose_animated(Npc& n, const Fighter* target, 
         if (!holds) continue;
         a.ability = d;
         a.task = &t;
+        // the task's utility-score selectors picked their candidates while its conditions were asked: the winner is the move's target when its task reads the
+        // selector's blackboard (StoredTarget from the GetBBCharacter task), and for a move that is not an attack (a heal, a shield) the picked ally always is
+        bind_pick(a, n, t, ctx, attack);
         if (t.max_distance >= 0) a.range_cm = static_cast<int>(t.max_distance);
         return a;
     }
@@ -942,12 +947,13 @@ bool CombatWorld::hit_reaches(const Npc& n, const Fighter& body, const BiteArea&
     return hit_lands(area, s, is_target, [this, from, at]() { return line_clear(from, at); });
 }
 
-uint64_t CombatWorld::aimed_at(const Npc& n, const BiteArea& area, uint64_t cast_target) {
+uint64_t CombatWorld::aimed_at(const Npc& n, const BiteArea& area, uint64_t cast_target, bool by_pick) {
     // the record finds its target the way it says: what the creature fights now, the one the cast was aimed at, or both in an order
     using D = BiteArea::Discovery;
     PlayerPort* locked = player(cast_target);
     const bool locked_ok = locked && locked->fighter().alive();
-    const uint64_t fighting = n.ai.target();
+    // a move aimed at the actor a selector picked has that actor for its target: the one the creature fights is not what its own record finds
+    const uint64_t fighting = by_pick ? cast_target : n.ai.target();
     PlayerPort* active = fighting ? player(fighting) : nullptr;
     const bool active_ok = active && active->fighter().alive();
     switch (area.discovery) {
@@ -1179,6 +1185,15 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         a = picked ? *picked : choose_animated(n, &port->fighter());
         if (!a.ability) return;   // nothing the tree allows with the target where it stands: the creature tries again at its next look
     }
+    // a selector of the task picked another actor: an attack aimed at it lands on it (when it is a player), and a move that is not an attack (a heal, a shield)
+    // keeps the pick as the creature its effects are meant for.  The hate list's own target is still the creature's fight; this move alone is aimed elsewhere.
+    uint64_t aim = target;
+    if (a.pick != 0 && a.pick_casts) {
+        if (player(a.pick)) aim = a.pick;
+    }
+    const uint64_t picked_ally = a.pick != 0 && a.pick_casts && !player(a.pick) ? a.pick : 0;
+    PlayerPort* aim_port = player(aim);
+    if (aim_port) port = aim_port;
     CastPlan plan;
     bool animated = false;
     Vec3 at;
@@ -1190,7 +1205,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
             at = port->fighter().position();
             // an alert (a growl, a yawp, a rally) names no target: the recorded casts of such moves carry an empty list of targets and a transform at the origin; so does a state (the Block)
             if (!is_alert_move(*a.ability, catalog_, data_.ids().health) && !is_state_move(*a.ability, catalog_, data_.ids().health)) {
-                cast.target = target;
+                cast.target = aim;
                 cast.target_guid = port->cylinder_guid();   // (the client's targeting finds the player by his collision cylinder's NetGUID, in full)
                 cast.tx = at.x;
                 cast.ty = at.y;
@@ -1225,11 +1240,11 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
                         play.freeze_scale = rule->radius_scale;
                         play.ignore_non_target = rule->ignore_non_target;
                     }
-                    play.blockers = [this, own_radius, target](std::vector<npc::NpcWorld::RootMotionBlock>& out) {
+                    play.blockers = [this, own_radius, aim](std::vector<npc::NpcWorld::RootMotionBlock>& out) {
                         for (PlayerPort* p : players_) {
                             if (!p->fighter().alive()) continue;
                             const Vec3 at = p->fighter().position();
-                            out.push_back({at.x, at.y, own_radius + p->fighter().radius_cm(), p->fighter().radius_cm(), p->actor_id() == target});
+                            out.push_back({at.x, at.y, own_radius + p->fighter().radius_cm(), p->fighter().radius_cm(), p->actor_id() == aim});
                         }
                     };
                     carried = npcs_world_->begin_root_motion(n.actor_id, std::move(play));
@@ -1257,7 +1272,7 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
         // The creature turns towards its target while the ability plays: the tree's Rotate To task that runs with it, at its speed and for its time; and the one attack the recordings show
         // turning it through the whole montage without a Rotate To (the Minotaur's axe strike, which keeps facing a player who runs round it while the montage carries it).
         if (a.task && npcs_world_ && (a.task->rotates || attack_keeps_turning(a.ability->row.name))) {
-            const uint64_t who = target;
+            const uint64_t who = aim;
             const double rate = a.task->rotates ? a.task->rotate_speed : 0.0;   // (0: the creature's own rate)
             const double until = now + (a.task->rotates && a.task->rotate_seconds > 0 ? std::min(a.task->rotate_seconds, plan.seconds) : plan.seconds);
             npcs_world_->track_target(
@@ -1281,7 +1296,9 @@ void CombatWorld::start_attack(Npc& n, uint64_t target, double now, const Attack
     }
     Pending p;
     p.npc = n.actor_id;
-    p.target = target;
+    p.target = aim;
+    p.pick = picked_ally;
+    p.by_pick = aim != target;
     p.ability = a.ability;
     p.task = a.task;
     if (animated) {
@@ -1399,14 +1416,15 @@ void CombatWorld::resolve_pending(double now) {
                 if (const abilities::HitDef* hit = catalog_.hit(guid); hit && (hit->row.applicable_targets & 1) != 0) land_self_effects(n, *hit, now);
                 // a hit lands by its targeting record when its notify falls due (where the creature is by then, facing as it faces): on the player the record's target part finds, wherever he stands
                 // unless the record measures, and on every player inside one of its volumes; a hit that reaches nobody sends nothing
-                const uint64_t aimed = area.has_target_part() ? aimed_at(n, area, p.target) : 0;
+                const uint64_t aimed = area.has_target_part() ? aimed_at(n, area, p.target, p.by_pick) : 0;
                 const std::vector<PlayerPort*> candidates = players_;
                 for (PlayerPort* q : candidates) {
                     if (!q->fighter().alive() || !hit_reaches(n, q->fighter(), area, aimed != 0 && q->actor_id() == aimed)) continue;
                     deliver_hit(n, *q, *p.ability, guid, now);
                 }
-                // an alert's hit reaches only its own side: the caster and its allies, by the same targeting record, and puts its effects on them
-                if (is_alert_move(*p.ability, catalog_, data_.ids().health)) land_alert_hit(n, *p.ability, area, guid, now, p.alert_logged);
+                // an alert's hit reaches only its own side: the caster and its allies, by the same targeting record, and puts its effects on them; a selector's
+                // picked ally (a heal's target) is the one the hit lands on
+                if (is_alert_move(*p.ability, catalog_, data_.ids().health)) land_alert_hit(n, *p.ability, area, guid, now, p.alert_logged, p.pick);
             }
             while (p.next_fire < p.timed_fires.size() && p.timed_fires[p.next_fire].first <= now && !stunned()) {
                 const PlannedFire fire = p.timed_fires[p.next_fire++].second;
@@ -2307,6 +2325,7 @@ void CombatWorld::begin_reset(Npc& n, double now) {
         write_stat(registry_, n.actor_id, content::kGuidHealth, max->value);
     }
     drop_attack(n);   // ... and with a fight that is reset
+    n.bb_targets.clear();   // (a selector's pick was of that fight: a later fight starts with no stored target)
     // its own effects are of the fight: a reset takes them off, except the ones its Blueprint gave it from spawn (the records are infinite and persist through death)
     for (auto it = n.own_effects.begin(); it != n.own_effects.end();) it = n.starting_effects.count(it->first) == 0 ? n.own_effects.erase(it) : std::next(it);
     set_flags(n, false, 0);
@@ -2378,6 +2397,7 @@ void CombatWorld::think(Npc& n, double now) {
         ++stats_.aggros;
         n.fight_began = now;
         n.fight_rolls.clear();
+        n.bb_targets.clear();
         if (n.ai.params().senses.enabled) {
             const npc::ai::Params& pr = n.ai.params();
             PlayerPort* who = player(o.target);
@@ -2565,5 +2585,6 @@ void CombatWorld::tick(double now) {
 #include "combat/combat_zone_area.inc"   // who stands in a lingering zone (actors_in_area)
 #include "combat/combat_mob_child_hits.inc"   // the hits a creature's hit fires when it lands, their effects on a player and their lingering zones
 #include "combat/combat_mob_hit_windows.inc"   // a montage's hit-window notify states and the montage a movement-event branch enters
+#include "combat/combat_mob_target_pick.inc"   // a tree's utility-score selector: the candidates it scores and the target it picks
 
 }  // namespace aoc::worldd::combat
