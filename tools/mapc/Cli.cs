@@ -55,7 +55,7 @@ public static class Cli
         public string? Part;               // --part FILE: where a batch writes its geometry
         public double HeapGb = 0;          // --heap-gb G: DOTNET_GCHeapHardLimit of each child (0: the default below)
         public double MinFreeGb = 6;       // --min-free-gb G: a batch does not start with less memory free than this
-        public double WaitMinutes = 40;    // --wait-minutes N: how long a batch waits for room (the game or a build running, too little memory free) before giving up
+        public double WaitMinutes = 40;    // --wait-minutes N: how long a batch waits for enough free memory before giving up
         public string? WorkDir;            // --work-dir DIR: where the batches' parts are kept (default: a folder beside the output; a finished part is reused by the next run)
         public int StopAfter = -1;         // --stop-after N: run batches 0..N, print their time and peak memory, merge nothing (the measurement run)
         public bool KeepParts;             // --keep-parts: do not delete the parts after a successful merge
@@ -228,8 +228,8 @@ public static class Cli
 // Cyb : C.O.A
 
     /// <summary>mapc town-floors: the two city-node platform umaps (Landscape_Flat_D_Master_01, Landscape_River_C_Master_01: 48 MB, not a map read) into DIR/town_platforms.bin, or with
-    /// --check a byte comparison with the file that is there.  It runs as a child under a heap limit (--heap-gb, 3 by default) behind the same guard as the map read (free memory, no game
-    /// or build running); `--probe` lists what the two umaps hold and writes nothing.</summary>
+    /// --check a byte comparison with the file that is there.  It runs as a child under a heap limit (--heap-gb, 3 by default) behind the same guard as the map read (free memory);
+    /// `--probe` lists what the two umaps hold and writes nothing.</summary>
     static int TownFloorsCommand(Opt o)
     {
         void Log(string m) => Console.WriteLine(m);
@@ -272,7 +272,7 @@ public static class Cli
     }
 
     /// <summary>mapc town-layouts: the collision geometry of what the five towns' layouts place (TownLayouts.cs) into DIR/town_layouts.bin, or with --check a byte comparison with the file
-    /// that is there.  A package read: it runs as a child under a heap limit (--heap-gb, 4 by default) behind the map read's guard (--min-free-gb free memory, no game or build running).
+    /// that is there.  A package read: it runs as a child under a heap limit (--heap-gb, 4 by default) behind the map read's guard (--min-free-gb free memory).
     /// `--probe PATH...` lists what the named level instances hold and writes nothing.</summary>
     static int TownLayoutsCommand(Opt o)
     {

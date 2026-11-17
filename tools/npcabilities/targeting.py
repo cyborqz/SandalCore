@@ -32,7 +32,9 @@ hit for (the `hit_windows` column of npc_montages.tsv), or one of its branch mon
     python targeting.py --selftest [DIR]       checks that pass on a throw-away database and tables
 """
 import argparse
+import contextlib
 import gzip
+import io
 import json
 import os
 import shutil
@@ -105,7 +107,7 @@ def ref(v):
 
 
 def branch_records(db):
-    """The ability, conditional branch and animation branch records, decoded once: guid -> record.  (The record table has no index on its guid: a lookup for each is a scan of the table.)"""
+    """The ability, conditional branch and animation branch records, decoded once: guid -> record.  (One scan of the record table: every record of three schemas is wanted, so no guid is known to look up.)"""
     out = {}
     for guid, data in db.execute("SELECT guid, data FROM record WHERE schema IN ('AoCAbilityRecordBase', 'ConditionalBranchRecordBase', 'AnimBranchRecordBase')"):
         try:
@@ -263,6 +265,7 @@ def selftest(root=None):
     db.execute('CREATE TABLE record (guid INTEGER PRIMARY KEY, name TEXT, schema TEXT, data BLOB)')
     db.execute('CREATE TABLE ab_montage (ability_guid INTEGER, anim_index INTEGER, soft_path TEXT)')
     db.execute('CREATE TABLE ab_ability_hit (ability_guid INTEGER, source TEXT, key INTEGER)')
+    db.execute('CREATE TABLE ab_targeting (ability_guid INTEGER, key INTEGER, targeting_guid INTEGER, targeting_name TEXT)')
 
     def add(guid, name, schema, data):
         db.execute('INSERT INTO record VALUES (?, ?, ?, ?)', (guid, name, schema, gzip.compress(json.dumps(data).encode())))
@@ -282,6 +285,14 @@ def selftest(root=None):
             db.execute("INSERT INTO ab_ability_hit VALUES (?, 'hit', ?)", (ability, key))
     for ability, path in ((launch, '/Game/Test/Launch.Launch'), (windowed, '/Game/Test/Window.Window'), (wrong_key, '/Game/Test/WrongKey.WrongKey'), (two_reasons, '/Game/Test/Window.Window')):
         db.execute('INSERT INTO ab_montage VALUES (?, 0, ?)', (ability, path))
+    # the targeting rows: an ability that stops on contact with one record, a key with no record, a key with no targeting (0), and an ability whose record names a discovery this tool does not know
+    strike, unknown_discovery, plain = 901, 902, 903
+    lock = {'TargetDiscoveryBehavior': 'ETargetDiscoveryBehavior::PrefersActiveTargets', 'ValidDistance': 450.0, 'ValidAngle': 90, 'bCheckTargetValidity': True}
+    add(910, 'Targeting910', 'AbilityTargetingRecordBase', {'LockOnInfo': lock, 'HurtBoxInfo': {'TargetingVolumes': []}})
+    add(911, 'Targeting911', 'AbilityTargetingRecordBase', {'LockOnInfo': dict(lock, TargetDiscoveryBehavior='ETargetDiscoveryBehavior::Invented')})
+    add(strike, 'Strike', 'AoCAbilityRecordBase', {'RootMotionFreezeBehavior': 'ERootMotionFreezeBehavior::StopOnContact', 'RootMotionFreezeDistance': 120.0})
+    for ability, key, record in ((strike, 1, 910), (strike, 2, 0), (strike, 3, 999), (unknown_discovery, 1, 911)):
+        db.execute("INSERT INTO ab_targeting VALUES (?, ?, ?, '')", (ability, key, record))
     db.commit()
     montages = os.path.join(d, 'npc_montages.tsv')
     with open(montages, 'w', encoding='utf-8', newline='\n') as f:
@@ -322,13 +333,73 @@ def selftest(root=None):
     montage_keys = read_montages(montages)
     if montage_keys.get('/Game/Test/Window.Window', {}).get('windows') != {1}:
         problems.append('a window with an interval is not read as key 1: %s' % montage_keys.get('/Game/Test/Window.Window'))
+    rows = targeting_rows(db, [strike, plain])   # (an ability with no ab_targeting row and no record has no line; a record of key 3 that does not exist and the key 0 give none either)
+    want = ['\t'.join(['901', '1', '450', '0', '90', '0', '0', 'stop', '120', '1', '0', 'prefers_active', '1', '0', '0', '0', ''])]
+    if rows != want:
+        problems.append('the targeting rows are %r, expected %r' % (rows, want))
+    with contextlib.redirect_stderr(io.StringIO()) as said:
+        refused = targeting_rows(db, [strike, unknown_discovery])
+    if refused is not None or 'target discovery' not in said.getvalue():
+        problems.append('a record that names an unknown target discovery is not refused: %r, said %r' % (refused, said.getvalue()))
+    if read_records(db, [910, 911, 5]) != {910: db.execute('SELECT data FROM record WHERE guid = 910').fetchone()[0], 911: db.execute('SELECT data FROM record WHERE guid = 911').fetchone()[0]}:
+        problems.append('read_records does not give the records of the guids that have one, and only those')
+    many = list(range(1000, 1000 + 1203))   # (more guids than one batch of 500 holds)
+    for guid in many:
+        add(guid, 'Many%d' % guid, 'AoCAbilityRecordBase', {})
+    if sorted(read_records(db, many, batch=500)) != many:
+        problems.append('read_records misses guids when it reads in several batches')
     db.close()
     shutil.rmtree(d, ignore_errors=True)
     for p in problems:
         print('targeting selftest: FAIL:', p)
     if not problems:
-        print('targeting selftest: ok: the Launch (obstruction branch) and the window move are played now, the wrong window key, the walking branch, the branch into a section and the second reason stay held, the branches column is last')
+        print('targeting selftest: ok: the Launch (obstruction branch) and the window move are played now, the wrong window key, the walking branch, the branch into a section and the second reason stay held, the branches column is last, the targeting rows read in one pass are the ones a lookup of each record gives')
     return 0 if not problems else 1
+
+
+def read_records(db, guids, batch=500):
+    """guid -> the data of its record, for each of the guids that has one, read in queries of `batch` guids each: a search of the record table's index on guid for each guid (record_by_guid, which
+    contentc makes), or one scan of the table for the whole batch when the file has no such index (an older content.db).  A guid that two rows have (the design database has one such) gives its
+    first row in the table's order, as a lookup of that guid alone does."""
+    out = {}
+    wanted = sorted(set(guids))
+    for i in range(0, len(wanted), batch):
+        part = wanted[i:i + batch]
+        for guid, data in db.execute('SELECT guid, data FROM record WHERE guid IN (%s) ORDER BY rowid' % ','.join('?' * len(part)), part):
+            out.setdefault(guid, data)
+    return out
+
+
+def targeting_rows(db, guids):
+    """The lines of npc_targeting.tsv for these abilities (sorted guids), or None when a record names a target discovery this tool does not know (said on stderr)."""
+    keys = {}   # ability guid -> [(key, targeting record guid)] in the order of the keys, all read at once
+    for ability, key, targeting in db.execute('SELECT ability_guid, key, targeting_guid FROM ab_targeting ORDER BY ability_guid, key'):
+        keys.setdefault(ability, []).append((key, targeting))
+    records = read_records(db, list(guids) + [t for g in guids for _, t in keys.get(g, []) if t])
+    rows = []
+    for guid in guids:
+        own = records.get(guid)
+        ability = json.loads(gzip.decompress(own)) if own is not None else {}
+        freeze = [FREEZE.get(str(ability.get('RootMotionFreezeBehavior') or ''), 'none'), number(ability.get('RootMotionFreezeDistance')),
+                  number(ability.get('RootMotionFreezeRadiusScale') if ability.get('RootMotionFreezeRadiusScale') is not None else 1), '1' if ability.get('RootMotionIgnoreNonTarget') else '0']
+        for key, targeting in keys.get(guid, []):
+            if not targeting:
+                continue
+            rec = records.get(targeting)
+            if rec is None:
+                continue
+            record = json.loads(gzip.decompress(rec))
+            lock = record.get('LockOnInfo') or {}
+            name = str(lock.get('TargetDiscoveryBehavior') or 'ETargetDiscoveryBehavior::None')
+            if name not in DISCOVERY:
+                print('targeting: ability %d key %s names a target discovery this tool does not know: %s' % (guid, key, name), file=sys.stderr)
+                return None
+            volumes = (record.get('HurtBoxInfo') or {}).get('TargetingVolumes') or []
+            rows.append('\t'.join([str(guid), str(key), number(lock.get('ValidDistance')), number(lock.get('ValidMinDistance')), number(lock.get('ValidAngle')),
+                                   number(lock.get('AngleCenter')), '1' if lock.get('bPerformConeCheck') else '0'] + freeze +
+                                  [DISCOVERY[name], '1' if lock.get('bCheckTargetValidity') else '0', '1' if lock.get('bPerformLoSCheck') else '0', number(lock.get('DistanceCenter')),
+                                   str(len(volumes)), ';'.join(shape(v) for v in volumes)]))
+    return rows
 
 
 def main():
@@ -347,29 +418,9 @@ def main():
         lines = f.read().splitlines()[1:]
     guids = sorted({int(l.split('\t')[1]) for l in lines if l})
     db = sqlite3.connect('file:' + a.content_db.replace('\\', '/') + '?mode=ro', uri=True)
-    rows = []
-    for guid in guids:
-        own = db.execute('SELECT data FROM record WHERE guid = ?', (guid,)).fetchone()
-        ability = json.loads(gzip.decompress(own[0])) if own else {}
-        freeze = [FREEZE.get(str(ability.get('RootMotionFreezeBehavior') or ''), 'none'), number(ability.get('RootMotionFreezeDistance')),
-                  number(ability.get('RootMotionFreezeRadiusScale') if ability.get('RootMotionFreezeRadiusScale') is not None else 1), '1' if ability.get('RootMotionIgnoreNonTarget') else '0']
-        for key, targeting in db.execute('SELECT key, targeting_guid FROM ab_targeting WHERE ability_guid = ? ORDER BY key', (guid,)).fetchall():
-            if not targeting:
-                continue
-            rec = db.execute('SELECT data FROM record WHERE guid = ?', (targeting,)).fetchone()
-            if not rec:
-                continue
-            record = json.loads(gzip.decompress(rec[0]))
-            lock = record.get('LockOnInfo') or {}
-            name = str(lock.get('TargetDiscoveryBehavior') or 'ETargetDiscoveryBehavior::None')
-            if name not in DISCOVERY:
-                print('targeting: ability %d key %s names a target discovery this tool does not know: %s' % (guid, key, name), file=sys.stderr)
-                return 1
-            volumes = (record.get('HurtBoxInfo') or {}).get('TargetingVolumes') or []
-            rows.append('\t'.join([str(guid), str(key), number(lock.get('ValidDistance')), number(lock.get('ValidMinDistance')), number(lock.get('ValidAngle')),
-                                   number(lock.get('AngleCenter')), '1' if lock.get('bPerformConeCheck') else '0'] + freeze +
-                                  [DISCOVERY[name], '1' if lock.get('bCheckTargetValidity') else '0', '1' if lock.get('bPerformLoSCheck') else '0', number(lock.get('DistanceCenter')),
-                                   str(len(volumes)), ';'.join(shape(v) for v in volumes)]))
+    rows = targeting_rows(db, guids)
+    if rows is None:
+        return 1
     with open(a.out, 'w', encoding='utf-8', newline='\n') as f:
         f.write(HEADER + '\n')
         for r in rows:

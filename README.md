@@ -87,7 +87,7 @@ To make only the game data (for example before `go test ./...` or `scripts\run_t
 | **Go** | 1.27.3 or newer (`services/go.mod`; `install.bat` upgrades an older Go, or take the installer from [go.dev/dl](https://go.dev/dl/)) | the backend services and `contentc` |
 | **.NET SDK** | 8.0 (any 8.x; with the 8.0 runtime) | `tools/mapc`, `tools/itemnames`, `tools/npcabilities` and `tools/waterbodies`, which read the game's files |
 | **Python** | 3.10 or newer | the generators that `scripts\extract_game_data.ps1` runs |
-| **Docker Desktop** | current | PostgreSQL, to run the servers (not needed to build); or run PostgreSQL 15+ yourself |
+| **Docker Desktop** | current (with Docker Compose 2.23.1 or newer) | PostgreSQL, to run the servers (not needed to build); or run PostgreSQL 15+ yourself |
 
 - 💾 **Disk:** about 20 GB free on the repository's drive for the first build. The game data is 1.5 GB and the finished C++ build about 12 GB; vcpkg needs more while it compiles the libraries.
 - 🧠 **Memory:** at least 6 GB free while the game data is built (the biggest program uses about 4 GB).
@@ -147,7 +147,7 @@ It also makes the generated sources and test fixtures the build includes (for ex
 
 **How long.** About 10 minutes the first time on a fast PC (24 threads, 31 GB: 10.3 minutes in all, of which the map read and the navigation mesh take 8); a slower PC takes longer. Every step is skipped when what it reads has not changed, so running it again takes about a second.
 
-**What runs again.** Every step keeps a record of what it read (in `dist\content\.extract\`) and runs again only when that changed. The navigation mesh step, the longest, reads the map, the five towns' floors and buildings, the Riverlands' rectangles and, in `content.db`, where the five towns' nodes stand. When only other game numbers change (abilities, items, quests, mobs), `content.db` and the files made from it are made again, but the navigation mesh is left as it is, which saves the 8 minutes it takes on a fast PC.
+**What runs again.** Every step keeps a record of what it read (in `dist\content\.extract\`) and runs again only when that changed. The navigation mesh step, the longest, reads the map, the five towns' floors and buildings, the Riverlands' rectangles and, in `content.db`, where the five towns' nodes stand. When only other game numbers change (abilities, items, quests, mobs), `content.db` and the files made from it are made again, but the navigation mesh is left as it is, which saves the 8 minutes it takes on a fast PC. Three more steps are kept the same way, by the bytes they read and not by the step before them: `townlayouts` reads the list that `townitems` writes (`dist\content\town_layout_items.tsv`, made from `content.db`), so a new `content.db` that gives the same list leaves it alone; `waterbodies` reads the Riverlands' rectangles (`tools\mapc\region_rects.tsv`); and `navbuild`, the builder of the navigation mesh (and through it the mesh), reads its own sources and the lines of `server\worldd\CMakeLists.txt` that build it (and the commands after them that name those targets or set a flag for every target of the file), so a test added to that file runs nothing again. The steps that read `content.db` itself (`region`, `headers`, `fixtures`, `roads`, `npcabilities`) run again whenever `content.db` is made again, because each reads rows of many tables and a missed table would leave stale data; to key one of them on the rows it reads, `contentc` would write a digest of every table and of every record type into `meta`, and the step would name the ones it reads.
 
 Run `powershell -File scripts\extract_game_data.ps1` by hand to use its options (`install.bat` runs it without them):
 
@@ -158,7 +158,7 @@ Run `powershell -File scripts\extract_game_data.ps1` by hand to use its options 
 | `-Skip <step>` | leaves one step out |
 | `-Force` | runs everything again |
 
-The steps are `tools`, `config`, `curves`, `names`, `database`, `region`, `headers`, `fixtures`, `navbuild`, `roads`, `townfloors`, `townlayouts`, `npcabilities`, `waterbodies`, `navmesh`. The output of every program is kept in `dist\content\.extract\`; `last_run.log` has all of it.
+The steps are `tools`, `config`, `curves`, `names`, `database`, `region`, `headers`, `fixtures`, `navbuild`, `roads`, `townfloors`, `townitems`, `townlayouts`, `npcabilities`, `waterbodies`, `navmesh`. The output of every program is kept in `dist\content\.extract\`; `last_run.log` has all of it.
 
 **Network.** The first run needs it once, for CUE4Parse (a git clone of github.com/FabianFG/CUE4Parse at a pinned commit; the script keeps its 7.5 MB of source), the NuGet packages that `tools\mapc\mapc.csproj` names (from nuget.org), the Go modules that `services\go.mod` names, and, in the first C++ build, the vcpkg libraries. Nothing is downloaded after that.
 

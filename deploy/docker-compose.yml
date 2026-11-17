@@ -16,7 +16,12 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    # Postgres runs the files of /docker-entrypoint-initdb.d on a fresh data volume only. The one file here is the text below, not a mount of a folder of the checkout: a path of the
+    # checkout in the settings would give every checkout its own config hash, and `docker compose up` would then recreate the container (and cut every connection to it) whenever it is
+    # started from another checkout than the last one. With no path in them, every checkout's settings are the same. (A file written inline needs Docker Compose 2.23.1 or newer.)
+    configs:
+      - source: init_test_db
+        target: /docker-entrypoint-initdb.d/01-test-db.sql
     healthcheck:
       # Over TCP: during first-start init only the unix socket is served, so
       # this turns healthy once the final server (and aoc_test) is up.
@@ -24,6 +29,12 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+configs:
+  init_test_db:
+    content: |
+      -- Integration tests run in throwaway schemas inside this database.
+      CREATE DATABASE aoc_test;
 
 volumes:
   pgdata:

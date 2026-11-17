@@ -32,6 +32,7 @@ Things to keep in mind:
 - A test does not depend on another test having run before it.
 - After adding checks, the program's `N passed` count goes up by the number of checks you added. If it does not, the program has no `aoc_tests::run` call (see below); a program that registers tests and never calls `aoc_tests::run` also prints a `[FAIL]` line when it ends.
 - A test that throws is reported as a failed check and the rest still run.
+- To run one test of a big program while you hunt a failing check, set `AOC_TEST_ONLY=<word>[,<word>...]` in the environment: `aoc_tests::run` then runs only the registered tests whose name contains one of the words and prints `[only] N of M tests`. A word that matches no test is a failed check, so a misspelled name never passes. A run with the variable set is a probe: the gate and every test run that counts run the whole program, with the variable unset.
 
 ## A program that has no registered checks yet
 

@@ -37,8 +37,9 @@ import (
 // dialogue actions' profession and Promote / Demote. 45 added the lingering zones' spawn (their origin,
 // attachment, actor class and fade time in ab_zone.spawn) and the targeting records the zones' volumes use.
 // 47 added craft_filter_item (the items of each gather-item filter that names a recipe input). 48 compiles a
-// division of two whole numbers in the ability formulas, truncated toward zero as the game does.
-const Version = "48"
+// division of two whole numbers in the ability formulas, truncated toward zero as the game does. 49 adds the
+// indexes record_by_guid and record_by_schema, so a lookup of a record by its guid no longer reads every row.
+const Version = "49"
 
 // Options say what Build reads and writes.
 type Options struct {
@@ -546,6 +547,12 @@ func Build(ctx context.Context, opt Options) (*Summary, error) {
 	if err := w.close(); err != nil {
 		return nil, err
 	}
+	// The record table's lookup indexes come after every row is in (record_index.go).
+	tIndex := time.Now()
+	if err := addRecordIndexes(tx); err != nil {
+		return nil, err
+	}
+	opt.logf("record indexes made in %.1f s", time.Since(tIndex).Seconds())
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

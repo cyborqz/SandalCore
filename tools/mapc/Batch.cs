@@ -8,7 +8,7 @@ using System.Text;
 
 namespace Mapc;
 
-/// <summary>The machine: free memory, and the processes a heavy job must not run beside (the PC hard-resets under heavy load).</summary>
+/// <summary>The machine: the free memory a heavy job waits for (the PC hard-resets under heavy load).</summary>
 public static class Sys
 {
     [StructLayout(LayoutKind.Sequential)]
@@ -33,39 +33,23 @@ public static class Sys
         return GlobalMemoryStatusEx(ref s) ? s.TotalPhys / 1073741824.0 : 0;
     }
 
-    static readonly string[] Heavy = { "MSBuild", "cl", "link", "cmake", "aoc_navbuild", "AOCClient", "AOCClient-Win64-Shipping", "AshesOfCreation" };
-
-    /// <summary>The names of the running processes a map read must not share the machine with: the game client, a build.  (Other mapc children are the caller's own.)</summary>
-    public static List<string> HeavyNeighbours()
-    {
-        var found = new List<string>();
-        foreach (var p in Process.GetProcesses())
-        {
-            try
-            {
-                string n = p.ProcessName;
-                if (n.StartsWith("AOCClient", StringComparison.OrdinalIgnoreCase) || Heavy.Contains(n, StringComparer.OrdinalIgnoreCase)) found.Add(n + "#" + p.Id);
-            }
-            catch { }
-            finally { p.Dispose(); }
-        }
-        return found;
-    }
-
-    /// <summary>Waits until at least <paramref name="minFreeGb"/> of memory is free and no game or build runs; false after <paramref name="maxMinutes"/>.</summary>
+    /// <summary>Waits while less than <paramref name="minFreeGb"/> of memory is free; false after <paramref name="maxMinutes"/>.</summary>
     public static bool WaitForRoom(double minFreeGb, double maxMinutes, Action<string> log)
+        => WaitForRoom(minFreeGb, maxMinutes, log, FreePhysicalGb, TimeSpan.FromSeconds(15));
+
+    /// <summary>The same wait with the free-memory reading and the poll interval given (the test calls this).</summary>
+    public static bool WaitForRoom(double minFreeGb, double maxMinutes, Action<string> log, Func<double> freeGb, TimeSpan poll)
     {
         var sw = Stopwatch.StartNew();
         string last = "";
         while (true)
         {
-            double free = FreePhysicalGb();
-            var heavy = HeavyNeighbours();
-            if (free >= minFreeGb && heavy.Count == 0) return true;
-            string why = free < minFreeGb ? $"only {free:F1} GB free (the guard wants {minFreeGb:F1})" : "running: " + string.Join(", ", heavy);
+            double free = freeGb();
+            if (free >= minFreeGb) return true;
+            string why = $"only {free:F1} GB free (the guard wants {minFreeGb:F1})";
             if (why != last) { log("waiting: " + why); last = why; }
             if (sw.Elapsed.TotalMinutes >= maxMinutes) { log($"gave up after {maxMinutes:F0} minutes: {why}"); return false; }
-            Thread.Sleep(15000);
+            Thread.Sleep(poll);
         }
     }
 }

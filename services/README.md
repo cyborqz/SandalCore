@@ -25,7 +25,7 @@ gateway and worldd send it. The game client's ICS stream does not use it.
 
 ```powershell
 scripts\services.ps1 up      # PostgreSQL in Docker
-scripts\services.ps1 build   # build auth, character, citynode, nodectl, worldctl, charimport, mesh and gateway into dist\services
+scripts\services.ps1 build   # build auth, character, citynode, nodectl, worldctl, charimport, mesh and gateway into dist\services: only those whose sources changed (`stale` lists them)
 scripts\services.ps1 run     # build, then start auth, character, citynode, mesh, gateway and dist\Release\worldd.exe hidden, logging to files
 scripts\services.ps1 stop    # stop those processes (worldd included)
 scripts\services.ps1 login   # sign in with config\dev_login.local.json, save the token for tether_server
@@ -1057,7 +1057,7 @@ What is in `content.db` (the schema is `internal/content/schema.go`):
   lacks; "already present" with the generated one; a patch that fits nothing stops the build), and
   the `0_AoCEvolve.dbc` note;
 - `record_table`, `record`: every table of the `.dbc` and every row, by table, TypeId and Guid (a
-  pair that is unique). A row is the table's record struct walked with the facts read from the
+  pair that is unique; a lookup by Guid alone or by the schema's name is served by `record_by_guid` and `record_by_schema`, which the build makes after the last row). A row is the table's record struct walked with the facts read from the
   client (`internal/designdb`: the leaf `FXxxRecord`'s own properties first, Transient properties
   not stored, 16-byte-aligned rows for four structs, 4 more bytes after a row with a parent,
   `InstancedStruct`, `Optional`), and every table's rows end exactly on its last byte. The TypeIds

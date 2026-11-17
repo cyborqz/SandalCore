@@ -47,7 +47,8 @@ AVOID = ('Freehold', 'FTUE', 'TEST', 'Test', 'NodeWar', 'Corrupted', 'Livestock'
 
 def load(db, schema):
     out = {}
-    for row in db.execute('SELECT guid, type_id, name, dev_only, data FROM record WHERE schema = ?', (schema,)):
+    # (rowid order, the order the table was written in: the record table's index on schema would give guid order, and a duplicate or a later pick must not depend on which file is read)
+    for row in db.execute('SELECT guid, type_id, name, dev_only, data FROM record WHERE schema = ? ORDER BY rowid', (schema,)):
         out[row[0]] = {'guid': row[0], 'type_id': row[1], 'name': row[2], 'dev_only': bool(row[3]), 'data': json.loads(gzip.decompress(row[4]))}
     return out
 

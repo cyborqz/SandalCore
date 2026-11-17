@@ -24,8 +24,8 @@
     dist\content\npc_trees.tsv                 what each Blueprint's state tree has tasks for (wander, patrol): an NPC whose tree has neither stands at its post (tools\npcabilities)
     dist\content\town_platforms.bin           the floor of the five towns (two city platform maps)  (mapc, from the game's containers)
     dist\content\town_layout_items.tsv,        the buildings, walls and terraces of the five towns' layouts at the level each town starts at (deploy\citynode_seed.json):
-                                               what stands where (a python list from content.db),
-      town_layouts.bin                         then their collision geometry (mapc, from the game's containers)
+                                               what stands where (a python list from content.db, the townitems step),
+      town_layouts.bin                         then their collision geometry (mapc, from the game's containers, the townlayouts step)
     dist\content\area_geom.bin, area_nav.bin   the navigation mesh (combat needs it)             (mapc and aoc_navbuild)
     dist\content\client_config\, zoi_chunks\   the game's Config files and its zone-of-influence grid (read by the generators below)
     the sources the build includes             world\zoi_surface_table.h, node_constants.h, constants_gen.go, region_data.h, garden_defs.h,
@@ -38,14 +38,16 @@
   4 GB of memory for any one program; the first build of the C++ libraries (vcpkg) comes on top and can take a long time.
 
   Every step is skipped when what it reads is unchanged since the last run (a stamp per step in dist\content\.extract), so install.bat and the launchers can call
-  this every time. The navigation mesh step, the longest, reads the map, the towns' floors and buildings, the Riverlands' rectangles and where the five towns' nodes stand
-  in content.db: it runs again when one of those changes, not when other game numbers do. The supported client build is the one of 2026-01-29 (AOCClient-Win64-Shipping.exe
+  this every time. Four steps hold the bytes they read, not the id of the step that wrote them: the navigation mesh step, the longest, reads the map, the towns' floors and
+  buildings, the Riverlands' rectangles and where the five towns' nodes stand in content.db; the townlayouts step reads the list the townitems step writes; the waterbodies step
+  reads the Riverlands' rectangles; the navbuild step (the builder of the navigation mesh) reads its own sources and the CMake lines that build it. Each runs again when
+  one of those changes, not when other game numbers (or a test registration in the CMake files) do. The supported client build is the one of 2026-01-29 (AOCClient-Win64-Shipping.exe
   235,606,624 bytes, CacheDB.dbc 144,085,052 bytes); with another build the script warns and goes on.
 
 .PARAMETER GameRoot
   The game's "Game" folder (the one that holds AOCClient.exe and AOC\). Default: GAME_ROOT, config\paths.json, Steam's libraries, the usual folders.
 .PARAMETER Only
-  Run only these steps: tools, config, curves, names, database, region, headers, fixtures, navbuild, roads, townfloors, townlayouts, npcabilities, waterbodies, navmesh.
+  Run only these steps: tools, config, curves, names, database, region, headers, fixtures, navbuild, roads, townfloors, townitems, townlayouts, npcabilities, waterbodies, navmesh.
 .PARAMETER Skip
   Leave these steps out (for example -Skip fixtures when you do not build the tests).
 .PARAMETER Force
@@ -398,7 +400,37 @@ function Get-CodeNpcAbilities { Get-CodeHash @('tools\npcabilities') }
 function Get-CodeItemNames { Get-CodeHash @('tools\itemnames') }
 function Get-CodeWaterBodies { Get-CodeHash @('tools\waterbodies') }
 function Get-CodeGens     { Get-CodeHash @('tools\capture\gen_zoi_surface.py', 'tools\capture\gen_region_rects.py', 'tools\capture\gen_region.py', 'tools\capture\gen_node_constants.py', 'tools\capture\gen_gm_garden.py', 'tools\capture\gen_tooltips.py', 'tools\worldd\gen_gear_fixture.py', 'tools\worldd\gen_talent_fixture.py') }
-function Get-CodeNav      { Get-CodeHash @('server\worldd\nav', 'server\worldd\world\town_platform.cpp', 'server\worldd\world\town_platform.h', 'third_party\recastnavigation', 'CMakeLists.txt', 'server\worldd\CMakeLists.txt', 'vcpkg.json') }     # aoc_navbuild links the towns' platform code from world\ as well as nav\
+# The CMake lines that build aoc_navbuild: server\worldd\CMakeLists.txt from its first line to the end of the aoc_navbuild block (find_package, Recast and Detour, the nav sources of worldd_nav, the
+# executable), and, after it, what can still change those three targets: a command whose first argument is aoc_navbuild, worldd_nav or recast_detour (target_sources, target_link_libraries,
+# set_property(TARGET ...) and the like; the name may stand on the line after the opening parenthesis), and a command that sets a flag for every target of the file (add_compile_definitions,
+# include_directories, set(CMAKE_CXX_FLAGS ...): CMake applies them to a target made before them too).  What else follows (worldd_core's file list, the other programs and the test
+# registrations) cannot change the builder, so an edit there leaves the step and the navigation mesh current.  A file in which the end of the block is not found counts whole: an edit
+# anywhere runs the steps again.  The file is read as statements (a statement runs to the line where its parentheses close), without line ends, so a checkout's CRLF or LF does not matter.
+# scripts\test_extract_keys.ps1 holds the cases.
+function Get-NavCMakeLines {
+    $file = Join-Path $repoRoot 'server\worldd\CMakeLists.txt'
+    if (-not (Test-Path -LiteralPath $file)) { return 'server\worldd\CMakeLists.txt missing' }
+    $stmts = New-Object System.Collections.Generic.List[string]
+    $buf = New-Object System.Collections.Generic.List[string]
+    $depth = 0
+    foreach ($line in [IO.File]::ReadAllLines($file)) {
+        $code = ($line -replace '"(?:[^"\\]|\\.)*"', '""') -replace '#.*$', ''      # (the parentheses of a string or a comment do not count)
+        $buf.Add($line)
+        $depth += [regex]::Matches($code, '\(').Count - [regex]::Matches($code, '\)').Count
+        if ($depth -le 0) { $stmts.Add(($buf -join "`n")); $buf.Clear(); $depth = 0 }
+    }
+    if ($buf.Count -gt 0) { $stmts.Add(($buf -join "`n")) }
+    $end = -1
+    for ($i = 0; $i -lt $stmts.Count; $i++) { if ($stmts[$i] -match '(?m)^\s*set_target_properties\(\s*aoc_navbuild\b') { $end = $i; break } }
+    if ($end -lt 0) { return ($stmts -join "`n") }
+    $later = '^\s*(?:(?:add_definitions|add_compile_definitions|add_compile_options|add_link_options|include_directories|link_directories|link_libraries|cmake_policy)\(|set\(\s*CMAKE_|list\(\s*APPEND\s+CMAKE_|(?:target_\w+|set_target_properties|set_property|add_dependencies)\(\s*(?:TARGET\s+)?(?:aoc_navbuild|worldd_nav|recast_detour)\b)'
+    $keep = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $stmts.Count; $i++) {
+        if ($i -le $end -or $stmts[$i] -match $later) { $keep.Add($stmts[$i]) }
+    }
+    return ($keep -join "`n")
+}
+function Get-CodeNav      { (Get-CodeHash @('server\worldd\nav', 'server\worldd\world\town_platform.cpp', 'server\worldd\world\town_platform.h', 'third_party\recastnavigation', 'CMakeLists.txt', 'vcpkg.json')) + ' ' + (Get-TextHash (Get-NavCMakeLines)) }     # aoc_navbuild links the towns' platform code from world\ as well as nav\
 # The level each node starts at in the server's seed file (deploy\citynode_seed.json): the towns' buildings are listed at those levels (tools\capture\gen_town_layouts.py), so a change of a
 # level there changes the list and the navigation mesh.  Only "nodes" counts: the workshops and the comment do not change what the map holds.
 function Get-SeedLevels {
@@ -410,6 +442,12 @@ function Get-SeedLevels {
     return (($pairs | Sort-Object) -join ';')
 }
 function Get-CodeLayouts  { (Get-CodeHash @('tools\capture\gen_town_layouts.py')) + ' ' + (Get-SeedLevels) }
+# The bytes of a file an earlier step writes (and "missing" when it is not there: the step then runs and says what is wrong).
+function Get-FileBytesId([string]$rel) {
+    $full = Join-Path $repoRoot $rel
+    if (Test-Path -LiteralPath $full) { return "$rel $(Get-FileSha $full)" }
+    return "$rel missing"
+}
 # The navigation mesh step reads, of what other steps write, the Riverlands' rectangles (tools\mapc\region_rects.tsv), the towns' buildings (town_layouts.bin) and, in content.db, the
 # rows of city_node (aoc_navbuild stands the towns' floors at the nodes; scripts\nav_inputs.py prints them). It reads nothing else of content.db. Its id holds those bytes and rows,
 # not the ids of the steps that write them: those ids change with every change of content.db (a new ability), the files and rows they write mostly do not, and the step takes
@@ -438,8 +476,12 @@ function Get-NavmeshInputs {
 }
 $ids = @{}
 
-# A step's id says what its output is a function of: the player's game files, the code that makes it and the ids of the steps it reads. The navigation mesh step is the one
-# exception: it holds the bytes it reads from two earlier steps' files and the node rows of content.db (above), so a step that runs again and writes the same bytes leaves it current.
+# A step's id says what its output is a function of: the player's game files, the code that makes it and the ids of the steps it reads. Three steps are the exception: they hold the
+# bytes they read from an earlier step's file, so a step that runs again and writes the same bytes leaves them current. The navigation mesh step holds the bytes of two files and the node
+# rows of content.db (above); townlayouts holds the bytes of the list that townitems writes (town_layout_items.tsv: the list is made from content.db, and most changes of content.db leave
+# it as it was); waterbodies holds the bytes of the Riverlands' rectangles (tools\mapc\region_rects.tsv, which the region step writes: it reads nothing else from the steps before it).
+# What each of the other steps would need to hold the bytes it reads from content.db, and why they keep the database step's id, is in the README's section on the game data.
+# The ids of those three are asked for again each time, not kept: the steps before them write the files they read while the script runs.
 function Get-Id([string]$step) {
     if ($ids.ContainsKey($step)) { return $ids[$step] }
     $usmap = Get-FileSha $usmapSrc
@@ -454,12 +496,13 @@ function Get-Id([string]$step) {
         'navbuild' { Get-TextHash ("navbuild " + (Get-CodeNav)) }
         'roads'    { Get-TextHash ("roads $gameId $usmap " + (Get-CodeMapc) + (Get-CodeContentc) + (Get-Id 'region')) }
         'townfloors' { Get-TextHash ("townfloors $gameId $usmap " + (Get-CodeMapc)) }
-        'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-CodeLayouts) + (Get-Id 'database')) }
+        'townitems' { Get-TextHash ("townitems " + (Get-CodeLayouts) + (Get-Id 'database')) }
+        'townlayouts' { Get-TextHash ("townlayouts $gameId $usmap " + (Get-CodeMapc) + (Get-FileBytesId 'dist\content\town_layout_items.tsv')) }
         'npcabilities' { Get-TextHash ("npcabilities $gameId $usmap " + (Get-CodeMapc) + (Get-CodeNpcAbilities) + ($NpcFolders -join ';') + ($NpcAnimEndFolders -join ';') + ($NpcSensesFolders -join ';') + (Get-Id 'database')) }
-        'waterbodies' { Get-TextHash ("waterbodies $gameId $usmap " + (Get-CodeMapc) + (Get-CodeWaterBodies) + (Get-Id 'region')) }
+        'waterbodies' { Get-TextHash ("waterbodies $gameId $usmap " + (Get-CodeMapc) + (Get-CodeWaterBodies) + (Get-FileBytesId 'tools\mapc\region_rects.tsv')) }
         'navmesh'  { Get-TextHash ("navmesh $gameId $usmap " + (Get-CodeMapc) + (Get-Id 'navbuild') + (Get-Id 'townfloors') + (Get-NavmeshInputs)) }
     }
-    if ($step -ne 'navmesh') { $ids[$step] = $v }      # the navigation mesh step's id is asked for again each time: the steps before it write what it reads while the script runs
+    if (@('navmesh', 'townlayouts', 'waterbodies') -notcontains $step) { $ids[$step] = $v }      # asked for again each time: the steps before them write what they read while the script runs
     return $v
 }
 
@@ -569,10 +612,15 @@ $steps = @(
         Assert-Files @('tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools step first'
         Invoke-Checked $dotnet @($mapcDll, 'town-floors', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir) 'mapc_town_floors'
     } },
-    @{ Name = 'townlayouts'; Title = 'Read the buildings, walls and terraces of the five towns (a list from content.db, then the meshes it names from the game, mapc; a few seconds)'; Outputs = @('dist\content\town_layout_items.tsv', 'dist\content\town_layouts.bin'); Run = {
-        Assert-Files @('dist\content\content.db', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools and database steps first'
+    @{ Name = 'townitems'; Title = 'List the buildings, walls and terraces of the five towns (a list from content.db; a few seconds)'; Outputs = @('dist\content\town_layout_items.tsv'); Run = {
+        Assert-Files @('dist\content\content.db') 'run the database step first'
         Invoke-Checked $python.Exe ($python.Prefix + @('-I', '-u', (Join-Path $repoRoot 'tools\capture\gen_town_layouts.py'), '--content-db', (Join-Path $outDir 'content.db'), '--out', (Join-Path $outDir 'town_layout_items.tsv'))) 'gen_town_layouts'
-        Invoke-Checked $dotnet @($mapcDll, 'town-layouts', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir, '--min-free-gb', '8') 'mapc_town_layouts'
+    } },
+    # mapc waits for 3 GB of free memory before it starts. Its peak working set was 1.69 GB in the one run measured (8 seconds; the child it starts holds its heap to 4 GB), so 3 GB leaves 1.3 GB, 77 percent
+    # more than that peak, for a slower read. It asked for 8 GB before, and one run waited 36 minutes for them to do 8 seconds of work.
+    @{ Name = 'townlayouts'; Title = "Read the meshes the five towns' layouts name from the game (the townitems step's list and the game's containers; mapc, a few seconds)"; Outputs = @('dist\content\town_layouts.bin'); Run = {
+        Assert-Files @('dist\content\town_layout_items.tsv', 'tools\mapc\bin\Release\net8.0\mapc.dll') 'run the tools and townitems steps first'
+        Invoke-Checked $dotnet @($mapcDll, 'town-layouts', '--paks', $gamePaks, '--usmap', $usmapSrc, '--out-dir', $outDir, '--min-free-gb', '3') 'mapc_town_layouts'
     } },
     @{ Name = 'npcabilities'; Title = 'Read the creature Blueprints and animation montages that give the creatures their attacks, what every creature notices and how far it follows, and the humanoid Blueprints and records that dress and name the people (tools/npcabilities; about two minutes)'; Outputs = @('dist\content\npc_abilities.tsv', 'dist\content\npc_montages.tsv', 'dist\content\npc_targeting.tsv', 'dist\content\npc_senses.tsv', 'dist\content\npc_aggro_curves.tsv', 'dist\content\npc_looks.tsv', 'dist\content\npc_appearances.tsv', 'dist\content\npc_names.tsv', 'dist\content\npc_trees.tsv', 'dist\content\npc_display_names.tsv'); Run = {
         Assert-Files @('tools\npcabilities\bin\Release\net8.0\npcabilities.dll', 'dist\content\content.db') 'run the tools and database steps first'

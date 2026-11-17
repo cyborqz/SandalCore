@@ -4,7 +4,9 @@
     scripts\services.ps1 test    buf lint + generated-code check, go vet + go test (needs 'up'); the tests of the
                                  character creation rules and of the character service's content.db use
                                  $env:AOC_CONTENT_DB (or dist\content\content.db) when that file exists, and skip without it
-    scripts\services.ps1 build   build auth, character, citynode, nodectl, quests, questctl, worldctl, charimport, mesh, gateway into dist\services
+    scripts\services.ps1 build   build auth, character, citynode, nodectl, quests, questctl, worldctl, charimport, mesh, gateway into dist\services: only the ones whose
+                                 sources (their packages under services\, go.mod, go.sum, the Go version) changed since their exe was built, all in one go command
+    scripts\services.ps1 stale   list the services whose exe is missing or was not built from the sources as they are now (builds nothing)
     scripts\services.ps1 run     build, then start auth, character, citynode, quests, mesh, gateway and worldd hidden; each logs
                                  to dist\services\logs\<name>.log (the previous run's: <name>.prev.log).  citynode
                                  (Nodes 1) serves the city nodes on :50055 and applies deploy\citynode_seed.json once, at its
@@ -32,7 +34,7 @@
 # GNU AGPL v3 with additional terms under section 7: see LICENSE and NOTICE.
 
 param(
-    [Parameter(Mandatory)] [ValidateSet('up', 'test', 'build', 'run', 'stop', 'login', 'down')] [string] $Action
+    [Parameter(Mandatory)] [ValidateSet('up', 'test', 'build', 'stale', 'run', 'stop', 'login', 'down')] [string] $Action
 )
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -41,16 +43,121 @@ $svc = Join-Path $root 'services'
 $out = Join-Path $root 'dist\services'
 $logs = Join-Path $out 'logs'
 
+# The services this script builds, started or used as tools (dist\services\<name>.exe from services\cmd\<name>).
+$serviceNames = @('auth', 'character', 'citynode', 'nodectl', 'quests', 'questctl', 'worldctl', 'charimport', 'mesh', 'gateway')
+$stampDir = Join-Path $out '.build'
+
+$sha256 = [Security.Cryptography.SHA256]::Create()
+function Get-Sha256Hex([byte[]]$bytes) { ([BitConverter]::ToString($sha256.ComputeHash($bytes)) -replace '-', '').ToLower() }
+
+# The directories under services\ of the packages a service is built from: its own (cmd\<name>) and, through the imports of every file of each, the packages of this module it imports.
+# A file that merely names such a package in a string counts too (a build that is not needed is only slower than one that is skipped wrongly). A package with a //go:embed line counts with
+# everything under it. The packages of other modules are fixed by go.mod and go.sum, the standard library by the Go version: both are in the hash below.
+function Get-ServiceDirs([string]$name, [string]$module, [hashtable]$importsOf) {
+    $seen = [ordered]@{}
+    $todo = New-Object System.Collections.Generic.Queue[string]
+    $todo.Enqueue("cmd/$name")
+    while ($todo.Count -gt 0) {
+        $rel = $todo.Dequeue()
+        if ($seen.Contains($rel)) { continue }
+        $seen[$rel] = $true
+        if (-not $importsOf.ContainsKey($rel)) {
+            $dir = Join-Path $svc ($rel -replace '/', '\')
+            $imports = New-Object System.Collections.Generic.List[string]
+            $embeds = $false
+            if (Test-Path -LiteralPath $dir) {
+                foreach ($f in Get-ChildItem -LiteralPath $dir -File -Filter '*.go' | Where-Object { $_.Name -notlike '*_test.go' }) {
+                    $src = [IO.File]::ReadAllText($f.FullName)
+                    foreach ($m in [regex]::Matches($src, '"' + [regex]::Escape($module) + '/([^"\s]+)"')) { $imports.Add($m.Groups[1].Value) }
+                    if ($src -match '(?m)^\s*//go:embed\b') { $embeds = $true }
+                }
+            }
+            $importsOf[$rel] = [pscustomobject]@{ Imports = @($imports | Select-Object -Unique); Embeds = $embeds }
+        }
+        foreach ($i in $importsOf[$rel].Imports) { $todo.Enqueue($i) }
+    }
+    return @($seen.Keys)
+}
+
+# The sources of a service as text: every file of its package directories (not the tests or notes), then go.mod and go.sum, then the Go version. A package with //go:embed counts with
+# everything under it, test data and notes included: an embedded file is part of the program, wherever it lies. One line for each file: its path under services\ and the SHA-256 of its
+# bytes. $fileSha keeps the hashes of files that more than one service reads.
+function Get-ServiceInputs([string]$name, [string]$module, [hashtable]$importsOf, [hashtable]$fileSha, [string]$goVersion) {
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($rel in (Get-ServiceDirs $name $module $importsOf)) {
+        $dir = Join-Path $svc ($rel -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $dir)) { $lines.Add("$rel missing"); continue }
+        $files = if ($importsOf[$rel].Embeds) { Get-ChildItem -LiteralPath $dir -File -Recurse | Where-Object { $_.Name -notlike '*_test.go' } }
+                 else { Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.Name -notlike '*_test.go' -and $_.Extension -ne '.md' } }
+        foreach ($f in ($files | Sort-Object FullName)) {
+            if (-not $fileSha.ContainsKey($f.FullName)) {
+                $fileSha[$f.FullName] = Get-Sha256Hex ([IO.File]::ReadAllBytes($f.FullName))
+            }
+            $lines.Add($f.FullName.Substring($svc.Length + 1) + ' ' + $fileSha[$f.FullName])
+        }
+    }
+    foreach ($f in 'go.mod', 'go.sum') {
+        $full = Join-Path $svc $f
+        $lines.Add("$f " + $(if (Test-Path -LiteralPath $full) { Get-Sha256Hex ([IO.File]::ReadAllBytes($full)) } else { 'missing' }))
+    }
+    $lines.Add("go $goVersion")
+    return ($lines -join "`n")
+}
+
+# The services whose exe is missing, or is not the one that was built from the sources as they are now: each build writes dist\services\.build\<name> with the hash of the sources it read
+# and the size and write time of the exe it made, and an exe that was replaced or a source that changed (whatever its file time says) makes the service stale.
+function Get-StaleServices {
+    $mod = [IO.File]::ReadAllLines((Join-Path $svc 'go.mod')) | Where-Object { $_ -match '^module\s+(\S+)' } | Select-Object -First 1
+    $module = ($mod -replace '^module\s+', '').Trim()
+    $goVersion = (& go version) -join ' '
+    $importsOf = @{}
+    $fileSha = @{}
+    $stale = @()
+    foreach ($name in $serviceNames) {
+        $exe = Join-Path $out "$name.exe"
+        $stamp = Join-Path $stampDir $name
+        $want = Get-Sha256Hex ([Text.Encoding]::UTF8.GetBytes((Get-ServiceInputs $name $module $importsOf $fileSha $goVersion)))
+        $current = $false
+        if ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $stamp)) {
+            $it = Get-Item -LiteralPath $exe
+            $current = ((Get-Content -LiteralPath $stamp -TotalCount 1) -eq ('{0} {1} {2}' -f $want, $it.Length, $it.LastWriteTimeUtc.Ticks))
+        }
+        if (-not $current) { $stale += $name }
+        $script:serviceWant[$name] = $want
+    }
+    return $stale
+}
+$serviceWant = @{}
+
+# Builds the services that are stale, all in one go command (they compile and link side by side, and the packages they share compile once); the ones that are current are left as they are.
+# A stamp is written only for an exe that the go command wrote, and a failed build stops with the stale ones still stale: the next call builds them again, and nothing runs a stale exe.
 function Build {
     New-Item -ItemType Directory -Force $out | Out-Null
+    $stale = @(Get-StaleServices)
+    if ($stale.Count -eq 0) {
+        Write-Host "the services in $out are up to date"
+        return
+    }
+    # A stale exe goes before the build: the go command does not overwrite a file that is not a program (a replaced exe), and a build that fails then leaves no exe to run. An exe that a running
+    # service holds cannot go, and that stops here with the reason.
+    foreach ($name in $stale) {
+        Remove-Item -LiteralPath (Join-Path $stampDir $name) -ErrorAction SilentlyContinue   # (a half-written exe has no stamp)
+        $exe = Join-Path $out "$name.exe"
+        if (Test-Path -LiteralPath $exe) {
+            try { Remove-Item -LiteralPath $exe -Force -ErrorAction Stop } catch { throw "cannot replace ${exe}: $($_.Exception.Message) (is the service running? scripts\services.ps1 stop)" }
+        }
+    }
+    New-Item -ItemType Directory -Force $stampDir | Out-Null
     Push-Location $svc
     try {
-        foreach ($name in 'auth', 'character', 'citynode', 'nodectl', 'quests', 'questctl', 'worldctl', 'charimport', 'mesh', 'gateway') {
-            & go build -o (Join-Path $out "$name.exe") "./cmd/$name"
-            if ($LASTEXITCODE -ne 0) { throw "go build $name failed" }
-        }
+        & go build -o (($out -replace '\\', '/') + '/') @($stale | ForEach-Object { "./cmd/$_" })
+        if ($LASTEXITCODE -ne 0) { throw "go build failed ($($stale -join ', '))" }
     } finally { Pop-Location }
-    Write-Host "built into $out"
+    foreach ($name in $stale) {
+        $it = Get-Item -LiteralPath (Join-Path $out "$name.exe")
+        Set-Content -LiteralPath (Join-Path $stampDir $name) -Value ('{0} {1} {2}' -f $serviceWant[$name], $it.Length, $it.LastWriteTimeUtc.Ticks) -Encoding ASCII
+    }
+    Write-Host "built $($stale -join ', ') into $out ($($serviceNames.Count - $stale.Count) up to date)"
 }
 # [C O A + Cyb]
 
@@ -106,7 +213,10 @@ try {
     switch ($Action) {
         'up' {
             & docker compose -f $compose up -d --wait --remove-orphans   # (a NATS container left by an older compose file is removed)
-            if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed (is Docker Desktop running?)' }
+            if ($LASTEXITCODE -ne 0) {
+                $composeVersion = (@(& docker compose version --short 2>$null) -join '').Trim()
+                throw ('docker compose up failed (is Docker Desktop running? deploy\docker-compose.yml needs Docker Compose 2.23.1 or newer; this one is ' + $(if ($composeVersion) { $composeVersion } else { 'not found' }) + ')')
+            }
             # The init script creates aoc_test only on a fresh volume; make sure it exists.
             $exists = & docker compose -f $compose exec -T postgres psql -U aoc -d aoc -tAc "SELECT 1 FROM pg_database WHERE datname = 'aoc_test'"
             if ("$exists".Trim() -ne '1') {
@@ -181,6 +291,10 @@ try {
             Write-Host "signed in as $($resp.username); token saved for tether_server"
         }
         'build' { Build }
+        'stale' {
+            $stale = @(Get-StaleServices)
+            if ($stale.Count -eq 0) { Write-Host 'none: every service in dist\services was built from its sources as they are now' } else { Write-Host ('stale: ' + ($stale -join ', ')) }
+        }
         'run' {
             $running = @(Get-ServiceProcess)
             if ($running.Count -gt 0) {

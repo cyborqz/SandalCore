@@ -74,13 +74,13 @@ SCHEMAS = ('CityNodeRecordBase', 'LayoutRecordBase', 'NodeAssetSetRecordBase', '
 
 
 class Records:
-    """The design records the layouts need, from content.db's record table (a guid is not indexed: one scan by schema reads them all, 18 MB packed)."""
+    """The design records the layouts need, from content.db's record table (one read by schema gets them all, 18 MB packed; in rowid order, the order the table was written in)."""
 
     def __init__(self, path):
         self.db = sqlite3.connect('file:' + path.replace('\\', '/') + '?mode=ro', uri=True)
         self.blobs = {}
         marks = ','.join('?' * len(SCHEMAS))
-        for guid, schema, name, data in self.db.execute('SELECT guid, schema, name, data FROM record WHERE schema IN (%s)' % marks, SCHEMAS):
+        for guid, schema, name, data in self.db.execute('SELECT guid, schema, name, data FROM record WHERE schema IN (%s) ORDER BY rowid' % marks, SCHEMAS):
             self.blobs[guid] = (schema, name, data)
         self.cache = {}
 

@@ -24,15 +24,19 @@
 //  - A test that throws is reported as a "[FAIL]" line and the next test runs. So are a test made for another fixture type and a name that is
 //    registered twice. run() returns how many of these it found: add it to the program's failure count (as above), so that the
 //    "N passed, M failed" line and the exit code stay true.
+//  - AOC_TEST_ONLY=<word>[,<word>...] in the environment makes run() run only the registered tests whose name contains one of the words, and print "[only] N of M tests". A word that matches
+//    no test is a failure. Use it to run one test of a big program while hunting a failing check; the whole program (no variable) is what a gate runs.
 //  - Nothing here needs a build-file change: the checks are plain .inc files included by the program's .cpp (see tests/README.md).
 // ============================================================================
 #pragma once
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <functional>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -133,11 +137,50 @@ int run_list(const std::vector<detail::Entry>& list, Ctx& ctx, std::FILE* out) {
     return problems;
 }
 
+/// The tests of `list` whose name contains one of the comma-separated words of `only` (the value of AOC_TEST_ONLY), in their order. A null or empty `only`, or one that holds no word
+/// (",,"), selects every test.
+inline std::vector<detail::Entry> select_only(const std::vector<detail::Entry>& list, const char* only) {
+    std::vector<std::string> words;
+    for (const char* p = only ? only : ""; *p;) {
+        const char* end = std::strchr(p, ',');
+        const std::size_t len = end ? static_cast<std::size_t>(end - p) : std::strlen(p);
+        if (len > 0) words.emplace_back(p, len);
+        p += len + (end ? 1 : 0);
+    }
+    if (words.empty()) return list;
+    std::vector<detail::Entry> chosen;
+    for (const detail::Entry& e : list) {
+        for (const std::string& w : words) {
+            if (std::strstr(e.name, w.c_str())) {
+                chosen.push_back(e);
+                break;
+            }
+        }
+    }
+    return chosen;
+}
+
+/// run_list() for the tests that `only` selects (see select_only). It prints "[only] N of M tests" so that a log shows the run was filtered. A filter that selects no test is one problem
+/// ("[FAIL] ... matches no registered test") and runs nothing, so a misspelled name never passes.
+template <class Ctx>
+int run_only(const std::vector<detail::Entry>& list, const char* only, Ctx& ctx, std::FILE* out) {
+    const std::vector<detail::Entry> chosen = select_only(list, only);
+    std::fprintf(out, "[only] %zu of %zu tests (AOC_TEST_ONLY=%s)\n", chosen.size(), list.size(), only ? only : "");
+    if (chosen.empty()) {
+        std::fprintf(out, "  [FAIL] test registry: AOC_TEST_ONLY=%s matches no registered test; none ran\n", only ? only : "");
+        return 1;
+    }
+    return run_list(chosen, ctx, out);
+}
+
 /// Runs every registered test in the order of the registrations, with `ctx` for the tests that take a fixture. Returns the number of problems it
-/// found itself (a test that threw, a test made for another fixture type, a name registered twice); each one is printed as a "[FAIL]" line.
+/// found itself (a test that threw, a test made for another fixture type, a name registered twice); each one is printed as a "[FAIL]" line. When the environment variable AOC_TEST_ONLY
+/// is set it runs only the tests whose name contains one of its comma-separated words (run_only).
 template <class Ctx>
 int run(Ctx& ctx) {
     detail::registry().ran = true;
+    const char* only = std::getenv("AOC_TEST_ONLY");
+    if (only && *only) return run_only(detail::entries(), only, ctx, stdout);
     return run_list(detail::entries(), ctx, stdout);
 }
 

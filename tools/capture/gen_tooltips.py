@@ -77,10 +77,11 @@ class DB:
         self.cache = {}
         for t, sch in TYPE_SCHEMA.items():
             SCHEMA_TYPE[sch] = t
-        # one scan: every name of the schemas the tooltips read -> guid (names are FNames: case-insensitive)
+        # every name of the schemas the tooltips read -> guid (names are FNames: case-insensitive); the first guid of a name wins, so the rows come in rowid order, the order the table was written in
+        # (the record table's index on schema would give guid order)
         self.names = {}
         marks = ','.join('?' * len(SCHEMA_TYPE))
-        for sch, nm, g in self.c.execute('select schema,name,guid from record where schema in (%s)' % marks, list(SCHEMA_TYPE)):
+        for sch, nm, g in self.c.execute('select schema,name,guid from record where schema in (%s) order by rowid' % marks, list(SCHEMA_TYPE)):
             d = self.names.setdefault(sch, {})
             d.setdefault(nm, g)
             d.setdefault(nm.lower(), g)

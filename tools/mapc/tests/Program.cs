@@ -173,6 +173,25 @@ Check(merged.Tiles.Count == 1 && merged.Meshes.Count == 3 && merged.Placements.C
 Check(GeomFile.Write(merged).SequenceEqual(GeomFile.Write(GeomFile.Read(GeomFile.Write(merged)))), "town layouts: the merged geometry round-trips");
 Check(TownLayouts.PackagePath(wallPath, ".uasset") == "AOC/Content/Test/SM_Wall.uasset" && TownLayouts.PackagePath("/Engine/BasicShapes/Cube.Cube", ".uasset") == "Engine/Content/BasicShapes/Cube.uasset" && TownLayouts.ObjectName(wallPath) == "SM_Wall", "town layouts: object paths name their package and object");
 
+// ---- the free-memory guard: only too little free memory makes it wait ---------------------------------------------------------------------------------
+var guardLog = new List<string>();
+int guardReads = 0;
+Check(Sys.WaitForRoom(6, 0.002, m => guardLog.Add(m), () => { guardReads++; return 8.0; }, TimeSpan.FromMilliseconds(5)) && guardReads == 1 && guardLog.Count == 0,
+    "free-memory guard: enough memory free returns true at once, with nothing logged");
+guardLog.Clear();
+var guardFree = new Queue<double>(new[] { 2.0, 8.0 });
+var guardCulture = System.Globalization.CultureInfo.CurrentCulture;
+string guardWait = string.Format(guardCulture, "waiting: only {0:F1} GB free (the guard wants {1:F1})", 2.0, 6.0);
+Check(Sys.WaitForRoom(6, 0.5, m => guardLog.Add(m), () => guardFree.Count > 0 ? guardFree.Dequeue() : 8.0, TimeSpan.FromMilliseconds(5)) && guardLog.Count == 1 &&
+      guardLog[0] == guardWait,
+    "free-memory guard: too little free waits, logs the wait line once, and returns true when the reading rises");
+guardLog.Clear();
+string guardWhy = string.Format(guardCulture, "only {0:F1} GB free (the guard wants {1:F1})", 1.0, 6.0);
+string guardGiveUp = string.Format(guardCulture, "gave up after {0:F0} minutes: {1}", 0.005, guardWhy);
+Check(!Sys.WaitForRoom(6, 0.005, m => guardLog.Add(m), () => 1.0, TimeSpan.FromMilliseconds(5)) && guardLog.Count == 2 &&
+      guardLog[0] == "waiting: " + guardWhy && guardLog[1] == guardGiveUp,
+    "free-memory guard: gives up after the wait limit with false and the give-up line");
+
 Console.WriteLine($"{passed} passed, 0 failed");
 
 sealed class FakeSource : TownLayouts.ISource
