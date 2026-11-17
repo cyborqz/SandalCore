@@ -145,8 +145,17 @@ void PlayerSession::on_interact(Connection& conn, const repl::ClientRpc& rpc, Cl
             vendor_by_talk_ = false;
             ++vendor_opens_;
             const FIntrepidNetworkGUID npc = a->actor.guid;
-            spdlog::log(level_for(vendor_logged_), "[session] {}: opens the shop {} of {}", name(), shops->def(shop) ? shops->def(shop)->name : std::to_string(shop), a->npc.name);
-            queue("ClientOpenVendor", [shop, npc](bootstrap::PlayerBootstrap& pb) { return pb.open_vendor(shop, npc); }, conn, /*must_build=*/true);
+            // what the window hides or greys out for this player and this shopkeeper: the list the cart is checked with (a conversation's shops send it too)
+            bool unreadable = false;
+            repl::UnavailableList unavailable = vendor::window_unavailable(*shops, shop, world_->city_nodes(), at.x, at.y, a->x, a->y, &unreadable);
+            size_t hidden_tabs = 0, listings = 0;
+            for (const repl::UnavailableTab& t : unavailable) {
+                hidden_tabs += t.inventory.hidden ? 1 : 0;
+                listings += t.listings.size();
+            }
+            spdlog::log(level_for(vendor_logged_), "[session] {}: opens the shop {} of {}: {} tab(s) listed as unavailable ({} hidden), {} listing(s){}", name(), shops->def(shop) ? shops->def(shop)->name : std::to_string(shop),
+                        a->npc.name, unavailable.size(), hidden_tabs, listings, unreadable ? "; a predicate does not evaluate and does not hold" : "");
+            queue("ClientOpenVendor", [shop, npc, unavailable = std::move(unavailable)](bootstrap::PlayerBootstrap& pb) { return pb.open_vendor(shop, npc, unavailable); }, conn, /*must_build=*/true);
             return;
         }
     }

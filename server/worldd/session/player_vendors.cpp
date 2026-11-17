@@ -104,14 +104,8 @@ bool PlayerSession::open_talk_shop(Connection& conn, const world::WorldActor& np
     vendor_by_talk_ = true;
     ++vendor_opens_;
     // what the window hides or greys out for this player and this shopkeeper
-    const vendor::ShopFacts facts = shop_facts_for(world_->city_nodes(), at, &npc);
     bool unreadable = false;
-    const vendor::TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
-        const auto v = dialogue::evaluate_expression(p.expression, facts);
-        if (!v) unreadable = true;
-        return v && v->i != 0;
-    };
-    repl::UnavailableList unavailable = shops->unavailable(def, holds);
+    repl::UnavailableList unavailable = vendor::window_unavailable(*shops, def, world_->city_nodes(), at.x, at.y, npc.x, npc.y, &unreadable);
     size_t hidden_tabs = 0, listings = 0;
     for (const repl::UnavailableTab& t : unavailable) {
         hidden_tabs += t.inventory.hidden ? 1 : 0;

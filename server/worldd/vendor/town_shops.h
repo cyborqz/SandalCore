@@ -31,6 +31,7 @@
 #include "items/wallet.h"
 #include "protocol/repl/value.h"
 #include "protocol/repl/vendor_rpc.h"
+#include "spawns/node_population.h"
 #include "vendor/node_tax_table.h"
 #include "world/city_nodes.h"
 
@@ -46,11 +47,12 @@
 
 namespace aoc::worldd::vendor {
 
-/// The shops this step switches on, by their def's name.  The last two are the Smithy vendor and the Woodshop vendor of the artisan outposts the Riverlands start in (Aven's End and
-/// Briarmoor Workshops, whose NPCs the world spawns at their plots): they sell the pickaxe, sickle, hunting bow and fishing pole reagents the gathering-tool recipes take; the other
-/// shops that list them belong to service buildings no node has built or to no NPC at all, so without these two those tools have no source in the live world.
+/// The shops this step switches on, by their def's name.  The last four are the vendors of the artisan outposts the Riverlands start in (Aven's End and Briarmoor Workshops, whose NPCs the
+/// world spawns at their plots): the Smithy and the Woodshop sell the pickaxe, sickle, hunting bow and fishing pole reagents the gathering-tool recipes take, and the Textile Mill and the
+/// Hideworks sell the Tailoring and Leatherworking recipe items and the reagents of the Weaving, Tanning, Tailoring and Leatherworking chains (their listings are gated by the node's
+/// biome).  The other shops that list these items belong to service buildings no node has built or to no NPC at all, so without these four those recipes have no source in the live world.
 inline constexpr const char* kOpenShops[] = {"Marketplace_Vendor", "Node_Vendor_BlackMarket", "Caravansary_VendorDef", "ServiceBuilding_TownHallAdmin_Vendor", "ArtisanshipPOI_Smithy_Vendor",
-                                             "ArtisanshipPOI_Woodshop_Vendor"};
+                                             "ArtisanshipPOI_Woodshop_Vendor", "ArtisanshipPOI_TextileMill_Vendor", "ArtisanshipPOI_Hideworks_Vendor"};
 
 /// How far the shopkeeper may be from the player, in cm, in three dimensions, for the shop to open and for a purchase to go through (12 m).
 inline constexpr double kShopRangeCm = 1200.0;
@@ -89,8 +91,8 @@ inline int64_t taxed_unit(int64_t price, const TaxRate& rate) {
 }
 
 /// What a shop's predicates are asked against: the node the player stands in and, for a shop a shopkeeper opens, the node the shopkeeper stands in.  GetPlayer, GetInteractionTarget,
-/// GetCurrentNode, Node_GetActorCityNode and Node_InLevelRangeInclusive are the functions the shops' own predicates use; any other function ends the evaluation with no value, and the
-/// predicate does not hold.
+/// GetCurrentNode, GetNodeBiome (the biome of the shopkeeper's node, or of the player's when no shopkeeper is given), Node_GetActorCityNode and Node_InLevelRangeInclusive are the functions
+/// the shops' own predicates use; any other function ends the evaluation with no value, and the predicate does not hold.
 class ShopFacts final : public dialogue::ExprHost {
 public:
     const world::CityNodes* nodes = nullptr;
@@ -115,6 +117,15 @@ public:
             const world::NodeSite site = nodes->node_at(player_x, player_y);
             const world::CityNodeInfo* n = nodes->by_rank(site.node_rank);
             return ExprValue::of(n ? n->guid : 0);
+        }
+        if (name == "GetNodeBiome") {
+            if (!args.empty() || !nodes) return std::nullopt;
+            // the biome the shop stands in (the game's own EBiomeType ordinal, with its name as an enum value compares by it)
+            const world::NodeSite site = nodes->node_at(has_npc ? npc_x : player_x, has_npc ? npc_y : player_y);
+            ExprValue v = ExprValue::of(site.biome);
+            const char* text = spawns::biome_name(site.biome);
+            if (*text) v.text = std::string("EBiomeType::") + text;
+            return v;
         }
         if (name == "Node_InLevelRangeInclusive") {
             if (args.size() != 3 || !nodes) return std::nullopt;
@@ -321,5 +332,25 @@ private:
     content::VendorData  d_;
     std::vector<int64_t> open_;
 };
+
+/// What the window of `shop` hides or greys out for a player standing at (player_x, player_y) cm, the shopkeeper at (npc_x, npc_y): the shop's predicates asked of the same facts a
+/// purchase asks them of (ShopFacts, the shopkeeper's node and the player's), so that the window shows what the cart is sold.  Every shop's window carries this list, whether a
+/// conversation opened it or the shopkeeper's use link did.  A predicate that does not evaluate does not hold; `unreadable`, when given, is set then.
+inline protocol::repl::UnavailableList window_unavailable(const TownShops& shops, int64_t shop, const world::CityNodes* nodes, double player_x, double player_y, double npc_x, double npc_y,
+                                                          bool* unreadable = nullptr) {
+    ShopFacts facts;
+    facts.nodes = nodes;
+    facts.player_x = player_x;
+    facts.player_y = player_y;
+    facts.has_npc = true;
+    facts.npc_x = npc_x;
+    facts.npc_y = npc_y;
+    const TownShops::Holds holds = [&](const content::VendorPredicateRow& p) {
+        const auto v = dialogue::evaluate_expression(p.expression, facts);
+        if (!v && unreadable) *unreadable = true;
+        return v && v->i != 0;
+    };
+    return shops.unavailable(shop, holds);
+}
 
 }  // namespace aoc::worldd::vendor

@@ -4775,6 +4775,7 @@ static void test_level_up_in_the_tick_of_the_death() {
 }
 
 #include "weaponsmithing_fight_tests.inc"
+#include "tailoring_fight_tests.inc"
 #include "ability_session_registered.inc"
 
 int main() {
@@ -4822,6 +4823,7 @@ int main() {
         test_e1_combat_session();
         test_e1_inline_target_session();
         test_ws_fight();
+        test_tlf_fight();
         test_a3_effect_outcome_on_the_wire();
         test_e1_npc_cylinder_export();
         test_e1_one_clock();

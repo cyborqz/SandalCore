@@ -4897,6 +4897,8 @@ static void test_consumables_item_gone_and_death() {
 
 #include "weaponsmithing_session_tests.inc"
 #include "weaponsmithing_review_session_tests.inc"
+#include "tailoring_session_tests.inc"
+#include "tailoring_review_session_tests.inc"
 #include "items_session_registered.inc"
 
 int main() {
@@ -4981,6 +4983,14 @@ int main() {
     test_ws_session_tool_events();
     test_ws_session_tool_room();
     test_ws_session_reconnect();
+    test_tls_vendor_learn_craft();
+    test_tls_orders();
+    test_tls_second_player();
+    test_tls_empty_reward();
+    test_tlr_window_lists();
+    test_tlr_smithy_recipes();
+    test_tlr_craft_orders();
+    test_tlr_apprentice_journeyman();
 
     g_fail += aoc_tests::run();   // every check registered in items_session_registered.inc
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

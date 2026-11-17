@@ -1498,6 +1498,8 @@ static void test_filter_real_data(const content::ContentDb& db) {
 #include "husbandry_tests.inc"
 #include "weaponsmithing_tests.inc"
 #include "weaponsmithing_review_tests.inc"
+#include "tailoring_tests.inc"
+#include "tailoring_review_tests.inc"
 
 int main() {
     const char* env = std::getenv("AOC_CONTENT_DB");
@@ -1549,6 +1551,13 @@ int main() {
     test_ws_smithy(*db, world);
     test_ws_reagent_shops(*db);
     test_ws_bow_craft(*db, world);
+    test_tl_data(*db, world);
+    test_tl_vendors(*db);
+    test_tl_plan(*db, world);
+    test_tl_feed(*db, world);
+    test_tl_holdbacks(*db);
+    test_tlr_shopkeepers(*db);
+    test_tlr_window(*db);
     test_scrolls(path, world);
     test_tools_and_vendor(path, world);
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
