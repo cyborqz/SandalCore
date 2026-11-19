@@ -58,7 +58,54 @@ namespace repl = ::aoc::protocol::repl;
 namespace schema = ::aoc::protocol::schema;
 namespace wire = ::aoc::protocol::wire;
 using bootstrap::Role;
-using protocol::emit::FIntrepidNetworkGUID;
+namespace {
+// Client-data gaps the server models: an item's ability reads a stat its stat block does not carry, while the block carries the number under another stat of the
+// same family.  For each row the cast gives the ability the item's `item_stat` value under the `read_stat` key it names; when `target_stat` differs, the buff's
+// mod moves there (the Might Potion: Arcane Surge reads and names Magical Power, the item carries the number as Physical Power, and the buff it gives is
+// Physical Power - the number lands on Physical Power, as the game shows).
+struct ConsumableStatFix {
+    int64_t item, read_stat, item_stat, target_stat;
+};
+constexpr ConsumableStatFix kConsumableStatFixes[] = {
+    // Might Potion: Arcane Surge's ability reads MagicalPowerRating; the item carries the same number as PhysicalPowerRating, and the buff it gives is Physical Power.
+    {6064634675081576599ll, 109183607068297ll, 109183603267200ll, 109183603267200ll},
+    // Elixir of Crafting Quality: the ability reads Artisan_Crafting_Quality_Rating; the item carries the same number as Artisan_Crafting_Cost_Rating.
+    {6064632105766944786ll, 6064630316223889411ll, 6064630316223627265ll, 6064630316223889411ll},
+    // Elixir of Hunting: the ability reads Artisan_Gathering_Hunting_Rarity_Rating; the item carries the same number as Artisan_Gathering_Hunting_Quantity_Rating.
+    {6064632105783263255ll, 6064630299332247618ll, 6064630299331854394ll, 6064630299332247618ll},
+    // Glyphic Goblet: reads MagicalPenetrationRating; carries the same number as MagicalSpeedRating.
+    {6064632586725298078ll, 109342908372605ll, 109183607068299ll, 109342908372605ll},
+    // Woodchip Wheat: reads PhysicalPenetrationRating; carries the same number as PhysicalSpeedRating.
+    {6064632586725298063ll, 109342856795769ll, 109342866232955ll, 109342856795769ll},
+    // Beef Tar Tar: reads PhysicalPenetrationRating; carries the same number as PhysicalSpeedRating.
+    {6064631986960924712ll, 109342856795769ll, 109342866232955ll, 109342856795769ll},
+    // Grilled Raptor Steak: reads MagicalPenetrationRating; carries the same number as MagicalSpeedRating.
+    {6064631986911117338ll, 109342908372605ll, 109183607068299ll, 109342908372605ll},
+    // Roasted Gryphon: reads MagicalPenetrationRating; carries the same number as MagicalSpeedRating.
+    {6064631986906071063ll, 109342908372605ll, 109183607068299ll, 109342908372605ll},
+    // Roasted Scorpion Skewers: reads PhysicalAccuracyRating; carries the same number as PhysicalSpeedRating.
+    {6064632983814602768ll, 109183605036677ll, 109342866232955ll, 109183605036677ll},
+    // Tanner's Jerky Sticks: reads PhysicalPenetrationRating; carries the same number as PhysicalSpeedRating.
+    {6064631987022921790ll, 109342856795769ll, 109342866232955ll, 109342856795769ll},
+    // Wyrmling Tar Tar: reads PhysicalPenetrationRating; carries the same number as PhysicalSpeedRating.
+    {6064631986970165292ll, 109342856795769ll, 109342866232955ll, 109342856795769ll},
+    // Novice Scroll of Processing Quality: the XP scroll's ability it casts reads Artisan_Processing_XP_Rating; the item carries the same number as Artisan_Processing_Rarity.
+    {6064634619058126947ll, 6064629302956655088ll, 6064629302956720627ll, 6064629302956655088ll},
+};
+// A display-only gap of the same kind: the client names an ability of its own for the item (the Might Potion casts Arcane Surge), and the buff that ability
+// draws would carry the ability's own name and stat.  The cast tells the client the effect record to draw the buff from; the effect applied, its mods and its
+// stacking stay the ability's own (the numbers are the item's already).
+struct ConsumableEffectFix {
+    int64_t item, effect, display;
+};
+constexpr ConsumableEffectFix kConsumableEffectFixes[] = {
+    // Might Potion: its buff is drawn as the physical-power effect (Surging Might's record, whose number is the item's Physical Power).  The Arcane Surge and
+    // Arcane potions keep their own effect.
+    {6064634675081576599ll, 6064632316175778138ll, 6064632316168765776ll},
+};
+// The Quickstride Potion (6064632111105835058) has the same shape — a mod with no target stat reads MaxHealth, and its block carries only MoveSpeedMult — and
+// stays unserved by this table: there is no stat to put its number under.
+}  // namespace
 
 // ============================================================================================================================
 //  abilities (plan A7)
@@ -717,6 +764,32 @@ std::shared_ptr<const ItemCast> PlayerSession::consumable_cast(int64_t ability, 
     cast->ability = ability;
     cast->quality = item->quality;
     cast->stats = stats_->item_stats(item->item_record_id, item->quality);
+    for (const ConsumableStatFix& fix : kConsumableStatFixes) {
+        if (fix.item != cast->record) continue;
+        double value = 0;
+        bool found = false;
+        for (const stats::StatMod& m : cast->stats) {
+            if (m.stat == fix.item_stat) {
+                value = m.value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) continue;
+        // the item's number under the stat its ability reads: the buff lands on the stat the tooltip names
+        bool had_read = false;
+        for (stats::StatMod& m : cast->stats) {
+            if (m.stat != fix.read_stat) continue;
+            m.value = value;
+            had_read = true;
+        }
+        if (!had_read) cast->stats.push_back({fix.read_stat, value});
+        if (fix.read_stat != fix.target_stat) cast->effect_stat_remap[fix.read_stat] = fix.target_stat;
+    }
+    for (const ConsumableEffectFix& fix : kConsumableEffectFixes) {
+        if (fix.item != cast->record) continue;
+        cast->effect_display_remap[fix.effect] = fix.display;   // display only: the effect applied and its mods stay the ability's
+    }
     cast->container = static_cast<int>(*container);
     cast->slot = slot;
     cast->instance_guid = item->instance_guid;
