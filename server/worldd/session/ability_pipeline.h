@@ -474,6 +474,16 @@ public:
     /// how long the key was held; 0 or less: worldd's own clock); true when the instance is one of ours.
     bool cancel(int32_t client_instance_id, double now, double held_seconds = 0);
 
+    /// Ends every running food or drink use: the data's cancel rule (the use's ability's ConditionalBranch "Consumable_Food_CancelOnMoveOrDamage" and its
+    /// AnimCancels of every ability) cancels those kinds when the player moves, is hit or starts another ability.  The cast the exception names is left alone: the
+    /// press that just started it.  A use that has not paid yet is cancelled outright: nothing is paid, the item is kept and the client is told its instance is
+    /// over.  One that has paid ends: its montage and its own lasting states (Resting) go, while its timed effects and the buffs its hit applied keep their own lives.
+    void end_item_casts(double now, const char* why, int32_t except_client_id = 0);
+
+    /// Ends every instance of an effect on the character, whatever applied it (the Rest effect's fragility: combat breaks it — the Rest ability's own
+    /// Resting and a meal's alike).  Nothing happens when none is on.
+    void end_resting_effects(int64_t effect_guid, double now, const char* why);
+
     /// ServerRequestBranchVerification: the client's cast bar ended and it asks the server to confirm the branch it took. A cast of an ability that waits for
     /// its branch (kBranchedCasts) goes on from this moment: the montage's jump, the cost, the hits and the montage's end follow at the offsets the retail
     /// capture shows. True when the request belongs to such a cast that was still waiting.
@@ -874,6 +884,7 @@ private:
         /// the own effects and expire by their own duration, not with the montage: a meal's 20 s of regeneration outlives the eating animation that ends in a few seconds.
         std::vector<const abilities::EffectDef*> timed_effects;
         bool effects_at_end = false;   // an eating or drinking use: its timed effects (the buff) wait for the end of the use, not its own step
+        bool end_client = false;   // the server ended this item cast itself (the player moved, was hit or started another ability): tell the client its instance is over
         std::optional<double>                 held_release_due;   // a release heard before the held effect's delayed start
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires

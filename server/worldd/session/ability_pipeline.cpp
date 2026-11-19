@@ -3372,6 +3372,58 @@ void AbilityPipeline::run_slot(CastRecord& rec, HitSlot& slot, double t, bool re
               (found ? "" : ": it found nobody")});
 }
 
+void AbilityPipeline::end_item_casts(double now, const char* why, int32_t except_client_id) {
+    bool any = false;
+    for (size_t i = casts_.size(); i-- > 0;) {
+        Cast& cast = casts_[i];
+        // The data's cancel rule: only a food or drink use is cancelled (its ability's ConditionalBranch "Consumable_Food_CancelOnMoveOrDamage"); the other
+        // kinds' uses are instant and nothing cancels them.  The press that started this use does not cancel its own cast.
+        if (!cast.item_cast || !cast.item_cast->interruptible || cast.end_due || cast.client_id == except_client_id) continue;
+        if (!cast.paid) {
+            // The use is cancelled before its cost step: nothing is paid, the item is kept (its reservation goes back), nothing fires, and the client is told
+            // its instance is over.
+            const int32_t client_id = cast.client_id;
+            AbilityEvent e;
+            e.at = now;
+            e.end_ability = client_id;
+            e.note = cast.def->row.name + " is over: " + why + ", nothing was paid and the item is kept";
+            spdlog::info("[abilities] {} {:.3f} s after the trigger: {}", cast.def->row.name, now - cast.trigger_at, e.note);
+            if (item_release_) item_release_(client_id);
+            drop_record(client_id);
+            end_zones_of(cast, now);
+            casts_.erase(casts_.begin() + static_cast<std::ptrdiff_t>(i));
+            instances_.erase(std::remove_if(instances_.begin(), instances_.end(), [client_id](const Instance& in) { return in.client_id == client_id; }), instances_.end());
+            events_.push_back(std::move(e));
+            any = true;
+            continue;
+        }
+        cast.end_due = now;
+        cast.end_client = true;   // the client is told the item's instance is over (its eating/sitting state ends)
+        drop_record(cast.client_id);   // a hit request that arrives after the use ends applies nothing
+        any = true;
+    }
+    if (!any) return;
+    spdlog::debug("[abilities] {}{}", why, ": every food or drink use still running ends");
+    advance(now);   // step_end: its own lasting states go, its montage clears, its timed effects stay
+}
+
+void AbilityPipeline::end_resting_effects(int64_t effect_guid, double now, const char* why) {
+    AbilityChange c;
+    for (size_t i = 0; i < effects_.size();) {
+        if (effects_[i].def->row.guid != effect_guid) {
+            ++i;
+            continue;
+        }
+        const EffectInst gone = effects_[i];
+        remove_instance(c, i);
+        run_effect_hits(c, gone, kExpirePhases, 2, now);
+    }
+    if (c.empty()) return;
+    sync_engine_effects();
+    recompute(c);
+    emit({std::move(c), std::nullopt, now, why});
+}
+
 bool AbilityPipeline::cancel(int32_t client_instance_id, double now, double held_seconds) {
     advance(now);
     cancel_timed(client_instance_id, now);
@@ -3593,7 +3645,10 @@ void AbilityPipeline::mark_launched(int32_t client_id) {
 // The casts a Dodge cancels besides the cast bars and the swings: every cast that is running while nothing of it has gone out. A song (a Melody), a toggle that this press ends, a consumable's use (its item is used at the
 // press and its buff applies in full), a pet command and a leap, a charge, a teleport or a dash (all gone out at the press) are no casts to cancel.
 bool AbilityPipeline::dodge_cancels(const Cast& cast) const {
-    if (cast.loop || cast.toggle_off || cast.item_cast || is_weapon_combo(cast.def->row) || gone_out_at_the_press(cast.def->row)) return false;
+    if (cast.loop || cast.toggle_off || is_weapon_combo(cast.def->row) || gone_out_at_the_press(cast.def->row)) return false;
+    // A food or drink use the Dodge catches before its cost step is cancelled with the item kept; one that has launched (its item taken, its effects on the way)
+    // is past the Dodge, as any cast that has gone out.
+    if (cast.item_cast) return !cast.paid && !cast.end_due;
     return !gone_out(cast.client_id, &cast);
 }
 
@@ -3618,6 +3673,7 @@ size_t AbilityPipeline::end_unlaunched(double t, const char* why) {
         if (!told) e.end_ability = client_id;
         for (int shot = 1; shot < cast.shots; ++shot) give_back(e.change, cast);   // (a Salvo that paid more than one shot before its first arrow left)
         refund(e.change, cast);   // (nothing when it had not paid yet)
+        if (cast.item_cast && !paid && item_release_) item_release_(client_id);   // (a food or drink use the Dodge caught before its cost step: the reserved item goes back)
         step_end(cast, t);
         drop_record(client_id);
         end_zones_of(cast, t);
@@ -5226,10 +5282,11 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
         cast.own_effects.clear();   // (finish_cast_if_done may let the cast go now: its lasting states are off)
         changed = true;
     }
-    // An eating or drinking use that reached its end with its item taken grants its timed effects (the buff) here: its own client ended it — the bar completed,
-    // the ServerEndAbility it sends when its montage plays out.  A use cancelled before its cost step is erased outright and never reaches this with `paid`, so
-    // nothing is granted for an item that was kept.
-    if (cast.effects_at_end && cast.paid) {
+    // An eating or drinking use grants its timed effects (the buff) only when its own client ended it — its bar completed, the ServerEndAbility it sends when its
+    // montage plays out.  A use the server itself ended (the player moved, was hit or started another ability) grants nothing: the food was not eaten, though its
+    // item is spent — the game kept an interrupted bar's item too.  A use cancelled before its cost step is erased outright and never reaches this with `paid`,
+    // so nothing is granted for an item that was kept either.
+    if (cast.effects_at_end && cast.paid && !cast.end_client) {
         const ConsumedScope consumed(*this, cast.item_cast);   // the granted buff's numbers read the item the use was made from
         for (const EffectDef* e : cast.timed_effects) {
             bool applies = true;
@@ -5239,8 +5296,9 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
             changed = true;
         }
     }
-    cast.timed_effects.clear();     // they keep their own duration as effects; the cast itself needs them no more    // A consumable's lasting states (Resting: 1 % of Health and Mana a second, an infinite effect) come from a hit of the use rather than from its EffectsIds, so no owner ties
-    // them to the ability: they end with the use too, when its eating or drinking montage does.  The timed effects (Nourishment) are not touched: they keep their own 20 s.
+    cast.timed_effects.clear();     // once granted they keep their own duration as effects; the cast itself needs them no more
+    // A consumable's lasting states (Resting: 1 % of Health and Mana a second, an infinite effect) come from a hit of the use rather than from its EffectsIds, so no owner ties
+    // them to the ability: they end with the use too, when its eating or drinking montage does.
     if (cast.item_cast) {
         std::set<int64_t> mine;
         for (const auto& [key, guid] : cast.def->effects) mine.insert(guid);
@@ -5273,6 +5331,14 @@ void AbilityPipeline::step_end(Cast& cast, double t) {
         c.abilities_changed.push_back(cast.item);
     }
     if (cast.item_cast) drop_record(cast.client_id);   // the use is over: a hit request that arrives later finds no cast and applies nothing
+    if (cast.end_client) {
+        // The server ended this use itself: the client is told its instance is over, so its eating or drinking animation stops with it.
+        AbilityEvent ev{std::move(c), std::nullopt, t, "the use of " + cast.def->row.name + " is over"};
+        ev.end_ability = cast.client_id;
+        cast.end_client = false;
+        emit(std::move(ev));
+        return;
+    }
     // a ground cast whose client never asked for its branch (the aim point is in the call, so its client's cast bar is not the game's own) has no client
     // end of its own: the server ends it here, so the animation does not play on after the spell is done. A cast aimed at an actor keeps its client's end.
     std::optional<int32_t> end;

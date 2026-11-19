@@ -127,6 +127,17 @@ void PlayerSession::take_hit(Connection& conn, const combat::IncomingHit& in, Cl
         return;
     }
     pipeline_->receive_hit(h, ability_seconds(now));
+    // The data's cancel rule names damage (the use's ability's ConditionalBranch "Consumable_Food_CancelOnMoveOrDamage"): a hit whose Health mod is a loss and
+    // whose source is neither a reaction nor an effect (a damage-over-time tick does not end it) ends a running food or drink use — this is the path the combat
+    // side's inbox drains into, a creature's melee, its projectiles and its zones among them.  A blow that went to the mount is above, and
+    // PlayerSession::receive_player_hit keeps the same rule for the hits the world worked out for another player's cast, as PlayerSession::take_damage does for
+    // the damage that comes to the session directly.
+    if ((h.flags & stats::kHitMiss) == 0 && h.source_type != content::kSourceTypeReaction && h.source_type != content::kSourceTypeEffect)
+        for (const combat::ResolvedMod& m : h.mods)
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) {
+                pipeline_->end_item_casts(ability_seconds(now), "the player takes damage");
+                break;
+            }
     if (duel_lost && duel_book_) duel_book_->defeated(pb_.setup().character_guid, pvp_world_now(now));   // #23 (MrJambix)
     if (mounts_ && (h.flags & stats::kHitMiss) == 0) {
         for (const combat::ResolvedMod& m : h.mods) {
@@ -173,6 +184,8 @@ void PlayerSession::drain_combat(Connection& conn, Clock::time_point now) {
         combat_flag_ = combat_side_->wants_in_combat;
         stats_->set_in_combat(combat_flag_);
         if (abilities_) abilities_->set_in_combat(combat_flag_, sec);
+        // The Rest effect's fragility breaks it in combat whatever applied it: the Rest ability's own Resting (the runtime above) and a meal's or a drink's alike.
+        if (combat_flag_ && abilities_ && pipeline_) pipeline_->end_resting_effects(abilities_->rules().rest.effect_guid, sec, "combat begins");
         pipeline_->refresh(sec, combat_flag_ ? "combat starts" : "combat ends", true);   // the regeneration is five times faster out of combat
         if (pb_.set_in_combat(combat_flag_)) {
             queue("pawn state", [](bootstrap::PlayerBootstrap& pb) { return pb.pawn_state_update("combat state"); }, conn, /*must_build=*/true);
@@ -196,6 +209,9 @@ double PlayerSession::take_damage(Connection& conn, double amount, Clock::time_p
     }
     if (amount > 0) mount_damaged(now);
     const double through = pipeline_->take_damage(amount, ability_seconds(now));
+    // The data's cancel rule names damage: a food or drink use is cancelled when its owner is hit (the use's ability's ConditionalBranch
+    // "Consumable_Food_CancelOnMoveOrDamage"; end_item_casts keeps to the kinds that rule covers).
+    if (amount > 0) pipeline_->end_item_casts(ability_seconds(now), "the player takes damage");
     take_ability_events();
     flush_abilities(conn);
     return through;
