@@ -190,6 +190,10 @@ var ConsumedAbilityRef = Ref{TypeID: 0, Guid: -3}
 // EffectInFilterRef is what GetEffect() gives: no record, a marker (EffectHasTag of it asks the host for the effect a filter is being asked about).
 var EffectInFilterRef = Ref{TypeID: 0, Guid: -4}
 
+// AbilityItemRef is what GetAbilityItemInstance() gives: no record, a marker (GetItemInstanceStat of it is the item the ability being run was cast from:
+// the stat's value in its stat block at its quality, the same value GetConsumedItemStat reads).  contentc compiles the pair to OpConsumed.
+var AbilityItemRef = Ref{TypeID: 0, Guid: -5}
+
 // The reactions' host functions: what a reaction's expression asks of the event in progress. The C++ engine has the same numbers.
 const (
 	HostConsumedAbilityHasTag  = 190 // AbilityHasTag(GetConsumedAbility(), tag): name: the tag

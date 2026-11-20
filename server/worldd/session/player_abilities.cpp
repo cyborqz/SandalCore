@@ -89,6 +89,9 @@ AbilityRuntime* PlayerSession::ability_runtime(Clock::time_point now) {
             pipeline_->set_weapon_tags([this] { return weapon_tags(); });
             pipeline_->set_active_target([this]() -> uint64_t { return active_targets_[0].is_valid() ? active_targets_[0].ObjectId : 0; });
             pipeline_->set_item_taker([this](int32_t client_instance_id) { return consumable_paid(client_instance_id); });   // consumables: the cost step takes the item
+            pipeline_->set_item_release([this](int32_t client_instance_id) { item_reserved_.erase(client_instance_id); });   // ... and a use cancelled before its cost step gives the reservation back
+            pipeline_->set_rest_effect(abilities_->rules().rest.effect_guid,
+                                       [this]() { return abilities_ && abilities_->rest_effect_on(); });   // the Resting effect is one: a meal's or a drink's own joins the Rest's
             // a player's heal reaches his own summoned mount: the mount is no combat world actor, its Health is the replicated stat the session holds
             // (the caster's own mount, never another player's, and only while it stands: a mount that dissolves or dies has saved the Health it had, so a heal on it would be lost)
             const auto healable = [this](uint64_t id) {
@@ -180,6 +183,15 @@ void PlayerSession::take_ability_events() {
     AbilityRuntime& runtime = *abilities_;
     std::vector<AbilityEvent> events = runtime.take_events();
     if (pipeline_) {
+        // The Resting effect is one: the Rest's own start takes it over from a running food or drink use (the meal's Resting joined it, or it began before the
+        // Rest's did — the sit-down's delay can put the Rest's own after the use's).  The takeover's removal goes out with the Rest's own add, in one flush.
+        const int64_t rest_effect = runtime.rules().rest.effect_guid;
+        if (std::any_of(events.begin(), events.end(), [rest_effect](const AbilityEvent& e) {
+                for (const bootstrap::EffectItem& item : e.change.effects_added)
+                    if (item.effect_guid == rest_effect) return true;
+                return false;
+            }))
+            pipeline_->end_effects_of(rest_effect);
         std::vector<AbilityEvent> more = pipeline_->take_events();
         events.insert(events.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
     }
@@ -540,6 +552,12 @@ void PlayerSession::on_ability_trigger(Connection& conn, const repl::ClientRpc& 
             crate_drop_due_.reset();   // (Drop Crate has not gone out until the crate leaves the back, 0.7 s after the press)
         }
     }
+    // The data's cancel rule: any ability press cancels a running food or drink use (its ability lists every ability in its AnimCancels) — the client plays
+    // its press whether the server models the ability or not (a weapon combo is refused here and the character still swings) and stops its own eating bar
+    // without telling the server.  Not the use the same press just started, not another item's use (a meal is eaten sitting), not the Rest itself; a Dodge
+    // cancels only what has not launched yet (its own end_by_dodge above).
+    if (pipeline_ && item_slot == -1 && ability != content::kGuidRest && ability != content::kGuidDodge)
+        pipeline_->end_item_casts(ability_seconds(now), "another ability starts", instance);
     take_ability_events();
     flush_abilities(conn);
     // a pet's command is the ability's: the pet obeys only when the pipeline took the cast (a refused Go To, still on its cooldown, orders nothing)
@@ -698,6 +716,12 @@ std::shared_ptr<const ItemCast> PlayerSession::consumable_cast(int64_t ability, 
     cast->ability = ability;
     cast->quality = item->quality;
     cast->stats = stats_->item_stats(item->item_record_id, item->quality);
+    {
+        // The data's cancel rule: only a food or drink use is cancelled (by movement, damage or another ability); the other kinds' uses are instant.
+        std::string tag_error;
+        cast->interruptible = db->item_has_tag(cast->record, "Item.Consumable.Food", tag_error) ||
+                              db->item_has_tag(cast->record, "Item.Consumable.Drink", tag_error);
+    }
     cast->container = static_cast<int>(*container);
     cast->slot = slot;
     cast->instance_guid = item->instance_guid;
@@ -762,6 +786,16 @@ void PlayerSession::receive_player_hit(const combat::PlayerIncomingHit& hit, std
     if (!pipeline_ || dead_) return;
     // the world's clock is the combat world's; the pipeline's starts at the join (abilities_origin_)
     effective = pipeline_->apply_ally_landing(hit, hit.at - pb_.setup().world_time);
+    // The data's cancel rule names damage: a food or drink use is ended when its owner takes a hit whose Health mod is a loss and whose source is neither a
+    // reaction nor an effect (a damage-over-time tick does not end it) — whoever sent it: another player's cast or a lingering zone (the use's ability's
+    // ConditionalBranch "Consumable_Food_CancelOnMoveOrDamage"; PlayerSession::take_hit keeps the same rule for the combat side's inbox — a creature's blows
+    // among them — and PlayerSession::take_damage for the damage that comes to the session directly).
+    if (hit.source_type != content::kSourceTypeReaction && hit.source_type != content::kSourceTypeEffect)
+        for (const combat::ResolvedMod& m : hit.mods)
+            if (m.stat_guid == content::kGuidHealth && m.value < 0) {
+                pipeline_->end_item_casts(hit.at - pb_.setup().world_time, "the player takes damage");
+                break;
+            }
     take_ability_events();
 }
 

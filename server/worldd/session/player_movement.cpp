@@ -86,6 +86,14 @@ void PlayerSession::tally_speed(const GoodPosition& before, const GoodPosition& 
     sprint_seen_ = false;
 }
 
+namespace {
+
+/// The least distance an accepted move must take the pawn before a running food or drink use counts as interrupted by it: a step of real walking is tens of
+/// centimetres, while a correction can leave a standing client's move a few centimetres from the server's good place.
+constexpr double kUseMovedCm = 5.0;
+
+}  // namespace
+
 void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const InBunch& bunch, Clock::time_point now, bool on_mount) {
     // the mounts milestone, stage 3: the controlled actor's channel is the only one that moves.  A move on the other (a pawn's while the player rides, a mount's that is not
     // ridden: a race of a few frames at a possession, or a client that lies) is dropped without a word to the client
@@ -175,7 +183,13 @@ void PlayerSession::on_move(Connection& conn, const repl::ClientRpc& rpc, const 
         if (AbilityRuntime* abilities = ability_runtime(now)) {
             const bool moving = is_moving(before, move);
             abilities->set_moving(moving, ability_seconds(now));
-            if (pipeline_) pipeline_->set_moving(moving);
+            if (pipeline_) {
+                pipeline_->set_moving(moving);
+                // The data's cancel rule: moving cancels a food or drink use.  Only a move that really took the pawn somewhere cancels it: the input bits say
+                // the player holds a direction, and a correction can leave the client's next move far from the server's good place while the player stands still.
+                const GoodPosition& after = checker_.good();
+                if (moving && std::hypot(after.x - before.x, after.y - before.y) > kUseMovedCm) pipeline_->end_item_casts(ability_seconds(now), "the player moves");
+            }
             if (!on_mount) tally_speed(before, checker_.good(), abilities->sprinting(), abilities->evading());
         }
         // the answer: at once, or (PlayerWorld::move_ack_gap, the original server's pace) the latest good move's at the tick (session/player_move_ack.cpp)

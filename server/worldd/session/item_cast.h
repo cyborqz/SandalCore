@@ -24,6 +24,9 @@ struct ItemCast {
     int64_t                      ability = 0;      // the ability the item casts
     int                          quality = 1;      // the item's quality: the rarity band its stat block is read at
     std::vector<stats::StatMod>  stats;            // the stat block's values at that quality, by stat guid (what GetConsumedItemStat answers)
+    /// The data's cancel rule: a food or drink use is cancelled when its player moves, is hit or starts another ability (the cast ability's ConditionalBranch
+    /// "Consumable_Food_CancelOnMoveOrDamage" and its AnimCancels of every ability); the other kinds' uses are instant and nothing cancels them.
+    bool                         interruptible = false;
     int                          container = 0;    // the bag the item lay in (svc::ItemContainer as a number)
     int32_t                      slot = -1;        // ... and its slot there
     std::string                  instance_guid;    // ... and its instance
