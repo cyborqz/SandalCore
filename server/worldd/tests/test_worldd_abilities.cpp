@@ -679,9 +679,9 @@ static void test_rest(const Rules& r) {
     CHECK(s.rt.rest_effect_on(), "the effect is still on");
     s.run_to(2.1);
     const auto gone = s.with("the Rest effect ends");
-    CHECK(!s.rt.rest_effect_on() && gone.size() == 1 && gone[0]->change.effects_removed == std::vector<int64_t>{0} && gone[0]->change.stats.size() == 2 &&
-              gone[0]->change.stats[0].value == k06 && gone[0]->change.stats[1].value == k06,
-          "0.067 s later the effect is removed and the regeneration is back to 0.6 (pkt#8318 -> #8320)");
+    CHECK(!s.rt.rest_effect_on() && gone.size() == 1 && gone[0]->change.effects_removed == std::vector<int64_t>{0} && gone[0]->change.abilities_removed.empty() &&
+              gone[0]->change.stats.size() == 2 && gone[0]->change.stats[0].value == k06 && gone[0]->change.stats[1].value == k06,
+          "0.067 s later the effect is removed and the regeneration is back to 0.6 (a client-side end leaves the item)");
 
     // a second Rest replaces the first in one step (pkt#8240), the item with a new AnimationCounter
     Sim again(r.rules);
@@ -702,6 +702,16 @@ static void test_rest(const Rules& r) {
     Sim fight(r.rules);
     fight.rt.set_in_combat(true, 0);
     CHECK(fight.trigger(content::kGuidRest, 0) == Refusal::InCombat && fight.ends() == std::vector<int32_t>{0}, "in combat a Rest is refused with ClientEndAbility");
+    // combat ends a running Rest: its effect's fragility breaks it
+    Sim combat(r.rules);
+    CHECK(combat.trigger(content::kGuidRest, 0) == Refusal::None && combat.rt.resting(), "(the Rest starts out of combat)");
+    combat.run_to(2.2);
+    CHECK(combat.rt.rest_effect_on(), "(the Rest effect is on)");
+    combat.rt.set_in_combat(true, combat.now);
+    combat.take();
+    combat.run_to(2.4);
+    CHECK(!combat.rt.resting() && !combat.rt.rest_effect_on() && combat.rt.stat(kHealthRegen) == k06,
+          "combat ends the Rest: its effect's fragility breaks it and the regeneration goes back");
     // Rest and a Dodge
     Sim d(r.rules);
     d.trigger(content::kGuidRest, 0);
