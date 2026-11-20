@@ -531,6 +531,14 @@ public:
     void set_active_target(ActiveTargetFn fn) { active_target_ = std::move(fn); }
     /// Where a consumable's cast takes its item when its cost step runs (after the other costs); none set: such a cast takes nothing (the pipeline alone, a test with no bag).
     void set_item_taker(ItemTakeFn fn) { item_taker_ = std::move(fn); }
+    /// Where a consumable's cast gives back the item it had reserved when it is cancelled before its cost step (the session drops the reservation; the item never left).
+    void set_item_release(std::function<void(int32_t)> fn) { item_release_ = std::move(fn); }
+    /// The Resting effect is one: this guid (the Rest ability's own effect — the same record a meal's or a drink's own Resting uses) never sits twice on the
+    /// character.  A use's own Resting does not apply while the Rest's is on (the meal's joins the Rest's) and not while an earlier use's instance is either;
+    /// end_effects_of takes a use's instances over when the Rest's own starts after them.
+    void set_rest_effect(int64_t guid, std::function<bool()> on) { rest_effect_guid_ = guid; rest_effect_on_ = std::move(on); }
+    /// Every instance of the effect a food or drink use holds goes (the Rest's own start takes the Resting over this way): true if any went.
+    bool end_effects_of(int64_t effect_guid);
     /// The caster's own mount for a heal's target (none set: a mount is no target the pipeline knows) and where the heal's Health goes.
     void set_mount_targets(MountTargetFn target, MountHealFn heal) {
         mount_target_ = std::move(target);
@@ -686,6 +694,8 @@ public:
     size_t clear_cooldowns(double now);
     /// Charges left in the cooldown group of an ability (-1 when it has no group running).
     int    charges_left(int64_t ability) const;
+    /// The ServerInstanceId of the cast the client knows as `client_instance_id` (-1: none runs).  An item cast's is the number its ServerEndAbility names.
+    int64_t instance_of(int32_t client_instance_id) const;
     double now() const { return now_; }
     /// The class the pipeline's class rule was resolved for (ECharacterClass; a change of the character's class needs refresh()).
     int    resource_class() const { return resource_class_; }
@@ -860,6 +870,10 @@ private:
         bootstrap::ActiveAbilityItem          item;
         std::shared_ptr<const ItemCast>       item_cast;                  // a consumable's cast: the item whose numbers the ability's formulas read (GetConsumedItemStat)
         std::vector<const abilities::EffectDef*> own_effects;   // the infinite effects the ability puts on its caster itself (no hit applies them)
+        /// The timed effects the ability puts on its caster itself (no hit applies them): a consumable's Nourishment (20 s of 1 s ticks) and its kind.  They start with
+        /// the own effects and expire by their own duration, not with the montage: a meal's 20 s of regeneration outlives the eating animation that ends in a few seconds.
+        std::vector<const abilities::EffectDef*> timed_effects;
+        bool effects_at_end = false;   // an eating or drinking use: its timed effects (the buff) wait for the end of the use, not its own step
         std::optional<double>                 held_release_due;   // a release heard before the held effect's delayed start
         bool                                  toggle_off = false;   // the ability is a loop that is on: this trigger ends it
         int64_t                               chain_owner = 0;      // a chain (Cleric_Mend's five projectiles that fire one hit): the one projectile this cast fires
@@ -922,6 +936,12 @@ private:
         uint64_t                    instigator = 0;              // the creature that put it on (0: the player's own)
         uint64_t                    from_player = 0;              // PvP: the other player whose hit left it (0: the character's own, or a creature's): its ticks that aim at an enemy are his hits   // #23 (MrJambix)
         bool                        pvp_force = false;             // ... and the force flag his action carried (its ticks are judged with it, not with the last trigger's)   // #23 (MrJambix)
+        /// The consumable whose stat block the effect's hits read (GetConsumedItemStat) when they run later (a meal's tick, a salve's tick): the item of the cast that
+        /// applied the effect. null for an effect that no item cast applied.
+        std::shared_ptr<const ItemCast> item;
+        /// The record the client draws this effect from (0: its own, `def->row.guid`).  A consumable may name another record for the display only (the Might
+        /// Potion shows the physical-power buff): the effect applied, its mods and its stacking stay the definition's own.
+        int64_t                     display_guid = 0;
     };
     /// A lingering zone the ability spawned with its cast: its actor on the client (the dance's visual effect, the Vine Field's circle), the place the
     /// data puts it and the hits it lands on whoever stands in it.  The infinite effects its overlap hits put on the caster end with the dance.
@@ -1111,8 +1131,16 @@ void   step_multi_hit(Cast& cast, double t);
     struct ConsumedScope {
         AbilityPipeline&                     p;
         const std::vector<stats::StatMod>*   saved;
-        ConsumedScope(AbilityPipeline& pipeline, const std::shared_ptr<const ItemCast>& item) : p(pipeline), saved(pipeline.consumed_) { p.consumed_ = item ? &item->stats : nullptr; }
-        ~ConsumedScope() { p.consumed_ = saved; }
+        std::shared_ptr<const ItemCast>      saved_item;
+        ConsumedScope(AbilityPipeline& pipeline, const std::shared_ptr<const ItemCast>& item)
+            : p(pipeline), saved(pipeline.consumed_), saved_item(pipeline.consumable_item_) {
+            p.consumed_ = item ? &item->stats : nullptr;
+            p.consumable_item_ = item;
+        }
+        ~ConsumedScope() {
+            p.consumed_ = saved;
+            p.consumable_item_ = std::move(saved_item);
+        }
     };
     /// The fill the no-argument GetAbilityProgressRatio() reads while a cast's hits are applied (1: the ability whose hit this is has played in full).
     struct FillScope {
@@ -1326,6 +1354,9 @@ void   step_multi_hit(Cast& cast, double t);
     WeaponTagsFn              weapon_tags_;
     ActiveTargetFn            active_target_;
     ItemTakeFn                item_taker_;
+    std::function<void(int32_t)> item_release_;   // a cancelled unpaid use gives back the item it had reserved (none set: nothing to give back)
+    int64_t                   rest_effect_guid_ = 0;   // the Resting effect's record: the one effect that never sits twice on the character (0: no such rule)
+    std::function<bool()>     rest_effect_on_;         // the Rest ability's own Resting is on (the runtime's; none set: never)
     MountTargetFn             mount_target_;
     MountHealFn               mount_heal_;
     double                    world_time_at_zero_;
@@ -1345,6 +1376,7 @@ void   step_multi_hit(Cast& cast, double t);
     double last_item_at_ = -1;                                      // when the ability item of the running cast came (the DefaultGroup's progress)
     double fill_ = 1;                                               // what the no-argument GetAbilityProgressRatio() reads (FillScope): 1, the ability whose hit this is has played in full
     const std::vector<stats::StatMod>* consumed_ = nullptr;   // what GetConsumedItemStat reads while a consumable's hits are applied (ConsumedScope)
+    std::shared_ptr<const ItemCast>    consumable_item_;      // ... the item itself, so an effect it applied keeps its numbers for the ticks that come later
     std::map<int64_t, double> full_bars_;                           // a HELD ability -> the longest bar this client has shown (seconds from the trigger to its request)
     double                    next_regen_ = kRegenInterval;
     std::set<int64_t>         known_;

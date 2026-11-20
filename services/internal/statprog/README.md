@@ -162,6 +162,7 @@ exports the syntax tree. `StatEnv(ctx, curves)` supplies the stat functions over
 | `GetStat` `GetStatInitRunningTotal` `EvalE` `EvalFormula` `GetTerm` `GetCharacterLevel` | the stat engine |
 | `GetOwner` `GetInstigator` `GetSource` `GetSelf` | one character: the same `Object` kinds apart |
 | `GetEffectCount` `GetEffectCountByTag` `GetSkillPurchased` `IsInCombat` `IsMoving` `IsUnkillable` `EquippedItemInSlotHasTag` `GetActorGuid` `GetPlayerProfessionLevel` `GetConsumedItemStat` `GetNpcEliteRank` | `aocexpr.State`: the part-2 state |
+| `GetAbilityItemInstance` `GetItemInstanceStat` | contentc folds the pair to `GetConsumedItemStat`'s op (a potion's HealingMod reads its own Health); the runtime needs no new state |
 
 `NoState` is the character with nothing yet: no effect (0), no skill bought, out of combat, not moving, killable, actor 0,
 **level 1 in every profession** (it gives the Bard's `Artisan_Gathering_Fishing_Sport_Power` 10 + 100 from the rod),
