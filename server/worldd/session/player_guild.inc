@@ -370,8 +370,8 @@ bootstrap::GuildWire PlayerSession::guild_wire_of(const Guild& g, const GuildMem
         m.rank = row.rank;
         m.level = static_cast<uint8_t>(std::clamp(guild_member_level(world_, row), 1, 25));
         m.class_id = static_cast<uint8_t>(std::clamp(guild_member_class(world_, row), 0, 8));
-        m.last_online = row.last_online;
-        m.joined = row.joined;
+        m.last_online = row.last_online / 1000;   // (the store's milliseconds, the wire's Unix seconds)
+        m.joined = row.joined / 1000;             // (the store's milliseconds, the wire's Unix seconds)
         m.group = row.group;
         m.guild_guid = g.id;
         m.online = online;

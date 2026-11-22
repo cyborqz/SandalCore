@@ -262,8 +262,8 @@ struct GuildMemberData {
     uint8_t     rank = 0;              // the index into the guild's ranks
     uint8_t     level = 1;
     uint8_t     class_id = 0;          // ECharacterClass as a byte (the member carries it as TEnumAsByte)
-    uint64_t    last_online = 0;       // Unix milliseconds, the client's real-time field
-    uint64_t    joined = 0;
+    uint64_t    last_online = 0;       // Unix seconds, the client's real-time field
+    uint64_t    joined = 0;            // Unix seconds, the client's real-time field
     int8_t      group = -1;
     GuidValue   guild_guid;
     bool        online = false;

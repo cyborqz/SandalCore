@@ -246,8 +246,8 @@ struct GuildMemberWire {
     uint8_t                 rank = 0;
     uint8_t                 level = 1;
     uint8_t                 class_id = 0;
-    uint64_t                last_online = 0;   // Unix milliseconds (the client's real-time field)
-    uint64_t                joined = 0;
+    uint64_t                last_online = 0;   // Unix seconds (the client's real-time field)
+    uint64_t                joined = 0;        // Unix seconds (the client's real-time field)
     int8_t                  group = -1;
     std::array<uint32_t, 4> guild_guid{};
     bool                    online = false;

@@ -434,11 +434,90 @@ static void test_a_logout_shows_the_member_offline_to_the_others() {
     }
     const repl::GuildData* data = test_guild_data(*w[0].s);
     CHECK(data && data->members.size() == 2 && data->members[1].online, "the leader's roster has dee online");
+    const int64_t before = test_wall_ms();
     w[1].s->finish("the guild test's logout");
     w.settle();
+    const int64_t after = test_wall_ms();
     data = test_guild_data(*w[0].s);
-    CHECK(data && data->members.size() == 2 && !data->members[1].online && data->members[1].last_online > 0, "after dee's logout the leader's roster has dee offline, with a last-online time");
-    CHECK(sink.last(id) && sink.last(id)->members.size() == 2, "and the guild was saved with its two members");
+    CHECK(data && data->members.size() == 2 && !data->members[1].online && data->members[1].last_online >= static_cast<uint64_t>(before / 1000) &&
+              data->members[1].last_online <= static_cast<uint64_t>(after / 1000),
+          "after dee's logout the leader's roster has dee offline, with the logout's time in Unix seconds");
+    const svc::Guild* saved = sink.last(id);
+    const svc::GuildMember* dee_saved = nullptr;
+    if (saved) {
+        for (const svc::GuildMember& m : saved->members) {
+            if (m.name == "dee") dee_saved = &m;
+        }
+    }
+    CHECK(saved && saved->members.size() == 2 && dee_saved && dee_saved->last_online_ms >= before && dee_saved->last_online_ms <= after,
+          "and the guild was saved with dee's last online in Unix milliseconds");
+    CHECK(dee_saved && dee_saved->joined_ms == 1763000000000, "the saved row keeps dee's joined time in Unix milliseconds (1,763,000,000,000)");
+    // dee logs in again: its row comes from the guild the second session joins, with the logout's seconds
+    const svc::Character dee_again = test_guild_relog(dee, sink, id);
+    if (!w.enter(2, dee_again, identity())) {
+        CHECK(false, "dee logs in again");
+        return;
+    }
+    data = test_guild_data(*w[2].s);
+    CHECK(data && data->members.size() == 2 && data->members[1].name == "dee" && data->members[1].last_online >= static_cast<uint64_t>(before / 1000) &&
+              data->members[1].last_online <= static_cast<uint64_t>(after / 1000),
+          "dee's second login carries the logout's Unix seconds in its roster");
+}
+
+static void test_two_logouts_send_their_own_unix_seconds() {
+    const std::string guild_name = test_guild_name(16);
+    std::printf("two members who log out one after the other each reach the roster with their own Unix seconds\n");
+    std::fflush(stdout);
+    TestGuildStore sink;
+    PartyWorld w;
+    w.fx.world->set_position_sink(&sink);
+    const std::string id = test_guild_id(37);
+    svc::Character cyb = party_record("cyb", {0x3d01, 0, 0, 1});
+    svc::Character dee = party_record("dee", {0x3d02, 0, 0, 2});
+    svc::Character ayla = party_record("ayla", {0x3d03, 0, 0, 3});
+    cyb = guild_record("cyb", {0x3d01, 0, 0, 1}, id, guild_name, 0, {{&cyb, 0}, {&dee, 2}, {&ayla, 2}});
+    dee = guild_record("dee", {0x3d02, 0, 0, 2}, id, guild_name, 2, {{&cyb, 0}, {&dee, 2}, {&ayla, 2}});
+    ayla = guild_record("ayla", {0x3d03, 0, 0, 3}, id, guild_name, 2, {{&cyb, 0}, {&dee, 2}, {&ayla, 2}});
+    seed_store(sink, cyb);
+    if (!w.enter(0, cyb, identity()) || !w.enter(1, dee, identity()) || !w.enter(2, ayla, identity())) {
+        CHECK(false, "the three players join");
+        return;
+    }
+    const int64_t dee_before = test_wall_ms();
+    w[1].s->finish("the guild test's first logout");
+    w.settle();
+    const int64_t dee_after = test_wall_ms();
+    const int64_t ayla_before = test_wall_ms();
+    w[2].s->finish("the guild test's second logout");
+    w.settle();
+    const int64_t ayla_after = test_wall_ms();
+    const repl::GuildData* data = test_guild_data(*w[0].s);
+    const repl::GuildMemberData* dee_row = nullptr;
+    const repl::GuildMemberData* ayla_row = nullptr;
+    if (data) {
+        for (const repl::GuildMemberData& row : data->members) {
+            if (row.name == "dee") dee_row = &row;
+            if (row.name == "ayla") ayla_row = &row;
+        }
+    }
+    CHECK(data && data->members.size() == 3 && dee_row && !dee_row->online && dee_row->last_online >= static_cast<uint64_t>(dee_before / 1000) &&
+              dee_row->last_online <= static_cast<uint64_t>(dee_after / 1000),
+          "dee's row carries its own logout time in Unix seconds");
+    CHECK(ayla_row && !ayla_row->online && ayla_row->last_online >= static_cast<uint64_t>(ayla_before / 1000) &&
+              ayla_row->last_online <= static_cast<uint64_t>(ayla_after / 1000),
+          "ayla's row carries its own later logout time in Unix seconds");
+    const svc::Guild* saved = sink.last(id);
+    const svc::GuildMember* dee_saved = nullptr;
+    const svc::GuildMember* ayla_saved = nullptr;
+    if (saved) {
+        for (const svc::GuildMember& m : saved->members) {
+            if (m.name == "dee") dee_saved = &m;
+            if (m.name == "ayla") ayla_saved = &m;
+        }
+    }
+    CHECK(dee_saved && dee_saved->last_online_ms >= dee_before && dee_saved->last_online_ms <= dee_after && ayla_saved && ayla_saved->last_online_ms >= ayla_before &&
+              ayla_saved->last_online_ms <= ayla_after,
+          "the last save keeps both members' times in Unix milliseconds");
 }
 
 static void test_the_last_place_goes_to_the_first_to_accept() {
@@ -514,5 +593,6 @@ AOC_REGISTER_TEST(test_the_guild_is_stored_the_way_the_service_takes_it);
 AOC_REGISTER_TEST(test_a_name_a_stored_guild_has_is_refused_before_the_guild_is_made);
 AOC_REGISTER_TEST(test_guildmates_may_be_helped_and_not_harmed);
 AOC_REGISTER_TEST(test_a_logout_shows_the_member_offline_to_the_others);
+AOC_REGISTER_TEST(test_two_logouts_send_their_own_unix_seconds);
 AOC_REGISTER_TEST(test_the_last_place_goes_to_the_first_to_accept);
 AOC_REGISTER_TEST(test_the_leader_kicks_the_only_officer);

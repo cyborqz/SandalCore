@@ -474,14 +474,22 @@ static void test_leaving_and_the_leaders_leave() {
         return;
     }
     size_t from = w[0].got.size();
+    const int64_t cooldown_before = test_wall_ms();
     CHECK(test_guild_leave(w, 0), "the leader leaves");
     w.settle();
+    const int64_t cooldown_after = test_wall_ms();
     CHECK(test_guild_reply(test_guild_replies(w, 0, from), "ClientGuildRequestSucceeded").has_value(), "the leave is answered with ClientGuildRequestSucceeded");
     CHECK(w[0].s->guild_name().empty() && test_guild_text(*w[0].s, "GuildName").empty(), "the leader is in no guild and its pawn's name is empty");
     CHECK(test_guild_instance(*w[0].s) == nullptr, "and its GuildMember alignment is gone");
     const auto cooldown = sink.cooldown_of(test_guild_character(w, 0));
     CHECK(cooldown && *cooldown > test_wall_ms() - 1000 && *cooldown <= test_wall_ms() + 432000000 + 1000,
           "the leader's join cooldown is saved at 432,000 s from now");
+    const repl::Value* cooldown_value = test_guild_value(*w[0].s, "GuildCooldown");
+    const repl::Ticks* cooldown_ticks = cooldown_value ? cooldown_value->get_if<repl::Ticks>() : nullptr;
+    constexpr int64_t kUnixEpochTicks = 621355968000000000ll;
+    CHECK(cooldown_ticks && cooldown_ticks->ticks >= kUnixEpochTicks + (cooldown_before + 432000000ll) * 10000ll &&
+              cooldown_ticks->ticks <= kUnixEpochTicks + (cooldown_after + 432000000ll) * 10000ll,
+          "the leaving member's GuildCooldown is FDateTime ticks (100 ns since 0001-01-01), 432,000 s from now");
     CHECK(w[1].s->guild_rank() == 0, "the officer (dee, the highest rank below the leader) is the leader now");
     const svc::Guild* saved = sink.last(id);
     CHECK(saved && saved->members.size() == 2 && saved->members[0].name == "dee" && saved->members[0].rank == 0 && saved->members[1].name == "ayla",
@@ -671,6 +679,63 @@ static void test_the_roster_and_its_refresh() {
     CHECK(test_guild_refresh(w, 0), "the leader asks for its guild's data");
     w.settle();
     CHECK(test_guild_reply(test_guild_replies(w, 0, from), "ClientGuildRequestSucceeded").has_value(), "the refresh is answered");
+}
+
+static void test_the_roster_sends_the_stored_times_in_unix_seconds() {
+    const std::string guild_name = test_guild_name(17);
+    std::printf("the roster sends a member's stored last-online and joined milliseconds as Unix seconds, and the player's own row carries the same\n");
+    std::fflush(stdout);
+    TestGuildSink sink;
+    PartyWorld w;
+    w.fx.world->set_position_sink(&sink);
+    const std::string id = test_guild_id(15);
+    svc::Character cyb = party_record("cyb", {0x3c01, 0, 0, 1});
+    svc::Character dee = party_record("dee", {0x3c02, 0, 0, 2});
+    cyb = guild_record("cyb", {0x3c01, 0, 0, 1}, id, guild_name, 0, {{&cyb, 0}, {&dee, 2}});
+    // the store's row of dee, an offline member who never enters this world: 1,794,945,360,000 ms, joined earlier
+    cyb.guild->members[1].last_online_ms = 1794945360000;
+    cyb.guild->members[1].joined_ms = 1763000000000;
+    // the leader's own row keeps another last-online value, so its own-row conversion is seen as well
+    cyb.guild->members[0].last_online_ms = 1794945000000;
+    cyb.guild->members[0].joined_ms = 1763000000000;
+    if (!w.enter(0, cyb, identity())) {
+        CHECK(false, "the leader joins");
+        return;
+    }
+    const repl::GuildData* data = test_guild_data(*w[0].s);
+    const repl::GuildMemberData* dee_row = nullptr;
+    const repl::GuildMemberData* cyb_row = nullptr;
+    if (data) {
+        for (const repl::GuildMemberData& row : data->members) {
+            if (row.name == "dee") dee_row = &row;
+            if (row.name == "cyb") cyb_row = &row;
+        }
+    }
+    CHECK(dee_row && dee_row->last_online == 1794945360 && dee_row->joined == 1763000000,
+          "the leader's roster has dee's stored times as Unix seconds (1,794,945,360 and 1,763,000,000)");
+    CHECK(dee_row && !dee_row->online && cyb_row && cyb_row->online, "dee is offline and the leader is online");
+    CHECK(cyb_row && cyb_row->last_online == 1794945000 && cyb_row->joined == 1763000000, "the leader's own roster row is in Unix seconds too");
+    const repl::Value* own_online = test_guild_value(*w[0].s, "GuildMemberData.PersistedGuildMemberData.LastTimeOnlineRealTime");
+    const repl::Value* own_joined = test_guild_value(*w[0].s, "GuildMemberData.PersistedGuildMemberData.TimeJoinedRealTime");
+    const uint64_t* own_online_value = own_online ? own_online->get_if<uint64_t>() : nullptr;
+    const uint64_t* own_joined_value = own_joined ? own_joined->get_if<uint64_t>() : nullptr;
+    CHECK(cyb_row && own_online_value && *own_online_value == 1794945000 && own_joined_value && *own_joined_value == 1763000000 &&
+              *own_online_value == cyb_row->last_online && *own_joined_value == cyb_row->joined,
+          "the player's own row (GuildMemberData.PersistedGuildMemberData) carries the same Unix seconds as its roster row (1,794,945,000 and 1,763,000,000)");
+    // a repeated request carries the same seconds again
+    if (!test_guild_refresh(w, 0)) {
+        CHECK(false, "the leader asks for its guild's data again");
+        return;
+    }
+    w.settle();
+    data = test_guild_data(*w[0].s);
+    dee_row = nullptr;
+    if (data) {
+        for (const repl::GuildMemberData& row : data->members) {
+            if (row.name == "dee") dee_row = &row;
+        }
+    }
+    CHECK(dee_row && dee_row->last_online == 1794945360 && dee_row->joined == 1763000000, "a repeated roster carries dee's times in Unix seconds again");
 }
 
 static void test_guild_chat_reaches_the_ranks_that_may_read_it() {
@@ -972,3 +1037,4 @@ AOC_REGISTER_TEST(test_an_offline_member_and_a_reconnect_mid_invite);
 AOC_REGISTER_TEST(test_a_login_elsewhere_keeps_the_guild);
 AOC_REGISTER_TEST(test_a_cooldown_survives_the_relog);
 AOC_REGISTER_TEST(test_the_guild_instance_survives_death);
+AOC_REGISTER_TEST(test_the_roster_sends_the_stored_times_in_unix_seconds);
