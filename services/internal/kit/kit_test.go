@@ -19,6 +19,7 @@ import (
 	"aocrop/services/internal/character"
 	"aocrop/services/internal/chardef"
 	"aocrop/services/internal/content"
+	"aocrop/services/internal/contenttest"
 )
 
 // Items of the synthetic content.db.
@@ -36,16 +37,13 @@ const (
 // build makes a content.db with the item and kit tables of the test and opens it. extra runs after the kits are in.
 func build(t *testing.T, mutate func(tx *sql.Tx)) *content.DB {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "content.db")
+	path := emptyContentDB(t)
 	sdb, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sdb.Close()
 	sdb.SetMaxOpenConns(1)
-	if err := content.Create(sdb); err != nil {
-		t.Fatal(err)
-	}
 	tx, err := sdb.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +104,157 @@ func build(t *testing.T, mutate func(tx *sql.Tx)) *content.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// emptyContentDB makes an empty content.db (the schema only) and returns its path.
+func emptyContentDB(t *testing.T) string {
+	t.Helper()
+	return contenttest.EmptyDB(t, content.Create)
+}
+
+// freshContentDB makes an empty content.db with content.Create itself, for the
+// test that compares the copied schema with it.
+func freshContentDB(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fresh-content.db")
+	sdb, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close()
+	if err := content.Create(sdb); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// contentColumn is one row of PRAGMA table_info.
+type contentColumn struct {
+	name, typ string
+	notNull   int
+	dflt      sql.NullString
+	pk        int
+}
+
+// contentShape reads what a content.db is made of: its sqlite_master rows, the
+// columns of every table and its meta rows.
+func contentShape(t *testing.T, path string) (master []string, columns map[string][]contentColumn, meta []string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	type masterRow struct{ typ, name, tblName, sql string }
+	rows, err := db.Query(`SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_master ORDER BY type, name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []masterRow
+	for rows.Next() {
+		var r masterRow
+		if err := rows.Scan(&r.typ, &r.name, &r.tblName, &r.sql); err != nil {
+			t.Fatal(err)
+		}
+		seen = append(seen, r)
+		master = append(master, strings.Join([]string{r.typ, r.name, r.tblName, r.sql}, "|"))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	columns = make(map[string][]contentColumn)
+	for _, r := range seen {
+		if r.typ != "table" {
+			continue
+		}
+		rows, err := db.Query(`PRAGMA table_info("` + strings.ReplaceAll(r.name, `"`, `""`) + `")`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var cid int
+			var c contentColumn
+			if err := rows.Scan(&cid, &c.name, &c.typ, &c.notNull, &c.dflt, &c.pk); err != nil {
+				t.Fatal(err)
+			}
+			columns[r.name] = append(columns[r.name], c)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+	}
+	rows, err = db.Query(`SELECT key, value FROM meta ORDER BY key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			t.Fatal(err)
+		}
+		meta = append(meta, key+"="+value)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	return master, columns, meta
+}
+
+// firstDifference names the first row of got that want does not have, so a
+// failure of a long sqlite_master list stays one short line.
+func firstDifference(got, want []string) string {
+	for i := 0; i < len(got) && i < len(want); i++ {
+		if got[i] != want[i] {
+			return fmt.Sprintf("row %d is %q, want %q", i, got[i], want[i])
+		}
+	}
+	return fmt.Sprintf("%d rows, want %d", len(got), len(want))
+}
+
+// A database made from the package's copied schema has exactly the tables,
+// columns, schema rows and meta rows of one content.Create makes.
+func TestTheTemplateCopyEqualsTheSchemaCreateMakes(t *testing.T) {
+	copied, fresh := emptyContentDB(t), freshContentDB(t)
+	for _, path := range []string{copied, fresh} {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO meta VALUES (?, ?), (?, ?)`,
+			content.MetaSchemaVersion, "1", content.MetaRecordEncoding, content.EncodingJSON); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gotMaster, gotColumns, gotMeta := contentShape(t, copied)
+	wantMaster, wantColumns, wantMeta := contentShape(t, fresh)
+	if !reflect.DeepEqual(gotMaster, wantMaster) {
+		t.Errorf("sqlite_master differs: %s", firstDifference(gotMaster, wantMaster))
+	}
+	for table, want := range wantColumns {
+		got, ok := gotColumns[table]
+		if !ok {
+			t.Errorf("table %s is missing from the copy", table)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("table %s: columns = %v, want %v", table, got, want)
+		}
+	}
+	for table := range gotColumns {
+		if _, ok := wantColumns[table]; !ok {
+			t.Errorf("table %s is only in the copy", table)
+		}
+	}
+	if !reflect.DeepEqual(gotMeta, wantMeta) {
+		t.Errorf("meta rows = %v, want %v", gotMeta, wantMeta)
+	}
 }
 
 func TestKitIsTheClassesRecordAsFreshInstances(t *testing.T) {

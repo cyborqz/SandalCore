@@ -10,12 +10,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"aocrop/services/internal/chardef"
 	"aocrop/services/internal/content"
+	"aocrop/services/internal/contenttest"
 	"aocrop/services/internal/createinfo"
 )
 
@@ -31,12 +31,9 @@ func optionBase(race, gender int32) int64 { return 1_000_000 * int64(1+race*2+ge
 // and references as the real record.data has them).
 func syntheticDB(t *testing.T) *content.DB {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "content.db")
+	path := contenttest.EmptyDB(t, content.Create)
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := content.Create(raw); err != nil {
 		t.Fatal(err)
 	}
 	exec := func(query string, args ...any) {
@@ -428,12 +425,9 @@ func TestCheckNamesEveryProblem(t *testing.T) {
 
 // A content.db without the appearances cannot be used.
 func TestLoadFailsWithoutTheAppearances(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "content.db")
+	path := contenttest.EmptyDB(t, content.Create)
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := content.Create(raw); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := raw.Exec(`INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)`,
