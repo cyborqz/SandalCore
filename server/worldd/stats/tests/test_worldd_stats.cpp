@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -46,6 +47,15 @@ static int g_pass = 0, g_fail = 0;
     if (cond) { g_pass++; } \
     else { std::printf("  [FAIL] "); std::printf(__VA_ARGS__); std::printf("\n"); g_fail++; } \
 } while (0)
+
+/// Runs one test function and prints its time, as the other programs print theirs when AOC_TEST_TIMES names the run.
+template <typename F>
+static void timed(const char* name, F&& fn) {
+    const bool show = std::getenv("AOC_TEST_TIMES") != nullptr;
+    const auto t0 = std::chrono::steady_clock::now();
+    fn();
+    if (show) std::printf("[time] %s: %.1f ms\n", name, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+}
 
 #ifndef STATS_CORPUS_PATH
 #define STATS_CORPUS_PATH "server/worldd/stats/testdata/corpus.txt"
@@ -442,6 +452,22 @@ const char* compare(double got, double want) {
     return "miss";
 }
 
+uint32_t crc32_ieee(const uint8_t* p, size_t n) {
+    static uint32_t table[256];
+    static bool init = false;
+    if (!init) {
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            table[i] = c;
+        }
+        init = true;
+    }
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; ++i) c = table[(c ^ p[i]) & 0xFF] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
+}
+
 std::vector<uint8_t> apply_edit(const std::vector<uint8_t>& orig, const Hostile& h, bool& ok) {
     if (h.whole) {
         ok = true;
@@ -456,12 +482,7 @@ std::vector<uint8_t> apply_edit(const std::vector<uint8_t>& orig, const Hostile&
         const uint32_t len = static_cast<uint32_t>(out.size() - 16);
         for (int i = 0; i < 4; ++i) out[8 + i] = static_cast<uint8_t>(len >> (8 * i));
         // crc32 of the body
-        uint32_t c = 0xFFFFFFFFu;
-        for (size_t i = 16; i < out.size(); ++i) {
-            c ^= out[i];
-            for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-        }
-        c ^= 0xFFFFFFFFu;
+        const uint32_t c = crc32_ieee(out.data() + 16, out.size() - 16);
         for (int i = 0; i < 4; ++i) out[12 + i] = static_cast<uint8_t>(c >> (8 * i));
     }
     return out;
@@ -469,12 +490,7 @@ std::vector<uint8_t> apply_edit(const std::vector<uint8_t>& orig, const Hostile&
 // built with C | O | A and C_Y_B
 
 void fix_crc(std::vector<uint8_t>& b) {
-    uint32_t c = 0xFFFFFFFFu;
-    for (size_t i = 16; i < b.size(); ++i) {
-        c ^= b[i];
-        for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-    }
-    c ^= 0xFFFFFFFFu;
+    const uint32_t c = crc32_ieee(b.data() + 16, b.size() - 16);
     for (int i = 0; i < 4; ++i) b[12 + i] = static_cast<uint8_t>(c >> (8 * i));
 }
 
@@ -680,8 +696,9 @@ void test_fuzz_parity(const Corpus& c) {
         size_t acc = 0;
         uint64_t h = 0;
         fuzz_parity(it->second, f.seed, f.n, acc, h);
-        CHECKF(acc == f.accepted && h == f.hash, "fuzz %s: %zu accepted with hash %016llx; Go has %zu and %016llx", f.bundle.c_str(), acc,
-               static_cast<unsigned long long>(h), f.accepted, static_cast<unsigned long long>(f.hash));
+        CHECKF(acc == f.accepted && h == f.hash, "the differential fuzz matches the Go engine's verdicts and hashes");
+        if (acc == f.accepted && h == f.hash) std::printf("  [ok ] the differential fuzz matches the Go engine's verdicts and hashes\n");
+        std::printf("  %s: %d damaged bundles, %zu accepted and run, the verdicts and results hash alike\n", f.bundle.c_str(), f.n, acc);
         std::printf("  %s: %d damaged bundles, %zu accepted and run, the verdicts and results hash alike\n", f.bundle.c_str(), f.n, acc);
     }
     CHECK(c.fuzzes.size() >= 3, "the corpus has its differential fuzz");
@@ -1274,19 +1291,20 @@ int main() {
         return 1;
     }
     std::map<std::string, StatBundle> bundles;
-    test_corpus(corpus, bundles);
-    test_damage_corpus(corpus);
-    test_gather_reads(corpus);
-    test_fuzz_parity(corpus);
-    if (bundles.count("main")) test_damage(corpus.bundles["main"], "the real graph");
+    timed("corpus", [&] { test_corpus(corpus, bundles); });
+    timed("damage corpus", [&] { test_damage_corpus(corpus); });
+    timed("gather reads", [&] { test_gather_reads(corpus); });
+    timed("fuzz parity", [&] { test_fuzz_parity(corpus); });
+    if (bundles.count("main")) timed("damage main", [&] { test_damage(corpus.bundles["main"], "the real graph"); });
     if (bundles.count("tiny")) {
-        test_damage(corpus.bundles["tiny"], "the tiny graph");
-        test_inputs(bundles["tiny"]);
+        timed("damage tiny", [&] { test_damage(corpus.bundles["tiny"], "the tiny graph"); });
+        timed("inputs", [&] { test_inputs(bundles["tiny"]); });
     }
-    test_gear_rules();
-    if (bundles.count("main")) test_character_stats(bundles["main"]);
-    if (bundles.count("main")) test_health_regeneration_rate(bundles["main"]);
-    if (bundles.count("main")) test_equipment_beyond_a_float(bundles["main"], bundles.count("main_double") ? &bundles["main_double"] : nullptr);
+    timed("gear rules", [&] { test_gear_rules(); });
+    if (bundles.count("main")) timed("character stats", [&] { test_character_stats(bundles["main"]); });
+    if (bundles.count("main")) timed("health regeneration", [&] { test_health_regeneration_rate(bundles["main"]); });
+    if (bundles.count("main"))
+        timed("equipment beyond a float", [&] { test_equipment_beyond_a_float(bundles["main"], bundles.count("main_double") ? &bundles["main_double"] : nullptr); });
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

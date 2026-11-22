@@ -8,7 +8,7 @@
 //
 //  Goal: prove we can DECODE + RE-ENCODE the Name FString property inside
 //  the captured pkt#104 bunch with bit-identical output.  This is the
-//  easier sibling of test_pkt22_round_trip.cpp — we're not parsing the
+//  easier sibling of a whole-bunch round trip — we're not parsing the
 //  whole bunch, just the FString region.
 //
 //  pkt#104 structure (derived from old patcher constants + verification):

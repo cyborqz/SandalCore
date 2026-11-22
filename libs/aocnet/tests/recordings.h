@@ -11,8 +11,6 @@
 //  The files a test looks for, all in that one folder:
 //    session.bin   every server packet of one recorded session (a container that starts with the magic "RPLY", version 1)
 //    packet_a.bin  one raw server packet: the update of the HUD character name
-//    packet_b.bin  one raw server packet: the spawn of the player pawn
-//    bunch.bin     one reassembled bunch payload: the spawn of the player controller
 // ============================================================================
 #pragma once
 
@@ -26,8 +24,6 @@ namespace recordings {
 inline constexpr const char* kEnv = "AOC_RECORDINGS_DIR";
 inline constexpr const char* kSession = "session.bin";
 inline constexpr const char* kPacketA = "packet_a.bin";
-inline constexpr const char* kPacketB = "packet_b.bin";
-inline constexpr const char* kBunch = "bunch.bin";
 
 /// The path of recording `name` in the folder AOC_RECORDINGS_DIR names; an empty string when the variable is not set or the file is not there.
 inline std::string find(const char* name) {

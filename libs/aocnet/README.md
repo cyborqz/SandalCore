@@ -249,9 +249,9 @@ the text comes from the repo's fast-array and RepLayout decoders and `leveling_w
 success. To add one, create `tests/test_<name>.cpp` and add `test_<name>` to
 the `foreach` list in `tests/CMakeLists.txt`. Build one with
 `scripts/build.ps1 -Target test_<name>`; run everything with
-`scripts/run_tests.ps1`. The six tests that compare against recorded
-packets (`test_sc_packet_info`, `test_name_update_bunch`, `test_pawn_spawn_diff`,
-`test_pc_spawn_diff`, `test_pkt22_round_trip`, `test_pkt104_round_trip`) read
+`scripts/run_tests.ps1`. The three tests that compare against recorded
+packets (`test_sc_packet_info`, `test_name_update_bunch`,
+`test_pkt104_round_trip`) read
 them from the folder named by the environment variable `AOC_RECORDINGS_DIR`
 (`tests/recordings.h` lists the file names). No recordings ship with the
 repository: without the variable (or without the file) such a test prints

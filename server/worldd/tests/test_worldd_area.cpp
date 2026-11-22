@@ -777,7 +777,10 @@ static void test_ground(const content::ContentDb& db) {
     w->tick_world(10.0);
     w->note_player(1, area.center_x, area.center_y);
     w->forget_player(1);
-    CHECK(true, "tick_world, note_player and forget_player without a ground do nothing (no crash)");
+    bool still_same = true;
+    w->registry().for_each([&](const world::WorldActor& a) { still_same = still_same && before[a.id] == std::array<double, 3>{a.x, a.y, a.z}; });
+    CHECK(still_same && w->npcs() == nullptr && w->nav() == nullptr,
+          "tick_world, note_player and forget_player without a ground leave every actor where it was and make no NPC world");
     {
         FILE* f = std::fopen(nav_path.c_str(), "rb");
         if (!f) {

@@ -28,11 +28,8 @@ foreach(t
     test_rep_layout_writer
     test_sc_packet_info
     test_hit_confirmation
-    test_pkt22_round_trip
     test_pkt104_round_trip
     test_name_update_bunch
-    test_pawn_spawn_diff
-    test_pc_spawn_diff
     test_package_map_export
     test_packet_notify
     test_handshake

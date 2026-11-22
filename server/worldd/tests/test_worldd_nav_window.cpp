@@ -46,6 +46,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <limits>
 #include <random>
@@ -80,6 +81,16 @@ static void settle(AreaNav& n, double seconds = 10) {
     while (n.loading() && ms_since(t0) < seconds * 1000) {
         n.pump(50.0);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    n.pump(50.0);
+}
+
+/// Pumps until `done()` is true (or a few seconds pass), as the world does tick after tick: waits on the condition, not on a count.
+static void settle_until(AreaNav& n, const std::function<bool()>& done, double seconds = 10) {
+    const auto t0 = Clock::now();
+    while (!done() && ms_since(t0) < seconds * 1000) {
+        n.pump(50.0);
+        std::this_thread::yield();
     }
     n.pump(50.0);
 }
@@ -301,7 +312,7 @@ static void test_borders() {
 
     // moving everyone away unloads the west chunk: its queries answer nothing, and when it is back they answer again
     n->set_interest({{cx_of(6), cx_of(6)}});
-    for (int i = 0; i < 100; ++i) { n->pump(50); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    settle_until(*n, [&] { return !n->ready_at(border - 3000, 3000); });
     CHECK(!n->ready_at(border - 3000, 3000) && !n->on_navmesh({border - 3000, 3000, 1000}) && !n->find_path({border - 3000, 3000, 1000}, {border - 2000, 3000, 1000}).found,
           "after the players left, an unloaded chunk answers nothing (a path there is not found: a stale reference is never kept, the caller asks again)");
     n->set_interest({{border - 500, 3000}});
@@ -346,7 +357,9 @@ static void test_policy() {
     CHECK(after.chunk_loads - before.chunk_loads <= 10 && after.chunk_unloads - before.chunk_unloads <= 5, "40 steps back and forth over a border: at most the new column's loads, nothing dropped and re-read");
     // two players far apart: the union
     n->set_interest({{cx_of(0), cx_of(0)}, {cx_of(5), cx_of(5)}});
-    for (int i = 0; i < 300; ++i) { n->pump(20); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    settle_until(*n, [&] {
+        return n->chunk_resident({0, 0}) && n->chunk_resident({5, 5}) && n->chunk_resident({2, 2}) && n->chunk_resident({3, 3}) && n->chunk_resident({6, 6});
+    });
     settle(*n);
     CHECK(n->chunk_resident({0, 0}) && n->chunk_resident({5, 5}) && n->chunk_resident({2, 2}) && n->chunk_resident({3, 3}) && n->chunk_resident({7 - 1, 6}), "two players: the union of their windows is resident");
     CHECK(n->ready_at(cx_of(0), cx_of(0)) && n->ready_at(cx_of(5), cx_of(5)), "ready at both players");
@@ -355,10 +368,29 @@ static void test_policy() {
     n->set_interest({});
     n->pump(50);
     CHECK(n->tile_count() == tiles, "no player at all: the ground stays as it is");
-    // a hostile number
-    n->set_interest({{std::nan(""), 0}, {1e300, -1e300}});
+    // a hostile number: the NaN point alone is no point at all; the enormous one is clamped to a far chunk and the window leaves for it
+    const auto before_nan = n->window_stats();
+    n->set_interest({{std::nan(""), 0}});
     n->pump(50);
-    CHECK(true, "NaN and enormous interest points do nothing (no crash)");
+    settle(*n);
+    const auto after_nan = n->window_stats();
+    std::printf("    (NaN point alone: resident %zu -> %zu, loads %llu -> %llu, unloads %llu -> %llu)\n", before_nan.resident_chunks, after_nan.resident_chunks,
+                (unsigned long long)before_nan.chunk_loads, (unsigned long long)after_nan.chunk_loads, (unsigned long long)before_nan.chunk_unloads,
+                (unsigned long long)after_nan.chunk_unloads);
+    CHECK(after_nan.resident_chunks == before_nan.resident_chunks && after_nan.resident_tiles == before_nan.resident_tiles &&
+              after_nan.chunk_loads == before_nan.chunk_loads && after_nan.chunk_unloads == before_nan.chunk_unloads && n->chunk_resident({2, 1}),
+          "a NaN interest point alone is no point: the resident chunks and the window's counts are as they were");
+    const auto before_huge = n->window_stats();
+    n->set_interest({{1e300, -1e300}});
+    n->pump(50);
+    settle_until(*n, [&] { return n->window_stats().resident_chunks < before_huge.resident_chunks; });
+    const auto after_huge = n->window_stats();
+    std::printf("    (enormous point alone: resident %zu -> %zu, loads %llu -> %llu, unloads %llu -> %llu)\n", before_huge.resident_chunks, after_huge.resident_chunks,
+                (unsigned long long)before_huge.chunk_loads, (unsigned long long)after_huge.chunk_loads, (unsigned long long)before_huge.chunk_unloads,
+                (unsigned long long)after_huge.chunk_unloads);
+    CHECK(after_huge.chunk_loads == before_huge.chunk_loads, "an enormous interest point loads no new chunk: it is clamped to a far one");
+    CHECK(after_huge.resident_chunks < before_huge.resident_chunks && after_huge.resident_tiles < before_huge.resident_tiles,
+          "an enormous interest point is a far chunk: the window leaves, and nothing new is resident (no crash)");
 // (Cyb ~ C-O-A)
 
     // the budget: a pump with no time still makes progress, a chunk's tiles come in over several pumps
@@ -656,7 +688,7 @@ static void test_npcs() {
     CHECK(moved > 50.0, "and now the wanderer walks");
     // the NPC's chunk leaves the window while a player is still near: it sleeps (frozen) instead of walking on nothing
     n->set_interest({{cx_of(6), cx_of(6)}});
-    for (int i = 0; i < 200; ++i) { n->pump(50); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+    settle_until(*n, [&] { return !n->ready_at(border + 3000, -3000); });
     CHECK(!n->ready_at(border + 3000, -3000), "the chunk is gone");
     const auto before = *reg.find(1006);
     for (int i = 0; i < 150; ++i) { w.note_player(1, border + 3000, -3000, 50.0 + i / 15.0); w.tick(50.0 + i / 15.0); }

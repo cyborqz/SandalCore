@@ -2102,19 +2102,23 @@ static void test_review_fuzz() {
 
 static void test_review_codec_noise() {
     std::printf("random bytes through the item readers\n");
-    size_t read_ok = 0;
+    size_t read_ok = 0, wrong = 0;
     std::mt19937_64 rng(99);
     for (int i = 0; i < 40000; ++i) {
         std::vector<uint8_t> bytes(1 + rng() % 300);
         for (auto& b : bytes) b = static_cast<uint8_t>(rng());
         if (rng() % 3 == 0) bytes[0] |= 1;   // has_item
         aoc::protocol::wire::PacketReader a(bytes.data(), bytes.size());
-        if (repl::read_item_instance(a)) ++read_ok;
+        const auto item = repl::read_item_instance(a);
+        if (item) ++read_ok;
+        if (a.overflowed() && item) ++wrong;
         aoc::protocol::wire::PacketReader b(bytes.data(), bytes.size());
-        (void)repl::read_item_storage_event(b);
+        const auto event = repl::read_item_storage_event(b);
+        if (b.overflowed() && event) ++wrong;
     }
     std::printf("    %zu instances read from 40,000 buffers of noise\n", read_ok);
-    CHECK(true, "no read ran past its buffer (a build with AddressSanitizer would have stopped it)");
+    CHECK(wrong == 0, "no read accepted an item or an event after it ran past the end of its buffer");
+    CHECK(read_ok > 0 && read_ok < 40000, "some of the 40,000 noise buffers are item instances, and not all of them");
 }
 
 // ---- main ----------------------------------------------------------------------------------------------------------------------

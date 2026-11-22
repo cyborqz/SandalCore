@@ -20,7 +20,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
+#include <cstring>
 #include <functional>
+#include <vector>
 
 using namespace aoc::protocol;
 using namespace aoc::protocol::repl;
@@ -70,6 +73,20 @@ static std::optional<Value> struct_trip(const char* name, const Value& v, const 
     auto back = read_struct(name, r, opts);
     if (!back || r.pos() != w.bit_pos()) return std::nullopt;
     return back;
+}
+
+/// True when `w` is exactly `bits` long and the bytes are `expect`'s first `bits` bits.
+static bool writes_as(const BunchWriter& w, const std::vector<uint8_t>& expect, size_t bits) {
+    if (w.bit_pos() != bits) {
+        std::printf("    wrote %zu bits, expected %zu\n", w.bit_pos(), bits);
+        return false;
+    }
+    size_t diff = 0;
+    if (!capture_blocks::same_bit_range(w.data(), expect.data(), bits, &diff)) {
+        std::printf("    first differing bit %zu\n", diff);
+        return false;
+    }
+    return true;
 }
 
 static void test_fvector() {
@@ -153,6 +170,14 @@ static void test_quantized_vectors() {
                           : x.mode == QuantVec::Mode::RawFloat ? "a full precision float vector round trips"
                                                                 : "a full precision double vector round trips");
     }
+    BunchWriter fw;
+    CHECK(write_struct("FVector_NetQuantize", Value(raw_float), fw) &&
+              writes_as(fw, {0x00, 0x00, 0x00, 0xc0, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60}, 103),
+          "a raw-float vector's golden bytes: SerializeInt 0, then X, Y and Z as three 32-bit IEEE floats");
+    BunchWriter dw;
+    CHECK(write_struct("FVector_NetQuantize", Value(raw_double), dw) &&
+              writes_as(dw, {0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60}, 199),
+          "a raw-double vector's golden bytes: SerializeInt 64, then X, Y and Z as three 64-bit IEEE doubles");
     const QuantVec huge = quantize_vector(100, 1e17, 0, 0);   // 1e19 scaled: beyond 2^62
     CHECK(huge.mode == QuantVec::Mode::RawDouble, "a vector too large to scale goes out at full precision");
     CHECK(quantize_vector(10, 0, std::nan(""), 0) == quantize_vector(10, 0, 0, 0), "a NaN vector goes out as zero");
@@ -239,6 +264,14 @@ static void test_gameplay_tags() {
     const auto back = struct_trip("FGameplayTagContainer", Value(two));
     const GameplayTagContainer* c = back ? back->get_if<GameplayTagContainer>() : nullptr;
     CHECK(c && *c == two, "a container of two tags round trips");
+    GameplayTagContainer gold;
+    gold.tags = {NameValue::plain("ability.sprint"), NameValue::plain("ability.dodge")};
+    BunchWriter gw;
+    CHECK(write_struct("FGameplayTagContainer", Value(gold), gw) &&
+              writes_as(gw, {0x04, 0x0f, 0x00, 0x00, 0x00, 0x61, 0x62, 0x69, 0x6c, 0x69, 0x74, 0x79, 0x2e, 0x73, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00,
+                             0x1c, 0x00, 0x00, 0x00, 0xc2, 0xc4, 0xd2, 0xd8, 0xd2, 0xe8, 0xf2, 0x5c, 0xc8, 0xde, 0xc8, 0xce, 0xca, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+                          369),
+          "FGameplayTagContainer's golden bytes: the not-empty bit, a 6-bit count, then the two FNames");
     BunchWriter w;
     write_struct("FGameplayTagContainer", Value(GameplayTagContainer{}), w);
     CHECK(w.bit_pos() == 1, "an empty container is one bit");
@@ -248,10 +281,22 @@ static void test_other_structs() {
     std::printf("FVector2D, FDateTime, FVector_NetQuantizeNormal, unknown structs\n");
     const auto v2 = struct_trip("FVector2D", Value(Vec2d{1.5, -2.25}));
     CHECK((v2 && v2->get_if<Vec2d>() && *v2->get_if<Vec2d>() == Vec2d{1.5, -2.25}), "FVector2D round trips (two doubles)");
+    BunchWriter v2w;
+    CHECK(write_struct("FVector2D", Value(Vec2d{1.5, -2.25}), v2w) &&
+              writes_as(v2w, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xc0}, 128),
+          "FVector2D's golden bytes: X and Y as two little-endian 64-bit IEEE doubles (1.5, -2.25)");
     const auto ticks = struct_trip("FDateTime", Value(Ticks{-638000000000000000ll}));
     CHECK(ticks && ticks->get_if<Ticks>() && ticks->get_if<Ticks>()->ticks == -638000000000000000ll, "FDateTime round trips (64 bits)");
+    BunchWriter tw;
+    CHECK(write_struct("FDateTime", Value(Ticks{-638000000000000000ll}), tw) &&
+              writes_as(tw, {0x00, 0x00, 0x4d, 0x59, 0x61, 0x5e, 0x25, 0xf7}, 64),
+          "FDateTime's golden bytes: one signed 64-bit tick count, little-endian");
     const auto n = struct_trip("FVector_NetQuantizeNormal", Value(Normal16{0, 32768, 65535}));
     CHECK((n && n->get_if<Normal16>() && *n->get_if<Normal16>() == Normal16{0, 32768, 65535}), "FVector_NetQuantizeNormal round trips (3 x 16 bits)");
+    BunchWriter nw;
+    CHECK(write_struct("FVector_NetQuantizeNormal", Value(Normal16{0, 32768, 65535}), nw) &&
+              writes_as(nw, {0x00, 0x00, 0x00, 0x80, 0xff, 0xff}, 48),
+          "FVector_NetQuantizeNormal's golden bytes: X, Y and Z as three 16-bit values, low byte first");
     BunchWriter w;
     write_struct("FVector_NetQuantizeNormal", Value(Normal16{1, 2, 3}), w);
     CHECK(w.bit_pos() == 48, "and is 48 bits, the width the schema gives it");
@@ -365,6 +410,18 @@ static void test_strings() {
         all = all && len == c.length && s && *s == c.text && body.pos() == w.bit_pos();
     }
     CHECK(all, "ANSI when pure ASCII (positive length), UTF-16 code units otherwise (negative), 0 for empty; all read back");
+    BunchWriter cafe;
+    CHECK(write_fstring(cafe, "Caf\xc3\xa9") &&
+              writes_as(cafe, {0xfb, 0xff, 0xff, 0xff, 0x43, 0x00, 0x61, 0x00, 0x66, 0x00, 0xe9, 0x00, 0x00, 0x00}, 112),
+          "FString's golden bytes for a non-ASCII string: a negative int32 length, then UTF-16 code units and a NUL");
+    BunchWriter japanese;
+    CHECK(write_fstring(japanese, "\xe6\x97\xa5\xe6\x9c\xac") &&
+              writes_as(japanese, {0xfd, 0xff, 0xff, 0xff, 0xe5, 0x65, 0x2c, 0x67, 0x00, 0x00}, 80),
+          "FString's golden bytes for two BMP characters: the length counts the two UTF-16 units");
+    BunchWriter emoji;
+    CHECK(write_fstring(emoji, "\xf0\x9f\x98\x80!") &&
+              writes_as(emoji, {0xfc, 0xff, 0xff, 0xff, 0x3d, 0xd8, 0x00, 0xde, 0x21, 0x00, 0x00, 0x00}, 96),
+          "FString's golden bytes for a surrogate pair and an ASCII character: four UTF-16 units in all");
     BunchWriter w;
     write_fstring(w, "hello");
     PacketReader cut(w.data(), w.byte_size(), w.bit_pos() - 8);

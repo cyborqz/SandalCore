@@ -525,9 +525,16 @@ static void test_view() {
     h.run(milliseconds(400));
     const ActorChannels after = actor_channels(h, before);
     CHECK(after.update_chains == 1 && after.open_chains == 0, "an awake NPC that changed gets one update chain");
-    // the session ending stops the view
+    // the session ending stops the view: an NPC changes after the finish, and nothing more is sent
+    const size_t before_finish = h.got.size();
     h.s->finish("test");
-    CHECK(true, "the session finishes with a view");
+    h.fx.world->registry().modify(h.near_a, world::Change::State, [&](world::WorldActor& a) {
+        for (repl::Subobject& sub : a.actor.subobjects) {
+            if (std::string(sub.obj.schema->name) == "UNPCCombatInfo") sub.obj.state.set(*sub.obj.schema, "bInCombat", repl::Value::boolean(false));
+        }
+    });
+    h.run(milliseconds(200));
+    CHECK(h.got.size() == before_finish, "the session sends nothing after it finishes");
 }
 
 static void test_removed_actor() {

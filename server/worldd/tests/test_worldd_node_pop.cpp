@@ -758,14 +758,17 @@ static void test_manager() {
     spawns::NodePopStats s3, s4;
     const auto l3 = select_real(*nodes->by_guid(kJoeva), 3, s3);
     const auto l4 = select_real(*nodes->by_guid(kJoeva), 4, s4);
-    size_t differing = 0;
+    size_t shared = 0, differing = 0;
     for (const spawns::NodeSpawn& x : l4) {
         for (const spawns::NodeSpawn& y : l3) {
-            if (x.ident == y.ident && x.spawn.asset->guid != y.spawn.asset->guid) ++differing;
+            if (x.ident != y.ident) continue;
+            ++shared;
+            if (x.spawn.asset->guid != y.spawn.asset->guid) ++differing;
         }
     }
-    std::printf("    (%zu points of Joeva name another Blueprint at Village than at Town)\n", differing);
-    CHECK(true, "(counted)");
+    std::printf("    (%zu points of Joeva name another Blueprint at Village than at Town; %zu are compared at both levels)\n", differing, shared);
+    CHECK(!l3.empty() && !l4.empty() && shared > 0, "the real data gives Joeva points at both levels and at least one point is compared at both");
+    CHECK(differing == 0, "the real data has no point that changes its Blueprint with the level: only the hand-made case proves the replacement");
 }
 
 // ---- a point that draws another Blueprint at another level (made by hand: the data has none) -----------------------------------------------

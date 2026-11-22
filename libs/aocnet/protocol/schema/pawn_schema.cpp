@@ -32,11 +32,10 @@
 //
 //  Fixture: src/protocol/tools/captured_pkt_78.bin (816 bytes, raw packet).
 //  For byte-identity calibration against captured:
-//    1. Extract actor_netguid + archetype/level NetGUIDs from pkt#78 bunch
-//       (same methodology as test_pc_spawn_diff).
+//    1. Extract actor_netguid + archetype/level NetGUIDs from pkt#78 bunch.
 //    2. Confirm partial-bunch status; if multi-fragment, reassemble first
 //       (see reassemble_pc_spawn.py for the pattern).
-//    3. Write test_pawn_spawn_diff.cpp and iterate handle/value alignment.
+//    3. Compare ActorBuilder's handles and values with the bunch.
 //
 //  Current state: ActorBuilder produces 1084 bits (136 bytes) for this
 //  schema.  NOT yet bit-compared against captured pkt#78 — the 844-bit
