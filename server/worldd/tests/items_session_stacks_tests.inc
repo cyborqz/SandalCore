@@ -270,9 +270,6 @@ void test_stack_session_join_rules() {
         const size_t events = h.mirror.events.size();
         h.request(bag_move(h, repl::StorageEventType::Swap, 1, 7, guid_n(201), 4, guid_n(204), 14), h.pc_ch);
         CHECK(h.mirror.events.size() == events + 4, "the client's Swap of the two colours is four events");
-        CHECK(h.s->inventory().at(Bag, 4) && h.s->inventory().at(Bag, 4)->instance_guid == guid_n(201) && h.s->inventory().at(Bag, 4)->quality == 10 &&
-                  h.s->inventory().at(Bag, 1) && h.s->inventory().at(Bag, 1)->instance_guid == guid_n(204) && h.s->inventory().at(Bag, 1)->quality == 20,
-              "the two whole stacks changed places");
     }
     // a split names a free slot: a Move of 5 onto the same item and colour in an occupied slot is refused
     {

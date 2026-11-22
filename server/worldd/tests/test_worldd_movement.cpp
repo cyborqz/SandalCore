@@ -52,6 +52,7 @@
 #include "session/player_session.h"
 #include "session/position_saver.h"
 #include "test_registry.h"
+#include "shared_world_data.h"
 
 #include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
@@ -443,35 +444,38 @@ struct RecordingSink : PositionSink {
     void save(const std::string& id, const svc::Position& p) override { saves.push_back({id, p}); }
 };
 
+static const fs::path& movement_small_db() {
+    static const fs::path dir = content_fixture::make_temp_dir("worldd_movement_");
+    static const fs::path db = dir / "content.db";
+    static const bool made = content_fixture::make_db(db);
+    if (!made) {
+        std::printf("  [FAIL] the small content.db cannot be made\n");
+        std::exit(2);
+    }
+    return db;
+}
+
 struct Fixture {
-    fs::path dir;
-    std::optional<content::ContentDb> content;
+    const content::ContentDb* content = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
 
     /// The small content.db of content_db_fixture.h, or, with `use_real`, the file AOC_CONTENT_DB names (the ability tables a
     /// scenario needs are only there).
     explicit Fixture(bool use_real = false) {
-        dir = content_fixture::make_temp_dir("worldd_movement_");
-        fs::path db = dir / "content.db";
+        fs::path db = movement_small_db();
         if (const char* real = std::getenv("AOC_CONTENT_DB"); use_real && real && *real) db = real;
-        else if (!content_fixture::make_db(db)) std::exit(2);
-        std::string error;
-        content = content::ContentDb::open(db.string(), error);
-        if (!content) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        shared_world::Entry& entry = shared_world::get(db.string());
+        content = entry.db ? &*entry.db : nullptr;
+        if (!content || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             std::exit(2);
         }
-        world = std::make_unique<PlayerWorld>(&*content, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_unique<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
-    ~Fixture() {
-        world.reset();
-        content.reset();
-        std::error_code ec;
-        fs::remove_all(dir, ec);
-    }
+    ~Fixture() { world.reset(); }
 };
 
 static svc::Character cyb_record() {

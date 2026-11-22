@@ -361,6 +361,7 @@ void test_view_passes_send_the_same_bytes_on_any_number_of_threads() {
 AOC_REGISTER_TEST(test_view_passes_send_the_same_bytes_on_any_number_of_threads);
 
 void test_view_passes_cost_on_one_thread_and_on_four() {
+    if (!std::getenv("AOC_BENCH")) return;
     using namespace thread_checks;
     std::printf("view threads: what the passes of 24 players cost on one thread and on four (the work of the server for the views, not a count of players)\n");
     char text[400];

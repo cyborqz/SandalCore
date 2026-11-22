@@ -38,6 +38,7 @@
 //                                with the rest of the update; a stat of the ability runtime goes through it (MaxStamina clamps Stamina)
 // ============================================================================
 #include "test_registry.h"
+#include "shared_world_data.h"
 #include "capture_leveling.h"
 #include "capture_packets.h"
 #include "content_db_fixture.h"
@@ -228,36 +229,44 @@ struct RecordingSink : PositionSink {
     void save_progress(const std::string& id, svc::Progress p) override { progress.emplace_back(id, std::move(p)); }
 };
 
+/// The small content.db is made once for the program; the real file is the path
+/// the caller names, AOC_CONTENT_DB, or the small one.
+static const fs::path& items_small_db_path() {
+    static const fs::path dir = cf::make_temp_dir("worldd_items_session_");
+    static const fs::path db = dir / "content.db";
+    static const bool made = cf::make_db(db);
+    if (!made) {
+        std::printf("  [FAIL] the small content.db cannot be made\n");
+        std::exit(2);
+    }
+    return db;
+}
+static fs::path items_db_path(bool real, const char* real_path) {
+    const char* real_db = std::getenv("AOC_CONTENT_DB");
+    if (real && real_path && *real_path) return real_path;
+    if (real && real_db && *real_db) return real_db;
+    return items_small_db_path();
+}
+
 struct Fixture {
-    fs::path dir;
-    std::optional<content::ContentDb> content;
+    const content::ContentDb* content = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
-    std::unique_ptr<PlayerWorld> world;
+    std::shared_ptr<PlayerWorld> world;
 
     /// The small content.db of content_db_fixture.h, or, with `real` and AOC_CONTENT_DB set, the real file.
     explicit Fixture(bool real = false, const char* real_path = nullptr) {
-        dir = cf::make_temp_dir("worldd_items_session_");
-        fs::path db = dir / "content.db";
-        const char* real_db = std::getenv("AOC_CONTENT_DB");
-        if (real && real_path && *real_path) db = real_path;
-        else if (real && real_db && *real_db) db = real_db;
-        else if (!cf::make_db(db)) std::exit(2);
-        std::string error;
-        content = content::ContentDb::open(db.string(), error);
-        if (!content) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        const fs::path db = items_db_path(real, real_path);
+        shared_world::Entry& entry = shared_world::get(db.string());
+        content = entry.db ? &*entry.db : nullptr;
+        if (!content || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             std::exit(2);
         }
-        world = std::make_unique<PlayerWorld>(&*content, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_shared<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
-    ~Fixture() {
-        world.reset();
-        content.reset();
-        std::error_code ec;
-        fs::remove_all(dir, ec);
-    }
+    ~Fixture() { world.reset(); }
 };
 // [C O A - C.Y.B]
 

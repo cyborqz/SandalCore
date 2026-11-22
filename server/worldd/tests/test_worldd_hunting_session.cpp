@@ -17,6 +17,7 @@
 //  exploits         two players on one creature, a flood of 400 interactions, a full resource bag (the pile and the callout), a kind that gives no item (the experience only)
 // ============================================================================
 #include "capture_hunting.h"
+#include "shared_world_data.h"
 #include "capture_gather.h"
 #include "content_db_fixture.h"
 #include "cyb_appearance.h"
@@ -207,7 +208,7 @@ struct Player {
 };
 
 struct Rig {
-    std::optional<content::ContentDb> db;
+    const content::ContentDb* db = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
     std::optional<spawns::CapturedData> captured;
@@ -220,12 +221,13 @@ struct Rig {
 
     bool open(const char* path) {
         std::string error;
-        db = content::ContentDb::open(path, error);
-        if (!db) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        shared_world::Entry& entry = shared_world::get(path);
+        db = entry.db ? &*entry.db : nullptr;
+        if (!db || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             return false;
         }
-        world = std::make_unique<PlayerWorld>(&*db, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_unique<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
         world->set_position_sink(&sink);
         if (!world->ready()) {
             std::printf("  [FAIL] the world is not ready: %s\n", world->content_problem().c_str());

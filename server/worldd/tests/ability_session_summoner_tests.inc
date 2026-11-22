@@ -291,9 +291,18 @@ void test_summoner_spawn_failure() {
     const auto& d = pets::kDefinitions[0];
     r.h.s->teach_ability(d.ability);
     r.play(0.5, false);
-    r.trigger(d.ability);
-    r.play(8.8, false);
+    g_log.str("");
+    const int32_t id = r.trigger(d.ability);
+    r.play(0.6, false);
+    const std::vector<int32_t> ends = r.m.end_ids();
+    CHECK(r.m.has_ability(d.ability), "the summon's ability item arrived");
+    CHECK(std::count(ends.begin(), ends.end(), id) == 0,
+          "the summon's cast was accepted: no ClientEndAbility for its instance");
+    r.play(8.4, false);
     CHECK(!r.h.s->summoned_pet() && !r.m.has_effect(d.effect), "a missing pet template leaves no phantom pet effect");
+    spdlog::default_logger()->flush();
+    const std::string log = g_log.str();
+    CHECK(log.find("could not be summoned") != std::string::npos, "the failed spawn was logged: the template is unavailable");
     CHECK(!r.h.s->abilities_failed(), "a missing pet template does not disable abilities");
 }
 AOC_REGISTER_TEST(test_summoner_pet_session);

@@ -32,6 +32,7 @@
 #include "cyb_appearance.h"
 #include "fake_client.h"
 #include "test_registry.h"
+#include "shared_world_data.h"
 #include "bootstrap/character_setup.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
@@ -223,7 +224,7 @@ struct Player {
 };
 
 struct Rig {
-    std::optional<content::ContentDb> db;
+    const content::ContentDb* db = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
     std::optional<spawns::CapturedData> captured;
@@ -234,12 +235,13 @@ struct Rig {
 
     bool open(const char* path, double respawn_mult = 0.001) {
         std::string error;
-        db = content::ContentDb::open(path, error);
-        if (!db) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        shared_world::Entry& entry = shared_world::get(path);
+        db = entry.db ? &*entry.db : nullptr;
+        if (!db || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             return false;
         }
-        world = std::make_unique<PlayerWorld>(&*db, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_unique<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
         world->set_position_sink(&sink);
         auto c = spawns::CapturedData::load(error);
         if (!c) {
@@ -1775,13 +1777,13 @@ static void test_view_load() {
 static void test_login_in_the_real_world() {
     std::printf("the login in the real world: the Riverlands' creatures and nodes beside the 671 state actors\n");
     Rig rig;
-    std::string open_error;
-    rig.db = content::ContentDb::open(g_path, open_error);
-    if (!rig.db) {
-        std::printf("  [skip] the content.db does not open: %s\n", open_error.c_str());
+    shared_world::Entry& entry = shared_world::get(g_path);
+    rig.db = entry.db ? &*entry.db : nullptr;
+    if (!rig.db || !entry.data) {
+        std::printf("  [skip] the content.db does not open: %s\n", entry.problem.c_str());
         return;
     }
-    rig.world = std::make_unique<PlayerWorld>(&*rig.db, "", bs::GameStateMode::Tier2, kServerId, rig.guids);
+    rig.world = std::make_unique<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, rig.guids);
     rig.world->set_position_sink(&rig.sink);
     std::string error;
     const std::string motion = (fs::path(g_tsv).parent_path() / "npc_motion.tsv").string();

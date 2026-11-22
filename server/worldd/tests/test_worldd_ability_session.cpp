@@ -88,6 +88,8 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace aoc::worldd;
@@ -150,42 +152,79 @@ static const schema::ClassSchema& class_named(const char* name) {
     return *c;
 }
 
+// ---- the split timer ------------------------------------------------------------------------------------------------------
+/// The seconds a case spent building its world (the shared data load and the fresh
+/// PlayerWorld), joining, and playing.  A test reads the differences; main prints the
+/// shard's line when AOC_TEST_TIMES is set.
+struct SplitTimes {
+    size_t worlds = 0;
+    double build_s = 0, join_s = 0, play_s = 0, setup_s = 0;
+    static SplitTimes totals;
+    static double seconds_since(const std::chrono::steady_clock::time_point& started) {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    }
+    static std::string line(bool enabled) {
+        if (!enabled) return {};
+        char buf[256];
+        std::snprintf(buf, sizeof buf, "[time] split: %zu worlds, world build %.2f s, join %.2f s, play %.2f s, total %.2f s (fight setup %.2f s)",
+                      totals.worlds, totals.build_s, totals.join_s, totals.play_s, totals.build_s + totals.join_s + totals.play_s + totals.setup_s, totals.setup_s);
+        return buf;
+    }
+    static SplitTimes now() { return totals; }
+};
+SplitTimes SplitTimes::totals;
+
+// ---- the shared game data ---------------------------------------------------------------------------------------------------
+#include "shared_world_data.h"
+
+/// The small content.db of content_db_fixture.h, made once for the program; or the
+/// real file when AOC_CONTENT_DB names it.
+static const fs::path& small_db_path() {
+    static const fs::path dir = content_fixture::make_temp_dir("worldd_ability_session_");
+    static const fs::path db = dir / "content.db";
+    static const bool made = content_fixture::make_db(db);
+    if (!made) {
+        std::printf("  [FAIL] the small content.db cannot be made\n");
+        std::exit(2);
+    }
+    return db;
+}
+static fs::path shared_db_path(bool use_real) {
+    if (use_real) return ability_rig::real_db_path();
+    if (const char* real = std::getenv("AOC_CONTENT_DB"); real && *real) return real;
+    return small_db_path();
+}
+
 struct Fixture {
-    fs::path dir;
-    std::optional<content::ContentDb> content;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
-    std::unique_ptr<PlayerWorld> world;
+    const content::ContentDb* content = nullptr;
+    std::shared_ptr<const WorldData> data;
+    std::shared_ptr<PlayerWorld> world;
 
     /// The small content.db of content_db_fixture.h, or, with AOC_CONTENT_DB set, the real file (the numbers are the same; the
     /// session then runs on contentc's own rows).
     /// `real`: the real content.db of the working tree (plan D2's tests: the ability tables are only there), whatever AOC_CONTENT_DB says.
     explicit Fixture(bool use_real = false) {
-        dir = content_fixture::make_temp_dir("worldd_ability_session_");
-        fs::path db = dir / "content.db";
-        const char* real = std::getenv("AOC_CONTENT_DB");
-        if (use_real) db = ability_rig::real_db_path();
-        else if (real && *real) db = real;
-        else if (!content_fixture::make_db(db)) std::exit(2);
-        std::string error;
-        content = content::ContentDb::open(db.string(), error);
-        if (!content) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        const auto started = std::chrono::steady_clock::now();
+        const fs::path db = shared_db_path(use_real);
+        shared_world::Entry& entry = shared_world::get(db.string());
+        content = entry.db ? &*entry.db : nullptr;
+        data = entry.data;
+        if (!content || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             std::exit(2);
         }
-        world = std::make_unique<PlayerWorld>(&*content, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_shared<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
         if (!world->ready()) {
             std::printf("  [FAIL] the world is not ready: %s\n", world->content_problem().c_str());
             std::exit(2);
         }
+        ++SplitTimes::totals.worlds;
+        SplitTimes::totals.build_s += SplitTimes::seconds_since(started);
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
-    ~Fixture() {
-        world.reset();
-        content.reset();
-        std::error_code ec;
-        fs::remove_all(dir, ec);
-    }
+    ~Fixture() { world.reset(); }
 };
 
 static svc::Character cyb_record() {
@@ -642,7 +681,10 @@ struct Harness {
     /// the join do not all fit the window, so the join stays queued until release() and settle().
     explicit Harness(size_t clog_pc_channel = 0, bool real = false, const svc::Character* record = nullptr, const std::function<void(PlayerWorld&)>& prepare = {},
                      PlayerWorld* shared = nullptr) : fx(real) {   // `shared`: join another Harness's world (two players in one world: abilities between players)   // #23 (MrJambix)
+        const auto setup_started = std::chrono::steady_clock::now();
         if (prepare) prepare(*fx.world);   // (plan E1, stage 3: the NPCs' ground and the fights are the world's before the session joins)
+        SplitTimes::totals.setup_s += SplitTimes::seconds_since(setup_started);
+        const auto join_started = std::chrono::steady_clock::now();
         if (clog_pc_channel) {
             hold = true;
             filler(3, clog_pc_channel);
@@ -655,6 +697,7 @@ struct Harness {
         pawn_ch = s->channel_of(bs::Role::Pawn);
         pc_ch = s->channel_of(bs::Role::PlayerController);
         if (!clog_pc_channel) settle();
+        SplitTimes::totals.join_s += SplitTimes::seconds_since(join_started);
     }
     /// `n` raw one-byte reliable bunches on `channel` (Connection::send queues them without opening anything): the client
     /// gets them and ignores them, and while they are unacknowledged they take up the channel's window.
@@ -766,11 +809,13 @@ struct Run {
     void cancel(int32_t id) { send_reliable(cancel_bunch(h.ability_guid(), id)); }
     /// 100 ms of play: the client's move, then the server's tick.
     void tick(bool moving, milliseconds d = milliseconds(100)) {
+        const auto started = std::chrono::steady_clock::now();
         ts += static_cast<float>(d.count()) / 1000.0f;
         if (moving) x += 10.0;
         h.client_sends({h.client.actor(h.pawn_ch, client_move(move_at(ts, x, moving)), /*reliable=*/false)});
         h.step(d);
         absorb();
+        SplitTimes::totals.play_s += SplitTimes::seconds_since(started);
     }
     void play(double seconds, bool moving) {
         const int n = static_cast<int>(std::llround(seconds * 10));
@@ -778,11 +823,13 @@ struct Run {
     }
     /// A move at `cm_per_s` along the ground, then the server's tick: `d` of play.
     void tick_at(double cm_per_s, milliseconds d = milliseconds(100)) {
+        const auto started = std::chrono::steady_clock::now();
         ts += static_cast<float>(d.count()) / 1000.0f;
         x += cm_per_s * static_cast<double>(d.count()) / 1000.0;
         h.client_sends({h.client.actor(h.pawn_ch, client_move(move_at(ts, x, true)), /*reliable=*/false)});
         h.step(d);
         absorb();
+        SplitTimes::totals.play_s += SplitTimes::seconds_since(started);
     }
     /// What the runtime has, for comparing with the client's view.
     const AbilityRuntime& rt() const { return *h.s->abilities(); }
@@ -3246,6 +3293,7 @@ static void test_e1_zone_abilities_export_rule() {
             }
         }
         if (defs.empty()) continue;
+        size_t class_opened = 0;
         {
             const auto bytes = capture_blocks::bytes_of(capture_blocks::kClientReadyToPhaseIn.hex);
             BunchWriter phase;
@@ -3281,7 +3329,10 @@ static void test_e1_zone_abilities_export_rule() {
             const std::vector<int32_t> ends = r.m.end_ids();
             const bool ended = std::find(ends.begin(), ends.end(), id) != ends.end();
             if (ended) ++refused;
-            if (opened > 0) ++zones_opened;
+            if (opened > 0) {
+                ++zones_opened;
+                ++class_opened;
+            }
             if (dance) {
                 bard_zones += opened > 0 ? 1 : 0;
                 CHECKF(opened > 0 && !ended, "Bard: %s opens its zone's actor (%zu opened, %s)", def->row.name.c_str(), opened, ended ? "ended" : "accepted");
@@ -3302,6 +3353,7 @@ static void test_e1_zone_abilities_export_rule() {
                 r.h.fx.world->tick_world(r.now());
             }
         }
+        CHECKF(!defs.empty() && class_opened > 0, "%s: the class opened its zones (%zu of the %zu zone abilities the data lists opened)", cls.name, class_opened, defs.size());
         r.play(6.0, false);   // the zones end and close
         r.absorb();
         GuidCache cache;
@@ -4319,32 +4371,85 @@ static bool run_flight_cast(const svc::Character& rec, const FlightCast& fc, std
     return true;
 }
 
+/// The Firebolt's five AnimationIndex variants in ONE world and one session: each cast
+/// is accepted, its own hits are collected, and the caster's Mana is filled again
+/// before the next.
+static bool run_flight_casts(const svc::Character& rec, const FlightCast& fc, const std::vector<int>& anims,
+                             std::vector<std::vector<TimedHit>>& all, std::vector<bool>& accepted) {
+    g_log.str("");
+    WolfWorld ww;
+    ww.level = fc.wolf_level;
+    ww.ahead = 0;
+    ww.north = fc.ahead;
+    Run r(0, true, &rec, [&](PlayerWorld& w) { ww.prepare(w); });
+    if (!ww.ground || ww.wolf == 0 || !r.h.fx.world->combat()) return false;
+    r.play(0.5, false);
+    const bs::PlayerSetup setup = r.h.s->bootstrap().setup();
+    const world::WorldActor* wa = r.h.fx.world->registry().find(ww.wolf);
+    const abilities::Catalog* cat = r.h.fx.world->ability_catalog();
+    const abilities::AbilityDef* def = cat ? cat->ability_named(fc.ability) : nullptr;
+    if (!wa || !def) return false;
+    const repl::InlineObject cyl = inline_cylinder_of(*wa);
+    r.h.s->teach_ability(def->row.guid);
+    r.h.fx.world->tick_world(r.now());
+    all.clear();
+    accepted.clear();
+    for (const int anim : anims) {
+        for (int wait = 0; wait < 80 && !r.m.cooldowns.empty(); ++wait) r.play(0.1, false);
+        r.h.s->set_current_value(kManaStat, r.m.stats[kMaxManaStat]);
+        const size_t before = r.m.hits.size();
+        const int32_t id = r.next_id++;
+        const BunchWriter trig = trigger_at_value(setup, def->row.guid, id, repl::Value(cyl), anim);
+        r.send_trigger(def->row.guid, id, &trig);
+        const std::vector<int32_t> ends = r.m.end_ids();
+        accepted.push_back(std::find(ends.begin(), ends.end(), id) == ends.end());
+        r.play(fc.seconds, false);
+        std::vector<TimedHit> hits;
+        for (size_t k = before; k < r.m.hits.size(); ++k) {
+            TimedHit t;
+            t.raw = r.m.hits[k];
+            const abilities::HitDef* hd = cat->hit(t.raw.record_guid);
+            const content::ProjectileRow* pr = cat->projectile(t.raw.source_record_guid);
+            t.hit = hd ? hd->row.name : "";
+            t.source = pr ? pr->name : "";
+            hits.push_back(std::move(t));
+        }
+        all.push_back(std::move(hits));
+    }
+    return true;
+}
+
 /// Milestone 1c, part A: one projectile's hits a cast (the Firebolt's two hands, the Frostbolt's bolt without its shard), the bounce's Source (the enemy the projectile flew from) and the Salvo's
 /// arrows, which land when they get to the target (the same shots at 5 and at 25 m land a flight apart).
 static void test_flight_leftovers() {
     std::printf("Flight leftovers: one projectile's hits a cast, the bounce's Source, the Salvo's arrows by distance\n");
     const svc::Character mage = class25(8, "Mage", 17750);
     // the Firebolt: AnimationIndex 0, 1 and 2 launch the right hand's projectile, the left's and the right's, and only that one's hits land (one Hit a cast); an index no montage has (3, -1: the client
-    // may send any) takes the first row, the right hand's, and still throws one
-    for (const int anim : {0, 1, 2, 3, -1}) {
+    // may send any) takes the first row, the right hand's, and still throws one -- one world and one session, five casts
+    {
         FlightCast fc;
         fc.ability = "Mage_Firebolt";
-        fc.anim = anim;
         fc.seconds = 2.0;
-        std::vector<TimedHit> hits;
-        const bool ok = run_flight_cast(mage, fc, hits);
-        CHECK(ok, "a world with ground and a Wolf for the Firebolt");
+        std::vector<std::vector<TimedHit>> all;
+        std::vector<bool> accepted;
+        const bool ok = run_flight_casts(mage, fc, {0, 1, 2, 3, -1}, all, accepted);
+        CHECK(ok, "a world with ground and a Wolf for the five Firebolt montages");
         if (!ok) return;
-        int landed = 0;
-        std::set<std::string> carried;
-        for (const TimedHit& h : hits) {
-            if (h.hit != "Mage_FireballCombo_Projectile_Hit") continue;
-            ++landed;
-            carried.insert(h.source);
+        for (size_t i = 0; i < all.size(); ++i) {
+            const int anim = std::vector<int>{0, 1, 2, 3, -1}[i];
+            CHECKF(accepted[i], "Firebolt, montage %d: the cast was accepted", anim);
+            int landed = 0;
+            std::set<std::string> carried;
+            for (const TimedHit& h : all[i]) {
+                if (h.hit != "Mage_FireballCombo_Projectile_Hit") continue;
+                ++landed;
+                carried.insert(h.source);
+            }
+            const std::string want = anim == 1 ? "Mage_FireballCombo_Projectile_L" : "Mage_FireballCombo_Projectile_R";
+            std::printf("  (Firebolt, montage %d: %d hit(s), from %s)\n", anim, landed, carried.empty() ? "none" : carried.begin()->c_str());
+            CHECK(landed == 1, (std::string("Firebolt, montage ") + std::to_string(anim) + ": one Hit confirmation, not one for each hand").c_str());
+            CHECK(carried == std::set<std::string>{want}, (std::string("Firebolt, montage ") + std::to_string(anim) + ": the Hit came from " + want).c_str());
         }
-        const std::string want = anim == 1 ? "Mage_FireballCombo_Projectile_L" : "Mage_FireballCombo_Projectile_R";
-        CHECK(landed == 1, (std::string("Firebolt, montage ") + std::to_string(anim) + ": one Hit confirmation, not one for each hand").c_str());
-        CHECK(carried == std::set<std::string>{want}, (std::string("Firebolt, montage ") + std::to_string(anim) + ": the Hit came from " + want).c_str());
     }
     // the Frostbolt: the bolt lands when its bar ends; the shard (fired by a hit of the bolt, with a talent and a Shocked enemy) does not land with it
     {
@@ -4805,6 +4910,7 @@ static void test_level_up_in_the_tick_of_the_death() {
 
 #include "weaponsmithing_fight_tests.inc"
 #include "tailoring_fight_tests.inc"
+#include "ability_session_shared_data_tests.inc"
 #include "ability_session_registered.inc"
 
 #ifndef AOC_SESSION_PARTS
@@ -4827,6 +4933,9 @@ int main() {
     auto logger = std::make_shared<spdlog::logger>("test", std::make_shared<spdlog::sinks::ostream_sink_mt>(g_log));
     logger->set_level(spdlog::level::debug);
     spdlog::set_default_logger(logger);
+
+    test_split_timer_counts_what_it_measures();
+    test_world_data_is_loaded_once_per_program();
 
     RUN_HERE(test_sprint());
     RUN_HERE(test_sprint_cancel());
@@ -4892,6 +5001,7 @@ int main() {
     if (AOC_SESSION_PARTS > 1) std::printf("part %d of %d of the ability session tests (the tests that hash to it)\n", AOC_SESSION_PART, AOC_SESSION_PARTS);
     aoc_tests::set_share(AOC_SESSION_PART, AOC_SESSION_PARTS);
     g_fail += aoc_tests::run();   // every check registered in ability_session_registered.inc (this part's share)
+    if (std::getenv("AOC_TEST_TIMES")) std::printf("%s\n", SplitTimes::line(true).c_str());
 
     if (const char* f = std::getenv("AOC_TEST_LOG_FILTER")) {   // (a debugging aid: the log lines that contain the text)
         std::istringstream in(g_log.str());

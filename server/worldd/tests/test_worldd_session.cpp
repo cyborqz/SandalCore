@@ -60,6 +60,8 @@
 #include "protocol/wire/server_move_parser.h"
 #include "session/player_session.h"
 #include "test_registry.h"
+#include "shared_world_data.h"
+#include "small_fixture_db.h"
 
 #include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
@@ -118,8 +120,7 @@ static void counting_random(uint8_t* out, size_t n) {
 // ---- the world: a small content.db, the allocator, the PlayerWorld ----------------------------------------------------------
 
 struct Fixture {
-    fs::path dir;
-    std::optional<content::ContentDb> content;
+    const content::ContentDb* content = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
 
@@ -127,30 +128,22 @@ struct Fixture {
     explicit Fixture(bs::GameStateMode mode = bs::GameStateMode::Tier2, bool with_content = true, const std::string& real_db = "") {
         std::string problem = "no such file";
         if (with_content) {
-            fs::path db = real_db;
-            if (real_db.empty()) {
-                dir = content_fixture::make_temp_dir("worldd_session_");
-                db = dir / "content.db";
-                if (!content_fixture::make_db(db)) std::exit(2);
-            }
-            std::string error;
-            content = content::ContentDb::open(db.string(), error);
-            if (!content) {
-                std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+            const fs::path db = real_db.empty() ? small_fixture_db() : fs::path(real_db);
+            shared_world::Entry& entry = shared_world::get(db.string());
+            content = entry.db ? &*entry.db : nullptr;
+            if (!content || !entry.data) {
+                std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
                 std::exit(2);
             }
             problem.clear();
+            world = std::make_unique<PlayerWorld>(entry.data, entry.problem, mode, kServerId, guids);
+        } else {
+            world = std::make_unique<PlayerWorld>(nullptr, problem, mode, kServerId, guids);
         }
-        world = std::make_unique<PlayerWorld>(content ? &*content : nullptr, problem, mode, kServerId, guids);
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
-    ~Fixture() {
-        world.reset();
-        content.reset();
-        std::error_code ec;
-        if (!dir.empty()) fs::remove_all(dir, ec);
-    }
+    ~Fixture() { world.reset(); }
 };
 
 /// cyb: a level-1 Kaelar male Bard with the customization as the character store returns it, no saved position.

@@ -111,6 +111,9 @@ struct Result {
     size_t   opens = 0, snapshots = 0, wakes = 0, forgotten = 0, closes = 0;
     size_t   updates = 0;      // update chains the view sent (reliable and not)
     size_t   throttled = 0;    // passes (or the rest of one) the view left to a busy connection
+    size_t   tracked = 0;      // actors the view holds at the end
+    size_t   scan_actors = 0;  // actors the scans examined in all
+    size_t   scan_compares = 0;   // ... and the order comparisons they made
 };
 
 /// The fixed scene (see the top of the file).  `paced`: the view's pacing is tight (20 packets in flight, 24 queued bunches) and the client is silent for two stretches, so that passes are held
@@ -178,6 +181,9 @@ inline Result run_scan_scene(bool paced) {
     r.closes = v.stats().closes_dormancy + v.stats().closes_relevancy + v.stats().closes_destroyed;
     r.updates = v.stats().updates + v.stats().updates_unreliable;
     r.throttled = v.stats().throttled;
+    r.tracked = v.tracked();
+    r.scan_actors = v.stats().scan_actors;
+    r.scan_compares = v.stats().scan_compares;
     return r;
 }
 
@@ -302,6 +308,10 @@ void test_view_scan_sends_the_same_bytes() {
         std::snprintf(text, sizeof(text), "...and it is a real one: %zu passes, %zu opens, %zu snapshots, %zu wakes, %zu closes, %zu forgotten, %zu update chains, %zu datagrams, %zu passes held back",
                       a.passes, a.opens, a.snapshots, a.wakes, a.closes, a.forgotten, a.updates, a.packets, a.throttled);
         CHECK(a.passes >= 900 && a.opens > 100 && a.snapshots > 300 && a.wakes > 20 && a.closes > 100 && a.forgotten > 20 && a.updates > 100 && (!paced || a.throttled > 100), text);
+        std::printf("  (the scan: %zu actor(s) tracked, %zu examined, %zu comparison(s) in %zu passes)\n", a.tracked, a.scan_actors, a.scan_compares, a.passes);
+        std::snprintf(text, sizeof(text), "%s: the scan examines and compares at most a few times what it tracks (%zu/%zu, %zu/%zu)", paced ? "paced" : "unpaced", a.scan_actors,
+                      a.tracked * a.passes, a.scan_compares, a.tracked * a.passes);
+        CHECK(a.scan_actors <= 2 * a.tracked * a.passes && a.scan_compares <= 8 * a.tracked * a.passes, text);
         // (taken from the scan that sorted the ids and the candidates in full at every pass)
         constexpr uint64_t kDigest = 0x84fd4b8c384e6db3ull, kPacedDigest = 0xe6ba2049b1aaadd6ull;
         const uint64_t held = paced ? kPacedDigest : kDigest;
@@ -323,7 +333,18 @@ void test_view_scan_order_is_the_order_of_a_full_sort() {
 }
 AOC_REGISTER_TEST(test_view_scan_order_is_the_order_of_a_full_sort);
 
+void test_view_scan_tracks_the_creatures() {
+    using namespace scan_checks;
+    std::printf("the view: one pass at 650 creatures tracks them all\n");
+    const Cost c = run_scan_cost(false, 1);
+    char text[300];
+    std::snprintf(text, sizeof(text), "the view holds the 650 creatures it scanned (%zu)", c.tracked);
+    CHECK(c.tracked >= 600, text);
+}
+AOC_REGISTER_TEST(test_view_scan_tracks_the_creatures);
+
 void test_view_scan_cost() {
+    if (!std::getenv("AOC_BENCH")) return;
     using namespace scan_checks;
     std::printf("the view: what one pass costs at 650 creatures (the work of the server for one view; not a count of players)\n");
     char text[400];

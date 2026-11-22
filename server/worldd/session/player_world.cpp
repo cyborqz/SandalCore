@@ -5,6 +5,7 @@
 //  session/player_world.cpp
 // ============================================================================
 #include "session/player_world.h"
+#include "session/world_data.h"
 #include "net/tick_profile.h"
 #include "session/friend_lookups.inc"
 
@@ -14,6 +15,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -21,6 +23,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -69,21 +72,54 @@ std::string stat_program_problem(const content::StatProgramRow& row, const stats
 
 }  // namespace
 
+namespace {
+std::atomic<size_t> g_world_data_loads{0};
+std::mutex          g_world_data_files_mutex;
+std::set<std::string> g_world_data_files;
+}  // namespace
+
+size_t WorldData::loads() { return g_world_data_loads.load(std::memory_order_relaxed); }
+size_t WorldData::files() {
+    std::lock_guard<std::mutex> lock(g_world_data_files_mutex);
+    return g_world_data_files.size();
+}
+
+WorldData::~WorldData() = default;
+
+std::shared_ptr<const WorldData> WorldData::load(const content::ContentDb* content, std::string& problem) {
+    if (!content) return nullptr;
+    auto data = std::shared_ptr<WorldData>(new WorldData(content));
+    g_world_data_loads.fetch_add(1, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(g_world_data_files_mutex);
+        g_world_data_files.insert(content->path());
+    }
+    if (!data->problem_.empty()) problem = data->problem_;
+    return data;
+}
+
+bootstrap::StatContext WorldData::stat_context() const {
+    return {bundle_ ? &*bundle_ : nullptr, gear_ ? &*gear_ : nullptr, stats::Rounding::HalfUp, curve_ ? &*curve_ : nullptr, curve_ ? &grants_ : nullptr,
+            talents_ ? &*talents_ : nullptr, mounts_ ? &mounts_->data() : nullptr, professions_ ? &*professions_ : nullptr, weapon_lines_ ? &*weapon_lines_ : nullptr};
+}
+
 bool PlayerWorld::load_mount_speeds(const std::string& path, std::string& error) {
-    if (!mounts_) {
+    if (!mounts()) {
         error = "there are no mounts";
         return false;
     }
+    if (!mounts_) mounts_ = *mounts();
     if (!mounts_->load_speeds(path, error)) return false;
     spdlog::info("[content] mount speeds: {} Blueprints from {}", mounts_->speeds_known(), path);
     return true;
 }
 
 bool PlayerWorld::load_mount_riders(const std::string& path, std::string& error) {
-    if (!mounts_) {
+    if (!mounts()) {
         error = "there are no mounts";
         return false;
     }
+    if (!mounts_) mounts_ = *mounts();
     if (!mounts_->load_riders(path, error)) return false;
     spdlog::info("[content] mount riders: {} Blueprints name their rider AnimBP in {}", mounts_->riders_known(), path);
     return true;
@@ -106,17 +142,14 @@ bool PlayerWorld::load_roads(const std::string& path, std::string& error) {
     return true;
 }
 
-PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_problem, bootstrap::GameStateMode mode,
-                         uint32_t server_id, protocol::ServerGuidAllocator& guids)
-    : content_(content), content_problem_(std::move(content_problem)), mode_(mode), server_id_(server_id), guids_(guids),
-      game_state_(guids.next()) {
+WorldData::WorldData(const content::ContentDb* content) : content_(content) {
     if (content_) {
         std::string error;
         rules_ = content_->ability_rules(error);
         if (!rules_) {
             // A content.db whose ability rows this worldd cannot run is as good as none: no login until it is rebuilt.
             content_ = nullptr;
-            content_problem_ = error;
+            problem_ = error;
         } else {
             catalog_.emplace(*content_);
             // plan B3: the stat program and the items' stat data
@@ -254,10 +287,34 @@ PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_
                 curve_.reset();
                 grants_.clear();
                 content_ = nullptr;
-                content_problem_ = problem + " (rebuild content.db with this checkout's contentc: cd services && go run ./cmd/contentc)";
+                problem_ = problem + " (rebuild content.db with this checkout's contentc: cd services && go run ./cmd/contentc)";
             }
         }
     }
+}
+PlayerWorld::PlayerWorld(const content::ContentDb* content, std::string content_problem, bootstrap::GameStateMode mode,
+                         uint32_t server_id, protocol::ServerGuidAllocator& guids)
+    : content_problem_(std::move(content_problem)), mode_(mode), server_id_(server_id), guids_(guids),
+      game_state_(guids.next()) {
+    if (content) {
+        std::string why;
+        data_ = WorldData::load(content, why);
+        if (!why.empty()) content_problem_ = why;
+    }
+    init_from_data();
+}
+
+PlayerWorld::PlayerWorld(std::shared_ptr<const WorldData> data, std::string content_problem, bootstrap::GameStateMode mode,
+                         uint32_t server_id, protocol::ServerGuidAllocator& guids)
+    : content_problem_(std::move(content_problem)), data_(std::move(data)), mode_(mode), server_id_(server_id), guids_(guids),
+      game_state_(guids.next()) {
+    init_from_data();
+}
+
+void PlayerWorld::init_from_data() {
+    if (!data_) return;
+    content_ = data_->content();
+    if (!data_->problem().empty()) content_problem_ = data_->problem();
 }
 // built with CoA and C | Y | B
 
@@ -1133,7 +1190,7 @@ void PlayerWorld::start_combat() {
         spdlog::info("[combat] OFF (--no-combat): the NPCs do not fight and take no hits");
         return;
     }
-    if (!bundle_ || !gear_ || !ability_catalog() || !npcs_) {
+    if (!stat_bundle() || !data_ || !data_->gear_catalog() || !ability_catalog() || !npcs_) {
         spdlog::warn("[combat] off: it needs the stat program, the item catalog, the ability tables and the NPCs' ground");
         return;
     }
@@ -1143,12 +1200,12 @@ void PlayerWorld::start_combat() {
         spdlog::warn("[combat] off: {}", e);
         return;
     }
-    combat_data_ = combat::CombatData::build(*rows, *bundle_, e);
+    combat_data_ = combat::CombatData::build(*rows, *stat_bundle(), e);
     if (!combat_data_) {
         spdlog::warn("[combat] off: {}", e);
         return;
     }
-    if (!npc_book_) npc_book_.emplace(*bundle_, *gear_);
+    if (!npc_book_) npc_book_.emplace(*stat_bundle(), *data_->gear_catalog());
     combat_ = std::make_unique<combat::CombatWorld>(registry_, npcs_.get(), nav_.get(), *combat_data_, *ability_catalog(), *npc_book_, motion_, combat_config_);
     combat_->set_ability_data(&npc_abilities_);
     if (!npc_senses_.empty()) combat_->set_senses_data(&npc_senses_);
@@ -1329,9 +1386,9 @@ size_t PlayerWorld::start_node_people(const spawns::NodePopulations::Config& con
     hooks.spawned = [this](uint64_t id, const content::NpcInstanceRow* instance, const content::NpcRouteRow* route, const world::CityNodeInfo& node, int64_t plot) {
         // A town person opens with the stats its template carried, and some templates carry none (a guard wizard, a villager), which the client shows as 0 health: every one gets the stat
         // program's numbers for its Blueprint and level (Health at its maximum), with or without a ground, fights or players.
-        if (bundle_ && gear_) {
+        if (stat_bundle() && data_ && data_->gear_catalog()) {
             if (const world::WorldActor* person = registry_.find(id); person && person->kind == world::ActorKind::Npc) {
-                if (!npc_book_) npc_book_.emplace(*bundle_, *gear_);
+                if (!npc_book_) npc_book_.emplace(*stat_bundle(), *data_->gear_catalog());
                 std::string why;
                 if (const auto cs = npc_book_->make(motion_.get(person->npc.archetype), person->npc.level, why)) {
                     combat::write_stats(registry_, id, *cs);

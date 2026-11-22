@@ -747,10 +747,14 @@ void ActorView::scan(double x, double y) {
         e.scan_stamp = gen;
         consider(id, &e);
     }
-    const auto nearer = [](const Cand& l, const Cand& r) { return l.d != r.d ? l.d < r.d : l.id < r.id; };
+    const auto nearer = [this](const Cand& l, const Cand& r) {
+        ++stats_.scan_compares;
+        return l.d != r.d ? l.d < r.d : l.id < r.id;
+    };
     if (!std::isfinite(x) || !std::isfinite(y)) {   // no distance to compare (a position that is not a number): the plain sort, which was always there
         std::sort(cands_.begin(), cands_.end(), nearer);
         scan_listed_ = cands_.size();
+        stats_.scan_actors += cands_.size();
         return;
     }
     // the actors the last pass had, at their old places (a place taken twice, or beyond the last list: the actor is treated as new), then the new ones
@@ -771,6 +775,7 @@ void ActorView::scan(double x, double y) {
     sort_after_small_changes(sorted_, ordered, nearer, merged_);
     cands_.swap(sorted_);
     scan_listed_ = cands_.size();
+    stats_.scan_actors += cands_.size();
 }
 
 void ActorView::pass(Connection& conn, double x, double y, Clock::time_point now) {

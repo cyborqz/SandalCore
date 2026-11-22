@@ -114,10 +114,10 @@ static void test_emote_list_agrees_with_the_content_tables() {
         return;
     }
     namespace ec = emote_list::ec;
-    Fixture fx(/*use_real=*/true);
-    const abilities::Catalog* cat = fx.world->ability_catalog();
-    CHECK(cat != nullptr, "the world holds the ability tables");
-    if (!cat) return;
+    const std::shared_ptr<const ability_rig::RigContent> shared = ability_rig::rig_content(ability_rig::real_db_path(), true);
+    CHECKF(shared && shared->problem.empty() && shared->catalog, "the shared catalog of the content tables loads (%s)", shared ? shared->problem.c_str() : "no data");
+    if (!shared || !shared->problem.empty() || !shared->catalog) return;
+    const abilities::Catalog* cat = &*shared->catalog;
     size_t in_tables = 0, without = 0;
     bool names_agree = true, tagged = true;
     std::string missing;
@@ -133,7 +133,9 @@ static void test_emote_list_agrees_with_the_content_tables() {
         const bool emote_tag = std::find(d->row.tags.begin(), d->row.tags.end(), "emote") != d->row.tags.end();
         tagged = tagged && (emote_tag || e.ability == aoc::worldd::content::kGuidRest);
     }
-    CHECKF(in_tables + without == 54, "every word has an ability row in the content tables or is counted without one (%zu and %zu)", in_tables, without);
+    // (the counts are the content.db of this tree: 54 words, 39 whose ability it
+    // holds and 15 whose ability is a client-only emote it does not)
+    CHECKF(in_tables == 39 && without == 15, "the content tables hold 39 of the list's 54 words and do not hold 15 (%zu and %zu)", in_tables, without);
     CHECK(names_agree, "where the tables hold the ability, its name is the list's (the list was copied from the same data)");
     CHECK(tagged, "and it carries the tag emote (General_Rest, the Rest, has none)");
     std::printf("  (%zu words play an ability the content tables hold; %zu do not: %s)\n", in_tables, without, missing.c_str());

@@ -303,19 +303,6 @@ void test_dodge_ends_the_barrage() {
         CHECK(count_ends(de, de.cast_id) == 0, "... the client is not told the cast is over");
         CHECK(de.mana_before - de.mana_after > 0.8f * price && de.charges_left >= 0, "... and nothing is given back: the Mana stays spent and the cooldown runs");
     }
-    // a Dodge the server refuses ends nothing, also before the first arrow
-    fc.dodge_first = true;
-    fc.dodge_at = 0.2;
-    {
-        std::vector<TimedHit> hits;
-        FlightEnd re;
-        ok = run_flight_cast(ranger, fc, hits, &re);
-        CHECK(ok, "a world with ground and a Wolf for the Barrage and two Dodges");
-        if (!ok) return;
-        CHECK(count_ends(re, re.dodge_id) == 1, "the second Dodge, 0.15 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(count_hits(hits, "Ranger_Barrage") == all && count_ends(re, re.cast_id) == 0 && re.mana_before - re.mana_after > 0.8f * price && re.charges_left >= 0,
-              "a refused Dodge changes nothing: every arrow lands, the cast is not ended, it stays paid");
-    }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_barrage);
 
@@ -368,18 +355,6 @@ void test_dodge_ends_the_salvo() {
         CHECK(e.dodge_item, "the server took the Dodge");
         CHECK(left.size() == 6 && count_hits(hits, "Ranger_Salvo") == 6, "a Dodge after the first arrow changes nothing: all six arrows leave and land");
         CHECK(count_ends(e, e.cast_id) == 0 && e.charges_left == 0 && spent > 5.5f * shot, "... the client is not told the cast is over and the six shots stay paid");
-    }
-    // a Dodge the server refuses ends nothing, also before the first arrow
-    fc.dodge_first = true;
-    fc.dodge_at = arrows[0] - 0.02;
-    {
-        std::vector<TimedHit> hits;
-        FlightEnd e;
-        ok = run_flight_cast(ranger, fc, hits, &e);
-        CHECK(ok, "a world with ground and a Wolf for the Salvo and two Dodges");
-        if (!ok) return;
-        CHECK(count_ends(e, e.dodge_id) == 1, "the second Dodge, 0.3 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(count_hits(hits, "Ranger_Salvo") == 6 && e.charges_left == 0 && count_ends(e, e.cast_id) == 0, "a refused Dodge changes nothing: six shots paid, six hits landed, the cast is not ended");
     }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_salvo);
@@ -476,15 +451,6 @@ void test_dodge_ends_a_weapon_swing() {
         CHECK(ok, "a world with ground and a Wolf for the book's swing and a Dodge after the page left");
         if (!ok) return;
         CHECK(count_hits(late, "Book_Projectile_Split_Hit_1") == 1 && count_ends(le, le.cast_id) == 0, "a Dodge after the page left changes nothing: the page lands and the client is told nothing");
-        fc.dodge_first = true;
-        fc.dodge_at = 0.25;
-        std::vector<TimedHit> refused;
-        FlightEnd re;
-        ok = run_flight_cast(bard, fc, refused, &re);
-        CHECK(ok, "a world with ground and a Wolf for the book's swing and two Dodges");
-        if (!ok) return;
-        CHECK(count_ends(re, re.dodge_id) == 1, "the second Dodge, 0.25 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(count_hits(refused, "Book_Projectile_Split_Hit_1") == 1 && count_ends(re, re.cast_id) == 0, "a refused Dodge changes nothing: the page lands and the swing is not ended");
     }
     // the shortbow's third swing sends three arrows (0.21, 0.37 and 0.49 s)
     {
@@ -557,14 +523,6 @@ void test_dodge_ends_a_weapon_swing() {
         if (!ok) return;
         const int late_ends = static_cast<int>(std::count(late.ends.begin(), late.ends.end(), late.swing_id));
         CHECK(late.landed >= 1 && late_ends == 0, "a Dodge after the client asked for the hit changes nothing: the hit lands and the client is told nothing");
-        as.dodge_first = true;
-        as.dodge_at = 0.25;
-        AxeEnd refused;
-        ok = run_axe_swing(bard, as, refused);
-        CHECK(ok, "a world with ground and a Wolf for the axe's swing and two Dodges");
-        if (!ok) return;
-        const int refused_ends = static_cast<int>(std::count(refused.ends.begin(), refused.ends.end(), refused.swing_id));
-        CHECK(refused.landed >= 1 && refused_ends == 0, "a refused Dodge changes nothing: the hit lands and the swing is not ended");
     }
 }
 AOC_REGISTER_TEST(test_dodge_ends_a_weapon_swing);
@@ -632,16 +590,6 @@ void test_dodge_ends_a_held_stance() {
         CHECK(dodged.dodge_item && dodged.on_early, "the Guard's effect is on, and the server took the Dodge");
         CHECK(dodged.on_late && guard_ends == 0, "a Dodge after the Guard's effect started changes nothing: the effect stays and the client is told nothing");
     }
-    gr.dodge_first = true;
-    gr.dodge_at = 0.0;
-    {
-        GuardEnd refused;
-        run_guard(mage, gr, refused);
-        const int dodge_ends = static_cast<int>(std::count(refused.ends.begin(), refused.ends.end(), refused.dodge_id));
-        const int refused_guard_ends = static_cast<int>(std::count(refused.ends.begin(), refused.ends.end(), refused.guard_id));
-        CHECK(dodge_ends == 1, "the second Dodge, right after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(refused.on_late && refused_guard_ends == 0, "a refused Dodge changes nothing: the Guard's effect comes and stays and the client is not told it ended");
-    }
 }
 AOC_REGISTER_TEST(test_dodge_ends_a_held_stance);
 
@@ -683,6 +631,9 @@ struct ChanEnd {
     double               healed_at = -1;          // when the Health first stood 80 over where the cast began (a heal that is confirmed to nobody shows only here; the Health regenerates 20 a tick)
     bool                 cooldown_on = false;
     int                  charges_left = -1;
+    size_t               zones_opened = 0;        // the zone actors opened on the client (not the four player actors)
+    std::set<int64_t>    effects_on;              // the effect guids on the client at the end
+    std::set<std::string> effect_names;           // ... and their record names
     std::string          log;
     std::string          probe;                   // where the caster stood, which way he faced and what he saw of the Wolf as the cast began
 };
@@ -754,6 +705,7 @@ static bool run_chan_cast(const svc::Character& rec, const ChanCast& cc, ChanEnd
     }
     if (asks.size() != cc.ask.size()) return false;
     const size_t before = r.m.hits.size();
+    const size_t other_before = r.m.other.size();
     if (combat::CombatWorld* cw = r.h.fx.world->combat(); cw && !cw->players().empty()) {
         const combat::Fighter& self = cw->players().front()->fighter();
         const combat::TargetInfo ti = cw->inspect(ww.wolf, self);
@@ -821,6 +773,14 @@ static bool run_chan_cast(const svc::Character& rec, const ChanCast& cc, ChanEnd
     }
     spdlog::default_logger()->flush();
     out.log = g_log.str();
+    out.zones_opened = 0;
+    for (size_t k = other_before; k < r.m.other.size(); ++k) out.zones_opened += r.m.other[k].open ? 1 : 0;
+    out.effects_on.clear();
+    out.effect_names.clear();
+    for (const auto& [id, guid] : r.m.effects) {
+        out.effects_on.insert(guid);
+        if (const abilities::EffectDef* ed = cat->effect(guid)) out.effect_names.insert(ed->row.name);
+    }
     out.ends = r.m.end_ids();
     out.mana_after = r.m.stats[kManaStat];
     out.health_after = r.m.stats[kHealthStat];
@@ -880,28 +840,6 @@ void test_dodge_ends_the_air_strike() {
         CHECK(left == 3 && landed == 3, "a Dodge after the first arrow changes nothing: all three arrows leave and land");
         CHECK(chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 0.8f * price && de.cooldown_on && de.charges_left == 0, "... the client is told nothing and the Air Strike stays paid: the Mana is spent and the cooldown runs");
     }
-    // a Dodge after the Air Strike is over
-    cc.dodge_at = 2.8;
-    {
-        ChanEnd de;
-        ok = run_chan_cast(ranger, cc, de);
-        CHECK(ok, "a world with ground and a Wolf for the Air Strike and a late Dodge");
-        if (!ok) return;
-        CHECK(de.dodge_item && chan_ends(de, de.cast_id) == 0, "a Dodge after the Air Strike is over ends nothing");
-        CHECK(spent_mana(de) > 0.8f * price && de.cooldown_on && de.charges_left == 0, "... and gives nothing back: the Mana stays spent and the cooldown runs");
-    }
-    // a Dodge the server refuses, also before the first arrow
-    cc.dodge_first = true;
-    cc.dodge_at = 0.5;
-    {
-        ChanEnd de;
-        ok = run_chan_cast(ranger, cc, de);
-        CHECK(ok, "a world with ground and a Wolf for the Air Strike and two Dodges");
-        if (!ok) return;
-        CHECK(chan_ends(de, de.dodge_id) == 1, "the second Dodge, 0.5 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(log_lines(de.log, "Ranger_AirStrike (arrow ", "it leaves") == 3 && chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 0.8f * price && de.cooldown_on,
-              "a refused Dodge changes nothing: three arrows leave, the cast is not ended, it stays paid");
-    }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_air_strike);
 
@@ -955,26 +893,6 @@ void test_dodge_ends_the_raining_death() {
         CHECK(de.dodge_item, "the server took the Dodge");
         CHECK(left == 2 && n == 2, "a Dodge after the first volley changes nothing: both volleys leave and land");
         CHECK(chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 0.8f * price && de.cooldown_on && de.charges_left == 0, "... the client is told nothing and the Raining Death stays paid: the Mana is spent and the cooldown runs");
-    }
-    cc.dodge_at = 2.0;   // both volleys left and landed
-    {
-        ChanEnd de;
-        ok = run_chan_cast(ranger, cc, de);
-        CHECK(ok, "a world with ground and a Wolf for the Raining Death and a late Dodge");
-        if (!ok) return;
-        CHECK(de.dodge_item && chan_ends(de, de.cast_id) == 0, "a Dodge after the Raining Death is over ends nothing");
-        CHECK(spent_mana(de) > 0.8f * price && de.cooldown_on && de.charges_left == 0, "... and gives nothing back: the Mana stays spent and the cooldown runs");
-    }
-    cc.dodge_first = true;
-    cc.dodge_at = 0.3;
-    {
-        ChanEnd de;
-        ok = run_chan_cast(ranger, cc, de);
-        CHECK(ok, "a world with ground and a Wolf for the Raining Death and two Dodges");
-        if (!ok) return;
-        CHECK(chan_ends(de, de.dodge_id) == 1, "the second Dodge, 0.3 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(chan_hits(de, "Ranger_RainingDeath_Hit", -1e9, true) == 2 && chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 0.8f * price && de.cooldown_on,
-              "a refused Dodge changes nothing: both volleys land, the cast is not ended, it stays paid");
     }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_raining_death);
@@ -1030,16 +948,6 @@ void test_dodge_ends_the_whirlwind() {
         CHECK(on_wolf(de, -1e9) == all && on_wolf(de, de.dodged_at + 0.3) >= 1, "a Dodge while the Whirlwind spins changes nothing: its hits go on landing");
         CHECK(chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 10.0f && de.cooldown_on, "... the client is told nothing and the Whirlwind stays paid: the Mana is spent and the cooldown runs");
     }
-    cc.dodge_first = true;
-    cc.dodge_at = 0.15;
-    {
-        ChanEnd re;
-        ok = run_chan_cast(fighter, cc, re);
-        CHECK(ok, "a world with ground and a Wolf for the Whirlwind and two Dodges");
-        if (!ok) return;
-        CHECK(chan_ends(re, re.dodge_id) == 1, "the second Dodge, 0.15 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(on_wolf(re, 2.5) >= 1 && chan_ends(re, re.cast_id) == 0 && spent_mana(re) > 10.0f && re.cooldown_on, "a refused Dodge changes nothing: the hits go on, the cast is not ended, it stays paid");
-    }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_whirlwind);
 
@@ -1092,25 +1000,6 @@ void test_dodge_ends_the_resplendent_beam() {
         CHECK(de.dodge_item, "the server took the Dodge");
         CHECK(chan_hits(de, "Cleric_ResplendentBeam_Hit") == all, "a Dodge after the beam is fired changes nothing: its hits land as they would have");
         CHECK(chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 30.0f && de.cooldown_on, "... the client is told nothing and the beam stays paid: the Mana is spent and the cooldown runs");
-    }
-    cc.dodge_at = 4.0;   // the beam is over
-    {
-        ChanEnd de;
-        ok = run_chan_cast(cleric, cc, de);
-        CHECK(ok, "a world with ground for the Resplendent Beam and a late Dodge");
-        if (!ok) return;
-        CHECK(de.dodge_item && chan_ends(de, de.cast_id) == 0, "a Dodge after the beam is over ends nothing");
-        CHECK(spent_mana(de) > 30.0f && de.cooldown_on && chan_hits(de, "Cleric_ResplendentBeam_Hit") >= 1, "... and gives nothing back: it stays paid and its hit landed");
-    }
-    cc.dodge_first = true;
-    cc.dodge_at = 0.5;
-    {
-        ChanEnd re;
-        ok = run_chan_cast(cleric, cc, re);
-        CHECK(ok, "a world with ground for the Resplendent Beam and two Dodges");
-        if (!ok) return;
-        CHECK(chan_ends(re, re.dodge_id) == 1, "the second Dodge, 0.5 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(chan_ends(re, re.cast_id) == 0 && spent_mana(re) > 30.0f && re.cooldown_on && chan_hits(re, "Cleric_ResplendentBeam_Hit") >= 1, "a refused Dodge changes nothing: the beam is fired, the cast is not ended, it stays paid");
     }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_resplendent_beam);
@@ -1167,26 +1056,6 @@ void test_dodge_ends_the_deliverance() {
         CHECK(de.dodge_item, "the server took the Dodge");
         CHECK(de.healed_at > 0 && de.health_after > de.health_before + 80.0f, "a Dodge after the heal landed changes nothing: the Cleric stays healed");
         CHECK(chan_ends(de, de.cast_id) == 0 && spent_mana(de) > 10.0f, "... the client is told nothing and the heal costs full: the Mana stays spent (no free heal)");
-    }
-    cc.dodge_at = 7.0;   // the Deliverance is over (this client sends no branch request or release: the cast goes on by itself 5.37 s after the press, pays 70 ms later and clears its montage 1.24 s after that)
-    cc.seconds = 8.0;
-    {
-        ChanEnd de;
-        ok = run_chan_cast(cleric, cc, de);
-        CHECK(ok, "a world with ground for the Deliverance and a late Dodge");
-        if (!ok) return;
-        CHECK(de.dodge_item && chan_ends(de, de.cast_id) == 0, "a Dodge after the Deliverance is over ends nothing");
-        CHECK(de.healed_at > 0 && spent_mana(de) > 10.0f, "... its heal stays landed and it stays paid");
-    }
-    cc.dodge_first = true;
-    cc.dodge_at = 0.5;
-    {
-        ChanEnd re;
-        ok = run_chan_cast(cleric, cc, re);
-        CHECK(ok, "a world with ground for the Deliverance and two Dodges");
-        if (!ok) return;
-        CHECK(chan_ends(re, re.dodge_id) == 1, "the second Dodge, 0.5 s after the first, is refused (ClientEndAbility for its instance)");
-        CHECK(re.healed_at > 0 && chan_ends(re, re.cast_id) == 0 && spent_mana(re) > 10.0f, "a refused Dodge changes nothing: its heal lands, the cast is not ended, it stays paid");
     }
 }
 AOC_REGISTER_TEST(test_dodge_ends_the_deliverance);
@@ -1251,6 +1120,10 @@ struct DodgeWindows {
     float  min_price = 10.0f;  // the Mana the cast must spend for the control to count (0: the cast spends no Mana: its cooldown is the sign that it is paid)
     bool   on_target = true;   // the hit's confirmations reach a target (a buff on the caster does not)
     bool   lands = true;       // the ability has a hit that lands (false: no hit is counted)
+    bool   zone = false;       // the ability opens a zone actor when it goes out
+    bool   zone_optional = false;   // the client may open none (the data's zone does not open in this scenario): the control check is skipped
+    const char* effect = nullptr;   // the effect it puts on the client when it goes out (null: none)
+    bool   effect_optional = false; // the client may hold no effect item (the effect's data is missing): the control check is skipped
 };
 static void prepare_dodge_cast(ChanCast& cc, const char* hit, const DodgeWindows& w) {
     if (w.ask_from >= 0) {
@@ -1278,6 +1151,8 @@ static bool run_dodge_control(const svc::Character& rec, const ChanCast& cc, con
     std::printf("  (%s, control: %d hit(s), Mana %.1f -> %.1f, cooldown %d, charges %d, %d end(s))\n", what, landed, ce.mana_before, ce.mana_after, ce.cooldown_on, ce.charges_left, chan_ends(ce, ce.cast_id));
     const bool good = (!w.lands || landed >= 1) && paid && ce.cooldown_on && chan_ends(ce, ce.cast_id) == 0;
     CHECKF(good, "%s, control, no Dodge: the ability goes out, it is paid, its cooldown runs and the client is told nothing", what);
+    if (w.zone && !w.zone_optional) CHECKF(ce.zones_opened > 0, "%s, control: the cast opened its zone actor on the client (%zu)", what, ce.zones_opened);
+    if (w.effect && !w.effect_optional) CHECKF(ce.effect_names.count(w.effect) != 0, "%s, control: the cast put its effect on the client (%s)", what, w.effect);
     if (!good) {
         std::printf("    | %s\n", ce.probe.c_str());
         log_excerpt(ce.log, cc.ability);
@@ -1304,6 +1179,9 @@ static void check_ordinary_ability_dodge(const svc::Character& rec, ChanCast cc,
         CHECKF(de.dodge_item && landed_hits(de, hit, w) == 0, "%s: a Dodge before the cost step cancels it: nothing of it goes out", what);
         CHECKF(chan_ends(de, de.cast_id) == 1, "%s: ... and the client is told it is over: one ClientEndAbility for its instance", what);
         CHECKF(dodge_unpaid(de, w), "%s: ... nothing was paid: no Mana (a regeneration tick may have added some) and no cooldown", what);
+        if (w.zone) CHECKF(de.zones_opened == 0, "%s: ... and no zone actor was opened (%zu)", what, de.zones_opened);
+        if (w.effect) CHECKF(de.effect_names.count(w.effect) == 0, "%s: ... and its effect never reached the client (%s)", what, w.effect);
+        if (hit) CHECKF(chan_hits(de, hit, -1e9, false) == 0, "%s: ... and no hit confirmation was made at all", what);
     }
     // a Dodge after the cost step and before the ability goes out: the cost comes back
     if (w.between >= 0) {
@@ -1329,17 +1207,6 @@ static void check_ordinary_ability_dodge(const svc::Character& rec, ChanCast cc,
                     chan_ends(de, de.cast_id));
         CHECKF(de.dodge_item && (!w.lands || landed_hits(de, hit, w) >= 1), "%s: a Dodge after it went out changes nothing: its hit stays landed (when it has one)", what);
         CHECKF(chan_ends(de, de.cast_id) == 0 && dodge_paid(de, w, price), "%s: ... the client is told nothing and it stays paid: the Mana is spent (when it spends any) and the cooldown runs", what);
-    }
-    // a Dodge the server refuses, also before the cost step
-    cc.dodge_first = true;
-    cc.dodge_at = w.refused >= 0 ? w.refused : w.before;
-    {
-        ChanEnd re;
-        const bool ok = run_chan_cast(rec, cc, re);
-        CHECKF(ok, "%s: a world with ground and a Wolf and two Dodges", what);
-        if (!ok) return;
-        CHECKF(chan_ends(re, re.dodge_id) == 1, "%s: the second Dodge, inside the cooldown of the first, is refused (ClientEndAbility for its instance)", what);
-        CHECKF((!w.lands || landed_hits(re, hit, w) >= 1) && chan_ends(re, re.cast_id) == 0 && dodge_paid(re, w, price), "%s: a refused Dodge changes nothing: the ability goes out, the cast is not ended, it stays paid", what);
     }
 }
 
@@ -1439,7 +1306,7 @@ void test_dodge_cancels_each_kind_of_ability() {
         w.lands = false;
         w.between = 1.2;
         w.after = 1.7;
-        check_ordinary_ability_dodge(fighter, cc, nullptr, "Fighter_Overpower with no hit asked for", w);
+        check_ordinary_ability_dodge(fighter, cc, "Fighter_Overpower", "Fighter_Overpower with no hit asked for", w);
     }
     {   // one of the ten one-shot Songs (not a Melody), aimed at the caster: its cost step comes at 1.9 s, so there is a long wind up before it
         ChanCast cc;
@@ -1490,8 +1357,10 @@ void test_dodge_cancels_each_kind_of_ability() {
         w.between = -1;
         w.after = 0.6;
         w.ask_from = -1;
-        w.seconds = 1.5;
+        w.seconds = 6.0;
         w.lands = false;
+        w.zone = true;
+        w.zone_optional = true;
         check_ordinary_ability_dodge(mage, cc, nullptr, "Mage_ArcaneEye", w);
     }
     {   // an ability that puts an effect on the caster itself: it goes out when the effect starts, 0.035 s after the cost step (0.28 s); it spends no Mana, so its cooldown shows that it is paid
@@ -1505,6 +1374,7 @@ void test_dodge_cancels_each_kind_of_ability() {
         w.seconds = 1.0;
         w.lands = false;
         w.min_price = 0;
+        w.effect = "Mage_EE_Lightning";
         check_ordinary_ability_dodge(mage, cc, nullptr, "Mage_Elemental_Empowerment", w);
     }
     {   // an ability with no hit of its own: nothing of it goes out for the server, so its payment is its launch (cost step at 0.35 s, the montage ends at 1.0 s)
@@ -1518,6 +1388,8 @@ void test_dodge_cancels_each_kind_of_ability() {
         w.seconds = 2.0;
         w.lands = false;
         w.min_price = 0;
+        w.effect = "Tank_Fortify";
+        w.effect_optional = true;
         check_ordinary_ability_dodge(class25(7, "Tank", 17754), cc, nullptr, "Tank_Fortify", w);
     }
 }

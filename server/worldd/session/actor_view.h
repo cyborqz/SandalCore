@@ -134,6 +134,8 @@ public:
         size_t throttled = 0;        // passes in which the connection was too busy for the view to send anything
         size_t peak_channels = 0;
         size_t bits_sent = 0;        // payload bits of the chains the view sent (exports and content)
+        size_t scan_actors = 0;      // actors a scan examined in all
+        size_t scan_compares = 0;    // ... and the order comparisons it made
     };
 
     /// `reserved(index)` is true for a channel index of the session's own (the player's four actors): the view never takes one.

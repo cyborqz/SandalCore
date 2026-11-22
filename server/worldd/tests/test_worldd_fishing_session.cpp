@@ -21,6 +21,7 @@
 #include "cyb_appearance.h"
 #include "fake_client.h"
 #include "test_registry.h"
+#include "shared_world_data.h"
 #include "bootstrap/character_setup.h"
 #include "bootstrap/constants.h"
 #include "fishing/fishing.h"
@@ -377,7 +378,7 @@ struct Player {
 };
 
 struct Rig {
-    std::optional<content::ContentDb> db;
+    const content::ContentDb* db = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
     RecordingSink sink;
@@ -389,12 +390,13 @@ struct Rig {
     /// (x from the spot + 300 to + 10,300, y from - 5,000 to + 5,000).
     bool open(const char* path, bool water = true, uint64_t seed = 0x6A7E5EEDull) {
         std::string error;
-        db = content::ContentDb::open(path, error);
-        if (!db) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        shared_world::Entry& entry = shared_world::get(path);
+        db = entry.db ? &*entry.db : nullptr;
+        if (!db || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             return false;
         }
-        world = std::make_unique<PlayerWorld>(&*db, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_unique<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
         world->set_position_sink(&sink);
         gather::Config cfg;
         cfg.seed = seed;

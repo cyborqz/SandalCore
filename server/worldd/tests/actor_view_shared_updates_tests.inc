@@ -444,7 +444,11 @@ void test_shared_updates_large_scene_sends_the_same_bytes() {
     std::snprintf(text, sizeof(text), "with the updates shared: %d of 40 connections get exactly the datagrams they got without; %zu of %zu update chains were built by another view (%llu built for sharing, %llu built for one view)",
                   same_viewers(a, b), b.shared, b.updates, static_cast<unsigned long long>(st.builds), static_cast<unsigned long long>(st.private_builds));
     CHECK(same_viewers(a, b) == 40 && a.digest == b.digest, text);
-    CHECK(b.shared > b.updates / 3 && st.private_builds > 0 && st.mismatches == 0, "...a large part of the updates were not built again, and some had to be (a lost chain's values put back, interactable mobs, a value taken away)");
+    const double hit_rate = (st.hits + st.builds + st.private_builds) == 0 ? 0.0
+                                                                          : static_cast<double>(st.hits) / static_cast<double>(st.hits + st.builds + st.private_builds);
+    std::snprintf(text, sizeof(text), "with the updates shared: %.0f%% were taken from another view's blocks; %llu built for sharing, %llu for one view",
+                  hit_rate * 100.0, static_cast<unsigned long long>(st.builds), static_cast<unsigned long long>(st.private_builds));
+    CHECK(b.shared > b.updates / 3 && st.hits > 0 && hit_rate > 0.5 && st.builds > 0 && st.private_builds > 0 && st.mismatches == 0, text);
     Params verify = large_scene();
     verify.shared = std::make_shared<SharedUpdates>(ShareMode::Verify, 4);   // one shared update in four is also built the plain way, from a copy of the shadow, and compared
     const SceneResult c = run_scene(verify);
@@ -491,6 +495,7 @@ void test_shared_updates_verify_finds_a_damaged_update() {
 AOC_REGISTER_TEST(test_shared_updates_verify_finds_a_damaged_update);
 
 void test_shared_updates_cost() {
+    if (!std::getenv("AOC_BENCH")) return;
     using namespace shared_checks;
     Stopwatch watch;
     std::printf("shared updates: what an update costs with 40 players holding the same mobs (the work of the server for the views, not a count of players)\n");

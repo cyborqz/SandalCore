@@ -43,6 +43,7 @@
 #include "spawns/mount_spawn.h"
 #include "spawns/mount_state.h"
 #include "test_registry.h"
+#include "shared_world_data.h"
 #include "world/actor_registry.h"
 #include "world/roads.h"
 // (C:Y:B | CoA)
@@ -179,33 +180,34 @@ static std::string real_db_path() {
 
 // ---- the world -------------------------------------------------------------------------------------------------------------------
 
+static const fs::path& mounts_ride_small_db() {
+    static const fs::path dir = cf::make_temp_dir("worldd_mounts_ride_");
+    static const fs::path db = dir / "content.db";
+    static const bool made = cf::make_db(db);
+    if (!made) {
+        std::printf("  [FAIL] the small content.db cannot be made\n");
+        std::exit(2);
+    }
+    return db;
+}
+
 struct Fixture {
-    fs::path dir;
-    std::optional<content::ContentDb> content;
-    std::optional<content::ContentDb> real;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
 // [Cyb x C O A]
 
     Fixture(bool real_content = false) {
-        dir = cf::make_temp_dir("worldd_mounts_ride_");
-        const fs::path db = dir / "content.db";
-        if (!cf::make_db(db)) std::exit(2);
         std::string error;
-        content = content::ContentDb::open(db.string(), error);
-        if (!content) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
-            std::exit(2);
-        }
-        real = content::ContentDb::open(real_db_path(), error);
-        if (!real) {
-            std::printf("  [FAIL] the real content.db does not open (%s): %s\n", real_db_path().c_str(), error.c_str());
+        shared_world::Entry& small = shared_world::get(mounts_ride_small_db().string());
+        shared_world::Entry& real = shared_world::get(real_db_path());
+        if (!small.db || !small.data || !real.db || !real.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", (!small.db ? small.problem : real.problem).c_str());
             std::exit(2);
         }
         // a test of the game's own abilities and fights (the heal on a mount) runs the real tables; the other tests the small fixture's
-        const content::ContentDb* world_content = real_content ? &*real : &*content;
-        world = std::make_unique<PlayerWorld>(world_content, "", bs::GameStateMode::Tier2, kServerId, guids);
-        auto book = spawns::MountBook::load(*real, error);
+        const shared_world::Entry& data = real_content ? real : small;
+        world = std::make_unique<PlayerWorld>(data.data, data.problem, bs::GameStateMode::Tier2, kServerId, guids);
+        auto book = spawns::MountBook::load(*real.db, error);
         if (!book) {
             std::printf("  [FAIL] the mounts do not load: %s\n", error.c_str());
             std::exit(2);
@@ -220,13 +222,7 @@ struct Fixture {
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
-    ~Fixture() {
-        world.reset();
-        content.reset();
-        real.reset();
-        std::error_code ec;
-        fs::remove_all(dir, ec);
-    }
+    ~Fixture() { world.reset(); }
 };
 
 // ---- the harness -------------------------------------------------------------------------------------------------------------------

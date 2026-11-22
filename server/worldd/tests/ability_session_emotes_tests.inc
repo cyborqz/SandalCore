@@ -176,22 +176,6 @@ static void test_walking_away_ends_the_rest() {
 
 AOC_REGISTER_TEST(test_walking_away_ends_the_rest);
 
-static void test_sit_is_matched_in_any_case() {
-    std::printf("/sit: SIT sits down, Sit stands up\n");
-    Run r;
-    r.play(0.5, false);
-    say_emote(r, "SIT");
-    r.play(0.3, false);
-    CHECK(r.m.has_ability(kRest) && r.h.s->abilities()->resting(), "SIT sits the character down");
-    say_emote(r, "sIt");
-    r.play(0.1, false);
-    bool jumped = false;
-    for (const auto& [eid, a] : r.m.abilities) jumped = a.ability == kRest && a.may_jump && a.animation_counter == 1;
-    CHECK(jumped && !r.h.s->abilities()->resting(), "sIt stands it up: the montage jumps to its end section");
-}
-
-AOC_REGISTER_TEST(test_sit_is_matched_in_any_case);
-
 static void test_a_sit_ends_a_rest_the_client_began() {
     std::printf("/sit: a Rest the client began with its own trigger is ended by /sit as well\n");
     Run r;

@@ -57,6 +57,7 @@
 #include "session/move_checker.h"
 #include "session/position_saver.h"
 #include "session/professions.h"
+#include "session/world_data.h"
 #include "session/actor_view.h"
 #include "session/talents.h"
 #include "session/weapon_lines.h"
@@ -114,6 +115,9 @@ public:
     /// this object and mint under `server_id`, the id mesh gave worldd.
     PlayerWorld(const content::ContentDb* content, std::string content_problem, bootstrap::GameStateMode mode,
                 uint32_t server_id, protocol::ServerGuidAllocator& guids);
+    /// A world built from data that a test program loaded once.  The object must outlive the world.
+    PlayerWorld(std::shared_ptr<const WorldData> data, std::string content_problem, bootstrap::GameStateMode mode,
+                uint32_t server_id, protocol::ServerGuidAllocator& guids);
     ~PlayerWorld();
 
     bool ready() const { return content_ != nullptr; }
@@ -121,44 +125,46 @@ public:
     const std::string& content_problem() const { return content_problem_; }
     /// Plan A7: the ability runtime's numbers (content.db's ability_runtime rows, read once at startup). Always set when
     /// ready(): a content.db whose rows this worldd cannot run is not ready, and says why in content_problem().
-    const content::AbilityRules* ability_rules() const { return rules_ ? &*rules_ : nullptr; }
+    const content::AbilityRules* ability_rules() const { return data_ ? data_->ability_rules() : nullptr; }
     /// Plan B2: what the equip rules ask of an item record: content.db's, unless a test replaced it. Null when content.db is not loaded.
-    const items::ItemCatalog* item_catalog() const { return catalog_override_ ? catalog_override_ : catalog_ ? &*catalog_ : nullptr; }
+    const items::ItemCatalog* item_catalog() const { return catalog_override_ ? catalog_override_ : data_ ? data_->item_catalog() : nullptr; }
     void set_item_catalog(const items::ItemCatalog* catalog) { catalog_override_ = catalog; }
     /// Plan B3: the verified stat program and where the items' stat data comes from; a context with null members when the world is not ready.
     /// `stat_rounding` is how an item's interpolated value is made whole (the research's best fit, half up).
     bootstrap::StatContext stat_context() const {
-        return {bundle_ ? &*bundle_ : nullptr, gear_ ? &*gear_ : nullptr, stats::Rounding::HalfUp, curve_ ? &*curve_ : nullptr, curve_ ? &grants_ : nullptr,
-                talents_ ? &*talents_ : nullptr, mounts_ ? &mounts_->data() : nullptr, professions_ ? &*professions_ : nullptr, weapon_lines_ ? &*weapon_lines_ : nullptr};
+        if (!data_) return {};
+        bootstrap::StatContext context = data_->stat_context();
+        if (mounts_) context.mounts = &mounts_->data();
+        return context;
     }
     /// Plan D1: the Adventuring level curve (content.db's leveling_type and leveling_curve) and the Universal tree's auto-granted nodes, read once
     /// at startup; a content.db without them is not ready. Null when the world is not ready.
-    const leveling::LevelCurve*            level_curve() const { return curve_ ? &*curve_ : nullptr; }
-    const std::vector<content::AutoGrant>& auto_grants() const { return grants_; }
-    const content::LevelingType*           leveling_type() const { return leveling_type_ ? &*leveling_type_ : nullptr; }
+    const leveling::LevelCurve*            level_curve() const { return data_ ? data_->level_curve() : nullptr; }
+    const std::vector<content::AutoGrant>& auto_grants() const { static const std::vector<content::AutoGrant> none; return data_ ? data_->auto_grants() : none; }
+    const content::LevelingType*           leveling_type() const { return data_ ? data_->leveling_type() : nullptr; }
     /// Plan D1, stage 2: the skill trees, nodes and ranks (content.db's skill_* tables), read once at startup; a content.db without them is not
     /// ready. Null when the world is not ready.
-    const talents::Catalog*                talents() const { return talents_ ? &*talents_ : nullptr; }
-    const stats::StatBundle* stat_bundle() const { return bundle_ ? &*bundle_ : nullptr; }
+    const talents::Catalog*                talents() const { return data_ ? data_->talents() : nullptr; }
+    const stats::StatBundle* stat_bundle() const { return data_ ? data_->stat_bundle() : nullptr; }
     /// Gathering stage 2: the 22 professions with their level-up curves and the five certification levels (content.db's profession, certification_level and
     /// action_certification, read once at startup). Null when the file has none of those tables (an older fixture): characters then have no professions.
-    const professions::Book* professions() const { return professions_ ? &*professions_ : nullptr; }
+    const professions::Book* professions() const { return data_ ? data_->professions() : nullptr; }
     /// Weapon XP: the 21 weapon lines (content.db's leveling types named Weapon_<line>) and the one curve they share, read once at startup. Null when the file has none (an older fixture):
     /// characters then hold no weapon XP and a weapon tree is judged at the character's level.
-    const weaponxp::Lines* weapon_lines() const { return weapon_lines_ ? &*weapon_lines_ : nullptr; }
+    const weaponxp::Lines* weapon_lines() const { return data_ ? data_->weapon_lines() : nullptr; }
     /// Glint tiers (contentc version 24): the currency tiers and their kinds (content.db's currency_tier and currency_def, read once at startup): which item is the next kind of a Glint
     /// certificate, and how a reward of Glint is split into kinds.  Null when the file has none of those tables (an older file or fixture): no stack of Glint changes kind and a reward
     /// is paid as it is rolled.
-    const items::CurrencyTable* currencies() const { return currencies_ ? &*currencies_ : nullptr; }
+    const items::CurrencyTable* currencies() const { return data_ ? data_->currencies() : nullptr; }
     /// Plan D2: every ability, hit, effect and expression of content.db's ab_* tables, read once at startup: what the generic ability runtime
     /// runs. Null when the file has none (an older fixture) or they did not read: then only Sprint, Dodge and Rest run, and the log says why.
-    const abilities::Catalog* ability_catalog() const { return catalog_override_set_ ? ability_catalog_override_ : ability_catalog_ ? &*ability_catalog_ : nullptr; }
+    const abilities::Catalog* ability_catalog() const { return catalog_override_set_ ? ability_catalog_override_ : data_ ? data_->ability_catalog() : nullptr; }
     void set_ability_catalog(const abilities::Catalog* catalog) {
         ability_catalog_override_ = catalog;
         catalog_override_set_ = true;
     }
     /// The mounts milestone: the mount tables of content.db and the captured donors (null when the file has none: no mount can be summoned).
-    const spawns::MountBook* mounts() const { return mounts_ ? &*mounts_ : nullptr; }
+    const spawns::MountBook* mounts() const { return mounts_ ? &*mounts_ : data_ ? data_->mounts() : nullptr; }
     /// A test's mounts (the real ones come from content.db at construction).
     void set_mounts(spawns::MountBook book) { mounts_ = std::move(book); }
     /// Reads the Blueprints' speeds (dist/content/mount_speeds.tsv): a mount runs at its Blueprint's speed when it is desummoned. False, with `error`, for a missing
@@ -541,6 +547,7 @@ public:
 // built by Cyb with C | O | A
 
 private:
+    void init_from_data();
     void log_npc_types() const;
     void log_huntables() const;
     void log_hunting_kinds();
@@ -596,22 +603,11 @@ private:
     void start_aftermath();
     void log_spawn_filter() const;
 
-    const content::ContentDb*            content_;
+    const content::ContentDb*            content_ = nullptr;
     std::string                          content_problem_;
-    std::optional<content::AbilityRules> rules_;
-    std::optional<items::ContentItemCatalog> catalog_;
-    std::optional<stats::StatBundle>         bundle_;
-    std::optional<content::ContentGearCatalog> gear_;
-    std::optional<content::LevelingType>     leveling_type_;   // plan D1
-    std::optional<leveling::LevelCurve>      curve_;
-    std::vector<content::AutoGrant>          grants_;          // the Universal tree's, by level
-    std::optional<talents::Catalog>          talents_;         // plan D1, stage 2
-    std::optional<professions::Book>         professions_;     // Gathering stage 2
-    std::optional<weaponxp::Lines>           weapon_lines_;    // weapon XP: the 21 weapon lines and their one curve
-    std::optional<items::CurrencyTable>      currencies_;      // Glint tiers
-    std::optional<abilities::Catalog>        ability_catalog_;  // plan D2
-    std::optional<spawns::MountBook>         mounts_;           // the mounts milestone
-    world::RoadMap                           roads_;            // the mounts milestone, stage 3
+    std::shared_ptr<const WorldData>     data_;
+    std::optional<spawns::MountBook>     mounts_;           // a test's mounts, or a copy the speed/rider loaders write; else the shared book
+    world::RoadMap                       roads_;            // the mounts milestone, stage 3
     const abilities::Catalog*                ability_catalog_override_ = nullptr;
     bool                                     catalog_override_set_ = false;
     const items::ItemCatalog*            catalog_override_ = nullptr;

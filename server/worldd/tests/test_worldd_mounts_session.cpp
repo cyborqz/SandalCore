@@ -20,6 +20,7 @@
 // ============================================================================
 #include "capture_mount_session.h"
 #include "content_db_fixture.h"
+#include "shared_world_data.h"
 #include "cyb_appearance.h"
 #include "fake_client.h"
 #include "bootstrap/captured_setup.h"
@@ -169,31 +170,33 @@ static std::string real_db_path() {
 
 // ---- the world -------------------------------------------------------------------------------------------------------------------
 
+static const fs::path& mounts_session_small_db() {
+    static const fs::path dir = cf::make_temp_dir("worldd_mounts_session_");
+    static const fs::path db = dir / "content.db";
+    static const bool made = cf::make_db(db);
+    if (!made) {
+        std::printf("  [FAIL] the small content.db cannot be made\n");
+        std::exit(2);
+    }
+    return db;
+}
+
 struct Fixture {
-    fs::path dir;
-    std::optional<content::ContentDb> content;
-    std::optional<content::ContentDb> real;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
 
     explicit Fixture(bool real_world = false) {
-        dir = cf::make_temp_dir("worldd_mounts_session_");
-        const fs::path db = dir / "content.db";
-        if (!cf::make_db(db)) std::exit(2);
         std::string error;
-        content = content::ContentDb::open(db.string(), error);
-        if (!content) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
-            std::exit(2);
-        }
-        real = content::ContentDb::open(real_db_path(), error);
-        if (!real) {
-            std::printf("  [FAIL] the real content.db does not open (%s): %s\n", real_db_path().c_str(), error.c_str());
+        shared_world::Entry& small = shared_world::get(mounts_session_small_db().string());
+        shared_world::Entry& real = shared_world::get(real_db_path());
+        if (!small.db || !small.data || !real.db || !real.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", (!small.db ? small.problem : real.problem).c_str());
             std::exit(2);
         }
         // (a real world: the real content.db's talents catalog, so the join's lists are the production path's, not the captured Bard's)
-        world = std::make_unique<PlayerWorld>(real_world ? &*real : &*content, "", bs::GameStateMode::Tier2, kServerId, guids);
-        auto book = spawns::MountBook::load(*real, error);
+        const shared_world::Entry& data = real_world ? real : small;
+        world = std::make_unique<PlayerWorld>(data.data, data.problem, bs::GameStateMode::Tier2, kServerId, guids);
+        auto book = spawns::MountBook::load(*real.db, error);
         if (!book) {
             std::printf("  [FAIL] the mounts do not load: %s\n", error.c_str());
             std::exit(2);
@@ -212,13 +215,7 @@ struct Fixture {
     }
     Fixture(const Fixture&) = delete;
     Fixture& operator=(const Fixture&) = delete;
-    ~Fixture() {
-        world.reset();
-        content.reset();
-        real.reset();
-        std::error_code ec;
-        fs::remove_all(dir, ec);
-    }
+    ~Fixture() { world.reset(); }
 };
 
 // ---- the harness -------------------------------------------------------------------------------------------------------------------
@@ -1154,7 +1151,8 @@ static void test_golden_refusal() {
         CHECK(shown.has_value(), "worldd shows the item of the refused summon");
         if (shown) {
             const std::set<uint16_t> d = item_diff(*ri_item, *shown);
-            CHECK(std::includes(std::set<uint16_t>({2, 15, 17}).begin(), std::set<uint16_t>({2, 15, 17}).end(), d.begin(), d.end()), (std::string("the refusal's item is retail's ") + std::to_string(capture) + " but for the instance, the counter and the instigator").c_str());
+            const std::set<uint16_t> unchanged_fields = {2, 15, 17};
+            CHECK(std::includes(unchanged_fields.begin(), unchanged_fields.end(), d.begin(), d.end()), (std::string("the refusal's item is retail's ") + std::to_string(capture) + " but for the instance, the counter and the instigator").c_str());
         }
         const schema::NetField* f = rc->schema->field("CalloutQueueReplication");
         const repl::FastArrayState* ra = f ? rc->arrays.find(f->index) : nullptr;
@@ -1274,7 +1272,8 @@ static void test_item_abilities() {
         h.play();
         const ClientLists l = client_lists(h);
         with_mounts = l.records;
-        const std::vector<int64_t> tail(bs::static_known_tail().begin(), bs::static_known_tail().end());
+        const auto known_tail = bs::static_known_tail();
+        const std::vector<int64_t> tail(known_tail.begin(), known_tail.end());
         CHECK(times_in(l.records, kSummonMountRecord) == 1, "a character with mounts in the bag has Summon_Mount in ReplicatedRecordsToLoad, once");
         CHECK(times_in(l.known, kSummonMountRecord) == 0, "and not in KnownAbilities (retail's login: 92 records with it, 75 known without it)");
         CHECK(l.records.size() >= tail.size() && std::equal(tail.begin(), tail.end(), l.records.end() - static_cast<std::ptrdiff_t>(tail.size())),
@@ -1307,7 +1306,8 @@ static void test_item_abilities_in_a_real_world() {
     }
     h.play();
     const ClientLists l = client_lists(h);
-    const std::vector<int64_t> tail(bs::static_known_tail().begin(), bs::static_known_tail().end());
+    const auto known_tail = bs::static_known_tail();
+    const std::vector<int64_t> tail(known_tail.begin(), known_tail.end());
     CHECK(times_in(l.records, kSummonMountRecord) == 1 && times_in(l.known, kSummonMountRecord) == 0, "Summon_Mount is in the records once and in no KnownAbilities");
     CHECK(l.records.size() >= tail.size() && std::equal(tail.begin(), tail.end(), l.records.end() - static_cast<std::ptrdiff_t>(tail.size())), "before the static tail");
     const Clock::time_point req = h.t;

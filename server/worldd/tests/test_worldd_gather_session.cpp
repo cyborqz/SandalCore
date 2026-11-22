@@ -23,6 +23,7 @@
 #include "fake_client.h"
 #include "nav_fixture.h"
 #include "test_registry.h"
+#include "shared_world_data.h"
 #include "bootstrap/character_setup.h"
 #include "gather/gathering.h"
 #include "items/inventory.h"
@@ -198,7 +199,7 @@ struct Player {
 };
 
 struct Rig {
-    std::optional<content::ContentDb> db;
+    const content::ContentDb* db = nullptr;
     aoc::protocol::ServerGuidAllocator guids{kServerId, kRandomizer};
     std::unique_ptr<PlayerWorld> world;
     std::optional<spawns::CapturedData> captured;
@@ -209,12 +210,13 @@ struct Rig {
 
     bool open(const char* path, double respawn_mult = 0.001, const nav::NavFile* ground = nullptr) {
         std::string error;
-        db = content::ContentDb::open(path, error);
-        if (!db) {
-            std::printf("  [FAIL] the content.db does not open: %s\n", error.c_str());
+        shared_world::Entry& entry = shared_world::get(path);
+        db = entry.db ? &*entry.db : nullptr;
+        if (!db || !entry.data) {
+            std::printf("  [FAIL] the content.db does not open: %s\n", entry.problem.c_str());
             return false;
         }
-        world = std::make_unique<PlayerWorld>(&*db, "", bs::GameStateMode::Tier2, kServerId, guids);
+        world = std::make_unique<PlayerWorld>(entry.data, entry.problem, bs::GameStateMode::Tier2, kServerId, guids);
         world->set_position_sink(&sink);
         auto c = spawns::CapturedData::load(error);
         if (!c) {

@@ -245,6 +245,15 @@ static std::optional<svc::InventoryItem> ws_held(const PlayerSession& s, int64_t
     return std::nullopt;
 }
 
+/// The named stacks still hold their quantities (a refusal took nothing).
+static bool ws_holds(const PlayerSession& s, std::initializer_list<std::pair<int64_t, int32_t>> stacks) {
+    for (const auto& [record, quantity] : stacks) {
+        const auto it = ws_held(s, record);
+        if (!it || it->quantity != quantity) return false;
+    }
+    return true;
+}
+
 /// `ms` of play in 20 ms ticks (the session's own).
 static void ws_run(Harness& h, int ms) {
     for (int done = 0; done < ms; done += 20) h.step();
@@ -503,20 +512,30 @@ static void test_ws_session_orders() {
           "nothing was taken: the bag and the purse are whole (a quick make takes at its end)");
 
     // the refusals: too few materials, a recipe not taught, a station under its tier, a stack the recipe does not take
+    bool refusals_clean = true;
+    size_t refusal_total = 0;
     Harness poor(ws_character(0, {}, {make_item(Bag, 0, wss::kCopper, 500, 4), make_item(Bag, 1, wss::kTimber, 501), make_item(Bag, 2, wss::kAxeReagent, 502)}), true, true, ws_real_db());
     const WsStation poor_station = ws_add_station(poor, wss::kSmithT1, "CraftingStation_Weaponsmithing_T1", wss::kT1Tax, 300, 0);
     if (poor_station.id == 0) return;
     ws_phase_in(poor);
     poor.request(ws_interact(poor_station.component), poor.pawn_ch);
     poor.request(ws_start_craft(poor_station, wss::kAxeRecipe, {wss_resource(wss::kCopper, 5), wss_resource(wss::kTimber, 1)}), poor.pc_ch);
-    CHECK(poor.s->quick_refused() >= 1 && !poor.s->quick_active(), "5 fragments asked of a bag of 4: refused, nothing taken");
+    refusal_total += poor.s->quick_refused();
+    CHECK(poor.s->quick_refused() >= 1 && !poor.s->quick_active() && poor.s->quick_made() == 0 && poor.s->wallet().copper() == 100000 &&
+              ws_holds(*poor.s, {{wss::kCopper, 4}, {wss::kTimber, 1}, {wss::kAxeReagent, 1}}),
+          "5 fragments asked of a bag of 4: refused, nothing taken and no craft started");
+    refusals_clean = refusals_clean && poor.s->quick_made() == 0 && !poor.s->quick_active() && poor.s->wallet().copper() == 100000;
     Harness wrong(ws_character(0, {}, {make_item(Bag, 0, wss::kCopper, 510, 5), make_item(Bag, 1, wss::kTimber, 511), make_item(Bag, 2, wss::kAxeReagent, 512)}), true, true, ws_real_db());
     const WsStation wrong_station = ws_add_station(wrong, wss::kSmithT1, "CraftingStation_Weaponsmithing_T1", wss::kT1Tax, 300, 0);
     if (wrong_station.id == 0) return;
     ws_phase_in(wrong);
     wrong.request(ws_interact(wrong_station.component), wrong.pawn_ch);
     wrong.request(ws_start_craft(wrong_station, wss::kAxeRecipe, {wss_resource(wss::kCopper, 4), wss_resource(wss::kTimber, 2)}), wrong.pc_ch);
-    CHECK(wrong.s->quick_refused() >= 1, "the wrong counts for the named stacks are refused (the request names 4 fragments, the recipe takes 5)");
+    refusal_total += wrong.s->quick_refused();
+    CHECK(wrong.s->quick_refused() >= 1 && !wrong.s->quick_active() && wrong.s->quick_made() == 0 && wrong.s->wallet().copper() == 100000 &&
+              ws_holds(*wrong.s, {{wss::kCopper, 5}, {wss::kTimber, 1}, {wss::kAxeReagent, 1}}),
+          "the wrong counts for the named stacks are refused, nothing taken and no craft started");
+    refusals_clean = refusals_clean && wrong.s->quick_made() == 0 && !wrong.s->quick_active() && wrong.s->wallet().copper() == 100000;
     // the Golgora at the Novice station (tier 1 at a station that reaches 0) and without the learning
     Harness low(ws_character(1, {wss::kGolgoraRecipe}, {make_item(Bag, 0, wss::kBoardOak, 520, 10), make_item(Bag, 1, wss::kIngotBrass, 521, 10),
                                                                   make_item(Bag, 2, wss::kMoldBasalt, 522)}), true, true, ws_real_db());
@@ -525,7 +544,11 @@ static void test_ws_session_orders() {
     ws_phase_in(low);
     low.request(ws_interact(low_station.component), low.pawn_ch);
     low.request(ws_start_craft(low_station, wss::kGolgoraRecipe, {wss_resource(wss::kBoardOak, 10), wss_resource(wss::kIngotBrass, 10), wss_resource(wss::kMoldBasalt, 1)}), low.pc_ch);
-    CHECK(low.s->quick_refused() >= 1 && !low.s->quick_active(), "a tier-1 recipe at a station that reaches 0 is refused");
+    refusal_total += low.s->quick_refused();
+    CHECK(low.s->quick_refused() >= 1 && !low.s->quick_active() && low.s->quick_made() == 0 && low.s->wallet().copper() == 100000 &&
+              ws_holds(*low.s, {{wss::kBoardOak, 10}, {wss::kIngotBrass, 10}, {wss::kMoldBasalt, 1}}),
+          "a tier-1 recipe at a station that reaches 0 is refused, nothing taken and no craft started");
+    refusals_clean = refusals_clean && low.s->quick_made() == 0 && !low.s->quick_active() && low.s->wallet().copper() == 100000;
     Harness untaught(ws_character(1, {}, {make_item(Bag, 0, wss::kBoardOak, 530, 10), make_item(Bag, 1, wss::kIngotBrass, 531, 10),
                                                          make_item(Bag, 2, wss::kMoldBasalt, 532)}), true, true, ws_real_db());
     const WsStation untaught_station = ws_add_station(untaught, wss::kSmithT2, "CraftingStation_Weaponsmithing_T2", wss::kT1Tax, 300, 0);
@@ -533,8 +556,12 @@ static void test_ws_session_orders() {
     ws_phase_in(untaught);
     untaught.request(ws_interact(untaught_station.component), untaught.pawn_ch);
     untaught.request(ws_start_craft(untaught_station, wss::kGolgoraRecipe, {wss_resource(wss::kBoardOak, 10), wss_resource(wss::kIngotBrass, 10), wss_resource(wss::kMoldBasalt, 1)}), untaught.pc_ch);
-    CHECK(untaught.s->quick_refused() >= 1 && !untaught.s->quick_active(), "a recipe the Apprentice was not taught is refused");
-    CHECK(h.s->quick_made() == 2, "the other orders");
+    refusal_total += untaught.s->quick_refused();
+    CHECK(untaught.s->quick_refused() >= 1 && !untaught.s->quick_active() && untaught.s->quick_made() == 0 && untaught.s->wallet().copper() == 100000 &&
+              ws_holds(*untaught.s, {{wss::kBoardOak, 10}, {wss::kIngotBrass, 10}, {wss::kMoldBasalt, 1}}),
+          "a recipe the Apprentice was not taught is refused, nothing taken and no craft started");
+    refusals_clean = refusals_clean && untaught.s->quick_made() == 0 && !untaught.s->quick_active() && untaught.s->wallet().copper() == 100000;
+    CHECK(refusals_clean && refusal_total >= 4 && h.s->quick_made() == 2, "all four refusals started no craft and took nothing; the first world made its two axes");
 }
 
 /// Two players at one station: each pays from his own bag and gets his own axe.
